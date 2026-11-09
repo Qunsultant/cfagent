@@ -473,6 +473,65 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
   }
 }
 
+/** Issue #3907: fail-fast recovery for orphaned `running` rows —
+ *  called from OrchestratorAgent.onStart next to
+ *  recoverQueuedAsyncJobs. A row whose executor died with the DO
+ *  (eviction / restart / deployment) has a stale heartbeat and no
+ *  path to a terminal state until the sweep's 2h backstop; recovery
+ *  closes that window at startup. Only stale-heartbeat rows are
+ *  failed (the same bound as the reap); fresh-heartbeat rows are
+ *  left alone — their executor may still be alive in a hibernated
+ *  isolate. Never re-runs a row: a paid mcp.tool job is never
+ *  silently re-executed. Idempotent by the guarded failRunning
+ *  transition (reapStaleRunning, same message/code as the reap);
+ *  per-row try/catch so one bad row never fails startup. */
+export async function recoverStaleRunningAsyncJobs(
+  ctx: AsyncJobsContext,
+): Promise<{ examined: number; failed: number }> {
+  ctx.ensureTables();
+  const rows = ports(ctx).read.listRunning(ctx.sessionKey(), STALE_SWEEP_BATCH_LIMIT) as unknown as Array<Record<string, unknown>>;
+  const nowMs = Date.now();
+  let failed = 0;
+  for (const row of rows) {
+    const jobId = String(row.job_id);
+    try {
+      if (row.status !== "running" || typeof row.started_at !== "string") continue;
+      if (!isHeartbeatStale(row, nowMs)) continue;
+      const completedAt = new Date(nowMs).toISOString();
+      const written = ports(ctx).queue.reapStaleRunning(
+        jobId,
+        STALE_RUNNING_REAP_MESSAGE,
+        completedAt,
+        FAILURE_ASYNC_JOB_FAILED_CODE,
+      );
+      if (written === 1) {
+        const toolName = toolNameFromRow(row);
+        ctx.audit("async_job.failed", "orchestrator", {
+          jobId,
+          capability: String(row.capability),
+          ...(toolName ? { tool: toolName } : {}),
+          error: STALE_RUNNING_REAP_MESSAGE,
+          errorCode: FAILURE_ASYNC_JOB_FAILED_CODE,
+          lastActivityAt:
+            typeof row.last_activity_at === "string" && row.last_activity_at
+              ? row.last_activity_at
+              : typeof row.started_at === "string"
+                ? row.started_at
+                : null,
+        });
+        failed++;
+      }
+    } catch (error) {
+      structuredLog.error("asyncJobs.recover_stale_running_job_failed", {
+        message: `[OrchestratorAgent] Stale running-job recovery failed for job ${jobId}:`,
+        jobId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { examined: rows.length, failed };
+}
+
 /** Issue #2567: what the stuck-running alert carries — the run's
  *  id, its kind (capability + display name), its age against the
  *  configured threshold, and its owner (the job's session scope:
@@ -574,8 +633,16 @@ export function getAsyncJob(ctx: AsyncJobsContext, jobId: string): AsyncJobRecor
   ctx.ensureTables();
   const row = ports(ctx).read.getRow(jobId, ctx.sessionKey()) as Record<string, unknown> | undefined;
   if (!row) return undefined;
+  // Issue #3784: a stale running job is failed on READ (the
+  // requester path cannot wait for the 15-minute sweep; the
+  // caller asking for status of a zombie job must not be told
+  // it is still running). Issue #3907: the reap consults the
+  // heartbeat — a live, heartbeating job is never reaped, at any
+  // age; only a stale heartbeat (or a pre-heartbeat row past the
+  // 2h backstop) is failed.
   if (row.status === "running" && typeof row.started_at === "string" &&
-    Date.now() - Date.parse(row.started_at) > STALE_RUNNING_REAP_MS) {
+    Date.now() - Date.parse(row.started_at) > STALE_RUNNING_REAP_MS &&
+    isHeartbeatStale(row)) {
     const completedAt = new Date().toISOString();
     ports(ctx).queue.reapStaleRunning(
       jobId,
@@ -646,6 +713,102 @@ const FAILURE_ASYNC_JOB_FAILED_CODE = "FAILURE_ASYNC_JOB_FAILED";
  *  research-task precedent (2 minutes). */
 export const ASYNC_JOB_HEARTBEAT_MS = 120_000;
 
+/** Issue #3907: the heartbeat-staleness bound — a live executor
+ *  heartbeats every ASYNC_JOB_HEARTBEAT_MS (2 min), so silence
+ *  longer than three intervals means the executor is dead. The
+ *  reap consults this bound, never age alone: a row whose last
+ *  activity is fresh is progressing and is never reaped, at any
+ *  age. Rows that predate heartbeats carry no last_activity_at;
+ *  for them the started_at age is the only evidence and the 2h
+ *  backstop still applies (see isHeartbeatStale). */
+export const HEARTBEAT_STALE_MS = 3 * ASYNC_JOB_HEARTBEAT_MS;
+
+/** Issue #3907: is this running row's executor dead? True when
+ *  its last recorded activity is older than HEARTBEAT_STALE_MS.
+ *  A row with no last_activity_at (predates #3811 heartbeats)
+ *  is stale only past the 2h backstop, measured on started_at —
+ *  the #3784 backstop is preserved for legacy rows. Never throws:
+ *  an unparseable timestamp reads as stale (fail the row closed,
+ *  never leave it running forever on a bad value). */
+export function isHeartbeatStale(
+  row: Record<string, unknown>,
+  nowMs: number = Date.now(),
+): boolean {
+  const lastActivity =
+    typeof row.last_activity_at === "string" && row.last_activity_at
+      ? Date.parse(row.last_activity_at)
+      : NaN;
+  if (Number.isFinite(lastActivity)) return nowMs - lastActivity > HEARTBEAT_STALE_MS;
+  const startedAt = typeof row.started_at === "string" ? Date.parse(row.started_at) : NaN;
+  if (!Number.isFinite(startedAt)) return true;
+  return nowMs - startedAt > STALE_RUNNING_REAP_MS;
+}
+
+/** Issue #3907: best-effort tool name for an mcp.tool row
+ *  (audit evidence only — never throws). */
+function toolNameFromRow(row: Record<string, unknown>): string | undefined {
+  try {
+    const payload = JSON.parse(String(row.payload_json ?? "")) as { toolName?: unknown };
+    return typeof payload?.toolName === "string" && payload.toolName ? payload.toolName : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Issue #3907: the executor's max-runtime deadline — env
+ *  ASYNC_JOB_MAX_RUNTIME_MINUTES, default 90 minutes (below the
+ *  2h reap backstop with margin for the sweep to observe the
+ *  failure). A blank/unparseable value falls through to the
+ *  default; 0 or negative DISABLES the deadline (the reap
+ *  backstop still applies). Follows the stuckRunAlert resolver
+ *  idiom (documented Worker env var, named built-in default, no
+ *  magic number in the execution path). */
+export const ASYNC_JOB_MAX_RUNTIME_ENV_VAR = "ASYNC_JOB_MAX_RUNTIME_MINUTES";
+export const DEFAULT_ASYNC_JOB_MAX_RUNTIME_MS = 90 * 60 * 1000;
+export const FAILURE_ASYNC_JOB_TIMEOUT_CODE = "FAILURE_ASYNC_JOB_TIMEOUT";
+export function resolveAsyncJobMaxRuntimeMs(env: Record<string, unknown>): number {
+  const raw = typeof env[ASYNC_JOB_MAX_RUNTIME_ENV_VAR] === "string"
+    ? (env[ASYNC_JOB_MAX_RUNTIME_ENV_VAR] as string).trim()
+    : "";
+  if (raw === "") return DEFAULT_ASYNC_JOB_MAX_RUNTIME_MS;
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes)) return DEFAULT_ASYNC_JOB_MAX_RUNTIME_MS;
+  if (minutes <= 0) return 0;
+  return Math.round(minutes * 60 * 1000);
+}
+
+/** Issue #3907: a per-job execution deadline — a promise that
+ *  rejects with the cataloged timeout BusinessError after ms.
+ *  The caller races the capability leg against it and cancels it
+ *  on every terminal path (cancel is idempotent). The rejection
+ *  abandons the hung leg, it does not abort it: the leg may still
+ *  settle in the background, but the row is already terminal, so
+ *  its late result is dropped and no second execution occurs. */
+export function createExecutionDeadline(maxRuntimeMs: number): {
+  promise: Promise<never>;
+  cancel: () => void;
+} {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let rejectFn: ((error: Error) => void) | undefined;
+  const promise = new Promise<never>((_resolve, reject) => {
+    rejectFn = reject;
+  });
+  if (maxRuntimeMs > 0) {
+    timer = setTimeout(() => {
+      rejectFn?.(new BusinessError(FAILURE_ASYNC_JOB_TIMEOUT_CODE, { maxRuntimeMs }));
+    }, maxRuntimeMs);
+  }
+  return {
+    promise,
+    cancel: () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
+}
+
 /** Issue #3811: derive the coded failure for a thrown error, through
  *  the single outcome catalog — never a message where a code belongs.
  *  A BusinessError keeps its own code; a message whose leading
@@ -697,20 +860,24 @@ export interface StaleAsyncJobSweepResult {
  * window on a 15-minute tick (armed by OrchestratorAgent.onStart,
  * next to the #618 ledger sweep).
  *
- * Per row, oldest first: past the 2h backstop the row is reaped as
- * failed with the read path's exact message and audited as
- * `async_job.failed` (the established `{ jobId, capability, error }`
- * shape, docs/operations/jobs-workflows-stages-01.md §Auditing —
- * no new event name); past the stuck threshold (default 30 min,
- * 0 = disabled) the row is flagged + alerted through
- * maybeAlertStuckRunning (exactly-once claim, so a second sweep
- * never re-alerts or re-reaps). Reap check BEFORE alert, same order
- * as getAsyncJob, so an already-reaped row is never alerted.
- * Idempotent by the guarded transitions; per-row try/catch so one
- * bad row never fails the sweep or its caller. The sweep never
- * publishes to the J1 CloudEvents stream (recorded decision on
- * #3784: mas_async_jobs rows are not J1 pipeline runs) and never
- * deletes a row.
+ * Per row, oldest first: past the 2h backstop AND with a stale
+ * heartbeat the row is reaped as failed with the read path's
+ * exact message and audited as `async_job.failed` (the established
+ * `{ jobId, capability, error }` shape, docs/operations/jobs-
+ * workflows-stages-01.md §Auditing — no new event name). Issue
+ * #3907: the heartbeat is the liveness signal — a row whose
+ * heartbeat is fresh is progressing and is never reaped, at any
+ * age (the 2026-11-09 incident: two paid jobs reaped by one
+ * sweep tick while still running). Past the stuck threshold
+ * (default 30 min, 0 = disabled) the row is flagged + alerted
+ * through maybeAlertStuckRunning (exactly-once claim, so a second
+ * sweep never re-alerts or re-reaps). Reap check BEFORE alert,
+ * same order as getAsyncJob, so an already-reaped row is never
+ * alerted. Idempotent by the guarded transitions; per-row
+ * try/catch so one bad row never fails the sweep or its caller.
+ * The sweep never publishes to the J1 CloudEvents stream
+ * (recorded decision on #3784: mas_async_jobs rows are not J1
+ * pipeline runs) and never deletes a row.
  */
 export function sweepStaleAsyncJobs(ctx: AsyncJobsContext, nowMs: number = Date.now()): StaleAsyncJobSweepResult {
   ctx.ensureTables();
@@ -722,7 +889,7 @@ export function sweepStaleAsyncJobs(ctx: AsyncJobsContext, nowMs: number = Date.
     try {
       if (row.status !== "running" || typeof row.started_at !== "string") continue;
       const ageMs = nowMs - Date.parse(row.started_at);
-      if (ageMs > STALE_RUNNING_REAP_MS) {
+      if (ageMs > STALE_RUNNING_REAP_MS && isHeartbeatStale(row, nowMs)) {
         const completedAt = new Date(nowMs).toISOString();
         const written = ports(ctx).queue.reapStaleRunning(
           jobId,
@@ -733,9 +900,14 @@ export function sweepStaleAsyncJobs(ctx: AsyncJobsContext, nowMs: number = Date.
           FAILURE_ASYNC_JOB_FAILED_CODE,
         );
         if (written === 1) {
+          const toolName = toolNameFromRow(row);
           ctx.audit("async_job.failed", "orchestrator", {
             jobId,
             capability: String(row.capability),
+            // Issue #3907: the tool name, so a reaped paid MCP job
+            // can be traced to its payment receipt (a reaped job
+            // otherwise carries no link to the x402 charge).
+            ...(toolName ? { tool: toolName } : {}),
             error: STALE_RUNNING_REAP_MESSAGE,
             errorCode: FAILURE_ASYNC_JOB_FAILED_CODE,
             // Issue #3811: the stall evidence — the executor's last
@@ -1032,6 +1204,26 @@ export async function retryAsyncJob(
   } catch {
     throw new Error(`Stored payload for async job ${jobId} is invalid JSON; it cannot be retried.`);
   }
+  // Issue #3907: a paid job cannot be retried from its recorded
+  // payload — the x402 paymentSignature it carries was consumed
+  // at verification (consumeTxHash), so a retry's verification
+  // rejects it as already used and the retry completes with a 402
+  // instead of re-running. Refuse with a named message; a retry
+  // needs a fresh payment, which this path cannot supply. (A
+  // payment-verification failure never reaches here as a failed
+  // job: the tool returns the 402 as its result and the job
+  // completes — so any failed paid row got past payment, and its
+  // signature is consumed.)
+  const retryArgs = payload.arguments;
+  const retrySignature =
+    retryArgs && typeof retryArgs === "object"
+      ? (retryArgs as Record<string, unknown>).paymentSignature
+      : undefined;
+  if (typeof retrySignature === "string" && retrySignature.trim() !== "") {
+    throw new Error(
+      "This paid job cannot be retried from its recorded payload: its payment was already consumed. Submit a new call with a fresh payment.",
+    );
+  }
   payload.retryOf = jobId;
   const graph = jobGraphFields(row);
   const submission = {
@@ -1154,6 +1346,14 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
   heartbeatTimer = setInterval(() => {
     heartbeatAsyncJob(ctx, jobId);
   }, ASYNC_JOB_HEARTBEAT_MS);
+  // Issue #3907: the execution deadline — a race against the
+  // capability legs below (maxRuntime default 90 min, env
+  // ASYNC_JOB_MAX_RUNTIME_MINUTES). A hung provider fetch is
+  // failed with FAILURE_ASYNC_JOB_TIMEOUT instead of running
+  // until the 2h reap backstop. Cancelled at both terminal
+  // points next to stopHeartbeat; the rejection abandons the
+  // hung leg, it does not abort it.
+  const executionDeadline = createExecutionDeadline(resolveAsyncJobMaxRuntimeMs(ctx.env as unknown as Record<string, unknown>));
   // Consolidation C3 (#1277): stage identity for transition recording
   // (in scope for both the completion and failure paths below).
   const jobStage = PIPELINE_STAGES.find((s) => s === job.stage);
@@ -1287,11 +1487,14 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       // own untracked publishers.
       headers.set("x-async-job-id", jobId);
       const body = typeof payload.body === "string" ? payload.body : undefined;
-      const response = await ctx.routeRequest(new Request(new URL(pathAndQuery, "https://agent.internal"), {
-        method,
-        headers,
-        body: method === "GET" || method === "HEAD" ? undefined : body,
-      }));
+      const response = await Promise.race([
+        ctx.routeRequest(new Request(new URL(pathAndQuery, "https://agent.internal"), {
+          method,
+          headers,
+          body: method === "GET" || method === "HEAD" ? undefined : body,
+        })),
+        executionDeadline.promise,
+      ]);
       const responseBody = await response.text();
       if (new TextEncoder().encode(responseBody).byteLength > 5_000_000) {
         throw new Error("Async API response exceeds the 5 MB job-result limit.");
@@ -1323,9 +1526,10 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       }
       const toolName = String(payload.toolName || "");
       const args = (payload.arguments || {}) as Record<string, unknown>;
-      result = await executeMCPTool(toolName, args, {
-        env: ctx.env,
-        orm: ctx.getOrm(),
+      result = await Promise.race([
+        executeMCPTool(toolName, args, {
+          env: ctx.env,
+          orm: ctx.getOrm(),
         sessionId: ctx.sessionKey(),
         audit: (type, agent, detail) => ctx.audit(type, agent, detail),
         // #1744: job-executor call — the external gate already ran
@@ -1351,7 +1555,9 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         // The scan mechanism itself is executing-pinned via the MCP leg
         // pin; this literal is source-pinned below (see the pin file).
         storage: ctx.agentCtx.storage,
-      });
+        }),
+        executionDeadline.promise,
+      ]);
     } else if (job.capability === "task.draft") {
       result = {
         taskId: `task_${crypto.randomUUID().slice(0, 8)}`,
@@ -1395,10 +1601,13 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         // fails the serve job explicitly (the chain's stop point),
         // exactly like a missing PDF key below.
         const { serveReportStage } = await import("../../services/unifiedReportPipeline");
-        const checked = await serveReportStage({
-          canonicalReportId: outcome.canonicalReportId,
-          findCanonicalReport: (id: string) => ctx.getOrm().reports.findById(id),
-        });
+        const checked = await Promise.race([
+          serveReportStage({
+            canonicalReportId: outcome.canonicalReportId,
+            findCanonicalReport: (id: string) => ctx.getOrm().reports.findById(id),
+          }),
+          executionDeadline.promise,
+        ]);
         if (!checked.verified) {
           throw new Error(codedMessage("FAILURE_REPORT_ARTIFACT_MISSING", checked.reason));
         }
@@ -1512,13 +1721,16 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         let noticeSent = false;
         if (channel !== "webhook" && shouldNotify(pipelinePolicy, "completed", channel)) {
           try {
-            const notice = await ctx.followupDeliveryPort().notify({
+            const notice = await Promise.race([
+              ctx.followupDeliveryPort().notify({
               channel,
               userLogin,
               text: formatUndeliverableNotification(outcome, payload.skipReason),
               ...(channel === "email" && outcome.emailTo ? { emailTo: outcome.emailTo } : {}),
               ...(channel === "slack" && outcome.slackChannel ? { slackChannel: outcome.slackChannel } : {}),
-            });
+              }),
+              executionDeadline.promise,
+            ]);
             noticeSent = notice.ok;
           } catch (noticeError) {
             structuredLog.warn("asyncJobs.undeliverable_notice_failed", {
@@ -1577,7 +1789,10 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           // is the duplicate this suppressor exists to stop.
           let delivery: { ok: boolean; error?: string; detail?: string };
           try {
-            delivery = await ctx.followupDeliveryPort().deliver({ channel, userLogin, outcome, artifacts });
+            delivery = await Promise.race([
+              ctx.followupDeliveryPort().deliver({ channel, userLogin, outcome, artifacts }),
+              executionDeadline.promise,
+            ]);
             if (!delivery.ok) throw new Error(codedMessage("FAILURE_DELIVERY_CHANNEL_FAILED", delivery.error || `Delivery via ${channel} failed.`));
           } catch (sendErr) {
             suppressor.release(deliveryRunId, deliveryDestination);
@@ -1630,13 +1845,16 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         outcome,
         typeof payload.detail === "string" ? payload.detail : undefined,
       );
-      const sent = await ctx.followupDeliveryPort().notify({
-        channel,
-        userLogin,
-        text,
-        ...(channel === "email" && outcome.emailTo ? { emailTo: outcome.emailTo } : {}),
-        ...(channel === "slack" && outcome.slackChannel ? { slackChannel: outcome.slackChannel } : {}),
-      });
+      const sent = await Promise.race([
+        ctx.followupDeliveryPort().notify({
+          channel,
+          userLogin,
+          text,
+          ...(channel === "email" && outcome.emailTo ? { emailTo: outcome.emailTo } : {}),
+          ...(channel === "slack" && outcome.slackChannel ? { slackChannel: outcome.slackChannel } : {}),
+        }),
+        executionDeadline.promise,
+      ]);
       if (!sent.ok) throw new Error(sent.error || `Notification via ${channel} failed.`);
       result = { status: "notified", channel, event };
       }
@@ -1653,7 +1871,8 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       // extraction ledger (one site per file).
       const createETradeService = (userLogin: string, environment: string | undefined) =>
         new ETradeService(ctx.getOrm(), ctx.env, userLogin, environment);
-      result = await executeShardJob(
+      result = await Promise.race([
+        executeShardJob(
         {
           sql: ctx.agentCtx.storage.sql,
           env: ctx.env as unknown as Record<string, unknown>,
@@ -1676,7 +1895,9 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           sessionId: ctx.sessionKey(),
         },
         shardPayload
-      );
+        ),
+        executionDeadline.promise,
+      ]);
     } else if (job.capability === "feed.snapshot") {
       // Consolidation #1236 (feed seam): the feed stage job. The
       // executor owns job state; the handler owns the work
@@ -1684,7 +1905,8 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       const { executeFeedSnapshotJob } = await import("../../services/feedSnapshotJob");
       const { ETradeService } = await import("../../services/etrade");
       const feedPayload = payload as unknown as import("../../services/feedSnapshotJob").FeedSnapshotJobPayload;
-      result = await executeFeedSnapshotJob(
+      result = await Promise.race([
+        executeFeedSnapshotJob(
         {
           sql: ctx.agentCtx.storage.sql,
           env: ctx.env as unknown as Record<string, unknown>,
@@ -1694,7 +1916,9 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           sessionId: ctx.sessionKey(),
         },
         feedPayload
-      );
+        ),
+        executionDeadline.promise,
+      ]);
     } else if (job.capability === "nlq.execute") {
       const query = String(payload.query || "").trim();
       if (!query) throw new Error("NLQ job requires a non-empty query.");
@@ -1733,8 +1957,9 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       // mcp mode takes no options, unchanged).
       const nlqDpPorts =
         resolvedNlqMode.mode === "mcp" ? null : await buildDataProviderPorts(ctx.env);
-      result = resolvedNlqMode.mode === "mcp"
-        ? await executeNaturalLanguageQuery(
+      result = await Promise.race([
+        resolvedNlqMode.mode === "mcp"
+        ? executeNaturalLanguageQuery(
             ctx.getOrm(),
             ctx.sessionKey(),
             query,
@@ -1742,7 +1967,7 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
             jobUserLoginForNlq,
             getUserDid(ctx.sessionKey()),
           )
-        : await executeNaturalLanguageQuery(
+        : executeNaturalLanguageQuery(
             ctx.getOrm(),
             ctx.sessionKey(),
             query,
@@ -1750,7 +1975,9 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
             jobUserLoginForNlq,
             getUserDid(ctx.sessionKey()),
             { scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), stockScreenPort: ctx.nlqStockScreenPort(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin: jobUserLoginForNlq, orm: ctx.getOrm(), sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, ctx.getOrm(), jobUserLoginForNlq), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin: jobUserLoginForNlq, sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }) },
-          );
+        ),
+        executionDeadline.promise,
+      ]);
     } else {
       throw new Error(`Unsupported async capability: ${job.capability}`);
     }
@@ -2011,9 +2238,12 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
     }
     // Issue #3811: the job's work is done — stop the heartbeat
     // (the terminal transition below stamps the final activity).
+    // Issue #3907: cancel the execution deadline with it.
     stopHeartbeat();
+    executionDeadline.cancel();
   } catch (error) {
     stopHeartbeat();
+    executionDeadline.cancel();
     const message = error instanceof Error ? error.message : String(error);
     const completedAt = new Date().toISOString();
     // Issue #3811: executor-side failure capture — the throw writes

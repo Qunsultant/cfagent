@@ -59,10 +59,27 @@ export interface AsyncJobsPanelProps {
   embedded?: boolean;
 }
 
+/** Issue #3907: the status pill text, as a pure function — counts
+ *  by state; "Queue clear" only when nothing is active AND
+ *  nothing failed in the window (the 2026-11-09 incident: five
+ *  failed jobs, zero active, the pill read "Idle / Queue
+ *  clear"). A failed load never reads as clear. */
+export function asyncJobsStatusLabel(args: {
+  active: number;
+  failed: number;
+  error: string | null;
+}): string {
+  if (args.error) return "Could not load";
+  if (args.active > 0) return `${args.active} task${args.active === 1 ? "" : "s"} running`;
+  if (args.failed > 0) return `${args.failed} failed`;
+  return "Idle / Queue clear";
+}
+
 export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
   const [jobs, setJobs] = useState<AsyncJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<string>();
   const [error, setError] = useState("");
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const tree = useMemo(() => buildJobTree(jobs), [jobs]);
 
   const refresh = useCallback(async () => {
@@ -72,6 +89,7 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
       if (!response.ok) throw new Error(data.error || "Could not load async jobs.");
       setJobs(data.jobs || []);
       setError("");
+      setLastRefreshedAt(Date.now());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load async jobs.");
     }
@@ -121,15 +139,17 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
   };
 
   const activeCount = jobs.filter((job) => job.status === "queued" || job.status === "running").length;
+  const failedCount = jobs.filter((job) => job.status === "failed").length;
+  const statusLabel = asyncJobsStatusLabel({ active: activeCount, failed: failedCount, error: error || null });
 
   if (embedded) {
     return (
       <div className="settings-async-jobs-box">
         <div className="async-jobs-subhead">
           <div className="async-status-pill-badge" role="status">
-            <span className={`async-dot ${activeCount > 0 ? "active" : "idle"}`} />
+            <span className={`async-dot ${activeCount > 0 || failedCount > 0 ? "active" : "idle"}`} />
             <span className="async-count-txt">
-              {activeCount > 0 ? `${activeCount} task${activeCount === 1 ? "" : "s"} running` : "Idle / Queue clear"}
+              {statusLabel}
             </span>
           </div>
           <Button
@@ -142,6 +162,12 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
           </Button>
         </div>
 
+        {lastRefreshedAt && (
+          <p className="async-jobs-refreshed">
+            Last refreshed {new Date(lastRefreshedAt).toLocaleTimeString()}.
+          </p>
+        )}
+
         {error && <p className="async-jobs-error" role="alert">{error}</p>}
 
         {jobs.length === 0 ? (
@@ -149,8 +175,9 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
             <span>No background jobs recorded in this session.</span>
           </div>
         ) : (
-          <ul className="settings-async-jobs-list">
-            {tree.slice(0, 5).map((node) => (
+          <>
+            <ul className="settings-async-jobs-list">
+              {tree.slice(0, 5).map((node) => (
               <li key={node.job.jobId} className={`settings-async-job-item status-${node.job.status}`}>
                 <div className="job-item-main">
                   <span className="job-item-label" title={node.job.label}>{node.job.label}</span>
@@ -186,7 +213,13 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
                 )}
               </li>
             ))}
-          </ul>
+            </ul>
+            {tree.length > 5 && (
+              <p className="async-jobs-truncated">
+                Showing 5 of {tree.length} jobs.
+              </p>
+            )}
+          </>
         )}
 
         <AsyncJobResultViewer jobId={selectedJob} variant="embedded" />
@@ -206,8 +239,13 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
           <Button type="button" onClick={() => void refresh()}>Refresh</Button>
         </div>
         <div role="status" className="async-jobs-live-status">
-          {activeCount > 0 ? `${activeCount} task${activeCount === 1 ? "" : "s"} running` : "Idle / Queue clear"}
+          {statusLabel}
         </div>
+        {lastRefreshedAt && (
+          <p className="async-jobs-refreshed">
+            Last refreshed {new Date(lastRefreshedAt).toLocaleTimeString()}.
+          </p>
+        )}
         {error && <p className="async-jobs-error" role="alert">{error}</p>}
         {jobs.length === 0 ? (
           <p className="async-jobs-empty">Submitted work will appear here.</p>

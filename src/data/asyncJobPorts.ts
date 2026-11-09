@@ -326,4 +326,4 @@ export const ACTIVE_JOB_PAYLOADS_SQL =
  *  exactly this statement for listRunning(). Issue #3811: the
  *  scan also selects last_activity_at (the stall evidence). */
 export const LIST_RUNNING_SQL =
-  "SELECT job_id, session_id, capability, display_name, status, started_at, stuck_alerted_at, last_activity_at, created_at FROM mas_async_jobs WHERE session_id = ? AND status = 'running' ORDER BY created_at ASC LIMIT ?";
+  "SELECT job_id, session_id, capability, display_name, payload_json, status, started_at, stuck_alerted_at, last_activity_at, created_at FROM mas_async_jobs WHERE session_id = ? AND status = 'running' ORDER BY created_at ASC LIMIT ?";
