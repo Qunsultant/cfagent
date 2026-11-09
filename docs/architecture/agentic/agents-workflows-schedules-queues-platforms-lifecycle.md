@@ -1413,6 +1413,29 @@ The operator surface over these products is Sec Studio,
 defined in the Platform of Platforms table above (Filed,
 #3774).
 
+Product & experience (CPO; parent programme #3695):
+
+| Product | Purpose | Status | Tracking |
+| --- | --- | --- | --- |
+| Side-bar (left-nav) | The one navigation surface: every menu, sub-menu, tab, and sub-tab with its own URL | Partial — preset-following Filed | #3696 (S1) |
+| Top-bar | The one top chrome: six Tier-1 controls at one size, one shared class | Partial — uniformity landed; preset-following Filed | #3696 (S1); #3825 |
+| Presets | Named UX configurations (all / traderFocus / minimal) applied across surfaces | Partial — presets Live; "None" Filed | #3696 (S1); #3697 (S2) |
+| Dynamic menu (configuration product) | The settings surface as a product: every control configurable, nothing hand-inserted | Partial — surface Live; product spec Filed | #3828 (S6) |
+| Feature flags (surfacing product) | Per-class surfacing: a capability exists once and is surfaced identically everywhere | Partial — global on/off Live; per-class surfacing Filed | #3827 (S5) |
+| Shell chrome (PageShell / PageTemplate) | One conformant shell for every page: title, scope note, sections, states, chrome hosts | Partial — shells Live; migrations in progress | #3046; #3050; #2150 |
+| Scaffold generator | New pages generated conformant (shell, nav, gate, pin test) instead of hand-built | Live; evolution Filed | #3080 (closed); #3834 (S11) |
+| Primitives + tokens | The one component system and the one token scale every surface builds from | Partial — Live; tier discipline + Rule of Three + anti-drift CI Filed | #3047; #3048; #3833 (S10) |
+| Toast / Notice feedback | One transient-feedback primitive (Toast) and one persistent-state primitive (Notice) | Live | #2283 (closed) |
+| Chat + workspace surfaces | Chat, voice, and Slack as primary interfaces with one agentic interaction system | Partial — agent-assisted Live; agentic UX Filed | #3082; #3142; #3836 (S13) |
+| Generative UI artifacts | Agent-composed UI as declarative data, rendered by the shell — never agent-emitted code | Filed | #3831 (S8) |
+| Ticker tape | The one market tape: one agent, one symbol list, frozen-not-hidden when auto-refresh is off | Live | #2230; #2312; #2689 |
+| Approvals queue / HITL door | The one door for money: every execution approved, every draft stamped with its broker | Live | #3086 (closed) |
+| Nav admin UI | Navigation as configuration: menus, routes, and deep links administered, not hard-coded | Filed | #3053 |
+| Standards checklist gate | The UX standards checklist as a gate: a surface ships only when it conforms | Filed | #3837 (S14) |
+| WCAG 2.2 AA | Accessibility conformance as a product requirement, not a review note | Filed | #3830 (S7) |
+| OWASP agentic safety | Agentic safety (prompt injection, excessive agency, tool misuse) as a product requirement | Filed | #3832 (S9) |
+| Declarative schema-driven views | Views declared as schema and rendered by the shell — one view definition, every surface | Filed | #3835 (S12) |
+
 All other platforms — products not yet defined (**TBD**
 placeholder rows; no filed product issues were found for these
 platforms in the 2026-11-09 survey):
@@ -1421,7 +1444,6 @@ platforms in the 2026-11-09 survey):
 | --- | --- |
 | Organization & strategy (CEO) | TBD — products to be defined by the owning platform |
 | Business architecture & commercial (CBO) | TBD — products to be defined by the owning platform |
-| Product & experience (CPO) | TBD — products to be defined by the owning platform |
 | Operations & service delivery (COO) | TBD — products to be defined by the owning platform |
 | Data & knowledge (CDO) | TBD — products to be defined by the owning platform (shared data and knowledge services per §12.1 are the platform's provision; their product definitions are not yet filed) |
 | Finance & capital (CFO) | TBD — products to be defined by the owning platform |
@@ -1709,8 +1731,9 @@ owner's word, not on this document.
 ### 14.8 Platforms and products
 
 - **Current:** §12.2's inventory — the Technology, Agentic,
-  and Security & trust platform products filed or partial; all
-  other platforms' products undefined.
+  Security & trust, and Product & experience (CPO) platform
+  products filed or partial; all other platforms' products
+  undefined.
 - **Future:** every platform productized under the platform
   model, each product registered and statused like §12.2's
   rows.
@@ -1718,7 +1741,9 @@ owner's word, not on this document.
   eleven #3701 children (Agentic Platform — filed; their build
   sequence is **TBD**); #3687's chain for tenant instantiation;
   the Security & trust platform's products defined in §12.2
-  (this issue, #3851); product definition for the remaining
+  (this issue, #3851); the Product & experience (CPO)
+  platform's products defined in §12.2 (this issue, #3856);
+  product definition for the remaining
   platforms is **TBD**, owned by each platform.
 
 ### 14.9 Operator surface: dashboards and Studios
