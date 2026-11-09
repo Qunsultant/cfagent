@@ -528,7 +528,12 @@ describe("goal-screen leg (new construction, scope update — fully in scope)", 
 describe("already-capturing verification (passes on control too — disclosed)", () => {
   it("async-job NLQ passes a stock-screen port (the #1661-closed path)", () => {
     const fileSrc = src("agents/orchestrator/asyncJobs.ts");
-    const idx = fileSrc.indexOf("await executeNaturalLanguageQuery(");
+    // #3907: the NLQ call is now raced against the execution deadline
+    // (`await Promise.race([..., executionDeadline.promise])`), so the
+    // `await` no longer sits on the call itself. Pin the call, not the
+    // await — the intent is unchanged: the async-job NLQ path passes a
+    // stock-screen port.
+    const idx = fileSrc.indexOf("executeNaturalLanguageQuery(");
     expect(idx).toBeGreaterThan(-1);
     const span = fileSrc.slice(idx, fileSrc.indexOf(");", idx));
     expect(span).toContain("stockScreenPort");
