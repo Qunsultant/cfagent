@@ -36,6 +36,7 @@ import {
   formatSignedMoney,
   portfolioFromPayload,
   portfolioSummary,
+  heroTradingType,
 } from "./brokerPortfolio";
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
@@ -281,6 +282,12 @@ export function ETradeTradingHub({
   } | null>(null);
   const [account, setAccount] = useState<ETradeAccount | null>(null);
   const [positions, setPositions] = useState<ETradePosition[]>([]);
+  /**
+   * Issue #3880: the side the SERVER resolved, echoed by every neutral broker
+   * read. Local `activeEnv` is a request hint the server is free to ignore in
+   * favour of the persisted selection, so it must not decide the badge.
+   */
+  const [resolvedEnv, setResolvedEnv] = useState<string | null>(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [configModalOpen, setConfigModalOpen] = useState(false);
 
@@ -1043,6 +1050,9 @@ export function ETradeTradingHub({
       });
       if (resp.ok) {
         const body = (await resp.json()) as unknown;
+        // Issue #3880: the payload's `environment` is the authoritative side.
+        const echoed = (body as { environment?: unknown })?.environment;
+        if (typeof echoed === "string" && echoed) setResolvedEnv(echoed);
         const read = portfolioFromPayload(body);
         let acct = read.account;
         // A payload without a positions array did not answer the question, so it
@@ -1722,7 +1732,9 @@ export function ETradeTradingHub({
   };
 
   const accountValue = account?.netAccountValue;
-  const isLive = activeEnv === "PROD";
+  // Issue #3880: prefer the server's answer; local state is the fallback for a
+  // surface that has not read yet.
+  const isLive = heroTradingType(resolvedEnv, activeEnv) === "live";
 
   // Issue #3669: what the ORDER page shows as connected, per selected
   // broker — E*TRADE's OAuth object, Alpaca's connect read, and for any
@@ -2285,9 +2297,15 @@ export function ETradeTradingHub({
                   </div>
                   <div className="port-summary-card">
                     <span className="summary-title">Active Positions</span>
-                    <span className="summary-amount">{summary.positionCount}</span>
+                    {/* Issue #3880: before the first read lands the count is
+                        unknown, not zero — "0" is a claim about the account. */}
+                    <span className="summary-amount">
+                      {summary.reported ? summary.positionCount : "—"}
+                    </span>
                     <span className="summary-change">
-                      {summary.optionCount} options · {summary.equityCount} equities &amp; ETFs
+                      {summary.reported
+                        ? `${summary.optionCount} options · ${summary.equityCount} equities & ETFs`
+                        : `Not read yet from ${brokerLabel} — use ↻ Refresh Positions`}
                     </span>
                   </div>
                 </>
