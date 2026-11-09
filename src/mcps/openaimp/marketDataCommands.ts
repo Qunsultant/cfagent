@@ -618,8 +618,13 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     // stand in for it. Validation therefore happens here, and the refusal
     // names both accepted spellings instead of echoing whichever one the
     // model happened to omit.
+    //
+    // Scope: the agent-facing `mcp` mode only. The REST modes keep their
+    // documented legacy default (#1727: an omitted size normalizes to 1) —
+    // changing that here would silently alter the `/trading` contract this
+    // slice is not about.
     const requestedQty = (input as any).qty ?? (input as any).quantity;
-    if (!(Number(requestedQty) > 0)) {
+    if (resolved.mode === "mcp" && !(Number(requestedQty) > 0)) {
       return {
         success: false,
         message:
