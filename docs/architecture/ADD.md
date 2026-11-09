@@ -39,6 +39,10 @@ pending with its owning issue. Delivery rules live in
   #1926),
   [multi-turn-agentic-workflows](./agentic/multi-turn-agentic-workflows.md)
   (one stage contract, two executors; design note for #3069 R9),
+  [agents-workflows-schedules-queues-platforms-lifecycle](./agentic/agents-workflows-schedules-queues-platforms-lifecycle.md)
+  (the target architecture for agents, workflows, schedules,
+  queues, platforms and lifecycle, and its current state; the
+  2026-11-09 discussion recorded on #3842, doc filed as #3844),
   [agent-as-a-service](./agentic/agent-as-a-service.md),
   [social-delivery-and-scheduled-pipelines](./agentic/social-delivery-and-scheduled-pipelines.md)
   (social posting #1077 and staged scheduling).
@@ -132,6 +136,10 @@ pending with its owning issue. Delivery rules live in
 Every change to this container or to any doc it links gets a changelog
 entry here, newest first:
 
+- 2026-11-09 — Agentic architecture: agents, workflows, schedules,
+  queues, platforms and lifecycle target architecture added —
+  [agents-workflows-schedules-queues-platforms-lifecycle](./agentic/agents-workflows-schedules-queues-platforms-lifecycle.md)
+  (discussion and governing tracker #3842, doc issue #3844).
 - 2026-11-06 — Agentic architecture: agent capabilities account
   added — [agent-capabilities](./agentic/agent-capabilities.md)
   (issue #3520).
