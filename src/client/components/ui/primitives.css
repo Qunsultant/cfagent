@@ -841,6 +841,53 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   gap: var(--space-2);
 }
 
+/* ---------- Template organisms I (#3132) ---------- */
+/* ContextStrip: the live-context slot — the order quote peek rebuilt
+ * as a primitive. Same sunken strip (surface-sunken, subtle border,
+ * body-sm, secondary text); the price reads in the accent tone.
+ * No outer margin: slot spacing is the template's Stack gap (§1.6b). */
+.ui-context-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body-sm);
+}
+
+.ui-context-strip strong {
+  color: var(--color-accent);
+}
+
+/* SummaryCard: the order calc card rebuilt as a primitive. Same
+ * sunken surface; rows read muted, the total row is separated by a
+ * top border and reads primary + bold, its value in success mono. */
+.ui-summary-card {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  font-size: var(--font-size-body);
+  color: var(--color-text-muted);
+}
+
+.ui-summary-total {
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: var(--space-2);
+  margin-top: var(--space-1);
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.ui-summary-total strong {
+  color: var(--color-success);
+  font-size: var(--font-size-title-sm);
+  font-family: var(--font-mono);
+}
+
 /* ---------- Toast (#2283) ---------- */
 /* The one familiar place for transient feedback. Fixed viewport, above
    the modal backdrop (z-index 9999), pointer-transparent except on the

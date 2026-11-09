@@ -36,6 +36,12 @@
  * - PageShell + PageSection — page chrome (title + scope note + sections)
  *   with primitive loading/empty/error states; sections carry the shared
  *   section treatment (title + description) instead of hand-rolled h3s.
+ * - PageTemplate — the template layer: header + slots + states, in
+ *   canonical order (#3131).
+ * - ContextStrip — sunken live-context strip (company/price/change/
+ *   bid-ask/status/source; #3132).
+ * - KpiRibbon — responsive row of KPI cards (label/value/sub-trend; #3132).
+ * - SummaryCard — label/value rows + emphasized total (#3132).
  * - Toast — the one global place for transient success/failure feedback
  *   (ToastProvider + useToast; auto-dismiss by tone, danger persists,
  *   hover/focus pause, Escape dismisses, role=status/alert announced).
@@ -74,6 +80,9 @@ export { Table, type TableProps, type TableColumn } from "./Table";
 export { Skeleton, type SkeletonProps } from "./Skeleton";
 export { PageShell, PageSection, type PageShellProps, type PageSectionProps } from "./PageShell";
 export { PageTemplate, type PageTemplateProps, type PageTemplateSlots } from "./PageTemplate";
+export { ContextStrip, type ContextStripProps, type ContextStripChangeTone } from "./ContextStrip";
+export { KpiRibbon, type KpiRibbonItem, type KpiRibbonProps, type KpiSubTone } from "./KpiRibbon";
+export { SummaryCard, type SummaryCardProps, type SummaryCardRow, type SummaryValueTone } from "./SummaryCard";
 export { ToastProvider, useToast, type ToastTone, type ToastInput, type ToastApi } from "./Toast";
 export { Menu, type MenuProps, type MenuItem } from "./Menu";
 export { Popover, type PopoverProps } from "./Popover";

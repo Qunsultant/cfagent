@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
+import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ContextStrip, KpiRibbon, SummaryCard, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -155,6 +155,9 @@ describe("Primitive styles (primitives.css)", () => {
       ".ui-modal-actions",
       ".ui-table",
       ".ui-skeleton",
+      ".ui-context-strip",
+      ".ui-summary-card",
+      ".ui-summary-total",
     ]) {
       expect(css, hook).toContain(hook);
     }
@@ -423,6 +426,51 @@ describe("PageTemplate (#3131)", () => {
     expect(template.props.actionBar).toBe("actions");
     expect(template.props.queueRail).toBe("queue");
     expect(template.props.children).toBe("workspace");
+  });
+});
+
+describe("Template organisms I (#3132)", () => {
+  it("ContextStrip carries the live-context contract", () => {
+    const element = React.createElement(ContextStrip, {
+      company: "Apple Inc.",
+      price: "$338.32",
+      change: "+1.23 (0.36%)",
+      changeTone: "positive",
+      bidAsk: "Bid: $338.30 / Ask: $338.35",
+      status: "REALTIME",
+      source: "Broker",
+    });
+    expect(element.type).toBe(ContextStrip);
+    expect(element.props.company).toBe("Apple Inc.");
+    expect(element.props.price).toBe("$338.32");
+    expect(element.props.changeTone).toBe("positive");
+    expect(element.props.status).toBe("REALTIME");
+  });
+
+  it("KpiRibbon carries the label/value/sub-trend contract", () => {
+    const element = React.createElement(KpiRibbon, {
+      items: [
+        { label: "Portfolio NAV", value: "$10,241,882", sub: "↑ +1.2% today", subTone: "success" },
+        { label: "Drawdown vs Alert", value: "-2.40%" },
+      ],
+    });
+    expect(element.type).toBe(KpiRibbon);
+    expect(element.props.items).toHaveLength(2);
+    expect(element.props.items[0].label).toBe("Portfolio NAV");
+    expect(element.props.items[0].subTone).toBe("success");
+  });
+
+  it("SummaryCard carries the rows + emphasized total contract", () => {
+    const element = React.createElement(SummaryCard, {
+      rows: [
+        { label: "Estimated Price per Share:", value: "$338.32" },
+        { label: "Online Commission:", value: "$0.00 USD" },
+      ],
+      total: { label: "Estimated Total Order Value:", value: "$3,383.20" },
+    });
+    expect(element.type).toBe(SummaryCard);
+    expect(element.props.rows).toHaveLength(2);
+    expect(element.props.total.value).toBe("$3,383.20");
   });
 });
 

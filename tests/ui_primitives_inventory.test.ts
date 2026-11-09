@@ -43,6 +43,10 @@ const INVENTORY: Record<string, string[]> = {
   "PageShell.tsx": ["PageShell", "PageSection"],
   // #3131 template layer: slots as props over the PageShell chrome.
   "PageTemplate.tsx": ["PageTemplate"],
+  // #3132 template organisms I: context strip, KPI ribbon, summary card.
+  "ContextStrip.tsx": ["ContextStrip"],
+  "KpiRibbon.tsx": ["KpiRibbon"],
+  "SummaryCard.tsx": ["SummaryCard"],
   // #2283 global toast: the single home for transient feedback.
   "Toast.tsx": ["ToastProvider", "useToast"],
   // #2283 stream 5: anchored surfaces join as primitives.
