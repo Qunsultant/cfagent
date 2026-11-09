@@ -31,6 +31,7 @@
 
 import type { Env } from "../types";
 import { MarketDataResearchService } from "./marketDataResearch";
+import { CANCEL_ALL_PREVIEW_TTL_MS, type CancelPreviewStore } from "./cancelPreviewStore";
 import { recordTradingRunOutcome, alpacaModeFromEnv } from "./tradingRunOutcome";
 import type { SqlStorage } from "../orm";
 import {
@@ -80,7 +81,11 @@ export type ScopedCancelRefusalCode =
   | "invalid_order_side"
   | "invalid_placed_after"
   | "cancel_max_exceeded"
-  | "limit_not_configured";
+  | "limit_not_configured"
+  // Issue #3885 — the cancel-all vocabulary.
+  | "cancel_all_needs_preview"
+  | "cancel_all_too_many"
+  | "cancel_all_preview_expired";
 
 export interface CancelLegSummary {
   declared: number;
@@ -556,6 +561,241 @@ export async function cancelTickerOrders(
       placedAfter: request.placedAfter ?? null,
     },
   });
+}
+
+export interface CancelAllPreview {
+  count: number;
+  ids: string[];
+  symbols: string[];
+  classes: string[];
+  oldest: string | null;
+  newest: string | null;
+  expiresAt: string;
+}
+
+export interface CancelAllReceipt extends ScopedCancelReceipt {
+  preview?: CancelAllPreview;
+  previewToken?: string;
+}
+
+function newPreviewToken(): string {
+  const cryptoApi = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (cryptoApi?.randomUUID) return cryptoApi.randomUUID();
+  return `cpreview_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Issue #3885 — cancel every open order, always in two steps.
+ *
+ * A bare call NEVER cancels: it lists the open orders, applies the configured
+ * cap and returns a preview plus a single-use token. Only a second call
+ * presenting that token acts, and only on the ids the user was shown — an
+ * order placed after the preview is not swept up by it. The cap is
+ * `cancelMaxCount` from configuration (#3888); an unset cap REFUSES here
+ * (unlike a ticker cancel), because “cancel everything” must never run
+ * unbounded.
+ */
+export async function cancelAllOrders(
+  port: CancelBrokerPort,
+  request: {
+    /** The token from the preview call. Omit for the preview itself. */
+    token?: string;
+    dryRun?: boolean;
+    reason?: string;
+    limits?: TradingLimitsSnapshot;
+  },
+  store: CancelPreviewStore,
+): Promise<CancelAllReceipt> {
+  const base = (): CancelAllReceipt => ({
+    success: false,
+    action: "cancel_all",
+    filter: {},
+    targeted: 0,
+    planned: [],
+    cancelled: [],
+    refused: [],
+    foldedLegIds: [],
+    message: "",
+    reason: request.reason,
+  });
+
+  const token = String(request.token ?? "").trim();
+
+  if (token) {
+    const record = store.find(token);
+    const now = Date.now();
+    if (!record) {
+      return {
+        ...base(),
+        code: "cancel_all_preview_expired",
+        message: `cancel_all_preview_expired: no preview matches that token, so nothing was cancelled. Ask again for a fresh preview.`,
+      };
+    }
+    if (record.usedAt) {
+      return {
+        ...base(),
+        code: "cancel_all_preview_expired",
+        message: `cancel_all_preview_expired: that preview token was already used at ${record.usedAt}, so nothing was cancelled. Ask again for a fresh preview.`,
+      };
+    }
+    const expiresAt = Date.parse(record.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+      return {
+        ...base(),
+        code: "cancel_all_preview_expired",
+        message: `cancel_all_preview_expired: that preview expired at ${record.expiresAt}, so nothing was cancelled. Ask again for a fresh preview.`,
+      };
+    }
+
+    // Mark used BEFORE any cancel: a crash mid-loop must not allow a replay.
+    store.markUsed(token, new Date(now).toISOString());
+
+    // Re-read the live state so each target is cancelled with its real class
+    // and role; an id that is no longer open is refused, not guessed at.
+    const listed = await port.listOpenOrders();
+    const live = listed.success && Array.isArray(listed.orders) ? mapAlpacaOrderList(listed.orders) : [];
+    const targets: CancelableOrder[] = [];
+    const vanished: ScopedCancelFailure[] = [];
+    for (const id of record.ids) {
+      const candidate = live.find((order) => order.orderId === id);
+      if (candidate) {
+        targets.push(candidate);
+        continue;
+      }
+      const read = await port.getOrder(id);
+      const status = read.success && read.order ? String(read.order?.status ?? "").trim().toLowerCase() : "";
+      vanished.push({
+        orderId: id,
+        symbol: String(read.success ? read.order?.symbol ?? "" : "").toUpperCase(),
+        statusBefore: status || "unknown",
+        code: "cancel_not_possible",
+        message: status
+          ? `order ${id} is '${status}' and no longer open, so it was not cancelled`
+          : `order ${id} could not be read (${read.message ?? "no reason returned"}), so it was not cancelled`,
+      });
+    }
+
+    const planned: ScopedCancelTarget[] = targets.map((order) => ({
+      orderId: order.orderId,
+      symbol: order.symbol,
+      orderClass: order.cancelClass,
+      role: order.role,
+      statusBefore: order.rawStatus,
+    }));
+
+    const cancelled: CancelTargetReceipt[] = [];
+    const refused: ScopedCancelFailure[] = [...vanished];
+    for (const target of targets) {
+      const receipt = await cancelTarget(port, target);
+      if (receipt.cancelled) cancelled.push(receipt);
+      else
+        refused.push({
+          orderId: target.orderId,
+          symbol: target.symbol,
+          statusBefore: target.rawStatus,
+          code: "cancel_failed",
+          message: receipt.message,
+        });
+    }
+
+    const success = refused.length === 0 && cancelled.length > 0;
+    const message =
+      `Cancel all: targeted ${record.ids.length}, cancelled ${cancelled.length}, refused ${refused.length}.` +
+      (refused.length > 0 ? ` Survived: ${refused.map((entry) => `${entry.orderId} (${entry.message})`).join("; ")}.` : "");
+    return {
+      ...base(),
+      success,
+      targeted: record.ids.length,
+      planned,
+      cancelled,
+      refused,
+      message,
+    };
+  }
+
+  const listed = await port.listOpenOrders();
+  if (!listed.success || !Array.isArray(listed.orders)) {
+    return {
+      ...base(),
+      code: "cancel_read_failed",
+      message:
+        `The broker's open orders could not be read, so no preview was produced: ${listed.message ?? "no reason returned"}` +
+        `${listed.httpStatus ? ` (HTTP ${listed.httpStatus})` : ""}.`,
+    };
+  }
+
+  const orders = mapAlpacaOrderList(listed.orders);
+  const resolution = resolveCancelTargets(orders, {});
+  if (!resolution.matched) {
+    return {
+      ...base(),
+      code: "no_orders_matched",
+      message: "no_orders_matched: there are no open orders to cancel, so there is nothing to preview.",
+    };
+  }
+
+  const cap = checkCancelCap(request.limits, resolution.targets.length, true);
+  if (!cap.ok) {
+    return {
+      ...base(),
+      code: cap.code === "limit_not_configured" ? "limit_not_configured" : "cancel_all_too_many",
+      planned: resolution.targets.map((order) => ({
+        orderId: order.orderId,
+        symbol: order.symbol,
+        orderClass: order.cancelClass,
+        role: order.role,
+        statusBefore: order.rawStatus,
+      })),
+      message: cap.message,
+    };
+  }
+
+  const timestamps = resolution.targets
+    .map((order) => order.placedAt)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const expiresAt = new Date(Date.now() + CANCEL_ALL_PREVIEW_TTL_MS).toISOString();
+  const preview: CancelAllPreview = {
+    count: resolution.targets.length,
+    ids: resolution.targets.map((order) => order.orderId),
+    symbols: Array.from(new Set(resolution.targets.map((order) => order.symbol))).sort(),
+    classes: Array.from(new Set(resolution.targets.map((order) => order.cancelClass))).sort(),
+    oldest: timestamps.length > 0 ? new Date(Math.min(...timestamps)).toISOString() : null,
+    newest: timestamps.length > 0 ? new Date(Math.max(...timestamps)).toISOString() : null,
+    expiresAt,
+  };
+
+  const freshToken = newPreviewToken();
+  if (!request.dryRun) {
+    store.save({
+      token: freshToken,
+      ids: preview.ids,
+      createdAt: new Date().toISOString(),
+      expiresAt,
+    });
+  }
+
+  return {
+    ...base(),
+    code: "cancel_all_needs_preview",
+    targeted: preview.count,
+    planned: resolution.targets.map((order) => ({
+      orderId: order.orderId,
+      symbol: order.symbol,
+      orderClass: order.cancelClass,
+      role: order.role,
+      statusBefore: order.rawStatus,
+    })),
+    foldedLegIds: resolution.foldedLegIds,
+    preview,
+    ...(request.dryRun ? {} : { previewToken: freshToken }),
+    message:
+      `cancel_all_needs_preview: ${preview.count} open order${preview.count === 1 ? "" : "s"} would be cancelled ` +
+      `(${preview.symbols.join(", ")}). Nothing has been cancelled. ` +
+      (request.dryRun
+        ? "This was a dry run, so no confirmation token was issued."
+        : `Confirm with the returned token within ${Math.round(CANCEL_ALL_PREVIEW_TTL_MS / 1000)} seconds.`),
+    ...(request.dryRun ? { dryRun: true } : {}),
+  };
 }
 
 /**

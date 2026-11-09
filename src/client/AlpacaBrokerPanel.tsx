@@ -8,6 +8,7 @@ import {
 } from "../trading/brokerCatalog";
 import { BrokerSurfaceGate } from "./BrokerSurfaceGate";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
+import { AlpacaCancelAllControl } from "./AlpacaCancelAllControl";
 
 /**
  * Issue #2853 (gap G2): the first non-E*TRADE panel under the broker panel contract.
@@ -375,6 +376,16 @@ export function AlpacaBrokerPanel({ activeEnv }: AlpacaBrokerPanelProps) {
       <Card id="section-order-history" className="ui-anchor">
         <Flex align="center" gap="2">
           <h4>Order history</h4>
+          {/* Issue #3885: cancel every open order — preview first, then the
+              token, then the table refreshes only on a confirmed cancel. */}
+          <AlpacaCancelAllControl
+            openOrders={
+              orderHistory.state === "ready"
+                ? (orderHistory.data.orders ?? []).filter((row) => row.status === "OPEN").length
+                : 0
+            }
+            onCancelled={() => setOrderHistoryNonce((n) => n + 1)}
+          />
         </Flex>
         <BrokerSurfaceGate broker="alpaca" surface="orderHistory">
           {orderHistory.state === "loading" && <Spinner size="sm" label="Loading Alpaca order history" />}
