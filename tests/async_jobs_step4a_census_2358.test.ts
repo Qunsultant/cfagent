@@ -54,8 +54,10 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // 34 at #2358; 36 after #2567 (+2: the stuck_alerted_at column
   // migration and the guarded markStuckAlerted UPDATE); 37 after
   // #3784 (+1: the listRunning sweep scan); 40 after #3810 (+3:
-  // the trigger / triggered_by / schedule_id probed columns).
-  ["src/data/doSqliteAsyncJobAdapter.ts", 40],
+  // the trigger / triggered_by / schedule_id probed columns);
+  // 43 after #3811 (+3: the last_activity_at + error_code column
+  // migrations and the guarded heartbeat UPDATE).
+  ["src/data/doSqliteAsyncJobAdapter.ts", 43],
   ["src/data/doSqliteJobOutcomeAdapter.ts", 13],
   ["src/data/doSqlitePausedScheduleAdapter.ts", 7],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],
