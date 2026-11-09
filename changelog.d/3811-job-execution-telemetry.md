@@ -1,6 +1,6 @@
-# Job execution telemetry (#3811)
+### Added
 
-- Async jobs now emit execution telemetry: a heartbeat stamps `last_activity_at`
+- Job execution telemetry (#3811): async jobs now emit execution telemetry: a heartbeat stamps `last_activity_at`
   on running rows every 2 minutes while the executor runs; an executor that
   dies mid-job leaves a stale heartbeat — the stall evidence.
 - Executor-side failure capture: a throw in `executeAsyncJob` writes a terminal
