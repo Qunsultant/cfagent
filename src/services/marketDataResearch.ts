@@ -2711,7 +2711,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
         message: data?.message || `Alpaca order placement failed: HTTP ${res.status}`,
       };
     } catch (err: any) {
-      return { success: false, message: `Alpaca network exception: ${err.message || String(err)}` };
+      return { success: false, message: `Network exception reading the order: ${err.message || String(err)}` };
     }
   }
 
@@ -2776,7 +2776,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
         message: data?.message || `Alpaca multi-leg order failed: HTTP ${res.status}`,
       };
     } catch (err: any) {
-      return { success: false, message: `Alpaca network exception: ${err.message || String(err)}` };
+      return { success: false, message: `Network exception reading the order: ${err.message || String(err)}` };
     }
   }
 
@@ -2978,7 +2978,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   }
 
   /**
-   * Real Alpaca Trading v2: Get ONE order (#3883).
+   * Real provider Trading v2: Get ONE order (#3883).
    *
    * A cancel decides from the broker's own record: the status says whether
    * there is anything to cancel, `order_class` says whether cancelling it
@@ -2988,11 +2988,11 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
    */
   async getOrder(orderId: string): Promise<{ success: boolean; order?: any; message?: string; httpStatus?: number }> {
     const id = String(orderId ?? "").trim();
-    if (!id) return { success: false, message: "Alpaca order read needs an order id." };
+    if (!id) return { success: false, message: "An order read needs an order id." };
     if (!this.isConfigured()) {
       return {
         success: false,
-        message: "Alpaca Trading error: ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY are required.",
+        message: "The trading credentials are not configured; the order cannot be read.",
       };
     }
 
@@ -3010,10 +3010,10 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
       return {
         success: false,
         httpStatus: res.status,
-        message: data?.message || `Alpaca order ${id} read failed: HTTP ${res.status}`,
+        message: data?.message || `The order ${id} read failed: HTTP ${res.status}`,
       };
     } catch (err: any) {
-      return { success: false, message: `Alpaca network exception: ${err.message || String(err)}` };
+      return { success: false, message: `Network exception reading the order: ${err.message || String(err)}` };
     }
   }
 

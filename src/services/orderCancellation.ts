@@ -42,8 +42,8 @@ export interface CancelBrokerPort {
   cancelOrder(orderId: string): Promise<{ success: boolean; orderId: string; message: string; httpStatus?: number }>;
 }
 
-/** The Alpaca port over the one service the ladder already uses (#3673). */
-export function createAlpacaCancelPort(env: Env): CancelBrokerPort {
+/** The broker port over the one service the ladder already uses (#3673). */
+export function createCancelBrokerPort(env: Env): CancelBrokerPort {
   const service = new MarketDataResearchService(env);
   return {
     getOrder: (orderId) => service.getAlpacaOrder(orderId),
@@ -104,8 +104,8 @@ function canRead(order: any): boolean {
 /**
  * Cancel exactly one order, with its bracket/OCO family semantics.
  *
- * `reason` is a caller's note (audited, never sent to the broker): Alpaca has
- * no reason field, and inventing one would misrepresent the wire.
+ * `reason` is a caller's note (audited, never sent to the broker): the wire
+ * has no reason field, and inventing one would misrepresent what was sent.
  */
 export async function cancelSingleOrder(
   port: CancelBrokerPort,
