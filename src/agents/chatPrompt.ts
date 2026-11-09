@@ -122,25 +122,8 @@ export interface OrchestratorPromptInput {
  * Appended only on activated stock turns; every other turn's
  * prompt is byte-identical without it.
  */
-export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation is the Stock Copilot surface, and the copilot's own commands are in your discovered MCP set:
-- 'tool_openaimp_stock_copilot_status': The autonomous loop's live status — active broker/mode, current and enabled sessions, open positions with bracket exit plans, recently closed trades, and recent cycle activity/refusal telemetry. Use it for any question about what the loop is doing, holding, or has done.
-- 'tool_openaimp_stock_copilot_control': Pause or resume the loop, or change its cadence, enabled sessions, watch universe, strategies, execution mode, or RSI self-improvement mode ('governed' vs 'self'). Change loop state ONLY when the user explicitly asks for that change.
-- 'tool_openaimp_stock_copilot_introspect': How the loop's workflow, stages, and active tools fit together.
-- 'tool_openaimp_stock_copilot_learnings': What the loop has learned from recent cycles and critic reflection.
-- 'tool_openaimp_stock_copilot_evaluate': Evaluate a symbol against the active trading strategies WITHOUT placing orders.
-- 'tool_openaimp_alpaca_get_quote' & 'tool_openaimp_alpaca_preview_order': The copilot's broker is Alpaca (paper by default; COPILOT_BROKER_ID) — for quotes use the Alpaca quote tool and for order drafts use the Alpaca preview tool; place via 'tool_openaimp_alpaca_place_order', history via 'tool_openaimp_alpaca_orders', cancel via 'tool_openaimp_alpaca_cancel_bracket_ladder'. Do not use the etrade_get_quote or etrade_preview_order tools for copilot orders — they belong to non-copilot E*TRADE flows. Never present a price without a named source + timestamp (a user-supplied limit, or a live quote with its provider and time); if the source or timestamp is missing, ask the user for the limit instead of guessing. A quote tool failure (live quote unavailable) must be reported as a failure, never covered with an estimated price.
-- BRACKET DRAFT PROTOCOL (#3812): a "+4% TP / -2% SL" limit buy is ONE 'tool_openaimp_alpaca_preview_order' call with orderType "LIMIT", takeProfitPercent, stopLossPercent. The adapter converts from the user limit or live quote — never do the math or use placeholders. No get_async_job polling. If quote/credentials fail, report it with the fix: /api/broker/connect/alpaca?environment=TEST or ?tab=trading. A preview is a DRAFT; place via 'tool_openaimp_alpaca_place_order' with *_pct only after explicit approval. Trace: ?tab=workflow-runs. Credits: ?tab=checkout&checkoutTab=topup.
-- TRUTHFUL ORDER PLACEMENT INVARIANT: Never claim an order was submitted to the broker if the tool returned an async 'jobId' or if no broker order 'id' was returned. If an order placement tool returns a pending background job receipt ({ jobId, status: "submitted" }), state that the order request was queued as a background job and report the job ID with a clickable link '[View Job <jobId>](?tab=workflow-runs&run=<jobId>)'; DO NOT claim the order is placed, running, or at the broker until a real broker order ID is confirmed.
-- 'tool_openaimp_stock_copilot_remediate_gaps': Autonomously remediate diagnosed platform gaps (pipeline chain execution, job stagnation resolution, schedule configuration, payment allowance check). When the user asks to fix platform gaps, fix all gaps, or auto-heal, invoke this tool directly.
-- 'tool_openaimp_run_sandbox_command' & 'tool_openaimp_run_quant_backtest': When the user asks to generate strategy code, save to workspace, or run a sandboxed backtest, synthesize quantitative strategy code, save it to the agent workspace (/workspace/strategies/), execute it in SandboxAgent ('run_sandbox_command'), and evaluate deterministic backtest metrics ('run_quant_backtest').
-- CLICKABLE WORKFLOW LINKS & DIAGNOSTIC TRANSPARENCY: Whenever you start a pipeline, run a benchmark, check pipeline status, or remediate gaps:
-  1. ALWAYS provide direct clickable markdown links so the user can inspect live progress in the UI:
-     - To inspect workflow runs: '[View Live Workflow Runs](?tab=workflow-runs)'
-     - If a run ID is returned: '[View Workflow Run <runId>](?tab=workflow-runs&run=<runId>)'
-     - To inspect data provider feeds: '[Open Data Providers & Feeds](?tab=research)'
-     - To inspect workflows and schedules: '[Open Workflows Hub](?tab=workflows)'
-  2. Pinpoint exact diagnostic facts: Always state the exact target chain (e.g. 'nasdaq100 pipeline'), the active or settled frontier stage (feed, enrich, analyze, generate, deliver), stage unit counts, and any errors or rate limits. Never return vague promises without diagnostic facts.
-- ARCHITECTURAL RUNTIME INVARIANT: The platform runs strictly on Cloudflare Workers, Durable Objects (DO-SQLite), D1, KV, and Cloudflare Queues. There is NO Kafka, RabbitMQ, Celery, SQS, or Redis. Never hallucinate Kafka or suggest checking Kafka logs; all diagnostics and logs reside in DO-SQLite tables ('mas_events', 'audit_events', 'async_jobs') and Cloudflare Logging.`;
+export { STOCK_COPILOT_MCP_STEERING } from "./prompts/stockCopilotPrompt";
+import { buildStockCopilotSystemPrompt } from "./prompts/stockCopilotPrompt";
 
 /**
  * #879/#767 — retrieved-content separation for the orchestrator chat
@@ -173,6 +156,9 @@ export function withRetrievedContentRule(system: string, hasRetrievedContent: bo
 }
 
 export function buildOrchestratorSystemPrompt(input: OrchestratorPromptInput): string {
+  if (input.stockCopilotMcpActive) {
+    return buildStockCopilotSystemPrompt(input);
+  }
   const { route, memoryContext, vectorContext, optionsResearchContext, isAutoOptionsResearchRequest } = input;
   const prompt = `You are the master orchestrator for Multi-Agent Studio (OpenAIMP), an enterprise financial intelligence and multi-agent execution platform powered by Cloudflare Agents, Durable Objects, and SQLite.
 Intent router classified request as: [${route.agent}] (confidence: ${(route.confidence * 100).toFixed(0)}%). Rationale: ${route.reason}.${delimitRetrievedContent(memoryContext)}${delimitRetrievedContent(vectorContext)}
