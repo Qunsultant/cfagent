@@ -634,6 +634,15 @@ function triggerEvidence(job: WorkflowRunJobRow): { trigger?: string; detail?: s
   }
   if (payload.scheduled === true || payload.scheduledAt) return { trigger: "scheduled" };
   if (str(payload.webhookUrl) || payload.webhook === true) return { trigger: "webhook" };
+  if (job.capability === "mcp.tool") {
+    const actingLogin = str(payload.actingLogin) ?? str(payload.userLogin) ?? str(payload.actor);
+    const toolName = str(payload.toolName) ?? "tool";
+    return {
+      trigger: "agent",
+      detail: `Agent tool call — ${toolName}`,
+      actor: actingLogin ?? undefined,
+    };
+  }
   const actor = str(payload.requestedBy) ?? str(payload.userLogin) ?? str(payload.actor);
   if (actor) return { trigger: "manual", actor };
   // #2786 Part 2 (scope b): an http.request row that records no trigger

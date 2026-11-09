@@ -36,6 +36,23 @@ describe("Issue #3624: Synchronous MCP tools classification", () => {
   it("classifies status/reader tools as synchronous", () => {
     expect(isSynchronousMcpTool("get_async_job")).toBe(true);
     expect(isSynchronousMcpTool("list_async_jobs")).toBe(true);
+    expect(isSynchronousMcpTool("get_pipeline_chain_status")).toBe(true);
+    expect(isSynchronousMcpTool("list_pipeline_chains")).toBe(true);
+    expect(isSynchronousMcpTool("run_pipeline_chain")).toBe(true);
+    expect(isSynchronousMcpTool("resume_pipeline_chain")).toBe(true);
+    expect(isSynchronousMcpTool("get_feed_job_status")).toBe(true);
+    expect(isSynchronousMcpTool("list_feed_jobs")).toBe(true);
+    expect(isSynchronousMcpTool("get_enrich_job_status")).toBe(true);
+    expect(isSynchronousMcpTool("list_enrich_jobs")).toBe(true);
+    expect(isSynchronousMcpTool("get_analyze_job_status")).toBe(true);
+    expect(isSynchronousMcpTool("list_analyze_jobs")).toBe(true);
+    expect(isSynchronousMcpTool("get_generate_job_status")).toBe(true);
+    expect(isSynchronousMcpTool("list_generate_jobs")).toBe(true);
+    expect(isSynchronousMcpTool("get_deliver_job_status")).toBe(true);
+    expect(isSynchronousMcpTool("list_deliver_jobs")).toBe(true);
+    expect(isSynchronousMcpTool("stock_copilot_remediate_gaps")).toBe(true);
+    expect(isSynchronousMcpTool("get_payment_budget")).toBe(true);
+    expect(isSynchronousMcpTool("check_payment_budget")).toBe(true);
   });
 
   it("keeps heavy/batch capabilities asynchronous", () => {

@@ -1684,11 +1684,12 @@ export class StockCopilotRemediateGapsCommand implements IMcpToolCommand<{ pipel
   ): Promise<PlatformRemediationResult> {
     const actingLogin = context.actingLogin?.();
     await recordDoorHop(context, this.name, "OrchestratorAgent");
-    const sql = context.orm?.getSql?.();
+    const sql = context.orm?.getSql?.() ?? (context.storage as any)?.sql;
     const settings = sql ? createSettingsPort(sql) : null;
     const result = await remediatePlatformGaps({
       env: context.env,
       userLogin: actingLogin ?? "owner",
+      sql,
       readSettingRaw: (key: string) => {
         try {
           return settings?.get(key) ?? null;
