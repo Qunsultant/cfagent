@@ -403,7 +403,7 @@ describe("issue #2488 — run_stock_screen catalog registration", () => {
     // 98 since #3536 (+4 enrich-job tools).
     // 106 since #3538 (+4 generate-job tools); 110 since #3539 (+4 deliver-job tools); 112 since #3673 (+2 bracket ladder tools).
     // 116 since #3540 (+4 pipeline-chain tools); 120 since #3530 slice B (+2 feed-job schedule tools); 122 since #3782 (+2 Alpaca quote/preview tools).
-    expect(McpToolFactory.getAllTools()).toHaveLength(123);
+    expect(McpToolFactory.getAllTools()).toHaveLength(124);
   });
 });
 

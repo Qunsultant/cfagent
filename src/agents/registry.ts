@@ -795,6 +795,16 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "The foss_* names are deprecated aliases (#1906) wrapping the canonical commands; each foss_* alias is superseded by the canonical market_data_*/alpaca_* name for the same command. Alias removal is a follow-up slice.",
   },
   {
+    // Issue #3888: the externalized trading limits get their own family — a
+    // risk surface, not market data, so it owns exactly one tool and one source.
+    id: "trading-limits-mcp-commands",
+    name: "Trading limits MCP commands",
+    source: "src/mcps/openaimp/tradingLimitCommands.ts",
+    status: "live",
+    commands: ["trading_limits"],
+    commandSources: [{ file: "src/mcps/openaimp/tradingLimitCommands.ts", kind: "readonly-name" }],
+  },
+  {
     id: "agentdb-read-mcp-commands",
     name: "AgentDB read MCP commands",
     source: "src/mcps/openaimp/agentDbReadCommands.ts",
