@@ -125,6 +125,10 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   ["src/agents/routes/orchestratorMigration.ts", 3, "issue #2681 orchestrator migration: DO-internal table export/import — sqlite_master discovery, SELECT *, INSERT OR REPLACE; the migration driver must read the source instance's own storage, no port path exists for cross-instance table copy"],
   ["src/agents/routes/schedules.ts", 3, "issue #1766 nightly retention legs: DO-internal orphan-sweep read (body_r2_key), sqlite_master discovery, and per-table SELECT * for the R2 snapshot; the pass runs inside the DO and reads its own storage, no port path exists for own-instance table dump"],
   ["src/agents/routes/screenerResearch.ts", 2, "issue #1257 live-check route: DO-internal SELECT-only read of the route's own instance mas_promotions table (in-flight stages + per-stage counts); no port path exists (the table has no adapter or D1 migration, and the stagedPromotion module that owned it was deleted); owner-directed landing, left in place until the owner directs removal"],
+  // #3887: the ladder state store owns its own one-row-per-ladder table in
+  // the caller's DO SQLite (spec + plan + placed rungs); no existing port
+  // models a resumable ladder, so the statements live here.
+  ["src/services/ladderStateStore.ts", 4, "issue #3887 ladder state: one row per ladder (spec/plan/placed) that a later observation resumes from; no port models it"],
 ];
 
 /** The step-4c families: zero above-layer sites remain. */
