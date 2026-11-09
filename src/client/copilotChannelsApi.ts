@@ -83,10 +83,16 @@ export class CopilotVoiceError extends Error {
 }
 
 async function voiceErrorCode(resp: Response): Promise<string> {
-  const data = (await resp.json().catch(() => ({}))) as { error?: unknown };
-  return typeof data.error === "string" && data.error
-    ? data.error
-    : "voice_backend_unavailable";
+  const data = (await resp.json().catch(() => ({}))) as {
+    error?: unknown;
+    code?: unknown;
+  };
+  if (typeof data.error === "string" && data.error) return data.error;
+  // The desk surface's gate refuses in the channel-desk body
+  // shape ({ code: "BROKER_CHANNEL_UNAVAILABLE", ... }, #3429) —
+  // the named code rides that field there.
+  if (typeof data.code === "string" && data.code) return data.code;
+  return "voice_backend_unavailable";
 }
 
 /**
@@ -131,6 +137,94 @@ export async function synthesizeCopilotVoice(
 ): Promise<Blob> {
   const resp = await apiFetch(
     `/api/copilot-channels/voice/tts?registration=${encodeURIComponent(registration)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    },
+  );
+  if (!resp.ok) throw new CopilotVoiceError(await voiceErrorCode(resp));
+  return resp.blob();
+}
+
+/* ------------------------------------------------------------------ */
+/* Surface-parameterized voice client (issue #3796)                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The trading desk's voice surface id (mirrors
+ * TRADING_DESK_VOICE_SURFACE_ID in
+ * src/services/copilotVoiceBackend.ts — the client/server
+ * literal-mirror idiom the backend ids above already follow).
+ */
+export const TRADING_DESK_VOICE_SURFACE = "trading-desk";
+
+/** The surface projection read's shape (GET /api/voice/backend). */
+export interface VoiceSurfaceProjection {
+  surface: string;
+  voiceBackend: CopilotVoiceBackendStatus;
+}
+
+/**
+ * Read one surface's resolved voice backend (the server's
+ * decision, never the client's): which speech machinery serves
+ * the surface's turns, and which layer decided.
+ */
+export async function fetchVoiceSurfaceBackend(
+  surface: string,
+): Promise<VoiceSurfaceProjection> {
+  const resp = await apiFetch(
+    `/api/voice/backend?surface=${encodeURIComponent(surface)}`,
+  );
+  const data = (await resp
+    .json()
+    .catch(() => ({}))) as VoiceSurfaceProjection & { error?: string };
+  if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+  return data;
+}
+
+/**
+ * Model backend, speech-to-text for a named SURFACE: POST the
+ * recorded audio to the surface STT endpoint; resolves with the
+ * transcript. Throws CopilotVoiceError with the server's named
+ * code on any failure (including the desk surface's
+ * BROKER_CHANNEL_UNAVAILABLE gate refusal).
+ */
+export async function transcribeVoiceSurface(
+  surface: string,
+  audioBase64: string,
+  contentType?: string,
+): Promise<string> {
+  const resp = await apiFetch(
+    `/api/voice/stt?surface=${encodeURIComponent(surface)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        audioBase64,
+        ...(contentType ? { contentType } : {}),
+      }),
+    },
+  );
+  if (!resp.ok) throw new CopilotVoiceError(await voiceErrorCode(resp));
+  const data = (await resp.json().catch(() => ({}))) as { text?: unknown };
+  if (typeof data.text !== "string" || !data.text.trim()) {
+    throw new CopilotVoiceError("voice_stt_model_failed");
+  }
+  return data.text;
+}
+
+/**
+ * Model backend, text-to-speech for a named SURFACE: POST the
+ * reply text to the surface TTS endpoint; resolves with the
+ * audio blob. Throws CopilotVoiceError with the named code.
+ */
+export async function synthesizeVoiceSurface(
+  surface: string,
+  text: string,
+): Promise<Blob> {
+  const resp = await apiFetch(
+    `/api/voice/tts?surface=${encodeURIComponent(surface)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

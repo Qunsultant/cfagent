@@ -229,6 +229,16 @@ function measure(): Map<string, number> {
  * base; composed with #3883's cancellation-surface update (1124/8745)
  * and #3884's cancel-ticker record (+5 lines, 1124/8750) the merged
  * recorded seed is 1124 rows / 8756 lines.
+ * Baseline update (#3796, 2026-11-09): the surface-parameterized
+ * voice routes put the trading-desk surface's #3429 broker gate
+ * in the voice route family (src/agents/routes/copilotChannels
+ * .ts): the gate compares the tenant's selected broker against
+ * the desk's broker because refusing BY NAME is the gate's job
+ * (the refusal it composes names the selection and the surface
+ * to use instead). Dispositioned INTEGRATION — the gate is part
+ * of the desk integration's own enforcement, in its route.
+ * 1 new row (copilotChannels.ts/etrade 1). Composed on the
+ * 1124 rows / 8756 lines seed: totals move 1124/8756 -> 1125/8757.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -419,7 +429,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
 
-  // ---- INTEGRATION (676 rows / 6524 lines) ----
+  // ---- INTEGRATION (677 rows / 6525 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -525,6 +535,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/brokerRisk.ts", "alpaca", 1],
   ["src/agents/routes/brokerRisk.ts", "etrade", 3],
   ["src/agents/routes/brokerScreen.ts", "etrade", 4],
+  // #3796 INTEGRATION: the surface voice routes host the desk
+  // surface's broker gate, whose comparison names the desk broker.
+  ["src/agents/routes/copilotChannels.ts", "etrade", 1],
   ["src/agents/routes/dataLifecycle.ts", "etrade", 8],
   ["src/agents/routes/dataProviders.ts", "alpaca", 3],
   ["src/agents/routes/dataProviders.ts", "etrade", 12],
@@ -1419,12 +1432,14 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1124 rows / 8756 lines)", () => {
+  it("the baseline itself is the recorded seed (1125 rows / 8757 lines)", () => {
     // #3883: +3 rows — the cancellation surface names the provider it executes
     // against (see the INTEGRATION disposition above).
     // #3905: +6 lines on the same seed — the Dow feed job's raises above
     // (feedJobs.ts/yahoo 12->14, feedPipelineJobs.ts/yahoo 19->23).
-    expect(BASELINE.length).toBe(1124);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8756);
+    // #3796: +1 row / +1 line — the surface voice routes host the desk
+    // surface's broker gate (see the INTEGRATION disposition above).
+    expect(BASELINE.length).toBe(1125);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8757);
   });
 });
