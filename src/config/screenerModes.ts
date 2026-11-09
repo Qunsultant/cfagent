@@ -49,8 +49,114 @@
  * NOT part of the slice that introduces this switch.
  */
 
+import {
+  registerAgentConfigEntry,
+  resolveAgentConfig,
+  type AgentConfigResolution,
+} from "../services/agentConfigResolver";
+
 /** The switch's Worker env var name. */
 export const SCREENER_ND_MODE_SWITCH = "SCREENER_ND_MODE" as const;
+
+/**
+ * The agent class the ND gate governs (the screener workflow's
+ * owning class) — the class scope the one resolver keys this
+ * choice by (#3741).
+ */
+export const SCREENER_ND_AGENT_CLASS = "ScreenerAgent" as const;
+
+/**
+ * Issue #3741 — the gate's STORED layer (the tenant layer of
+ * the one resolver): mas_settings keys, most granular first —
+ * `screener_nd_mode:<class>`, then the bare tenant key. Hosts
+ * that supply a settings reader resolve through it; the
+ * env-only hosts (the workflow seams) are unchanged.
+ */
+export const SCREENER_ND_MODE_SETTING_KEY = "screener_nd_mode" as const;
+
+export function screenerNdModeSettingKey(className: string): string {
+  return `${SCREENER_ND_MODE_SETTING_KEY}:${className}`;
+}
+
+/** The gate's two states, as the one resolver's value domain. */
+export type ScreenerNdMode = "on" | "off";
+
+function normalizeScreenerNdValue(raw: unknown): ScreenerNdMode | "invalid" | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string") return "invalid";
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "on") return "on";
+  if (normalized === "off") return "off";
+  return "invalid";
+}
+
+/**
+ * Issue #3741 — the screener mode choice is an entry of the
+ * ONE resolver (src/services/agentConfigResolver.ts), resolved
+ * per agent class: stored (`screener_nd_mode:<class>`, then
+ * the bare key) > env (SCREENER_ND_MODE, the deployment
+ * default) > built-in "off". The env layer keeps this switch's
+ * fail-closed posture exactly: an unrecognized value resolves
+ * to "off" with invalid=true — it never enables the mode. The
+ * per-run selection (the command's explicit screenMode) and
+ * the replay rules are not this gate's and are untouched.
+ */
+registerAgentConfigEntry<ScreenerNdMode>({
+  id: "screenerNdMode",
+  layers: ["stored", "env"],
+  storedKeys: (identity) => {
+    const keys: string[] = [];
+    if (identity.className) keys.push(screenerNdModeSettingKey(identity.className));
+    keys.push(SCREENER_ND_MODE_SETTING_KEY);
+    return [...new Set(keys)];
+  },
+  parseStored: (raw) => {
+    if (typeof raw !== "string" || !raw.trim()) return { parse: { kind: "absent" }, issues: [] };
+    const normalized = normalizeScreenerNdValue(raw);
+    if (normalized === null || normalized === "invalid") {
+      return {
+        parse: { kind: "absent" },
+        issues: [
+          `screener ND mode setting: malformed value "${raw.trim()}" (expected "on" or "off")`,
+        ],
+      };
+    }
+    return { parse: { kind: "decision", value: normalized }, issues: [] };
+  },
+  envVar: SCREENER_ND_MODE_SWITCH,
+  parseEnv: (raw) => {
+    const normalized = normalizeScreenerNdValue(raw);
+    if (normalized === null) return { parse: { kind: "absent" }, issues: [] };
+    if (normalized === "invalid") {
+      return {
+        parse: { kind: "invalid", raw: typeof raw === "string" ? raw : undefined },
+        issues: [],
+      };
+    }
+    return {
+      parse: {
+        kind: "decision",
+        value: normalized,
+        raw: typeof raw === "string" ? raw : undefined,
+      },
+      issues: [],
+    };
+  },
+  envInvalid: "fail-closed",
+  failClosedValue: () => "off",
+  codeDefault: () => "off",
+  formatValue: (value) => value,
+  parseWriteValue: (raw) => {
+    const normalized = normalizeScreenerNdValue(raw);
+    return normalized === "on" || normalized === "off" ? normalized : undefined;
+  },
+  valueDomain: '"on" or "off"',
+  writeStoredKey: (identity) =>
+    identity.className
+      ? screenerNdModeSettingKey(identity.className)
+      : SCREENER_ND_MODE_SETTING_KEY,
+});
 
 /** Audit event emitted when a switch value fails closed. */
 export function screenerNdConfigErrorEvent(): string {
@@ -66,23 +172,30 @@ export interface ResolvedScreenerNdGate {
   raw?: string;
 }
 
+/** Map the one resolver's result onto this gate's public shape. */
+function toResolvedScreenerNdGate(resolved: AgentConfigResolution): ResolvedScreenerNdGate {
+  return {
+    enabled: resolved.value === "on",
+    invalid: resolved.invalid ?? false,
+    raw: resolved.raw,
+  };
+}
+
 /**
  * Resolves the gate from one env value. Blank/unset → off
  * (the built-in default); "on" → enabled; "off" → off; any
  * other non-blank value → off with invalid=true.
+ * (#3741: delegated to the one resolver — the `screenerNdMode`
+ * entry above, env layer only; this shape is unchanged.)
  */
 export function resolveScreenerNdGate(envValue: unknown): ResolvedScreenerNdGate {
-  if (envValue === undefined || envValue === null) {
-    return { enabled: false, invalid: false, raw: undefined };
-  }
-  if (typeof envValue !== "string") {
-    return { enabled: false, invalid: true, raw: undefined };
-  }
-  const normalized = envValue.trim().toLowerCase();
-  if (!normalized) return { enabled: false, invalid: false, raw: undefined };
-  if (normalized === "on") return { enabled: true, invalid: false, raw: envValue };
-  if (normalized === "off") return { enabled: false, invalid: false, raw: envValue };
-  return { enabled: false, invalid: true, raw: envValue };
+  return toResolvedScreenerNdGate(
+    resolveAgentConfig(
+      "screenerNdMode",
+      { className: SCREENER_ND_AGENT_CLASS },
+      { env: { [SCREENER_ND_MODE_SWITCH]: envValue } },
+    ),
+  );
 }
 
 /** Resolves the gate from an env object (the Worker env, or any record carrying the var). */
@@ -92,4 +205,26 @@ export function resolveScreenerNdGateFromEnv(env: unknown): ResolvedScreenerNdGa
       ? (env as Record<string, unknown>)[SCREENER_ND_MODE_SWITCH]
       : undefined;
   return resolveScreenerNdGate(value);
+}
+
+/**
+ * Issue #3741 — the gate's FULL resolution through the one
+ * resolver, for hosts that can supply the stored layer (a
+ * settings reader) and want the named source: stored > env >
+ * built-in off, per agent class. The env-only seams keep using
+ * resolveScreenerNdGateFromEnv, whose behavior is unchanged.
+ */
+export function resolveScreenerNdGateResolved(deps: {
+  env?: unknown;
+  readSettingRaw?: (key: string) => string | null;
+  className?: string;
+}): AgentConfigResolution {
+  return resolveAgentConfig(
+    "screenerNdMode",
+    { className: deps.className ?? SCREENER_ND_AGENT_CLASS },
+    {
+      env: (deps.env ?? undefined) as Record<string, unknown> | undefined,
+      readSettingRaw: deps.readSettingRaw,
+    },
+  );
 }

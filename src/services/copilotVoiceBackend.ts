@@ -58,6 +58,10 @@ import {
   type CopilotChannelSwitchSource,
   type CopilotRegistrationId,
 } from "./copilotChannels";
+import {
+  registerAgentConfigEntry,
+  resolveAgentConfig,
+} from "./agentConfigResolver";
 import type { Env } from "../types";
 
 /** The voice backends. The client seam's ids mirror these literals. */
@@ -212,12 +216,71 @@ export interface VoiceBackendResolution {
 }
 
 /**
+ * Issue #3741 — the voice backend switch is an entry of the ONE
+ * resolver (src/services/agentConfigResolver.ts): the layers
+ * are this module's own parsers and defaults table (stored
+ * `copilot_voice_backend:<surface>` > env COPILOT_VOICE_BACKEND
+ * > webspeech), so the generalization preserves every surface's
+ * keys and behavior exactly. The write door the stored layer
+ * gains here is the resolver's (its key is the surface's own
+ * voiceBackendSettingKey).
+ */
+registerAgentConfigEntry<CopilotVoiceBackendId>({
+  id: "voiceBackend",
+  layers: ["stored", "env"],
+  storedKeys: (identity) => {
+    const surface = identity.surfaceId ?? identity.registrationId;
+    return isVoiceSurfaceId(surface) ? [voiceBackendSettingKey(surface)] : [];
+  },
+  parseStored: (raw) => {
+    const { decision, issues } = parseStoredCopilotVoiceBackend(raw);
+    return {
+      parse:
+        decision !== undefined
+          ? { kind: "decision", value: decision }
+          : { kind: "absent" },
+      issues,
+    };
+  },
+  envVar: COPILOT_VOICE_BACKEND_ENV,
+  parseEnv: (raw, identity) => {
+    const { decisions, issues } = parseEnvCopilotVoiceBackendEntries(
+      typeof raw === "string" ? raw : undefined,
+    );
+    const surface = identity.surfaceId ?? identity.registrationId;
+    const decision = isVoiceSurfaceId(surface) ? decisions.get(surface) : undefined;
+    return {
+      parse:
+        decision !== undefined
+          ? { kind: "decision", value: decision }
+          : { kind: "absent" },
+      issues,
+    };
+  },
+  codeDefault: (identity) => {
+    const surface = identity.surfaceId ?? identity.registrationId;
+    return isVoiceSurfaceId(surface) ? VOICE_BACKEND_DEFAULTS[surface] : "webspeech";
+  },
+  formatValue: (value) => value,
+  parseWriteValue: (raw) => {
+    const normalized = raw.trim().toLowerCase();
+    return isCopilotVoiceBackendId(normalized) ? normalized : undefined;
+  },
+  valueDomain: '"webspeech" or "model"',
+  writeStoredKey: (identity) => {
+    const surface = identity.surfaceId ?? identity.registrationId;
+    return isVoiceSurfaceId(surface) ? voiceBackendSettingKey(surface) : null;
+  },
+});
+
+/**
  * Resolve one SURFACE's voice backend (#3796): the login's stored
  * decision wins, then the deployment env, then the code default.
  * Never throws; malformed config is reported in `issues`. Every
  * surface — copilot registration or trading desk — resolves
  * through this one function, each from its own stored key and
- * its own env entries.
+ * its own env entries. (#3741: delegated to the one resolver —
+ * the `voiceBackend` entry above; the result shape is unchanged.)
  */
 export function resolveVoiceBackend(deps: {
   surfaceId: VoiceSurfaceId;
@@ -226,36 +289,16 @@ export function resolveVoiceBackend(deps: {
   /** The deployment env (absent ⇒ no env layer). */
   env?: Env | Record<string, unknown> | null;
 }): VoiceBackendResolution {
-  const { surfaceId } = deps;
-  const issues: string[] = [];
-
-  if (deps.readSettingRaw) {
-    const stored = parseStoredCopilotVoiceBackend(
-      deps.readSettingRaw(voiceBackendSettingKey(surfaceId)),
-    );
-    issues.push(...stored.issues);
-    if (stored.decision !== undefined) {
-      return { surfaceId, backend: stored.decision, source: "stored", issues };
-    }
-  }
-
-  const envRaw = deps.env
-    ? (deps.env as Record<string, unknown>)[COPILOT_VOICE_BACKEND_ENV]
-    : undefined;
-  const envParsed = parseEnvCopilotVoiceBackendEntries(
-    typeof envRaw === "string" ? envRaw : undefined,
+  const resolved = resolveAgentConfig(
+    "voiceBackend",
+    { surfaceId: deps.surfaceId },
+    { readSettingRaw: deps.readSettingRaw, env: deps.env },
   );
-  issues.push(...envParsed.issues);
-  const envDecision = envParsed.decisions.get(surfaceId);
-  if (envDecision !== undefined) {
-    return { surfaceId, backend: envDecision, source: "env", issues };
-  }
-
   return {
-    surfaceId,
-    backend: VOICE_BACKEND_DEFAULTS[surfaceId],
-    source: "default",
-    issues,
+    surfaceId: deps.surfaceId,
+    backend: resolved.value as CopilotVoiceBackendId,
+    source: resolved.source as CopilotChannelSwitchSource,
+    issues: resolved.issues,
   };
 }
 

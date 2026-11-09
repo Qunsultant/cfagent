@@ -373,6 +373,14 @@
  * surface-parameterized voice routes) — bringing the pinned
  * inventory to 418 entries; the delegation sequence is unchanged
  * (same handler, same position).
+ *
+ * Issue #3741 added two more in the same handler — GET and POST
+ * /copilot-channels/config (the one resolver's config read +
+ * write door; the pin format does not capture the method, so
+ * the path appears twice, in declaration order, ahead of the
+ * channel read) — bringing the pinned inventory to 420 entries;
+ * the delegation sequence is unchanged (same handler, same
+ * position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -935,6 +943,11 @@ const EXPECTED_INVENTORY = [
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/learnings\")",
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/evaluate\")",
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/control\")",
+  // Issue #3741: the one resolver's config read + write door
+  // (in handleCopilotChannelsRoutes, declared first in the
+  // handler; GET and POST share the path condition).
+  "handleCopilotChannelsRoutes :: endsWith(\"/copilot-channels/config\")",
+  "handleCopilotChannelsRoutes :: endsWith(\"/copilot-channels/config\")",
   // Issue #3773: the chat surface's per-registration channel-projection read
   // (in handleCopilotChannelsRoutes, delegated last).
   "handleCopilotChannelsRoutes :: endsWith(\"/copilot-channels\")",

@@ -64,12 +64,49 @@
  * The desk's turn route and its gates are untouched: reuse here
  * is at the voice layer (capture/playback backends, models),
  * never the conversation layer.
+ *
+ * Issue #3741 — the ONE resolver's read + write door lives in
+ * this route family (it is the stored layer's settings family):
+ *
+ *   GET  /api/copilot-channels/config?entry=<id>[&registration=][&surface=][&className=]
+ *     → { entry, identity, value, source, pinned, issues, refusals }
+ *     The entry's resolution for the named identity, through
+ *     the one resolver (src/services/agentConfigRegistry.ts),
+ *     with the effective source and pin state named.
+ *   POST /api/copilot-channels/config
+ *     { entry, value, registration?, surface?, className? }
+ *     → { ok, entry, key, value, resolution }
+ *     A stored-layer write through the resolver's write core:
+ *     the write lands in the login's own mas_settings (the
+ *     platform's settings machinery — no parallel store), is
+ *     audited (agent_config.write: who, key, old → new, layer),
+ *     and refuses BY NAME — 403 AGENT_CONFIG_PINNED for an
+ *     operator-pinned entry, 400 AGENT_CONFIG_INVALID_VALUE /
+ *     AGENT_CONFIG_WRITE_UNSUPPORTED / AGENT_CONFIG_UNKNOWN_ENTRY,
+ *     500 AGENT_CONFIG_WRITE_UNAVAILABLE when the host has no
+ *     settings writer. This door is what gives the #3796
+ *     voice-backend surface keys (copilot_voice_backend:<surface>)
+ *     their first write path. The family's discipline holds:
+ *     401 without a verified login; tenant writes are per-login,
+ *     as the stored layer already is.
  */
 
 import {
   COPILOT_CHANNEL_DISABLED,
   isCopilotRegistrationId,
+  type CopilotRegistrationId,
 } from "../../services/copilotChannels";
+import {
+  AGENT_CONFIG_INVALID_VALUE,
+  AGENT_CONFIG_PINNED,
+  AGENT_CONFIG_UNKNOWN_ENTRY,
+  AGENT_CONFIG_WRITE_UNAVAILABLE,
+  getAgentConfigEntry,
+  resolveAgentConfig,
+  writeAgentConfigValue,
+  type AgentConfigIdentity,
+} from "../../services/agentConfigRegistry";
+import { SCREENER_ND_AGENT_CLASS } from "../../config/screenerModes";
 import {
   isVoiceSurfaceId,
   resolveVoiceBackend,
@@ -103,6 +140,17 @@ export interface CopilotChannelsRouteContext {
   getScreenerExecutionContext: () => Promise<ScreenerExecutionContext | undefined>;
   /** The instance's settings reader (the resolver's stored layer). */
   readSettingRaw: (key: string) => string | null;
+  /** The instance's settings writer (#3741 config write door).
+   *  Optional because read-only hosts omit it; a config write
+   *  without it fails closed (500) rather than reporting
+   *  success while storing nothing (the #2482 discipline). */
+  writeSetting?: (key: string, value: string) => void;
+  /** Config writes are audited (optional: read-only hosts omit it). */
+  audit?: (
+    type: string,
+    agent: "orchestrator",
+    payload: Record<string, unknown>,
+  ) => void;
 }
 
 /**
@@ -159,6 +207,47 @@ async function voiceSurfaceGate(
  * Returns a Response on match, null when the path does not match
  * (the orchestrator then continues its sequential matching).
  */
+/**
+ * Assemble the #3741 identity a config call names: a copilot
+ * registration, a voice surface, and/or an agent class. The two
+ * migrated choices carry class defaults when the caller names
+ * none (the chat/NLQ choice belongs to the orchestrator class;
+ * the screener ND choice to the screener class) — every other
+ * entry resolves exactly the identity it is given.
+ */
+function agentConfigIdentity(
+  entry: string,
+  fields: { registration?: unknown; surface?: unknown; className?: unknown },
+): { identity: AgentConfigIdentity } | { error: string } {
+  const identity: AgentConfigIdentity = {};
+  if (fields.registration !== undefined && fields.registration !== null) {
+    if (!isCopilotRegistrationId(fields.registration)) {
+      return {
+        error:
+          "Unknown copilot registration (expected one of: general, options, stock)",
+      };
+    }
+    identity.registrationId = fields.registration as CopilotRegistrationId;
+  }
+  if (fields.surface !== undefined && fields.surface !== null) {
+    if (!isVoiceSurfaceId(fields.surface)) {
+      return {
+        error:
+          'Unknown voice surface (expected a copilot registration or "trading-desk")',
+      };
+    }
+    identity.surfaceId = fields.surface;
+  }
+  if (typeof fields.className === "string" && fields.className.trim()) {
+    identity.className = fields.className.trim();
+  } else if (entry === "chatNlqMode") {
+    identity.className = "OrchestratorAgent";
+  } else if (entry === "screenerNdMode") {
+    identity.className = SCREENER_ND_AGENT_CLASS;
+  }
+  return { identity };
+}
+
 export async function handleCopilotChannelsRoutes(
   request: Request,
   url: URL,
@@ -166,6 +255,10 @@ export async function handleCopilotChannelsRoutes(
   sessionId: string,
   ctx: CopilotChannelsRouteContext,
 ): Promise<Response | null> {
+  const isConfigRead =
+    path.endsWith("/copilot-channels/config") && request.method === "GET";
+  const isConfigWrite =
+    path.endsWith("/copilot-channels/config") && request.method === "POST";
   const isChannelsRead =
     path.endsWith("/copilot-channels") && request.method === "GET";
   const isCopilotVoiceStt =
@@ -184,7 +277,9 @@ export async function handleCopilotChannelsRoutes(
     !isChannelsRead &&
     !isVoiceStt &&
     !isVoiceTts &&
-    !isSurfaceBackendRead
+    !isSurfaceBackendRead &&
+    !isConfigRead &&
+    !isConfigWrite
   ) {
     return null;
   }
@@ -196,6 +291,99 @@ export async function handleCopilotChannelsRoutes(
     .catch(() => undefined);
   if (!executionContext?.userLogin) {
     return Response.json({ error: "Authentication required" }, { status: 401 });
+  }
+
+  // Issue #3741 — the one resolver's config read + write door.
+  if (isConfigRead || isConfigWrite) {
+    const body = isConfigWrite
+      ? ((await request.json().catch(() => null)) as Record<string, unknown> | null)
+      : null;
+    const field = (name: string): unknown =>
+      isConfigWrite ? body?.[name] : url.searchParams.get(name) ?? undefined;
+    const entry = field("entry");
+    if (typeof entry !== "string" || !getAgentConfigEntry(entry)) {
+      return Response.json(
+        {
+          error: AGENT_CONFIG_UNKNOWN_ENTRY,
+          message: `Unknown agent config entry "${typeof entry === "string" ? entry : ""}".`,
+        },
+        { status: 400 },
+      );
+    }
+    const assembled = agentConfigIdentity(entry, {
+      registration: field("registration"),
+      surface: field("surface"),
+      className: field("className"),
+    });
+    if ("error" in assembled) {
+      return Response.json({ error: assembled.error }, { status: 400 });
+    }
+    const { identity } = assembled;
+    const def = getAgentConfigEntry(entry)!;
+
+    if (isConfigRead) {
+      const resolved = resolveAgentConfig(entry, identity, {
+        readSettingRaw: ctx.readSettingRaw,
+        env: ctx.env,
+      });
+      return Response.json({
+        entry,
+        identity,
+        value: def.formatValue(resolved.value),
+        source: resolved.source,
+        pinned: resolved.pinned,
+        issues: resolved.issues,
+        refusals: resolved.refusals,
+      });
+    }
+
+    const value = field("value");
+    if (typeof value !== "string" || !value.trim()) {
+      return Response.json(
+        {
+          error: AGENT_CONFIG_INVALID_VALUE,
+          message: "Field 'value' must be a non-empty string.",
+        },
+        { status: 400 },
+      );
+    }
+    const result = writeAgentConfigValue(
+      {
+        readSettingRaw: ctx.readSettingRaw,
+        writeSetting: ctx.writeSetting,
+        audit: ctx.audit
+          ? (type, payload) => ctx.audit?.(type, "orchestrator", payload)
+          : undefined,
+        env: ctx.env,
+        actor: executionContext.userLogin,
+      },
+      entry,
+      identity,
+      value,
+    );
+    if (!result.ok) {
+      const status =
+        result.error === AGENT_CONFIG_PINNED
+          ? 403
+          : result.error === AGENT_CONFIG_WRITE_UNAVAILABLE
+            ? 500
+            : 400;
+      return Response.json(
+        { error: result.error, message: result.message },
+        { status },
+      );
+    }
+    return Response.json({
+      ok: true,
+      entry,
+      key: result.key,
+      value: def.formatValue(result.resolution.value),
+      resolution: {
+        value: def.formatValue(result.resolution.value),
+        source: result.resolution.source,
+        pinned: result.resolution.pinned,
+      },
+    });
   }
 
   // Resolve WHICH surface this call serves: the copilot routes
