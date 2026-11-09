@@ -1,0 +1,2 @@
+### Changed
+- Anti-drift documentation consolidated into one home (#3802): docs/compliance/anti-drift.md is now the single anti-drift document (gaining a consolidation note and the zero-FOUC pre-paint hydration control folded in from its duplicate); docs/compliance/anti-drift-controls.md is retired under the gitops §22 rename form as anti-drift-controls.deprecated.md — content frozen verbatim, header naming anti-drift.md as superseded by it, retirement recorded in the deprecation ledger, citing references and the compliance-docs pin updated in the same change.
