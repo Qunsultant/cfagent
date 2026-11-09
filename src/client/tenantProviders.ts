@@ -9,8 +9,9 @@
  * state is a cache of the server value; localStorage holds only
  * the last-known server value as a mirror, used before the boot
  * load completes. A fresh browser with no mirror and no server
- * response stays etrade / etrade (fail to the legacy behaviour),
- * never to a provider/broker the user did not select.
+ * response stays on the platform defaults (#3812: etrade data
+ * provider / alpaca broker), never on a provider/broker the user
+ * did not select.
  */
 import { useEffect, useState } from "react";
 import { csrfHeaders } from "./apiFetch";
@@ -26,6 +27,47 @@ const BROKER_KEY = "cfagent_tenant_broker";
 export interface TenantProvidersState {
   dataProviderId: string;
   brokerId: string;
+  /**
+   * Issue #3751: the served provider identity (display names from
+   * the server's one identity map) for THIS state's two selections,
+   * as carried on the GET providers response. Optional and additive:
+   * an older id-only response still validates, and a state built
+   * locally (mirror, optimistic save) simply has no served identity
+   * yet — labels then come from the mirror option lists below.
+   */
+  dataProviderDisplayName?: string;
+  brokerDisplayName?: string;
+  /** True when the server's stored data-provider value fell back to the platform default. */
+  dataProviderFellBack?: boolean;
+  /** True when the server's stored broker value fell back to the platform default. */
+  brokerFellBack?: boolean;
+}
+
+/** The identity block of the GET providers response (#3751), when present. */
+interface ServedProviderIdentity {
+  dataProviderDisplayName?: unknown;
+  brokerDisplayName?: unknown;
+  dataProviderFellBack?: unknown;
+  brokerFellBack?: unknown;
+}
+
+/** Copy the well-typed identity fields out of a response's identity block. */
+function identityFieldsOf(identity: ServedProviderIdentity | undefined): Partial<TenantProvidersState> {
+  if (!identity) return {};
+  const fields: Partial<TenantProvidersState> = {};
+  if (typeof identity.dataProviderDisplayName === "string") {
+    fields.dataProviderDisplayName = identity.dataProviderDisplayName;
+  }
+  if (typeof identity.brokerDisplayName === "string") {
+    fields.brokerDisplayName = identity.brokerDisplayName;
+  }
+  if (typeof identity.dataProviderFellBack === "boolean") {
+    fields.dataProviderFellBack = identity.dataProviderFellBack;
+  }
+  if (typeof identity.brokerFellBack === "boolean") {
+    fields.brokerFellBack = identity.brokerFellBack;
+  }
+  return fields;
 }
 
 export const DEFAULT_TENANT_PROVIDERS_STATE: TenantProvidersState = {
@@ -48,6 +90,25 @@ export const BROKER_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "etrade", label: "E*TRADE" },
   { id: "alpaca", label: "Alpaca" },
 ];
+
+/**
+ * Issue #3751: the client identity projection — the label a surface
+ * renders for a provider/broker id. The served identity (from the
+ * server's one identity map) wins when the id IS the state's current
+ * selection; otherwise the pre-load mirror lists above; otherwise
+ * the raw id (today's fallback — an unknown id is never dressed up
+ * with a guessed brand). Names resolve at render time from ids.
+ */
+export function labelForDataProvider(state: TenantProvidersState, id: string): string {
+  if (id === state.dataProviderId && state.dataProviderDisplayName) return state.dataProviderDisplayName;
+  return DATA_PROVIDER_OPTIONS.find((o) => o.id === id)?.label ?? id;
+}
+
+/** The broker twin of labelForDataProvider. */
+export function labelForBroker(state: TenantProvidersState, id: string): string {
+  if (id === state.brokerId && state.brokerDisplayName) return state.brokerDisplayName;
+  return BROKER_OPTIONS.find((o) => o.id === id)?.label ?? id;
+}
 
 let memoryState: TenantProvidersState | null = null;
 let serverLoaded = false;
@@ -93,15 +154,31 @@ export function readTenantProvidersState(): TenantProvidersState {
   return readMirrorState();
 }
 
+/** labelForBroker over the current (cached/mirrored) tenant state. */
+export function currentBrokerLabel(id: string): string {
+  return labelForBroker(readTenantProvidersState(), id);
+}
+
+/** labelForDataProvider over the current (cached/mirrored) tenant state. */
+export function currentDataProviderLabel(id: string): string {
+  return labelForDataProvider(readTenantProvidersState(), id);
+}
+
 export function loadTenantProvidersFromServer(): Promise<TenantProvidersState | null> {
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
     try {
       const res = await globalThis.fetch(TENANT_PROVIDERS_ENDPOINT);
       if (!res.ok) return null;
-      const data = (await res.json()) as Partial<TenantProvidersState>;
+      const data = (await res.json()) as Partial<TenantProvidersState> & {
+        identity?: ServedProviderIdentity;
+      };
       if (typeof data.dataProviderId !== "string" || typeof data.brokerId !== "string") return null;
-      const state = { dataProviderId: data.dataProviderId, brokerId: data.brokerId };
+      const state: TenantProvidersState = {
+        dataProviderId: data.dataProviderId,
+        brokerId: data.brokerId,
+        ...identityFieldsOf(data.identity),
+      };
       serverLoaded = true;
       applyState(state);
       return state;
