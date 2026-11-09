@@ -51,6 +51,8 @@ const PINNED_STAR_REEXPORTS = [
   "./cancelFilters",
   // Issue #3887: the base-breakout continuation ladder (detection, plan, machine).
   "./baseBreakout",
+  // Issue #3892: the declarative advanced-order registry and its builders.
+  "./advancedOrders",
   // Issue #3232: the broker catalog joins the public trading surface.
   "./brokerCatalog",
   // Issue #2853: the broker panel contract joins the public trading surface.
