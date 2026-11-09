@@ -515,11 +515,13 @@ describe("S0-P24 ledger gap (B-L-01/02/03): S1 closes B-L-01 on job_run_records;
     }
   });
 
-  it("pins mas_async_jobs as carrying no schedule/workflow/trigger column", () => {
+  it("pins mas_async_jobs as carrying no workflow column (#3810 adds trigger/schedule provenance columns)", () => {
     const adapter = read("src/data/doSqliteAsyncJobAdapter.ts");
-    expect(adapter).not.toContain("schedule_id");
+    // #3810: the adapter gains the three provenance columns (probed migration).
+    for (const col of ["trigger", "triggered_by", "schedule_id"]) {
+      expect(adapter).toContain(`ADD COLUMN ${col}`);
+    }
     expect(adapter).not.toContain("workflow_id");
-    expect(adapter).not.toContain("ADD COLUMN trigger");
   });
 
   it("pins mas_opportunity_scans as carrying no linkage columns", () => {

@@ -175,6 +175,8 @@ describe("MCP server protocol acceptance (#2494)", () => {
     expect(submitJob).toHaveBeenCalledWith({
       capability: "mcp.tool",
       payload: { toolName: "list_database_tables", arguments: {} },
+      // #3810: MCP submissions stamp trigger "agent" at the queue point.
+      trigger: "agent",
     });
     expect(JSON.parse(resp.result.content[0].text)).toEqual(receipt);
   });

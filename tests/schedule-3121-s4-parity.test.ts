@@ -698,14 +698,20 @@ describe("S4-P09 explicit nulls on a chain with no originating schedule/workflow
 });
 
 describe("S4-P10 mas_async_jobs gains no columns in S4 (#3121, B-L-02)", () => {
-  it("the queue adapter's probed migration adds only the graph/stage columns", () => {
+  it("the queue adapter's probed migration adds the graph/stage columns plus #3810's provenance columns", () => {
     const src = readFileSync("src/data/doSqliteAsyncJobAdapter.ts", "utf8");
     for (const column of ["parent_job_id", "job_kind", "channel", "not_before", "stage", "chain_id"]) {
       expect(src).toContain(`ADD COLUMN ${column}`);
     }
-    expect(src).not.toMatch(/ADD COLUMN (schedule_id|workflow_id|trigger)/);
+    // #3810: the adapter additionally gains the three provenance columns
+    // (trigger, triggered_by, schedule_id) — the row shape changes by
+    // design; workflow_id is still never added.
+    for (const column of ["trigger", "triggered_by", "schedule_id"]) {
+      expect(src).toContain(`ADD COLUMN ${column}`);
+    }
+    expect(src).not.toMatch(/ADD COLUMN workflow_id/);
     // The S1 planners already stamp the payload (not a column); S4
-    // restamps at submit — the row shape is unchanged.
+    // restamps at submit.
     expect(readFileSync("src/services/screenerFollowups.ts", "utf8")).toContain("followupLedgerLinkage");
   });
 
