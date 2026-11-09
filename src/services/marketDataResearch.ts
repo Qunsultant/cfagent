@@ -2231,24 +2231,61 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     return fetch(url, init);
   }
 
+  /**
+   * Issue #3846 — which Alpaca credential pair this provider is trading.
+   *
+   * The deployment carries BOTH `ALPACA_LIVE_*` and `ALPACA_PAPER_*`.
+   * The previous order (live before paper) meant a paper request sent the
+   * LIVE key to `paper-api.alpaca.markets` and got a 401 — the transcript's
+   * "Alpaca rejected the order". The side now follows the explicit
+   * ALPACA_TRADING_TYPE, then the base URL; unset is paper.
+   */
+  private alpacaCredentialSide(): "paper" | "live" {
+    const explicit = String(this.env?.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
+    if (explicit === "live" || explicit === "prod") return "live";
+    if (explicit === "paper" || explicit === "test") return "paper";
+    const base = String(this.env?.ALPACA_BASE_URL ?? "").trim().toLowerCase();
+    if (base.includes("paper-api")) return "paper";
+    if (base.includes("api.alpaca.markets")) return "live";
+    return "paper";
+  }
+
   getApiKey(env?: Env): string {
     const activeEnv = env || this.env;
+    if (this.alpacaCredentialSide() === "live") {
+      return (
+        activeEnv?.ALPACA_LIVE_API_KEY ||
+        activeEnv?.ALPACA_API_KEY ||
+        activeEnv?.ALPACA_API_KEY_ID ||
+        activeEnv?.ALPACA_PAPER_API_KEY ||
+        ""
+      );
+    }
     return (
+      activeEnv?.ALPACA_PAPER_API_KEY ||
       activeEnv?.ALPACA_API_KEY ||
       activeEnv?.ALPACA_API_KEY_ID ||
       activeEnv?.ALPACA_LIVE_API_KEY ||
-      activeEnv?.ALPACA_PAPER_API_KEY ||
       ""
     );
   }
 
   getApiSecret(env?: Env): string {
     const activeEnv = env || this.env;
+    if (this.alpacaCredentialSide() === "live") {
+      return (
+        activeEnv?.ALPACA_LIVE_SECRET_KEY ||
+        activeEnv?.ALPACA_SECRET_KEY ||
+        activeEnv?.ALPACA_API_SECRET_KEY ||
+        activeEnv?.ALPACA_PAPER_SECRET_KEY ||
+        ""
+      );
+    }
     return (
+      activeEnv?.ALPACA_PAPER_SECRET_KEY ||
       activeEnv?.ALPACA_SECRET_KEY ||
       activeEnv?.ALPACA_API_SECRET_KEY ||
       activeEnv?.ALPACA_LIVE_SECRET_KEY ||
-      activeEnv?.ALPACA_PAPER_SECRET_KEY ||
       ""
     );
   }
@@ -3357,10 +3394,7 @@ export class MarketDataResearchService {
 
 
   getProviderStatuses(): MarketDataResearchProviderStatus[] {
-    const alpacaConfigured = Boolean(
-      (this.env?.ALPACA_API_KEY || this.env?.ALPACA_API_KEY_ID) &&
-      (this.env?.ALPACA_SECRET_KEY || this.env?.ALPACA_API_SECRET_KEY)
-    );
+    const alpacaConfigured = this.alpaca.isConfigured();
     return [
       {
         provider: "yfinance",
