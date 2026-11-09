@@ -1681,7 +1681,7 @@ export function Chat({ user }: { user: User }) {
               <div className="sub-header-brand-crumbs">
                 <span className="crumb-module">{getCrumb(tab)}</span>
                 <span className="crumb-divider">{" / "}</span>
-                <span className="crumb-subtitle">
+                <span className="crumb-subtitle top-nav-control">
                   {accountMode === "paper" ? "Paper" : "Live Execution"}
                 </span>
               </div>
@@ -1701,6 +1701,7 @@ export function Chat({ user }: { user: User }) {
               {/* Universal Top Bar Refresh Button */}
               <Button
                 variant="ghost"
+                className="nav-refresh-btn top-nav-control"
                 onClick={handleGlobalRefresh}
                 disabled={isRefreshing}
                 title={`Refresh active workspace & market data feeds${lastRefreshedAt ? ` (last refreshed: ${lastRefreshedAt})` : ""}`}
@@ -1713,7 +1714,8 @@ export function Chat({ user }: { user: User }) {
 
               {/* Trade Button (Orange/Amber pill matching reference) */}
               <Button
-                variant="trade"
+                variant="ghost"
+                className="nav-trade-btn top-nav-control"
                 onClick={() => {
                   handleSelectTab("order");
                   setTbdMenuOpen(false);

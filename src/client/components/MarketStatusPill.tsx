@@ -18,7 +18,7 @@ export function MarketStatusPill({ className = "", variant = "sub-header" }: Mar
 
   return (
     <div
-      className={`${baseClass} ${statusClass} ${className}`.trim()}
+      className={`${baseClass} top-nav-control ${statusClass} ${className}`.trim()}
       title={
         status.isOpen
           ? `US Equity Markets are OPEN (${status.easternTimeFormatted}). Regular Trading Hours are 09:30 - 16:00 ET.`

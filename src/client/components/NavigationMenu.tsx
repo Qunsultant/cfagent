@@ -785,7 +785,7 @@ export function NavigationMenu({
           {onRefresh && (
             <Button
               variant="ghost"
-              className={`nav-refresh-btn ${isRefreshing ? "refreshing" : ""}`}
+              className={`nav-refresh-btn top-nav-control ${isRefreshing ? "refreshing" : ""}`}
               onClick={onRefresh}
               disabled={isRefreshing}
               title={`Refresh active workspace & market data feeds${lastRefreshedAt ? ` (last refreshed: ${lastRefreshedAt})` : ""}`}
@@ -798,7 +798,7 @@ export function NavigationMenu({
           )}
 
           {/* Quick Font Size Controls */}
-          <div className="nav-font-size-ctrl" title="Adjust application font size throughout the app">
+          <div className="nav-font-size-ctrl top-nav-control" title="Adjust application font size throughout the app">
             <Button
               variant="ghost"
               className="nav-font-btn"
@@ -833,7 +833,7 @@ export function NavigationMenu({
           {/* Quick Trade Button */}
           <Button
             variant="ghost"
-            className="nav-trade-btn"
+            className="nav-trade-btn top-nav-control"
             onClick={() => onSelectTab("autopilot")}
             title="Open Autopilot & Trading execution center"
           >

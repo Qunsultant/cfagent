@@ -266,7 +266,7 @@ export function StockSearchBar({ onSelectTab, onAskAgent, className = "" }: Stoc
       {/* Search Bar Inline Trigger */}
       <div className={`stock-search-trigger-container ${className}`}>
         <Button
-          className="stock-search-trigger-btn"
+          className="stock-search-trigger-btn top-nav-control"
           onClick={() => setIsOpen(true)}
           title={`Search stocks, options, workflows (${shortcutHint})`}
           aria-label="Search stocks and platform commands"
