@@ -390,6 +390,10 @@ async function providerView(
   );
   return {
     id: record.id,
+    // #3751: the registry adapter's display name, projected for the
+    // panel heading (null when no adapter is registered for the
+    // record — the panel falls back to the id, never a guess).
+    name: adapter?.name ?? null,
     adapterKind: record.adapterKind,
     lifecycleState: record.lifecycleState,
     enabled: record.enabled,

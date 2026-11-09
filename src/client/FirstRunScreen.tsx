@@ -63,9 +63,9 @@ import {
   type ETradeStatusView,
   type PlatformIdentityView,
 } from "./firstRunApi";
-import { readTenantProvidersState } from "./tenantProviders";
+import { labelForBroker, readTenantProvidersState } from "./tenantProviders";
 import { firstRunBrokerStep } from "./firstRunBrokerStep";
-import { BROKER_CATALOG, brokerCredentialGuidance, isBrokerId } from "../trading/brokerCatalog";
+import { brokerCredentialGuidance, isBrokerId } from "../trading/brokerCatalog";
 import { listPlans, subscriptionTrial, type PlanView } from "./commercialApi";
 import {
   getApprovedFreeQuota,
@@ -145,13 +145,17 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
    * poll and no redirect to offer — asking the user to "Connect E*TRADE" was the
    * one journey still written for a single broker.
    */
-  const storedBrokerId = readTenantProvidersState().brokerId;
+  const tenantProvidersState = readTenantProvidersState();
+  const storedBrokerId = tenantProvidersState.brokerId;
   // The same branch the hub uses to pick a panel, so an unrecognised id cannot
   // be offered E*TRADE's authorization here while the hub renders Alpaca's panel.
   const knownBrokerId = isBrokerId(storedBrokerId) && storedBrokerId === "etrade" ? "etrade" : "alpaca";
   const brokerStep = firstRunBrokerStep({
     broker: storedBrokerId,
-    label: BROKER_CATALOG[knownBrokerId].label,
+    // #3751: the label comes from the tenant-providers identity
+    // projection (the one identity map, served); the credential
+    // kind stays catalogue-sourced below.
+    label: labelForBroker(tenantProvidersState, knownBrokerId),
     credentialKind: brokerCredentialGuidance(knownBrokerId).kind,
   });
   const [prefsSaved, setPrefsSaved] = useState(false);

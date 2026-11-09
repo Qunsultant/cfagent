@@ -246,6 +246,26 @@ function measure(): Map<string, number> {
  * (the incident sentence names the fundamentals feed job and the quotes dataset
  * without the provider brand), so the row is the rule line alone. Seed pin
  * totals move 1125/8757 -> 1126/8758.
+ * Baseline update (#3751, 2026-11-09): ProviderIdentity — the display-name
+ * data of the tenant-provider server module is restructured into the ONE
+ * identity map (INTEGRATION: naming the provider is that module's job) and
+ * the context module resolves names from it, so the two server modules
+ * gain alpaca lines while their stale pre-#3812 default comments retire
+ * etrade lines (tenantProviders.ts alpaca 7->10 / etrade 13->11;
+ * optionsProviderContext.ts alpaca 3->5 / etrade 16->14). The providers
+ * route serves the resolved identity, naming the default broker in its
+ * corrected comment (1 new row: routes/reports.ts alpaca 1). On the
+ * client, the tenant state module gains the identity-projection prose
+ * (tenantProviders.ts alpaca 8->9 / etrade 5->4) and stockCopilotApi.ts
+ * DELETES its private broker-name copy for the projection
+ * (alpaca 2->1; its etrade row retires outright). Composed onto the
+ * post-build main: #3857's correction of the same tenantProviders.ts
+ * header comment adds one etrade line back (11->12), and #3885's
+ * cancel-all rows landed on main after this slice's base (brokerOrders
+ * .ts alpaca 5->6, cancelOrderCommands.ts alpaca 3->5, 1 new row
+ * AlpacaCancelAllControl.tsx alpaca 8 - #3885's own disposition).
+ * Net composed vs the ship-time main (1127 rows / 8769 lines on the
+ * tip's own baseline): rows 1127 -> 1127, lines 8769 -> 8770.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (186 rows / 1039 lines) ----
@@ -586,6 +606,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/platformTenants.ts", "etrade", 1],
   ["src/agents/routes/premium.ts", "etrade", 7],
   ["src/agents/routes/premium.ts", "yahoo", 7],
+  ["src/agents/routes/reports.ts", "alpaca", 1],
   ["src/agents/routes/reports.ts", "etrade", 1],
   ["src/agents/routes/routeIdentity.ts", "etrade", 1],
   ["src/agents/routes/schedules.ts", "etrade", 21],
@@ -666,13 +687,12 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/screeningAdapters.ts", "etrade", 1],
   ["src/client/screeningAdapters.ts", "nasdaq", 1],
   ["src/client/screeningAdapters.ts", "yahoo", 3],
-  ["src/client/stockCopilotApi.ts", "alpaca", 2],
-  ["src/client/stockCopilotApi.ts", "etrade", 1],
+  ["src/client/stockCopilotApi.ts", "alpaca", 1],
   ["src/client/styles.css", "alpaca", 8],
   ["src/client/styles.css", "etrade", 79],
   ["src/client/styles.css", "yahoo", 4],
-  ["src/client/tenantProviders.ts", "alpaca", 8],
-  ["src/client/tenantProviders.ts", "etrade", 5],
+  ["src/client/tenantProviders.ts", "alpaca", 9],
+  ["src/client/tenantProviders.ts", "etrade", 4],
   ["src/client/tenantProviders.ts", "nasdaq", 1],
   ["src/client/tenantProviders.ts", "public.com", 1],
   ["src/client/tenantProviders.ts", "yahoo", 1],
@@ -903,8 +923,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/oasfRecords.ts", "etrade", 2],
   ["src/services/optionsAuthFreshness.ts", "etrade", 21],
   ["src/services/optionsAuthFreshness.ts", "yahoo", 1],
-  ["src/services/optionsProviderContext.ts", "alpaca", 3],
-  ["src/services/optionsProviderContext.ts", "etrade", 16],
+  ["src/services/optionsProviderContext.ts", "alpaca", 5],
+  ["src/services/optionsProviderContext.ts", "etrade", 14],
   ["src/services/optionsProviderContext.ts", "yahoo", 3],
   ["src/services/optionsServeRecord.ts", "etrade", 5],
   ["src/services/patternSignals.ts", "etrade", 1],
@@ -948,8 +968,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/stockCopilotIntrospection.ts", "nasdaq", 1],
   ["src/services/stockCopilotIntrospection.ts", "yahoo", 1],
   ["src/services/stockCopilotSessions.ts", "alpaca", 1],
-  ["src/services/tenantProviders.ts", "alpaca", 7],
-  ["src/services/tenantProviders.ts", "etrade", 13],
+  ["src/services/tenantProviders.ts", "alpaca", 10],
+  ["src/services/tenantProviders.ts", "etrade", 12],
   ["src/services/tenantProviders.ts", "nasdaq", 2],
   ["src/services/tenantProviders.ts", "public.com", 1],
   ["src/services/tenantProviders.ts", "yahoo", 2],
@@ -1394,8 +1414,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/cancelFilters.ts", "alpaca", 7],
   ["src/services/orderCancellation.ts", "alpaca", 2],
   ["src/mcps/openaimp/cancelOrderCommands.ts", "alpaca", 5],
-  // #3885 INTEGRATION: the Portfolio control is the provider's cancel-all
-  // surface (its test ids name the broker so a panel test can target it).
   ["src/client/AlpacaCancelAllControl.tsx", "alpaca", 8],
   // #3866 INTEGRATION: the lifecycle table names the brokers it covers.
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "etrade", 1],

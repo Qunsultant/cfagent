@@ -551,7 +551,8 @@ export async function handleReportsRoutes(
   // provider/broker agnosticism programme). Two independent
   // selections, stored on the existing agent_tenant_settings row
   // (migration 0027), tenant server-resolved via resolveIaaaTenant,
-  // never from a client value. Absent row = etrade / etrade.
+  // never from a client value. Absent row = the platform defaults
+  // (#3812: etrade data provider / alpaca broker).
   // This route does not touch the auto-refresh handler above.
   if (path.endsWith("/tenant/settings/providers")) {
     try {
@@ -565,7 +566,26 @@ export async function handleReportsRoutes(
       const tenantId = resolveIaaaTenant(ctx.env as { IAAA_TENANT_ID?: string } | null | undefined);
       if (request.method === "GET") {
         const current = await adapter.getTenantProviders(tenantId);
-        return Response.json({ tenantId, dataProviderId: current.dataProviderId, brokerId: current.brokerId });
+        // Issue #3751: the resolved provider identity rides the
+        // response — display names from the one identity map via
+        // the composed context resolver, over the SAME row this
+        // handler already read (no second store read). The
+        // adapter has already applied the platform defaults per
+        // field, so an absent row serves the default identities;
+        // the fellBack flags carry the context's resolution state.
+        const { resolveTenantProviderContext } = await import("../../services/optionsProviderContext");
+        const providerContext = resolveTenantProviderContext(current);
+        return Response.json({
+          tenantId,
+          dataProviderId: current.dataProviderId,
+          brokerId: current.brokerId,
+          identity: {
+            dataProviderDisplayName: providerContext.dataProviderDisplayName,
+            brokerDisplayName: providerContext.brokerDisplayName,
+            dataProviderFellBack: providerContext.dataProviderFellBack,
+            brokerFellBack: providerContext.brokerFellBack,
+          },
+        });
       }
       if (request.method === "POST") {
         const body = (await request.json().catch(() => null)) as {

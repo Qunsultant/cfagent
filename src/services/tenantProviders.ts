@@ -29,18 +29,58 @@ import { codedMessage } from "../outcomes/outcomeAspects";
 export const BROKER_IDS = ["etrade", "alpaca"] as const;
 export type BrokerId = (typeof BROKER_IDS)[number];
 
-export const DATA_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  etrade: "E*TRADE",
-  public: "Public.com",
-  yahoo: "Yahoo Finance",
-  nasdaq: "Nasdaq Listings",
-  alpaca: "Alpaca",
+/**
+ * Issue #3751: the ONE provider-identity map — the home of record
+ * for how a provider/broker is NAMED in UX text and messages.
+ * Display name only (short name / docs URL were deferred by the
+ * 2026-11-09 ruling: no consumer exists for them yet). Identity
+ * is configuration, not literals: surfaces resolve names from
+ * here (server) or from the identity this map produces on the
+ * tenant-providers route (client), never from a local copy.
+ * The names agree with the registry adapters' `name` fields and
+ * BROKER_CATALOG's labels, with ONE documented divergence: the
+ * alpaca adapter's registry name is "Alpaca Markets" while the
+ * tenant-facing display name is "Alpaca" (both pinned as-is).
+ */
+export interface ProviderIdentity {
+  readonly id: string;
+  readonly displayName: string;
+}
+
+export const DATA_PROVIDER_IDENTITIES: Readonly<Record<string, ProviderIdentity>> = {
+  etrade: { id: "etrade", displayName: "E*TRADE" },
+  public: { id: "public", displayName: "Public.com" },
+  yahoo: { id: "yahoo", displayName: "Yahoo Finance" },
+  nasdaq: { id: "nasdaq", displayName: "Nasdaq Listings" },
+  alpaca: { id: "alpaca", displayName: "Alpaca" },
 };
 
-export const BROKER_DISPLAY_NAMES: Record<string, string> = {
-  etrade: "E*TRADE",
-  alpaca: "Alpaca",
+export const BROKER_IDENTITIES: Readonly<Record<string, ProviderIdentity>> = {
+  etrade: { id: "etrade", displayName: "E*TRADE" },
+  alpaca: { id: "alpaca", displayName: "Alpaca" },
 };
+
+/** Identity for a data-provider id; undefined for an unknown id (never a guessed brand). */
+export function dataProviderIdentity(id: string): ProviderIdentity | undefined {
+  return DATA_PROVIDER_IDENTITIES[id];
+}
+
+/** Identity for a broker id; undefined for an unknown id (never a guessed brand). */
+export function brokerIdentity(id: string): ProviderIdentity | undefined {
+  return BROKER_IDENTITIES[id];
+}
+
+function displayNamesOf(identities: Readonly<Record<string, ProviderIdentity>>): Record<string, string> {
+  const names: Record<string, string> = {};
+  for (const identity of Object.values(identities)) names[identity.id] = identity.displayName;
+  return names;
+}
+
+/** Derived projection of DATA_PROVIDER_IDENTITIES (kept for existing consumers). */
+export const DATA_PROVIDER_DISPLAY_NAMES: Record<string, string> = displayNamesOf(DATA_PROVIDER_IDENTITIES);
+
+/** Derived projection of BROKER_IDENTITIES (kept for existing consumers). */
+export const BROKER_DISPLAY_NAMES: Record<string, string> = displayNamesOf(BROKER_IDENTITIES);
 
 export function isDataProviderId(value: unknown): value is string {
   return typeof value === "string" && (DATA_PROVIDER_IDS as readonly string[]).includes(value);

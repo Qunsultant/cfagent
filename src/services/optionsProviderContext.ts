@@ -3,8 +3,9 @@
  * integration point, consumption side.
  *
  * This module is the pure plumbing the options surfaces consume: tenant
- * provider resolution with the provider design's fail-open `etrade`/`etrade`
- * fallback, conditional surface gating points, a coded capability-unavailable
+ * provider resolution with the provider design's fail-open fallback to
+ * the platform defaults (#3812: etrade data provider / alpaca broker),
+ * conditional surface gating points, a coded capability-unavailable
  * path, and provenance stamping of `dataProviderId`/`brokerId` onto a run
  * record's provenance object.
  *
@@ -50,7 +51,12 @@
  */
 
 import { DATA_PROVIDER_IDS, type DataProviderCapability } from "../trading";
-import { BROKER_IDS, type BrokerId } from "./tenantProviders";
+import {
+  BROKER_IDENTITIES,
+  BROKER_IDS,
+  DATA_PROVIDER_IDENTITIES,
+  type BrokerId,
+} from "./tenantProviders";
 import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 
 // Issue #3812: the defaults are slice 1's values, derived — never a second
@@ -73,10 +79,20 @@ const DATA_PROVIDER_CAPABILITIES: Record<DataProviderId, readonly DataProviderCa
 export interface TenantProviderContext {
   dataProviderId: DataProviderId;
   brokerId: BrokerId;
-  /** True when the stored data-provider value was absent/unknown and the legacy default was used. */
+  /** True when the stored data-provider value was absent/unknown and the platform default was used. */
   dataProviderFellBack: boolean;
-  /** True when the stored broker value was absent/unknown and the legacy default was used. */
+  /** True when the stored broker value was absent/unknown and the platform default was used. */
   brokerFellBack: boolean;
+  /**
+   * Issue #3751: the resolved data provider's display name, from the
+   * one identity map in tenantProviders.ts. Resolved from the
+   * RESOLVED id, so a fell-back field carries the default provider's
+   * name — the defaults are real selections (#3812), and the
+   * fellBack flag above keeps that visible rather than relabelling.
+   */
+  dataProviderDisplayName: string;
+  /** Issue #3751: the resolved broker's display name (same rule as dataProviderDisplayName). */
+  brokerDisplayName: string;
 }
 
 function normalizeId<T extends string>(value: unknown, known: readonly T[], fallback: T): { id: T; fellBack: boolean } {
@@ -89,13 +105,16 @@ function normalizeId<T extends string>(value: unknown, known: readonly T[], fall
 
 /**
  * Resolve a tenant's provider/broker context from a stored settings row (or
- * its absence). Resolution fails OPEN to the legacy `etrade`/`etrade`
- * behaviour — an absent row, a pre-migration row, or a store read failure
- * must not take down a surface that worked before (provider design §1/§6).
+ * its absence). Resolution fails OPEN to the platform defaults (#3812:
+ * etrade data provider / alpaca broker) — an absent row, a pre-migration
+ * row, or a store read failure must not take down a surface that worked
+ * before (provider design §1/§6).
  * This is resolution, not settings validation: the settings route itself
  * fails closed (503) when its store is unbound, per the auto-refresh pattern.
  * The `*FellBack` flags keep the fallback visible in provenance instead of
- * silently relabelling a tenant as an E*TRADE tenant.
+ * silently relabelling a tenant; the #3751 display names resolve from the
+ * resolved ids through the one identity map, so a fell-back field names
+ * the default provider whose data/brokerage the tenant actually gets.
  */
 export function resolveTenantProviderContext(input?: {
   dataProviderId?: unknown;
@@ -108,6 +127,12 @@ export function resolveTenantProviderContext(input?: {
     brokerId: broker.id,
     dataProviderFellBack: data.fellBack,
     brokerFellBack: broker.fellBack,
+    // The resolved ids are known ids by construction (normalizeId only
+    // returns a vocabulary id or the default), so the identity lookup
+    // cannot miss; the `?? id` guard keeps the type honest without ever
+    // inventing a name for an unknown id.
+    dataProviderDisplayName: DATA_PROVIDER_IDENTITIES[data.id]?.displayName ?? data.id,
+    brokerDisplayName: BROKER_IDENTITIES[broker.id]?.displayName ?? broker.id,
   };
 }
 
