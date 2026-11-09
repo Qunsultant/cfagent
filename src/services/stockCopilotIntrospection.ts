@@ -397,7 +397,7 @@ export async function introspectStockCopilot(
   // the real commercial store from env when no store was injected
   // (deps.commercial undefined), so the introspection reports the
   // real stored selection; an unbound store reads as unresolved,
-  // never alpaca/paper.
+  // never a default broker/mode.
   const commercial = deps.commercial;
 
   const selection = await resolveCopilotTradingSelection({
