@@ -1,4 +1,4 @@
-﻿### Changed
+### Changed
 
 - **Staleness is the merge queue's job (#3917):** Policy Gate check (f) is now a diagnostic that names which of `main`'s additions a branch predates, instead of failing the branch and demanding a rebase. The queue builds each entry on the latest base and re-runs `merge_group` there; deletion enforcement stays with check (i), which fails every deletion. A verified ruleset audit replaces the stale “no merge queue exists” claim in gitops §22.
 - **Pins assert accounting, not sizes (#3917):** the MCP catalog length is no longer a literal in eleven suites — one pin asserts the factory tool set and the declared scope set are identical. Family counts and both census totals are derived from their tables instead of hand-bumped numbers, so an additive PR is one edit rather than fifteen.
