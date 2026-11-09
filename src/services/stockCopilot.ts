@@ -57,7 +57,11 @@
  */
 
 import type { CopilotSelectionResolution } from "../agents/copilotTradingMode";
-import { COPILOT_BROKER_ID } from "../agents/copilotTradingMode";
+import {
+  brokerCopilotCapability,
+  isCopilotBroker,
+  tradingTypeFor,
+} from "../trading";
 import type {
   CopilotExecutionMode,
   StockCopilotActivityPort,
@@ -113,6 +117,10 @@ export const STOCK_COPILOT_MODE_MISMATCH = "stock_copilot_mode_mismatch";
 /** Named state when the tenant's active broker is not the copilot's
  *  broker: the cycle is inactive, places nothing, and says so. */
 export const STOCK_COPILOT_INACTIVE_BROKER = "stock_copilot_inactive_broker";
+
+/** Issue #3839: the selected broker is not declared copilot-capable in
+ *  the broker catalog (or its autonomous cycle is declared off). */
+export const STOCK_COPILOT_UNSUPPORTED_BROKER = "stock_copilot_unsupported_broker";
 
 /**
  * Copilot exit-plan policy (v1 constants, one home): every entry is
@@ -721,17 +729,22 @@ export async function runStockCopilotCycle(
     return result;
   }
   const selection = deps.selection.selection;
-  if (selection.brokerId !== COPILOT_BROKER_ID) {
-    const isBrokerNeutral =
-      String(deps.env.STOCK_COPILOT_BROKER_NEUTRAL ?? "").toLowerCase() === "true" ||
-      deps.env.STOCK_COPILOT_BROKER_ID === selection.brokerId;
-    if (!isBrokerNeutral) {
-      // One active broker, and it is not the copilot's: the cycle is
-      // inactive — named, recorded, and zero platform calls.
-      result.status = "inactive_broker";
-      appendCycleActivity(deps, result, nowIso, "inactive", STOCK_COPILOT_INACTIVE_BROKER, session);
-      return result;
-    }
+  // Issue #3839: the catalog is the single source of truth. Any broker
+  // declared `copilot.supported && copilot.autonomousCycle` runs; an
+  // unknown or declared-off broker is a named, recorded refusal with zero
+  // platform calls. No broker id is hardcoded here.
+  if (!isCopilotBroker(selection.brokerId)) {
+    result.status = "inactive_broker";
+    result.refusal = STOCK_COPILOT_UNSUPPORTED_BROKER;
+    appendCycleActivity(deps, result, nowIso, "inactive", STOCK_COPILOT_UNSUPPORTED_BROKER, session);
+    return result;
+  }
+  const copilotCapability = brokerCopilotCapability(selection.brokerId);
+  if (!copilotCapability.supported || !copilotCapability.autonomousCycle) {
+    result.status = "inactive_broker";
+    result.refusal = STOCK_COPILOT_UNSUPPORTED_BROKER;
+    appendCycleActivity(deps, result, nowIso, "inactive", STOCK_COPILOT_UNSUPPORTED_BROKER, session);
+    return result;
   }
 
   // MODE GUARD — the adapter's own resolver (#3158), evaluated
@@ -739,13 +752,19 @@ export async function runStockCopilotCycle(
   // platform will trade against must agree with the selected mode.
   // When externalized (#3541: STOCK_COPILOT_STRICT_MODE_GUARD=false or
   // STOCK_COPILOT_AUTO_ALIGN_MODE=true), the loop auto-aligns to the resolved base.
-  const resolvedBase = resolveAlpacaTradingBase(deps.env, selection.environment);
-  if (resolvedBase.isLive !== (selection.mode === "live")) {
+  // The mode guard is broker-neutral: Alpaca's own base resolver decides
+  // paper/live for Alpaca; every other broker's catalog mapping is
+  // authoritative (the selection's mode was derived from the same mapping).
+  const modeMatches =
+    selection.brokerId === "alpaca"
+      ? resolveAlpacaTradingBase(deps.env, selection.environment).isLive === (selection.mode === "live")
+      : tradingTypeFor(selection.brokerId, selection.environment) === selection.mode;
+  if (!modeMatches) {
     const allowPermissiveMode =
       String(deps.env.STOCK_COPILOT_STRICT_MODE_GUARD ?? "").toLowerCase() === "false" ||
       String(deps.env.STOCK_COPILOT_AUTO_ALIGN_MODE ?? "").toLowerCase() === "true";
     if (allowPermissiveMode) {
-      selection.mode = resolvedBase.isLive ? "live" : "paper";
+      selection.mode = tradingTypeFor(selection.brokerId, selection.environment);
     } else {
       result.status = "refused_mode_mismatch";
       result.refusal = STOCK_COPILOT_MODE_MISMATCH;

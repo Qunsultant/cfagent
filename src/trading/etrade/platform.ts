@@ -30,6 +30,7 @@ import { getCuratedStockBySymbol } from "../../config/curatedStockUniverse";
 import { getETradeAuthStatus, etradeIdentityFromLogin } from "../../security/etradeOAuth";
 import { parseStrategyOrder } from "../../agents/routes/orderPayloadHash";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
+import { computeBracketExits } from "../bracketPercent";
 
 /**
  * Quote provenance (issue #118, audit F12/F13).
@@ -430,6 +431,35 @@ export class ETradeTradingPlatform implements ITradingPlatform {
       executionPrice = params.limitPrice ?? Math.abs(params.strategyNetDebit || 0) / (hasOptions ? 100 : Math.max(shareQuantity, 1));
       estimatedTotal = Number((executionPrice * (hasOptions ? params.quantity * 100 : shareQuantity)).toFixed(2));
     }
+    // Issue #3839: percent bracket exits. E*TRADE has no native bracket
+    // placement in this client, so the preview carries the computed legs;
+    // executeOrder refuses a bracket draft rather than placing a parent
+    // with unprotected children. Options brackets are not a supported shape.
+    const percentRequested =
+      params.takeProfitPercent !== undefined || params.stopLossPercent !== undefined;
+    if (percentRequested && optionLegs.length > 0) {
+      throw new Error("Percent bracket exits are supported for equity orders only; option strategies price their own legs.");
+    }
+    if (
+      percentRequested &&
+      (params.takeProfitPercent === undefined || params.stopLossPercent === undefined)
+    ) {
+      throw new Error(
+        "Bracket percent exits need both takeProfitPercent and stopLossPercent (both or neither).",
+      );
+    }
+    const percentExits = percentRequested
+      ? computeBracketExits({
+          side: action,
+          entryPrice: executionPrice,
+          takeProfitPercent: params.takeProfitPercent as number,
+          stopLossPercent: params.stopLossPercent as number,
+        })
+      : null;
+    const takeProfit = params.takeProfit ?? percentExits?.takeProfit;
+    const stopLoss = params.stopLoss ?? percentExits?.stopLoss;
+    const orderClass = params.orderClass || (takeProfit || stopLoss ? "bracket" : undefined);
+
     let estimatedCommission = 0.0;
     let upstreamPreviewId: string | undefined;
     let brokerNotice: string | undefined;
@@ -507,10 +537,20 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     const pricingQuoteStatus = quote?.quoteStatus;
     const previewMessage = optionLegs.length
       ? `E*TRADE ${brokerOrderType} Preview: ${params.quantity} strategy unit(s) of ${symbol} @ ${params.limitPrice ? `$${params.limitPrice.toFixed(2)} net` : "market"}. Estimated total: $${estimatedTotal.toLocaleString()} USD. No order has been placed; human approval is required.`
-      : `E*TRADE Order Preview: ${action} ${params.quantity} ${symbol} @ ${orderType === "MARKET" ? "MKT (~$" + quote!.lastPrice.toFixed(2) + ")" : "$" + executionPrice.toFixed(2)}. Estimated Total: $${estimatedTotal.toLocaleString()} USD. NO SHARES HAVE BEEN BOUGHT. Awaiting explicit Human-in-the-Loop authorization.${isNonLivePricingQuoteStatus(pricingQuoteStatus) ? ` ${nonLivePricingNotice(pricingQuoteStatus)}` : ""}`;
+      : `E*TRADE Order Preview: ${action} ${params.quantity} ${symbol} @ ${orderType === "MARKET" ? "MKT (~$" + quote!.lastPrice.toFixed(2) + ")" : "$" + executionPrice.toFixed(2)}. Estimated Total: $${estimatedTotal.toLocaleString()} USD.${orderClass === "bracket" ? ` Bracket draft: take-profit $${takeProfit?.limitPrice?.toFixed(2) ?? "-"} / stop-loss $${stopLoss?.stopPrice?.toFixed(2) ?? "-"} (E*TRADE preview only; place exits separately).` : ""} NO SHARES HAVE BEEN BOUGHT. Awaiting explicit Human-in-the-Loop authorization.${isNonLivePricingQuoteStatus(pricingQuoteStatus) ? ` ${nonLivePricingNotice(pricingQuoteStatus)}` : ""}`;
     const storedPreviewNotes = optionLegs.length
       ? JSON.stringify({ kind: "strategy-order-v1", assetClass, brokerOrderType, optionLegs, strategyNetDebit: params.strategyNetDebit, note: brokerNotice })
-      : brokerNotice;
+      : orderClass === "bracket"
+        ? JSON.stringify({
+            kind: "bracket-draft-v1",
+            orderClass,
+            takeProfit,
+            stopLoss,
+            takeProfitPercent: percentExits?.takeProfitPercent,
+            stopLossPercent: percentExits?.stopLossPercent,
+            note: brokerNotice,
+          })
+        : brokerNotice;
 
     const draft: ETradeOrderDraft = {
       orderId,
@@ -530,6 +570,15 @@ export class ETradeTradingPlatform implements ITradingPlatform {
       estimatedCommission,
       estimatedTotal,
       pricingQuoteStatus,
+      orderClass,
+      takeProfit,
+      stopLoss,
+      ...(percentExits
+        ? {
+            takeProfitPercent: percentExits.takeProfitPercent,
+            stopLossPercent: percentExits.stopLossPercent,
+          }
+        : {}),
       status: "previewed",
       proposerDid: didProof.proposerDid,
       authorizerDid: userDid,
@@ -612,6 +661,16 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     const quantity = record.quantity;
     const proposerDid = record.proposerDid;
     const proofSignature = record.proofSignature;
+
+    // Issue #3839: an E*TRADE bracket preview is a DRAFT with computed
+    // legs; this client has no conditional-order placement, so a parent
+    // must never be placed alone under a bracket approval. Refuse honestly
+    // and leave the draft previewed; separate exit orders are the path.
+    if (decision === "approved" && typeof record.previewNotes === "string" && record.previewNotes.includes("bracket-draft-v1")) {
+      throw new Error(
+        `Order draft '${orderId}' is an E*TRADE bracket preview. This client has no native bracket placement, so placing the parent alone would leave the position unprotected. Nothing was submitted; place the parent and the two exits as separate approved orders.`,
+      );
+    }
 
     if (decision === "rejected") {
       if (this.orm?.trades) {

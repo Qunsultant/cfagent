@@ -43,7 +43,8 @@ import type {
 } from "../../actors/thinkAdapter";
 import type { Env } from "../../types";
 import type { ScreenerExecutionContext } from "./scheduleMaintenance";
-import { resolveCopilotTradingSelection } from "../copilotTradingMode";
+import { COPILOT_BROKER_ID, resolveCopilotTradingSelection } from "../copilotTradingMode";
+import { brokerCopilotCapability, type BrokerId } from "../../trading";
 import type { CommercialStore } from "../../data/commercialPorts";
 import {
   createStockCopilotActivityPort,
@@ -200,8 +201,12 @@ export async function runStockCopilotCycleForInstance(
     readSettingRaw: ctx.readSettingRaw,
     commercial: ctx.commercial,
   });
+  // Issue #3839: the platform follows the SELECTED broker; the catalog's
+  // copilot capability supplies the bars provider. No broker is hardcoded.
+  const selectedBroker = (selection.resolved ? selection.selection.brokerId : COPILOT_BROKER_ID) as BrokerId;
+  const copilotCapability = brokerCopilotCapability(selectedBroker);
   const platform = TradingPlatformRegistry.getPlatform(
-    "alpaca",
+    selectedBroker,
     ctx.env,
     ctx.getOrm(),
     userLogin,
@@ -259,11 +264,12 @@ export async function runStockCopilotCycleForInstance(
         }),
         memory: createStockCopilotMemoryPort(sql),
         loadBars: async (symbol: string) => {
-          // The facade's alpaca-first order with explicit-unavailable
-          // failure (#923): no synthetic bars are ever substituted, so a
-          // data outage surfaces as a cycle error entry, never a trade
-          // on invented prices.
-          const bars = await marketData.getHistoricalBars(symbol, "1D", 60, "alpaca");
+          // The facade's provider order with explicit-unavailable failure
+          // (#923): no synthetic bars are ever substituted, so a data
+          // outage surfaces as a cycle error entry, never a trade on
+          // invented prices. The provider is the broker catalog's
+          // declared copilot bars provider (#3839).
+          const bars = await marketData.getHistoricalBars(symbol, "1D", 60, copilotCapability.barsProvider);
           return bars
             .map((b) => b.close)
             .filter((c) => Number.isFinite(c) && c > 0);

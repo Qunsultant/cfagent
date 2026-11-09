@@ -93,6 +93,38 @@ export type BrokerOperation =
   // the declaration flips to true on the day a second source is wired.
   | "optionsDiscovery";
 
+/**
+ * Issue #3839: the copilot's per-broker capability, declared in the SAME
+ * catalog as everything else. The copilot never hardcodes a broker: it
+ * reads this block, so onboarding a broker is one catalog entry + one
+ * registry registration. A broker that cannot quote, preview, or place is
+ * declared unsupported here rather than failing at the first cycle.
+ */
+export interface BrokerCopilotCapability {
+  /** The copilot may run on this broker at all. */
+  readonly supported: boolean;
+  /** The autonomous scheduled cycle may place orders on this broker. */
+  readonly autonomousCycle: boolean;
+  /**
+   * Bracket support: `native` places TP/SL children at the broker,
+   * `preview` produces a bracket DRAFT but placement is separate exit
+   * orders, `none` has no bracket model.
+   */
+  readonly bracketOrders: "native" | "preview" | "none";
+  /** Percent exits are accepted by preview/place for this broker. */
+  readonly percentBrackets: boolean;
+  /** The market-data provider the copilot uses for historical bars. */
+  readonly barsProvider: "alpaca" | "yfinance" | "hybrid";
+  /** The discovered MCP tool names (without the `tool_openaimp_` prefix). */
+  readonly tools: {
+    readonly quote: string;
+    readonly preview: string;
+    readonly place: string;
+    readonly orders: string | null;
+    readonly cancel: string | null;
+  };
+}
+
 export interface BrokerDefinition {
   readonly id: BrokerId;
   readonly label: string;
@@ -111,6 +143,8 @@ export interface BrokerDefinition {
     readonly mode: Readonly<Record<TradingType, BrokerStatusMode>>;
     readonly environment: Readonly<Record<TradingType, "paper" | "live">>;
   };
+  /** Issue #3839: the copilot's declared capability on this broker. */
+  readonly copilot: BrokerCopilotCapability;
 }
 
 /** Wire protocol strings, one per broker kind. Additive: existing values stay. */
@@ -196,6 +230,22 @@ export const BROKER_CATALOG = {
       mode: { paper: "sandbox_api", live: "live_oauth" },
       environment: { paper: "paper", live: "live" },
     },
+    copilot: {
+      supported: true,
+      autonomousCycle: true,
+      // The E*TRADE client has no native bracket/conditional placement;
+      // the preview carries the legs, placement is separate exit orders.
+      bracketOrders: "preview",
+      percentBrackets: true,
+      barsProvider: "yfinance",
+      tools: {
+        quote: "etrade_get_quote",
+        preview: "etrade_preview_order",
+        place: "etrade_execute_order",
+        orders: null,
+        cancel: null,
+      },
+    },
   },
   alpaca: {
     id: "alpaca",
@@ -247,6 +297,20 @@ export const BROKER_CATALOG = {
       protocol: "alpaca_rest_v2",
       mode: { paper: "paper_api", live: "live_api" },
       environment: { paper: "paper", live: "live" },
+    },
+    copilot: {
+      supported: true,
+      autonomousCycle: true,
+      bracketOrders: "native",
+      percentBrackets: true,
+      barsProvider: "alpaca",
+      tools: {
+        quote: "alpaca_get_quote",
+        preview: "alpaca_preview_order",
+        place: "alpaca_place_order",
+        orders: "alpaca_orders",
+        cancel: "alpaca_cancel_bracket_ladder",
+      },
     },
   },
 } as const satisfies Record<BrokerId, BrokerDefinition>;
@@ -325,6 +389,23 @@ export function resolveBrokerSelection(input: {
 /** True when the selected broker can perform the operation (#3233). */
 export function brokerSupports(broker: BrokerId, operation: BrokerOperation): boolean {
   return BROKER_CATALOG[broker].supports[operation];
+}
+
+/** Issue #3839: the copilot capability for one broker. Total by type. */
+export function brokerCopilotCapability(broker: BrokerId): BrokerCopilotCapability {
+  return BROKER_CATALOG[broker].copilot;
+}
+
+/** The brokers the copilot supports, derived from the catalog — never a list. */
+export function copilotBrokerIds(): BrokerId[] {
+  return (Object.keys(BROKER_CATALOG) as BrokerId[]).filter(
+    (broker) => BROKER_CATALOG[broker].copilot.supported,
+  );
+}
+
+/** Narrowing guard used by the copilot's selection resolver. */
+export function isCopilotBroker(broker: string): broker is BrokerId {
+  return isBrokerId(broker) && BROKER_CATALOG[broker].copilot.supported;
 }
 
 /**
