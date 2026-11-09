@@ -181,7 +181,7 @@ describe("#3884 — records and surfaces", () => {
   it("the route exposes the ticker scope and refuses another broker by name", () => {
     const source = readFileSync("src/agents/routes/brokerOrders.ts", "utf8");
     expect(source).toContain('path.endsWith("/broker/orders/cancel-ticker")');
-    expect(source).toContain("cancelTickerOrders(createAlpacaCancelPort(ctx.env)");
+    expect(source).toContain("cancelTickerOrders(createCancelBrokerPort(ctx.env)");
     expect(source).toContain("provider_unsupported");
   });
 
