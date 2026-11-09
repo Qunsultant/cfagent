@@ -279,6 +279,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
     expect(DELIVER_PIPELINE_CATALOG.map((e) => e.jobId)).toEqual([
       "yahoo-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp100-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sp500-quotes-enrich-analyze-generate-deliver",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "etrade-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "public-nasdaq100-quotes-enrich-analyze-generate-deliver",
@@ -298,7 +299,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
 
   it("every catalog definition resolves as a valid J1 job definition", () => {
     const raws = buildAllDeliverPipelineJobDefinitions({});
-    expect(raws).toHaveLength(5);
+    expect(raws).toHaveLength(6);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("deliver");
@@ -309,7 +310,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
     }
   });
 
-  it("registerSchedules registers the full plane incl. deliver (27 declarations)", async () => {
+  it("registerSchedules registers the full plane incl. deliver (32 declarations)", async () => {
     const h = await makeHarness();
     const specs: Array<{ jobId: string }> = [];
     const registrations = await h.control.registerSchedules({
@@ -318,7 +319,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(27);
+    expect(registrations).toHaveLength(32);
     expect(specs.map((s) => s.jobId)).toContain(DELIVER_ID);
   });
 });
