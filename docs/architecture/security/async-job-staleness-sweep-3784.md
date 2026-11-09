@@ -112,3 +112,64 @@ deploy. The production live check — a stuck run producing a visible
 Slack alert + the `async_job.stuck_detected` / `async_job.stuck_alert`
 audit events — is outstanding until #3789 lands and is not claimed
 by #3784.
+
+## Amendment — heartbeat-aware reap + execution deadline (#3907)
+
+The 2h reap as specified above was age-only: it reaped any row
+past 2h regardless of whether its executor was still alive. On
+2026-11-09 it killed two live, paid MCP jobs (`paid_options_screener`
+`62319ea2`, `paid_market_research` `f89ae255`, both started 11:50 AM,
+both reaped by the same 2:02:01 PM sweep tick) that had paid x402
+charges and produced no result. The executor heartbeats every 2
+minutes (`ASYNC_JOB_HEARTBEAT_MS`, #3811) and the reap never looked
+at the heartbeat it maintains.
+
+- **Reap semantics, amended:** a row is reaped only when it is past
+  the 2h backstop AND its heartbeat is stale (`isHeartbeatStale`:
+  `last_activity_at` older than `HEARTBEAT_STALE_MS` = 3 × the
+  2-min heartbeat; a pre-heartbeat row with no `last_activity_at`
+  falls back to `started_at` age, preserving the #3784 backstop).
+  A live, heartbeating job is never reaped, at any age. The same
+  rule applies to the `getAsyncJob` read-path reap. The stuck alert
+  already knew the distinction ("a stuck run with a fresh heartbeat
+  is still progressing") — the reap now applies it.
+- **Execution deadline:** `executeAsyncJob` races every capability
+  leg against `createExecutionDeadline` (default 90 min, env
+  `ASYNC_JOB_MAX_RUNTIME_MINUTES`, 0 = disabled). A hung leg fails
+  with the new cataloged code `FAILURE_ASYNC_JOB_TIMEOUT` instead
+  of running to the reap. The race abandons the hung leg, it does
+  not abort it — the row is terminal, so a late result is dropped
+  and no second execution occurs.
+- **Orphaned-running recovery:** `onStart` now also runs
+  `recoverStaleRunningAsyncJobs` (same seam as
+  `recoverQueuedAsyncJobs`): stale-heartbeat `running` rows are
+  failed fast at startup instead of waiting for the 2h sweep.
+  Rows are never re-run — a paid `mcp.tool` job is never silently
+  re-executed.
+- **Paid-job evidence:** the two paid commands audit
+  `agentic_payment.tool_paid_started` (tool, price, receiptId,
+  txHash) BEFORE the long call, and the reap/fail audit gains the
+  tool name for `mcp.tool` jobs, so a reaped paid job traces to
+  its x402 receipt. There is still no refund/credit mechanism —
+  that is the filed follow-up #3908, not this change.
+- **Paid-job retry guard:** `retryAsyncJob` refuses a payload
+  carrying `arguments.paymentSignature` with a named message (the
+  signature was consumed at verification; a retry would 402).
+- **Queues page honesty:** `AsyncJobsPanel`'s pill counts by state
+  ("Queue clear" only when nothing active AND nothing failed) and
+  the embedded list notes "Showing 5 of N jobs"; `DlqPanel`'s
+  header reads "Could not load" on a load failure, never "Queue
+  clear" alongside the error. `src/agents/routes/dlq.ts` returns
+  `{error}` JSON for every failure, never a bare 500.
+- **What this does not do:** provider-level fetch timeouts in the
+  options screen / market research services (filed follow-up
+  #3909); a credit/refund path (#3908). The five failed jobs from
+  the incident (1× screener + 4× research, $0.45 if all five
+  verified payment) are not recoverable by this change — their
+  payments were consumed before the reap.
+- **Tests:** `tests/async_job_heartbeat_reap_deadline_3907.test.ts`
+  (fresh heartbeat never reaped at 2h+; stale heartbeat reaped;
+  read-path reap same; deadline expiry → coded timeout failure;
+  recovery fail-fast; paid retry guard). The #3784 sweep test and
+  the #3811 telemetry test pins are preserved where behavior is
+  preserved.

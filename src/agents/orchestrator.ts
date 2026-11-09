@@ -90,7 +90,7 @@ import type { DoNamespaceLike } from "../data/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
-import { submitAsyncJob, recoverQueuedAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
+import { submitAsyncJob, recoverQueuedAsyncJobs, recoverStaleRunningAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
 import { watchdogMissedSchedules, type ScheduleWatchdogContext, type ScheduleWatchdogSweepResult } from "./orchestrator/scheduleWatchdog";
 import { RECORDED_SCHEDULE_CALLBACKS } from "./orchestrator/scheduleCallbacks";
 import { ensureOrchestratorTables } from "./orchestrator/tableSchema";
@@ -1030,6 +1030,19 @@ export class OrchestratorAgent extends PortThink {
       });
     }
 
+    // Issue #3907: fail fast the orphaned `running` rows whose
+    // executor died with the DO — same seam as the queued
+    // recovery above, its own try/catch so a bad row never fails
+    // startup.
+    try {
+      await this.recoverStaleRunningAsyncJobs();
+    } catch (error) {
+      structuredLog.error("orchestrator.on_start_stale_running_async_jobs_recovery_failed", {
+        message: "[OrchestratorAgent][onStart] Could not recover stale running async jobs:",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     try {
       // Issue #2496 (Mesh Improvement S1): establish the SDK MCP
       // client connection to this instance's own openaimp MCP
@@ -1676,6 +1689,11 @@ export class OrchestratorAgent extends PortThink {
   // Issue #992: extracted to ./orchestrator/asyncJobs.ts (recoverQueuedAsyncJobs);
   private async recoverQueuedAsyncJobs(): Promise<void> {
     return recoverQueuedAsyncJobs(this.asyncJobsContext());
+  }
+
+  // Issue #3907: extracted to ./orchestrator/asyncJobs.ts (recoverStaleRunningAsyncJobs);
+  private async recoverStaleRunningAsyncJobs(): Promise<{ examined: number; failed: number }> {
+    return recoverStaleRunningAsyncJobs(this.asyncJobsContext());
   }
 
   // Issue #992: extracted to ./orchestrator/asyncJobs.ts (getAsyncJob);

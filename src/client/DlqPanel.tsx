@@ -26,6 +26,18 @@ interface DlqRecord {
   createdAtMs: number;
 }
 
+/** Issue #3907: the header text, as a pure function — loading /
+ *  load-failed / empty / N records are distinct states; a failed
+ *  load never reads as "Queue clear" (the 2026-11-09 incident:
+ *  the panel showed "Queue clear" alongside "could not be
+ *  loaded"). */
+export function dlqHeaderStatus(args: { loading: boolean; error: string | null; count: number }): string {
+  if (args.loading) return "Loading…";
+  if (args.error) return "Could not load";
+  if (args.count === 0) return "Queue clear";
+  return `${args.count} unreplayed record${args.count === 1 ? "" : "s"}`;
+}
+
 export function DlqPanel() {
   const [records, setRecords] = useState<DlqRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,9 +142,7 @@ export function DlqPanel() {
     <div className="dlq-panel">
       <div className="dlq-panel-head">
         <span role="status">
-          {records.length === 0
-            ? "Queue clear"
-            : `${records.length} unreplayed record${records.length === 1 ? "" : "s"}`}
+          {dlqHeaderStatus({ loading: false, error, count: records.length })}
         </span>
         <Button type="button" variant="secondary" size="sm" onClick={() => void refresh()}>
           Refresh
@@ -151,10 +161,12 @@ export function DlqPanel() {
       )}
 
       {records.length === 0 ? (
-        <EmptyState
-          title="No unreplayed records"
-          description="The dead-letter queue is clear: nothing is waiting for a replay."
-        />
+        error ? null : (
+          <EmptyState
+            title="No unreplayed records"
+            description="The dead-letter queue is clear: nothing is waiting for a replay."
+          />
+        )
       ) : (
         <ul className="dlq-record-list">
           {records.map((record) => (
