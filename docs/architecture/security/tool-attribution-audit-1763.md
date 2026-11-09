@@ -207,6 +207,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `trading_limits` (#3888: the externalized limits, read and change) | mcp:trade | L (I / R on other doors) |
 | `alpaca_cancel_order` (#3883: cancel one order, with bracket-leg semantics) | mcp:trade | L (I / R on other doors) |
 | `alpaca_cancel_ticker` (#3884: every open order for one symbol, filterable by class/side/ladder) | mcp:trade | L (I / R on other doors) |
+| `alpaca_cancel_all` (#3885: every open order, two-step with a single-use preview token and a configured cap) | mcp:trade | L (I / R on other doors) |
 | `foss_alpaca_place_order` (deprecated #1906 alias of `alpaca_place_order`, same scope) | mcp:trade | L (I / R on other doors) |
 | `execute_durable_twap` | mcp:trade | L (I / R on other doors) |
 | `propose_stock_trade` | mcp:trade | L via door 2 only — acting identity required (#2349); refused on doors 1/3 (no acting-identity carrier there). Preview only: the result is a pending-approval proposal; no order is placed |
