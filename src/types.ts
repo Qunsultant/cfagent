@@ -1655,6 +1655,9 @@ export interface BrokerOrderDraft {
   orderClass?: string;
   takeProfit?: { limitPrice?: number };
   stopLoss?: { stopPrice?: number; limitPrice?: number };
+  /** Issue #3839: the percent exits as requested, echoed on the receipt. */
+  takeProfitPercent?: number;
+  stopLossPercent?: number;
   expirationScheduleId?: string;
   expiresAt?: string;
   placedAt?: string;

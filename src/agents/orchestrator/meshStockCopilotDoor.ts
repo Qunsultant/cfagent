@@ -14,6 +14,7 @@ import {
   COPILOT_BROKER_ID,
   resolveCopilotTradingSelection,
 } from "../copilotTradingMode";
+import { isCopilotBroker } from "../../trading";
 import type { CommercialStore } from "../../data/commercialPorts";
 import {
   createStockCopilotActivityPort,
@@ -253,7 +254,7 @@ export async function getStockCopilotStatusViaDoor(
     ? "off"
     : !selection.resolved
       ? "mode_unresolved"
-      : selection.selection.brokerId !== COPILOT_BROKER_ID
+      : !isCopilotBroker(selection.selection.brokerId)
         ? "inactive_broker"
         : paused
           ? "paused"
