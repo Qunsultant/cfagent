@@ -415,6 +415,7 @@ describe("pipeline-chain routes (#3540)", () => {
     expect(body.jobs.map((j) => j.jobId)).toEqual([
       "yahoo-nasdaq100-quotes-pipeline",
       "yahoo-sp100-quotes-pipeline",
+      "yahoo-sp500-quotes-pipeline",
     ]);
     expect(body.jobs[0].frontier).toBe("feed");
     expect(body.jobs[0].stages).toHaveLength(5);
@@ -432,6 +433,7 @@ describe("pipeline-chain routes (#3540)", () => {
     expect(yahoo.pipelineChains.map((j: any) => j.jobId)).toEqual([
       "yahoo-nasdaq100-quotes-pipeline",
       "yahoo-sp100-quotes-pipeline",
+      "yahoo-sp500-quotes-pipeline",
     ]);
   });
 
