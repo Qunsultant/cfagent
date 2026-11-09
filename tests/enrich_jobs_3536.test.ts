@@ -131,6 +131,7 @@ describe("the element vocabulary (#3536)", () => {
       "public-nasdaq100-quotes-enrich",
       "yahoo-nasdaq100-quotes-enrich",
       "yahoo-sp100-quotes-enrich",
+      "yahoo-sp500-quotes-enrich",
     ]);
     const yahoo = registry.get("yahoo-nasdaq100-quotes-enrich")!;
     expect(yahoo.enrichFrom).toEqual([
