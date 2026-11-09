@@ -1,0 +1,2 @@
+### Fixed
+- Neutrality census baseline repair (#3798): the code standards set (PR #3793) added provider-brand rows in two new docs (docs/architecture/code/10-mcp-standards.md, 13-structure-and-file-organization.md) that the #3525 census pin had never baselined, taking main red on Tests shard 4/4; both rows are now baselined INTEGRATION with their disposition recorded in the pin header (seed totals 1098/8568 → 1100/8575). No standards document changed.
