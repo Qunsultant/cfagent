@@ -42,9 +42,19 @@ In brief:
 ## Policy Gate rules every agent must know (gitops §22)
 
 - **No deletions.** No PR may delete a file — the gate fails any
-  deletion with no label bypass. Retire by deprecating in place:
-  keep the file, mark it deprecated, name what superseded it, and
-  remove it from exports/indexes instead of deleting it. Pure
+  deletion with no label bypass. Retire by deprecating, never by
+  deleting (gitops §22, owner directions #1894 + #2299): rename the
+  file so the name itself says it can be deleted (`foo.ts` →
+  `foo.deprecated.ts`, same directory, imports updated in the same
+  slice), add a header note naming what superseded it, and record an
+  entry in the single deprecation ledger at
+  `docs/architecture/transition/deprecations.md` (file, date, reason,
+  replacement, consumers at deprecation, deletion condition).
+  Deprecated files are frozen — no new features, no new consumers;
+  refactoring only to migrate consumers off them. The earlier
+  in-place form (keep the file, mark it deprecated, remove it from
+  exports/indexes) remains valid only for marks already in the
+  codebase until those files are renamed under this rule. Pure
   renames pass (the gate sees R, not D). Exception (#1917): a deleted
   TEST file passes when an added test file preserves every one of its
   test names (exact, or fuzzy at ratio >= 0.55 under a distinct
