@@ -1470,7 +1470,7 @@ export class StockCopilotStatusCommand implements IMcpToolCommand<Record<string,
 export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotControlInput> {
   readonly name = "stock_copilot_control";
   readonly description =
-    "Pause or resume the autonomous Stock Copilot trading loop, set cycle cadence/interval, update enabled trading sessions, configure watch universe, switch execution mode (deterministic vs agentic), or toggle RSI mode (governed vs self).";
+    "Pause or resume the autonomous Stock Copilot trading loop, enable/disable 24/7 Autopilot and emergency kill-switch, configure Autopilot risk limits, switch interactive Chat Copilot execution mode ('hitl' vs 'autonomous'), set cycle cadence/interval, update enabled trading sessions, configure watch universe, switch loop execution mode (deterministic vs agentic), or toggle RSI mode (governed vs self).";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -1481,6 +1481,27 @@ export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotC
       pauseUntil: {
         type: "string",
         description: "Pause loop until a specific time (e.g. '9:30 AM ET' or ISO timestamp).",
+      },
+      autopilotRunning: {
+        type: "boolean",
+        description: "Enable (true) or disable (false) the 24/7 autonomous Autopilot execution envelope.",
+      },
+      copilotExecutionMode: {
+        type: "string",
+        enum: ["hitl", "autonomous"],
+        description: "Interactive Chat Copilot trade execution mode: 'hitl' (draft preview card requiring human approval) or 'autonomous' (immediate execution within risk limits without human confirmation).",
+      },
+      killSwitch: {
+        type: "boolean",
+        description: "Engage (true) or clear (false) the emergency Autopilot kill-switch.",
+      },
+      killSwitchReason: {
+        type: "string",
+        description: "Optional audit reason when engaging the emergency kill-switch.",
+      },
+      autopilotLimits: {
+        type: "object",
+        description: "Optional risk policy limit overrides (maxPositionPct, minCashReservePct, maxOrdersPerDay, drawdownAlertPct, universeAllowlist).",
       },
       cadence: {
         type: "string",
@@ -1515,6 +1536,20 @@ export class StockCopilotControlCommand implements IMcpToolCommand<StockCopilotC
   readonly zodSchema = z.object({
     paused: z.boolean().optional().describe("Pause or resume the loop"),
     pauseUntil: z.string().optional().describe("Pause trading until specific time (e.g. '9:30 AM')"),
+    autopilotRunning: z.boolean().optional().describe("Enable or disable the autonomous Autopilot envelope"),
+    copilotExecutionMode: z.enum(["hitl", "autonomous"]).optional().describe("Interactive chat execution mode ('hitl' or 'autonomous')"),
+    killSwitch: z.boolean().optional().describe("Engage or clear the emergency Autopilot kill-switch"),
+    killSwitchReason: z.string().optional().describe("Reason for engaging the emergency kill-switch"),
+    autopilotLimits: z
+      .object({
+        maxPositionPct: z.number().positive().max(100).optional(),
+        minCashReservePct: z.number().min(0).max(100).optional(),
+        maxOrdersPerDay: z.number().int().positive().optional(),
+        drawdownAlertPct: z.number().positive().max(100).optional(),
+        universeAllowlist: z.array(z.string()).optional(),
+      })
+      .optional()
+      .describe("Optional Autopilot risk policy limit overrides"),
     cadence: z.string().optional().describe("Cycle interval cadence (e.g. 'every 1 hour', 'every 30 minutes')"),
     sessions: z.array(z.enum(COPILOT_SESSIONS as unknown as [string, ...string[]])).optional().describe("Enabled session IDs"),
     universe: z.union([z.string(), z.array(z.string())]).optional().describe("Universe preset or ticker array"),
