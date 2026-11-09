@@ -129,7 +129,6 @@ export class DoSqliteAsyncJobStore
       // NULL on rows that never failed.
       this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN error_code TEXT");
     }
-    }
     this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_parent ON mas_async_jobs(parent_job_id)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_chain ON mas_async_jobs(chain_id)");
   }
