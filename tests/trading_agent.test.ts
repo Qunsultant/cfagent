@@ -104,10 +104,10 @@ const fakeConfig = {
 };
 
 describe("TradingAgent config (#291)", () => {
-  it("baseline: etrade enabled and default, all services on", () => {
+  it("baseline: etrade + alpaca enabled, alpaca default, all services on", () => {
     const config = getTradingAgentConfig({});
     expect(config.enabledProviders).toEqual(["etrade", "alpaca"]);
-    expect(config.defaultProvider).toBe("etrade");
+    expect(config.defaultProvider).toBe("alpaca");
     expect(config.enabledServices).toContain("stock_screening");
     expect(config.enabledServices).toContain("options_trading");
   });

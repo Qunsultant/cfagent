@@ -44,9 +44,7 @@ import {
   BROKER_DISPLAY_NAMES,
   isBrokerId,
   resolveTenantProviders,
-  type BrokerId,
 } from "../../services/tenantProviders";
-import { DEFAULT_TENANT_PROVIDERS } from "../../data/commercialPorts";
 import { tradingTypeFor } from "../../trading";
 import { isLoginShaped } from "../../security/serviceIdentity";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
@@ -676,14 +674,11 @@ export async function handleSchedulesRoutes(
           // reader instead of a test's vi.mock of it.
           const { readTenantBrokerSelection } = await import("../../services/providerConnections");
           const brokerRead = await readTenantBrokerSelection(ctx.env);
-          const fallbackBroker: BrokerId = isBrokerId(DEFAULT_TENANT_PROVIDERS.brokerId)
-            ? DEFAULT_TENANT_PROVIDERS.brokerId
-            : "etrade";
-          const brokerId = brokerRead.status === "ok" ? brokerRead.brokerId : fallbackBroker;
+          const brokerId = brokerRead.status === "ok" ? brokerRead.brokerId : "etrade";
           createBrokerId = brokerId;
           const createEnvironment = trustedEnvironment === "TEST" ? "TEST" : "PROD";
           createMode = tradingTypeFor(
-            isBrokerId(brokerId) ? brokerId : fallbackBroker,
+            isBrokerId(brokerId) ? brokerId : "etrade",
             createEnvironment
           );
           if (brokerId === "etrade") {
