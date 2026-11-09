@@ -171,6 +171,7 @@ describe("the report / format vocabulary (#3538)", () => {
     expect(registry.list().map((j) => j.id)).toEqual([
       "yahoo-nasdaq100-quotes-enrich-analyze-generate",
       "yahoo-sp100-quotes-enrich-analyze-generate",
+      "yahoo-sp500-quotes-enrich-analyze-generate",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate",
       "etrade-nasdaq100-quotes-enrich-analyze-generate",
       "public-nasdaq100-quotes-enrich-analyze-generate",
