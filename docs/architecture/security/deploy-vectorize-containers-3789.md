@@ -58,12 +58,11 @@ Nothing else changes. The capability is preserved, not deleted:
 - The container binding stays: `class_name: "SandboxAgent"` +
   `scheduling_policy: "durable_object"`, so `this.ctx.container` is still
   bound in SandboxAgent.
-- The image is supplied at runtime, not by config:
-  `ETradeSandboxService.runCommand` calls
+- The image is supplied at runtime, not by config: the sandbox
+  service's `runCommand` (in `src/services/sandboxAgent.ts`) calls
   `container.start({ image: "cloudflare/debian-trixie", entrypoint:
-  ["sleep", "infinity"], enableInternet: false })`
-  (`src/services/sandboxAgent.ts`). The config field carried nothing the
-  code uses.
+  ["sleep", "infinity"], enableInternet: false })`. The config field
+  carried nothing the code uses.
 
 The `images` map (named, digest-pinned images in the account registry)
 was not used instead: the code never reads `ctx.container.images`, and
