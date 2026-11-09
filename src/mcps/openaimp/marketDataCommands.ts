@@ -577,7 +577,7 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
 
     // Issue #3839: Alpaca bracket/OCO orders are day-only. Refuse before
     // broker contact instead of letting the broker reject an unattended run.
-    if (normalized.order_class === "bracket" && normalized.time_in_force !== "day") {
+    if (normalized.order_class === "bracket" && (normalized.time_in_force ?? "day") !== "day") {
       return {
         success: false,
         message: "Bracket orders require time_in_force 'day' at Alpaca; a GTC bracket is refused before broker contact.",
