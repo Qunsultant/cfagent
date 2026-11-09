@@ -226,7 +226,7 @@ export class AlpacaCancelAllCommand implements IMcpToolCommand {
     context: McpToolContext,
   ) {
     const receipt = await cancelAllOrders(
-      createAlpacaCancelPort(context.env),
+      createCancelBrokerPort(context.env),
       {
         token: input.confirm,
         dryRun: input.dryRun,
