@@ -23,12 +23,16 @@ import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { brokerSectionNav } from "./brokerSectionNav";
 import type { RiskBroker } from "./portfolioRiskApi";
 import { brokerSupports, isBrokerId } from "../trading";
+import { submitVoiceTurn } from "./voiceDeskClient";
 import {
-  isVoiceRecognitionSupported,
-  speakVoiceText,
-  startVoiceRecognition,
-  submitVoiceTurn,
-} from "./voiceDeskClient";
+  createSurfaceVoiceBackend,
+  type VoiceBackend,
+  type VoiceCaptureHandle,
+} from "./voiceBackend";
+import {
+  fetchVoiceSurfaceBackend,
+  TRADING_DESK_VOICE_SURFACE,
+} from "./copilotChannelsApi";
 import { brokerModeBadge, brokerPresentation } from "../trading/brokerPresentation";
 import {
   accountsFromPayload,
@@ -584,16 +588,64 @@ export function ETradeTradingHub({
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceIsMuted, setVoiceIsMuted] = useState(false);
   const [speechRecognitionActive, setSpeechRecognitionActive] = useState(false);
+  const [voiceFailureCode, setVoiceFailureCode] = useState<string | null>(null);
+
+  // Issue #3796: the desk surface's ONE voice backend — the
+  // shared seam (voiceBackend.ts), built for the surface the
+  // server switch resolves (stored > env > code default). It
+  // starts at the code default (webspeech — the desk's voice as
+  // originally built) and is replaced when the surface
+  // projection read lands. Capture and playback run through the
+  // seam; turn submission stays the desk's (submitVoiceTurn to
+  // the desk route, with the desk's own gates server-side).
+  const [voiceBackend, setVoiceBackend] = useState<VoiceBackend>(() =>
+    createSurfaceVoiceBackend("webspeech", {
+      surface: TRADING_DESK_VOICE_SURFACE,
+    }),
+  );
+  const voiceCaptureRef = useRef<VoiceCaptureHandle | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchVoiceSurfaceBackend(TRADING_DESK_VOICE_SURFACE)
+      .then((projection) => {
+        if (cancelled) return;
+        setVoiceBackend(
+          createSurfaceVoiceBackend(projection.voiceBackend.backend, {
+            surface: TRADING_DESK_VOICE_SURFACE,
+          }),
+        );
+      })
+      .catch(() => {
+        // The read failed: the surface keeps the code-default
+        // adapter (webspeech) — the switch's own default layer.
+        // The server still gates the model endpoints by name, so
+        // a stale default can never reach them silently.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const speakText = (text: string) => {
-    // #3738: the shared voice-desk client (voiceDeskClient.ts) —
-    // the same TTS helper the Stock Copilot panel's voice control
-    // speaks through.
-    speakVoiceText(text, {
-      muted: voiceIsMuted,
-      onStart: () => setVoiceStatus("speaking"),
-      onEnd: () => setVoiceStatus("idle"),
-    });
+    // Issue #3796: playback runs through the desk surface's ONE
+    // voice backend (the shared seam) — the switch chooses the
+    // machinery (browser synthesis or the server TTS model); the
+    // desk supplies only its mute state and status callbacks. A
+    // named playback failure surfaces its code, like the
+    // composer's; muted or unavailable playback returns to idle.
+    void voiceBackend
+      .speak(text, {
+        muted: voiceIsMuted,
+        onEnd: () => setVoiceStatus("idle"),
+        onError: (code) => {
+          setVoiceFailureCode(code);
+          setVoiceStatus("idle");
+        },
+      })
+      .then((spoke) => {
+        if (!spoke) setVoiceStatus("idle");
+      });
   };
 
   const handleVoiceTurn = async (textToSubmit?: string) => {
@@ -655,43 +707,62 @@ export function ETradeTradingHub({
   const handleToggleVoiceRecording = () => {
     if (typeof window === "undefined") return;
 
-    if (!isVoiceRecognitionSupported()) {
-      toast.warning("Web Speech API is not supported in this browser. You can type in the prompt box or use the quick chips.");
-      return;
-    }
-
     if (speechRecognitionActive) {
+      // Issue #3796: the seam's capture handle makes the stop
+      // real — the capture actually ends (the desk's pre-seam
+      // wiring reset the state but never stopped the pass).
+      voiceCaptureRef.current?.stop();
+      voiceCaptureRef.current = null;
       setSpeechRecognitionActive(false);
       setVoiceStatus("idle");
       return;
     }
 
-    // #3738: the shared voice-desk client (voiceDeskClient.ts)
-    // runs the recognition pass; the hub wires its state to the
-    // pass's callbacks, exactly as the Stock Copilot panel's
-    // voice control does.
-    const handle = startVoiceRecognition({
+    if (!voiceBackend.isSupported()) {
+      toast.warning("Web Speech API is not supported in this browser. You can type in the prompt box or use the quick chips.");
+      return;
+    }
+
+    // Issue #3796: capture runs through the desk surface's ONE
+    // voice backend (the shared seam — the same adapters the
+    // chat composer consumes); the hub wires its state to the
+    // capture callbacks, and the final transcript submits as a
+    // DESK turn (handleVoiceTurn → the desk route), never a
+    // chat turn: reuse is at the voice layer only.
+    setVoiceFailureCode(null);
+    const handle = voiceBackend.startCapture({
       onStart: () => {
         setSpeechRecognitionActive(true);
         setVoiceStatus("listening");
       },
       onInterim: (text) => setVoiceInterim(text),
+      onProcessing: () => setVoiceStatus("thinking"),
       onFinal: (text) => {
+        voiceCaptureRef.current = null;
         setVoiceInterim(null);
         setSpeechRecognitionActive(false);
         void handleVoiceTurn(text);
       },
-      onError: () => {
+      onError: (code) => {
+        voiceCaptureRef.current = null;
         setSpeechRecognitionActive(false);
         setVoiceStatus("idle");
+        // A NAMED failure (a voice endpoint's code) is a visible
+        // state and submits nothing; a codeless browser
+        // recognition error returns quietly to idle (the desk's
+        // long-standing treatment).
+        if (code) setVoiceFailureCode(code);
       },
       onEnd: () => {
+        voiceCaptureRef.current = null;
         setSpeechRecognitionActive(false);
       },
     });
     if (!handle) {
       setSpeechRecognitionActive(false);
       setVoiceStatus("idle");
+    } else {
+      voiceCaptureRef.current = handle;
     }
   };
 
@@ -2823,6 +2894,16 @@ export function ETradeTradingHub({
                   />
                 ))}
               </div>
+
+              {/* Issue #3796: a named voice failure (the endpoint's
+                  code) is a visible state, like the composer's —
+                  never a silent fallback to the other backend. */}
+              {voiceFailureCode && (
+                <Notice tone="danger">
+                  Voice failed ({voiceFailureCode}). Nothing was sent — type
+                  your prompt below or use the quick chips instead.
+                </Notice>
+              )}
 
               {/* Interim Real-Time Transcript Display */}
               {voiceInterim && (
