@@ -281,7 +281,7 @@ describe("deliver-job copilot tools (#3539)", () => {
     expect(status.jobId).toBe(DELIVER_ID);
     expect(status.deliver.snapshot.inputRunId).toBeTruthy();
     const list = (await new ListDeliverJobsCommand().execute({}, context)) as any;
-    expect(list.jobs).toHaveLength(5);
+    expect(list.jobs).toHaveLength(6);
     expect(list.jobs.map((j: any) => j.jobId)).toContain(DELIVER_ID);
   });
 
