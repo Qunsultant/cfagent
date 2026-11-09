@@ -2,18 +2,15 @@
  * Issue #3773 — the chat composer's voice control: the voice
  * channel of the copilot conversation itself.
  *
- * Rendered by the chat tab (AgentChatTabContent) directly above
- * the composer, only when the active copilot registration's voice
- * channel resolves effective (the server projection's
- * channels.voice.effective — switch AND #3720 class activation;
- * the tab owns that gate). Where the Stock Copilot panel's voice
- * control (#3738) runs DESK turns, this control feeds the CHAT
- * conversation: a transcript is submitted through the same send
- * path as a typed message (the tab's sendChatText via
- * onSubmitTranscript), so text and voice are two input channels
- * into ONE conversation. The assistant's reply to a
- * voice-submitted turn is spoken back, with a mute toggle; typed
- * turns are never spoken.
+ * The voice channel feeds the CHAT conversation: a transcript is
+ * submitted through the same send path as a typed message (the
+ * tab's sendChatText via onSubmitTranscript), so text and voice
+ * are two input channels into ONE conversation. The assistant's
+ * reply to a voice-submitted turn is spoken back, with a mute
+ * toggle; typed turns are never spoken. (Where this control
+ * serves the conversation, the Stock Copilot panel's old voice
+ * section ran DESK turns; #3794 retired that section — voice
+ * lives only in the chat box.)
  *
  * HOW voice works is the provider seam's business
  * (src/client/voiceBackend.ts): the tab hands this control the
@@ -23,6 +20,16 @@
  * only. A backend failure surfaces its named code in a danger
  * Notice and submits nothing — never a silent fallback to the
  * other backend.
+ *
+ * Issue #3794 — placement: the CONTROLS (mic + mute) sit INLINE
+ * inside the chat box row, alongside the text input and the Send
+ * control, like a standard chat interface — never on a separate
+ * bar. The state therefore lives in useChatComposerVoice, owned
+ * by the tab: the tab renders ChatComposerVoiceFeedback (the
+ * named-failure Notices and transient status — feedback, not
+ * controls) beside the box, and ChatComposerVoiceButtons inside
+ * the composer form. ChatComposerVoiceControl remains as the
+ * composed form (feedback over a buttons row) for standalone use.
  *
  * Styling follows the host surface: the chat tab is the Fluent v9
  * surface (#3146), so the controls are the same Fluent primitives
@@ -59,28 +66,64 @@ const useStyles = makeStyles({
     paddingLeft: "var(--space-3)",
     paddingRight: "var(--space-3)",
   },
+  inline: {
+    display: "flex",
+    alignItems: "center",
+    gap: "var(--space-1-5)",
+    flexShrink: 0,
+  },
+  statusRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "var(--space-1-5)",
+    paddingTop: "var(--space-1)",
+    paddingLeft: "var(--space-3)",
+    paddingRight: "var(--space-3)",
+  },
 });
 
-export function ChatComposerVoiceControl(props: {
+export interface ChatComposerVoiceControlProps {
   /** The send path is unavailable (e.g. the session is resetting). */
   disabled?: boolean;
   /** A chat turn is in flight — the mic waits, and no reply is spoken mid-turn. */
   isBusy: boolean;
   /** The shared conversation (useAgentChat messages), for reply playback. */
   messages: readonly any[];
-  /** The ONE voice backend the server switch resolved for this registration. */
-  backend: VoiceBackend;
+  /** The ONE voice backend the server switch resolved for this registration (null until it resolves). */
+  backend: VoiceBackend | null;
   /** Submit a captured transcript as a normal user chat turn. */
   onSubmitTranscript: (text: string) => void;
-}) {
-  const styles = useStyles();
+}
+
+export interface ChatComposerVoice {
+  status: VoiceStatus;
+  interim: string | null;
+  muted: boolean;
+  unsupported: boolean;
+  /** A named capture failure (its code), shown until the next capture. */
+  failureCode: string | null;
+  /** A named reply-playback failure (its code) — the turn WAS sent. */
+  playbackFailureCode: string | null;
+  /** The mic is unavailable (send path busy/resetting, or a capture is being transcribed). */
+  micDisabled: boolean;
+  toggleRecording: () => void;
+  toggleMuted: () => void;
+}
+
+/**
+ * The composer voice state machine (#3773), owned by the caller
+ * since #3794 split the render: feedback renders beside the chat
+ * box, the controls inside it, and both read this one state. The
+ * hook is inert while no backend has resolved (backend null).
+ */
+export function useChatComposerVoice(
+  props: ChatComposerVoiceControlProps,
+): ChatComposerVoice {
   const [status, setStatus] = useState<VoiceStatus>("idle");
   const [interim, setInterim] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
-  /** A named capture failure (its code), shown until the next capture. */
   const [failureCode, setFailureCode] = useState<string | null>(null);
-  /** A named reply-playback failure (its code) — the turn WAS sent. */
   const [playbackFailureCode, setPlaybackFailureCode] = useState<string | null>(null);
   const captureRef = useRef<VoiceCaptureHandle | null>(null);
   /** Armed by a voice submission: the next NEW assistant reply is spoken. */
@@ -111,6 +154,8 @@ export function ChatComposerVoiceControl(props: {
   // playback. The mute toggle governs both backends.
   useEffect(() => {
     if (!armedRef.current || props.isBusy) return;
+    const backend = backendRef.current;
+    if (!backend) return;
     const lastAssistant = [...props.messages]
       .reverse()
       .find((m) => m?.role === "assistant");
@@ -126,7 +171,7 @@ export function ChatComposerVoiceControl(props: {
     if (!text) return;
     spokenReplyIdRef.current = lastAssistant.id;
     setStatus("speaking");
-    void backendRef.current
+    void backend
       .speak(text, {
         muted: mutedRef.current,
         onEnd: () => setStatus("idle"),
@@ -141,19 +186,21 @@ export function ChatComposerVoiceControl(props: {
   }, [props.messages, props.isBusy]);
 
   const toggleRecording = () => {
+    const backend = props.backend;
+    if (!backend) return;
     if (status === "listening") {
       captureRef.current?.stop();
       return;
     }
     if (status === "thinking") return;
-    if (!props.backend.isSupported()) {
+    if (!backend.isSupported()) {
       setUnsupported(true);
       return;
     }
     setUnsupported(false);
     setFailureCode(null);
     setPlaybackFailureCode(null);
-    const handle = props.backend.startCapture({
+    const handle = backend.startCapture({
       onStart: () => setStatus("listening"),
       onInterim: (text) => setInterim(text),
       onProcessing: () => setStatus("thinking"),
@@ -194,60 +241,124 @@ export function ChatComposerVoiceControl(props: {
     captureRef.current = handle;
   };
 
+  const micDisabled =
+    ((props.disabled || props.isBusy) && status !== "listening") ||
+    status === "thinking";
+
+  return {
+    status,
+    interim,
+    muted,
+    unsupported,
+    failureCode,
+    playbackFailureCode,
+    micDisabled,
+    toggleRecording,
+    toggleMuted: () => setMuted((m) => !m),
+  };
+}
+
+/**
+ * The voice channel's FEEDBACK (#3794): the named-failure Notices
+ * and the transient status (badge + interim transcript). Feedback
+ * is not a control bar — it renders beside the chat box, and only
+ * while there is something to report (an idle, healthy channel
+ * renders nothing here; its controls sit in the box).
+ */
+export function ChatComposerVoiceFeedback(props: { voice: ChatComposerVoice }) {
+  const styles = useStyles();
+  const { voice } = props;
+  const showStatus = voice.status !== "idle" || voice.interim !== null;
+  if (!voice.unsupported && !voice.failureCode && !voice.playbackFailureCode && !showStatus) {
+    return null;
+  }
   return (
-    <div data-testid="chat-composer-voice">
-      {unsupported && (
+    <div>
+      {voice.unsupported && (
         <Notice tone="warning">
           Speech recognition is not supported in this browser. Type your
           message below instead.
         </Notice>
       )}
-      {failureCode && (
+      {voice.failureCode && (
         <Notice tone="danger">
-          Voice failed ({failureCode}). Nothing was sent — type your message
+          Voice failed ({voice.failureCode}). Nothing was sent — type your message
           below instead.
         </Notice>
       )}
-      {playbackFailureCode && (
+      {voice.playbackFailureCode && (
         <Notice tone="danger">
-          Reply playback failed ({playbackFailureCode}).
+          Reply playback failed ({voice.playbackFailureCode}).
         </Notice>
       )}
+      {showStatus && (
+        <div className={styles.statusRow}>
+          <Badge
+            size="small"
+            appearance="tint"
+            color={voice.status === "idle" ? "subtle" : "informative"}
+          >
+            {STATUS_LABEL[voice.status]}
+          </Badge>
+          {voice.interim && (
+            <span>
+              🎙️ <em>{voice.interim}…</em>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The voice channel's CONTROLS (#3794): the mic and the mute
+ * toggle. These render INLINE inside the chat box row (the
+ * composer form), alongside the text input and the Send control —
+ * the only place voice controls appear.
+ */
+export function ChatComposerVoiceButtons(props: { voice: ChatComposerVoice }) {
+  const styles = useStyles();
+  const { voice } = props;
+  return (
+    <div className={styles.inline} data-testid="chat-composer-voice">
+      <Button
+        type="button"
+        appearance={voice.status === "listening" ? "primary" : "subtle"}
+        size="small"
+        disabled={voice.micDisabled}
+        onClick={voice.toggleRecording}
+        title="Start or stop voice input"
+      >
+        {voice.status === "listening" ? "⏹ Stop listening" : "🎙 Speak"}
+      </Button>
+      <Button
+        type="button"
+        appearance="subtle"
+        size="small"
+        onClick={voice.toggleMuted}
+        title="Toggle spoken replies"
+      >
+        {voice.muted ? "🔇 Audio muted" : "🔊 Audio on"}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The composed control (#3773): feedback over a buttons row, for
+ * standalone use. The chat tab does NOT use this form — since
+ * #3794 it owns the hook and places the pieces itself (feedback
+ * beside the box, buttons inside it).
+ */
+export function ChatComposerVoiceControl(props: ChatComposerVoiceControlProps) {
+  const styles = useStyles();
+  const voice = useChatComposerVoice(props);
+  return (
+    <div>
+      <ChatComposerVoiceFeedback voice={voice} />
       <div className={styles.bar}>
-        <Button
-          type="button"
-          appearance={status === "listening" ? "primary" : "subtle"}
-          size="small"
-          disabled={
-            ((props.disabled || props.isBusy) && status !== "listening") ||
-            status === "thinking"
-          }
-          onClick={toggleRecording}
-          title="Start or stop voice input"
-        >
-          {status === "listening" ? "⏹ Stop listening" : "🎙 Speak"}
-        </Button>
-        <Button
-          type="button"
-          appearance="subtle"
-          size="small"
-          onClick={() => setMuted((m) => !m)}
-          title="Toggle spoken replies"
-        >
-          {muted ? "🔇 Audio muted" : "🔊 Audio on"}
-        </Button>
-        <Badge
-          size="small"
-          appearance="tint"
-          color={status === "idle" ? "subtle" : "informative"}
-        >
-          {STATUS_LABEL[status]}
-        </Badge>
-        {interim && (
-          <span>
-            🎙️ <em>{interim}…</em>
-          </span>
-        )}
+        <ChatComposerVoiceButtons voice={voice} />
       </div>
     </div>
   );

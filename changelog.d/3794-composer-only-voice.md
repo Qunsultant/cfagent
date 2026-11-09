@@ -1,0 +1,4 @@
+### Composer-only voice — the mic lives in the chat box (#3794)
+
+- The Stock Copilot panel's separate voice section is removed: voice no longer appears on its own bar in the panel. The panel control file is retired in place as deprecated (superseded by the composer control) under the repo's no-deletions rule.
+- In the chat tab, the voice controls (mic + mute toggle) now sit inline inside the chat box row, alongside the text input and the Send control, like a standard chat interface. The named-failure notices and transient voice status remain beside the box as feedback; no voice controls render outside the box. The gate is unchanged — the controls render exactly when the active copilot registration's voice channel resolves effective — and both speech backends (webspeech / model) work as before.

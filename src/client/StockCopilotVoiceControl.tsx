@@ -1,4 +1,16 @@
 /**
+ * @deprecated superseded by src/client/chat/ChatComposerVoiceControl.tsx (#3794)
+ *
+ * Issue #3794 retired this panel voice section: voice lives only
+ * in the chat box (the composer mic, inline in the chat input
+ * bar), never on a separate bar in the Stock Copilot panel, so
+ * StockCopilotPanel no longer renders this control and nothing
+ * imports it. The file is retained in place under the repo's
+ * no-deletions rule (gitops §22) rather than deleted. The desk
+ * route, the channels resolver/projection, and the shared
+ * voice-desk client below are untouched — they still serve the
+ * Trading Hub's own voice surface.
+ *
  * Issue #3738 — the Stock Copilot panel's voice control.
  *
  * Rendered by StockCopilotPanel only when the stock registration's

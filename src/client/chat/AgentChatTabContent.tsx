@@ -19,7 +19,11 @@ import {
   fetchCopilotChannels,
   type CopilotChannelsProjection,
 } from "../copilotChannelsApi";
-import { ChatComposerVoiceControl } from "./ChatComposerVoiceControl";
+import {
+  ChatComposerVoiceButtons,
+  ChatComposerVoiceFeedback,
+  useChatComposerVoice,
+} from "./ChatComposerVoiceControl";
 import { createVoiceBackend } from "../voiceBackend";
 import { findCopilot, getRegisteredCopilots, hasCustomSurface, isRegisteredCopilotId } from "./copilotRegistry";
 // Fluent v9 replaces our primitives on this page only (#3146 experiment).
@@ -367,6 +371,23 @@ export function AgentChatTabContentInner({
       return false;
     }
   };
+
+  // Issue #3794: the tab owns the composer voice state so the
+  // channel's feedback (named-failure notices, transient status)
+  // can sit beside the chat box while its CONTROLS (mic + mute)
+  // render inline inside the box — voice has no separate bar.
+  // The hook is inert until the projection resolves a backend;
+  // voiceOn is the #3773 gate (projection effective + backend).
+  const voiceOn = copilotVoiceEffective(channelsProjection) && voiceBackend !== null;
+  const composerVoice = useChatComposerVoice({
+    disabled: isResetting,
+    isBusy,
+    messages,
+    backend: voiceBackend,
+    onSubmitTranscript: (text) => {
+      sendChatText(text);
+    },
+  });
 
   const handleSendChat = (e: React.FormEvent) => {
     e.preventDefault();
@@ -734,21 +755,14 @@ export function AgentChatTabContentInner({
         </Button>
       </div>
 
-      {/* Voice channel of the conversation (#3773): rendered only
-          when the active registration's voice channel resolves
-          effective; transcripts submit through sendChatText, the
-          same path as typed turns. */}
-      {copilotVoiceEffective(channelsProjection) && voiceBackend && (
-        <ChatComposerVoiceControl
-          disabled={isResetting}
-          isBusy={isBusy}
-          messages={messages}
-          backend={voiceBackend}
-          onSubmitTranscript={(text) => {
-            sendChatText(text);
-          }}
-        />
-      )}
+      {/* Voice channel feedback (#3773, #3794): the named-failure
+          notices and transient status sit beside the chat box;
+          the voice CONTROLS render inside the box (in the form
+          below) — never on a separate bar. Rendered only when the
+          active registration's voice channel resolves effective;
+          transcripts submit through sendChatText, the same path
+          as typed turns. */}
+      {voiceOn && <ChatComposerVoiceFeedback voice={composerVoice} />}
 
       {/* Chat Input Bar */}
       <form className="chat-input-bar" onSubmit={handleSendChat}>
@@ -772,6 +786,7 @@ export function AgentChatTabContentInner({
           disabled={isBusy || isResetting}
           autoFocus
         />
+        {voiceOn && <ChatComposerVoiceButtons voice={composerVoice} />}
         <Button
           type="submit"
           appearance="primary"

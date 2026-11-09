@@ -14,13 +14,15 @@
  *     panel already writes, the wrangler-vars deployment layer of
  *     #3727, then the code default that records today's behavior).
  *  2. The stock×voice pair wired end-to-end as first consumer:
- *     - the Stock Copilot panel renders its voice control only
- *       when voice resolves ON (switch AND the #3720 class-level
- *       activation — both must be on for the channel to serve);
  *     - a voice turn carrying the stock context while the switch
  *       is OFF is refused by name at the desk route
  *       (COPILOT_CHANNEL_DISABLED) and audited — distinct from
  *       the #3720 activation-withdrawal audit.
+ *     (The panel voice section this slice first shipped was
+ *     retired by #3794 — voice lives only in the chat box, its
+ *     mic inline in the composer; section 5 now pins the panel
+ *     carrying NO voice section. The switch/activation resolution
+ *     itself is unchanged.)
  *  3. Every other (registration × channel) resolves to its
  *     CURRENT effective state — this slice changes no other
  *     copilot's behavior.
@@ -581,7 +583,7 @@ describe("issue #3738 — the control route is the stored-layer door for channel
 });
 
 /* ------------------------------------------------------------------ */
-/* 5. The panel: the voice affordance renders only when voice is ON    */
+/* 5. The panel: NO voice section — voice lives in the chat box (#3794) */
 /* ------------------------------------------------------------------ */
 
 function panelStatus(channels?: Record<string, unknown>) {
@@ -618,29 +620,22 @@ async function renderPanel(status: Record<string, unknown>): Promise<{ container
   return { container, root };
 }
 
-describe("issue #3738 — the Stock Copilot panel's voice affordance", () => {
-  it("renders the voice control when stock voice resolves ON (switch + activation)", async () => {
+describe("issue #3794 — the Stock Copilot panel carries NO voice section (composer-only voice)", () => {
+  it("renders no voice section even when stock voice resolves effective — and the rest of the panel is intact", async () => {
     const { container, root } = await renderPanel(
       panelStatus({
         voice: { enabled: true, source: "env", manifestState: "enabled", effective: true },
       }),
     );
-    expect(container.textContent).toContain("Voice");
-    expect(container.querySelector("[data-testid='stock-copilot-voice']")).not.toBeNull();
-    await act(async () => root.unmount());
-  });
-
-  it("renders NO voice control when the switch is OFF (effective false)", async () => {
-    const { container, root } = await renderPanel(
-      panelStatus({
-        voice: { enabled: false, source: "stored", manifestState: "enabled", effective: false },
-      }),
-    );
     expect(container.querySelector("[data-testid='stock-copilot-voice']")).toBeNull();
+    expect(container.textContent).not.toContain("voice desk");
+    expect(container.textContent).not.toContain("Speak");
+    expect(container.textContent).toContain("Trading sessions");
+    expect(container.textContent).toContain("Open positions");
     await act(async () => root.unmount());
   });
 
-  it("renders NO voice control when the status carries no channel projection", async () => {
+  it("renders no voice section when the status carries no channel projection", async () => {
     const { container, root } = await renderPanel(panelStatus());
     expect(container.querySelector("[data-testid='stock-copilot-voice']")).toBeNull();
     await act(async () => root.unmount());

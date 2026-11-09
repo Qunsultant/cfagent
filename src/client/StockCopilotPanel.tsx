@@ -16,12 +16,13 @@
  * and the named outside-enabled-sessions state when the loop is
  * waiting for an enabled session — visible, never a silent skip.
  *
- * #3738 adds the voice section: rendered only when the stock
- * registration's voice channel resolves ON (the status read's
- * channels.voice.effective — the externalized channel switch
- * composed with the #3720 activation); the control itself lives
- * in StockCopilotVoiceControl.tsx and runs the shared voice-desk
- * client (voiceDeskClient.ts).
+ * #3794 removes the panel's voice section (added by #3738):
+ * voice lives only in the chat box — the composer mic (#3773),
+ * inline in the chat input bar. This panel renders no voice
+ * controls. The channel resolution (the #3738 switch composed
+ * with the #3720 activation) still gates the composer affordance
+ * and the desk route server-side, and the status read keeps
+ * projecting channels for the surfaces that consume them.
  *
  * Built only from src/client/components/ui/ primitives with
  * token-only styling (ux-architecture §20); data loads through
@@ -58,8 +59,6 @@ import {
   type StockCopilotStatus,
   type StockCopilotStatusKind,
 } from "./stockCopilotApi";
-import { StockCopilotVoiceControl } from "./StockCopilotVoiceControl";
-import { findCopilot } from "./chat/copilotRegistry";
 import "./stockCopilotPanel.css";
 
 /** Auto-refresh cadence for the panel (the loop itself runs every 30 minutes). */
@@ -343,12 +342,6 @@ export function StockCopilotPanel() {
           );
         })}
       </div>
-
-      {status.channels?.voice?.effective && (
-        <StockCopilotVoiceControl
-          sourceTab={findCopilot("stock")?.sourceTab ?? "Stock Copilot"}
-        />
-      )}
 
       <div className="scp-section-title">Open positions</div>
       <Table

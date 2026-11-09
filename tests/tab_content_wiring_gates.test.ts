@@ -89,6 +89,11 @@ const KNOWN_ORPHANS = [
   // Deprecated in place in #2954 (superseded by OptionsHub.tsx);
   // preserved under the zero-deletions policy gate (§22).
   "src/client/options/OptionsResearchHost.tsx",
+  // Deprecated in place in #3794 (superseded by the composer voice
+  // control in chat/ChatComposerVoiceControl.tsx — voice lives only
+  // in the chat box); preserved under the zero-deletions policy
+  // gate (§22).
+  "src/client/StockCopilotVoiceControl.tsx",
 ];
 
 describe("tab content wiring gates (#2083)", () => {
