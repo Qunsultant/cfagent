@@ -16,6 +16,14 @@ import "./styles.css";
 import "./tokens.css";
 import "./components/ui/primitives.css";
 
+// Issue #3891 — build marker: the short commit sha this bundle was built
+// from (substituted by the `define` in vite.config.ts). Exposed on window
+// so post-deploy QA can prove the live bundle is the one this deploy
+// built; a stale deploy serves an older sha and fails the qa-smoke check
+// instead of reporting success.
+declare const __BUILD_COMMIT__: string;
+(window as any).__BUILD_COMMIT__ = __BUILD_COMMIT__;
+
 // Startup applies preferences without writing storage.
 applyThemeToDocument(getStoredTheme());
 applyTypographyToDocument(getStoredFontScale(), getStoredFontStyle());

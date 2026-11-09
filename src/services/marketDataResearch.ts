@@ -2711,7 +2711,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
         message: data?.message || `Alpaca order placement failed: HTTP ${res.status}`,
       };
     } catch (err: any) {
-      return { success: false, message: `Alpaca network exception: ${err.message || String(err)}` };
+      return { success: false, message: `Network exception reading the order: ${err.message || String(err)}` };
     }
   }
 
@@ -2776,7 +2776,7 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
         message: data?.message || `Alpaca multi-leg order failed: HTTP ${res.status}`,
       };
     } catch (err: any) {
-      return { success: false, message: `Alpaca network exception: ${err.message || String(err)}` };
+      return { success: false, message: `Network exception reading the order: ${err.message || String(err)}` };
     }
   }
 
@@ -2974,6 +2974,46 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
       };
     } catch (err: any) {
       return { success: false, message: err?.message || "Network error" };
+    }
+  }
+
+  /**
+   * Real provider Trading v2: Get ONE order (#3883).
+   *
+   * A cancel decides from the broker's own record: the status says whether
+   * there is anything to cancel, `order_class` says whether cancelling it
+   * also takes held legs, and `legs` says which ones. `nested=true` is what
+   * asks Alpaca to include those legs on the parent row — without it a
+   * bracket parent reads as a bare order and the cascade would be guesswork.
+   */
+  async getOrder(orderId: string): Promise<{ success: boolean; order?: any; message?: string; httpStatus?: number }> {
+    const id = String(orderId ?? "").trim();
+    if (!id) return { success: false, message: "An order read needs an order id." };
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        message: "The trading credentials are not configured; the order cannot be read.",
+      };
+    }
+
+    try {
+      const res = await this.throttledFetch(
+        `${this.getTradingUrl()}/v2/orders/${encodeURIComponent(id)}?nested=true`,
+        { headers: this.getHeaders() },
+      );
+      const data = (await res.json().catch(() => ({}))) as any;
+      if (res.ok && data?.id) {
+        return { success: true, order: data };
+      }
+      // Issue #3866: the status travels, so a 404 reads as "unknown order"
+      // rather than as a network failure.
+      return {
+        success: false,
+        httpStatus: res.status,
+        message: data?.message || `The order ${id} read failed: HTTP ${res.status}`,
+      };
+    } catch (err: any) {
+      return { success: false, message: `Network exception reading the order: ${err.message || String(err)}` };
     }
   }
 
@@ -3493,6 +3533,14 @@ export class MarketDataResearchService {
    */
   async getAlpacaOrders(status: "open" | "closed" | "all" = "open"): Promise<{ success: boolean; orders?: any[]; message?: string }> {
     return this.alpacaTrading.getOrders(status);
+  }
+
+  /**
+   * Real Alpaca Trading v2: read ONE order (#3883) — the record a cancel
+   * decides from (status, order_class, declared legs).
+   */
+  async getAlpacaOrder(orderId: string): Promise<{ success: boolean; order?: any; message?: string; httpStatus?: number }> {
+    return this.alpacaTrading.getOrder(orderId);
   }
 
   /**

@@ -795,6 +795,17 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "The foss_* names are deprecated aliases (#1906) wrapping the canonical commands; each foss_* alias is superseded by the canonical market_data_*/alpaca_* name for the same command. Alias removal is a follow-up slice.",
   },
   {
+    // Issue #3883: order cancellation is its own family — one engine, one
+    // vocabulary, one receipt across every cancel scope.
+    id: "order-cancel-mcp-commands",
+    name: "Order-cancellation MCP commands",
+    source: "src/mcps/openaimp/cancelOrderCommands.ts",
+    status: "live",
+    // Issue #3884: the per-ticker scope rides the same engine and family.
+    commands: ["alpaca_cancel_order", "alpaca_cancel_ticker"],
+    commandSources: [{ file: "src/mcps/openaimp/cancelOrderCommands.ts", kind: "readonly-name" }],
+  },
+  {
     // Issue #3888: the externalized trading limits get their own family — a
     // risk surface, not market data, so it owns exactly one tool and one source.
     id: "trading-limits-mcp-commands",

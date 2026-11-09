@@ -25,6 +25,14 @@
  */
 import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports, BROKER_CATALOG, BROKER_UNAVAILABLE_CODE } from "../../trading";
 import { handleBrokerLimitRoutes } from "./brokerLimits";
+import {
+  cancelSingleOrder,
+  cancelTickerOrders,
+  createCancelBrokerPort,
+  recordCancelOutcome,
+  recordScopedCancelOutcome,
+} from "../../services/orderCancellation";
+import { resolveTradingLimits } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import { unauthenticatedResponse } from "./routeIdentity";
@@ -379,6 +387,23 @@ export async function handleBrokerOrderRoutes(
         );
       }
 
+      // Issue #3883: on this broker the route runs the SAME engine the
+      // `alpaca_cancel_order` tool runs, so the two surfaces cannot give
+      // different answers about one order (bracket cascade, a filled
+      // order's refusal, the leg semantics). Other brokers keep their
+      // own cancel through the platform seam, untouched.
+      if (broker === "alpaca") {
+        const receipt = await cancelSingleOrder(createCancelBrokerPort(ctx.env), {
+          orderId: cancelOrderId,
+          reason: typeof body.reason === "string" ? body.reason : undefined,
+        });
+        recordCancelOutcome(ctx.getOrm()?.getSql?.(), receipt, "broker_order_cancel", ctx.env);
+        return Response.json(
+          { ...receipt, orderId: receipt.target?.orderId ?? cancelOrderId, timestamp: new Date().toISOString() },
+          { status: receipt.success ? 200 : 409 },
+        );
+      }
+
       const cancelled = await platform.cancelOrderRemote(cancelOrderId);
       return Response.json(cancelled, { status: cancelled.success ? 200 : 409 });
     } catch (err) {
@@ -386,6 +411,58 @@ export async function handleBrokerOrderRoutes(
         { error: err instanceof Error ? err.message : "Failed to cancel order" },
         { status: 500 },
       );
+    }
+  }
+
+  // Issue #3884/#3886: cancel every open order for one ticker, with the
+  // shared class/side/ladder filter. Alpaca is the broker that can list its
+  // own open orders for a symbol; any other broker is refused by name rather
+  // than asked to cancel someone else's orders.
+  if (path.endsWith("/broker/orders/cancel-ticker") && request.method === "POST") {
+    try {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const symbol = String(body.symbol ?? "").trim().toUpperCase();
+      if (!symbol) {
+        return Response.json({ code: "no_orders_matched", message: "A ticker cancel needs a symbol. Nothing was cancelled." }, { status: 400 });
+      }
+      const userLogin = request.headers.get("x-user-login");
+      if (!userLogin) return unauthenticatedResponse();
+
+      const broker = await resolveTenantBroker(ctx.env);
+      if (broker !== "alpaca") {
+        return Response.json(
+          {
+            code: "provider_unsupported",
+            broker,
+            message: `${broker} does not expose a per-symbol open-order cancel here; no other broker was asked to cancel ${symbol}.`,
+            retryable: false,
+          },
+          { status: 501 },
+        );
+      }
+
+      const limits = resolveTradingLimits({
+        symbol,
+        env: ctx.env,
+        readSetting: (key) => ctx.readSettingRaw(key),
+      });
+      const receipt = await cancelTickerOrders(createCancelBrokerPort(ctx.env), {
+        symbol,
+        orderClass: body.orderClass,
+        orderSide: body.orderSide,
+        ladderId: body.ladderId,
+        placedAfter: body.placedAfter,
+        dryRun: body.dryRun === true,
+        reason: typeof body.reason === "string" ? body.reason : undefined,
+        limits,
+      });
+      if (!receipt.dryRun) {
+        recordScopedCancelOutcome(ctx.getOrm()?.getSql?.(), receipt, "broker_orders_cancel_ticker", ctx.env);
+      }
+      const status = receipt.success ? 200 : receipt.code === "cancel_read_failed" ? 502 : 409;
+      return Response.json(receipt, { status });
+    } catch (err) {
+      return Response.json({ error: err instanceof Error ? err.message : "Failed to cancel the ticker's orders" }, { status: 500 });
     }
   }
 

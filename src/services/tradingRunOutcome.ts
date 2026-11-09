@@ -51,6 +51,20 @@ export interface TradingRunOutcomeInput {
   /** Issue #3897: Slack and Email notification delivery status on order placement. */
   slackNotification?: string;
   emailNotification?: string;
+  /**
+   * Issue #3883: a cancel records its own outcome word (the shared run
+   * status vocabulary is completed/failed/partial) and the broker's own
+   * status, so a run says both what the platform asked and what happened.
+   */
+  cancelOutcome?: "cancelled" | "cancel_failed";
+  brokerStatus?: string;
+  /**
+   * Issue #3884/#3885: a batch (ticker/all) cancel is one run with real
+   * counts, not a single unit — the caller supplies how many it targeted and
+   * how many the broker actually cancelled.
+   */
+  scanned?: number;
+  matched?: number;
 }
 
 /**
@@ -90,9 +104,10 @@ export function recordTradingRunOutcome(
       trigger: "manual",
       status: input.status,
       // One order attempt is one unit: scanned=1, matched=1 only when the
-      // broker accepted the draft/order. A refusal records matched=0.
-      scanned: 1,
-      matched: input.status === "completed" ? 1 : 0,
+      // broker accepted the draft/order. A refusal records matched=0. A
+      // batch cancel supplies its own counts (#3884/#3885).
+      scanned: input.scanned ?? 1,
+      matched: input.matched ?? (input.status === "completed" ? 1 : 0),
       ...(input.codedError ? { codedError: input.codedError } : {}),
       deliveryStates: {
         broker: input.broker ?? "alpaca",
@@ -117,6 +132,8 @@ export function recordTradingRunOutcome(
           : {}),
         ...(input.slackNotification ? { slackNotification: input.slackNotification } : {}),
         ...(input.emailNotification ? { emailNotification: input.emailNotification } : {}),
+        ...(input.cancelOutcome ? { outcome: input.cancelOutcome } : {}),
+        ...(input.brokerStatus ? { brokerStatus: input.brokerStatus } : {}),
       },
       origin: input.origin,
     });

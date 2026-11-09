@@ -244,6 +244,12 @@ export const MCP_FAMILY_OASF_SKILLS: Record<string, OasfSkillRef[]> = {
     SK.portfolioManagement,
     SK.tradingStrategy,
   ],
+  // Issue #3883: cancellation — the risk-reducing half of order control.
+  "order-cancel-mcp-commands": [
+    SK.tradingStrategy,
+    SK.portfolioManagement,
+    SK.regulatedFinanceOperations,
+  ],
   // Issue #3888: the limits surface — risk ceilings and their provenance.
   "trading-limits-mcp-commands": [
     SK.tradingStrategy,
