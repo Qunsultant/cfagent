@@ -421,7 +421,7 @@ export async function getStockCopilotStatusViaDoor(
   // Issue #3899 (RC3): no fake broker default — the resolver composes
   // the real commercial store from env when no store was injected
   // (ctx.commercial undefined), so the status reports the real stored
-  // selection; an unbound store reads as unresolved, never alpaca.
+  // selection; an unbound store reads as unresolved, never a default broker.
   const commercial = ctx.commercial;
 
   const selection = await resolveCopilotTradingSelection({
