@@ -132,6 +132,16 @@ export function createTurnTools(ctx: ChatTurnHelpersContext, requestId: string):
   });
 }
 
+const STOCK_COPILOT_INTENT_RE =
+  /\b(draft a limit (?:buy|sell)|limit (?:buy|sell) order|market (?:buy|sell) order|preview (?:buy|sell)|buy \d+\s+[a-z]{1,5}\b|sell \d+\s+[a-z]{1,5}\b|buy [a-z]{1,5} at (?:market|limit)|sell [a-z]{1,5} at (?:market|limit)|take-profit.*stop-loss|bracket exits?|alp_ord_|approve (?:[a-z]+\s+)?trade draft|stock copilot|enable autopilot|disable autopilot|autopilot status|autopilot limits|kill[- ]switch)\b/i;
+const OPTIONS_INTENT_EXCLUSION_RE =
+  /\b(options?|calls?|puts?|iron condor|straddle|strangle|credit spread|debit spread|dte|greeks)\b/i;
+
+export function isStockCopilotIntent(text: string): boolean {
+  if (!text || OPTIONS_INTENT_EXCLUSION_RE.test(text)) return false;
+  return STOCK_COPILOT_INTENT_RE.test(text);
+}
+
 /**
  * Issue #686: derive the turn inputs for a turn Think drives
  * itself (the WebSocket chat protocol, saveMessages admissions) —
@@ -157,6 +167,12 @@ export async function deriveTurn(ctx: ChatTurnHelpersContext, turnCtx: { message
     sourceTab?: string;
     userLogin?: string;
   };
+  const rawSourceTab = metadata.sourceTab;
+  const effectiveSourceTab =
+    (!rawSourceTab || rawSourceTab === "Chat & Agents" || rawSourceTab === "Copilot Guide") &&
+    isStockCopilotIntent(userText)
+      ? "Stock Copilot"
+      : rawSourceTab;
   const recentTurns = (turnCtx.messages ?? []).slice(-6).map((m: any) => ({
     role: m?.role as string | undefined,
     content:
@@ -172,8 +188,8 @@ export async function deriveTurn(ctx: ChatTurnHelpersContext, turnCtx: { message
   return {
     userText,
     userLogin: metadata.userLogin || sessionId,
-    sourceTab: metadata.sourceTab,
-    isAutoOptionsResearchRequest: metadata.sourceTab === "Broker · Auto Options Research",
+    sourceTab: effectiveSourceTab,
+    isAutoOptionsResearchRequest: effectiveSourceTab === "Broker · Auto Options Research",
     recentTurns,
   };
 }

@@ -331,8 +331,8 @@ export class MockSqlStorage implements SqlStorage {
       const idCol = cols[0];
       const existsIndex = existing.findIndex((r) => r[idCol] === record[idCol]);
       if (existsIndex >= 0) {
-        if ((insertMatch[1] || "").toUpperCase() === "REPLACE") {
-          existing[existsIndex] = record;
+        if ((insertMatch[1] || "").toUpperCase() === "REPLACE" || /ON\s+CONFLICT[\s\S]*DO\s+UPDATE/i.test(q)) {
+          existing[existsIndex] = { ...existing[existsIndex], ...record };
         }
         // else IGNORE: keep the existing row
       } else {

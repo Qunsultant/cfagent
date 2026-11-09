@@ -16,6 +16,7 @@ import {
 } from "../copilotTradingMode";
 import { isCopilotBroker } from "../../trading";
 import type { CommercialStore } from "../../data/commercialPorts";
+import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
 import {
   createStockCopilotActivityPort,
   createStockCopilotControlPort,
@@ -28,6 +29,10 @@ import type {
   CopilotPositionRecord,
   StockCopilotStoreSqlExecutor,
 } from "../../data/stockCopilotStorePorts";
+import {
+  normalizeAutopilotLimits,
+  type AutopilotPolicyLimits,
+} from "../../services/riskPolicyEngine";
 import type { Env } from "../../types";
 import {
   isStockCopilotPaperEnabled,
@@ -118,6 +123,27 @@ export interface StockCopilotClosedPositionView {
   closedAt: string | null;
 }
 
+export const COPILOT_CHAT_EXECUTION_MODE_SETTING_KEY = "stock_copilot:chat_execution_mode";
+export const AUTOPILOT_DOOR_STATE_KEY = "autopilot_state_v1";
+
+export type CopilotChatExecutionMode = "hitl" | "autonomous";
+
+export interface StockCopilotAutopilotLimits extends AutopilotPolicyLimits {
+  maxOrdersPerDay: number;
+  minCashReservePct: number;
+  universeAllowlist?: string[] | null;
+}
+
+export interface StockCopilotAutopilotSnapshot {
+  running: boolean;
+  killSwitch: boolean;
+  killSwitchReason: string | null;
+  mode: "autonomous" | "hitl";
+  ordersToday: number;
+  limits: StockCopilotAutopilotLimits;
+  updatedAt: string | null;
+}
+
 export interface StockCopilotStatusResult {
   flagEnabled: boolean;
   paused: boolean;
@@ -129,6 +155,8 @@ export interface StockCopilotStatusResult {
     effective: string;
   };
   executionMode: CopilotExecutionMode;
+  copilotExecutionMode: CopilotChatExecutionMode;
+  autopilot: StockCopilotAutopilotSnapshot;
   universe: string[];
   strategies: string[];
   status: string;
@@ -150,6 +178,11 @@ export interface StockCopilotControlInput {
   cadence?: string;
   pauseUntil?: string;
   executionMode?: CopilotExecutionMode;
+  copilotExecutionMode?: CopilotChatExecutionMode;
+  autopilotRunning?: boolean;
+  killSwitch?: boolean;
+  killSwitchReason?: string;
+  autopilotLimits?: Partial<StockCopilotAutopilotLimits>;
   rsiMode?: StockCopilotRsiMode;
   universe?: string | string[];
   strategies?: string | string[];
@@ -165,6 +198,8 @@ export interface StockCopilotControlResult {
   };
   pauseUntil?: string | null;
   executionMode: CopilotExecutionMode;
+  copilotExecutionMode: CopilotChatExecutionMode;
+  autopilot: StockCopilotAutopilotSnapshot;
   rsiMode: StockCopilotRsiMode;
   universe: string[];
   strategies: string[];
@@ -174,6 +209,118 @@ export interface StockCopilotControlResult {
 export interface StockCopilotLearningsResult {
   learnings: CopilotLearningRecord[];
   summary: string;
+}
+
+function normalizeDoorAutopilotLimits(
+  raw?: Partial<StockCopilotAutopilotLimits> | null,
+): StockCopilotAutopilotLimits {
+  const input = (raw ?? {}) as Partial<StockCopilotAutopilotLimits>;
+  const base = normalizeAutopilotLimits({
+    ...input,
+    ordersPerDay: input.maxOrdersPerDay ?? input.ordersPerDay,
+    cashReservePct: input.minCashReservePct ?? input.cashReservePct,
+    universeSymbols: input.universeAllowlist ?? input.universeSymbols,
+  });
+  return {
+    ...base,
+    maxOrdersPerDay: base.ordersPerDay,
+    minCashReservePct: base.cashReservePct,
+    universeAllowlist: base.universeSymbols ?? null,
+  };
+}
+
+function readDoorAutopilotRaw(sql: StockCopilotStoreSqlExecutor): Record<string, unknown> {
+  try {
+    const port = createOrchestratorTablePorts(sql as never).autopilot;
+    port.ensureSchema();
+    const raw = port.getValue(AUTOPILOT_DOOR_STATE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function readDoorAutopilotSnapshot(sql: StockCopilotStoreSqlExecutor): StockCopilotAutopilotSnapshot {
+  const raw = readDoorAutopilotRaw(sql);
+  const today = new Date().toISOString().slice(0, 10);
+  const storedDate = typeof raw.ordersDate === "string" ? raw.ordersDate : today;
+  const running = Boolean(raw.running);
+  const killSwitch = Boolean(raw.killSwitch);
+  return {
+    running,
+    killSwitch,
+    killSwitchReason: typeof raw.killSwitchReason === "string" ? raw.killSwitchReason : null,
+    mode: running && !killSwitch ? "autonomous" : "hitl",
+    ordersToday: storedDate === today ? Number(raw.ordersToday) || 0 : 0,
+    limits: normalizeDoorAutopilotLimits((raw.limits as Partial<StockCopilotAutopilotLimits> | null) ?? null),
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
+  };
+}
+
+function writeDoorAutopilotState(
+  sql: StockCopilotStoreSqlExecutor,
+  patch: Record<string, unknown>,
+): StockCopilotAutopilotSnapshot {
+  const raw = readDoorAutopilotRaw(sql);
+  const current = readDoorAutopilotSnapshot(sql);
+  const updatedAt = new Date().toISOString();
+  const next = {
+    ...raw,
+    running: current.running,
+    killSwitch: current.killSwitch,
+    killSwitchReason: current.killSwitchReason,
+    limits: current.limits,
+    ordersToday: current.ordersToday,
+    ordersDate: new Date().toISOString().slice(0, 10),
+    ...patch,
+    updatedAt,
+  };
+  try {
+    const port = createOrchestratorTablePorts(sql as never).autopilot;
+    port.ensureSchema();
+    port.putValue(AUTOPILOT_DOOR_STATE_KEY, JSON.stringify(next), updatedAt);
+  } catch {
+    // Best-effort persistence when mock SQL is used in unit tests
+  }
+  const running = Boolean(next.running);
+  const killSwitch = Boolean(next.killSwitch);
+  return {
+    running,
+    killSwitch,
+    killSwitchReason: typeof next.killSwitchReason === "string" ? next.killSwitchReason : null,
+    mode: running && !killSwitch ? "autonomous" : "hitl",
+    ordersToday: Number(next.ordersToday) || 0,
+    limits: normalizeDoorAutopilotLimits((next.limits as Partial<StockCopilotAutopilotLimits> | null) ?? null),
+    updatedAt,
+  };
+}
+
+export function resolveCopilotChatExecutionMode(opts: {
+  readSettingRaw?: ((key: string) => string | null) | undefined;
+  env?: Partial<Env>;
+  sql?: StockCopilotStoreSqlExecutor;
+  autopilotRunning?: boolean;
+}): CopilotChatExecutionMode {
+  const settingVal = opts.readSettingRaw?.(COPILOT_CHAT_EXECUTION_MODE_SETTING_KEY)?.trim().toLowerCase();
+  if (settingVal === "autonomous" || settingVal === "hitl") {
+    return settingVal;
+  }
+  if (opts.sql) {
+    const raw = readDoorAutopilotRaw(opts.sql);
+    if (raw.chatExecutionMode === "autonomous" || raw.chatExecutionMode === "hitl") {
+      return raw.chatExecutionMode;
+    }
+  }
+  const envVal = String((opts.env as Record<string, unknown> | undefined)?.STOCK_COPILOT_CHAT_EXECUTION_MODE ?? "")
+    .trim()
+    .toLowerCase();
+  if (envVal === "autonomous" || envVal === "hitl") {
+    return envVal;
+  }
+  if (opts.autopilotRunning === true) {
+    return "autonomous";
+  }
+  return "hitl";
 }
 
 function projectOpenPosition(p: CopilotPositionRecord): StockCopilotOpenPositionView {
@@ -290,6 +437,13 @@ export async function getStockCopilotStatusViaDoor(
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
+  const autopilot = readDoorAutopilotSnapshot(ctx.sql);
+  const copilotExecutionMode = resolveCopilotChatExecutionMode({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+    sql: ctx.sql,
+    autopilotRunning: autopilot.running && !autopilot.killSwitch,
+  });
 
   return {
     flagEnabled,
@@ -302,6 +456,8 @@ export async function getStockCopilotStatusViaDoor(
       effective: cadence.effective,
     },
     executionMode,
+    copilotExecutionMode,
+    autopilot,
     rsiMode,
     universe,
     strategies,
@@ -465,6 +621,67 @@ export async function controlStockCopilotViaDoor(
     });
   }
 
+  if (typeof input.autopilotRunning === "boolean") {
+    writeDoorAutopilotState(ctx.sql, { running: input.autopilotRunning });
+    if (typeof input.paused !== "boolean") {
+      control.setControl({
+        userLogin: login,
+        paused: !input.autopilotRunning,
+        updatedAt: nowIso,
+        updatedBy: login,
+      });
+    }
+    ctx.audit?.("stock_copilot.control_autopilot_running_via_door", "orchestrator", {
+      userLogin: login,
+      autopilotRunning: input.autopilotRunning,
+    });
+  }
+
+  if (typeof input.killSwitch === "boolean") {
+    const reason = input.killSwitch
+      ? String(input.killSwitchReason || "Emergency stop triggered via Stock Copilot chat").slice(0, 200)
+      : null;
+    writeDoorAutopilotState(ctx.sql, {
+      killSwitch: input.killSwitch,
+      killSwitchReason: reason,
+    });
+    if (input.killSwitch) {
+      control.setControl({
+        userLogin: login,
+        paused: true,
+        updatedAt: nowIso,
+        updatedBy: login,
+      });
+    }
+    ctx.audit?.("stock_copilot.control_kill_switch_via_door", "orchestrator", {
+      userLogin: login,
+      killSwitch: input.killSwitch,
+      killSwitchReason: reason,
+    });
+  }
+
+  if (input.autopilotLimits !== undefined && typeof input.autopilotLimits === "object" && input.autopilotLimits !== null) {
+    const currentSnap = readDoorAutopilotSnapshot(ctx.sql);
+    const mergedLimits = normalizeDoorAutopilotLimits({
+      ...currentSnap.limits,
+      ...input.autopilotLimits,
+    });
+    writeDoorAutopilotState(ctx.sql, { limits: mergedLimits });
+    ctx.audit?.("stock_copilot.control_autopilot_limits_via_door", "orchestrator", {
+      userLogin: login,
+      limits: mergedLimits,
+    });
+  }
+
+  if (input.copilotExecutionMode === "hitl" || input.copilotExecutionMode === "autonomous") {
+    ctx.writeSetting?.(COPILOT_CHAT_EXECUTION_MODE_SETTING_KEY, input.copilotExecutionMode);
+    writeDoorAutopilotState(ctx.sql, { chatExecutionMode: input.copilotExecutionMode });
+    ctx.audit?.("stock_copilot.control_chat_execution_mode_via_door", "orchestrator", {
+      userLogin: login,
+      copilotExecutionMode: input.copilotExecutionMode,
+    });
+  }
+
   const updatedControl = control.getControl(login);
   const enabledSessions = resolveCopilotSessions({
     readSettingRaw: ctx.readSettingRaw,
@@ -491,6 +708,13 @@ export async function controlStockCopilotViaDoor(
     env: ctx.env,
   });
   const pauseUntil = ctx.readSettingRaw?.("stock_copilot:pause_until") ?? null;
+  const autopilot = readDoorAutopilotSnapshot(ctx.sql);
+  const copilotExecutionMode = resolveCopilotChatExecutionMode({
+    readSettingRaw: ctx.readSettingRaw,
+    env: ctx.env,
+    sql: ctx.sql,
+    autopilotRunning: autopilot.running && !autopilot.killSwitch,
+  });
 
   return {
     success: true,
@@ -502,6 +726,8 @@ export async function controlStockCopilotViaDoor(
     },
     pauseUntil,
     executionMode,
+    copilotExecutionMode,
+    autopilot,
     rsiMode,
     universe,
     strategies,

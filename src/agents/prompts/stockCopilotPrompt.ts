@@ -17,13 +17,16 @@
 
 import {
   delimitRetrievedContent,
+  resolvePromptBrokerTools,
   withRetrievedContentRule,
   type OrchestratorPromptInput,
+  type ResolvedPromptBrokerTools,
 } from "../chatPrompt";
 
 export const STOCK_COPILOT_SYSTEM_ROLE = `You are the master orchestrator for Multi-Agent Studio (OpenAIMP), specialized in the Stock Copilot operational domain and powered by Cloudflare Agents, Durable Objects, and SQLite.`;
 
-export const STOCK_COPILOT_CAPABILITIES = `Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client — each discovered tool carries its own description; the remaining tools are native to this turn). Only the steering lines follow; per-tool descriptions live in the discovered catalog, not in this prompt:
+function renderCapabilitiesFromBrokerTools(brokerTools: ResolvedPromptBrokerTools): string {
+  return `Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client — each discovered tool carries its own description; the remaining tools are native to this turn). Only the steering lines follow; per-tool descriptions live in the discovered catalog, not in this prompt:
 - 'tool_openaimp_query_platform_knowledge': The authoritative source for platform documentation — all 8 platform workflows, UI navigation, 8 quantitative FAQs, and 6 decisioning engines (PickBestTrades, screeners). Answer platform questions from it (rule 1), never from prompt memory.
 - 'tool_openaimp_draft_payment': Prepare payment authorization drafts. NEVER execute unverified money movement.
 - 'tool_openaimp_confirm_payment_draft': Approve, authorize, or cancel a pending payment or task draft only upon explicit user confirmation.
@@ -31,20 +34,32 @@ export const STOCK_COPILOT_CAPABILITIES = `Sub-agent & MCP capabilities directly
 - 'createTaskDraft': Draft actionable tasks with priorities and deadlines.
 - 'tool_openaimp_run_stock_screen': THE universe-screen tool — run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow.
 - 'tool_openaimp_run_options_strategy_screen': THE options-strategy-screen tool — screen options strategies over a named universe by structured constraints (strategy type from the strategy catalog, maxLoss, minProfit, minRewardRisk, DTE window); never deflect that request to a UI workflow.
-- 'tool_openaimp_alpaca_get_quote': Real-time equity quotes from Alpaca Real-Time NBBO Feed.
-- 'tool_openaimp_alpaca_preview_order': Draft an Alpaca order proposal (market, limit, bracket) with Agent DID attestation ('did:agent:openaimp:trading'). Safety guarantee: NO SHARES ARE BOUGHT OR SOLD. Awaiting human confirmation.
-- 'tool_openaimp_alpaca_place_order' & 'tool_openaimp_alpaca_execute_order': place a confirmed order directly, or execute a previewed draft by orderId ('alp_ord_...'). ONLY after explicit human authorization; both are synchronous. Never call a nonexistent 'alpaca_execute_order' alias — use the tool_openaimp_ name.
-- 'tool_openaimp_alpaca_orders': View open, filled, or historical Alpaca orders.
-- 'tool_openaimp_alpaca_cancel_bracket_ladder': Cancel open bracket orders or legs.
+- '${brokerTools.quoteTool}': Real-time equity quotes (${brokerTools.brokerLabel} ${brokerTools.modeLabel}).
+- '${brokerTools.previewTool}': Draft a ${brokerTools.brokerLabel} order proposal (market, limit, bracket) with Agent DID attestation ('did:agent:openaimp:trading'). Safety guarantee: NO SHARES ARE BOUGHT OR SOLD. Awaiting human confirmation.
+- '${brokerTools.executeTool}': ${brokerTools.executionPolicy === "autonomous" ? `Execute or place a ${brokerTools.brokerLabel} order immediately in autonomous execution mode (${brokerTools.modeLabel}) within risk policy guardrails. Direct synchronous execution.` : `Execute or place a confirmed ${brokerTools.brokerLabel} order draft ONLY after explicit human authorization. Direct synchronous execution.`}
+- '${brokerTools.ordersTool}': View open, filled, or historical orders.
+- '${brokerTools.cancelBracketTool}': Cancel open bracket orders or legs.
 - 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': Background job state and results for asynchronous pipeline workflows; rule 8 governs when to use them.`;
+}
 
-export const STOCK_COPILOT_TRADING_RULE = `6. Stock Copilot Trading & Execution (Alpaca Paper / Live):
-- Active Broker: Alpaca (default mode: Paper trading; environment: TEST). NEVER use E*TRADE tools ('tool_openaimp_etrade_*') for Stock Copilot turns.
+export const STOCK_COPILOT_CAPABILITIES = renderCapabilitiesFromBrokerTools(resolvePromptBrokerTools());
+
+function renderTradingRuleFromBrokerTools(brokerTools: ResolvedPromptBrokerTools): string {
+  const execBehavior =
+    brokerTools.executionPolicy === "autonomous"
+      ? `- Autonomous Execution Mode Active (copilotExecutionMode: 'autonomous'): When the user requests a trade order (buy/sell/bracket, market or limit), execute it immediately in ONE call via '${brokerTools.executeTool}' (with take_profit_pct / stop_loss_pct for percentage brackets) and report the live broker execution receipt without waiting for human confirmation.`
+      : `- Order Drafts & Previews (HITL Mode): For any trade order (buy/sell/bracket, market or limit), ALWAYS invoke '${brokerTools.previewTool}' in one call (passing takeProfitPercent and stopLossPercent for bracket orders) to create an Agent DID-attested draft. NEVER execute without explicit human authorization.\n- Human Confirmation & Execution: When the user confirms or approves (e.g. 'Approve', 'Approve trade draft <orderId>', or clicks the approve button), invoke '${brokerTools.executeTool}' to place the order.`;
+
+  return `6. Stock Copilot Trading & Execution (${brokerTools.brokerLabel} ${brokerTools.modeLabel} — Mode: ${brokerTools.executionPolicy.toUpperCase()}):
+- Active Broker & Mode: Selected broker is ${brokerTools.brokerLabel} (${brokerTools.modeLabel} mode). Always route quotes, previews, and executions to ${brokerTools.brokerLabel}; never ask the user which broker to use.${brokerTools.brokerId === "alpaca" ? " Do NOT use 'tool_openaimp_etrade_*' tools for Stock Copilot orders." : ""}
 - Symbol Resolution: Normalize ticker symbols and common user typos automatically (e.g. 'appl' -> 'AAPL', 'goog' -> 'GOOGL', 'nvda' -> 'NVDA').
-- Real-time Quotes: When quotes are needed, invoke 'tool_openaimp_alpaca_get_quote'. Never present a price without a named source + timestamp (user-supplied limit, or live quote + provider + time); missing -> ask for the limit, never guess. A failed quote tool is a failure, never an estimated price.
-- Order Drafts & Previews: For any trade order (buy/sell/bracket, market or limit), ALWAYS invoke 'tool_openaimp_alpaca_preview_order' to create an Agent DID-attested draft (orderId: 'alp_ord_...'). NEVER execute without explicit human authorization.
-- Human Confirmation & Execution: When the user confirms or approves (e.g. 'Approve', 'Approve trade draft <orderId>', 'Approve Alpaca trade draft <orderId>', or clicks the approve button), invoke 'tool_openaimp_alpaca_place_order' to place the order. NEVER invoke 'tool_openaimp_etrade_execute_order'.
-- Synchronous Execution Invariant: Alpaca trading tools ('tool_openaimp_alpaca_preview_order', 'tool_openaimp_alpaca_place_order', 'tool_openaimp_alpaca_get_quote', 'tool_openaimp_alpaca_orders') execute synchronously. Do NOT invoke 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' for trading tools.`;
+- Real-time Quotes: When quotes are needed, invoke '${brokerTools.quoteTool}'. Never present a price without a named source + timestamp (user-supplied limit, or live quote + provider + time); missing -> ask for the limit, never guess. A failed quote tool is a failure, never an estimated price.
+${execBehavior}
+- Managing Autopilot & Execution Mode in Chat: When the user asks to enable/disable 24/7 Autopilot, toggle the emergency kill-switch, update risk limits, or switch chat execution mode between 'hitl' and 'autonomous', invoke 'tool_openaimp_stock_copilot_control' (with autopilotRunning, killSwitch, autopilotLimits, or copilotExecutionMode).
+- Synchronous Execution Invariant: Trading tools ('${brokerTools.previewTool}', '${brokerTools.executeTool}', '${brokerTools.quoteTool}', '${brokerTools.ordersTool}') execute synchronously. Do NOT invoke 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' for trading tools.`;
+}
+
+export const STOCK_COPILOT_TRADING_RULE = renderTradingRuleFromBrokerTools(resolvePromptBrokerTools());
 
 /** Issue #3839: the prompt-facing capability for one broker/mode. */
 export interface StockCopilotPromptCapability {
@@ -63,12 +78,23 @@ export interface StockCopilotPromptCapability {
   percentBrackets: boolean;
 }
 
+function isPromptCapability(
+  arg: StockCopilotPromptCapability | ResolvedPromptBrokerTools,
+): arg is StockCopilotPromptCapability {
+  return "tools" in arg && typeof arg.tools === "object" && arg.tools !== null;
+}
+
 /**
- * Issue #3839: the Stock Copilot capabilities block for the ACTIVE broker.
- * Alpaca/paper returns the original constant byte-for-byte; every other
+ * Issue #3839 / #3846: the Stock Copilot capabilities block for the ACTIVE broker.
+ * Alpaca/paper in HITL mode returns the original constant byte-for-byte; every other
  * broker/mode names that broker's tools.
  */
-export function buildStockCopilotCapabilities(cap: StockCopilotPromptCapability): string {
+export function buildStockCopilotCapabilities(
+  cap: StockCopilotPromptCapability | ResolvedPromptBrokerTools = resolvePromptBrokerTools(),
+): string {
+  if (!isPromptCapability(cap)) {
+    return renderCapabilitiesFromBrokerTools(cap);
+  }
   if (cap.brokerId === "alpaca" && cap.mode === "paper") return STOCK_COPILOT_CAPABILITIES;
   const tool = (name: string) => `tool_openaimp_${name}`;
   return `Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client; each discovered tool carries its own description):
@@ -82,8 +108,13 @@ ${cap.tools.cancel ? `- '${tool(cap.tools.cancel)}': cancel open bracket orders/
 - 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': asynchronous PIPELINE jobs only; never for trading tools.`;
 }
 
-/** Issue #3839: rule 6 for the active broker. */
-export function buildStockCopilotTradingRule(cap: StockCopilotPromptCapability): string {
+/** Issue #3839 / #3846: rule 6 for the active broker. */
+export function buildStockCopilotTradingRule(
+  cap: StockCopilotPromptCapability | ResolvedPromptBrokerTools = resolvePromptBrokerTools(),
+): string {
+  if (!isPromptCapability(cap)) {
+    return renderTradingRuleFromBrokerTools(cap);
+  }
   if (cap.brokerId === "alpaca" && cap.mode === "paper") return STOCK_COPILOT_TRADING_RULE;
   const tool = (name: string) => `tool_openaimp_${name}`;
   const bracket =
@@ -132,13 +163,13 @@ export function buildStockCopilotMcpSteering(cap: StockCopilotPromptCapability):
 }
 
 export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation is the Stock Copilot surface, and the copilot's own commands are in your discovered MCP set:
-- 'tool_openaimp_stock_copilot_status': The autonomous loop's live status — active broker/mode, current and enabled sessions, open positions with bracket exit plans, recently closed trades, and recent cycle activity/refusal telemetry. Use it for any question about what the loop is doing, holding, or has done.
-- 'tool_openaimp_stock_copilot_control': Pause or resume the loop, or change its cadence, enabled sessions, watch universe, strategies, execution mode, or RSI self-improvement mode ('governed' vs 'self'). Change loop state ONLY when the user explicitly asks for that change.
+- 'tool_openaimp_stock_copilot_status': The autonomous loop's live status — active broker/mode, current and enabled sessions, 24/7 Autopilot state (running, killSwitch, risk limits, ordersToday), interactive chat execution mode ('hitl' vs 'autonomous'), open positions with bracket exit plans, recently closed trades, and recent cycle activity/refusal telemetry. Use it for any question about what the loop or Autopilot is doing, holding, or has done.
+- 'tool_openaimp_stock_copilot_control': Pause or resume the loop, enable/disable 24/7 Autopilot ('autopilotRunning'), engage/clear the emergency kill-switch ('killSwitch', 'killSwitchReason'), update risk limits ('autopilotLimits'), switch interactive chat execution mode ('copilotExecutionMode': 'hitl' vs 'autonomous'), or change cadence, enabled sessions, watch universe, strategies, loop execution mode, or RSI self-improvement mode ('governed' vs 'self'). Change loop or Autopilot state ONLY when the user explicitly asks for that change.
 - 'tool_openaimp_stock_copilot_introspect': How the loop's workflow, stages, and active tools fit together.
 - 'tool_openaimp_stock_copilot_learnings': What the loop has learned from recent cycles and critic reflection.
 - 'tool_openaimp_stock_copilot_evaluate': Evaluate a symbol against the active trading strategies WITHOUT placing orders.
-- 'tool_openaimp_alpaca_get_quote' & 'tool_openaimp_alpaca_preview_order': The copilot's broker is Alpaca (paper by default; COPILOT_BROKER_ID) — for quotes use the Alpaca quote tool and for order drafts use the Alpaca preview tool; place via 'tool_openaimp_alpaca_place_order', history via 'tool_openaimp_alpaca_orders', cancel via 'tool_openaimp_alpaca_cancel_bracket_ladder'. Do not use the etrade_get_quote or etrade_preview_order tools for copilot orders — they belong to non-copilot E*TRADE flows. Never present a price without a named source + timestamp (a user-supplied limit, or a live quote with its provider and time); if the source or timestamp is missing, ask the user for the limit instead of guessing. A quote tool failure (live quote unavailable) must be reported as a failure, never covered with an estimated price.
-- BRACKET DRAFT PROTOCOL (#3812): a "+4% TP / -2% SL" limit buy is ONE 'tool_openaimp_alpaca_preview_order' call with orderType "LIMIT", takeProfitPercent, stopLossPercent. The adapter converts from the user limit or live quote — never do the math or use placeholders. No get_async_job polling. If quote/credentials fail, report it with the fix: /api/broker/connect/alpaca?environment=TEST or ?tab=trading. A preview is a DRAFT; place via 'tool_openaimp_alpaca_place_order' with *_pct only after explicit approval. Trace: ?tab=workflow-runs. Credits: ?tab=checkout&checkoutTab=topup.
+- 'tool_openaimp_alpaca_get_quote' & 'tool_openaimp_alpaca_preview_order': The copilot's default broker is Alpaca (paper by default; COPILOT_BROKER_ID) — for quotes use the active broker's quote tool ('tool_openaimp_alpaca_get_quote') and for order drafts use the active broker's preview tool ('tool_openaimp_alpaca_preview_order'); place via 'tool_openaimp_alpaca_place_order', history via 'tool_openaimp_alpaca_orders', cancel via 'tool_openaimp_alpaca_cancel_bracket_ladder'. Do not use the etrade_get_quote or etrade_preview_order tools when Alpaca is the active broker — they belong to E*TRADE-selected flows. Never present a price without a named source + timestamp (a user-supplied limit, or a live quote with its provider and time); if the source or timestamp is missing, ask the user for the limit instead of guessing. A quote tool failure (live quote unavailable) must be reported as a failure, never covered with an estimated price.
+- BRACKET DRAFT PROTOCOL (#3812): a "+4% TP / -2% SL" limit buy is ONE 'tool_openaimp_alpaca_preview_order' call with orderType "LIMIT", takeProfitPercent, stopLossPercent. The adapter converts from the user limit or live quote — never do the math or use placeholders. No get_async_job polling. If quote/credentials fail, report it with the fix: /api/broker/connect/alpaca?environment=TEST or ?tab=trading. In HITL mode a preview is a DRAFT and placed via 'tool_openaimp_alpaca_place_order' with *_pct only after explicit approval; in autonomous chat mode ('copilotExecutionMode': 'autonomous') call 'tool_openaimp_alpaca_place_order' directly. Trace: ?tab=workflow-runs. Credits: ?tab=checkout&checkoutTab=topup.
 - TRUTHFUL ORDER PLACEMENT INVARIANT: Never claim an order was submitted to the broker if the tool returned an async 'jobId' or if no broker order 'id' was returned. If an order placement tool returns a pending background job receipt ({ jobId, status: "submitted" }), state that the order request was queued as a background job and report the job ID with a clickable link '[View Job <jobId>](?tab=workflow-runs&run=<jobId>)'; DO NOT claim the order is placed, running, or at the broker until a real broker order ID is confirmed.
 - 'tool_openaimp_stock_copilot_remediate_gaps': Autonomously remediate diagnosed platform gaps (pipeline chain execution, job stagnation resolution, schedule configuration, payment allowance check). When the user asks to fix platform gaps, fix all gaps, or auto-heal, invoke this tool directly.
 - 'tool_openaimp_run_sandbox_command' & 'tool_openaimp_run_quant_backtest': When the user asks to generate strategy code, save to workspace, or run a sandboxed backtest, synthesize quantitative strategy code, save it to the agent workspace (/workspace/strategies/), execute it in SandboxAgent ('run_sandbox_command'), and evaluate deterministic backtest metrics ('run_quant_backtest').
@@ -153,13 +184,25 @@ export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation i
 
 export function buildStockCopilotSystemPrompt(input: OrchestratorPromptInput): string {
   const { route, memoryContext, vectorContext, optionsResearchContext, isAutoOptionsResearchRequest, stockCopilotCapability } = input;
+  const brokerTools = resolvePromptBrokerTools({
+    activeBroker: input.activeBroker ?? stockCopilotCapability?.brokerId,
+    activeMode: input.activeMode ?? stockCopilotCapability?.mode,
+    copilotExecutionMode: input.copilotExecutionMode,
+  });
+  const useCapabilityBlock = Boolean(stockCopilotCapability && brokerTools.executionPolicy !== "autonomous");
+  const capabilities = useCapabilityBlock
+    ? buildStockCopilotCapabilities(stockCopilotCapability!)
+    : renderCapabilitiesFromBrokerTools(brokerTools);
+  const tradingRule = useCapabilityBlock
+    ? buildStockCopilotTradingRule(stockCopilotCapability!)
+    : renderTradingRuleFromBrokerTools(brokerTools);
   const prompt = `${STOCK_COPILOT_SYSTEM_ROLE}
 Intent router classified request as: [${route.agent}] (confidence: ${(route.confidence * 100).toFixed(0)}%). Rationale: ${route.reason}.${delimitRetrievedContent(memoryContext)}${delimitRetrievedContent(vectorContext)}
 ${optionsResearchContext ? `\n${delimitRetrievedContent(optionsResearchContext)}\n${isAutoOptionsResearchRequest
     ? "If AUTO_OPTIONS_RESEARCH_JOB_SUBMITTED is present, tell the user it was accepted and include its job ID; do not claim analysis results yet. If AUTO_OPTIONS_RESEARCH_EXECUTION_ERROR is present, report that queueing failure clearly."
     : ""}` : ""}
 
-${stockCopilotCapability ? buildStockCopilotCapabilities(stockCopilotCapability) : STOCK_COPILOT_CAPABILITIES}
+${capabilities}
 
 Platform documentation — the 8 workflows with their tabs and APIs, the UI navigation map, the quantitative FAQs, and the decisioning engines — is NOT carried in this prompt. Retrieve it at turn time with 'tool_openaimp_query_platform_knowledge'; that corpus is the single source of truth for how the platform works and how to navigate it.
 
@@ -169,9 +212,9 @@ Agentic Best Practices & Workflow Rules:
 3. RAG & Knowledge Retrieval: If 'tool_openaimp_knowledge_search' or 'tool_openaimp_query_platform_knowledge' returns matching documents, cite them accurately.
 4. Human-in-the-Loop (HITL) Execution: For financial operations or task proposals, always require human confirmation. When a user approves (or mentions a draft ID like pay_xxx or task_xxx), call 'tool_openaimp_confirm_payment_draft' with decision: 'approved'.
 5. Multi-Turn Context & Session Memory: Respect the active session memory facts shown above. When the user asks to remember a preference, call 'tool_openaimp_manage_session_memory' with action: 'remember'.
-${stockCopilotCapability ? buildStockCopilotTradingRule(stockCopilotCapability) : STOCK_COPILOT_TRADING_RULE}
+${tradingRule}
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
-8. Background execution: Long-running asynchronous workflows return queued job IDs. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results of asynchronous background jobs. Trading tools ('tool_openaimp_alpaca_preview_order', 'tool_openaimp_alpaca_place_order') are synchronous — do NOT call 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' for trading tools. Never imply queued work is already complete.
+8. Background execution: Long-running asynchronous workflows return queued job IDs. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results of asynchronous background jobs. Trading tools ('${brokerTools.previewTool}', '${brokerTools.executeTool}') are synchronous — do NOT call 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' for trading tools. Never imply queued work is already complete.
 
 ${stockCopilotCapability ? buildStockCopilotMcpSteering(stockCopilotCapability) : STOCK_COPILOT_MCP_STEERING}`;
 

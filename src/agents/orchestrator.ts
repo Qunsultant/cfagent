@@ -2410,6 +2410,12 @@ export class OrchestratorAgent extends PortThink {
         state: stockMcpActivation.state,
       });
     }
+    const chatExecSetting = this.readSettingRaw("stock_copilot:chat_execution_mode");
+    const apState = this.getAutopilotState();
+    const copilotExecutionMode: "autonomous" | "hitl" =
+      chatExecSetting === "autonomous" || (chatExecSetting !== "hitl" && apState.running && !apState.killSwitch)
+        ? "autonomous"
+        : "hitl";
     // Issue #3839: the copilot's steering follows the ACTIVE broker/mode
     // from the tenant selection, not a hardcoded broker. An unresolved or
     // unsupported selection leaves the capability absent; the default
@@ -2447,6 +2453,7 @@ export class OrchestratorAgent extends PortThink {
         // of CHAT_NLQ_MODE. The auto-research branch never runs
         // the gate; its steering stays the flagged-off default.
         chatNlqEnabled: nlqGate.mode === "on",
+        copilotExecutionMode,
       }),
       maxSteps: this.maxSteps,
       ...(isAutoOptionsResearchRequest

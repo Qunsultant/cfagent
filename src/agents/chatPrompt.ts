@@ -119,6 +119,50 @@ export interface OrchestratorPromptInput {
    * (the fixtures' contract).
    */
   chatNlqEnabled?: boolean;
+  /**
+   * Issue #3846: selected broker id, trading mode ('paper' default, or 'live'),
+   * and interactive chat execution policy ('hitl' default, or 'autonomous').
+   */
+  activeBroker?: string;
+  activeMode?: string;
+  copilotExecutionMode?: "hitl" | "autonomous";
+}
+
+export interface ResolvedPromptBrokerTools {
+  brokerId: string;
+  brokerLabel: string;
+  modeId: "paper" | "live";
+  modeLabel: string;
+  quoteTool: string;
+  previewTool: string;
+  executeTool: string;
+  ordersTool: string;
+  cancelBracketTool: string;
+  executionPolicy: "hitl" | "autonomous";
+}
+
+export function resolvePromptBrokerTools(
+  input?: Partial<Pick<OrchestratorPromptInput, "activeBroker" | "activeMode" | "copilotExecutionMode">>,
+): ResolvedPromptBrokerTools {
+  const isEtrade = /^(etrade|e\*trade|e-trade)$/i.test(String(input?.activeBroker ?? "").trim());
+  const isLive = /^(live|prod)$/i.test(String(input?.activeMode ?? "").trim());
+  const executionPolicy = input?.copilotExecutionMode === "autonomous" ? "autonomous" : "hitl";
+  const [brokerId, brokerLabel, quoteTool, previewTool, executeTool] = isEtrade
+    ? ["etrade", "E*TRADE", "tool_openaimp_etrade_get_quote", "tool_openaimp_etrade_preview_order", "tool_openaimp_etrade_execute_order"]
+    : ["alpaca", "Alpaca", "tool_openaimp_alpaca_get_quote", "tool_openaimp_alpaca_preview_order", "tool_openaimp_alpaca_place_order"];
+  const [ordersTool, cancelBracketTool] = ["tool_openaimp_alpaca_orders", "tool_openaimp_alpaca_cancel_bracket_ladder"];
+  return {
+    brokerId,
+    brokerLabel,
+    modeId: isLive ? "live" : "paper",
+    modeLabel: isLive ? "Live" : "Paper",
+    quoteTool,
+    previewTool,
+    executeTool,
+    ordersTool,
+    cancelBracketTool,
+    executionPolicy,
+  };
 }
 
 /**
@@ -173,6 +217,7 @@ export function buildOrchestratorSystemPrompt(input: OrchestratorPromptInput): s
     return buildStockCopilotSystemPrompt(input);
   }
   const { route, memoryContext, vectorContext, optionsResearchContext, isAutoOptionsResearchRequest } = input;
+  const brokerTools = resolvePromptBrokerTools(input);
   const prompt = `You are the master orchestrator for Multi-Agent Studio (OpenAIMP), an enterprise financial intelligence and multi-agent execution platform powered by Cloudflare Agents, Durable Objects, and SQLite.
 Intent router classified request as: [${route.agent}] (confidence: ${(route.confidence * 100).toFixed(0)}%). Rationale: ${route.reason}.${delimitRetrievedContent(memoryContext)}${delimitRetrievedContent(vectorContext)}
 ${optionsResearchContext ? `\n${delimitRetrievedContent(optionsResearchContext)}\n${isAutoOptionsResearchRequest
@@ -189,9 +234,9 @@ Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tool
 - 'tool_openaimp_run_stock_screen': THE universe-screen tool — run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow.
 - 'tool_openaimp_run_options_strategy_screen': THE options-strategy-screen tool — screen options strategies over a named universe by structured constraints (strategy type from the strategy catalog, maxLoss, minProfit, minRewardRisk, DTE window); never deflect that request to a UI workflow (rule 6).
 - 'tool_openaimp_etrade_market_scan': Filter-scan of raw exchange listings by technical and fundamental indicators (RSI, Market Cap, Sector, Price, MACD, Volume, Gainers/Losers). Returns raw listings rows — NOT a universe screen; use 'tool_openaimp_run_stock_screen' when the user names a universe or asks to run a screen.
-- 'tool_openaimp_etrade_get_quote': Real-time equity quotes.
-- 'tool_openaimp_etrade_preview_order': Draft an order proposal with cryptographic Agent DID attestation ('did:agent:openaimp:trading'). NEVER execute without human confirmation.
-- 'tool_openaimp_etrade_execute_order': Execute a confirmed order draft ONLY after explicit human authorization.
+- '${brokerTools.quoteTool}': Real-time equity quotes (${brokerTools.brokerLabel} ${brokerTools.modeLabel}).
+- '${brokerTools.previewTool}': Draft an order proposal with cryptographic Agent DID attestation ('did:agent:openaimp:trading'). NEVER execute without human confirmation.
+- '${brokerTools.executeTool}': ${brokerTools.executionPolicy === "autonomous" ? `Execute an order immediately in autonomous mode (${brokerTools.brokerLabel} ${brokerTools.modeLabel}) within risk policy limits.` : "Execute a confirmed order draft ONLY after explicit human authorization."}
 - 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': Background job state and results; rule 8 governs when to use them.
 
 Platform documentation — the 8 workflows with their tabs and APIs, the UI navigation map, the quantitative FAQs, and the decisioning engines — is NOT carried in this prompt. Retrieve it at turn time with 'tool_openaimp_query_platform_knowledge'; that corpus is the single source of truth for how the platform works and how to navigate it.
@@ -202,7 +247,7 @@ Agentic Best Practices & Workflow Rules:
 3. RAG & Knowledge Retrieval: If 'tool_openaimp_knowledge_search' or 'tool_openaimp_query_platform_knowledge' returns matching documents, cite them accurately.
 4. Human-in-the-Loop (HITL) Execution: For financial operations or task proposals, always require human confirmation. When a user approves (or mentions a draft ID like pay_xxx or task_xxx), call 'tool_openaimp_confirm_payment_draft' with decision: 'approved'.
 5. Multi-Turn Context & Session Memory: Respect the active session memory facts shown above. When the user asks to remember a preference, call 'tool_openaimp_manage_session_memory' with action: 'remember'.
-6. E*TRADE Trading & Market Screening: When the user asks to run a stock screen over a universe (e.g. NASDAQ100, SP500, or ALL universes), invoke 'tool_openaimp_run_stock_screen' with that universe. When the user asks to screen options strategies over a universe (e.g. bull put credit spreads in NASDAQ100 with max loss <= $30 and max profit > $0), invoke 'tool_openaimp_run_options_strategy_screen' with the structured constraints (strategyType, maxLoss, minProfit) — never deflect that request to a UI workflow. When the user asks for a listings-style filter scan (by RSI, market cap, sector, price, gainers/losers across listings), invoke 'tool_openaimp_etrade_market_scan'. For quotes invoke 'tool_openaimp_etrade_get_quote'. For trade orders (buy/sell), ALWAYS use the active broker's preview tool ('tool_openaimp_etrade_preview_order'; 'tool_openaimp_alpaca_preview_order' on a Stock Copilot turn). Only execute via 'tool_openaimp_etrade_execute_order' when the user explicitly confirms approval. Never state an order price without its source + timestamp (user limit, or live quote + provider + time); missing \u2192 ask for the limit, never guess. A failed quote tool is a failure, never an estimated price.
+6. Broker-Neutral Trading & Market Screening (${brokerTools.brokerLabel} ${brokerTools.modeLabel}): When the user asks to run a stock screen over a universe (e.g. NASDAQ100, SP500, or ALL universes), invoke 'tool_openaimp_run_stock_screen' with that universe. When the user asks to screen options strategies over a universe (e.g. bull put credit spreads in NASDAQ100 with max loss <= $30 and max profit > $0), invoke 'tool_openaimp_run_options_strategy_screen' with the structured constraints (strategyType, maxLoss, minProfit) — never deflect that request to a UI workflow. When the user asks for a listings-style filter scan (by RSI, market cap, sector, price, gainers/losers across listings), invoke 'tool_openaimp_etrade_market_scan'. Active broker is ${brokerTools.brokerLabel} (${brokerTools.modeLabel}) — never ask which broker to use. For quotes invoke '${brokerTools.quoteTool}'. ${brokerTools.executionPolicy === "autonomous" ? `Autonomous mode is active: for trade orders (buy/sell/bracket), invoke '${brokerTools.executeTool}' directly.` : `For trade orders (buy/sell/bracket), ALWAYS invoke '${brokerTools.previewTool}' in one call. Only execute via '${brokerTools.executeTool}' when the user explicitly confirms approval.`} Never state an order price without its source + timestamp (user limit, or live quote + provider + time); missing \u2192 ask for the limit, never guess. A failed quote tool is a failure, never an estimated price.
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
 8. Background execution: MCP capabilities return queued job IDs instead of final results. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results. Never imply queued work is already complete.${input.stockCopilotMcpActive ? `\n\n${input.stockCopilotCapability ? buildStockCopilotMcpSteering(input.stockCopilotCapability) : STOCK_COPILOT_MCP_STEERING}` : ""}`;
   return withRetrievedContentRule(prompt, Boolean(memoryContext || vectorContext || optionsResearchContext));

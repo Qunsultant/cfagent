@@ -348,7 +348,12 @@ export function AgentChatTabContentInner({
       }
     }
 
-    const sourceTab = activeView === "options" ? "Broker · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents");
+    const baseSourceTab = activeView === "options" ? "Broker · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents");
+    const isStockTradePrompt =
+      activeView !== "options" &&
+      !/\b(options?|calls?|puts?|iron condor|straddle|strangle|credit spread|debit spread|dte|greeks)\b/i.test(text) &&
+      /\b(draft a limit (?:buy|sell)|limit (?:buy|sell) order|market (?:buy|sell) order|preview (?:buy|sell)|buy \d+\s+[a-z]{1,5}\b|sell \d+\s+[a-z]{1,5}\b|buy [a-z]{1,5} at (?:market|limit)|sell [a-z]{1,5} at (?:market|limit)|take-profit.*stop-loss|bracket exits?|alp_ord_|approve (?:[a-z]+\s+)?trade draft|stock copilot|enable autopilot|disable autopilot|autopilot status|autopilot limits|kill[- ]switch)\b/i.test(text);
+    const sourceTab = isStockTradePrompt ? "Stock Copilot" : baseSourceTab;
     const lower = text.toLowerCase();
     if (activeView === "stock") {
       if (lower === "pause" || lower === "pause loop" || lower === "pause stock copilot" || lower.includes("pause the loop") || lower.includes("pause stock copilot")) {
@@ -395,7 +400,12 @@ export function AgentChatTabContentInner({
   };
 
   const handleChipClick = (prompt: string, sourceTab?: string) => {
-    const effectiveSource = sourceTab || (activeView === "options" ? "Broker · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents"));
+    const baseSource = sourceTab || (activeView === "options" ? "Broker · Auto Options Research" : (currentCopilot?.sourceTab || "Chat & Agents"));
+    const isStockChip =
+      activeView !== "options" &&
+      !/\b(options?|calls?|puts?|iron condor|straddle|strangle|credit spread|debit spread|dte|greeks)\b/i.test(prompt) &&
+      /\b(draft a limit (?:buy|sell)|limit (?:buy|sell) order|market (?:buy|sell) order|preview (?:buy|sell)|buy \d+\s+[a-z]{1,5}\b|sell \d+\s+[a-z]{1,5}\b|buy [a-z]{1,5} at (?:market|limit)|sell [a-z]{1,5} at (?:market|limit)|take-profit.*stop-loss|bracket exits?|alp_ord_|approve (?:[a-z]+\s+)?trade draft|stock copilot|enable autopilot|disable autopilot|autopilot status|autopilot limits|kill[- ]switch)\b/i.test(prompt);
+    const effectiveSource = isStockChip ? "Stock Copilot" : baseSource;
     if (isBusy || isResetting) return;
     const lower = prompt.trim().toLowerCase();
     if (activeView === "stock") {
@@ -411,7 +421,7 @@ export function AgentChatTabContentInner({
         content: prompt,
         role: "user",
         parts: [{ type: "text", text: prompt }],
-        metadata: { sourceTab, userLogin: user.login },
+        metadata: { sourceTab: effectiveSource, userLogin: user.login },
       } as any);
     } catch (err) {
       console.error("Failed to send chip action:", err);
