@@ -1375,6 +1375,44 @@ platform model document gains the operator-surface layer, or
 the layer stays issue-defined, is a decision to record —
 **TBD**.
 
+Security & trust Platform (owner: CISO):
+
+The Security and trust platform covers threat analysis,
+permission assessment, suspicious-agent detection,
+authorized containment coordination, and security-control
+validation — platforms.md §2: NIST CSF; ISO/IEC 27001;
+zero-trust architecture; threat modeling; secure
+development practices. Standing rule: security findings
+cannot be overruled by an agent seeking release or
+increased autonomy.
+
+| Product | Purpose | Status | Tracking |
+| --- | --- | --- | --- |
+| IAAA platform | End-to-end identity, authentication, authorization, and audit: stable identities, federated login, sessions, step-up, membership, RBAC+FGA, delegation, audit | Partial — Q3–Q9 closed and merged; Q10–Q12 open | #945 |
+| Policy decision & enforcement (PDP / PEP / PIP / PAP) + obligations | The policy decision point, route PEP, attribute provider, approval-gated PAP editor, and the frozen obligation channel | Partial — PDP/PEP/PIP/PAP built; per-route PDP enforcement for token callers lands with #945 wiring (fail-closed until then) | #1755, #1751, #2838 |
+| Service tokens | Tenant-bound service credentials (svc_token) with provisioning, rotation, and revocation | Partial — token capability live; orchestrator migration against live production is an owner step | #2681 |
+| Role grants | Platform- and tenant-admin role assignment with a single ALL_ROLES model and route-level self-grant refusal | Live | #2688 |
+| Logged-in users | Active login sessions per user with revoke, on IAAA Admin Overview | Live — login counts are retained-audit-events counts, never lifetime totals; role-aware breakdown Filed under #3114 | #2836 |
+| Session caps | Per-user cap of 10 concurrent active sessions, oldest-out, with cross-login visibility | Live | #2840 |
+| Request quotas | One per-user pool for report runs (daily / weekly / monthly) enforced at submission | Partial — enforcement live; tier values PENDING CBO/owner decision | #2842 |
+| Audit & observability | One event schema, Analytics Engine adapter, audit gate enforcing in payments, tamper-response runbook and alert | Partial — retention and tamper policy is proposed, not settled | #1743, #3156 |
+| Incident substrate reliability | The #3781 family's repairs: price-provenance guardrail, stuck-run sweep, schedule watchdog, screener-chain repair, runs provenance, job telemetry | Live — all merged and deployed | #3781 |
+| Detection & response | Suspicious-agent detection, alerting, and containment | Filed | #3765 |
+| Agentic security management | A governed security agent for IAAA administration (propose → approve → apply → audit) | Filed | #3114 |
+| SessionStore resource governance | Rollup, cap-alert, and dashboard-comparison goals over Durable Objects usage | Partial — instrumentation live; activation owner-gated | #1819 |
+
+Note: #3785's chat-links implementation came via PR #3824
+(the #3785 branch was stood down); #3810 and #3811 were
+auto-closed by #3813's merge and their implementations then
+merged as #3826 and #3843; #3781 itself was auto-closed by
+#3824's merge. The Emergency-Authority Register is a draft
+artifact, not a product: DRAFT, not adopted, owner decisions
+D1–D13 pending
+(`docs/architecture/security/emergency-authority-register.md`).
+The operator surface over these products is Sec Studio,
+defined in the Platform of Platforms table above (Filed,
+#3774).
+
 All other platforms — products not yet defined (**TBD**
 placeholder rows; no filed product issues were found for these
 platforms in the 2026-11-09 survey):
@@ -1391,7 +1429,6 @@ platforms in the 2026-11-09 survey):
 | Investment & portfolio (CIO function) | TBD — products to be defined |
 | Research (Chief Research Officer / Chief Scientist function) | TBD — products to be defined |
 | Enterprise, investment & model risk (CRO function) | TBD — products to be defined |
-| Security & trust (CISO function) | TBD — products to be defined (the Sec Studio row above is the operator surface over this function's concerns, tracked under #3774) |
 | Compliance & market integrity (CCO function) | TBD — products to be defined |
 | Quality & Evaluation (independent assurance function) | TBD — products to be defined (the evaluation product row above is the Agentic Platform's; this function's own products are separate and undefined) |
 | People & Workforce (human–agent workforce function) | TBD — products to be defined |
@@ -1671,17 +1708,18 @@ owner's word, not on this document.
 
 ### 14.8 Platforms and products
 
-- **Current:** §12.2's inventory — the Technology and Agentic
-  platform products filed or partial; all other platforms'
-  products undefined.
+- **Current:** §12.2's inventory — the Technology, Agentic,
+  and Security & trust platform products filed or partial; all
+  other platforms' products undefined.
 - **Future:** every platform productized under the platform
   model, each product registered and statused like §12.2's
   rows.
 - **Roadmap:** #3700 and #3709 (Technology Platform); the
   eleven #3701 children (Agentic Platform — filed; their build
   sequence is **TBD**); #3687's chain for tenant instantiation;
-  product definition for the remaining platforms is **TBD**,
-  owned by each platform.
+  the Security & trust platform's products defined in §12.2
+  (this issue, #3851); product definition for the remaining
+  platforms is **TBD**, owned by each platform.
 
 ### 14.9 Operator surface: dashboards and Studios
 
