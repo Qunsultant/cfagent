@@ -1052,12 +1052,12 @@ export function AutopilotControlCenter({
           columns={[
             {
               key: "time",
-              header: "TIME",
+              header: "DATE & TIME",
               cellClassName: "time-cell",
               render: (job) => {
                 try {
                   const d = new Date(job.createdAt);
-                  return <>{isNaN(d.getTime()) ? job.createdAt : d.toLocaleTimeString("en-US", { hour12: true })}</>;
+                  return <>{isNaN(d.getTime()) ? job.createdAt : `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${d.toLocaleTimeString("en-US", { hour12: true })}`}</>;
                 } catch {
                   return <>{job.createdAt}</>;
                 }
