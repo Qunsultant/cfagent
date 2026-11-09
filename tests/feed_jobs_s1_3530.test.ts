@@ -360,6 +360,7 @@ describe("feed job contract + registry (#3530 S1)", () => {
       "yahoo-nasdaq100-quotes",
       "yahoo-nasdaq100-fundamentals",
       "yahoo-sp100-quotes",
+      "yahoo-sp500-quotes",
       "alpaca-nasdaq100-quotes",
       "etrade-nasdaq100-quotes",
       "public-nasdaq100-quotes",
@@ -621,7 +622,7 @@ describe("runFeedJob (#3530 S1)", () => {
       runFeedJob(
         registry,
         { provider, universeStore: await universeStore(), datasetStore },
-        "yahoo-sp500-quotes",
+        "yahoo-dow-quotes",
         {},
       ),
     ).rejects.toMatchObject({ name: "FeedJobError", code: FEED_JOB_CODES.jobNotFound });
