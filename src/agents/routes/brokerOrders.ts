@@ -26,12 +26,14 @@
 import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports, BROKER_CATALOG, BROKER_UNAVAILABLE_CODE } from "../../trading";
 import { handleBrokerLimitRoutes } from "./brokerLimits";
 import {
+  cancelAllOrders,
   cancelSingleOrder,
   cancelTickerOrders,
   createCancelBrokerPort,
   recordCancelOutcome,
   recordScopedCancelOutcome,
 } from "../../services/orderCancellation";
+import { createSqlCancelPreviewStore } from "../../services/cancelPreviewStore";
 import { resolveTradingLimits } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
@@ -463,6 +465,66 @@ export async function handleBrokerOrderRoutes(
       return Response.json(receipt, { status });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to cancel the ticker's orders" }, { status: 500 });
+    }
+  }
+
+  // Issue #3885: cancel every open order. Always two steps — a bare call
+  // returns the preview and a single-use token (code cancel_all_needs_preview),
+  // and only a call carrying that token cancels.
+  if (path.endsWith("/broker/orders/cancel-all") && request.method === "POST") {
+    try {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const userLogin = request.headers.get("x-user-login");
+      if (!userLogin) return unauthenticatedResponse();
+
+      const broker = await resolveTenantBroker(ctx.env);
+      if (broker !== "alpaca") {
+        return Response.json(
+          {
+            code: "provider_unsupported",
+            broker,
+            message: `${broker} does not expose a cancel-all here; no other broker was asked to cancel every open order.`,
+            retryable: false,
+          },
+          { status: 501 },
+        );
+      }
+
+      const sql = ctx.getOrm()?.getSql?.();
+      if (!sql) {
+        return Response.json(
+          { code: "cancel_preview_store_unavailable", message: "The preview store is unavailable, so cancel-all refused rather than cancel unbounded." },
+          { status: 503 },
+        );
+      }
+
+      const limits = resolveTradingLimits({
+        env: ctx.env,
+        readSetting: (key) => ctx.readSettingRaw(key),
+      });
+      const receipt = await cancelAllOrders(
+        createCancelBrokerPort(ctx.env),
+        {
+          token: typeof body.confirm === "string" ? body.confirm : undefined,
+          dryRun: body.dryRun === true,
+          reason: typeof body.reason === "string" ? body.reason : undefined,
+          limits,
+        },
+        createSqlCancelPreviewStore(sql),
+      );
+      if (receipt.success || receipt.cancelled.length > 0 || receipt.refused.length > 0) {
+        recordScopedCancelOutcome(
+          sql,
+          receipt,
+          "broker_orders_cancel_all",
+          ctx.env,
+          `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`,
+        );
+      }
+      const status = receipt.success ? 200 : receipt.code === "cancel_read_failed" ? 502 : 409;
+      return Response.json(receipt, { status });
+    } catch (err) {
+      return Response.json({ error: err instanceof Error ? err.message : "Failed to cancel every open order" }, { status: 500 });
     }
   }
 

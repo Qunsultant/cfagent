@@ -726,6 +726,8 @@ const EXPECTED_INVENTORY = [
   "handleBrokerOrderRoutes :: endsWith(\"/broker/order/cancel\")",
   // Issue #3884: the per-ticker cancel scope.
   "handleBrokerOrderRoutes :: endsWith(\"/broker/orders/cancel-ticker\")",
+  // Issue #3884: the per-ticker cancel scope.
+  "handleBrokerOrderRoutes :: endsWith(\"/broker/orders/cancel-all\")",
   "handleBrokerOrderRoutes :: endsWith(\"/broker/orders\")",
   "handleTradingIntegrationsRoutes :: endsWith(\"/trading/email/inbound\")",
   "handleTradingIntegrationsRoutes :: endsWith(\"/trading/email/approve-link\")",

@@ -15,14 +15,36 @@
 import { z } from "zod";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import {
+  cancelAllOrders,
   cancelSingleOrder,
   cancelTickerOrders,
   createCancelBrokerPort,
   recordCancelOutcome,
   recordScopedCancelOutcome,
 } from "../../services/orderCancellation";
+import {
+  createInMemoryCancelPreviewStore,
+  createSqlCancelPreviewStore,
+  type CancelPreviewStore,
+} from "../../services/cancelPreviewStore";
 import { CANCEL_ORDER_CLASSES, resolveTradingLimits, type TradingLimitsSnapshot } from "../../trading";
 import { createSettingsPort } from "../../data/createSettingsPorts";
+
+/**
+ * A host without Durable Object storage still gets a working two-step flow
+ * inside one process; the TTL bounds how long a token can live either way.
+ */
+const fallbackPreviewStore = createInMemoryCancelPreviewStore();
+
+function previewStoreFor(context: McpToolContext): CancelPreviewStore {
+  const sql = context.orm?.getSql?.();
+  if (!sql) return fallbackPreviewStore;
+  try {
+    return createSqlCancelPreviewStore(sql);
+  } catch {
+    return fallbackPreviewStore;
+  }
+}
 
 /** The limits snapshot the cancel caps read (#3888), over the caller's own settings. */
 export function readLimitsFor(context: McpToolContext, symbol?: string): TradingLimitsSnapshot {
@@ -165,6 +187,76 @@ export class AlpacaCancelTickerCommand implements IMcpToolCommand {
     });
     if (!receipt.dryRun) {
       recordScopedCancelOutcome(context.orm?.getSql?.(), receipt, "alpaca_cancel_ticker", context.env);
+    }
+    return receipt;
+  }
+}
+
+/**
+ * Issue #3885 — `alpaca_cancel_all`: cancel every open order, in two steps.
+ *
+ * A bare call never cancels: it returns a preview (count, symbols, classes,
+ * oldest/newest) plus a single-use token. Only a second call presenting that
+ * token acts, on exactly the ids the user was shown. Above `cancelMaxCount`
+ * the preview refuses and reports the real count; an unset cap refuses too,
+ * because “cancel everything” must never run unbounded.
+ */
+export class AlpacaCancelAllCommand implements IMcpToolCommand {
+  readonly name = "alpaca_cancel_all";
+  readonly description =
+    "Cancel EVERY open Alpaca order, always in two steps. The first call returns a preview (count, symbols, classes, oldest/newest) and a single-use token; nothing is cancelled. The second call with that token cancels exactly the orders the preview listed. Refuses above the configured cancelMaxCount (reporting the real count) and refuses when no cap is configured. Tokens are single-use and expire.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      confirm: { type: "string", description: "The preview token returned by the first call. Omit to get a preview." },
+      dryRun: { type: "boolean", description: "Return the preview and issue no token; cancels nothing" },
+      reason: { type: "string", description: "Why the caller is cancelling (audited, never sent to the broker)" },
+    },
+  };
+
+  readonly zodSchema = z.object({
+    confirm: z.string().min(1).optional(),
+    dryRun: z.boolean().optional(),
+    reason: z.string().max(500).optional(),
+  });
+
+  async execute(
+    input: { confirm?: string; dryRun?: boolean; reason?: string },
+    context: McpToolContext,
+  ) {
+    const receipt = await cancelAllOrders(
+      createCancelBrokerPort(context.env),
+      {
+        token: input.confirm,
+        dryRun: input.dryRun,
+        reason: input.reason,
+        limits: readLimitsFor(context),
+      },
+      previewStoreFor(context),
+    );
+
+    context.audit?.(
+      receipt.success ? "alpaca.cancel_all_completed" : receipt.previewToken ? "alpaca.cancel_all_previewed" : "alpaca.cancel_all_refused",
+      "trading",
+      {
+        code: receipt.code,
+        preview: receipt.preview ?? null,
+        targeted: receipt.targeted,
+        cancelled: receipt.cancelled.map((entry) => entry.orderId),
+        refused: receipt.refused.map((entry) => ({ orderId: entry.orderId, code: entry.code, message: entry.message })),
+        dryRun: receipt.dryRun === true,
+        reason: receipt.reason,
+      },
+    );
+    if (receipt.success || receipt.cancelled.length > 0 || receipt.refused.length > 0) {
+      recordScopedCancelOutcome(
+        context.orm?.getSql?.(),
+        receipt,
+        "alpaca_cancel_all",
+        context.env,
+        `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`,
+      );
     }
     return receipt;
   }
