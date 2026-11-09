@@ -190,6 +190,7 @@ jobs:
           S_SCREENER_SLACK_CHANNEL: ${{ secrets.SCREENER_SLACK_CHANNEL }}
           S_SCREENER_EMAIL_TO: ${{ secrets.SCREENER_EMAIL_TO }}
           S_CHANNEL_EMAIL_PRINCIPALS: ${{ secrets.CHANNEL_EMAIL_PRINCIPALS }}
+          S_THINK_WEBHOOK_SECRET: ${{ secrets.THINK_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
           source scripts/ci/put-secret.sh
@@ -224,6 +225,12 @@ jobs:
           optional_secret SCREENER_SLACK_CHANNEL "$S_SCREENER_SLACK_CHANNEL"
           optional_secret SCREENER_EMAIL_TO "$S_SCREENER_EMAIL_TO"
           optional_secret CHANNEL_EMAIL_PRINCIPALS "$S_CHANNEL_EMAIL_PRINCIPALS"
+
+          # Think webhook channel credential (#3474; sync added by
+          # #3821): genuinely optional — the channel fails closed
+          # (503) until the operator sets the GitHub secret, so
+          # absence is reported here, never a sync failure.
+          optional_secret THINK_WEBHOOK_SECRET "$S_THINK_WEBHOOK_SECRET"
 
       - name: Set E*TRADE secrets on Cloudflare Worker [${{ needs.load-environment.outputs.target_env }}]
         env:

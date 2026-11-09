@@ -92,6 +92,17 @@ describe("deploy.yml — email principals secret sync (#1518)", () => {
   });
 });
 
+describe("deploy.yml — Think webhook secret sync (#3474, #3821)", () => {
+  it("pushes THINK_WEBHOOK_SECRET for webhook channel ingress", () => {
+    expect(workflow).toMatch(
+      /S_THINK_WEBHOOK_SECRET:\s*\$\{\{\s*secrets\.THINK_WEBHOOK_SECRET\s*\}\}/
+    );
+    expect(workflow).toMatch(
+      /optional_secret THINK_WEBHOOK_SECRET "\$S_THINK_WEBHOOK_SECRET"/
+    );
+  });
+});
+
 describe("deploy.yml — Alpaca secret sync (#3277)", () => {
   it("pushes the dual-mode paper and live Alpaca secrets", () => {
     for (const secret of [

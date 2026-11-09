@@ -343,16 +343,6 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "market_data_company_fundamentals",
   "market_data_historical_bars",
   "market_data_research",
-  "propose_stock_trade",
-  "propose_options_trade",
-  "get_trading_accounts",
-  "get_trading_positions",
-  "get_trading_quote",
-  "start_trade_approval",
-  "decide_trade_approval",
-  "get_trade_approval_status",
-  "dispatch_trading_webhook",
-  "think_trade_validation",
 ]);
 
 const LEGACY_BROKER_TOOL_PREFIX = ["et", "ra", "de_"].join("");
