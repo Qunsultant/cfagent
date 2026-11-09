@@ -212,6 +212,14 @@ function measure(): Map<string, number> {
  * the only growth is the new job's own id/label lines: 2 raises
  * (feedJobs.ts/yahoo 10->12, feedPipelineJobs.ts/yahoo 15->19).
  * Recorded-seed totals move 1121/8729 -> 1121/8735.
+ * Baseline update (#3905, 2026-11-09): the Dow universe joins
+ * the feed workflow as a Yahoo quotes feed job - one registry
+ * definition in the feed-job registry and one entry in the feed
+ * pipeline catalog. Both files are the provider-id registries
+ * (INTEGRATION at seed: naming the provider is their job), and
+ * the only growth is the new job's own id/label lines: 2 raises
+ * (feedJobs.ts/yahoo 12->14, feedPipelineJobs.ts/yahoo 19->23).
+ * Recorded-seed totals move 1121/8735 -> 1121/8741.
  * Baseline update (#3838, 2026-11-09): externalize Stock Copilot prompts
  * into src/agents/prompts/stockCopilotPrompt.ts (dispositioned INTEGRATION:
  * names the provider its agent tools integrate — Alpaca Paper trading for
@@ -827,12 +835,12 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/feedJobs.ts", "alpaca", 5],
   ["src/services/feedJobs.ts", "etrade", 5],
   ["src/services/feedJobs.ts", "nasdaq", 9],
-  ["src/services/feedJobs.ts", "yahoo", 12],
+  ["src/services/feedJobs.ts", "yahoo", 14],
   ["src/services/feedPipelineJobs.ts", "alpaca", 5],
   ["src/services/feedPipelineJobs.ts", "etrade", 4],
   ["src/services/feedPipelineJobs.ts", "nasdaq", 18],
   ["src/services/feedPipelineJobs.ts", "public.com", 2],
-  ["src/services/feedPipelineJobs.ts", "yahoo", 19],
+  ["src/services/feedPipelineJobs.ts", "yahoo", 23],
   ["src/services/feedProviderWiring.ts", "alpaca", 2],
   ["src/services/feedProviderWiring.ts", "etrade", 4],
   ["src/services/feedProviderWiring.ts", "nasdaq", 1],
@@ -1399,8 +1407,8 @@ describe("#3525 S6 shrink-only provider-brand census pin", () => {
     expect(total).toBeLessThanOrEqual(PLATFORM_BASELINE_TOTAL);
   });
 
-  it("the baseline itself is the recorded seed (1121 rows / 8735 lines)", () => {
+  it("the baseline itself is the recorded seed (1121 rows / 8741 lines)", () => {
     expect(BASELINE.length).toBe(1121);
-    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8735);
+    expect(BASELINE.reduce((a, [, , c]) => a + c, 0)).toBe(8741);
   });
 });
