@@ -47,6 +47,7 @@ import {
   type WorkflowLifecycleState,
   type WorkflowRunSchedule,
 } from "./workflowLifecycle";
+import { codedMessage } from "../outcomes/outcomeAspects";
 
 export type WorkflowRunTrigger = "manual" | "scheduled" | "autonomous" | "webhook" | "agent" | "unknown";
 
@@ -152,6 +153,21 @@ export interface WorkflowRun {
   finishedAt: string | null;
   durationMs: number | null;
   /**
+   * Issue #3811: the executor's last recorded activity across the
+   * run's jobs (heartbeat, falling back to the claim instant for
+   * rows that predate heartbeats), or null when no job recorded
+   * one. Absent on runs recorded before this slice — never
+   * backfilled, never invented.
+   */
+  lastActivityAt?: string | null;
+  /**
+   * Issue #3811: milliseconds since the last activity, for a
+   * running run only — the heartbeat age that distinguishes
+   * "still progressing" from "stalled". Null for terminal runs
+   * and for runs with no recorded activity.
+   */
+  heartbeatAgeMs?: number | null;
+  /**
    * Issue #3655: broker + data-provider + mode provenance for a
    * scheduled run, recorded at creation/fire time. Absent on runs
    * recorded before provenance existed — never backfilled from the
@@ -242,6 +258,15 @@ export interface WorkflowRunJobRow {
   trigger?: string | null;
   triggered_by?: string | null;
   schedule_id?: string | null;
+  /** Issue #3811: the executor's last recorded activity (claim,
+   *  heartbeat, or terminal transition), or NULL for rows claimed
+   *  before heartbeats existed. Carried through the route mapping
+   *  so the runs view can show last activity + heartbeat age. */
+  last_activity_at?: string | null;
+  /** Issue #3811: the coded failure (single outcome catalog),
+   *  or NULL for rows that never failed. Carried through the route
+   *  mapping so the runs view can show the coded error. */
+  error_code?: string | null;
 }
 
 /** The mas_job_outcomes columns this model reads. */
@@ -746,6 +771,35 @@ function isoOrNull(value: unknown): string | null {
   return Number.isFinite(Date.parse(text)) ? text : null;
 }
 
+/**
+ * Issue #3811: the detail after a leading "[CODE] business — "
+ * prefix, or null when the message carries no such prefix. The
+ * single outcome catalog renders coded messages in exactly that
+ * shape (codedMessage), so the detail is what follows the first
+ * " — " separator.
+ */
+function codedErrorDetail(message: string | null | undefined): string | null {
+  if (!message) return null;
+  const match = /^\[[^\]]+\][^—]*—\s([\s\S]*)$/.exec(message);
+  return match ? match[1] : null;
+}
+
+/**
+ * Issue #3811: a job row's error rendered with its code — the
+ * coded message (code + business message + the raw detail, with a
+ * leading "[CODE] ..." prefix stripped so the code never renders
+ * twice). A row with no code keeps its raw error verbatim; a row
+ * with a code but no message renders the code alone. The code is
+ * the answer to "failing or successful?"; the detail is the why.
+ */
+function codedStageError(job: WorkflowRunJobRow): string | null {
+  const raw = str(job.error);
+  const code = str(job.error_code);
+  if (!code) return raw;
+  const detail = codedErrorDetail(raw) ?? raw;
+  return codedMessage(code, detail ?? undefined);
+}
+
 function durationBetween(start: string | null, end: string | null): number | null {
   if (!start || !end) return null;
   const from = Date.parse(start);
@@ -884,6 +938,18 @@ function stageRowsForGroup(
 
     const startedAt = isoOrNull(job.started_at) ?? isoOrNull(job.created_at);
     const completedAt = isoOrNull(job.completed_at);
+    // Issue #3811: stage terminal reasons for ALL jobs, not only
+    // screening stages. A transition's reason wins; otherwise a
+    // skipped/held stage carries its result's reason, and a failed
+    // stage carries its coded error — so a tool run's stage says
+    // WHY it ended, not just that it did.
+    const jobResult = parseObject(job.result_json);
+    const resultReason =
+      (jobResult?.status === "skipped" || jobResult?.status === "held") &&
+      typeof jobResult?.reason === "string"
+        ? jobResult.reason
+        : null;
+    const errorCode = str(job.error_code);
     stages.push({
       key: job.job_id,
       order: stages.length + 1,
@@ -895,8 +961,8 @@ function stageRowsForGroup(
       finishedAt: completedAt,
       durationMs: durationBetween(startedAt, completedAt),
       detail: job.display_name || null,
-      reason: matchedTransition?.reason ?? null,
-      error: str(job.error),
+      reason: matchedTransition?.reason ?? resultReason ?? (errorCode ? codedMessage(errorCode) : null),
+      error: codedStageError(job),
       capability: job.capability || null,
       jobKind: str(job.job_kind),
       channel: str(job.channel),
@@ -1081,6 +1147,21 @@ export function runFromJobs(
     ? collation.resumedSkippedUnits.filter((v): v is string => typeof v === "string")
     : [];
 
+  // Issue #3811: the run's last activity — the latest heartbeat
+  // across its jobs, falling back to the claim instant (started_at)
+  // for rows that predate heartbeats. A running run's heartbeat age
+  // is the stall evidence; a terminal run has none.
+  const lastActivityAt =
+    jobs
+      .map((j) => isoOrNull(j.last_activity_at) ?? isoOrNull(j.started_at))
+      .filter((v): v is string => Boolean(v))
+      .sort()
+      .pop() ?? null;
+  const heartbeatAgeMs =
+    runStatus === "running" && lastActivityAt && Number.isFinite(Date.parse(lastActivityAt))
+      ? nowMs - Date.parse(lastActivityAt)
+      : null;
+
   return {
     id: str(jobs[0]?.chain_id) ?? main.job_id,
     runId: str(jobs[0]?.chain_id) ?? main.job_id,
@@ -1115,6 +1196,8 @@ export function runFromJobs(
     startedAt,
     finishedAt,
     durationMs: durationBetween(startedAt, finishedAt),
+    lastActivityAt,
+    heartbeatAgeMs,
     stageCount: stages.length,
     completedStages: stages.filter((s) => s.status === "completed").length,
     failedStages: stages.filter((s) => s.status === "failed").length,
@@ -1278,6 +1361,11 @@ export function runFromOutcome(
     startedAt: outcome.createdAt,
     finishedAt: outcome.createdAt,
     durationMs: null,
+    // Issue #3811: an outcome-only run's last activity is its
+    // recording instant; outcomes are terminal records, so there
+    // is no heartbeat age.
+    lastActivityAt: outcome.createdAt,
+    heartbeatAgeMs: null,
     // Issue #3655: broker + data-provider provenance from the unified
     // canonical record when it carries them.
     ...(unified?.brokerId ? { brokerId: unified.brokerId } : {}),
@@ -1549,6 +1637,21 @@ export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
     input.trigger === "manual" || input.trigger === "scheduled"
       ? input.trigger
       : ("unknown" as const);
+  // Issue #3811: the saga's last activity — the latest recorded
+  // instant across its stages, projection row, and ended row.
+  const lastActivityAt =
+    [
+      ...stages.map((s) => s.finishedAt ?? s.startedAt),
+      msToIso(input.projection?.updatedAtMs),
+      msToIso(input.endedAtMs),
+    ]
+      .filter((v): v is string => Boolean(v))
+      .sort()
+      .pop() ?? null;
+  const heartbeatAgeMs =
+    status === "running" && lastActivityAt && Number.isFinite(Date.parse(lastActivityAt))
+      ? Date.now() - Date.parse(lastActivityAt)
+      : null;
   return {
     id: sagaId,
     runId: sagaId,
@@ -1570,6 +1673,8 @@ export function runFromSagaChain(input: SagaChainRunInput): WorkflowRun | null {
     startedAt,
     finishedAt,
     durationMs: durationBetween(startedAt, finishedAt),
+    lastActivityAt,
+    heartbeatAgeMs,
     stageCount: stages.length,
     completedStages: stages.filter((s) => s.status === "completed").length,
     failedStages: stages.filter((s) => s.status === "failed").length,

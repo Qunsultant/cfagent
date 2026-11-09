@@ -144,7 +144,11 @@ describe("stale async-job sweep (#3784)", () => {
 
   it("reaps a run past 2h as failed with the read path's exact message + async_job.failed audit, never alerted", async () => {
     const h = makeHarness();
-    seedRow(h.db, { jobId: "job-ancient", startedAt: isoAgo(3 * 60 * MIN) });
+    // Captured once: the sweep's audit carries this exact instant as
+    // the last activity, so a fresh Date.now() at assertion time
+    // would flake by milliseconds.
+    const startedAt = isoAgo(3 * 60 * MIN);
+    seedRow(h.db, { jobId: "job-ancient", startedAt });
 
     const result = sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 1, alerted: 0, reaped: 1 });
@@ -159,6 +163,11 @@ describe("stale async-job sweep (#3784)", () => {
       jobId: "job-ancient",
       capability: "screen.run",
       error: REAP_MESSAGE,
+      // Issue #3811: the reaped row carries the generic failure code
+      // and the stall evidence — the last activity, which for a row
+      // with no heartbeat is the claim instant (started_at).
+      errorCode: "FAILURE_ASYNC_JOB_FAILED",
+      lastActivityAt: startedAt,
     });
     expect(
       h.audits.filter((a) => a.type === "async_job.stuck_detected"),

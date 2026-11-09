@@ -64,6 +64,9 @@ const NOTICE_UNKNOWN_EXPECTED =
 const STUCK_EXPECTED =
   "⚠️ Stuck run detected: job job-1 (screen) has been running for ~45 min (alert threshold 30 min; the 2h reap is the backstop).\n" +
   "Capability: screener · Owner: u1 · Started: 2026-11-02T00:00:00Z\n" +
+  // Issue #3811: the alert carries the stall evidence — the
+  // executor's last activity.
+  "Last activity: 2026-11-02T00:44:00Z (~1 min ago)\n" +
   "Diagnosis + safe intervention: docs/operations/runbook/stuck-runs.md";
 
 const CAP_EXPECTED =
@@ -203,6 +206,9 @@ describe("migrated surfaces render from the catalog, byte-identical (#2975)", ()
           capability: "screener",
           ownerLogin: "u1",
           startedAt: "2026-11-02T00:00:00Z",
+          // Issue #3811: the stall evidence rides the template.
+          lastActivityAt: "2026-11-02T00:44:00Z",
+          lastActivityMin: 1,
         },
         "legacy_stuck_run_alert",
       ),

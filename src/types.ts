@@ -2830,6 +2830,12 @@ export interface AsyncJobRecord {
   error?: string;
   result?: unknown;
   responseStatus?: number;
+  /** Issue #3811: the executor's last recorded activity (claim,
+   *  heartbeat, or terminal transition), when recorded. */
+  lastActivityAt?: string;
+  /** Issue #3811: the coded failure (single outcome catalog),
+   *  when the row failed. */
+  errorCode?: string;
 }
 
 export interface AsyncJobPayload {
