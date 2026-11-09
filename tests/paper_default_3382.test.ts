@@ -1,16 +1,21 @@
 /**
  * Issue #3382 — a first order is never live by accident.
  *
- * The deployment's environment (PROD on the live worker) is the right default
- * for READS: a tenant on the live deployment should see the live account. It is
- * the wrong default for the two places that decide which account an ACTION uses:
+ * A tenant who has never chosen anything is on paper for the two places
+ * that decide which account an ACTION uses:
  *
  *   - placing an order (preview stamps the mode, execute spends it), and
  *   - signing a broker in (the credential side must match the mode it trades).
  *
- * A tenant who has never chosen anything is on paper for both; choosing live is
- * an explicit act that persists a selection. Reads keep the deployment default,
- * so nothing about the live data plane changes.
+ * Choosing live is an explicit act that persists a selection.
+ *
+ * Issue #3857 (owner rule, superseding the reads half of this file):
+ * the default broker mode is paper (TEST), never live — for READS as
+ * well as actions. The mode is one selection (`etrade:environment`);
+ * the read resolver and the trade resolver now agree that an unset
+ * selection means paper. The pin below that used to hold reads on the
+ * deployment default is updated to the paper default with the reason
+ * recorded here, not silently.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -46,14 +51,16 @@ describe("the trade mode defaults to paper (#3382)", () => {
   });
 });
 
-describe("reads keep the deployment default (#3382)", () => {
+describe("reads default to paper too (#3857)", () => {
   it("honours both stored values exactly as before", () => {
     expect(resolveBrokerEnvironmentFromSettings(readSetting("TEST"), PROD_ENV)).toBe("TEST");
     expect(resolveBrokerEnvironmentFromSettings(readSetting("PROD"), PROD_ENV)).toBe("PROD");
   });
 
-  it("still falls back to the deployment for a tenant with no choice", () => {
-    // Pinned on purpose: this change must not move what a live deployment reads.
-    expect(resolveBrokerEnvironmentFromSettings(readSetting(null), PROD_ENV)).toBe("PROD");
+  it("falls back to paper for a tenant with no choice", () => {
+    // Pinned on purpose (#3857, owner rule): the default mode is paper,
+    // for reads as for actions — live is an explicit stored selection.
+    // This supersedes #3382's reads-keep-the-deployment-default pin.
+    expect(resolveBrokerEnvironmentFromSettings(readSetting(null), PROD_ENV)).toBe("TEST");
   });
 });
