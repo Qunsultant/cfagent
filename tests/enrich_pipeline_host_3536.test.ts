@@ -84,10 +84,11 @@ async function pollRecords(
 }
 
 describe("the feed → enrich host hand-off (#3536)", () => {
-  it("the host manages the five enrich jobs", () => {
+  it("the host manages the six enrich jobs", () => {
     expect(pipelineEnrichJobIds()).toEqual([
       "yahoo-nasdaq100-quotes-enrich",
       "yahoo-sp100-quotes-enrich",
+      "yahoo-sp500-quotes-enrich",
       "alpaca-nasdaq100-quotes-enrich",
       "etrade-nasdaq100-quotes-enrich",
       "public-nasdaq100-quotes-enrich",
