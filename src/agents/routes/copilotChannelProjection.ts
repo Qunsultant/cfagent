@@ -26,7 +26,9 @@ import {
 } from "../../services/copilotChannels";
 import {
   resolveCopilotVoiceBackend,
+  resolveVoiceBackend,
   type CopilotVoiceBackendId,
+  type VoiceSurfaceId,
 } from "../../services/copilotVoiceBackend";
 import { resolveStockCopilotVoiceActivation } from "../../trading";
 import type { Env } from "../../types";
@@ -108,5 +110,26 @@ export function projectCopilotVoiceBackend(deps: {
   env?: Env | Record<string, unknown> | null;
 }): CopilotVoiceBackendStatus {
   const resolution = resolveCopilotVoiceBackend(deps);
+  return { backend: resolution.backend, source: resolution.source };
+}
+
+/** One voice surface's wire projection (#3796): the same shape, keyed by surface. */
+export interface VoiceSurfaceBackendStatus {
+  backend: CopilotVoiceBackendId;
+  source: CopilotChannelResolution["source"];
+}
+
+/**
+ * Project one SURFACE's voice backend (#3796): the surface-keyed
+ * form of the projection above — the trading desk's read and any
+ * future surface project through this, so every surface's
+ * backend decision is resolved and named the same way.
+ */
+export function projectVoiceBackend(deps: {
+  surfaceId: VoiceSurfaceId;
+  readSettingRaw?: (key: string) => string | null;
+  env?: Env | Record<string, unknown> | null;
+}): VoiceSurfaceBackendStatus {
+  const resolution = resolveVoiceBackend(deps);
   return { backend: resolution.backend, source: resolution.source };
 }

@@ -39,6 +39,18 @@
  * Malformed entries never decide anything: they are collected
  * into `issues` and surfaced in the resolution (the channels
  * resolver's fail-visible posture), never silently applied.
+ *
+ * Issue #3796 — the switch is keyed by SURFACE, not only by
+ * copilot registration: there is ONE voice implementation, and
+ * the trading desk is a first-class surface of it beside the
+ * three registrations. A surface contributes only its id; the
+ * layering, the stored-key namespace, the env var, and the code
+ * default (webspeech on every surface) are shared. Copilot
+ * registrations keep their existing keys and behavior exactly —
+ * a stored `copilot_voice_backend:<registration>` value wins
+ * exactly as it did before the generalization — and each surface
+ * resolves independently: one surface's decision never moves
+ * another's.
  */
 
 import {
@@ -69,11 +81,34 @@ export const VOICE_STT_MODEL_FAILED = "voice_stt_model_failed";
 export const VOICE_TTS_MODEL_FAILED = "voice_tts_model_failed";
 export const VOICE_BACKEND_UNAVAILABLE = "voice_backend_unavailable";
 
+/**
+ * The voice SURFACES (#3796): the copilot registrations plus the
+ * trading desk. A surface is the unit the backend switch, the
+ * STT/TTS endpoints, and the client seam are keyed by; surfaces
+ * consume the ONE voice implementation and contribute only their
+ * id and their turn-submission semantics.
+ */
+export const TRADING_DESK_VOICE_SURFACE_ID = "trading-desk";
+export type VoiceSurfaceId =
+  | CopilotRegistrationId
+  | typeof TRADING_DESK_VOICE_SURFACE_ID;
+
+export function isVoiceSurfaceId(value: unknown): value is VoiceSurfaceId {
+  return (
+    isCopilotRegistrationId(value) || value === TRADING_DESK_VOICE_SURFACE_ID
+  );
+}
+
+/** The per-login stored-settings key for one surface's backend decision. */
+export function voiceBackendSettingKey(surfaceId: VoiceSurfaceId): string {
+  return `copilot_voice_backend:${surfaceId}`;
+}
+
 /** The per-login stored-settings key for one registration's backend decision. */
 export function copilotVoiceBackendSettingKey(
   registrationId: CopilotRegistrationId,
 ): string {
-  return `copilot_voice_backend:${registrationId}`;
+  return voiceBackendSettingKey(registrationId);
 }
 
 /**
@@ -89,6 +124,20 @@ export const COPILOT_VOICE_BACKEND_DEFAULTS: Record<
   general: "webspeech",
   options: "webspeech",
   stock: "webspeech",
+};
+
+/**
+ * THE code-default layer for every SURFACE (#3796): webspeech
+ * everywhere — the desk's voice as originally built included.
+ * The registration rows are the #3773 table above; the desk row
+ * joins it here so one table serves the generalized resolver.
+ */
+export const VOICE_BACKEND_DEFAULTS: Record<
+  VoiceSurfaceId,
+  CopilotVoiceBackendId
+> = {
+  ...COPILOT_VOICE_BACKEND_DEFAULTS,
+  [TRADING_DESK_VOICE_SURFACE_ID]: "webspeech",
 };
 
 export interface CopilotVoiceBackendResolution {
@@ -122,56 +171,71 @@ export function parseStoredCopilotVoiceBackend(raw: string | null | undefined): 
 }
 
 /**
- * Parse the ENV form — entries `<registration>=webspeech|model`
+ * Parse the ENV form — entries `<surface>=webspeech|model`
  * in the single COPILOT_VOICE_BACKEND var (the COPILOT_CHANNELS
- * format). Malformed entries decide nothing and are reported as
- * issues.
+ * format; #3796: the surface key is a copilot registration or
+ * the trading-desk surface). Malformed entries decide nothing
+ * and are reported as issues.
  */
 export function parseEnvCopilotVoiceBackendEntries(
   raw: string | null | undefined,
-): { decisions: Map<CopilotRegistrationId, CopilotVoiceBackendId>; issues: string[] } {
-  const decisions = new Map<CopilotRegistrationId, CopilotVoiceBackendId>();
+): { decisions: Map<VoiceSurfaceId, CopilotVoiceBackendId>; issues: string[] } {
+  const decisions = new Map<VoiceSurfaceId, CopilotVoiceBackendId>();
   const issues: string[] = [];
   if (typeof raw !== "string") return { decisions, issues };
   for (const part of raw.split(",")) {
     const trimmed = part.trim();
     if (!trimmed) continue;
     const eq = trimmed.indexOf("=");
-    const registration = eq > 0 ? trimmed.slice(0, eq).trim().toLowerCase() : "";
+    const surface = eq > 0 ? trimmed.slice(0, eq).trim().toLowerCase() : "";
     const backend = eq > 0 ? trimmed.slice(eq + 1).trim().toLowerCase() : "";
-    if (!isCopilotRegistrationId(registration) || !isCopilotVoiceBackendId(backend)) {
+    if (!isVoiceSurfaceId(surface) || !isCopilotVoiceBackendId(backend)) {
       issues.push(
-        `${COPILOT_VOICE_BACKEND_ENV}: malformed entry "${trimmed}" (expected "<registration>=webspeech|model")`,
+        `${COPILOT_VOICE_BACKEND_ENV}: malformed entry "${trimmed}" (expected "<surface>=webspeech|model")`,
       );
       continue;
     }
-    decisions.set(registration, backend);
+    decisions.set(surface, backend);
   }
   return { decisions, issues };
 }
 
+/** The surface-keyed resolution (#3796): the resolver's result for ANY voice surface. */
+export interface VoiceBackendResolution {
+  surfaceId: VoiceSurfaceId;
+  /** The backend that serves this surface's voice turns. */
+  backend: CopilotVoiceBackendId;
+  /** Which layer decided: the login's stored setting, the deployment env, or the code default. */
+  source: CopilotChannelSwitchSource;
+  /** Malformed entries encountered while resolving — surfaced, never applied. */
+  issues: string[];
+}
+
 /**
- * Resolve one registration's voice backend: the login's stored
+ * Resolve one SURFACE's voice backend (#3796): the login's stored
  * decision wins, then the deployment env, then the code default.
- * Never throws; malformed config is reported in `issues`.
+ * Never throws; malformed config is reported in `issues`. Every
+ * surface — copilot registration or trading desk — resolves
+ * through this one function, each from its own stored key and
+ * its own env entries.
  */
-export function resolveCopilotVoiceBackend(deps: {
-  registrationId: CopilotRegistrationId;
+export function resolveVoiceBackend(deps: {
+  surfaceId: VoiceSurfaceId;
   /** The hosting instance's settings reader (absent ⇒ no stored layer). */
   readSettingRaw?: (key: string) => string | null;
   /** The deployment env (absent ⇒ no env layer). */
   env?: Env | Record<string, unknown> | null;
-}): CopilotVoiceBackendResolution {
-  const { registrationId } = deps;
+}): VoiceBackendResolution {
+  const { surfaceId } = deps;
   const issues: string[] = [];
 
   if (deps.readSettingRaw) {
     const stored = parseStoredCopilotVoiceBackend(
-      deps.readSettingRaw(copilotVoiceBackendSettingKey(registrationId)),
+      deps.readSettingRaw(voiceBackendSettingKey(surfaceId)),
     );
     issues.push(...stored.issues);
     if (stored.decision !== undefined) {
-      return { registrationId, backend: stored.decision, source: "stored", issues };
+      return { surfaceId, backend: stored.decision, source: "stored", issues };
     }
   }
 
@@ -182,15 +246,42 @@ export function resolveCopilotVoiceBackend(deps: {
     typeof envRaw === "string" ? envRaw : undefined,
   );
   issues.push(...envParsed.issues);
-  const envDecision = envParsed.decisions.get(registrationId);
+  const envDecision = envParsed.decisions.get(surfaceId);
   if (envDecision !== undefined) {
-    return { registrationId, backend: envDecision, source: "env", issues };
+    return { surfaceId, backend: envDecision, source: "env", issues };
   }
 
   return {
-    registrationId,
-    backend: COPILOT_VOICE_BACKEND_DEFAULTS[registrationId],
+    surfaceId,
+    backend: VOICE_BACKEND_DEFAULTS[surfaceId],
     source: "default",
     issues,
+  };
+}
+
+/**
+ * Resolve one registration's voice backend: the login's stored
+ * decision wins, then the deployment env, then the code default.
+ * Never throws; malformed config is reported in `issues`.
+ * (#3796: the registration-shaped view of resolveVoiceBackend —
+ * the same resolution, keyed by the registration surface.)
+ */
+export function resolveCopilotVoiceBackend(deps: {
+  registrationId: CopilotRegistrationId;
+  /** The hosting instance's settings reader (absent ⇒ no stored layer). */
+  readSettingRaw?: (key: string) => string | null;
+  /** The deployment env (absent ⇒ no env layer). */
+  env?: Env | Record<string, unknown> | null;
+}): CopilotVoiceBackendResolution {
+  const resolved = resolveVoiceBackend({
+    surfaceId: deps.registrationId,
+    readSettingRaw: deps.readSettingRaw,
+    env: deps.env,
+  });
+  return {
+    registrationId: deps.registrationId,
+    backend: resolved.backend,
+    source: resolved.source,
+    issues: resolved.issues,
   };
 }

@@ -42,6 +42,28 @@
  * is refused by name (503 voice_backend_unavailable), never a
  * silent fallback. Model failures are named too (502
  * voice_stt_model_failed / voice_tts_model_failed).
+ *
+ * Issue #3796 — ONE voice implementation, keyed by SURFACE: the
+ * same handler also serves the surface-parameterized routes,
+ *
+ *   GET  /api/voice/backend?surface=<id>
+ *     → { surface, voiceBackend: { backend, source } }
+ *   POST /api/voice/stt?surface=<id>   (same contract as above)
+ *   POST /api/voice/tts?surface=<id>   (same contract as above)
+ *
+ * where a surface is a copilot registration or the trading desk
+ * (`trading-desk`). The copilot paths above are the compatibility
+ * form of the same routes (surface = the registration) and keep
+ * working unchanged. Each surface passes through ITS OWN
+ * availability gate before the shared backend gate: a copilot
+ * surface keeps the channel gate (403 COPILOT_CHANNEL_DISABLED);
+ * the desk surface composes with the desk's own gate — the #3429
+ * broker gate the desk turn route enforces (a tenant whose
+ * selected broker is not the desk's broker gets the 501
+ * BROKER_CHANNEL_UNAVAILABLE refusal, before any model runs).
+ * The desk's turn route and its gates are untouched: reuse here
+ * is at the voice layer (capture/playback backends, models),
+ * never the conversation layer.
  */
 
 import {
@@ -49,17 +71,22 @@ import {
   isCopilotRegistrationId,
 } from "../../services/copilotChannels";
 import {
-  resolveCopilotVoiceBackend,
+  isVoiceSurfaceId,
+  resolveVoiceBackend,
   VOICE_BACKEND_UNAVAILABLE,
   VOICE_STT_MODEL_FAILED,
   VOICE_TTS_MODEL_FAILED,
+  type VoiceSurfaceId,
 } from "../../services/copilotVoiceBackend";
 import { base64ToBytes } from "../../services/reportBlobStore";
+import { resolveTenantBroker } from "../../services/tenantProviders";
 import { resolveAiModelName } from "../model";
 import {
   projectCopilotChannelStatuses,
   projectCopilotVoiceBackend,
+  projectVoiceBackend,
 } from "./copilotChannelProjection";
+import { channelBrokerRefusal } from "./tradingIntegrations";
 import type { Env } from "../../types";
 
 /** Structural mirror of OrchestratorAgent's ScreenerExecutionContext
@@ -79,9 +106,58 @@ export interface CopilotChannelsRouteContext {
 }
 
 /**
- * Handles the copilot channel-projection read. Returns a Response
- * on match, null when the path does not match (the orchestrator
- * then continues its sequential matching).
+ * The voice endpoints' availability gate for ONE surface
+ * (#3796): each surface is gated by its own semantics, composed
+ * here — never silently widened or narrowed.
+ *
+ * - A copilot surface keeps the #3738 channel gate: the voice
+ *   channel must resolve effective (switch + class activation),
+ *   else the family's 403 COPILOT_CHANNEL_DISABLED.
+ * - The trading-desk surface composes with the desk's own #3429
+ *   gate — the same broker gate the desk turn route enforces
+ *   before it builds its service: a tenant whose selected broker
+ *   is not the desk's broker gets the 501
+ *   BROKER_CHANNEL_UNAVAILABLE refusal (the ONE refusal
+ *   implementation, routes/tradingIntegrations.ts). The #3720
+ *   copilot-context lift belongs to copilot-context turns on the
+ *   turn route; a desk-surface voice call carries no copilot
+ *   context, so no lift applies here.
+ *
+ * Returns the refusal Response, or null when the surface serves.
+ */
+async function voiceSurfaceGate(
+  surfaceId: VoiceSurfaceId,
+  ctx: CopilotChannelsRouteContext,
+): Promise<Response | null> {
+  if (isCopilotRegistrationId(surfaceId)) {
+    const channels = projectCopilotChannelStatuses({
+      registrationId: surfaceId,
+      readSettingRaw: ctx.readSettingRaw,
+      env: ctx.env,
+    });
+    if (!channels.voice.effective) {
+      return Response.json(
+        {
+          error: COPILOT_CHANNEL_DISABLED,
+          message: `The voice channel is not enabled for the ${surfaceId} copilot.`,
+        },
+        { status: 403 },
+      );
+    }
+    return null;
+  }
+  const selectedBroker = await resolveTenantBroker(ctx.env);
+  if (selectedBroker !== "etrade") {
+    return channelBrokerRefusal(selectedBroker);
+  }
+  return null;
+}
+
+/**
+ * Handles the copilot channel-projection read, the copilot voice
+ * endpoints, and the #3796 surface-parameterized voice routes.
+ * Returns a Response on match, null when the path does not match
+ * (the orchestrator then continues its sequential matching).
  */
 export async function handleCopilotChannelsRoutes(
   request: Request,
@@ -92,11 +168,26 @@ export async function handleCopilotChannelsRoutes(
 ): Promise<Response | null> {
   const isChannelsRead =
     path.endsWith("/copilot-channels") && request.method === "GET";
-  const isVoiceStt =
+  const isCopilotVoiceStt =
     path.endsWith("/copilot-channels/voice/stt") && request.method === "POST";
-  const isVoiceTts =
+  const isCopilotVoiceTts =
     path.endsWith("/copilot-channels/voice/tts") && request.method === "POST";
-  if (!isChannelsRead && !isVoiceStt && !isVoiceTts) return null;
+  const isSurfaceBackendRead =
+    path.endsWith("/voice/backend") && request.method === "GET";
+  const isSurfaceVoiceStt =
+    path.endsWith("/voice/stt") && request.method === "POST" && !isCopilotVoiceStt;
+  const isSurfaceVoiceTts =
+    path.endsWith("/voice/tts") && request.method === "POST" && !isCopilotVoiceTts;
+  const isVoiceStt = isCopilotVoiceStt || isSurfaceVoiceStt;
+  const isVoiceTts = isCopilotVoiceTts || isSurfaceVoiceTts;
+  if (
+    !isChannelsRead &&
+    !isVoiceStt &&
+    !isVoiceTts &&
+    !isSurfaceBackendRead
+  ) {
+    return null;
+  }
 
   // Fail closed: without the instance's verified login context
   // there is no "own instance" whose switches could resolve.
@@ -107,53 +198,71 @@ export async function handleCopilotChannelsRoutes(
     return Response.json({ error: "Authentication required" }, { status: 401 });
   }
 
-  const registration = url.searchParams.get("registration");
-  if (!isCopilotRegistrationId(registration)) {
-    return Response.json(
-      {
-        error:
-          "Unknown copilot registration (expected one of: general, options, stock)",
-      },
-      { status: 400 },
-    );
-  }
+  // Resolve WHICH surface this call serves: the copilot routes
+  // name it by registration (the surface IS the registration);
+  // the surface routes name it directly.
+  let surfaceId: VoiceSurfaceId;
+  if (isChannelsRead || isCopilotVoiceStt || isCopilotVoiceTts) {
+    const registration = url.searchParams.get("registration");
+    if (!isCopilotRegistrationId(registration)) {
+      return Response.json(
+        {
+          error:
+            "Unknown copilot registration (expected one of: general, options, stock)",
+        },
+        { status: 400 },
+      );
+    }
+    surfaceId = registration;
 
-  if (isChannelsRead) {
-    return Response.json({
-      registration,
-      channels: projectCopilotChannelStatuses({
-        registrationId: registration,
-        readSettingRaw: ctx.readSettingRaw,
-        env: ctx.env,
-      }),
-      voiceBackend: projectCopilotVoiceBackend({
-        registrationId: registration,
-        readSettingRaw: ctx.readSettingRaw,
-        env: ctx.env,
-      }),
-    });
+    if (isChannelsRead) {
+      return Response.json({
+        registration,
+        channels: projectCopilotChannelStatuses({
+          registrationId: registration,
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
+        voiceBackend: projectCopilotVoiceBackend({
+          registrationId: registration,
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
+      });
+    }
+  } else {
+    const surface = url.searchParams.get("surface");
+    if (!isVoiceSurfaceId(surface)) {
+      return Response.json(
+        {
+          error:
+            'Unknown voice surface (expected a copilot registration or "trading-desk")',
+        },
+        { status: 400 },
+      );
+    }
+    surfaceId = surface;
+
+    if (isSurfaceBackendRead) {
+      return Response.json({
+        surface,
+        voiceBackend: projectVoiceBackend({
+          surfaceId: surface,
+          readSettingRaw: ctx.readSettingRaw,
+          env: ctx.env,
+        }),
+      });
+    }
   }
 
   // The voice endpoints serve the model backend only, and only
-  // when the voice channel itself serves: channel gate first
-  // (403, the channel family's named refusal), then the backend
-  // gate (503, named — never a silent fallback to webspeech).
-  const channels = projectCopilotChannelStatuses({
-    registrationId: registration,
-    readSettingRaw: ctx.readSettingRaw,
-    env: ctx.env,
-  });
-  if (!channels.voice.effective) {
-    return Response.json(
-      {
-        error: COPILOT_CHANNEL_DISABLED,
-        message: `The voice channel is not enabled for the ${registration} copilot.`,
-      },
-      { status: 403 },
-    );
-  }
-  const backend = resolveCopilotVoiceBackend({
-    registrationId: registration,
+  // when the surface itself serves: the surface's availability
+  // gate first (named refusal), then the backend gate (503,
+  // named — never a silent fallback to webspeech).
+  const gateRefusal = await voiceSurfaceGate(surfaceId, ctx);
+  if (gateRefusal) return gateRefusal;
+  const backend = resolveVoiceBackend({
+    surfaceId,
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
@@ -163,7 +272,9 @@ export async function handleCopilotChannelsRoutes(
         error: VOICE_BACKEND_UNAVAILABLE,
         message:
           backend.backend !== "model"
-            ? `The ${registration} copilot's voice backend is "${backend.backend}", not "model".`
+            ? isCopilotRegistrationId(surfaceId)
+              ? `The ${surfaceId} copilot's voice backend is "${backend.backend}", not "model".`
+              : `The ${surfaceId} voice surface's backend is "${backend.backend}", not "model".`
             : "The Workers AI binding is not available in this deployment.",
       },
       { status: 503 },

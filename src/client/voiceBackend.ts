@@ -24,12 +24,20 @@
  * CopilotVoiceError) — never a silent fallback to the other
  * backend. (Browser recognition errors carry no code: the desk's
  * treatment, a quiet return to idle.)
+ *
+ * Issue #3796: the seam is keyed by SURFACE. Copilot surfaces
+ * construct through createVoiceBackend (registration endpoints);
+ * the trading desk and any other named surface construct through
+ * createSurfaceVoiceBackend (surface endpoints). Both build the
+ * SAME two adapters — one voice implementation behind one switch.
  */
 
 import {
   CopilotVoiceError,
   synthesizeCopilotVoice,
+  synthesizeVoiceSurface,
   transcribeCopilotVoice,
+  transcribeVoiceSurface,
   type CopilotVoiceBackendId,
 } from "./copilotChannelsApi";
 import {
@@ -129,7 +137,20 @@ function namedCode(err: unknown): string {
   return err instanceof CopilotVoiceError ? err.code : "voice_backend_unavailable";
 }
 
-function createModelVoiceBackend(registration: string): VoiceBackend {
+/**
+ * The model adapter's speech endpoints (#3796): the ONE model
+ * adapter serves every surface; a surface contributes only the
+ * endpoint pair its routes resolve through (copilot registrations
+ * through the copilot voice endpoints, a named surface through
+ * the surface endpoints). Capture, playback, and failure posture
+ * below are shared — no surface gets its own adapter.
+ */
+export interface VoiceModelEndpoints {
+  transcribe: (audioBase64: string, contentType?: string) => Promise<string>;
+  synthesize: (text: string) => Promise<Blob>;
+}
+
+function createModelVoiceBackend(endpoints: VoiceModelEndpoints): VoiceBackend {
   return {
     id: "model",
     isSupported: () =>
@@ -157,11 +178,7 @@ function createModelVoiceBackend(registration: string): VoiceBackend {
         handlers.onProcessing?.();
         try {
           const audioBase64 = await blobToBase64(blob);
-          const text = await transcribeCopilotVoice(
-            registration,
-            audioBase64,
-            blob.type,
-          );
+          const text = await endpoints.transcribe(audioBase64, blob.type);
           handlers.onFinal(text);
         } catch (err) {
           handlers.onError?.(namedCode(err));
@@ -210,7 +227,7 @@ function createModelVoiceBackend(registration: string): VoiceBackend {
       if (opts?.muted) return false;
       let audioBlob: Blob;
       try {
-        audioBlob = await synthesizeCopilotVoice(registration, text);
+        audioBlob = await endpoints.synthesize(text);
       } catch (err) {
         opts?.onError?.(namedCode(err));
         return false;
@@ -239,14 +256,39 @@ function createModelVoiceBackend(registration: string): VoiceBackend {
 
 /**
  * Build the adapter the projection resolved for one registration.
- * The seam's only construction point: surfaces ask for the
- * resolved id and consume the VoiceBackend interface.
+ * The seam's construction point for copilot surfaces: surfaces
+ * ask for the resolved id and consume the VoiceBackend interface.
  */
 export function createVoiceBackend(
   id: VoiceBackendId,
   deps: { registration: string },
 ): VoiceBackend {
   return id === "model"
-    ? createModelVoiceBackend(deps.registration)
+    ? createModelVoiceBackend({
+        transcribe: (audioBase64, contentType) =>
+          transcribeCopilotVoice(deps.registration, audioBase64, contentType),
+        synthesize: (text) => synthesizeCopilotVoice(deps.registration, text),
+      })
+    : createWebSpeechVoiceBackend();
+}
+
+/**
+ * Build the adapter the projection resolved for one named
+ * SURFACE (#3796) — the trading desk and any future surface. The
+ * same adapters as the copilot construction above; only the
+ * model endpoints differ (the surface-parameterized routes).
+ * The webspeech adapter is surface-independent by construction
+ * (the browser machinery is the same for every surface).
+ */
+export function createSurfaceVoiceBackend(
+  id: VoiceBackendId,
+  deps: { surface: string },
+): VoiceBackend {
+  return id === "model"
+    ? createModelVoiceBackend({
+        transcribe: (audioBase64, contentType) =>
+          transcribeVoiceSurface(deps.surface, audioBase64, contentType),
+        synthesize: (text) => synthesizeVoiceSurface(deps.surface, text),
+      })
     : createWebSpeechVoiceBackend();
 }
