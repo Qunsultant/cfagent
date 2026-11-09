@@ -34,6 +34,12 @@ export interface PortfolioSummary {
   readonly positionCount: number;
   readonly optionCount: number;
   readonly equityCount: number;
+  /**
+   * Issue #3880: did a read actually land? The hero used to print
+   * "0 positions" before the first response arrived, which is a claim the
+   * platform had not verified. `false` must render as unknown, never as zero.
+   */
+  readonly reported: boolean;
 }
 
 export interface PortfolioRead {
@@ -147,6 +153,9 @@ export function portfolioSummary(
     equity,
     cash,
     buyingPower,
+    // Issue #3880: the same "read landed" fact the money figures already use,
+    // surfaced so counts can say "unknown" instead of "0".
+    reported: read,
     dayGain: read ? dayGain : null,
     unrealisedGain: read ? unrealisedGain : null,
     positionCount: positions.length,
@@ -169,4 +178,24 @@ export function formatSignedMoney(value: number | null): string {
   if (value === null) return "—";
   const sign = value >= 0 ? "+" : "-";
   return `${sign}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * Issue #3880 — which side a hero badge should print.
+ *
+ * The hub derived the side from local state (`activeEnv === "PROD"`) while the
+ * server resolves the side from the persisted selection and ignores the
+ * request's environment hint. The two disagree whenever the client's stored
+ * default is stale, and the page then printed "LIVE TRADING" for a paper
+ * account. A payload that echoes `environment` is the authoritative answer;
+ * local state is only the fallback for a surface with no server read yet.
+ */
+export function heroTradingType(
+  environment: unknown,
+  fallback: "TEST" | "PROD",
+): "live" | "paper" {
+  const value = typeof environment === "string" ? environment.trim().toUpperCase() : "";
+  if (value === "PROD" || value === "LIVE") return "live";
+  if (value === "TEST" || value === "PAPER" || value === "SANDBOX") return "paper";
+  return fallback === "PROD" ? "live" : "paper";
 }
