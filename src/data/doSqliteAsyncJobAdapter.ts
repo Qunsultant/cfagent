@@ -106,6 +106,19 @@ export class DoSqliteAsyncJobStore
       // Issue #2567: the stuck-running alert claim stamp.
       this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN stuck_alerted_at TEXT");
     }
+    if (!names.has("trigger")) {
+      // Issue #3810: provenance stamped at submission — the trigger
+      // that caused this job. NULL = the submission carried none.
+      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN trigger TEXT");
+    }
+    if (!names.has("triggered_by")) {
+      // Issue #3810: the trigger's actor (a login, a goal id).
+      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN triggered_by TEXT");
+    }
+    if (!names.has("schedule_id")) {
+      // Issue #3810: the originating schedule's id (NULL = not scheduled).
+      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN schedule_id TEXT");
+    }
     this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_parent ON mas_async_jobs(parent_job_id)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_chain ON mas_async_jobs(chain_id)");
   }
@@ -142,7 +155,7 @@ export class DoSqliteAsyncJobStore
     // not span newlines inside the column list (tests would silently drop
     // the row) — keep this statement on one line.
     this.sql.exec(
-      "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, created_at, updated_at, parent_job_id, job_kind, channel, not_before, stage, chain_id) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, created_at, updated_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, trigger, triggered_by, schedule_id) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       input.jobId,
       input.sessionId,
       input.capability,
@@ -156,6 +169,9 @@ export class DoSqliteAsyncJobStore
       input.notBefore ?? null,
       input.stage ?? null,
       input.chainId ?? null,
+      input.trigger ?? null,
+      input.triggeredBy ?? null,
+      input.scheduleId ?? null,
     );
   }
 
@@ -175,7 +191,7 @@ export class DoSqliteAsyncJobStore
     // Single-line INSERT per the MockSqlStorage lesson (multi-line
     // column lists silently no-op in the shared mock).
     this.sql.exec(
-      "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, completed_at, job_kind, stage, chain_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, completed_at, job_kind, stage, chain_id, trigger, triggered_by, schedule_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       input.jobId,
       input.sessionId,
       input.capability,
@@ -190,6 +206,9 @@ export class DoSqliteAsyncJobStore
       input.jobKind ?? "main",
       input.stage ?? null,
       input.chainId ?? null,
+      input.trigger ?? null,
+      input.triggeredBy ?? null,
+      input.scheduleId ?? null,
     );
   }
 
@@ -268,7 +287,7 @@ export class DoSqliteAsyncJobStore
   getRow(jobId: string, sessionId: string): AsyncJobStoredRow | undefined {
     const rows = Array.from(this.sql.exec(
       `SELECT job_id, session_id, capability, display_name, status, result_json, response_status,
-            error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at
+            error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id
      FROM mas_async_jobs WHERE job_id = ? AND session_id = ?`,
       jobId,
       sessionId,
@@ -278,7 +297,7 @@ export class DoSqliteAsyncJobStore
 
   listRows(sessionId: string, limit: number): AsyncJobListRow[] {
     return Array.from(this.sql.exec(
-      `SELECT job_id, session_id, capability, display_name, status, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at
+      `SELECT job_id, session_id, capability, display_name, status, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id
      FROM mas_async_jobs WHERE session_id = ?
      ORDER BY created_at DESC LIMIT ?`,
       sessionId,
@@ -313,7 +332,7 @@ export class DoSqliteAsyncJobStore
 
   getRetrySource(jobId: string, sessionId: string) {
     const rows = Array.from(this.sql.exec(
-      `SELECT job_id, capability, display_name, status, payload_json, parent_job_id, job_kind, channel, stage, chain_id
+      `SELECT job_id, capability, display_name, status, payload_json, parent_job_id, job_kind, channel, stage, chain_id, trigger, triggered_by, schedule_id
      FROM mas_async_jobs WHERE job_id = ? AND session_id = ?`,
       jobId,
       sessionId,
@@ -328,6 +347,9 @@ export class DoSqliteAsyncJobStore
       channel: string | null;
       stage: string | null;
       chain_id: string | null;
+      trigger: string | null;
+      triggered_by: string | null;
+      schedule_id: string | null;
     }>;
     return rows[0];
   }
@@ -349,7 +371,7 @@ export class DoSqliteAsyncJobStore
 
   workflowRunRows(sessionId: string, limit: number): AsyncJobWorkflowRow[] {
     return Array.from(this.sql.exec(
-      "SELECT job_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at FROM mas_async_jobs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+      "SELECT job_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id FROM mas_async_jobs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
       sessionId,
       limit,
     )) as unknown as AsyncJobWorkflowRow[];

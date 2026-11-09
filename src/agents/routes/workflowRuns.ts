@@ -116,6 +116,12 @@ export function readWorkflowRunJobs(sql: WorkflowRunsSql, sessionId: string, lim
     // the runs view can derive the Stuck display (the SQL
     // projection already selects it).
     stuck_alerted_at: str(row.stuck_alerted_at),
+    // Issue #3810: provenance stamped at submission rides the row
+    // so the read model can evidence the run's own trigger and
+    // schedule (the SQL projection already selects it).
+    trigger: str(row.trigger),
+    triggered_by: str(row.triggered_by),
+    schedule_id: str(row.schedule_id),
   }));
 }
 
@@ -461,11 +467,23 @@ export function buildSagaChainRuns(input: SagaChainRunsInput): WorkflowRun[] {
     const endedPayload = rows.find((r) => r["type"] === "saga.ended")?.["payload"] as
       | Record<string, unknown>
       | undefined;
+    // Issue #3810: the saga entry carries its own trigger (manual /
+    // scheduled, validated at the entry) — pass it through so the
+    // chain evidences its trigger instead of "unknown". Any other
+    // value stays uncarried (the chain stays "unknown", never
+    // guessed).
+    const sagaTrigger = stringField(startedPayload, "trigger");
     const run = runFromSagaChain({
       sagaId,
       jobs,
       projection,
       triggeredBy: input.userLogin,
+      ...(sagaTrigger === "manual" || sagaTrigger === "scheduled"
+        ? {
+            trigger: sagaTrigger,
+            triggerDetail: `${sagaTrigger === "scheduled" ? "Scheduled" : "Manual"} — recorded by the saga entry`,
+          }
+        : {}),
       endedCode: stringField(endedPayload, "outcomeCode"),
       endedAtMs: jobs.find((j) => j.stage === "done")?.updatedAtMs ?? null,
       started: startedPayload

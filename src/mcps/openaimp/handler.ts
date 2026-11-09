@@ -258,6 +258,11 @@ export function createOpenaimpMcpServer(context: OpenaimpMcpHandlerContext): Ser
             ...(actingLogin ? { actingLogin } : {}),
             ...(traceparent ? { traceparent } : {}),
           },
+          // Issue #3810: the job was queued by an agent (turn or
+          // external MCP client) — stamp the trigger (and the acting
+          // identity when resolved) at submission.
+          trigger: "agent",
+          ...(actingLogin ? { triggeredBy: actingLogin } : {}),
         });
         // #2428 (Agent Mesh S17): the queue-time trace hop,
         // recorded here for the same reason the stamps live here —

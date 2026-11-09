@@ -330,6 +330,8 @@ describe("MCP tools/call delivery mode", () => {
     expect(submitJob).toHaveBeenCalledWith({
       capability: "mcp.tool",
       payload: { toolName: "list_database_tables", arguments: {} },
+      // Issue #3810: the handler stamps the agent trigger at queue time.
+      trigger: "agent",
     });
     expect(JSON.parse(resp.result?.content[0].text)).toMatchObject({ jobId: receipt.jobId, status: "queued" });
   });
