@@ -1,4 +1,4 @@
-﻿### Added
+### Added
 
 - **Base-breakout continuation ladder (#3887):** `alpaca_place_bracket_ladder` gains `entry_mode: "baseBreakout"` — rung 1 is placed when a configurable base confirms (window range + volume-backed breakout, with the detector publishing its inputs), and rung N+1 only after the price advances `continuation_increment` past the last rung. No timer places a rung. `fixedGrid` (#3673) stays the default and is unchanged. #rsi
 - **Named stops (#3887):** `base_not_formed`, `budget_exhausted`, `order_cap_reached`, `tier_cap_reached`, `price_below_base`, `outside_session`, `ladder_cancelled`, `rung_place_failed` — the receipt says which cap stopped the ladder, with the numbers. #rsi
