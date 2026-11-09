@@ -16,6 +16,7 @@ import {
   controlStockCopilotViaDoor,
   type StockCopilotDoorContext,
 } from "../src/agents/orchestrator/meshStockCopilotDoor";
+import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
 import {
   StockCopilotStatusCommand,
   StockCopilotControlCommand,
@@ -125,6 +126,10 @@ function createTestDoorContext(sql: MockSqlExecutor, overrides?: Partial<StockCo
     sql: sql as any,
     readSettingRaw: (k: string) => settingsStore.get(k) ?? null,
     writeSetting: (k: string, v: string) => settingsStore.set(k, v),
+    // Issue #3899: the door reads the REAL stored broker selection —
+    // the empty in-memory store resolves to the copilot default
+    // (alpaca, paper) through the resolver, never a hardcoded fake.
+    commercial: new InMemoryCommercialAdapter(),
     audit: vi.fn(),
     ...overrides,
   };
@@ -246,8 +251,14 @@ describe("Issue #3513 MCP Tool Commands", () => {
     expect(statusCmd.name).toBe("stock_copilot_status");
     const statusResult = await statusCmd.execute({}, mcpContext);
     expect(statusResult.userLogin).toBe("agent_dev");
-    expect(statusResult.activeBroker).toBe("alpaca");
-    expect(statusResult.activeMode).toBe("paper");
+    // Issue #3899: the MCP door context carries no commercial store
+    // and this harness binds no AGENT_DB, so the selection is
+    // unresolved (never a hardcoded alpaca) — in production the
+    // resolver composes the real D1 store from env.
+    expect(statusResult.selectionResolved).toBe(false);
+    expect(statusResult.activeBroker).toBeNull();
+    expect(statusResult.activeMode).toBeNull();
+    expect(statusResult.status).toBe("mode_unresolved");
 
     const controlCmd = new StockCopilotControlCommand();
     expect(controlCmd.name).toBe("stock_copilot_control");

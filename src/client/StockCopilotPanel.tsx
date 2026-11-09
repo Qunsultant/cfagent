@@ -71,6 +71,9 @@ const STATUS_VIEW: Record<StockCopilotStatusKind, { label: string; tone: BadgeTo
   off: { label: "Off", tone: "neutral" },
   mode_unresolved: { label: "Mode unresolved", tone: "danger" },
   inactive_broker: { label: "Inactive broker", tone: "neutral" },
+  // Issue #3899: the loop is armed but no cycle has ever executed —
+  // configuration presented as liveness was the incident.
+  never_executed: { label: "Never executed", tone: "warning" },
 };
 
 const OUTCOME_VIEW: Record<StockCopilotActivityRecord["outcome"], { label: string; tone: BadgeTone }> = {
@@ -311,6 +314,14 @@ export function StockCopilotPanel() {
             ? `The active selection is ${selectionLabel} — the Stock Copilot trades on Alpaca only, so it stays inactive while another broker is active.`
             : "A different broker is active in the panel menu — the Stock Copilot trades on Alpaca only, so it stays inactive."}{" "}
           Select Alpaca in the panel menu to activate it.
+        </Notice>
+      )}
+      {status.status === "never_executed" && (
+        <Notice tone="warning">
+          No cycle has executed yet — the loop is armed but has never
+          fired (or never recorded a firing). Check the runs view for
+          the stock-copilot-paper-cycle job; the first cycle (or its
+          named refusal) will appear here as the latest cycle.
         </Notice>
       )}
       {status.paused && (

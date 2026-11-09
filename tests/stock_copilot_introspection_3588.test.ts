@@ -15,6 +15,7 @@ import {
 } from "../src/agents/routes/stockCopilot";
 import { MeshDoorError } from "../src/agents/orchestrator/meshDoors";
 import type { StockCopilotStoreSqlExecutor } from "../src/data/stockCopilotStorePorts";
+import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
 import {
   createStockCopilotPositionPort,
   createStockCopilotActivityPort,
@@ -164,6 +165,11 @@ describe("Issue #3588 — Stock Copilot Introspection Service", () => {
       positionPort,
       activityPort,
       controlPort,
+      // Issue #3899: the introspection reads the REAL stored broker
+      // selection — the empty in-memory store resolves to the copilot
+      // default (alpaca, paper) through the resolver, never a
+      // hardcoded fake.
+      commercial: new InMemoryCommercialAdapter(),
     });
 
     expect(result.ok).toBe(true);

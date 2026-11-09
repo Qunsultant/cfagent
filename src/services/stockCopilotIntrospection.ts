@@ -20,7 +20,6 @@
  */
 
 import {
-  COPILOT_BROKER_ID,
   resolveCopilotTradingSelection,
 } from "../agents/copilotTradingMode";
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
@@ -94,8 +93,10 @@ export interface StockCopilotIntrospectionResult {
   timestamp: string;
   mode: "deterministic" | "agentic";
   configuration: {
-    broker: string;
-    mode: string;
+    /** The real stored broker selection, or null when unresolved. */
+    broker: string | null;
+    /** The real stored mode, or null when unresolved. */
+    mode: string | null;
     selectionResolved: boolean;
     cadence: {
       configured: string;
@@ -392,12 +393,12 @@ export async function introspectStockCopilot(
   const { userLogin, readSettingRaw, env, positionPort, activityPort, controlPort } = deps;
 
   // 1. Resolve configuration from DO SQLite and env
-  const commercial =
-    deps.commercial !== undefined
-      ? deps.commercial
-      : ({
-          getTenantBrokerSelection: async () => COPILOT_BROKER_ID,
-        } as unknown as CommercialStore);
+  // Issue #3899 (RC3): no fake broker default — the resolver composes
+  // the real commercial store from env when no store was injected
+  // (deps.commercial undefined), so the introspection reports the
+  // real stored selection; an unbound store reads as unresolved,
+  // never alpaca/paper.
+  const commercial = deps.commercial;
 
   const selection = await resolveCopilotTradingSelection({
     env,
@@ -405,8 +406,8 @@ export async function introspectStockCopilot(
     commercial,
   });
 
-  const activeBroker = selection.resolved ? selection.selection.brokerId : COPILOT_BROKER_ID;
-  const activeMode = selection.resolved ? selection.selection.mode : "paper";
+  const activeBroker = selection.resolved ? selection.selection.brokerId : null;
+  const activeMode = selection.resolved ? selection.selection.mode : null;
   const cadence = resolveCopilotCadence({ env, readSettingRaw });
   const enabledSessions = resolveCopilotSessions({ readSettingRaw, env });
   const universe = resolveCopilotUniverse({ readSettingRaw, env });
@@ -448,7 +449,7 @@ export async function introspectStockCopilot(
   }
 
   learnings.push(
-    `Operating on ${activeBroker.toUpperCase()} in ${activeMode.toUpperCase()} mode with honest cadence of ${cadence.effective}.`,
+    `Operating on ${(activeBroker ?? "unresolved").toUpperCase()} in ${(activeMode ?? "unresolved").toUpperCase()} mode with honest cadence of ${cadence.effective}.`,
   );
 
   const criticSummary =
@@ -481,13 +482,13 @@ export async function introspectStockCopilot(
     `# 🧠 Stock Copilot Self-Explanation & Capability Briefing`,
     ``,
     `> **User:** \`${userLogin}\` | **Timestamp:** \`${nowIso}\`  `,
-    `> **Broker:** \`${activeBroker.toUpperCase()}\` | **Mode:** \`${activeMode.toUpperCase()}\` | **Cadence:** \`${cadence.effective}\`  `,
+    `> **Broker:** \`${(activeBroker ?? "unresolved").toUpperCase()}\` | **Mode:** \`${(activeMode ?? "unresolved").toUpperCase()}\` | **Cadence:** \`${cadence.effective}\`  `,
     `> **Status:** \`${paused ? "PAUSED" : "ACTIVE"}\` | **Enabled Sessions:** \`${enabledSessions.join(", ")}\``,
     ``,
     `---`,
     ``,
     `## 1. Runtime Configuration & Environment`,
-    `- **Active Broker & Mode:** \`${activeBroker}\` in \`${activeMode}\` mode (enforces paper trading default).`,
+    `- **Active Broker & Mode:** \`${activeBroker ?? "unresolved"}\` in \`${activeMode ?? "unresolved"}\` mode (enforces paper trading default).`,
     `- **Cycle Cadence:** Configured as \`${cadence.configured}\` (Effective: \`${cadence.effective}\`).`,
     `- **Monitored Universe:** ${universePreset ? `\`${universePreset}\` (${universe.map((s) => `\`${s}\``).join(", ")})` : universe.map((s) => `\`${s}\``).join(", ")}.`,
     `- **Active Strategies:** ${strategies.map((s) => `\`${s}\``).join(", ")}.`,

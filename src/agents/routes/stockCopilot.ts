@@ -94,6 +94,7 @@ import {
 import { evaluateStockCopilotStrategy } from "../../services/stockCopilotEvaluation";
 import { summarizeLearnings } from "../../services/stockCopilotAgenticLoop";
 import { introspectStockCopilot } from "../../services/stockCopilotIntrospection";
+import { hasCopilotCycleLedgerRows } from "../orchestrator/meshStockCopilotDoor";
 import {
   copilotChannelsSettingKey,
   parseStoredCopilotChannelEntries,
@@ -272,6 +273,16 @@ export async function handleStockCopilotRoutes(
         readSettingRaw: ctx.readSettingRaw,
         commercial: ctx.commercial,
       });
+      const rawActivity = activity.listActivity(userLogin, ACTIVITY_LIMIT);
+      const lastCycle =
+        rawActivity.length > 0
+          ? (rawActivity[0] as unknown as Record<string, unknown>)
+          : null;
+      // Issue #3899 (RC3): "live" means a cycle has run, not just that
+      // the gates pass — with no activity record and no ledger row the
+      // copilot has never executed, and the status says so.
+      const neverExecuted =
+        lastCycle === null && !hasCopilotCycleLedgerRows(ctx.sql);
       const status = !flagEnabled
         ? "off"
         : !selection.resolved
@@ -282,7 +293,9 @@ export async function handleStockCopilotRoutes(
               ? "paused"
               : currentSession === null || !enabledSessions.includes(currentSession)
                 ? "outside_enabled_sessions"
-                : "live";
+                : neverExecuted
+                  ? "never_executed"
+                  : "live";
       const cadence = resolveCopilotCadence({
         env: ctx.env,
         readSettingRaw: ctx.readSettingRaw,
@@ -328,6 +341,10 @@ export async function handleStockCopilotRoutes(
           .listClosedPositions(userLogin, CLOSED_POSITION_LIMIT)
           .map(projectClosedPosition),
         activity: activity.listActivity(userLogin, ACTIVITY_LIMIT),
+        // Issue #3899 (RC3): the panel's liveness proof — null until a
+        // cycle actually fires and records.
+        lastCycle,
+        neverExecuted,
       });
     } catch (err) {
       return Response.json(
@@ -349,6 +366,9 @@ export async function handleStockCopilotRoutes(
         positionPort: positions,
         activityPort: activity,
         controlPort: control,
+        // Issue #3899 (RC3): the real commercial store, composed from
+        // env by the resolver when absent — never the fake default.
+        commercial: ctx.commercial,
       });
       return Response.json(introspection);
     } catch (err) {

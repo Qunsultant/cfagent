@@ -93,7 +93,8 @@ export type StockCopilotStatusKind =
   | "outside_enabled_sessions"
   | "live"
   | "mode_unresolved"
-  | "inactive_broker";
+  | "inactive_broker"
+  | "never_executed";
 
 /**
  * #3738: one channel's switch resolution as the status read
@@ -146,6 +147,11 @@ export interface StockCopilotStatus {
   selectionResolved: boolean;
   activeBroker: string | null;
   activeMode: "paper" | "live" | null;
+  /** #3899: true when no cycle has ever executed (no activity record
+   *  and no cycle row in the runs ledger). */
+  neverExecuted?: boolean;
+  /** #3899: the latest recorded cycle, or null when none ever ran. */
+  lastCycle?: StockCopilotActivityRecord | null;
   userLogin: string;
   controlUpdatedAt: string | null;
   /** #3738: the registration's channel switches (voice affordance source). */

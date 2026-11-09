@@ -1131,6 +1131,13 @@ export class OrchestratorAgent extends PortThink {
         error: idxErr instanceof Error ? idxErr.message : String(idxErr),
       });
     }
+
+    // Issue #3899 (RC1): a cold start that lands AFTER the execution
+    // context exists (a redeploy, an eviction) must re-evaluate the
+    // declaration against it — the onStart reconcile is the
+    // best-effort arm for that path. Best-effort: a failure never
+    // blocks startup.
+    await this.reconcileCopilotScheduledTasks();
   }
 
   /**
@@ -1272,6 +1279,27 @@ export class OrchestratorAgent extends PortThink {
   // Issue #992: extracted to ./orchestrator/scheduleMaintenance.ts (ensureStrategyScanSchedule);
   async ensureStrategyScanSchedule(context: ScreenerExecutionContext): Promise<void> {
     return ensureStrategyScanSchedule(this.scheduleMaintenanceContext(), context);
+  }
+
+  /**
+   * Issue #3899 (RC1): re-reconcile the Think scheduled-task
+   * declaration after app-owned data it reads changed. The SDK's
+   * own hook for this exact case — `internal_reconcileScheduledTasks`
+   * ("call this after changing app-owned data that
+   * `getScheduledTasks()` reads"). Best-effort by design: a
+   * reconcile failure is logged, never thrown — a request must
+   * never fail, and startup must never block, because the scheduler
+   * could not be re-armed.
+   */
+  private async reconcileCopilotScheduledTasks(): Promise<void> {
+    try {
+      await this.internal_reconcileScheduledTasks();
+    } catch (reconcileError) {
+      structuredLog.warn("orchestrator.copilot_schedule_reconcile_failed", {
+        message: "[OrchestratorAgent] Could not reconcile the Stock Copilot scheduled task:",
+        error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError),
+      });
+    }
   }
 
   // Issue #2693 (#2494 Think adoption, screener slice 1): extracted
@@ -2687,6 +2715,20 @@ export class OrchestratorAgent extends PortThink {
           message: "[OrchestratorAgent] Could not reconcile authenticated baseline schedules:",
           error: scheduleError instanceof Error ? scheduleError.message : String(scheduleError),
         });
+      }
+      // Issue #3899 (RC1): the Think task declaration reads this
+      // stored context, and its first evaluation (cold start) always
+      // predates it — re-reconcile exactly when the stored context
+      // changed, so the first authenticated request arms the
+      // `stock-copilot-paper-cycle` task instead of waiting for a
+      // cold start that may never come. Best-effort (see
+      // reconcileCopilotScheduledTasks): the reconcile never fails
+      // the request.
+      const contextChanged =
+        previous?.userLogin !== context.userLogin ||
+        previous?.environment !== context.environment;
+      if (contextChanged) {
+        await this.reconcileCopilotScheduledTasks();
       }
     }
 
