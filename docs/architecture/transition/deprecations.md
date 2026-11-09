@@ -27,3 +27,22 @@ slice.
   decision plus a gate amendment; deletion is outside the #2381
   program slices. Retain until the owner confirms no pre-rename
   debugging still needs the frozen originals.
+
+## 2026-11-08 — anti-drift framework supersedes the anti-drift controls document (#3802)
+
+- File: `docs/compliance/anti-drift-controls.md` → `docs/compliance/anti-drift-controls.deprecated.md`
+- Date: 2026-11-08
+- Reason: Two documents stated the same anti-drift thesis, the same active
+  controls, and the same eight mandatory future controls (the standards-set
+  survey under #3791 found the duplication). One subject, one home: the
+  framework document is the surviving home.
+- Replacement: `docs/compliance/anti-drift.md` (single anti-drift home;
+  the controls document's one unique control — zero-FOUC pre-paint
+  hydration — was folded into its §2 in the same slice).
+- Consumers at deprecation: the standards set README
+  (`docs/architecture/code/README.md`) and
+  `docs/compliance/facts-n-findings-01.md` referenced the controls path;
+  both were updated in the same slice. The compliance-docs pin
+  (`tests/compliance_docs.test.ts`) now asserts the deprecated path.
+- Deletion condition: zero consumers plus an owner decision plus a gate
+  amendment; deletion is never part of a program slice.
