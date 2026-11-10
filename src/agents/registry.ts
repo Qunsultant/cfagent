@@ -1700,10 +1700,12 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
       "browser.snap_transaction",
       "browser.capture_page",
       "browser.scrape_tables",
+      "browser.web_fetch",
+      "browser.web_search",
     ],
     gate: A2A_EDGE_GATE,
     notes:
-      "The door never accepts or forwards a caller-supplied webhookUrl — delivery targets are env configuration only (the #2223 precedent, held on every door since #2351).",
+      "The door never accepts or forwards a caller-supplied webhookUrl — delivery targets are env configuration only (the #2223 precedent, held on every door since #2351). The web operations (#3969) serve the class's webFetch / webSearch capabilities on this surface, behind the same capability gate as the turn path.",
   },
   {
     className: "BrowserAgent",
@@ -1873,10 +1875,10 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     className: "SandboxAgent",
     door: "a2a",
     status: "exposed",
-    operations: ["sandbox.status", "sandbox.run_command"],
+    operations: ["sandbox.status", "sandbox.run_command", "sandbox.web_fetch", "sandbox.web_search"],
     gate: A2A_EDGE_GATE,
     notes:
-      "Added by #2421 — the #2253/S1 recorded follow-up (dispatch: src/agents/sandboxA2aDispatch.ts). Credential posture since S16 (#2426): this surface has its own mesh credential (A2A_TOKEN_SANDBOX), with the shared token as its transitional fallback, like every A2A surface. Results carry the service's degraded posture verbatim: with no container backend bound, run_command returns executed:false — never emulated, never fabricated. Input parity with the other doors: { command, timeoutMs } only; envVars/workingDir are accepted on no door and are not accepted here.",
+      "Added by #2421 — the #2253/S1 recorded follow-up (dispatch: src/agents/sandboxA2aDispatch.ts). Credential posture since S16 (#2426): this surface has its own mesh credential (A2A_TOKEN_SANDBOX), with the shared token as its transitional fallback, like every A2A surface. Results carry the service's degraded posture verbatim: with no container backend bound, run_command returns executed:false — never emulated, never fabricated. Input parity with the other doors: { command, timeoutMs } only; envVars/workingDir are accepted on no door and are not accepted here. The web operations (#3969) serve the class's webFetch / webSearch capabilities on this surface, behind the same capability gate as the turn path; they do not use the sandbox backend, so the degradation does not apply to them.",
   },
   {
     className: "SandboxAgent",

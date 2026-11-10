@@ -609,6 +609,14 @@ function makeBrowserExecutor(overrides: Partial<BrowserA2AExecutor> = {}) {
       calls.push({ method: "scrapeTables", args: url });
       return { url, tables: [{ headers: ["A"], rows: [["1"]] }] } as any;
     },
+    fetchWeb: async (url) => {
+      calls.push({ method: "fetchWeb", args: url });
+      return { success: true, url, finalUrl: url, status: 200, contentType: "text/plain", text: "page text", truncated: false, fetchedAt: "2026-10-29T00:00:00.000Z" } as any;
+    },
+    searchWeb: async (query, count) => {
+      calls.push({ method: "searchWeb", args: { query, count } });
+      return { provider: "duckduckgo", query, count: 0, results: [] } as any;
+    },
     ...overrides,
   };
   return { executor, calls };
