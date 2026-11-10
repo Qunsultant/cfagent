@@ -127,6 +127,14 @@ export interface StockCopilotChannelsStatus {
   voice: CopilotVoiceChannelStatus;
 }
 
+/** #4001 (follow-up): one recorded handler entry for the cycle task. */
+export interface CopilotCycleFiringAttempt {
+  taskId: string;
+  scheduledFor: number;
+  occurrenceKey: string;
+  receivedAt: string;
+}
+
 export interface StockCopilotStatus {
   flagEnabled: boolean;
   paused: boolean;
@@ -159,6 +167,10 @@ export interface StockCopilotStatus {
   neverExecuted?: boolean;
   /** #3899: the latest recorded cycle, or null when none ever ran. */
   lastCycle?: StockCopilotActivityRecord | null;
+  /** #4001 (follow-up): the latest firing the handler actually entered, or null. */
+  lastCycleFiringAttempt?: CopilotCycleFiringAttempt | null;
+  /** #4001 (follow-up): the last reason the task was not declared, or null. */
+  lastCycleNotDeclared?: { cause: string; atMs: number } | null;
   userLogin: string;
   controlUpdatedAt: string | null;
   /** #3738: the registration's channel switches (voice affordance source). */
