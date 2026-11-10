@@ -69,7 +69,8 @@ export function resolveScheduledLogin(
 ): string | undefined {
   // #4004: the payload login is authoritative only when it can BE a
   // principal. A legacy record can carry an instance address
-  // (shared_orchestrator / default_trader) or a malformed value; the
+  // (shared_orchestrator / the legacy default address) or a malformed
+  // value; the
   // dispatch gate refuses those by design, so preferring them denied
   // every firing (SHARED_ADDRESS / NO_IDENTITY) while the authenticated
   // context sat right behind it. Fall back to the context the last
