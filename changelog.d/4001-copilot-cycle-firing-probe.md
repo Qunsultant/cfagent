@@ -1,0 +1,3 @@
+### Fixed
+
+- **Stock Copilot cycle still never fired (#4001):** the 11:05 slot ran under the #4008 fix and still left zero trace — no ledger row, no audit, no activity record — so the firing is now marked at the dispatch boundary: the task handler writes a firing marker to DO KV storage (a sink the sql write path cannot swallow) before any cycle work runs, and the copilot status read surfaces it as `lastCycleFiringAttempt` alongside the last non-declaration cause as `lastCycleNotDeclared`. A later firing with a marker but no ledger row names the sql write path; a firing with no marker names the declaration/dispatch path. The marker write is best-effort and can never break the cycle. #4001 stays open — the proof is still a cycle firing in production. #CISO-bhdm
