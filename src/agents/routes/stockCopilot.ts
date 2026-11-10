@@ -395,6 +395,7 @@ export async function handleStockCopilotRoutes(
         // Issue #3899 (RC3): the real commercial store, composed from
         // env by the resolver when absent — never the fake default.
         commercial: ctx.commercial,
+        sql: ctx.sql,
       });
       return Response.json(introspection);
     } catch (err) {
