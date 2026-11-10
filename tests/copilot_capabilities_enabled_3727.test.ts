@@ -122,11 +122,10 @@ describe("copilot capability enablement (#3727) and the chat/NLQ choice (#3740)"
     }
     // Every capability the class's base record declares enabled —
     // i.e. declares with a mechanism — resolves enabled under the
-    // production env. The one exception shape is a prerequisite-
-    // gated entry (webSearch → BRAVE_SEARCH_API_KEY, a provider
-    // secret set outside vars): it may resolve "unavailable"
-    // through that named prerequisite, never disabled-by-config
-    // (asserted above).
+    // production env. A prerequisite-gated entry may instead resolve
+    // "unavailable" through that named prerequisite, never
+    // disabled-by-config (asserted above); since #3935 web_search
+    // carries no prerequisite, so nothing takes that shape today.
     const base = PORT_THINK_CAPABILITY_BASE["OrchestratorAgent"] ?? {};
     for (const [id, e] of Object.entries(base)) {
       if (!e || e.state !== "enabled") continue;

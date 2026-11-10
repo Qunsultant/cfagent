@@ -24,15 +24,17 @@
  *     an in-memory Map (the same fact the S4 fibers cells rest on)
  *     and checkpoint read-back (#2763) covers only runs that carry
  *     a runId.
- *   - web-search is "degraded" (since #2731) BECAUSE the
- *     web_search command IS registered in the catalog but its
- *     provider backend is not configured: no BRAVE_SEARCH_API_KEY
- *     secret exists in this deployment, so the provider seam
- *     (src/services/webSearch.ts) fails every call loud with
- *     web_search_provider_not_configured. It is the one
- *     command-carrying family that is not "live" — the
- *     commands-are-live pin below carries the explicit exception,
- *     and the degraded-evidence test pins the facts.
+ *   - web-search is "live" (since #3935, on #2731's command) BECAUSE
+ *     the web_search command IS registered in the catalog AND the
+ *     provider seam (src/services/webSearch.ts) now carries a
+ *     provider chain, free/keyless first: the keyless DuckDuckGo
+ *     provider answers with no configuration at all, so the backend
+ *     is no longer config-gated off. It was "degraded" from #2731
+ *     to #3935, when the only provider needed a BRAVE_SEARCH_API_KEY
+ *     secret this deployment never had. The named failures are now
+ *     the empty-chain (web_search_provider_not_configured) and
+ *     exhausted-chain (web_search_all_providers_failed) errors,
+ *     pinned below.
  *   - web-fetch is "live" (since #2760, tracker #2708 A3) BECAUSE
  *     the web_fetch tool exists in the MCP catalog, defined by
  *     src/mcps/openaimp/webFetchCommands.ts over the deterministic
@@ -144,7 +146,7 @@ const EXPECTED_STATUS: Record<string, MeshToolFamilyStatus> = {
   "payments-tools": "live",
   "screening-research-services": "live",
   "durable-fibers": "degraded",
-  "web-search": "degraded",
+  "web-search": "live",
   "web-fetch": "live",
   "ai-search-platform": "degraded",
   "agent-skills": "live",
@@ -169,18 +171,12 @@ describe("tool family status table (#2417)", () => {
 
   it("every family carrying McpToolFactory commands is live (the catalog is the evidence)", () => {
     const catalog = new Set(McpToolFactory.getAllTools().map((t) => t.name));
-    // #2731: the one recorded exception — web-search carries a
-    // catalog command whose provider backend is config-gated off
-    // in this deployment, so the family is "degraded" with its
-    // evidence pinned in the degraded-evidence suite below (the
-    // sandbox-tools posture: surface live, backend absent). Any
-    // OTHER command-carrying family reading non-live fails here.
-    const COMMAND_FAMILY_DEGRADED = new Set(["web-search"]);
+    // #3935 retired the one recorded exception: web-search's provider
+    // chain is keyless-first, so a catalog command now implies a live
+    // backend for every command-carrying family, with no carve-out.
     for (const family of MESH_TOOL_FAMILIES) {
       if (family.commands.length === 0) continue;
-      expect(family.status, family.id).toBe(
-        COMMAND_FAMILY_DEGRADED.has(family.id) ? "degraded" : "live",
-      );
+      expect(family.status, family.id).toBe("live");
       for (const command of family.commands) {
         expect(catalog.has(command), `${family.id}:${command}`).toBe(true);
       }
@@ -227,20 +223,25 @@ describe("degraded status evidence (#2417)", () => {
     expect(src).toContain("FiberCheckpointError");
   });
 
-  it("web-search: the command is registered, and the seam's not-configured failure is the recorded backend fact (#2731)", () => {
+  it("web-search: the command is registered, and the keyless-first chain is the recorded backend fact (#2731, #3935)", () => {
     // The surface is live: web_search is in the factory catalog.
     const catalog = new Set(McpToolFactory.getAllTools().map((t) => t.name));
     expect(catalog.has("web_search")).toBe(true);
-    // The backend fact the degraded status rests on: the provider
-    // seam fails loud with the named error while no provider key
-    // is configured, and the family record names the enablement.
+    // The backend fact the live status rests on (#3935): a provider
+    // chain, free/keyless first, whose keyless member needs no
+    // configuration — and whose two named failures are the empty
+    // chain and the exhausted chain.
     const service = read("src/services/webSearch.ts");
     expect(service).toContain("web_search_provider_not_configured");
+    expect(service).toContain("web_search_all_providers_failed");
+    expect(service).toContain("DuckDuckGoWebSearchProvider");
+    expect(service).toContain("SEARXNG_BASE_URL");
     expect(service).toContain("BRAVE_SEARCH_API_KEY");
     const family = getToolFamily("web-search");
     expect(family).toBeDefined();
     expect(family!.commands).toEqual(["web_search"]);
-    expect(family!.notes ?? "").toContain("wrangler secret put BRAVE_SEARCH_API_KEY");
+    expect(family!.notes ?? "").toContain("free/keyless first");
+    expect(family!.notes ?? "").toContain("web_search_all_providers_failed");
   });
 
   it("ai-search-platform: the ai_search_namespaces binding is declared in wrangler.jsonc (namespace \"default\", #1169), and the env type records it", () => {

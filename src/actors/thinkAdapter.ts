@@ -383,7 +383,7 @@ export class PortThink extends Think<any> {
     if (this.isPortCapabilityEnabled("webSearch")) {
       tools.web_search = {
         description:
-          "Search the open web through the configured provider; returns titles, URLs, and snippets with the provider named. Fails with web_search_provider_not_configured when no provider key is set — never fabricates results.",
+          "Search the open web through the configured provider chain (free/keyless first: SearXNG, DuckDuckGo, Brave); returns titles, URLs, and snippets with the provider that served named. Fails with web_search_provider_not_configured when the chain is empty and web_search_all_providers_failed when every provider fails — never fabricates results.",
         inputSchema: z.object({
           query: z.string().min(1).describe("Web search query."),
           count: z.number().optional().describe("Maximum results, clamped to 1-10 (default 5)."),

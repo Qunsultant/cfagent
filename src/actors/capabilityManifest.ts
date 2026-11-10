@@ -311,8 +311,7 @@ const FLEET_DEFAULT_POSTURE: Record<CapabilityId, CapabilityEntry> = {
   ),
   webSearch: entry(
     "enabled",
-    "Provided by PortThink (#3495, #3934): the web_search tool (getPortWebTools over src/services/webSearch.ts, #2731) composes onto every PortThink class — a chat turn through port hooks (beforeTurn), and a class with no chat turn on its execution surface (getExecutionTools). It fails loud with web_search_provider_not_configured until the provider key is set; the provider decision is #3501.",
-    { prerequisite: "BRAVE_SEARCH_API_KEY" },
+    "Provided by PortThink (#3495, #3934, #3935): the web_search tool (getPortWebTools over src/services/webSearch.ts) composes onto every PortThink class — a chat turn through port hooks (beforeTurn), and a class with no chat turn on its execution surface (getExecutionTools). The service runs a named-provider CHAIN, free/keyless first: SearXNG when SEARXNG_BASE_URL is set, then DuckDuckGo (keyless, always available), then Brave when BRAVE_SEARCH_API_KEY is set; order and subset come from WEB_SEARCH_PROVIDERS. A provider failure falls through and the result names the provider that served. An empty chain fails web_search_provider_not_configured; an exhausted chain fails web_search_all_providers_failed carrying every attempt's reason — results are never fabricated. AGENT_CAPABILITIES_DISABLED withdraws it.",
   ),
   aiSearch: entry(
     "not-implemented",
@@ -356,8 +355,7 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
     ),
     webSearch: entry(
       "enabled",
-      "The web_search command (src/mcps/openaimp/webSearchCommands.ts over src/services/webSearch.ts, #2731) runs over a named-provider seam (first provider: Brave). It fails loud with web_search_provider_not_configured until the provider key is set; the provider decision is #3501.",
-      { prerequisite: "BRAVE_SEARCH_API_KEY" },
+      "The web_search command (src/mcps/openaimp/webSearchCommands.ts over src/services/webSearch.ts, #2731/#3935) runs a named-provider chain, free/keyless first: SearXNG (SEARXNG_BASE_URL) → DuckDuckGo (keyless) → Brave (BRAVE_SEARCH_API_KEY), with order/subset from WEB_SEARCH_PROVIDERS. The result names the provider that served; an exhausted chain fails web_search_all_providers_failed carrying each attempt's reason.",
     ),
     payments: entry(
       "enabled",
@@ -388,8 +386,7 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
     ),
     webSearch: entry(
       "enabled",
-      "Composed on this class's execution surface (#3934): the port's turn hook never fires for a class with no chat turn; getExecutionTools composes web_search here, behind the same capability gate. It fails loud with web_search_provider_not_configured until the provider key is set; the provider decision is #3501.",
-      { prerequisite: "BRAVE_SEARCH_API_KEY" },
+      "Composed on this class's execution surface (#3934): the port's turn hook never fires for a class with no chat turn; getExecutionTools composes web_search here, behind the same capability gate. The service runs a free/keyless-first provider chain (#3935), so the tool needs no key; an exhausted chain fails web_search_all_providers_failed with each attempt's reason.",
     ),
   },
   SlackAgent: {
@@ -417,8 +414,7 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
     ),
     webSearch: entry(
       "enabled",
-      "Composed on this class's execution surface (#3934): the port's turn hook never fires for a class with no chat turn; getExecutionTools composes web_search here, behind the same capability gate. It fails loud with web_search_provider_not_configured until the provider key is set; the provider decision is #3501.",
-      { prerequisite: "BRAVE_SEARCH_API_KEY" },
+      "Composed on this class's execution surface (#3934): the port's turn hook never fires for a class with no chat turn; getExecutionTools composes web_search here, behind the same capability gate. The service runs a free/keyless-first provider chain (#3935), so the tool needs no key; an exhausted chain fails web_search_all_providers_failed with each attempt's reason.",
     ),
   },
 };
@@ -444,12 +440,6 @@ const PREREQUISITE_CHECKS: Record<
   [THINK_WEBHOOK_SECRET_ENV]: {
     isMet: (env) => resolveThinkWebhookSecret(env) !== undefined,
     unavailableReason: "webhook_secret_not_configured",
-  },
-  BRAVE_SEARCH_API_KEY: {
-    isMet: (env) =>
-      typeof env.BRAVE_SEARCH_API_KEY === "string" &&
-      env.BRAVE_SEARCH_API_KEY.trim().length > 0,
-    unavailableReason: "web_search_provider_not_configured",
   },
 };
 
