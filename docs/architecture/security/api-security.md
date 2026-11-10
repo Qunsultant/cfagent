@@ -121,36 +121,39 @@ Rules:
 - **Live inbound state is owner-visible only.** Code and config show
   no deploy path that sets `A2A_API_TOKEN`, but whether it is set
   out-of-band on the Worker cannot be proven from the repo and is
-  never claimed here; that check belongs to the owner.
-- **No secret value is ever recorded here.** Names, directions, and
-  enablement states only.
+  never claimed here; that ## 7. Slack credentials: the whole set is deployed (#3974)
 
-## 7. Slack credentials: what is wired, and what is deliberately not (#3952)
+Owner direction: the deployment carries the complete Slack credential
+set, so enabling a channel is configuration only. All seven reach the
+Worker as `optional_secret` pushes from `.github/workflows/deploy.yml` —
+an absent value is reported in the job summary and leaves the channel in
+its own fail-closed state, never a deploy failure.
 
-Four Slack Worker secrets reach the deployment through
-`.github/workflows/deploy.yml`, all as `optional_secret` pushes — an absent
-value is reported in the job summary and leaves the channel in its
-fail-closed state, never a deploy failure.
+### Readers that exist today
 
 | Worker secret | Read by | Absence means |
 | --- | --- | --- |
-| `SLACK_SIGNING_SECRET` | `src/security/webhookSecurity.ts` (`gateSlackRequest`), `src/agents/slackAgent.ts` | The inbound channel refuses every request (`/slack/*`); no signature check can pass. |
-| `SLACK_BOT_TOKEN` | `src/services/slackFiles.ts`, `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/trading/slack/agent.ts`, delivery jobs | The outbound bot-API leg is skipped; delivery surfaces report "no Slack transport configured" by name. The snap's bot leg also needs a channel passed per call — it has no `SLACK_CHANNEL` fallback. |
+| `SLACK_SIGNING_SECRET` | `src/security/webhookSecurity.ts` (`gateSlackRequest`), `src/agents/slackAgent.ts` | The inbound channel refuses every request under `/slack/*`; no signature check can pass. |
+| `SLACK_BOT_TOKEN` | `src/services/slackFiles.ts`, `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/trading/slack/agent.ts`, delivery jobs | The outbound bot-API leg is skipped and delivery surfaces report "no Slack transport configured" by name. The snap's bot leg takes its channel per call — it has no `SLACK_CHANNEL` fallback. |
 | `SLACK_CLIENT_ID` | `src/server/routes/messaging.ts` (`/slack/install`) | The install route answers 500 naming the missing variable. |
-| `SLACK_CLIENT_SECRET` | `src/server/routes/messaging.ts` (`/slack/oauth_callback`) | The OAuth callback cannot exchange the code; installation fails at that step. |
+| `SLACK_CLIENT_SECRET` | `src/server/routes/messaging.ts` (`/slack/oauth_callback`) | The OAuth code exchange cannot run; installation stops at that step. |
+| `SLACK_WEBHOOK_URL` | `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/services/deliverJobs.ts` | The webhook leg is skipped; delivery falls through to the remaining transports. |
 
-**Deliberately not synced** (setting them on the Worker would configure
-nothing the code reads):
+### Staged: deployed, no reader yet
 
-- `SLACK_APP_TOKEN` — Slack Socket Mode only. This Worker serves Slack
-  over HTTP events and the interactions endpoint, so an app-level token
-  has no consumer here.
-- `SLACK_VERIFICATION_TOKEN` — deprecated by Slack and superseded by
-  request signing. Accepting it as a second verification path would
-  weaken `gateSlackRequest`, not extend it.
+These three are present on the Worker so a reader can land without a
+second configuration change. They configure nothing today, and this
+section is the record of that — never a claim that a channel exists.
+
 - `SLACK_APP_ID` — no code path reads it; the install URL is built from
-  the client id (`ETradeSlackTradingService.getInstallUrl`).
+  the client id.
+- `SLACK_APP_TOKEN` — Slack Socket Mode. This Worker serves Slack over
+  HTTP events and the interactions endpoint; the token has no consumer
+  until a Socket Mode client is added.
+- `SLACK_VERIFICATION_TOKEN` — deprecated by Slack. It is deployed for
+  completeness only and must not be added as a second inbound
+  verification path: request signing (`SLACK_SIGNING_SECRET`) is the
+  one check, and a second, weaker path would weaken it.
 
-Wiring any of the three is a code change first (the reader), then a
-deploy.yml line — never a deployment setting that silently implies a
-capability.
+Adding a reader is a code change first, then this section; a deployed
+secret never by itself enables a capability.

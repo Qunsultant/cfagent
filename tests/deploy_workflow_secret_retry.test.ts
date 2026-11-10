@@ -157,18 +157,18 @@ describe("scripts/ci/put-secret.sh (#590)", () => {
 // ---------------------------------------------------------------------------
 
 describe("deploy.yml — Slack credentials (#3952)", () => {
-  // The four names the Worker code reads. Presence in the sync list is
-  // what makes a GitHub secret reach the deployment at all.
+  // The whole Slack credential set (#3974, owner direction): synced now so
+  // enabling a channel later is configuration only. Presence in the sync
+  // list is what makes a GitHub secret reach the deployment at all.
   const WIRED = [
+    "SLACK_APP_ID",
+    "SLACK_APP_TOKEN",
     "SLACK_BOT_TOKEN",
-    "SLACK_SIGNING_SECRET",
     "SLACK_CLIENT_ID",
     "SLACK_CLIENT_SECRET",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_VERIFICATION_TOKEN",
   ];
-
-  // Names with no reader in src/: syncing them would configure nothing
-  // the code implements (api-security.md §7 records the reasons).
-  const NOT_WIRED = ["SLACK_APP_TOKEN", "SLACK_VERIFICATION_TOKEN", "SLACK_APP_ID"];
 
   it("syncs each Slack credential the code reads, as an optional push", () => {
     for (const name of WIRED) {
@@ -180,10 +180,17 @@ describe("deploy.yml — Slack credentials (#3952)", () => {
     }
   });
 
-  it("does not push the three names no code path reads", () => {
-    for (const name of NOT_WIRED) {
-      expect(workflow, `${name}: has no reader — do not sync it`).not.toContain(`secret ${name} `);
-      expect(workflow, `${name}: has no reader — do not sync it`).not.toContain(`secrets.${name}`);
+  it("keeps the staged names deployed rather than skipped", () => {
+    // Three of the seven have no reader yet (#3974). They stay in the sync
+    // list deliberately; the doc records that they configure nothing until
+    // a reader lands, so the deployment never claims a channel it lacks.
+    const doc = readFileSync(
+      new URL("../docs/architecture/security/api-security.md", import.meta.url),
+      "utf-8",
+    );
+    expect(doc).toContain("Staged: deployed, no reader yet");
+    for (const name of ["SLACK_APP_ID", "SLACK_APP_TOKEN", "SLACK_VERIFICATION_TOKEN"]) {
+      expect(doc, `${name} must be recorded as staged`).toContain(name);
     }
   });
 
