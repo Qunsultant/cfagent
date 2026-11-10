@@ -128,12 +128,12 @@ export const AGENT_CARDS: AgentCard[] = [
   {
     name: "browser",
     description:
-      "Captures transaction and page snapshots for Slack delivery and scrapes rendered page tables. Delivery goes only to env-configured destinations — a caller-supplied webhook is never honored.",
+      "Captures transaction and page snapshots for Slack delivery, scrapes rendered page tables, and fetches and searches the web through the fleet's web services (web_fetch / web_search, capability-gated). Delivery goes only to env-configured destinations — a caller-supplied webhook is never honored.",
     version: "1.0.0",
     endpoint: "/a2a/browser",
     cardPath: "/a2a/browser/agent-card.json",
-    capabilities: ["transaction-snap", "page-snapshot", "dom-scraping"],
-    operations: ["browser.snap_transaction", "browser.capture_page", "browser.scrape_tables"],
+    capabilities: ["transaction-snap", "page-snapshot", "dom-scraping", "web-fetch", "web-search"],
+    operations: ["browser.snap_transaction", "browser.capture_page", "browser.scrape_tables", "browser.web_fetch", "browser.web_search"],
   },
   {
     name: "slack",
@@ -148,12 +148,12 @@ export const AGENT_CARDS: AgentCard[] = [
   {
     name: "sandbox",
     description:
-      "Reports the sandbox's backend status and runs shell commands through SandboxAgent's one service (ETradeSandboxService). Honestly degraded in this deployment: no container backend is bound, so run_command returns executed:false with exitCode:null and no fabricated output until an owner binds one — check sandbox.status first.",
+      "Reports the sandbox's backend status and runs shell commands through SandboxAgent's one service (ETradeSandboxService). Honestly degraded in this deployment: no container backend is bound, so run_command returns executed:false with exitCode:null and no fabricated output until an owner binds one — check sandbox.status first. Also fetches and searches the web through the fleet's web services (web_fetch / web_search, capability-gated); those operations do not use the sandbox backend and are not degraded by its absence.",
     version: "1.0.0",
     endpoint: "/a2a/sandbox",
     cardPath: "/a2a/sandbox/agent-card.json",
-    capabilities: ["sandbox-status", "sandbox-run"],
-    operations: ["sandbox.status", "sandbox.run_command"],
+    capabilities: ["sandbox-status", "sandbox-run", "web-fetch", "web-search"],
+    operations: ["sandbox.status", "sandbox.run_command", "sandbox.web_fetch", "sandbox.web_search"],
   },
 ];
 

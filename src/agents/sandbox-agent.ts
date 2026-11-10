@@ -56,8 +56,21 @@ import { ETradeSandboxService } from "../services/sandboxAgent";
 import {
   dispatchSandboxA2A,
   sandboxA2AOutcome,
+  SandboxA2ACapabilityDisabledError,
   type SandboxA2AOutcome,
+  type SandboxWebToolFailure,
 } from "./sandboxA2aDispatch";
+import {
+  fetchWebPage,
+  WebFetchError,
+  type WebFetchResult,
+} from "../services/webFetch";
+import {
+  executeWebSearch,
+  WebSearchError,
+  type WebSearchEnv,
+  type WebSearchOutcome,
+} from "../services/webSearch";
 import type {
   SandboxExecutionRequest,
   SandboxExecutionResult,
@@ -90,6 +103,18 @@ const DEGRADED_DETAIL =
  * (PortThink.getExecutionTools, the same builder and the same
  * capability gate as the turn path), alongside the sandbox
  * capability this class exists for.
+ *
+ * Issue #3969 (Route A): the composed surface alone realized
+ * nothing for this class — no production caller composes a
+ * toolset for a headless agent. The capabilities are therefore
+ * ALSO served where this class is actually invoked: its A2A
+ * operations (sandbox.web_fetch / sandbox.web_search in
+ * ./sandboxA2aDispatch), through the fetchWeb / searchWeb
+ * methods below — the same services and the same capability
+ * gate as the turn path, refusing by name when the capability
+ * is withdrawn by configuration. The web operations do not
+ * touch the sandbox service, so the degraded container posture
+ * above does not apply to them.
  */
 export class SandboxAgent extends PortThink {
   private sandboxService?: ETradeSandboxService;
@@ -138,6 +163,59 @@ export class SandboxAgent extends PortThink {
     request: SandboxExecutionRequest
   ): Promise<SandboxExecutionResult> {
     return this.getService().runCommand(request);
+  }
+
+  /**
+   * Issue #3969: the web_fetch capability on this class's A2A
+   * operations surface. Delegates to the ONE web fetch service
+   * (src/services/webFetch.ts) — the same service the turn path's
+   * web_fetch tool calls; it does not go through the sandbox
+   * service, so the absent container backend does not degrade it.
+   * The capability gate is consulted first: a capability
+   * withdrawn by configuration refuses by name before any fetch.
+   * Service failures return the port tool door's failure shape
+   * (named code + message), never fabricated content.
+   */
+  async fetchWeb(url: string): Promise<WebFetchResult | SandboxWebToolFailure> {
+    if (!this.isPortCapabilityEnabled("webFetch")) {
+      throw new SandboxA2ACapabilityDisabledError(
+        `Operation "sandbox.web_fetch" refused: capability "webFetch" is disabled by configuration for SandboxAgent (AGENT_CAPABILITIES_DISABLED).`,
+      );
+    }
+    try {
+      return await fetchWebPage(url);
+    } catch (err) {
+      if (err instanceof WebFetchError) {
+        return { ok: false, error: err.code, message: err.message, status: err.status ?? null };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Issue #3969: the web_search capability on this class's A2A
+   * operations surface. Delegates to the ONE web search service
+   * (src/services/webSearch.ts — the provider chain, free/keyless
+   * first) with this instance's env, exactly as the turn path's
+   * web_search tool does. Gate and failure shape as fetchWeb.
+   */
+  async searchWeb(
+    query: string,
+    count?: number,
+  ): Promise<WebSearchOutcome | SandboxWebToolFailure> {
+    if (!this.isPortCapabilityEnabled("webSearch")) {
+      throw new SandboxA2ACapabilityDisabledError(
+        `Operation "sandbox.web_search" refused: capability "webSearch" is disabled by configuration for SandboxAgent (AGENT_CAPABILITIES_DISABLED).`,
+      );
+    }
+    try {
+      return await executeWebSearch(this.env as unknown as WebSearchEnv, query, count);
+    } catch (err) {
+      if (err instanceof WebSearchError) {
+        return { ok: false, error: err.code, message: err.message, provider: err.provider ?? "" };
+      }
+      throw err;
+    }
   }
 
   /**
@@ -216,6 +294,8 @@ export class SandboxAgent extends PortThink {
       executor: {
         sandboxStatus: () => this.sandboxStatus(),
         runCommand: (request) => this.runCommand(request),
+        fetchWeb: (url) => this.fetchWeb(url),
+        searchWeb: (query, count) => this.searchWeb(query, count),
       },
     });
     return sandboxA2AOutcome(data);

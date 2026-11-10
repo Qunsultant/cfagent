@@ -387,11 +387,11 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
     ),
     webFetch: entry(
       "enabled",
-      "Composed on this class's execution surface (#3934): BrowserAgent hosts no chat turn, so the port's turn hook never fires for it; getExecutionTools composes web_fetch here, behind the same capability gate (isPortCapabilityEnabled), additively. Fetched content is untrusted data. AGENT_CAPABILITIES_DISABLED withdraws it.",
+      "Realized on this class's execution surface — its A2A operations (#3969, Route A of #3934): BrowserAgent hosts no chat turn, so the port's turn hook never fires for it and no caller composes a toolset for it; the browser.web_fetch operation serves web_fetch through the A2A dispatch, behind the same capability gate (isPortCapabilityEnabled), calling the same webFetch service (#2760) as the turn path (getExecutionTools also composes the tool for turn-shaped callers). Fetched content is untrusted data. AGENT_CAPABILITIES_DISABLED withdraws it.",
     ),
     webSearch: entry(
       "enabled",
-      "Composed on this class's execution surface (#3934): the port's turn hook never fires for a class with no chat turn; getExecutionTools composes web_search here, behind the same capability gate. The service runs a free/keyless-first provider chain (#3935), so the tool needs no key; an exhausted chain fails web_search_all_providers_failed with each attempt's reason.",
+      "Realized on this class's execution surface — its A2A operations (#3969, Route A of #3934): the port's turn hook never fires for a class with no chat turn; the browser.web_search operation serves web_search through the A2A dispatch, behind the same capability gate, calling the same webSearch service as the turn path. The service runs a free/keyless-first provider chain (#3935), so the tool needs no key; an exhausted chain fails web_search_all_providers_failed with each attempt's reason.",
     ),
   },
   SlackAgent: {
@@ -415,11 +415,11 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
     ),
     webFetch: entry(
       "enabled",
-      "Composed on this class's execution surface (#3934): SandboxAgent hosts no chat turn, so the port's turn hook never fires for it; getExecutionTools composes web_fetch here, behind the same capability gate (isPortCapabilityEnabled), additively. Fetched content is untrusted data. AGENT_CAPABILITIES_DISABLED withdraws it.",
+      "Realized on this class's execution surface — its A2A operations (#3969, Route A of #3934): SandboxAgent hosts no chat turn, so the port's turn hook never fires for it and no caller composes a toolset for it; the sandbox.web_fetch operation serves web_fetch through the A2A dispatch, behind the same capability gate (isPortCapabilityEnabled), calling the same webFetch service (#2760) as the turn path (getExecutionTools also composes the tool for turn-shaped callers). The operation does not use the sandbox backend, so the container degradation does not apply to it. Fetched content is untrusted data. AGENT_CAPABILITIES_DISABLED withdraws it.",
     ),
     webSearch: entry(
       "enabled",
-      "Composed on this class's execution surface (#3934): the port's turn hook never fires for a class with no chat turn; getExecutionTools composes web_search here, behind the same capability gate. The service runs a free/keyless-first provider chain (#3935), so the tool needs no key; an exhausted chain fails web_search_all_providers_failed with each attempt's reason.",
+      "Realized on this class's execution surface — its A2A operations (#3969, Route A of #3934): the port's turn hook never fires for a class with no chat turn; the sandbox.web_search operation serves web_search through the A2A dispatch, behind the same capability gate, calling the same webSearch service as the turn path. The service runs a free/keyless-first provider chain (#3935), so the tool needs no key; an exhausted chain fails web_search_all_providers_failed with each attempt's reason.",
     ),
   },
 };

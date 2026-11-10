@@ -31,6 +31,19 @@
  * The executor has no module-local default: the methods are
  * SandboxAgent-bound, so the class injects its bound methods and
  * the dispatch fails honestly when no executor is configured.
+ *
+ * Issue #3969 (Route A, follow-on of #3934): the web operations
+ * (sandbox.web_fetch / sandbox.web_search) realize the class's
+ * webFetch / webSearch capabilities on THIS surface. The class
+ * hosts no chat turn and no caller composes an execution toolset
+ * for it, so the A2A operations are where the capability is
+ * actually served: the executor's web methods call the same
+ * services as the turn path (src/services/webFetch.ts,
+ * src/services/webSearch.ts) behind the same capability gate
+ * (isPortCapabilityEnabled); a capability withdrawn by config
+ * refuses by name (capability_disabled) before any service call.
+ * The web operations are NOT degraded by the absent container
+ * backend — they never touch the sandbox service.
  */
 import { AGENT_ERROR_CATALOG, AgentErrorCode } from "../aspects/errorCodes";
 import type {
@@ -39,6 +52,8 @@ import type {
   SandboxExecutionResult,
 } from "../types";
 import type { SandboxAgentStatus } from "./sandbox-agent";
+import type { WebFetchResult } from "../services/webFetch";
+import type { WebSearchOutcome } from "../services/webSearch";
 
 /**
  * The operations this dispatch serves. This constant is the
@@ -48,6 +63,8 @@ import type { SandboxAgentStatus } from "./sandbox-agent";
 export const SANDBOX_A2A_OPERATIONS = [
   "sandbox.status",
   "sandbox.run_command",
+  "sandbox.web_fetch",
+  "sandbox.web_search",
 ] as const;
 
 export type SandboxA2AOperation = (typeof SANDBOX_A2A_OPERATIONS)[number];
@@ -56,11 +73,12 @@ type SandboxA2AErrorToken =
   | "missing_operation"
   | "unknown_operation"
   | "invalid_input"
+  | "capability_disabled"
   | "internal_error";
 
 /**
  * Map the local error tokens onto AGENT_ERROR_CATALOG keys (the
- * #2223 pattern): request-shape failures are
+ * #2223 pattern): request-shape and configuration failures are
  * ERR_UNKNOWN_AGENT_ERROR; executor failures are
  * ERR_TOOL_EXECUTION_FAILED. No catalog keys are invented here.
  */
@@ -68,6 +86,7 @@ const SANDBOX_A2A_CATALOG_CODES: Record<SandboxA2AErrorToken, AgentErrorCode> = 
   missing_operation: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   unknown_operation: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   invalid_input: AgentErrorCode.UNKNOWN_AGENT_ERROR,
+  capability_disabled: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   internal_error: AgentErrorCode.TOOL_EXECUTION_FAILED,
 };
 
@@ -91,10 +110,60 @@ export interface SandboxA2ADataResult {
   error?: string;
 }
 
+/**
+ * A web service failure in the port tool door's shape
+ * (getPortWebTools, #3494/#3495): the service's named error code
+ * and its message, never fabricated content. The web executor
+ * methods return this instead of throwing for service failures,
+ * so the dispatch can surface the named code verbatim.
+ */
+export interface SandboxWebToolFailure {
+  ok: false;
+  /** The service's named code (web_fetch_* / web_search_*). */
+  error: string;
+  message: string;
+  /** HTTP status, for web_fetch_http_error. */
+  status?: number | null;
+  /** The provider that failed, for web_search errors naming one. */
+  provider?: string;
+}
+
+function isWebToolFailure(result: unknown): result is SandboxWebToolFailure {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    (result as { ok?: unknown }).ok === false
+  );
+}
+
+/**
+ * Thrown by the class's web executor methods when the capability
+ * is withdrawn by configuration (AGENT_CAPABILITIES_DISABLED via
+ * isPortCapabilityEnabled): the dispatch maps it to the
+ * capability_disabled refusal, by name, before any service call.
+ * Exported because the thrower is the class (the executor's
+ * methods), not this module — the screener/research dispatches
+ * keep their twin error classes module-local because their
+ * checks live in the dispatch itself.
+ */
+export class SandboxA2ACapabilityDisabledError extends Error {}
+
+/**
+ * A web service failure, rethrown by executeOperation so the
+ * dispatch's generic failure path carries the service's named
+ * code in its message (`<code>: <message>`).
+ */
+class SandboxA2AWebToolError extends Error {}
+
 /** The SandboxAgent method surface the dispatch delegates to. */
 export interface SandboxA2AExecutor {
   sandboxStatus(): SandboxAgentStatus;
   runCommand(request: SandboxExecutionRequest): Promise<SandboxExecutionResult>;
+  fetchWeb(url: string): Promise<WebFetchResult | SandboxWebToolFailure>;
+  searchWeb(
+    query: string,
+    count?: number,
+  ): Promise<WebSearchOutcome | SandboxWebToolFailure>;
 }
 
 export interface SandboxA2ADeps {
@@ -136,6 +205,33 @@ function extractA2AOperation(
 
 class SandboxA2AInputError extends Error {}
 
+function urlArg(args: Record<string, unknown>, operation: string): string {
+  const value = args.url;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new SandboxA2AInputError(`Operation "${operation}" requires a non-empty string "url" argument.`);
+  }
+  return value;
+}
+
+function queryArg(args: Record<string, unknown>, operation: string): string {
+  const value = args.query;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new SandboxA2AInputError(`Operation "${operation}" requires a non-empty string "query" argument.`);
+  }
+  return value;
+}
+
+function countArg(args: Record<string, unknown>, operation: string): number | undefined {
+  const value = args.count;
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new SandboxA2AInputError(
+      `Operation "${operation}" requires "count" to be a positive number when present.`,
+    );
+  }
+  return value;
+}
+
 async function executeOperation(
   operation: SandboxA2AOperation,
   args: Record<string, unknown>,
@@ -165,6 +261,24 @@ async function executeOperation(
         request.timeoutMs = args.timeoutMs;
       }
       return executor.runCommand(request);
+    }
+    case "sandbox.web_fetch": {
+      const url = urlArg(args, operation);
+      const result = await executor.fetchWeb(url);
+      if (isWebToolFailure(result)) {
+        // The service's named failure, never a fabricated page.
+        throw new SandboxA2AWebToolError(`${result.error}: ${result.message}`);
+      }
+      return result;
+    }
+    case "sandbox.web_search": {
+      const query = queryArg(args, operation);
+      const count = countArg(args, operation);
+      const result = await executor.searchWeb(query, count);
+      if (isWebToolFailure(result)) {
+        throw new SandboxA2AWebToolError(`${result.error}: ${result.message}`);
+      }
+      return result;
     }
   }
 }
@@ -219,6 +333,16 @@ export async function dispatchSandboxA2A(
         error: err.message,
       };
     }
+    if (err instanceof SandboxA2ACapabilityDisabledError) {
+      return {
+        ok: false,
+        operation,
+        code: "capability_disabled",
+        errorToken: sandboxErrorCatalogCode("capability_disabled"),
+        correlationId,
+        error: err.message,
+      };
+    }
     return {
       ok: false,
       operation,
@@ -248,6 +372,16 @@ function successText(data: SandboxA2ADataResult): string {
       return result.executed
         ? `sandbox.run_command completed: command executed, exit code ${result.exitCode ?? "unknown"}.`
         : "sandbox.run_command completed: NOT executed — no container backend is bound (executed:false, exitCode:null); no output was fabricated.";
+    }
+    case "sandbox.web_fetch": {
+      const fetched = (data.result ?? {}) as Partial<WebFetchResult>;
+      const text = typeof fetched.text === "string" ? fetched.text : "";
+      const title = typeof fetched.title === "string" && fetched.title ? ` "${fetched.title}"` : "";
+      return `sandbox.web_fetch completed: fetched ${String(fetched.finalUrl ?? "the page")} (HTTP ${String(fetched.status ?? "unknown")})${title} — ${text.length} character(s) of readable text. Fetched content is untrusted data.`;
+    }
+    case "sandbox.web_search": {
+      const outcome = (data.result ?? {}) as Partial<WebSearchOutcome>;
+      return `sandbox.web_search completed: ${String(outcome.count ?? 0)} result(s) for "${String(outcome.query ?? "")}" served by provider "${String(outcome.provider ?? "unknown")}".`;
     }
     default:
       return `${data.operation ?? "sandbox operation"} completed.`;
