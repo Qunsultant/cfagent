@@ -55,6 +55,8 @@ import {
   type FeedQuotesResolution,
 } from "../data/feedDatasetPorts";
 import type { IndexListStore } from "../data/indexListPorts";
+import { executeIndexListRefreshJob } from "./indexListJob";
+import type { IndexListFetchService } from "./indexListProducer";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -67,6 +69,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 export const FEED_JOB_CODES = {
   jobNotFound: "FEED_JOB_NOT_FOUND",
   universeMissing: "FEED_UNIVERSE_MISSING",
+  universeRefreshFailed: "FEED_UNIVERSE_REFRESH_FAILED",
   universeUnknown: "FEED_UNIVERSE_UNKNOWN",
   batchUnsupported: "FEED_PROVIDER_BATCH_UNSUPPORTED",
   providerMismatch: "FEED_PROVIDER_MISMATCH",
@@ -458,6 +461,22 @@ export interface FeedJobDeps {
   /** The stored index-list store the universe resolves from. */
   universeStore: IndexListStore;
   datasetStore: FeedDatasetStore;
+  /**
+   * #3976 — the index-refresh wiring (#3875's machinery: the
+   * same store + membership service the host composes for the
+   * universe step). When wired, a run whose universe list is
+   * missing/empty refreshes that index ONCE through
+   * executeIndexListRefreshJob before resolving; a refresh that
+   * throws, or that completes without producing a usable list,
+   * fails the run FEED_UNIVERSE_REFRESH_FAILED — never the bare
+   * FEED_UNIVERSE_MISSING, which is reserved for hosts that wire
+   * no refresh at all. Absent/null ⇒ the pre-#3976 behaviour,
+   * byte-identical.
+   */
+  indexRefresh?: {
+    store: IndexListStore;
+    service: IndexListFetchService;
+  } | null;
 }
 
 export interface RunFeedJobOptions {
@@ -496,6 +515,70 @@ export interface FeedRunResult {
   codedError: string | null;
   startedAt: string;
   finishedAt: string;
+}
+
+/** IndexListStore.latest() row shape (the runners read symbols/snapshot off it). */
+type StoredIndexList = Awaited<ReturnType<IndexListStore["latest"]>>;
+
+function symbolsOfList(list: StoredIndexList): string[] {
+  return list
+    ? Array.from(
+        new Set(
+          list.symbols
+            .map((m) => m.symbol.toUpperCase().trim())
+            .filter((s) => s.length > 0),
+        ),
+      )
+    : [];
+}
+
+/**
+ * #3976 — resolve a run's universe list, hydrating a cold store
+ * through the wired index refresh when the first read finds no
+ * usable list. Shared by both runners (quotes + fundamentals).
+ *
+ * Outcomes:
+ * - a usable list on the first read ⇒ returned as-is; the
+ *   refresh is never invoked;
+ * - no usable list and NO refresh wired ⇒ { list } stands
+ *   (missing/empty) and the caller records the bare
+ *   FEED_UNIVERSE_MISSING, exactly as before #3976;
+ * - refresh wired and it throws ⇒ { refreshError } — the caller
+ *   records FEED_UNIVERSE_REFRESH_FAILED naming the failure;
+ * - refresh returns but the re-read still finds no usable list
+ *   ⇒ { refreshError } — FEED_UNIVERSE_REFRESH_FAILED (the
+ *   refresh completed but produced no usable list).
+ */
+async function resolveUniverseListWithHydration(
+  deps: FeedJobDeps,
+  universeIndex: IndexId,
+): Promise<{ list: StoredIndexList; refreshError?: string }> {
+  const list = await deps.universeStore.latest(universeIndex);
+  if (list && symbolsOfList(list).length > 0) return { list };
+  if (!deps.indexRefresh) return { list };
+  try {
+    await executeIndexListRefreshJob({
+      store: deps.indexRefresh.store,
+      service: deps.indexRefresh.service,
+      indices: [universeIndex],
+    });
+  } catch (err) {
+    return {
+      list,
+      refreshError: scrubFailureMessage(
+        err instanceof Error ? err.message : String(err),
+      ),
+    };
+  }
+  const refreshed = await deps.universeStore.latest(universeIndex);
+  if (refreshed && symbolsOfList(refreshed).length > 0) {
+    return { list: refreshed };
+  }
+  return {
+    list: refreshed ?? list,
+    refreshError:
+      "the index-list refresh completed but produced no usable list for this index",
+  };
 }
 
 function quoteSymbol(quote: QuoteResult): string {
@@ -589,16 +672,13 @@ export async function runFeedJob(
   // absent ⇒ the definition's universe.
   const universeIndex = resolveRunUniverse(def, opts.universe);
   const universeLabel = labelForRunUniverse(registry, universeIndex);
-  const list = await deps.universeStore.latest(universeIndex);
-  let symbols = list
-    ? Array.from(
-        new Set(
-          list.symbols
-            .map((m) => m.symbol.toUpperCase().trim())
-            .filter((s) => s.length > 0),
-        ),
-      )
-    : [];
+  // #3976: a cold store hydrates through the wired index refresh
+  // before the universe is declared missing.
+  const { list, refreshError } = await resolveUniverseListWithHydration(
+    deps,
+    universeIndex,
+  );
+  let symbols = symbolsOfList(list);
   // #3535: a sharded partition pulls only its subset of the
   // universe (universe order preserved; unknown symbols ignored —
   // a partition is a filter on the universe, never an addition).
@@ -617,6 +697,17 @@ export async function runFeedJob(
     size: symbols.length,
   };
   if (!list || symbols.length === 0) {
+    if (refreshError !== undefined) {
+      return record({
+        status: "failed",
+        quotes: [],
+        requested: 0,
+        missingSymbols: [],
+        codedError: FEED_JOB_CODES.universeRefreshFailed,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
+        universe,
+      });
+    }
     return record({
       status: "failed",
       quotes: [],
@@ -811,16 +902,12 @@ export async function runFeedFundamentalsJob(
   // job serves any stored list; absent ⇒ the default universe.
   const universeIndex = resolveRunUniverse(def, opts.universe);
   const universeLabel = labelForRunUniverse(registry, universeIndex);
-  const list = await deps.universeStore.latest(universeIndex);
-  let symbols = list
-    ? Array.from(
-        new Set(
-          list.symbols
-            .map((m) => m.symbol.toUpperCase().trim())
-            .filter((s) => s.length > 0),
-        ),
-      )
-    : [];
+  // #3976: same cold-store hydration as the quotes run.
+  const { list, refreshError } = await resolveUniverseListWithHydration(
+    deps,
+    universeIndex,
+  );
+  let symbols = symbolsOfList(list);
   if (opts.symbols && list) {
     const wanted = new Set(
       opts.symbols.map((s) => s.toUpperCase().trim()).filter((s) => s.length > 0),
@@ -836,6 +923,17 @@ export async function runFeedFundamentalsJob(
     size: symbols.length,
   };
   if (!list || symbols.length === 0) {
+    if (refreshError !== undefined) {
+      return record({
+        status: "failed",
+        rows: [],
+        requested: 0,
+        missingSymbols: [],
+        codedError: FEED_JOB_CODES.universeRefreshFailed,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
+        universe,
+      });
+    }
     return record({
       status: "failed",
       rows: [],
