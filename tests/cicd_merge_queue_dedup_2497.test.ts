@@ -73,8 +73,10 @@ describe("CI/CD Merge Queue + Policy Gate + Tree-Hash Deduplication (#2497, #249
     expect(ciYml).toContain("test-shard-mq:");
     expect(ciYml).toContain("Tests PR (shard");
     expect(ciYml).toContain("Tests MQ (shard");
-    // PR job stays parallel with fast-gates (needs load-environment only)
-    expect(ciYml).toMatch(/test-shard-pr:[\s\S]*?needs: \[load-environment\]/);
+    // #3924: the PR job now also waits for fast-gates, so a typecheck, build or
+    // pin-suite failure never spends four shard runners. Its merge_group split
+    // (the job below) is unchanged.
+    expect(ciYml).toMatch(/test-shard-pr:[\s\S]*?needs: \[load-environment, fast-gates\]/);
     expect(ciYml).toContain("github.event_name != 'merge_group'");
     // MQ job waits for fast-gates before burning 4 shard runners
     expect(ciYml).toMatch(/test-shard-mq:[\s\S]*?needs: \[load-environment, fast-gates\]/);
