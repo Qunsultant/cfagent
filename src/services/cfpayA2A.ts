@@ -49,6 +49,14 @@ export interface A2AOperationResult {
   ok: boolean;
   data?: unknown;
   error?: string;
+  /**
+   * Stable local failure code when ok is false and the failure is a
+   * DELIVERY condition rather than a network throw, so a caller can
+   * branch on it without parsing the message: `cfpay_http_error` (the
+   * agent answered a non-2xx status) or `cfpay_no_delivery_receipt`
+   * (the agent answered, but reported no outcome at all).
+   */
+  code?: string;
 }
 
 /**
@@ -101,7 +109,13 @@ export async function cfpayA2AOperation(
     });
 
     if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}` };
+      return {
+        ok: false,
+        code: "cfpay_http_error",
+        error:
+          `cfpay A2A answered HTTP ${res.status} on ${agentPath} for "${operation}": the operation was not ` +
+          `confirmed delivered. Check the cfpay deployment and its inbound credential.`,
+      };
     }
 
     const data = (await res.json()) as any;
@@ -127,7 +141,18 @@ export async function cfpayA2AOperation(
         }
       }
     }
-    return { ok: false, error: "no_data_part_in_response" };
+    // The agent answered 2xx but reported no outcome at all. Delivery
+    // is therefore UNKNOWN, not failed and not delivered — say so, and
+    // keep the protocol detail in-band so the cause stays traceable.
+    return {
+      ok: false,
+      code: "cfpay_no_delivery_receipt",
+      error:
+        `cfpay accepted "${operation}" on ${agentPath} but returned no delivery receipt ` +
+        `(no_data_part_in_response): the notification agent reported no outcome, so delivery is ` +
+        `unconfirmed rather than successful. Check that the cfpay notification agent is deployed ` +
+        `and the destination channel is configured.`,
+    };
   } catch (err) {
     return {
       ok: false,
