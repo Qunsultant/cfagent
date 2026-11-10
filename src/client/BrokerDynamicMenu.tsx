@@ -8,8 +8,10 @@ import { isTabFeatureEnabled } from "./featureFlags";
 import { PillGroup, Button, TextInput, Select } from "./components/ui";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { apiFetch } from "./apiFetch";
-import { syncTarget } from "./brokerEndpoints";
+import { syncTarget, connectStatusEndpoint } from "./brokerEndpoints";
 import { brokerPresentation } from "../trading/brokerPresentation";
+import { brokerCredentialGuidance, isBrokerId } from "../trading/brokerCatalog";
+import { brokerOptions } from "./brokerOptions";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
 import {
   loadTapeSelection,
@@ -29,7 +31,7 @@ import {
   saveStoredAdBannerConfig,
 } from "./adBannerConfig";
 import { useAutoRefresh } from "./autoRefresh";
-import { useTenantProviders, DATA_PROVIDER_OPTIONS, BROKER_OPTIONS } from "./tenantProviders";
+import { useTenantProviders, DATA_PROVIDER_OPTIONS } from "./tenantProviders";
 import { getPollingConfig } from "./pollingConfig";
 import {
   FONT_SCALE_PRESETS,
@@ -171,7 +173,7 @@ export function BrokerDynamicMenu({
 
   const [localMsg, setLocalMsg] = useState("");
   const [localDiagLoading, setLocalDiagLoading] = useState(false);
-  const [showAlpacaSignIn, setShowAlpacaSignIn] = useState(false);
+  const [showKeyPairSignIn, setShowKeyPairSignIn] = useState(false);
 
   // Central auto-refresh
   const [autoRefreshState, setAutoRefreshState] = useAutoRefresh();
@@ -400,7 +402,15 @@ export function BrokerDynamicMenu({
   // never falls back to E*TRADE when no selection is stored.
   const selectedBrokerId = tenantProviders.brokerId ?? "alpaca";
   const selectedBrokerLabel = brokerPresentation(selectedBrokerId).label;
-  const brokerIcon = selectedBrokerId === "alpaca" ? "🦙" : "⚡";
+  const brokerIcon = brokerPresentation(selectedBrokerId).icon;
+  // Issue #3855: the connect surface switches on the broker's credential
+  // kind, not its id — a key-pair broker gets the key-pair surface, an
+  // OAuth broker gets the OAuth surface, whatever firm either one is.
+  // An unrecognised id keeps the menu's standing OAuth fallback (the
+  // pre-#3855 else-branch), never a guessed broker.
+  const selectedBrokerCredentialKind = isBrokerId(selectedBrokerId)
+    ? brokerCredentialGuidance(selectedBrokerId).kind
+    : "oauth1_per_login";
 
   // Single environment value with immediate local reactivity
   const [localEnv, setLocalEnv] = useState<BrokerEnvironment | null>(null);
@@ -445,34 +455,41 @@ export function BrokerDynamicMenu({
   const isLive = effectiveEnv === "PROD";
 
 
-  const [alpacaStatus, setAlpacaStatus] = useState<{ configured?: boolean; signedIn?: boolean } | null>(null);
+  // Issue #3855: the key-pair connect read, gated on the broker's
+  // credential kind — not on its id. A key-pair broker answers on its
+  // own connect surface (the endpoint module decides the URL); a broker
+  // with no connect surface here gets no fetch, never another broker's
+  // status read.
+  const [keyPairStatus, setKeyPairStatus] = useState<{ configured?: boolean; signedIn?: boolean } | null>(null);
 
   useEffect(() => {
-    if (selectedBrokerId !== "alpaca") return;
+    if (selectedBrokerCredentialKind !== "api_key_pair") return;
+    const statusUrl = connectStatusEndpoint(selectedBrokerId);
+    if (!statusUrl) return;
     let cancelled = false;
-    const url = `/api/broker/connect/alpaca?environment=${encodeURIComponent(effectiveEnv)}`;
+    const url = `${statusUrl}?environment=${encodeURIComponent(effectiveEnv)}`;
     apiFetch(url)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled && data && typeof data === "object") {
           const body = data as Record<string, unknown>;
-          setAlpacaStatus({
+          setKeyPairStatus({
             configured: Boolean(body.configured),
             signedIn: Boolean(body.signedIn),
           });
         }
       })
       .catch(() => {
-        if (!cancelled) setAlpacaStatus(null);
+        if (!cancelled) setKeyPairStatus(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [selectedBrokerId, effectiveEnv]);
+  }, [selectedBrokerId, selectedBrokerCredentialKind, effectiveEnv]);
 
   const isConnected =
-    selectedBrokerId === "alpaca"
-      ? Boolean(alpacaStatus?.configured || alpacaStatus?.signedIn)
+    selectedBrokerCredentialKind === "api_key_pair"
+      ? Boolean(keyPairStatus?.configured || keyPairStatus?.signedIn)
       : !!oauthStatus?.authenticated;
 
   const handleMouseEnter = () => {
@@ -622,7 +639,7 @@ export function BrokerDynamicMenu({
     }
   };
 
-  const toggleAlpacaSignIn = () => setShowAlpacaSignIn((open) => !open);
+  const toggleKeyPairSignIn = () => setShowKeyPairSignIn((open) => !open);
   const isDiagnosticsRunning = diagnosticsLoading || localDiagLoading;
 
   return (
@@ -641,7 +658,7 @@ export function BrokerDynamicMenu({
         title={
           isPinned
             ? "Settings pinned open (click to unpin)"
-            : `Settings (${selectedBrokerLabel} · ${isLive ? "Live" : (selectedBrokerId === "alpaca" ? "Paper" : "Sandbox")}) — Broker, preferences, layout & themes`
+            : `Settings (${selectedBrokerLabel} · ${brokerPresentation(selectedBrokerId).modeShort[isLive ? "live" : "paper"]}) — Broker, preferences, layout & themes`
         }
         aria-label="Settings"
       >
@@ -687,8 +704,8 @@ export function BrokerDynamicMenu({
                 </div>
                 <span className={`brand-status-text ${isConnected ? "connected" : "disconnected"}`}>
                   {isConnected
-                    ? (selectedBrokerId === "alpaca"
-                        ? (alpacaStatus?.signedIn ? "● User Key Connected" : "● Deployment Key Active")
+                    ? (selectedBrokerCredentialKind === "api_key_pair"
+                        ? (keyPairStatus?.signedIn ? "● User Key Connected" : "● Deployment Key Active")
                         : "● OAuth Session Active")
                     : "○ Disconnected"}
                 </span>
@@ -700,11 +717,7 @@ export function BrokerDynamicMenu({
               >
                 {!isConnected
                   ? "OFFLINE"
-                  : isLive
-                  ? "LIVE"
-                  : selectedBrokerId === "alpaca"
-                  ? "PAPER"
-                  : "SANDBOX"}
+                  : brokerPresentation(selectedBrokerId).modeShort[isLive ? "live" : "paper"].toUpperCase()}
               </span>
             </div>
           </div>
@@ -725,10 +738,10 @@ export function BrokerDynamicMenu({
               ariaLabel="Broker choice"
               size="sm"
               variant="default"
-              options={BROKER_OPTIONS.map((opt) => ({
+              options={brokerOptions().map((opt) => ({
                 id: opt.id,
                 label: opt.label,
-                icon: opt.id === "alpaca" ? "🦙" : "⚡",
+                icon: opt.icon,
                 tooltip: `Select ${opt.label} as active broker`,
               }))}
               value={selectedBrokerId}
@@ -748,9 +761,9 @@ export function BrokerDynamicMenu({
                 size="sm"
                 className={`btn-env-mini active ${isLive ? "prod" : ""}`}
                 onClick={() => onSwitchEnv(isLive ? "TEST" : "PROD")}
-                title={`Current mode: ${isLive ? "Live" : (selectedBrokerId === "alpaca" ? "Paper" : "Sandbox")}. Click to toggle to ${isLive ? (selectedBrokerId === "alpaca" ? "Paper" : "Sandbox") : "Live"}.`}
+                title={`Current mode: ${brokerPresentation(selectedBrokerId).modeWord[isLive ? "live" : "paper"]}. Click to toggle to ${brokerPresentation(selectedBrokerId).modeWord[isLive ? "paper" : "live"]}.`}
               >
-                {isLive ? "🔴 Live" : (selectedBrokerId === "alpaca" ? "🧪 Paper" : "🧪 Sandbox")}
+                {isLive ? "🔴 Live" : `🧪 ${brokerPresentation(selectedBrokerId).modeShort[isLive ? "live" : "paper"]}`}
               </Button>
               <Button
                 type="button"
@@ -763,20 +776,20 @@ export function BrokerDynamicMenu({
               >
                 🔄 Sync
               </Button>
-              {selectedBrokerId === "alpaca" ? (
+              {selectedBrokerCredentialKind === "api_key_pair" ? (
                 <Button
                   type="button"
                   size="sm"
                   className="btn-action-mini connect"
-                  onClick={toggleAlpacaSignIn}
-                  aria-expanded={showAlpacaSignIn}
-                  title={isConnected ? "Alpaca connection status & BYOK" : "Connect Alpaca"}
+                  onClick={toggleKeyPairSignIn}
+                  aria-expanded={showKeyPairSignIn}
+                  title={isConnected ? `${selectedBrokerLabel} connection status & BYOK` : `Connect ${selectedBrokerLabel}`}
                 >
-                  {showAlpacaSignIn
-                    ? "🦙 Close info"
+                  {showKeyPairSignIn
+                    ? `${brokerIcon} Close info`
                     : isConnected
-                    ? "🦙 Connected"
-                    : "🦙 Connect Alpaca"}
+                    ? `${brokerIcon} Connected`
+                    : `${brokerIcon} Connect ${selectedBrokerLabel}`}
                 </Button>
               ) : isConnected ? (
                 <>
@@ -816,8 +829,8 @@ export function BrokerDynamicMenu({
               )}
             </div>
 
-            {/* Embedded Alpaca credentials card */}
-            {selectedBrokerId === "alpaca" && showAlpacaSignIn && (
+            {/* Embedded key-pair credentials card */}
+            {selectedBrokerCredentialKind === "api_key_pair" && showKeyPairSignIn && (
               <div className="embedded-alpaca-signin">
                 <AlpacaSignInCard
                   activeEnv={effectiveEnv}

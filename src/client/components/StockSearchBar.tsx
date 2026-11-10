@@ -4,7 +4,7 @@ import { SEARCH_SYMBOLS, type NamedQuoteSymbol } from "../quotes/symbolSets";
 import type { NavTabId } from "./NavigationMenu";
 import { Badge, Button, Modal, PillGroup, TextInput, type BadgeTone, type PillOption } from "./ui";
 import { BRAND } from "../branding";
-import { useTenantProviders, BROKER_OPTIONS } from "../tenantProviders";
+import { useTenantProviders, labelForBroker } from "../tenantProviders";
 
 export type StockTickerItem = NamedQuoteSymbol & {
   bid?: string;
@@ -104,7 +104,7 @@ export function StockSearchBar({ onSelectTab, onAskAgent, className = "" }: Stoc
   // the app route through the selected broker, so the search control
   // shows which broker that is, live from the tenant providers state.
   const [tenantProviders] = useTenantProviders();
-  const brokerLabel = BROKER_OPTIONS.find((o) => o.id === tenantProviders.brokerId)?.label ?? tenantProviders.brokerId;
+  const brokerLabel = labelForBroker(tenantProviders, tenantProviders.brokerId);
   const listRef = useRef<HTMLDivElement>(null);
 
   // Issue #2100: the feed lifecycle (socket, fallback, flash) lives in
