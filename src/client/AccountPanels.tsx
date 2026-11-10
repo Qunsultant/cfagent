@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, TextInput, Notice } from "./components/ui";
-import { useTenantProviders, BROKER_OPTIONS, brokerUnavailableNotice } from "./tenantProviders";
+import { useTenantProviders, labelForBroker, brokerUnavailableNotice } from "./tenantProviders";
 import {
   cancelRemoteOrder,
   createWatchlist,
@@ -54,7 +54,7 @@ interface AccountPanelsProps {
 
 export function AccountPanels({ activeEnv, onUnreadAlertsChange }: AccountPanelsProps) {
   const [tenantProviders] = useTenantProviders();
-  const selectedBrokerLabel = BROKER_OPTIONS.find((o) => o.id === tenantProviders.brokerId)?.label ?? tenantProviders.brokerId;
+  const selectedBrokerLabel = labelForBroker(tenantProviders, tenantProviders.brokerId);
   const [open, setOpen] = useState({ alerts: true, transactions: true, watchlists: true, orders: true });
   const toggle = (key: keyof typeof open) => setOpen((o) => ({ ...o, [key]: !o[key] }));
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
