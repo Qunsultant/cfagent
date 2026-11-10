@@ -1,0 +1,3 @@
+### Fixed
+
+- **"Cancel all open orders" now completes, instead of previewing and polling (#4020):** `alpaca_cancel_all` is a two-step tool by design (#3885) — the first call returns a preview plus a single-use token and cancels nothing, and only a second call with that token acts. The copilot called it once, polled `get_async_job` three times, and left every order open. The steering now requires the full protocol: preview, show the count, confirm with the token in the same turn, and report the receipt's cancelled/refused ids verbatim; a refusal above the configured cap is reported with the real count and the cap; and trading tools are never polled through `get_async_job` — they answer synchronously, and an expired token means re-preview.
