@@ -540,6 +540,14 @@ export interface FeedJobSurfaceView {
   pipeline: {
     state: string;
     currentRunId: string | null;
+    /** Issue #4002 (recording slice): when the instance's current
+     *  run started. The onStart recovery uses this as the guard
+     *  for attributing a pipeline run id to an orphaned async
+     *  job row — a run that started after the executor's last
+     *  activity is a later run, not this row's orphan. Read
+     *  straight from the instance record, not from artifacts, so
+     *  it survives the host's orphan settle. */
+    runStartedAt: string | null;
     lastRunStatus: string | null;
     lastRunAt: string | null;
     stages: JobStatusView["stages"];
@@ -577,6 +585,10 @@ export async function buildFeedJobSurfaceView(args: {
     ? {
         state: args.pipeline.instance?.state ?? "idle",
         currentRunId: args.pipeline.instance?.currentRunId ?? null,
+        // Issue #4002 (recording slice): the instance's current
+        // run start, straight from the record — not lastRunAt,
+        // which the host's orphan settle rewrites to settle time.
+        runStartedAt: args.pipeline.instance?.runStartedAt ?? null,
         lastRunStatus: args.pipeline.latestRun?.outcome ?? null,
         lastRunAt:
           args.pipeline.latestRun?.finished ??
