@@ -1,0 +1,3 @@
+### Added
+
+- **Built-in goal dropdown + seed-all button on the Scheduled goals page (#3996):** the Add-goal form now offers a "Built-in goal" dropdown (read from the new session-gated `GET /api/schedule/builtin-goals`, the server's `DEFAULT_SCHEDULES` — no second client-side copy) that pre-fills id, name, cron, operation, budget, timeZone and the enabled state, with goals that already exist marked "already added" and surfaced instead of duplicated; a "Seed all built-in goals" button adds every missing built-in goal in order with per-goal added / skipped / failed reporting, seeding the daily social post and the ETF-holdings refresh as disabled. The form gains an Enabled toggle so a pre-filled disabled goal submits as disabled. #CISO-bhdm
