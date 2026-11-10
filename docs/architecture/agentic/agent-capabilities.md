@@ -115,9 +115,10 @@ The tools an agent can wield, beyond its doors. (The per-tool account
   (tracker A3, #2760); conformance across agents is S10 #3494.
 - **Web search** — search the web as a tool. **Partial**: the tool
   exists (tracker A2, #2731) and fails loud until a provider key is
-  configured; the provider decision (Brave vs SearXNG vs Cloudflare
-  Web Search API) is the owner's, filed as #3501; conformance is
-  S11 #3495.
+  configured; the provider decision was answered by #3935 (owner
+  decision 2026-11-10): a multi-provider chain, free/keyless first
+  (SearXNG, DuckDuckGo), Brave as keyed fallback — closing #3501;
+  conformance is S11 #3495.
 - **AI Search (RAG)** — retrieval over indexed corpora — OCC, FINRA,
   platform docs — feeding the learning loop. The curated corpus is
   **Live** (#3375); report indexing runs at store time today, and
@@ -302,12 +303,45 @@ uniformity is tracked by #3514; its dual-mode instantiation by #3519.
 Everything in this document that can vary is externalized
 configuration (AOP, #2419): capability disablement (manifest,
 #3489), modes (§5), cadences, sessions, universes, loop bounds. Two
-classes of step remain the operator's, by design, and are named
-wherever they gate a capability: **secrets** (e.g.
-`THINK_WEBHOOK_SECRET` for the webhook channel;
-`BRAVE_SEARCH_API_KEY` pending the provider decision #3501) and
-**approvals** (catalogue price approval for payments; the
-non-deterministic screener flag flip is CISO-gated).
+classes of step remain the operator's, by design: **secrets /
+bindings** and **approvals**. The per-capability checklist — a
+capability reports `unavailable` (fails loud) until its step is done:
+
+- **Email (#3490)** — the channel is live at the port, but no mail
+  arrives until the operator creates the Cloudflare Email Service
+  routing rule, and no mail sends until the `EMAIL` binding exists:
+  1. Cloudflare dashboard → **Compute > Email Service > Email
+     Routing > Settings**, enable **subaddressing** (plus addressing,
+     RFC 5233).
+  2. Create a routing rule: **Email pattern** `orchestrator-agent`,
+     domain `agent.openaimp.com`, **Action** `Send to a Worker`,
+     **Destination** the cfagent Worker. With subaddressing enabled,
+     `orchestrator-agent+<login>@agent.openaimp.com` is matched by the
+     `orchestrator-agent@agent.openaimp.com` rule, and the `+<login>`
+     detail is preserved in `message.to` for the Worker resolver.
+     (Alternative: enable the **catch-all rule** → Send to a Worker;
+     the Worker itself dispatches agent vs NLQ mail. One rule per
+     agent base local part otherwise.)
+  3. Verify: send a test mail to
+     `orchestrator-agent+<login>@agent.openaimp.com` and confirm the
+     addressed instance's hook fires; confirm NLQ mail to
+     `trade@agent.openaimp.com` still lands in the trading pipeline.
+- **Webhooks (#3474)** — set the `THINK_WEBHOOK_SECRET` Worker
+  secret. Production answers 503 until it is set.
+- **Web search (#3495)** — the provider chain, free/keyless first:
+  SearXNG when `SEARXNG_BASE_URL` is set, then DuckDuckGo (keyless,
+  always available — the tool answers with zero configuration), then
+  Brave when `BRAVE_SEARCH_API_KEY` is set. Order and subset come
+  from `WEB_SEARCH_PROVIDERS` (default `searxng,duckduckgo,brave`).
+  Provider decision is #3935 (owner decision 2026-11-10).
+- **Slack (S5)** — set `SLACK_BOT_TOKEN` (or `SLACK_WEBHOOK_URL`) as
+  a Worker secret for posting. Ingress runs the shared channel
+  handler on per-team OrchestratorAgent instances.
+- **A2A / agent-as-a-tool** — live on a transitional shared token;
+  the per-surface secrets rollout is operator-deferred.
+- **Payments (S14, #3498)** — catalogue price approval through the
+  CBO price-catalogue gate, before a priced capability is exposed.
+- **Non-deterministic mode (S17)** — the flag flip is CISO-gated.
 
 ## 8. Tracking map
 
