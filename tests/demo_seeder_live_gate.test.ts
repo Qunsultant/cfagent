@@ -66,8 +66,13 @@ describe("#921 demo seeder live gate", () => {
     const handler = src.slice(src.indexOf("const handleSeedDemoPortfolio"));
     const handlerBody = handler.slice(0, handler.indexOf("setPositions(samplePositions)"));
     expect(handlerBody).toMatch(/if \(isLive\) return;/);
-    // Both call sites are render-gated on !isLive.
-    const gateCount = (src.match(/!isLive && \(/g) || []).length;
+    // Both call sites are render-gated on !isLive. The buttons moved with the
+    // portfolio sub-tab into PortfolioPanel (#3050 PR5); the gate travels
+    // with them, so count both hosts.
+    const panelSrc = readFileSync("src/client/PortfolioPanel.tsx", "utf8");
+    const gateCount =
+      (src.match(/!isLive && \(/g) || []).length +
+      (panelSrc.match(/!isLive && \(/g) || []).length;
     expect(gateCount).toBeGreaterThanOrEqual(2);
   });
 });
