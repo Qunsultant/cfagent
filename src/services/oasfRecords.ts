@@ -195,6 +195,9 @@ export const CAPABILITY_OASF_SKILLS: Record<string, OasfSkillRef[]> = {
   "transaction-snap": [SK.browserAutomation],
   "page-snapshot": [SK.browserAutomation],
   "dom-scraping": [SK.webScraping],
+  // #3969: the browser + sandbox cards declare web-fetch now
+  // (web-search is mapped above, under search).
+  "web-fetch": [SK.webScraping],
   "pre-trade-approval": [SK.regulatedFinanceOperations],
   // sandbox
   "sandbox-status": [SK.monitoringAlerting],

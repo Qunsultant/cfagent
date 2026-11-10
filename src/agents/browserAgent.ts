@@ -15,8 +15,21 @@ import { PortThink } from "../actors/thinkAdapter";
 import {
   dispatchBrowserA2A,
   browserA2AOutcome,
+  BrowserA2ACapabilityDisabledError,
   type BrowserA2AOutcome,
+  type BrowserWebToolFailure,
 } from "./browserA2aDispatch";
+import {
+  fetchWebPage,
+  WebFetchError,
+  type WebFetchResult,
+} from "../services/webFetch";
+import {
+  executeWebSearch,
+  WebSearchError,
+  type WebSearchEnv,
+  type WebSearchOutcome,
+} from "../services/webSearch";
 import type {
   Env,
   TransactionSnapData,
@@ -56,6 +69,16 @@ import { ETradeBrowserService } from "../services/browserAgent";
  * capability gate as the turn path). The surface is inherited
  * deliberately: BrowserAgent ships no AI SDK tools of its own, so
  * overriding it would only restate the base.
+ *
+ * Issue #3969 (Route A): the composed surface alone realized
+ * nothing for this class — no production caller composes a
+ * toolset for a headless agent. The capabilities are therefore
+ * ALSO served where this class is actually invoked: its A2A
+ * operations (browser.web_fetch / browser.web_search in
+ * ./browserA2aDispatch), through the fetchWeb / searchWeb
+ * methods below — the same services and the same capability
+ * gate as the turn path, refusing by name when the capability
+ * is withdrawn by configuration.
  */
 export class BrowserAgent extends PortThink {
   private browserService?: ETradeBrowserService;
@@ -111,13 +134,66 @@ export class BrowserAgent extends PortThink {
   }
 
   /**
+   * Issue #3969: the web_fetch capability on this class's A2A
+   * operations surface. Delegates to the ONE web fetch service
+   * (src/services/webFetch.ts) — the same service the turn path's
+   * web_fetch tool calls. The capability gate is consulted first:
+   * a capability withdrawn by configuration refuses by name
+   * before any fetch. Service failures return the port tool
+   * door's failure shape (named code + message), never fabricated
+   * content.
+   */
+  async fetchWeb(url: string): Promise<WebFetchResult | BrowserWebToolFailure> {
+    if (!this.isPortCapabilityEnabled("webFetch")) {
+      throw new BrowserA2ACapabilityDisabledError(
+        `Operation "browser.web_fetch" refused: capability "webFetch" is disabled by configuration for BrowserAgent (AGENT_CAPABILITIES_DISABLED).`,
+      );
+    }
+    try {
+      return await fetchWebPage(url);
+    } catch (err) {
+      if (err instanceof WebFetchError) {
+        return { ok: false, error: err.code, message: err.message, status: err.status ?? null };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Issue #3969: the web_search capability on this class's A2A
+   * operations surface. Delegates to the ONE web search service
+   * (src/services/webSearch.ts — the provider chain, free/keyless
+   * first) with this instance's env, exactly as the turn path's
+   * web_search tool does. Gate and failure shape as fetchWeb.
+   */
+  async searchWeb(
+    query: string,
+    count?: number,
+  ): Promise<WebSearchOutcome | BrowserWebToolFailure> {
+    if (!this.isPortCapabilityEnabled("webSearch")) {
+      throw new BrowserA2ACapabilityDisabledError(
+        `Operation "browser.web_search" refused: capability "webSearch" is disabled by configuration for BrowserAgent (AGENT_CAPABILITIES_DISABLED).`,
+      );
+    }
+    try {
+      return await executeWebSearch(this.env as unknown as WebSearchEnv, query, count);
+    } catch (err) {
+      if (err instanceof WebSearchError) {
+        return { ok: false, error: err.code, message: err.message, provider: err.provider ?? "" };
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Issue #2223 (final slice): A2A door, cfpay signature — the edge
    * dispatcher (src/a2a) resolves the "browser" name to this class
    * (the class is stateless, so the bare name is the instance) and
    * calls this with the parsed body + origin (a Request cannot
    * cross the DO RPC boundary). Thin delegation to the dispatch
    * module (./browserA2aDispatch), which mirrors onRequest's three
-   * routes onto the same methods and never forwards a
+   * routes onto the same methods, serves the web operations
+   * (#3969) through fetchWeb / searchWeb, and never forwards a
    * caller-supplied webhookUrl — delivery targets come from env
    * configuration only. The deliberately unset portHooks do not
    * block this door: it calls the real methods directly, never a
@@ -130,6 +206,8 @@ export class BrowserAgent extends PortThink {
         sendTransactionSnapToSlack: (tx, options) => this.sendTransactionSnapToSlack(tx, options),
         capturePageSnapshot: (url, options) => this.capturePageSnapshot(url, options),
         scrapeTables: (url) => this.scrapeTables(url),
+        fetchWeb: (url) => this.fetchWeb(url),
+        searchWeb: (query, count) => this.searchWeb(query, count),
       },
     });
     return browserA2AOutcome(data);

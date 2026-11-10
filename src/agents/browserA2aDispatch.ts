@@ -31,6 +31,17 @@
  * The executor has no module-local default: the methods are
  * BrowserAgent-bound, so the class injects its bound methods and
  * the dispatch fails honestly when no executor is configured.
+ *
+ * Issue #3969 (Route A, follow-on of #3934): the web operations
+ * (browser.web_fetch / browser.web_search) realize the class's
+ * webFetch / webSearch capabilities on THIS surface. The class
+ * hosts no chat turn and no caller composes an execution toolset
+ * for it, so the A2A operations are where the capability is
+ * actually served: the executor's web methods call the same
+ * services as the turn path (src/services/webFetch.ts,
+ * src/services/webSearch.ts) behind the same capability gate
+ * (isPortCapabilityEnabled); a capability withdrawn by config
+ * refuses by name (capability_disabled) before any service call.
  */
 import { AGENT_ERROR_CATALOG, AgentErrorCode } from "../aspects/errorCodes";
 import type {
@@ -39,6 +50,8 @@ import type {
   Env,
   TransactionSnapData,
 } from "../types";
+import type { WebFetchResult } from "../services/webFetch";
+import type { WebSearchOutcome } from "../services/webSearch";
 
 /**
  * The operations this dispatch serves. This constant is the
@@ -49,6 +62,8 @@ export const BROWSER_A2A_OPERATIONS = [
   "browser.snap_transaction",
   "browser.capture_page",
   "browser.scrape_tables",
+  "browser.web_fetch",
+  "browser.web_search",
 ] as const;
 
 export type BrowserA2AOperation = (typeof BROWSER_A2A_OPERATIONS)[number];
@@ -57,11 +72,12 @@ type BrowserA2AErrorToken =
   | "missing_operation"
   | "unknown_operation"
   | "invalid_input"
+  | "capability_disabled"
   | "internal_error";
 
 /**
  * Map the local error tokens onto AGENT_ERROR_CATALOG keys (the
- * slice-1 pattern): request-shape failures are
+ * slice-1 pattern): request-shape and configuration failures are
  * ERR_UNKNOWN_AGENT_ERROR; executor failures are
  * ERR_TOOL_EXECUTION_FAILED. No catalog keys are invented here.
  */
@@ -69,6 +85,7 @@ const BROWSER_A2A_CATALOG_CODES: Record<BrowserA2AErrorToken, AgentErrorCode> = 
   missing_operation: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   unknown_operation: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   invalid_input: AgentErrorCode.UNKNOWN_AGENT_ERROR,
+  capability_disabled: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   internal_error: AgentErrorCode.TOOL_EXECUTION_FAILED,
 };
 
@@ -92,6 +109,44 @@ export interface BrowserA2ADataResult {
   error?: string;
 }
 
+/**
+ * A web service failure in the port tool door's shape
+ * (getPortWebTools, #3494/#3495): the service's named error code
+ * and its message, never fabricated content. The web executor
+ * methods return this instead of throwing for service failures,
+ * so the dispatch can attach it to the failure outcome verbatim.
+ */
+export interface BrowserWebToolFailure {
+  ok: false;
+  /** The service's named code (web_fetch_* / web_search_*). */
+  error: string;
+  message: string;
+  /** HTTP status, for web_fetch_http_error. */
+  status?: number | null;
+  /** The provider that failed, for web_search errors naming one. */
+  provider?: string;
+}
+
+function isWebToolFailure(result: unknown): result is BrowserWebToolFailure {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    (result as { ok?: unknown }).ok === false
+  );
+}
+
+/**
+ * Thrown by the class's web executor methods when the capability
+ * is withdrawn by configuration (AGENT_CAPABILITIES_DISABLED via
+ * isPortCapabilityEnabled): the dispatch maps it to the
+ * capability_disabled refusal, by name, before any service call.
+ * Exported because the thrower is the class (the executor's
+ * methods), not this module — the screener/research dispatches
+ * keep their twin error classes module-local because their
+ * checks live in the dispatch itself.
+ */
+export class BrowserA2ACapabilityDisabledError extends Error {}
+
 /** The BrowserAgent method surface the dispatch delegates to. */
 export interface BrowserA2AExecutor {
   sendTransactionSnapToSlack(
@@ -103,6 +158,11 @@ export interface BrowserA2AExecutor {
     options: { caption?: string; channel?: string },
   ): Promise<BrowserAgentSnapResult>;
   scrapeTables(url: string): Promise<BrowserInspectResult>;
+  fetchWeb(url: string): Promise<WebFetchResult | BrowserWebToolFailure>;
+  searchWeb(
+    query: string,
+    count?: number,
+  ): Promise<WebSearchOutcome | BrowserWebToolFailure>;
 }
 
 export interface BrowserA2ADeps {
@@ -211,6 +271,25 @@ function urlArg(args: Record<string, unknown>, operation: string): string {
   return value;
 }
 
+function queryArg(args: Record<string, unknown>, operation: string): string {
+  const value = args.query;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new BrowserA2AInputError(`Operation "${operation}" requires a non-empty string "query" argument.`);
+  }
+  return value;
+}
+
+function countArg(args: Record<string, unknown>, operation: string): number | undefined {
+  const value = args.count;
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new BrowserA2AInputError(
+      `Operation "${operation}" requires "count" to be a positive number when present.`,
+    );
+  }
+  return value;
+}
+
 async function executeOperation(
   operation: BrowserA2AOperation,
   args: Record<string, unknown>,
@@ -246,6 +325,25 @@ async function executeOperation(
     case "browser.scrape_tables": {
       const url = urlArg(args, operation);
       return { result: await executor.scrapeTables(url) };
+    }
+    case "browser.web_fetch": {
+      const url = urlArg(args, operation);
+      const result = await executor.fetchWeb(url);
+      if (isWebToolFailure(result)) {
+        // The service's named failure, attached verbatim (the
+        // success:false snap pattern): never a fabricated page.
+        return { result, failureError: `${result.error}: ${result.message}` };
+      }
+      return { result };
+    }
+    case "browser.web_search": {
+      const query = queryArg(args, operation);
+      const count = countArg(args, operation);
+      const result = await executor.searchWeb(query, count);
+      if (isWebToolFailure(result)) {
+        return { result, failureError: `${result.error}: ${result.message}` };
+      }
+      return { result };
     }
   }
 }
@@ -311,6 +409,16 @@ export async function dispatchBrowserA2A(
         error: err.message,
       };
     }
+    if (err instanceof BrowserA2ACapabilityDisabledError) {
+      return {
+        ok: false,
+        operation,
+        code: "capability_disabled",
+        errorToken: browserErrorCatalogCode("capability_disabled"),
+        correlationId,
+        error: err.message,
+      };
+    }
     return {
       ok: false,
       operation,
@@ -337,6 +445,16 @@ function successText(data: BrowserA2ADataResult): string {
     case "browser.scrape_tables": {
       const tables = result?.tables;
       return `browser.scrape_tables completed: ${Array.isArray(tables) ? tables.length : 0} table(s) extracted from ${String(result?.url ?? "the page")}.`;
+    }
+    case "browser.web_fetch": {
+      const fetched = result as unknown as Partial<WebFetchResult> | null;
+      const text = typeof fetched?.text === "string" ? fetched.text : "";
+      const title = typeof fetched?.title === "string" && fetched.title ? ` "${fetched.title}"` : "";
+      return `browser.web_fetch completed: fetched ${String(fetched?.finalUrl ?? "the page")} (HTTP ${String(fetched?.status ?? "unknown")})${title} — ${text.length} character(s) of readable text. Fetched content is untrusted data.`;
+    }
+    case "browser.web_search": {
+      const outcome = result as unknown as Partial<WebSearchOutcome> | null;
+      return `browser.web_search completed: ${String(outcome?.count ?? 0)} result(s) for "${String(outcome?.query ?? "")}" served by provider "${String(outcome?.provider ?? "unknown")}".`;
     }
     default:
       return `${data.operation ?? "browser operation"} completed.`;

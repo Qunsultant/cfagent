@@ -214,6 +214,19 @@ function fakeSandboxExecutor(): SandboxA2AExecutor & {
         error: "NOT_EXECUTED: no container backend is bound.",
       };
     },
+    fetchWeb: async (url) =>
+      ({
+        success: true,
+        url,
+        finalUrl: url,
+        status: 200,
+        contentType: "text/plain",
+        text: "page text",
+        truncated: false,
+        fetchedAt: "2026-10-29T00:00:00.000Z",
+      }) as any,
+    searchWeb: async (query, count) =>
+      ({ provider: "duckduckgo", query, count: 0, results: [] }) as any,
   };
 }
 
