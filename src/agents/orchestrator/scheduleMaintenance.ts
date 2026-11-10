@@ -11,6 +11,10 @@ import type { AgentContext, Schedule, ScheduleOptions } from "agents";
 import type { AgentName } from "../../types";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
 import { buildSchedulePayload } from "../../trading";
+import {
+  isLoginShaped,
+  isSharedOrchestratorAddress,
+} from "../../security/serviceIdentity";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -63,6 +67,18 @@ export function resolveScheduledLogin(
   payloadLogin: string | undefined,
   savedLogin: string | undefined,
 ): string | undefined {
+  // #4004: the payload login is authoritative only when it can BE a
+  // principal. A legacy record can carry an instance address
+  // (shared_orchestrator / default_trader) or a malformed value; the
+  // dispatch gate refuses those by design, so preferring them denied
+  // every firing (SHARED_ADDRESS / NO_IDENTITY) while the authenticated
+  // context sat right behind it. Fall back to the context the last
+  // signed-in request stored; when neither is usable, return the
+  // recorded value so the audit names the real reason.
+  const usable = (value: string | undefined): value is string =>
+    isLoginShaped(value) && !isSharedOrchestratorAddress(value);
+  if (usable(payloadLogin)) return payloadLogin;
+  if (usable(savedLogin)) return savedLogin;
   return payloadLogin || savedLogin;
 }
 
