@@ -285,6 +285,7 @@ describe("feed job registry (#3530 S2)", () => {
       "yahoo-dow-quotes",
       "yahoo-nasdaq100-fundamentals",
       "yahoo-nasdaq100-quotes",
+      "yahoo-nasdaq100-technicals",
       "yahoo-sp100-quotes",
       "yahoo-sp500-quotes",
     ]);

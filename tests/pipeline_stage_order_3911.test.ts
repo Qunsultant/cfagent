@@ -66,6 +66,7 @@ const T0 = Date.parse("2026-11-07T12:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
 const FEED_ID = "yahoo-nasdaq100-quotes";
 const FUND_ID = "yahoo-nasdaq100-fundamentals";
+const TECH_ID = "yahoo-nasdaq100-technicals";
 const ENRICH_ID = `${FEED_ID}-enrich`;
 const ANALYZE_ID = `${ENRICH_ID}-analyze`;
 const CHAIN_ID = `${FEED_ID}-pipeline`;
@@ -130,6 +131,7 @@ describe("chain prerequisite (#3911)", () => {
     const yahoo = registry.forId(CHAIN_ID)!;
     expect(yahoo.feedJobId).toBe(FEED_ID);
     expect(yahoo.fundamentalsJobId).toBe(FUND_ID);
+    expect(yahoo.technicalsJobId).toBe(TECH_ID);
     expect(yahoo.stages.map((s) => [s.stage, s.jobId])).toEqual([
       ["feed", FEED_ID],
       ["enrich", ENRICH_ID],
@@ -137,12 +139,14 @@ describe("chain prerequisite (#3911)", () => {
       ["generate", `${ANALYZE_ID}-generate`],
       ["deliver", `${ANALYZE_ID}-generate-deliver`],
     ]);
-    // Fundamentals is the enrich join, folded into the feed
-    // stage as a node — never a stage job of its own.
+    // Fundamentals and technicals are the enrich joins, folded
+    // into the feed stage as nodes — never stage jobs of their own.
     expect(yahoo.stages.map((s) => s.jobId)).not.toContain(FUND_ID);
+    expect(yahoo.stages.map((s) => s.jobId)).not.toContain(TECH_ID);
     expect(yahoo.nodes.map((n) => n.jobId)).toEqual([
       FEED_ID,
       FUND_ID,
+      TECH_ID,
       ENRICH_ID,
       ANALYZE_ID,
       `${ANALYZE_ID}-generate`,
@@ -262,6 +266,58 @@ function fundamentalsInput(runId: string): FeedDatasetStoreInput {
   };
 }
 
+/** #3931: the technicals join the enrich job declares — thirty live
+ *  daily bars per symbol (closes 100..129), persisted alongside the
+ *  fundamentals copy so the enrich run completes on both joins. */
+function technicalsInput(runId: string): FeedDatasetStoreInput {
+  const barsFor = (symbol: string) => {
+    const bars = [];
+    for (let i = 0; i < 30; i++) {
+      const close = 100 + i;
+      bars.push({
+        provenance: "live",
+        timestamp: iso(T0 - (30 - 1 - i) * 24 * 3600_000),
+        open: close - 0.5,
+        high: close + 1,
+        low: close - 1,
+        close,
+        volume: 1_000_000,
+      });
+    }
+    return { symbol, bars };
+  };
+  return {
+    sourceId: "yahoo" as DataProviderId,
+    dataset: "technicals",
+    jobId: TECH_ID,
+    universe: {
+      kind: "index",
+      index: "nasdaq100" as IndexId,
+      label: "Nasdaq-100",
+      snapshotDate: "2026-11-02",
+      sourceLabel: "Wikipedia (Nasdaq-100 table)",
+      size: 2,
+    },
+    run: {
+      runId,
+      trigger: "manual",
+      startedAt: iso(T0),
+      finishedAt: iso(T0 + 1000),
+      status: "completed",
+      requested: 2,
+      received: 2,
+      failed: 0,
+      missingSymbols: [],
+      codedError: null,
+      errorMessage: null,
+    },
+    quotes: [],
+    bars: [barsFor("AAPL"), barsFor("MSFT")],
+    asOf: iso(T0 + 1000),
+    nowIso: iso(T0 + 1000),
+  } as unknown as FeedDatasetStoreInput;
+}
+
 describe("the feed → enrich → analyze seam (#3911)", () => {
   it("a standalone feed run's quotes are enriched, then analyzed, by exact lineage", async () => {
     const datasetStore = new InMemoryFeedDatasetStore();
@@ -283,6 +339,9 @@ describe("the feed → enrich → analyze seam (#3911)", () => {
     // The fundamentals join the enrich job declares (the incident
     // ran this job — it is a join source, never the feed input).
     await datasetStore.store(fundamentalsInput("feed-fund-3911"));
+    // #3931: and the technicals join it declares — both joins
+    // present, so the enrich run completes.
+    await datasetStore.store(technicalsInput("feed-tech-3911"));
 
     // Stage 2 — enrich: resolves the feed run's artifact by feed
     // job id and persists enriched rows naming that input.

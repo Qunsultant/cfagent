@@ -48,6 +48,7 @@ import {
   FEED_JOB_CODES,
   FeedJobError,
   runFeedFundamentalsJob,
+  YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
   type FeedJobDefinition,
 } from "../src/services/feedJobs";
 import {
@@ -81,11 +82,15 @@ import type {
   QuoteResult,
 } from "../src/trading/dataProviders/contract";
 import type { IndexId } from "../src/trading";
-import type { MarketDataResearchCompanyFundamentals } from "../src/types";
+import type {
+  MarketDataResearchCompanyFundamentals,
+  MarketDataResearchHistoricalBar,
+} from "../src/types";
 
 const T0 = Date.parse("2026-11-07T12:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
 const FUND_ID = "yahoo-nasdaq100-fundamentals";
+const TECH_ID = YAHOO_NASDAQ100_TECHNICALS_JOB_ID;
 const NASDAQ_SYMBOLS = ["AAPL", "MSFT"];
 const SP100_SYMBOLS = ["AAPL", "XOM"];
 
@@ -200,6 +205,56 @@ function fundamentalsArtifact(
         recommendationKey: "buy",
       },
     })) as unknown as FeedDatasetStoreInput["fundamentals"],
+    run: runRecord(runId, atMs, rows.length),
+    nowIso: iso(atMs + 1000),
+  } as unknown as FeedDatasetStoreInput;
+}
+
+/**
+ * Thirty live daily bars, closes 100..129 (+1/day), high=close+1,
+ * low=close-1 — RSI(14)=100, ATR(14)=2 exactly (#3931 fixture).
+ * Seeds the technicals join so a run can complete on both joins.
+ */
+function risingBars(symbol: string, count = 30): MarketDataResearchHistoricalBar[] {
+  const bars: MarketDataResearchHistoricalBar[] = [];
+  for (let i = 0; i < count; i++) {
+    const close = 100 + i;
+    bars.push({
+      provenance: "live",
+      timestamp: iso(T0 - (count - 1 - i) * 24 * 3600_000),
+      open: close - 0.5,
+      high: close + 1,
+      low: close - 1,
+      close,
+      volume: 1_000_000,
+    });
+  }
+  return bars;
+}
+
+function technicalsArtifact(
+  runId: string,
+  atMs: number,
+  index: IndexId,
+  rows: Array<{ symbol: string; bars: MarketDataResearchHistoricalBar[] }>,
+): FeedDatasetStoreInput {
+  return {
+    sourceId: "yahoo",
+    dataset: "technicals",
+    jobId: TECH_ID,
+    elements: ["historicalBars"],
+    universe: {
+      kind: "index",
+      index,
+      label: INDEX_LABELS[index],
+      snapshotDate: "2026-11-02",
+      sourceLabel: `Wikipedia (${INDEX_LABELS[index]} table)`,
+      size: rows.length,
+    },
+    providerId: "yahoo",
+    asOf: iso(atMs + 1000),
+    quotes: [],
+    bars: rows.map((r) => ({ symbol: r.symbol, bars: r.bars })),
     run: runRecord(runId, atMs, rows.length),
     nowIso: iso(atMs + 1000),
   } as unknown as FeedDatasetStoreInput;
@@ -414,11 +469,19 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
   it("every quotes enrich job joins the fundamentals dataset for its own universe", () => {
     const registry = buildEnrichJobRegistry({});
     for (const def of registry.list()) {
+      // #3931: every quotes enrich job joins BOTH gap-filling
+      // datasets for its own universe — fundamentals and technicals.
       expect(def.enrichFrom).toEqual([
         {
           feedJobId: FUND_ID,
           sourceId: "yahoo",
           dataset: "fundamentals",
+          universe: def.universe.index,
+        },
+        {
+          feedJobId: TECH_ID,
+          sourceId: "yahoo",
+          dataset: "technicals",
           universe: def.universe.index,
         },
       ]);
@@ -433,21 +496,31 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
     const off = buildEnrichJobRegistry({
       ENRICH_JOB_ALPACA_NASDAQ100_QUOTES_ENRICH_FUNDAMENTALS_JOIN: "off",
     });
-    expect(off.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toEqual([]);
+    // The knob is per job and per join: opting the fundamentals join
+    // out leaves the technicals join in place (quotes-only for the
+    // fundamentals elements, technicals still joined).
+    expect(off.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toEqual([
+      {
+        feedJobId: TECH_ID,
+        sourceId: "yahoo",
+        dataset: "technicals",
+        universe: "nasdaq100",
+      },
+    ]);
     expect(off.get("alpaca-nasdaq100-quotes-enrich")!.elements).not.toContain("peTrailing");
     // The knob is per job: the other broker jobs keep the join.
-    expect(off.get("etrade-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(1);
-    expect(off.get("yahoo-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(1);
+    expect(off.get("etrade-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(2);
+    expect(off.get("yahoo-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(2);
 
     const on = buildEnrichJobRegistry({
       ENRICH_JOB_ALPACA_NASDAQ100_QUOTES_ENRICH_FUNDAMENTALS_JOIN: "on",
     });
-    expect(on.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(1);
+    expect(on.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(2);
 
     const bogus = buildEnrichJobRegistry({
       ENRICH_JOB_ALPACA_NASDAQ100_QUOTES_ENRICH_FUNDAMENTALS_JOIN: "bogus",
     });
-    expect(bogus.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(1);
+    expect(bogus.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(2);
   });
 
   it("a broker enrich run carries fundamentals values from the persisted join", async () => {
@@ -462,6 +535,12 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
     );
     await datasetStore.store(fundamentalsArtifact("feed-f", T0, "nasdaq100", [
       { symbol: "AAPL", peTrailing: 28.5 },
+    ]));
+    // #3931: the technicals join is present for both symbols, so the
+    // run's only miss is MSFT in the fundamentals join.
+    await datasetStore.store(technicalsArtifact("feed-t", T0, "nasdaq100", [
+      { symbol: "AAPL", bars: risingBars("AAPL") },
+      { symbol: "MSFT", bars: risingBars("MSFT") },
     ]));
     const enrichedStore = new InMemoryEnrichedDatasetStore();
     const registry = buildEnrichJobRegistry({});
@@ -499,6 +578,16 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
     await datasetStore.store(fundamentalsArtifact("feed-f-nq", T0 + 60_000, "nasdaq100", [
       { symbol: "AAPL", peTrailing: 28.5 },
       { symbol: "MSFT", peTrailing: 22 },
+    ]));
+    // #3931: the technicals join is present for both universes, so
+    // both enrich runs complete on both joins.
+    await datasetStore.store(technicalsArtifact("feed-t-sp", T0, "sp100", [
+      { symbol: "AAPL", bars: risingBars("AAPL") },
+      { symbol: "XOM", bars: risingBars("XOM") },
+    ]));
+    await datasetStore.store(technicalsArtifact("feed-t-nq", T0 + 60_000, "nasdaq100", [
+      { symbol: "AAPL", bars: risingBars("AAPL") },
+      { symbol: "MSFT", bars: risingBars("MSFT") },
     ]));
     await datasetStore.store(
       feedArtifact("feed-sp", T0, {
@@ -581,6 +670,12 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
         dataset: "fundamentals",
         universe: "nasdaq100",
       },
+      {
+        feedJobId: TECH_ID,
+        sourceId: "yahoo",
+        dataset: "technicals",
+        universe: "nasdaq100",
+      },
     ]);
     expect(
       byId.get("yahoo-sp100-quotes-enrich")!.root.steps[0]!.params.enrichFrom,
@@ -589,6 +684,12 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
         feedJobId: FUND_ID,
         sourceId: "yahoo",
         dataset: "fundamentals",
+        universe: "sp100",
+      },
+      {
+        feedJobId: TECH_ID,
+        sourceId: "yahoo",
+        dataset: "technicals",
         universe: "sp100",
       },
     ]);
@@ -649,9 +750,10 @@ describe("the chains fold the parameterized fundamentals node (#3930)", () => {
         (n) => n.params?.feedJobId === FUND_ID,
       )?.params,
     ).toMatchObject({ feedJobId: FUND_ID, universe: "sp100" });
-    // The alpaca chain now carries six nodes (fundamentals folds in).
-    expect(walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!)).toHaveLength(6);
-    expect(walk(byId.get("yahoo-nasdaq100-quotes-pipeline")!)).toHaveLength(6);
+    // The alpaca chain now carries seven nodes (fundamentals and
+    // technicals fold in, #3931).
+    expect(walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!)).toHaveLength(7);
+    expect(walk(byId.get("yahoo-nasdaq100-quotes-pipeline")!)).toHaveLength(7);
     expect(CHAIN_PIPELINE_CATALOG).toHaveLength(7);
   });
 });

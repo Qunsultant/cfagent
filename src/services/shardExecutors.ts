@@ -380,6 +380,40 @@ async function feedYahoo(
     });
     historyDeps = { fetchBars: async () => null };
   }
+  // Issue #3931: persisted technicals are the PRIMARY source —
+  // the technicals job's stored daily bars, read once up front.
+  // A fresh copy serves every symbol it carries (labelled
+  // persisted); a missing or stale copy degrades to the live deps
+  // above, exactly as before. The read never fails the shard: any
+  // failure here falls back to live.
+  try {
+    const { createFeedDatasetAdapter } = await import("../data/createFeedDatasetPorts");
+    const feedJobs = await import("./feedJobs");
+    const { withPersistedBarsFirst } = await import("../trading");
+    const datasetStore = createFeedDatasetAdapter(
+      deps.env as { AGENT_DB?: unknown },
+    );
+    if (datasetStore) {
+      const envStrings: Record<string, string | undefined> = {};
+      for (const [key, value] of Object.entries(deps.env)) {
+        if (typeof value === "string") envStrings[key] = value;
+      }
+      const technicalsDef = feedJobs
+        .buildFeedJobRegistry(envStrings)
+        .get(feedJobs.YAHOO_NASDAQ100_TECHNICALS_JOB_ID);
+      const persisted = await feedJobs.readPersistedTechnicalsBars(datasetStore, {
+        ...(technicalsDef
+          ? { maxAgeSeconds: technicalsDef.staleAfterMinutes * 60 }
+          : {}),
+        nowMs: Date.now(),
+      });
+      if (persisted && !persisted.stale) {
+        historyDeps = withPersistedBarsFirst(historyDeps, persisted);
+      }
+    }
+  } catch {
+    // Persisted read unavailable — the live fallback stands.
+  }
   const technicalsMap = await fetchPlatformTechnicalsBatch(historyDeps, symbols);
   return {
     technicals: [...technicalsMap.entries()].map(([symbol, t]) => ({ ...t, symbol })),

@@ -7,8 +7,10 @@
  *
  * Indicator methodology is broker-honest: computed from snapshot quotes
  * only. Range-based overbought/oversold is labeled as such — never as RSI.
- * RSI(14)/MACD need price history the broker feed does not provide; shown as "—"
- * when unavailable rather than faked.
+ * RSI(14)/MACD/ATR(14) read the persisted Yahoo daily bars first (#3931:
+ * the technicals job's stored copy, labelled as the source), with the live
+ * Yahoo history fetch as the fallback when persisted data is absent or
+ * stale; shown as "—" when unavailable rather than faked.
  */
 
 import { useMemo, useState, type ReactElement } from "react";
@@ -22,6 +24,8 @@ export interface StockTechnicalsData {
   macdSignalLine: number | null;
   macdHistogram: number | null;
   macdSignal: string | null;
+  /** #3931 — Wilder ATR(14) from the same daily bars (persisted primary, live fallback). */
+  atr14: number | null;
   gapPercent: number | null;
   gapDirection: "up" | "down" | "flat" | null;
   historyBars: number;
@@ -135,6 +139,7 @@ type SortKey =
   | "valueZone"
   | "momentumScore"
   | "rsi14"
+  | "atr14"
   | "quantRating"
   | "valueGrade"
   | "momentumGrade"
@@ -182,6 +187,8 @@ function sortValue(row: { indicators?: ScreenedIndicatorsData } & Record<string,
       return ZONE_RANK[row.indicators?.valueZone ?? "fair"] ?? 2;
     case "rsi14":
       return row.rsi14 ?? -1;
+    case "atr14":
+      return row.technicals?.atr14 ?? -1;
     case "quantRating":
       return QUANT_RANK[row.factorGrades?.quantRating ?? ""] ?? -1;
     case "valueGrade":
@@ -648,8 +655,9 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
                     { key: "momentumScore", header: <SortLabel label="Momentum" k="momentumScore" {...all} />, render: (s) => s.momentumScore.toFixed(0) },
                     { key: "range", header: <SortLabel label="Range" k="rangeZone" {...all} title="Range-based (52-week position), not RSI" />, render: (s) => (s.indicators?.rangeZone ?? "—") },
                     { key: "valueZone", header: <SortLabel label="Value" k="valueZone" {...all} />, render: (s) => (s.indicators?.valueZone ?? "—") },
-                    { key: "rsi", header: <SortLabel label="RSI(14)" k="rsi14" {...all} title="Real RSI(14) from Yahoo daily history" />, render: (s) => (<span title={s.technicals?.historySource ? `RSI(14) from ${s.technicals.historySource} (${s.technicals.historyBars} bars)` : "No history — RSI unavailable"}>{s.rsi14 == null ? "—" : s.rsi14.toFixed(1)}</span>) },
-                    { key: "macd", header: (<span title="MACD(12,26,9) from Yahoo daily history">MACD</span>), render: (s) => (<span style={{ fontSize: "0.75rem" }} title={s.technicals?.macdSignal ?? "No history — MACD unavailable"}>{s.technicals?.macdHistogram == null ? "—" : `${s.technicals.macdHistogram >= 0 ? "+" : ""}${s.technicals.macdHistogram.toFixed(2)}`}</span>) },
+                    { key: "rsi", header: <SortLabel label="RSI(14)" k="rsi14" {...all} title="Real RSI(14) from persisted Yahoo daily bars (live Yahoo fallback)" />, render: (s) => (<span title={s.technicals?.historySource ? `RSI(14) from ${s.technicals.historySource} (${s.technicals.historyBars} bars)` : "No history — RSI unavailable"}>{s.rsi14 == null ? "—" : s.rsi14.toFixed(1)}</span>) },
+                    { key: "macd", header: (<span title="MACD(12,26,9) from persisted Yahoo daily bars (live Yahoo fallback)">MACD</span>), render: (s) => (<span style={{ fontSize: "0.75rem" }} title={s.technicals?.macdSignal ?? "No history — MACD unavailable"}>{s.technicals?.macdHistogram == null ? "—" : `${s.technicals.macdHistogram >= 0 ? "+" : ""}${s.technicals.macdHistogram.toFixed(2)}`}</span>) },
+                    { key: "atr", header: <SortLabel label="ATR(14)" k="atr14" {...all} title="Wilder ATR(14) from persisted Yahoo daily bars (live Yahoo fallback)" />, render: (s) => (<span title={s.technicals?.historySource ? `ATR(14) from ${s.technicals.historySource} (${s.technicals.historyBars} bars)` : "No history — ATR unavailable"}>{s.technicals?.atr14 == null ? "—" : s.technicals.atr14.toFixed(2)}</span>) },
                     { key: "source", header: "Source", render: (s) => (<span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>{s.source}</span>) },
                   ], all.sortKey, all.sortDir)}
                   rows={all.sorted}

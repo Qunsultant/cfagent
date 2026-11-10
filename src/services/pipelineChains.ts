@@ -18,7 +18,8 @@
  * never a second hand-written lineage table. The fundamentals
  * feed job joins every chain whose enrich job declares it as
  * a join source (the #3930 parameterized join — one job, the
- * chain's universe as its input); there is no provider
+ * chain's universe as its input); the technicals feed job joins
+ * every chain the same way (#3931). There is no provider
  * special case here.
  */
 import { buildFeedJobRegistry } from "./feedJobs";
@@ -83,6 +84,10 @@ export interface PipelineChainDefinition {
    *  the lineage's enrich job declares one; else null. #3930:
    *  every lineage declares it (one parameterized job). */
   fundamentalsJobId: string | null;
+  /** The technicals feed job feeding the enrich join, when
+   *  the lineage's enrich job declares one; else null. #3931:
+   *  every lineage declares it (one parameterized job). */
+  technicalsJobId: string | null;
   enrichJobId: string;
   analyzeJobId: string;
   generateJobId: string;
@@ -105,7 +110,8 @@ export interface PipelineChainDefinition {
   /** The five stages, in chain order. */
   stages: PipelineChainStageRef[];
   /** Every child node of the chain job, in execution order
-   *  (the fundamentals node precedes enrich, folded to feed). */
+   *  (the fundamentals and technicals nodes precede enrich,
+   *  folded to feed). */
   nodes: PipelineChainNodeRef[];
 }
 
@@ -115,7 +121,9 @@ export interface PipelineChainDefinition {
  * the composition is NESTED — each stage is the single child
  * of the stage before it — so the feed stage is the root (""),
  * the fundamentals input (when the lineage has one) is "0",
- * enrich is "0/0" (or "0" without fundamentals), and so on.
+ * the technicals input (when the lineage has one) is "0/0",
+ * enrich is "0/0/0" (or "0/0" / "0" without one or both), and
+ * so on.
  * Nesting is the shape the engine's hand-off rule assumes:
  * a stage's persisted input is its PARENT stage's output, and
  * in a chain the parent IS the previous stage — so the uniform
@@ -232,6 +240,9 @@ export function buildPipelineChainRegistry(
     const fundamentalsJobId =
       enrich.enrichFrom.find((s) => s.dataset === "fundamentals")?.feedJobId ??
       null;
+    const technicalsJobId =
+      enrich.enrichFrom.find((s) => s.dataset === "technicals")?.feedJobId ??
+      null;
     const id = `${feed.id}-pipeline`;
     const orderedNodes: Array<{
       stage: PipelineChainStageKind;
@@ -240,6 +251,9 @@ export function buildPipelineChainRegistry(
       { stage: "feed", jobId: feed.id },
       ...(fundamentalsJobId
         ? [{ stage: "feed" as const, jobId: fundamentalsJobId }]
+        : []),
+      ...(technicalsJobId
+        ? [{ stage: "feed" as const, jobId: technicalsJobId }]
         : []),
       { stage: "enrich", jobId: enrich.id },
       { stage: "analyze", jobId: analyze.id },
@@ -269,6 +283,7 @@ export function buildPipelineChainRegistry(
       id,
       feedJobId: feed.id,
       fundamentalsJobId,
+      technicalsJobId,
       enrichJobId: enrich.id,
       analyzeJobId: analyze.id,
       generateJobId: generate.id,

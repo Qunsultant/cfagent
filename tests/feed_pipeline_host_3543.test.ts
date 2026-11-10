@@ -146,7 +146,10 @@ describe("pipeline host wiring (#3543)", () => {
     // the plane - every stage family gains its sp500 member.
     // #3905 pin update (§7): the Dow Yahoo quotes job joins
     // the plane - every stage family gains its dow member.
-    expect(pipelineJobIds()).toHaveLength(9);
+    // #3931 pin update (§7): the parameterized Yahoo technicals
+    // job joins the plane — one job per data type, parameterized
+    // by universe, never per-universe copies.
+    expect(pipelineJobIds()).toHaveLength(10);
     expect(pipelineEnrichJobIds()).toHaveLength(7);
     expect(pipelineAnalyzeJobIds()).toHaveLength(7);
     expect(pipelineGenerateJobIds()).toHaveLength(7);

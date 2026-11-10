@@ -114,6 +114,12 @@ export interface StockTechnicals {
   macdSignalLine: number | null;
   macdHistogram: number | null;
   macdSignal: string | null;
+  /**
+   * #3931 — Wilder ATR(14) from the same daily bars (live or
+   * persisted). Null when history is insufficient — the results
+   * view renders "—", never a zero.
+   */
+  atr14: number | null;
   gapPercent: number | null;
   gapDirection: "up" | "down" | "flat" | null;
   historyBars: number;
@@ -2180,6 +2186,7 @@ export const EMPTY_TECHNICALS: StockTechnicals = {
   macdSignalLine: null,
   macdHistogram: null,
   macdSignal: null,
+  atr14: null,
   gapPercent: null,
   gapDirection: null,
   historyBars: 0,
@@ -2207,6 +2214,7 @@ export function attachTechnicals(
         macdSignalLine: t.macdSignalLine,
         macdHistogram: t.macdHistogram,
         macdSignal: t.macdSignal,
+        atr14: t.atr14,
         gapPercent: t.gapPercent,
         gapDirection: t.gapDirection,
         historyBars: t.barsUsed,

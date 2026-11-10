@@ -34,6 +34,7 @@ import { buildGenerateJobRegistry } from "../src/services/generateJobs";
 import { buildDeliverJobRegistry } from "../src/services/deliverJobs";
 import {
   buildFeedJobRegistry as buildFeedRegistry,
+  YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
   type FeedJobDefinition,
 } from "../src/services/feedJobs";
 import {
@@ -75,6 +76,7 @@ import type {
 } from "../src/trading/dataProviders/contract";
 import type {
   MarketDataResearchCompanyFundamentals,
+  MarketDataResearchHistoricalBar,
   MarketDataResearchQuote,
 } from "../src/types";
 
@@ -83,6 +85,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 const SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMZN"];
 const FEED_ID = "yahoo-nasdaq100-quotes";
 const FUND_ID = "yahoo-nasdaq100-fundamentals";
+const TECH_ID = YAHOO_NASDAQ100_TECHNICALS_JOB_ID;
 const ENRICH_ID = `${FEED_ID}-enrich`;
 const ANALYZE_ID = `${ENRICH_ID}-analyze`;
 const GENERATE_ID = `${ANALYZE_ID}-generate`;
@@ -126,6 +129,28 @@ function fakeProvider(id: DataProvider["id"]): DataProvider {
         capability: "fundamentals",
         result: { symbol, marketCap: 1_000_000, peTrailing: 25 } as MarketDataResearchCompanyFundamentals,
       }) as DataResult<MarketDataResearchCompanyFundamentals>,
+    // #3931: the technicals node pulls daily bars through the
+    // historicalBars capability — 30 live bars, closes 100..129.
+    getHistoricalBars: async (symbol: string) => {
+      const bars: MarketDataResearchHistoricalBar[] = [];
+      for (let i = 0; i < 30; i++) {
+        const close = 100 + i;
+        bars.push({
+          provenance: "live",
+          timestamp: iso(T0 - (30 - 1 - i) * 24 * 3600_000),
+          open: close - 0.5,
+          high: close + 1,
+          low: close - 1,
+          close,
+          volume: 1_000_000,
+        });
+      }
+      return {
+        providerId: id,
+        capability: "historicalBars",
+        result: bars,
+      } as DataResult<MarketDataResearchHistoricalBar[]>;
+    },
   };
 }
 
@@ -235,9 +260,11 @@ describe("pipeline chain registry + catalog (#3540)", () => {
     ]);
     const yahoo = registry.forId(CHAIN_ID)!;
     expect(yahoo.fundamentalsJobId).toBe(FUND_ID);
+    expect(yahoo.technicalsJobId).toBe(TECH_ID);
     expect(yahoo.nodes.map((n) => n.jobId)).toEqual([
       FEED_ID,
       FUND_ID,
+      TECH_ID,
       ENRICH_ID,
       ANALYZE_ID,
       GENERATE_ID,
@@ -250,25 +277,29 @@ describe("pipeline chain registry + catalog (#3540)", () => {
       "0/0/0",
       "0/0/0/0",
       "0/0/0/0/0",
+      "0/0/0/0/0/0",
     ]);
     expect(chainStageNodePath(yahoo, "feed")).toBe("");
-    expect(chainStageNodePath(yahoo, "enrich")).toBe("0/0");
-    expect(chainStageNodePath(yahoo, "deliver")).toBe("0/0/0/0/0");
+    expect(chainStageNodePath(yahoo, "enrich")).toBe("0/0/0");
+    expect(chainStageNodePath(yahoo, "deliver")).toBe("0/0/0/0/0/0");
     const alpaca = registry.forId("alpaca-nasdaq100-quotes-pipeline")!;
     // #3930: every chain folds the parameterized fundamentals
     // node in — the alpaca chain's fundamentals node runs the
     // same job with the chain's universe as its input.
     expect(alpaca.fundamentalsJobId).toBe(FUND_ID);
-    expect(alpaca.nodes).toHaveLength(6);
+    // #3931: and the parameterized technicals node, the same way.
+    expect(alpaca.technicalsJobId).toBe(TECH_ID);
+    expect(alpaca.nodes).toHaveLength(7);
     expect(alpaca.nodes.map((n) => n.jobId)).toEqual([
       "alpaca-nasdaq100-quotes",
       FUND_ID,
+      TECH_ID,
       "alpaca-nasdaq100-quotes-enrich",
       "alpaca-nasdaq100-quotes-enrich-analyze",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate-deliver",
     ]);
-    expect(chainStageNodePath(alpaca, "deliver")).toBe("0/0/0/0/0");
+    expect(chainStageNodePath(alpaca, "deliver")).toBe("0/0/0/0/0/0");
     expect(registry.forStageJob(DELIVER_ID)?.id).toBe(CHAIN_ID);
     expect(registry.forFeedJob(FEED_ID)?.id).toBe(CHAIN_ID);
   });
@@ -334,8 +365,17 @@ describe("pipeline chain definitions (#3540)", () => {
       params.push(node.steps?.[0]?.params);
       node = node.children?.[0];
     }
-    expect(kinds).toEqual(["feed", "feed", "enrich", "analyze", "generate", "deliver"]);
+    expect(kinds).toEqual([
+      "feed",
+      "feed",
+      "feed",
+      "enrich",
+      "analyze",
+      "generate",
+      "deliver",
+    ]);
     expect(steps).toEqual([
+      "feed.pull",
       "feed.pull",
       "feed.pull",
       "enrich.apply",
@@ -346,10 +386,11 @@ describe("pipeline chain definitions (#3540)", () => {
     // The nodes carry the stage jobs' own step params — derived, never forked.
     expect(params[0]).toMatchObject({ feedJobId: FEED_ID });
     expect(params[1]).toMatchObject({ feedJobId: FUND_ID });
-    expect(params[5]).toMatchObject({ deliverJobId: DELIVER_ID });
+    expect(params[2]).toMatchObject({ feedJobId: TECH_ID });
+    expect(params[6]).toMatchObject({ deliverJobId: DELIVER_ID });
   });
 
-  it("ensure is idempotent and registerSchedules declares the whole plane (44)", async () => {
+  it("ensure is idempotent and registerSchedules declares the whole plane (45)", async () => {
     const h = await makeHarness();
     const first = await h.stores.definitions.getDefinition(CHAIN_ID);
     await ensureChainPipelineJobs(h.control, h.stores, {});
@@ -358,7 +399,7 @@ describe("pipeline chain definitions (#3540)", () => {
     const registrations = await h.control.registerSchedules({
       schedule: async (spec) => `reg:${spec.jobId}:${spec.nodePath}`,
     });
-    expect(registrations).toHaveLength(44);
+    expect(registrations).toHaveLength(45);
     const chainRegs = registrations.filter((r) => r.jobId.endsWith("-pipeline"));
     expect(chainRegs).toHaveLength(7);
     expect(chainRegs.every((r) => r.nodePath === "")).toBe(true);

@@ -35,12 +35,26 @@ export interface YahooTechnicals {
   macdSignalLine: number | null;
   macdHistogram: number | null;
   macdSignal: string | null;
+  /**
+   * #3931 — Wilder ATR(14) from the same daily bars, or null
+   * when history is insufficient (< 14 bars). The screener
+   * results view renders it as its own column; the enrich job
+   * carries it as the "atr" element. Computed from the same bars
+   * as RSI/MACD — never a separate fetch, never a separate path.
+   */
+  atr14: number | null;
   /** Overnight gap % = (open − prevClose) / prevClose * 100. */
   gapPercent: number | null;
   gapDirection: "up" | "down" | "flat" | null;
   /** Number of daily bars used. */
   barsUsed: number;
-  source: "Yahoo Finance";
+  /**
+   * Where the bars came from. "Yahoo Finance" is the live fetch;
+   * the persisted-first read (#3931) passes its own label here
+   * ("Persisted Yahoo daily bars (as of …)") so the UX can name
+   * the source — the provider is Yahoo either way.
+   */
+  source: string;
 }
 
 /**
@@ -921,11 +935,16 @@ export function classifyGap(
 /**
  * Compute technicals from daily bars. RSI needs 14+ bars, MACD 26+;
  * below that the respective field is null (honest, not estimated).
+ * ATR needs 14+ bars (Wilder, via computeAtr); below that it is
+ * null too. `source` names where the bars came from (default the
+ * live Yahoo fetch); the persisted-first read (#3931) passes its
+ * persisted label so the UX names the persisted source.
  */
 export function computeTechnicals(
   symbol: string,
   bars: YahooDailyBar[] | null,
-  config: ScreenerConfig = DEFAULT_SCREENER_CONFIG
+  config: ScreenerConfig = DEFAULT_SCREENER_CONFIG,
+  source: string = "Yahoo Finance",
 ): YahooTechnicals {
   const base: YahooTechnicals = {
     symbol,
@@ -934,10 +953,11 @@ export function computeTechnicals(
     macdSignalLine: null,
     macdHistogram: null,
     macdSignal: null,
+    atr14: null,
     gapPercent: null,
     gapDirection: null,
     barsUsed: bars?.length ?? 0,
-    source: "Yahoo Finance",
+    source,
   };
   if (!bars || bars.length < 2) return base;
 
@@ -962,5 +982,9 @@ export function computeTechnicals(
     base.macdHistogram = Number(macd.histogram.toFixed(3));
     base.macdSignal = macd.macdSignal;
   }
+  // #3931: ATR(14) from the same bars — null when the series is
+  // too short, exactly like RSI/MACD above (computeAtr enforces
+  // the 14-bar minimum and refuses malformed bars).
+  base.atr14 = computeAtr(bars);
   return base;
 }

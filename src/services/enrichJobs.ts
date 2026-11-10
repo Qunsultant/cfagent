@@ -19,8 +19,10 @@
  *   Series indicators (SMA / Bollinger) compute over the
  *   persisted snapshot series (the feed store's run history)
  *   with that basis recorded on the artifact; RSI / MACD / ATR
- *   require daily-bar history the feed stage does not persist,
- *   so they are named-unavailable until a bars dataset exists.
+ *   compute over the persisted daily-bar history the technicals
+ *   job persists (#3931) — and stay named-unavailable, with the
+ *   coded reason, where no technicals copy exists for the job's
+ *   universe or a symbol's bars are too short.
  * - A missing persisted input refuses BY NAME
  *   (ENRICH_INPUT_MISSING, fail-closed — the stage_input_missing
  *   pattern): the failed run is recorded on the enriched store
@@ -33,14 +35,18 @@
  * configuration — a configuration bug).
  */
 import {
+  computeAtr,
   computeBollingerBands,
   computeScreeningIndicators,
   computeSma,
+  computeTechnicals,
+  marketDataResearchBarsToDailyBars,
   scrubFailureMessage,
   type DataProviderId,
   type IndexId,
   type QuoteResult,
   type ScreeningIndicators,
+  type YahooDailyBar,
 } from "../trading";
 import {
   feedDatasetRowCount,
@@ -134,10 +140,11 @@ export const ENRICH_FUNDAMENTALS_ELEMENTS = [
  *  the basis recorded on the artifact. */
 export const ENRICH_SERIES_ELEMENTS = ["sma", "bollinger"] as const;
 
-/** Known elements the persisted inputs cannot support today:
- *  each requires daily-bar history, which no feed dataset
- *  persists. Accepted in configuration, reported unavailable
- *  with the coded reason — never fabricated. */
+/** History elements: computed over the persisted daily-bar
+ *  history the technicals job persists (#3931) — one value per
+ *  symbol where its bars exist, a named gap where they do not.
+ *  Accepted in configuration before #3931, reported unavailable
+ *  with the coded reason — never fabricated; now computable. */
 export const ENRICH_HISTORY_ELEMENTS = ["rsi", "macd", "atr"] as const;
 
 export const ENRICH_ALL_ELEMENTS: readonly string[] = [
@@ -156,6 +163,10 @@ const HISTORY_SET = new Set<string>(ENRICH_HISTORY_ELEMENTS);
 export const ENRICH_GAP_REASONS = {
   requiresDailyBarHistory: "requires_daily_bar_history",
   insufficientSnapshotSeries: "insufficient_snapshot_series",
+  /** The persisted bars exist but are too short for the element
+   *  (RSI needs 15 bars, MACD 27, ATR 14) — a named gap, never
+   *  a value estimated from a short window (#3931). */
+  insufficientDailyBars: "insufficient_daily_bars",
   fieldNotInSnapshot: "field_not_in_snapshot",
   joinDatasetMissing: "join_dataset_missing",
   symbolNotInJoinDataset: "symbol_not_in_join_dataset",
@@ -309,6 +320,24 @@ export function resolveFundamentalsJoinMode(
   return "auto";
 }
 
+/**
+ * #3931 — the per-job technicals-join mode, from
+ * ENRICH_JOB_<JOB_ID>_TECHNICALS_JOIN: "auto" (default —
+ * join the parameterized technicals dataset for the job's
+ * own universe when one is registered), "on" (the same join,
+ * pinned explicitly), "off" (no history elements — the pre-#3931
+ * behavior, kept behind the switch). An unknown value falls
+ * back to "auto" (the minutes-knob idiom).
+ */
+export function resolveTechnicalsJoinMode(
+  env: Record<string, string | undefined>,
+  jobId: string,
+): "auto" | "on" | "off" {
+  const raw = env[knobKey(jobId, "TECHNICALS_JOIN")];
+  if (raw === "off" || raw === "on" || raw === "auto") return raw;
+  return "auto";
+}
+
 export const ENRICH_JOB_DEFAULTS = {
   cadenceMinutes: 60,
   staleAfterMinutes: 180,
@@ -316,18 +345,24 @@ export const ENRICH_JOB_DEFAULTS = {
 
 /**
  * The built-in registry: one enrich job per QUOTES feed job in
- * the #3530 registry (the fundamentals job is an enrichment
- * SOURCE, not a target; the universe job's product is the
- * stored index list, not a feed-dataset artifact). #3930: every
+ * the #3530 registry (the fundamentals and technicals jobs are
+ * enrichment SOURCES, not targets; the universe job's product is
+ * the stored index list, not a feed-dataset artifact). #3930: every
  * quotes job joins the parameterized fundamentals dataset for
  * ITS OWN universe — the join is by symbol and by universe, so
  * a broker chain carries the 14 fundamentals elements exactly
  * where the persisted dataset carries the symbol, and named
- * gaps where it does not. The per-job FUNDAMENTALS_JOIN knob ("auto" | "on" | "off",
- * default "auto") opts one job out to quotes-only; an unknown
- * value falls back to "auto". Every job's element set is the
- * default snapshot + screening + series set (plus the
- * fundamentals elements for jobs with a join source).
+ * gaps where it does not. #3931: every quotes job ALSO joins the
+ * parameterized technicals dataset for ITS OWN universe, and
+ * carries rsi / macd / atr computed from the persisted daily
+ * bars (values where the dataset carries the symbol, named gaps
+ * where it does not). The per-job FUNDAMENTALS_JOIN and
+ * TECHNICALS_JOIN knobs ("auto" | "on" | "off", default "auto")
+ * opt one job out of a join; an unknown value falls back to
+ * "auto". Every job's element set is the default snapshot +
+ * screening + series set (plus the fundamentals elements for
+ * jobs with a fundamentals join source, plus the history
+ * elements for jobs with a technicals join source).
  */
 export function buildEnrichJobRegistry(
   env: Record<string, string | undefined>,
@@ -336,11 +371,14 @@ export function buildEnrichJobRegistry(
   const fundamentalsJobs = feedRegistry
     .list()
     .filter((j) => j.dataset === "fundamentals");
+  const technicalsJobs = feedRegistry
+    .list()
+    .filter((j) => j.dataset === "technicals");
   const registry = new EnrichJobRegistry();
   for (const feed of feedRegistry.list()) {
     if (feed.dataset !== "quotes") continue;
     const id = `${feed.id}-enrich`;
-    const enrichFrom: EnrichJoinSource[] =
+    const fundamentalsFrom: EnrichJoinSource[] =
       resolveFundamentalsJoinMode(env, id) === "off"
         ? []
         : fundamentalsJobs.map((job) => ({
@@ -349,9 +387,26 @@ export function buildEnrichJobRegistry(
             dataset: job.dataset,
             universe: feed.universe.index,
           }));
-    const defaults = enrichFrom.length
-      ? [...ENRICH_DEFAULT_ELEMENTS, ...ENRICH_FUNDAMENTALS_ELEMENTS]
-      : ENRICH_DEFAULT_ELEMENTS;
+    // #3931: the technicals join — same shape as fundamentals,
+    // its own knob, its own universe-matched copy.
+    const technicalsFrom: EnrichJoinSource[] =
+      resolveTechnicalsJoinMode(env, id) === "off"
+        ? []
+        : technicalsJobs.map((job) => ({
+            feedJobId: job.id,
+            sourceId: job.sourceId,
+            dataset: job.dataset,
+            universe: feed.universe.index,
+          }));
+    const enrichFrom: EnrichJoinSource[] = [
+      ...fundamentalsFrom,
+      ...technicalsFrom,
+    ];
+    const defaults = [
+      ...ENRICH_DEFAULT_ELEMENTS,
+      ...(fundamentalsFrom.length ? [...ENRICH_FUNDAMENTALS_ELEMENTS] : []),
+      ...(technicalsFrom.length ? [...ENRICH_HISTORY_ELEMENTS] : []),
+    ];
     registry.register({
       id,
       feedJobId: feed.id,
@@ -473,10 +528,29 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
   const coverage: EnrichComputation["elementCoverage"] = {};
   for (const element of elements) coverage[element] = { computed: 0, unavailable: 0 };
 
+  // #3931 — the persisted daily bars, by symbol, from the
+  // technicals join artifact(s). A symbol's bars convert through
+  // the live-only rule (a stored row whose bars are not all live
+  // converts to null and is skipped — defense in depth; the
+  // producing job already refuses such rows at persist time).
   // History elements are unavailable for the whole artifact —
-  // one gap entry, not one per symbol.
+  // one gap entry, not one per symbol — ONLY when no technicals
+  // copy resolved at all; with a copy, each symbol computes from
+  // its own bars (values) or takes a per-symbol named gap.
+  const barsBySymbol = new Map<string, YahooDailyBar[]>();
+  let technicalsJoinPresent = false;
+  for (const source of input.enrichFrom) {
+    if (source.dataset !== "technicals") continue;
+    const artifact = input.joinArtifacts.get(source.feedJobId);
+    if (!artifact) continue;
+    technicalsJoinPresent = true;
+    for (const row of artifact.bars ?? []) {
+      const daily = marketDataResearchBarsToDailyBars(row.bars);
+      if (daily) barsBySymbol.set(row.symbol.toUpperCase(), daily);
+    }
+  }
   for (const element of elements) {
-    if (HISTORY_SET.has(element)) {
+    if (HISTORY_SET.has(element) && !technicalsJoinPresent) {
       gaps.push({
         element,
         reason: ENRICH_GAP_REASONS.requiresDailyBarHistory,
@@ -488,10 +562,15 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
   // Fundamentals join maps, per join source.
   const joinRows = new Map<string, Map<string, Record<string, unknown>>>();
   let joinDatasetMissing = false;
+  // Per-join-source missingness (#3931): a missing technicals copy must not
+  // mislabel fundamentals gaps as join_dataset_missing (and vice versa).
+  // joinDatasetMissing stays the any-missing flag that drives partial status.
+  let fundamentalsJoinMissing = false;
   for (const source of input.enrichFrom) {
     const artifact = input.joinArtifacts.get(source.feedJobId);
     if (!artifact) {
       joinDatasetMissing = true;
+      if (source.dataset === "fundamentals") fundamentalsJoinMissing = true;
       continue;
     }
     const bySymbol = new Map<string, Record<string, unknown>>();
@@ -501,7 +580,7 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
     joinRows.set(source.feedJobId, bySymbol);
   }
   const wantsFundamentals = elements.some((e) => FUNDAMENTALS_SET.has(e));
-  if (wantsFundamentals && input.enrichFrom.length > 0 && joinDatasetMissing) {
+  if (wantsFundamentals && input.enrichFrom.length > 0 && fundamentalsJoinMissing) {
     for (const element of elements) {
       if (!FUNDAMENTALS_SET.has(element)) continue;
       gaps.push({ element, reason: ENRICH_GAP_REASONS.joinDatasetMissing, symbols: [] });
@@ -554,10 +633,61 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
       }
     };
 
+    // #3931: one technicals computation per row, shared by the
+    // history elements (RSI/MACD via computeTechnicals, ATR via
+    // computeAtr — the same functions the screener's live leg
+    // uses, over the same persisted bars the UX reads).
+    const dailyBars = barsBySymbol.get(fields.symbol);
+    const technicals =
+      dailyBars && elements.some((e) => HISTORY_SET.has(e))
+        ? computeTechnicals(fields.symbol, dailyBars)
+        : null;
+
     for (const element of elements) {
       if (HISTORY_SET.has(element)) {
-        coverage[element].unavailable++;
-        unavailable.push(element);
+        // No bars for this symbol: named gap (the whole-artifact
+        // gap above already covers the no-copy-at-all case, so
+        // this branch only fires with a copy present).
+        if (!dailyBars || !technicals) {
+          coverage[element].unavailable++;
+          unavailable.push(element);
+          if (technicalsJoinPresent) {
+            joinMissing.add(fields.symbol);
+            noteGap(
+              element,
+              ENRICH_GAP_REASONS.symbolNotInJoinDataset,
+              fields.symbol,
+            );
+          }
+          continue;
+        }
+        if (element === "rsi") {
+          if (technicals.rsi14 === null) {
+            mark(element, false, ENRICH_GAP_REASONS.insufficientDailyBars);
+          } else {
+            features.rsi = round6(technicals.rsi14);
+            mark(element, true);
+          }
+        } else if (element === "macd") {
+          if (technicals.macdLine === null) {
+            mark(element, false, ENRICH_GAP_REASONS.insufficientDailyBars);
+          } else {
+            features.macdLine = round6(technicals.macdLine);
+            features.macdSignalLine = round6(technicals.macdSignalLine!);
+            features.macdHistogram = round6(technicals.macdHistogram!);
+            features.macdSignal = technicals.macdSignal!;
+            mark(element, true);
+          }
+        } else {
+          // "atr" — Wilder ATR(14) over the same bars.
+          const atr = computeAtr(dailyBars);
+          if (atr === null) {
+            mark(element, false, ENRICH_GAP_REASONS.insufficientDailyBars);
+          } else {
+            features.atr = round6(atr);
+            mark(element, true);
+          }
+        }
         continue;
       }
       if (FUNDAMENTALS_SET.has(element)) continue; // handled in the join pass below
@@ -719,7 +849,7 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
           joinMissing.add(fields.symbol);
           noteGap(
             element,
-            joinDatasetMissing
+            fundamentalsJoinMissing
               ? ENRICH_GAP_REASONS.joinDatasetMissing
               : ENRICH_GAP_REASONS.symbolNotInJoinDataset,
             fields.symbol,

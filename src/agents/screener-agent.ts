@@ -27,6 +27,12 @@ import {
 import { getServiceUserLogin } from "../security/serviceIdentity";
 import { DatabaseORM } from "../orm";
 import { ETradeService } from "../services/etrade";
+import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+import {
+  buildFeedJobRegistry,
+  readPersistedTechnicalsBars,
+  YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
+} from "../services/feedJobs";
 import { createScreenRunLockPort } from "../data/createScreenRunLockPorts";
 import type { ScreenRunLockPort } from "../data/screenRunLockPorts";
 import { createUserRequestQuotaPort } from "../data/createUserRequestQuotaPorts";
@@ -101,6 +107,7 @@ import {
   verifyAlpacaDataProvider,
   verifyNasdaqDataProvider,
   verifyYahooDataProvider,
+  withPersistedBarsFirst,
   yahooQuoteProviderFromRoute,
   type CapabilityRouteRecord,
   type ProviderConfigRecord,
@@ -296,9 +303,10 @@ export interface ScreenerRunResult {
    * many quoted symbols the Yahoo history leg actually produced
    * MACD / gap values for. Recorded so a technicals outage is data
    * (the 2026-10-23 run showed blank MACD/Gap on every row with no
-   * signal anywhere that history coverage was zero).
+   * signal anywhere that history coverage was zero). #3931: ATR
+   * coverage rides the same record (same bars).
    */
-  technicalsCoverage?: { symbols: number; withMacd: number; withGap: number };
+  technicalsCoverage?: { symbols: number; withMacd: number; withGap: number; withAtr?: number };
   /** Per-run PDF key populated by persistRun after the PDF is stored. */
   pdfKey?: string;
   /** Issue #822: explicit PDF generation status. 'failed' means generatePdfAsset
@@ -1311,6 +1319,40 @@ export class ScreenerAgent extends PortThink {
         ...(platformPorts.config ? { configPort: platformPorts.config } : {}),
         ...(platformPorts.captures ? { capturePort: platformPorts.captures } : {}),
       })) ?? { fetchBars: async () => null };
+      // Issue #3931: persisted technicals are the PRIMARY source
+      // for this run's technicals leg — the technicals job's
+      // stored daily bars, read once up front. A fresh copy
+      // serves every symbol it carries (no live call at all for
+      // those symbols, labelled persisted); a missing or stale
+      // copy degrades to the live deps above, exactly as before.
+      // The read never fails the screen: any failure here falls
+      // back to live.
+      let historyDeps = platformHistoryDeps;
+      try {
+        const datasetStore = createFeedDatasetAdapter(this.env);
+        if (datasetStore) {
+          const envStrings: Record<string, string | undefined> = {};
+          for (const [key, value] of Object.entries(
+            this.env as unknown as Record<string, unknown>,
+          )) {
+            if (typeof value === "string") envStrings[key] = value;
+          }
+          const technicalsDef = buildFeedJobRegistry(envStrings).get(
+            YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
+          );
+          const persisted = await readPersistedTechnicalsBars(datasetStore, {
+            ...(technicalsDef
+              ? { maxAgeSeconds: technicalsDef.staleAfterMinutes * 60 }
+              : {}),
+            nowMs: Date.now(),
+          });
+          if (persisted && !persisted.stale) {
+            historyDeps = withPersistedBarsFirst(platformHistoryDeps, persisted);
+          }
+        }
+      } catch {
+        // Persisted read unavailable — the live fallback stands.
+      }
       // Provider-scoped acquisition (#261, #1007). Symbols come from
       // the listings directory (membership, not market data) for both
       // providers; quotes come from the named provider or nothing.
@@ -1366,7 +1408,7 @@ export class ScreenerAgent extends PortThink {
       // Issue #1331: bars come through the platform history deps
       // (bound above); the throttled beat stays the onBatch hook.
       const technicalsBySymbol = await fetchPlatformTechnicalsBatch(
-        platformHistoryDeps,
+        historyDeps,
         acquired.quotes.map((q) => q.symbol),
         { onBatch: () => beat() }
       );
@@ -1378,6 +1420,8 @@ export class ScreenerAgent extends PortThink {
         symbols: acquired.quotes.length,
         withMacd: [...technicalsBySymbol.values()].filter((t) => t.macdLine != null).length,
         withGap: [...technicalsBySymbol.values()].filter((t) => t.gapPercent != null).length,
+        // #3931: ATR coverage rides the same record (same bars).
+        withAtr: [...technicalsBySymbol.values()].filter((t) => t.atr14 != null).length,
       };
 
       // Issue #266: SA-style factor grades, computed percentile-relative
@@ -1396,6 +1440,7 @@ export class ScreenerAgent extends PortThink {
         symbols: allStocks.length,
         withMacd: technicalsCoverage.withMacd,
         withGap: technicalsCoverage.withGap,
+        withAtr: technicalsCoverage.withAtr,
       });
       const bySymbol = new Map(allStocks.map((s) => [s.symbol, s]));
       let opportunities = selectStandouts(
