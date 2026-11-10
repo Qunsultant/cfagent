@@ -2710,7 +2710,7 @@ export function ETradeTradingHub({
                   {/* Preset Quick Chips */}
                   <div className="omnichannel-chip-row">
                     <Button
-                      onClick={() => handleSimulateSlack("@${presentation.botName} quote NVDA")}
+                      onClick={() => handleSimulateSlack(`@${presentation.botName} quote NVDA`)}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2718,7 +2718,7 @@ export function ETradeTradingHub({
                       📈 Quote NVDA
                     </Button>
                     <Button
-                      onClick={() => handleSimulateSlack("@${presentation.botName} screen stocks priced between $20 and $200")}
+                      onClick={() => handleSimulateSlack(`@${presentation.botName} screen stocks priced between $20 and $200`)}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2726,7 +2726,7 @@ export function ETradeTradingHub({
                       🔍 Screen Price Range
                     </Button>
                     <Button
-                      onClick={() => handleSimulateSlack("@${presentation.botName} preview buy 10 NVDA limit 125.00")}
+                      onClick={() => handleSimulateSlack(`@${presentation.botName} preview buy 10 NVDA limit 125.00`)}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2734,7 +2734,7 @@ export function ETradeTradingHub({
                       ⚡ Buy 10 NVDA Ticket
                     </Button>
                     <Button
-                      onClick={() => handleSimulateSlack("@${presentation.botName} show my portfolio positions")}
+                      onClick={() => handleSimulateSlack(`@${presentation.botName} show my portfolio positions`)}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
