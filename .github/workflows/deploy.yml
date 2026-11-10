@@ -199,6 +199,7 @@ jobs:
           S_SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
           S_SLACK_VERIFICATION_TOKEN: ${{ secrets.SLACK_VERIFICATION_TOKEN }}
           S_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          S_SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
         run: |
           set -euo pipefail
           source scripts/ci/put-secret.sh
@@ -258,6 +259,11 @@ jobs:
           optional_secret SLACK_SIGNING_SECRET "$S_SLACK_SIGNING_SECRET"
           optional_secret SLACK_VERIFICATION_TOKEN "$S_SLACK_VERIFICATION_TOKEN"
           optional_secret SLACK_WEBHOOK_URL "$S_SLACK_WEBHOOK_URL"
+          # The default destination for the bot-API legs (#3980). Not a
+          # credential — a channel id or #name — but it belongs with the
+          # set: without it a bot-token deployment with no per-call
+          # channel refuses by name instead of posting.
+          optional_secret SLACK_CHANNEL "$S_SLACK_CHANNEL"
 
       - name: Set E*TRADE secrets on Cloudflare Worker [${{ needs.load-environment.outputs.target_env }}]
         env:

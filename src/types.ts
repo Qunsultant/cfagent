@@ -812,6 +812,16 @@ export interface Env {
   SLACK_VERIFICATION_TOKEN?: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_WEBHOOK_URL?: string;
+  /**
+   * Default Slack channel for the bot-API legs (#3980). Read by the
+   * browser agent's snap and page-capture paths (and by the screener and
+   * trading senders) so a caller that passes no channel still has a
+   * destination; `SCREENER_SLACK_CHANNEL` is the second fallback. Absent
+   * with no per-call channel is the named `slack_channel_not_configured`
+   * refusal, never a post to an undefined channel.
+   */
+  SLACK_CHANNEL?: string;
+  SCREENER_SLACK_CHANNEL?: string;
   // Cloudflare Voice Agent Configuration
   DEEPGRAM_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;

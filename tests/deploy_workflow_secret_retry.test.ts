@@ -169,6 +169,7 @@ describe("deploy.yml — Slack credentials (#3952)", () => {
     "SLACK_SIGNING_SECRET",
     "SLACK_VERIFICATION_TOKEN",
     "SLACK_WEBHOOK_URL",
+    "SLACK_CHANNEL",
   ];
 
   it("syncs each Slack credential the code reads, as an optional push", () => {
