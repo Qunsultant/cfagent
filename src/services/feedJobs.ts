@@ -88,6 +88,10 @@ export const FEED_JOB_CODES = {
   noBarsReturned: "FEED_NO_BARS_RETURNED",
   newsUnsupported: "FEED_PROVIDER_NEWS_UNSUPPORTED",
   noNewsReturned: "FEED_NO_NEWS_RETURNED",
+  refreshTimeout: "FEED_REFRESH_TIMEOUT",
+  fetchTimeout: "FEED_FETCH_TIMEOUT",
+  captureTimeout: "FEED_CAPTURE_TIMEOUT",
+  deadlineExceeded: "FEED_DEADLINE_EXCEEDED",
 } as const;
 export type FeedJobCode = (typeof FEED_JOB_CODES)[keyof typeof FEED_JOB_CODES];
 
