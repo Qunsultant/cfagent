@@ -35,7 +35,6 @@ import {
   resolveRunUniverse,
   runFeedFundamentalsJob,
   runFeedJob,
-  runFeedTechnicalsJob,
   FEED_JOB_CODES,
   type FeedJobDefinition,
   type FeedJobRegistry,
@@ -98,16 +97,6 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     // input serves any stored list.
     label: "Yahoo fundamentals — parameterized (default Nasdaq-100)",
     aliases: ["fundamentals", "yahoo fundamentals"],
-  },
-  {
-    jobId: "yahoo-nasdaq100-technicals",
-    sourceId: "yahoo",
-    dataset: "technicals",
-    // #3931: ONE parameterized technicals job — the label
-    // names the DEFAULT universe (nasdaq100); a run's universe
-    // input serves any stored list.
-    label: "Yahoo technicals — parameterized (default Nasdaq-100)",
-    aliases: ["technicals", "yahoo technicals"],
   },
   {
     jobId: "yahoo-sp100-quotes",
@@ -353,7 +342,7 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     if (!provider) throw feedNotConfigured(def.id, `a capture-wired provider for "${def.sourceId}"`);
 
     // #3930: the run's universe input (a parameterized job —
-    // fundamentals, technicals): the step param names the stored index
+    // fundamentals): the step param names the stored index
     // list; absent ⇒ the definition's universe. Resolved (and
     // refused by name when unknown or unsupported) BEFORE any
     // refresh or fetch, so the refresh, the shard partition,
@@ -364,13 +353,33 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
         : undefined;
     const effectiveUniverse = resolveRunUniverse(def, universeParam);
 
-    const existingList = await deps.universeStore.latest(effectiveUniverse);
-    if ((!existingList || existingList.symbols.length === 0) && deps.indexRefresh) {
-      await executeIndexListRefreshJob({
-        store: deps.indexRefresh.store,
-        service: deps.indexRefresh.service,
-        indices: [effectiveUniverse],
-      }).catch(() => undefined);
+    // #3976: hydration lives in the RUNNERS now — the host's
+    // indexRefresh wiring is passed into the runner deps below,
+    // and a refresh failure is recorded on the run as
+    // FEED_UNIVERSE_REFRESH_FAILED instead of being swallowed
+    // here (the pre-#3976 `.catch(() => undefined)`) and
+    // resurfacing as the bare FEED_UNIVERSE_MISSING. The one
+    // step-level hydration that remains is FOR THE SHARD
+    // PARTITION READ ONLY: a sharded unit's partition is
+    // computed from the stored list BEFORE its run (the #3535
+    // pin: one run per unit, pulling only its partition), so a
+    // cold store must be hydrated before that read. Its failure
+    // is thrown NAMED — never swallowed.
+    if (ctx.shardKey && deps.indexRefresh) {
+      const existingList = await deps.universeStore.latest(effectiveUniverse);
+      if (!existingList || existingList.symbols.length === 0) {
+        try {
+          await executeIndexListRefreshJob({
+            store: deps.indexRefresh.store,
+            service: deps.indexRefresh.service,
+            indices: [effectiveUniverse],
+          });
+        } catch (err) {
+          throw new Error(
+            `${FEED_JOB_CODES.universeRefreshFailed}: index-list refresh for the "${effectiveUniverse}" universe failed before the shard partition could be computed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
     }
 
     // Sharded shape: this unit pulls its partition of the
@@ -396,12 +405,16 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
       ...(universeParam ? { universe: effectiveUniverse } : {}),
       ...(symbols ? { symbols } : {}),
     };
+    const runnerDeps = {
+      provider,
+      universeStore: deps.universeStore,
+      datasetStore: deps.datasetStore,
+      ...(deps.indexRefresh ? { indexRefresh: deps.indexRefresh } : {}),
+    };
     const result: FeedRunResult =
       def.dataset === "fundamentals"
-        ? await runFeedFundamentalsJob(deps.registry, { provider, universeStore: deps.universeStore, datasetStore: deps.datasetStore }, def.id, runOpts)
-        : def.dataset === "technicals"
-          ? await runFeedTechnicalsJob(deps.registry, { provider, universeStore: deps.universeStore, datasetStore: deps.datasetStore }, def.id, runOpts)
-          : await runFeedJob(deps.registry, { provider, universeStore: deps.universeStore, datasetStore: deps.datasetStore }, def.id, runOpts);
+        ? await runFeedFundamentalsJob(deps.registry, runnerDeps, def.id, runOpts)
+        : await runFeedJob(deps.registry, runnerDeps, def.id, runOpts);
     if (result.status === "failed") {
       // The feed run recorded its own failure in the dataset
       // store; the pipeline run fails with the same coded error
