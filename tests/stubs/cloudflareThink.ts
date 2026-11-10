@@ -49,6 +49,13 @@
  *   machinery, no connections, no persistence — a test asserting
  *   on these pins the port's behavior at the seam, and live
  *   broadcast/lifecycle proof stays workerd, like turns.
+ * - the base Agent's scheduler seams (issue #3923, for the
+ *   PortThink state-off enforcement): `schedule` / `scheduleEvery`
+ *   record each arming that REACHES the SDK base in
+ *   `scheduleCalls` and return a stub Schedule, so a test can
+ *   prove whether the port's override delegated an arming to the
+ *   base or refused it before delegation. No alarm ever fires
+ *   under Node: arming is recorded, never executed.
  *
  * What it REFUSES — deliberately, so it can never mask a real
  * failure: `runTurn()` and `submitMessages()` throw a loud stub
@@ -87,6 +94,41 @@ export class Think<Env = unknown> {
   setState(next: unknown): void {
     this.state = next;
     this.stateBroadcasts.push(next);
+  }
+
+  /**
+   * Every scheduler arming that reached the base, in order — the
+   * test-visible record of the base Agent's scheduler seam
+   * (issue #3923). An arming the port refused before delegation
+   * never appears here.
+   */
+  readonly scheduleCalls: Array<{
+    kind: "once" | "every";
+    when: unknown;
+    callback: unknown;
+    payload: unknown;
+  }> = [];
+
+  /** Base Agent seam: arm a one-shot/cron schedule (recorded, never fired). */
+  async schedule(
+    when: unknown,
+    callback: unknown,
+    payload?: unknown,
+    _options?: unknown,
+  ): Promise<{ id: string }> {
+    this.scheduleCalls.push({ kind: "once", when, callback, payload });
+    return { id: `stub-schedule-${this.scheduleCalls.length}` };
+  }
+
+  /** Base Agent seam: arm a repeating schedule (recorded, never fired). */
+  async scheduleEvery(
+    intervalSeconds: unknown,
+    callback: unknown,
+    payload?: unknown,
+    _options?: unknown,
+  ): Promise<{ id: string }> {
+    this.scheduleCalls.push({ kind: "every", when: intervalSeconds, callback, payload });
+    return { id: `stub-schedule-${this.scheduleCalls.length}` };
   }
 
   /**

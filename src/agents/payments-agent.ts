@@ -160,6 +160,13 @@ export class PaymentsAgent extends PortThink {
      */
     traceId?: string;
   }): Promise<PaymentRecord> {
+    // Issue #3923 (follow-on of #3741): the payments capability
+    // requires `state` — on a fully ephemeral instance (state
+    // disabled by config for this class) the work-start refuses
+    // BY NAME before any guard or ledger work. This is the
+    // class's single execution entry: handleA2A's dispatch
+    // funnels through here, so both surfaces are covered.
+    this.assertPortCapabilityServable("payments");
     const guard = await this.getGuard(req.agentId);
     const paymentReq = {
       agentId: req.agentId,
