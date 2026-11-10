@@ -211,7 +211,7 @@ describe("Issue #120: Browser Agent honesty", () => {
         return htmlResponse();
       });
 
-      const service = new ETradeBrowserService({ SLACK_BOT_TOKEN: "xoxb-test" } as any);
+      const service = new ETradeBrowserService({ SLACK_CHANNEL: "#desk", SLACK_BOT_TOKEN: "xoxb-test" } as any);
       const res = await service.captureAndSendToSlack("https://example.com/quote/NVDA");
       expect(res.success).toBe(false);
       expect(res.error).toContain("channel_not_found");
@@ -248,7 +248,7 @@ describe("Issue #120: Browser Agent honesty", () => {
         status: 200,
         json: async () => ({ ok: false, error: "invalid_auth" }),
       } as any);
-      const service = new ETradeBrowserService({ SLACK_BOT_TOKEN: "xoxb-bad" } as any);
+      const service = new ETradeBrowserService({ SLACK_CHANNEL: "#desk", SLACK_BOT_TOKEN: "xoxb-bad" } as any);
       const res = await service.sendTransactionSnapToSlack(sampleTx);
       expect(res.success).toBe(false);
       expect(res.error).toContain("invalid_auth");
