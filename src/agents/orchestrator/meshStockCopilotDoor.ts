@@ -15,6 +15,7 @@ import {
 } from "../copilotTradingMode";
 import { isCopilotBroker } from "../../trading";
 import type { CommercialStore } from "../../data/commercialPorts";
+import { SqlIndexListStore } from "../../data/doSqliteIndexListAdapter";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import { STOCK_COPILOT_TASK_ID } from "./scheduledTasksCopilot";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
@@ -68,8 +69,7 @@ import {
 import {
   COPILOT_UNIVERSE_SETTING_KEY,
   COPILOT_STRATEGIES_SETTING_KEY,
-  resolveCopilotUniverse,
-  resolveCopilotUniversePreset,
+  resolveCopilotUniverseFull,
   resolveCopilotStrategies,
   parseUniverseInput,
   parseStrategiesInput,
@@ -180,6 +180,11 @@ export interface StockCopilotStatusResult {
    * configuration is never again presented as liveness.
    */
   neverExecuted: boolean;
+  /** Issue #3936: where the reported universe came from. */
+  universeSource?: "configured" | "stored-index" | "preset-fallback";
+  universeStale?: boolean;
+  universeSnapshotDate?: string | null;
+  universeFallbackReason?: string | null;
 }
 
 export interface StockCopilotControlInput {
@@ -215,6 +220,11 @@ export interface StockCopilotControlResult {
   universePreset: string | null;
   strategies: string[];
   updatedAt: string;
+  /** Issue #3936: where the reported universe came from. */
+  universeSource?: "configured" | "stored-index" | "preset-fallback";
+  universeStale?: boolean;
+  universeSnapshotDate?: string | null;
+  universeFallbackReason?: string | null;
 }
 
 export interface StockCopilotLearningsResult {
@@ -465,10 +475,13 @@ export async function getStockCopilotStatusViaDoor(
     env: ctx.env,
   });
 
-  const universe = resolveCopilotUniverse({
+  // Issue #3936: report the resolution the cycle runs, not the sync preset.
+  const universeResolution = await resolveCopilotUniverseFull({
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
+    indexListStore: new SqlIndexListStore(ctx.sql as never),
   });
+  const universe = universeResolution.symbols;
   const strategies = resolveCopilotStrategies({
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
@@ -500,7 +513,14 @@ export async function getStockCopilotStatusViaDoor(
     autopilot,
     rsiMode,
     universe,
-    universePreset: resolveCopilotUniversePreset(universe),
+    // #3936: the preset comes from the resolution, not from matching the
+    // symbol array — a stored 100-member list never equals a preset array,
+    // and matching it would report `null` for a correctly resolved index.
+    universePreset: universeResolution.preset,
+    universeSource: universeResolution.source,
+    universeStale: universeResolution.stale,
+    universeSnapshotDate: universeResolution.snapshotDate,
+    universeFallbackReason: universeResolution.reason,
     strategies,
     status,
     selectionResolved: selection.resolved,
@@ -741,10 +761,13 @@ export async function controlStockCopilotViaDoor(
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
-  const universe = resolveCopilotUniverse({
+  // Issue #3936: report the resolution the cycle runs, not the sync preset.
+  const universeResolution = await resolveCopilotUniverseFull({
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
+    indexListStore: new SqlIndexListStore(ctx.sql as never),
   });
+  const universe = universeResolution.symbols;
   const strategies = resolveCopilotStrategies({
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
@@ -772,7 +795,11 @@ export async function controlStockCopilotViaDoor(
     autopilot,
     rsiMode,
     universe,
-    universePreset: resolveCopilotUniversePreset(universe),
+    universePreset: universeResolution.preset,
+    universeSource: universeResolution.source,
+    universeStale: universeResolution.stale,
+    universeSnapshotDate: universeResolution.snapshotDate,
+    universeFallbackReason: universeResolution.reason,
     strategies,
     updatedAt: updatedControl?.updatedAt ?? nowIso,
   };

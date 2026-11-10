@@ -192,50 +192,6 @@ export async function runStockCopilotCycleForInstance(
     return;
   }
   const userLogin = executionContext.userLogin;
-  // #3451: resolve the active broker + mode for this login from the
-  // panel menu's selection model. The platform is constructed under
-  // the SELECTED environment, so its own credential pair and base
-  // URL follow the mode; an unresolved selection constructs it
-  // unselected and the cycle refuses before touching it.
-  const selection = await resolveCopilotTradingSelection({
-    env: ctx.env,
-    readSettingRaw: ctx.readSettingRaw,
-    commercial: ctx.commercial,
-  });
-  // Issue #3839: the platform follows the SELECTED broker; the catalog's
-  // copilot capability supplies the bars provider. No broker is hardcoded.
-  const selectedBroker: BrokerId =
-    selection.resolved && isCopilotBroker(selection.selection.brokerId)
-      ? selection.selection.brokerId
-      : COPILOT_BROKER_ID;
-  const copilotCapability = brokerCopilotCapability(selectedBroker);
-  const platform = TradingPlatformRegistry.getPlatform(
-    selectedBroker,
-    ctx.env,
-    ctx.getOrm(),
-    userLogin,
-    selection.resolved ? selection.selection.environment : undefined,
-  );
-  const marketData = new MarketDataResearchService(ctx.env);
-  // #3398: the user's enabled trading sessions, resolved at firing
-  // time from the same settings the status route reports — the
-  // per-login stored choice wins, the deployment env is the
-  // default, regular-only when neither speaks.
-  const enabledSessions = resolveCopilotSessions({
-    readSettingRaw: ctx.readSettingRaw,
-    env: ctx.env,
-  });
-  // Issue #3899 (RC4): the cycle runs the FULL universe — when the
-  // configured preset is NASDAQ100 the member list resolves from
-  // the stored nasdaq100 membership (weekly refresh), with the
-  // 12-symbol preset as the labelled fallback only. The resolution
-  // (source, symbol count, fallback reason) rides the cycle audit
-  // below, so every firing names the universe it actually ran.
-  const universeResolution = await resolveCopilotUniverseFull({
-    readSettingRaw: ctx.readSettingRaw,
-    env: ctx.env,
-    indexListStore: new SqlIndexListStore(sql),
-  });
   // Issue #3788: Think task firings are recorded in the runs ledger
   // (recordScheduleCallbackRun, the orchestrator-schedule seam) with
   // the cycle result's status mapped to the ledger outcome — "ok" is
@@ -243,12 +199,62 @@ export async function runStockCopilotCycleForInstance(
   // stock_copilot.cycle audit still fires inside, unchanged. A cycle
   // that throws records a failure and rethrows to the handler, whose
   // catch audits it with a code.
+  // Issue #4001: ALL firing setup happens INSIDE the recorded
+  // callback below. Before this fix the selection / platform /
+  // sessions / universe resolution ran before the wrapper, so a
+  // throw in any of them skipped the ledger entirely and the firing
+  // died with zero trace (the 9:05 slot). Inside the wrapper, any
+  // such throw records a named failure ledger row.
   await recordScheduleCallbackRun(
     sql,
     "stock-copilot-paper-cycle",
     { scheduleId: STOCK_COPILOT_TASK_ID, trigger: "scheduled" },
     { id: taskCtx.taskId },
     async () => {
+      // #3451: resolve the active broker + mode for this login from the
+      // panel menu's selection model. The platform is constructed under
+      // the SELECTED environment, so its own credential pair and base
+      // URL follow the mode; an unresolved selection constructs it
+      // unselected and the cycle refuses before touching it.
+      const selection = await resolveCopilotTradingSelection({
+        env: ctx.env,
+        readSettingRaw: ctx.readSettingRaw,
+        commercial: ctx.commercial,
+      });
+      // Issue #3839: the platform follows the SELECTED broker; the catalog's
+      // copilot capability supplies the bars provider. No broker is hardcoded.
+      const selectedBroker: BrokerId =
+        selection.resolved && isCopilotBroker(selection.selection.brokerId)
+          ? selection.selection.brokerId
+          : COPILOT_BROKER_ID;
+      const copilotCapability = brokerCopilotCapability(selectedBroker);
+      const platform = TradingPlatformRegistry.getPlatform(
+        selectedBroker,
+        ctx.env,
+        ctx.getOrm(),
+        userLogin,
+        selection.resolved ? selection.selection.environment : undefined,
+      );
+      const marketData = new MarketDataResearchService(ctx.env);
+      // #3398: the user's enabled trading sessions, resolved at firing
+      // time from the same settings the status route reports — the
+      // per-login stored choice wins, the deployment env is the
+      // default, regular-only when neither speaks.
+      const enabledSessions = resolveCopilotSessions({
+        readSettingRaw: ctx.readSettingRaw,
+        env: ctx.env,
+      });
+      // Issue #3899 (RC4): the cycle runs the FULL universe — when the
+      // configured preset is NASDAQ100 the member list resolves from
+      // the stored nasdaq100 membership (weekly refresh), with the
+      // 12-symbol preset as the labelled fallback only. The resolution
+      // (source, symbol count, fallback reason) rides the cycle audit
+      // below, so every firing names the universe it actually ran.
+      const universeResolution = await resolveCopilotUniverseFull({
+        readSettingRaw: ctx.readSettingRaw,
+        env: ctx.env,
+        indexListStore: new SqlIndexListStore(sql),
+      });
       const result = await runStockCopilotCycle({
         env: ctx.env,
         positions: createStockCopilotPositionPort(sql),

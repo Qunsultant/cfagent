@@ -73,6 +73,59 @@ export function listOperations() {
 }
 
 /**
+ * Issue #3996 — built-in scheduled goals, the single source of
+ * truth for the goals UI dropdown and the seed-all button. The
+ * canonical definitions live in src/schedule.ts DEFAULT_SCHEDULES
+ * and are read from this server endpoint at load time — the client
+ * carries no second copy of the values.
+ */
+export function listBuiltinGoals() {
+  return api<{ ok: boolean; goals: ScheduledGoal[] }>("/api/schedule/builtin-goals");
+}
+
+/**
+ * Issue #3996 — posts each built-in goal in order and reports
+ * per-goal results. A goal the loaded list already contains is
+ * SKIPPED without posting, and one the server reports as already
+ * existing is SKIPPED too — the batch never fails wholesale and
+ * never duplicates. The goal's own `enabled` value is posted
+ * as-is, so the disabled-by-design goals seed as disabled.
+ */
+export async function addBuiltinGoals(
+  goals: ScheduledGoal[],
+  existingIds: string[],
+): Promise<PresetGoalResult[]> {
+  const existing = new Set(existingIds);
+  const results: PresetGoalResult[] = [];
+  for (const goal of goals) {
+    if (existing.has(goal.id)) {
+      results.push({ id: goal.id, status: "skipped", reason: "already exists" });
+      continue;
+    }
+    try {
+      await addGoal({
+        id: goal.id,
+        name: goal.name,
+        cron: goal.cron,
+        operation: goal.operation,
+        budgetCents: goal.budgetCents,
+        enabled: goal.enabled,
+        ...(goal.timeZone ? { timeZone: goal.timeZone } : {}),
+      });
+      results.push({ id: goal.id, status: "added" });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Could not add goal.";
+      if (message.toLowerCase().includes("already exists")) {
+        results.push({ id: goal.id, status: "skipped", reason: message });
+      } else {
+        results.push({ id: goal.id, status: "failed", error: message });
+      }
+    }
+  }
+  return results;
+}
+
+/**
  * Issue #1922 — SessionStore resource goals preset. Values are exactly
  * the activation payloads in
  * docs/architecture/security/sessionstore-resource-rollup-alert-1819.md

@@ -181,7 +181,7 @@ export interface OpportunityStock {
 // Universe acquisition — the ONLY stage that varies by trigger.
 // ---------------------------------------------------------------------------
 
-export type UniverseMode = "all-listings" | "live-quotes" | "etrade-only" | "yahoo" | "alpaca";
+export type UniverseMode = "all-listings" | "live-quotes" | "etrade-only" | "yahoo" | "alpaca" | "public";
 
 /**
  * Issue #1007: which data provider feeds a run. A provider changes
@@ -189,7 +189,7 @@ export type UniverseMode = "all-listings" | "live-quotes" | "etrade-only" | "yah
  * persistence. Recorded on ScreenerRunResult and in the canonical
  * report body so every run states which provider produced it.
  */
-export type StockScreenProvider = "etrade" | "yahoo" | "alpaca";
+export type StockScreenProvider = "etrade" | "yahoo" | "alpaca" | "public"; // Issue #3990: Public screens record their own provider.
 
 export interface AcquireUniverseOptions {
   mode: UniverseMode;
@@ -693,7 +693,7 @@ async function resolveAllListings(
  */
 async function resolveUniverseListings(
   opts: AcquireUniverseOptions,
-  mode: "live-quotes" | "etrade-only" | "alpaca"
+  mode: "live-quotes" | "etrade-only" | "alpaca" | "public"
 ): Promise<NasdaqStockListing[]> {
   if (opts.symbols) return opts.symbols;
   if (opts.universeDeps) {
@@ -874,6 +874,22 @@ export function bindAlpacaQuoteDeps(
 }
 
 /**
+ * Issue #3990: bind one platform quotes provider to the pipeline
+ * seam — the Public binding. The binding itself is provider-generic
+ * (the same getQuote/getQuotesBatch shape as the etrade-only
+ * binding); only the name differs, so a Public run's deps are
+ * visibly Public-bound at the call site and never pass through an
+ * E*TRADE- or Alpaca-named binding. This binding takes NO gap-fill
+ * parameter: public means Public or nothing, by construction.
+ */
+export function bindPublicQuoteDeps(
+  provider: DataProvider,
+  runContext: DataRunContext
+): QuoteScreenerDeps {
+  return bindEtradeQuoteDeps(provider, runContext);
+}
+
+/**
  * Issue #3655: resolve the alpaca-mode quote provider from the
  * platform route table, mirroring yahooQuoteProviderFromRoute. The
  * quotes route must exist, alpaca's config must be enabled (state
@@ -902,6 +918,41 @@ export function alpacaQuoteProviderFromRoute(
   if (!provider || !provider.capabilities.includes("quotes")) {
     throw new Error(
       "Alpaca-mode quote resolution failed: no quotes-capable alpaca adapter is registered."
+    );
+  }
+  return provider;
+}
+
+/**
+ * Issue #3990: resolve the public-mode quote provider from the
+ * platform route table, mirroring alpacaQuoteProviderFromRoute. The
+ * quotes route must exist, public's config must be enabled (state
+ * and flag — the operator lifecycle act that makes the Public data
+ * adapter servable), and the registry must hold a quotes-capable
+ * public adapter. Anything else throws — no silent substitution, no
+ * fallback to another provider.
+ */
+export function publicQuoteProviderFromRoute(
+  registry: DataProviderRegistry,
+  configs: readonly ProviderConfigRecord[],
+  routes: readonly CapabilityRouteRecord[]
+): DataProvider {
+  const route = routes.find((r) => r.capability === "quotes");
+  if (!route) {
+    throw new Error(
+      "Public-mode quote resolution failed: no quotes route exists."
+    );
+  }
+  const config = configs.find((c) => c.id === "public");
+  if (!config || config.lifecycleState !== "enabled" || !config.enabled) {
+    throw new Error(
+      "Public-mode quote resolution failed: the public provider is not enabled (lifecycle state and flag)."
+    );
+  }
+  const provider = registry.get("public");
+  if (!provider || !provider.capabilities.includes("quotes")) {
+    throw new Error(
+      "Public-mode quote resolution failed: no quotes-capable public adapter is registered."
     );
   }
   return provider;
@@ -1717,13 +1768,18 @@ export async function acquireUniverse(
   // adapter for etrade-only). Labels, provenance, and the auth
   // failure code are parameterized on the mode below, so an Alpaca
   // run never reports E*TRADE provenance or an E*TRADE OAuth code.
-  if (opts.mode === "etrade-only" || opts.mode === "alpaca") {
+  // Issue #3990: "public" mode joins the same branch — the caller
+  // binds the Public adapter, and a Public run reports Public.com
+  // provenance (never Alpaca's, never E*TRADE's).
+  if (opts.mode === "etrade-only" || opts.mode === "alpaca" || opts.mode === "public") {
     if (!opts.quoteDeps) {
       throw new Error(`${opts.mode} mode requires quoteDeps.fetchQuote`);
     }
     const isAlpacaQuotes = opts.mode === "alpaca";
-    const quoteProviderName = isAlpacaQuotes ? "Alpaca" : "E*TRADE";
-    const quoteProviderId: StockScreenProvider = isAlpacaQuotes ? "alpaca" : "etrade";
+    const isPublicQuotes = opts.mode === "public";
+    const isNonEtradeQuotes = isAlpacaQuotes || isPublicQuotes;
+    const quoteProviderName = isAlpacaQuotes ? "Alpaca" : isPublicQuotes ? "Public.com" : "E*TRADE";
+    const quoteProviderId: StockScreenProvider = opts.mode === "etrade-only" ? "etrade" : opts.mode;
     const cfg = opts.config ?? DEFAULT_SCREENER_CONFIG;
     // Issue #1770: the run's subrequest budget, shared by the batch
     // and per-symbol passes below. Symbols deferred by the budget are
@@ -1735,7 +1791,7 @@ export async function acquireUniverse(
     );
     const budgetDeferred = new Set<string>();
     const symbols =
-      opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, isAlpacaQuotes ? "alpaca" : "etrade-only"));
+      opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, opts.mode === "etrade-only" ? "etrade-only" : opts.mode));
     const maxSymbols = opts.maxSymbols ?? cfg.acquisition.defaultMaxSymbols;
     const limited = maxSymbols > 0 ? symbols.slice(0, maxSymbols) : symbols;
     if (limited.length === 0) {
@@ -1771,7 +1827,7 @@ export async function acquireUniverse(
         // dynamically fetched Nasdaq listing row does, and resolveStockSector
         // provides curated/inferred enrichment.
         sector: resolveStockSector(listing.symbol, live.companyName || listing.companyName, live.sector || listing.sector),
-        source: isAlpacaQuotes ? "Alpaca live" : "E*TRADE live",
+        source: isAlpacaQuotes ? "Alpaca live" : isPublicQuotes ? "Public.com live" : "E*TRADE live",
         quoteStatus: "LIVE",
       } as ETradeQuote);
       quotedSymbols.add(listing.symbol.toUpperCase());
@@ -1948,7 +2004,9 @@ export async function acquireUniverse(
       // Issue #3655: FAILURE_AUTH_TOKEN_EXPIRED is the E*TRADE OAuth
       // code — an Alpaca run with auth failures falls through to the
       // generic provider-unavailable error below, which names Alpaca.
-      if (authFailures > 0 && !isAlpacaQuotes) {
+      // Issue #3990: the same holds for a Public run — its auth
+      // failure is a Public token failure, never an E*TRADE OAuth code.
+      if (authFailures > 0 && !isNonEtradeQuotes) {
         const { BusinessError } = await import("../outcomes/outcomeAspects");
         throw new BusinessError("FAILURE_AUTH_TOKEN_EXPIRED", { failedCount: failed.length, authFailures });
       }

@@ -101,8 +101,15 @@ import type {
   DataProviderCapability,
   DataResult,
   DataRunContext,
+  FundamentalsResult,
   OptionsChainRequest,
+  OptionsChainSource,
 } from "./contract";
+import {
+  buildAlpacaOptionsConfig,
+  createAlpacaOptionsChainSource,
+} from "../alpaca/optionsData";
+import type { OutboundRateLimiter } from "../../security/outboundRateLimiter";
 import { recordCapture, resolveRunContext } from "./captureStore";
 import { createCaptureFetchOutcomeRecorder } from "./captureStore";
 import {
@@ -691,6 +698,36 @@ export interface MarketDataProviderOptions {
     symbol: string,
     runContext?: DataRunContext,
   ) => Promise<DataNewsArticle[]>;
+  /**
+   * Issue #3990 — the fundamentals fetcher, when this adapter serves
+   * the fundamentals capability. `false` means the wrapped provider's
+   * getFundamentals is NOT servable, so the adapter declares nothing
+   * and serves no getFundamentals: Alpaca's throws (no live source;
+   * ADR 0019 — Yahoo covers fundamentals, never faked), and a
+   * declaration the implementation cannot honour fails the
+   * conformance kit's rule (conformance.ts: "a provider that declares
+   * a capability it does not implement fails that capability's
+   * check"). A function injects the fetcher (tests; a future
+   * provider whose fundamentals live elsewhere). Absent, the wrapped
+   * provider's own getFundamentals serves it — through the breaker
+   * when one is configured, exactly as before (the Yahoo path).
+   */
+  fundamentals?:
+    | ((
+        symbol: string,
+        runContext?: DataRunContext,
+      ) => Promise<FundamentalsResult>)
+    | false;
+  /**
+   * Issue #3990 — the options-chains source, when this adapter serves
+   * the optionsChains capability. Supplied, the adapter declares
+   * "optionsChains" and serves getOptionsChain/getOptionExpiryDates
+   * through it (tracked + captured like every other capability);
+   * absent, the capability is not declared (ISP — the Yahoo adapter
+   * passes none). The Alpaca adapter defaults this to the repo's own
+   * Alpaca options read path (optionsData.ts) below.
+   */
+  optionsChain?: OptionsChainSource;
 }
 
 function createMarketDataProvider(
@@ -761,11 +798,27 @@ function createMarketDataProvider(
     getQuotes?: (symbols: string[]) => Promise<import("../../types").MarketDataResearchQuote[]>;
   };
   const newsFetcher = options?.news;
+  // Issue #3990 — fundamentals is declared exactly when a fetcher
+  // serves it: the injected one, or the wrapped provider's own
+  // (through the breaker when configured). `false` declares nothing.
+  const fundamentalsFetcher =
+    options?.fundamentals === false
+      ? undefined
+      : (options?.fundamentals ??
+        ((symbol: string) => effectiveProvider.getFundamentals(symbol)));
+  const optionsChainSource = options?.optionsChain;
   // #3932: "news" is declared exactly when a news fetcher is
   // supplied (ISP — the Yahoo adapter supplies one, Alpaca none).
-  const capabilities: readonly DataProviderCapability[] = newsFetcher
-    ? ["quotes", "historicalBars", "fundamentals", "news"]
-    : ["quotes", "historicalBars", "fundamentals"];
+  // Issue #3990: the same rule for fundamentals and optionsChains —
+  // a capability is declared exactly when a source serves it, so the
+  // declaration can never name what the implementation cannot do.
+  const capabilities: readonly DataProviderCapability[] = [
+    "quotes",
+    "historicalBars",
+    ...(fundamentalsFetcher ? (["fundamentals"] as const) : []),
+    ...(newsFetcher ? (["news"] as const) : []),
+    ...(optionsChainSource ? (["optionsChains"] as const) : []),
+  ];
   return {
     id,
     name,
@@ -792,13 +845,57 @@ function createMarketDataProvider(
       );
       return tag(id, "historicalBars", result);
     },
-    getFundamentals: async (symbol: string, runContext?: DataRunContext) => {
-      const result = await trackedFetch(outcomeRecorder, meta("fundamentals", { symbol }, runContext), () =>
-        effectiveProvider.getFundamentals(symbol)
-      );
-      await captureFetch("fundamentals", { symbol }, result, runContext);
-      return tag(id, "fundamentals", result);
-    },
+    // Issue #3990 — fundamentals, served through the resolved
+    // fetcher (injected, or the wrapped provider's own through the
+    // breaker). The method exists exactly when the capability is
+    // declared.
+    ...(fundamentalsFetcher
+      ? {
+          getFundamentals: async (symbol: string, runContext?: DataRunContext) => {
+            const result = await trackedFetch(
+              outcomeRecorder,
+              meta("fundamentals", { symbol }, runContext),
+              () => fundamentalsFetcher(symbol, runContext)
+            );
+            await captureFetch("fundamentals", { symbol }, result, runContext);
+            return tag(id, "fundamentals", result);
+          },
+        }
+      : {}),
+    // Issue #3990 — optionsChains, served through the injected
+    // source. The methods exist exactly when the capability is
+    // declared; both halves (chain + expiry calendar) travel
+    // together under the one capability.
+    ...(optionsChainSource
+      ? {
+          getOptionsChain: async (
+            request: OptionsChainRequest,
+            runContext?: DataRunContext,
+            requestBudget?: import("../interfaces").OptionRequestBudget
+          ) => {
+            const result = await trackedFetch(
+              outcomeRecorder,
+              meta("optionsChains", { symbol: request.symbol }, runContext),
+              () => optionsChainSource.getChain(request, runContext, requestBudget)
+            );
+            await captureFetch("optionsChains", { symbol: request.symbol }, result, runContext);
+            return tag(id, "optionsChains", result);
+          },
+          getOptionExpiryDates: async (
+            symbol: string,
+            runContext?: DataRunContext,
+            requestBudget?: import("../interfaces").OptionRequestBudget
+          ) => {
+            const result = await trackedFetch(
+              outcomeRecorder,
+              meta("optionsChains", { symbol }, runContext),
+              () => optionsChainSource.getExpiryDates(symbol, runContext, requestBudget)
+            );
+            await captureFetch("optionsChains", { symbol }, result, runContext);
+            return tag(id, "optionsChains", result);
+          },
+        }
+      : {}),
     // #3932 — news, served through the injected fetcher (the
     // Yahoo adapter defaults it to fetchYahooNewsArticles). The
     // method exists exactly when the capability is declared.
@@ -953,7 +1050,48 @@ export function createAlpacaDataProvider(
   env?: Env,
   options?: MarketDataProviderOptions
 ): DataProvider {
-  return createMarketDataProvider("alpaca", "Alpaca Markets", provider, env, options);
+  return createMarketDataProvider("alpaca", "Alpaca Markets", provider, env, {
+    ...options,
+    // Issue #3990 — the wrapped provider's getFundamentals throws
+    // (no live source; ADR 0019 — Yahoo covers fundamentals, never
+    // faked), so the adapter does not declare fundamentals unless a
+    // caller explicitly injects a source.
+    fundamentals: options?.fundamentals ?? false,
+    // Issue #3990 — optionsChains, defaulted to the repo's own
+    // Alpaca options read path (optionsData.ts: contracts +
+    // snapshots); tests inject a stub. The default is built here,
+    // in the Alpaca factory, so the shared wrapper stays generic.
+    optionsChain: options?.optionsChain ?? alpacaOptionsChainSource(provider, env),
+  });
+}
+
+/**
+ * Issue #3990: the Alpaca adapter's default options source. The
+ * config resolves paper/live from env exactly as the trading
+ * platform does (same helper); the underlying quote comes from the
+ * wrapped provider's own getQuote (raw — the source is built before
+ * the wrapper applies the breaker, and no Alpaca breaker is
+ * configured in production today); the snapshot/contract fetches
+ * share the provider's outbound budget when it exposes one.
+ */
+function alpacaOptionsChainSource(
+  provider: IMarketDataProvider,
+  env?: Env
+): OptionsChainSource {
+  const limiter = (provider as { outboundLimiter?: OutboundRateLimiter }).outboundLimiter;
+  const cfg = buildAlpacaOptionsConfig(env, limiter);
+  return createAlpacaOptionsChainSource(cfg, async (symbol: string) => {
+    const quote = await provider.getQuote(symbol);
+    // The chain's underlying price is the last price (the platform's
+    // assembly reads the same field); the quote's price is the honest
+    // fallback when no last trade is reported. Neither present is a
+    // failure, never a zero — a chain cannot pivot on an invented price.
+    const lastPrice = quote.lastPrice ?? quote.price;
+    if (lastPrice === undefined) {
+      throw new Error(`Alpaca quote for ${symbol} carries no price; cannot assemble an option chain.`);
+    }
+    return { symbol: quote.symbol, lastPrice };
+  });
 }
 
 /**
@@ -1022,12 +1160,19 @@ export async function verifyAlpacaDataProvider(
   options?: {
     provider?: IMarketDataProvider;
     outcomeRecorder?: FetchOutcomeRecorder;
+    /**
+     * Issue #3990 — injectable options source (tests stub it; the
+     * conformance kit probes every declared capability, and the
+     * default source would call Alpaca's live API). Production
+     * passes none: the factory defaults the real source from env.
+     */
+    optionsChain?: OptionsChainSource;
   }
 ): Promise<{ ok: boolean; summary: string }> {
   const adapter = createAlpacaDataProvider(
     options?.provider ?? new AlpacaMarketDataProvider(env),
     env,
-    { outcomeRecorder: options?.outcomeRecorder }
+    { outcomeRecorder: options?.outcomeRecorder, optionsChain: options?.optionsChain }
   );
   if (!adapter.isConfigured(env)) {
     return {

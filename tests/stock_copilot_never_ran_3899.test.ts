@@ -633,7 +633,7 @@ describe("Issue #3899 RC4 — NASDAQ100 resolves to the stored 100-member list",
       env: {} as any,
       indexListStore: store,
     });
-    expect(resolved.source).toBe("stored-nasdaq100");
+    expect(resolved.source).toBe("stored-index");
     expect(resolved.symbols).toHaveLength(100);
     expect(resolved.symbols).toContain("N100_001");
     expect(resolved.symbols).toContain("N100_100");
@@ -674,10 +674,12 @@ describe("Issue #3899 RC4 — NASDAQ100 resolves to the stored 100-member list",
     expect(resolved.reason).toMatch(/stale/i);
   });
 
-  it("a non-NASDAQ100 universe never touches the index store", async () => {
+  // #3936 changed this premise: SP100 is now an INDEX preset and resolves
+  // stored membership. A symbol preset still never reads the store.
+  it("a symbol-list universe never touches the index store", async () => {
     const throwingStore = {
       async latest(): Promise<never> {
-        throw new Error("store must not be read for SP100");
+        throw new Error("store must not be read for MEGA_TECH");
       },
       async store(): Promise<never> {
         throw new Error("store must not be written");
@@ -685,12 +687,12 @@ describe("Issue #3899 RC4 — NASDAQ100 resolves to the stored 100-member list",
     };
     const resolved = await resolveCopilotUniverseFull({
       readSettingRaw: (key: string) =>
-        key === "stock_copilot:universe" ? "SP100" : null,
+        key === "stock_copilot:universe" ? "MEGA_TECH" : null,
       env: {} as any,
       indexListStore: throwingStore as any,
     });
     expect(resolved.source).toBe("configured");
-    expect(resolved.symbols).toEqual([...PRESET_UNIVERSES.SP100]);
+    expect(resolved.symbols).toEqual([...PRESET_UNIVERSES.MEGA_TECH]);
   });
 
   it("an index-store read failure falls back to the labelled preset, never a silent no-op", async () => {
@@ -762,7 +764,7 @@ describe("Issue #3899 RC4 — NASDAQ100 resolves to the stored 100-member list",
     });
     const cycleAudit = audits.find((a) => a.type === "stock_copilot.cycle");
     expect(cycleAudit).toBeDefined();
-    expect(cycleAudit!.payload.universeSource).toBe("stored-nasdaq100");
+    expect(cycleAudit!.payload.universeSource).toBe("stored-index");
     expect(cycleAudit!.payload.universeSymbols).toBe(100);
   });
 });

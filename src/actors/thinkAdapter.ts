@@ -174,6 +174,7 @@ export type {
 // hook.)
 export type { SkillSource } from "@cloudflare/think";
 import type { ToolSet, UIMessage } from "ai";
+import type { RetryOptions, Schedule, ScheduleOptions } from "agents";
 import { z } from "zod";
 import PostalMime from "postal-mime";
 import type { AgentEmail } from "agents/email";
@@ -237,6 +238,33 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 });
 
 /**
+ * Issue #3923 (follow-on of #3741) — a work-start refused because
+ * the instance's resolved capability manifest carries a
+ * requires-edge refusal (`capability_requires_state:<id>`): the
+ * capability is enabled for the class, but its implementation
+ * persists through Durable Object storage and this instance runs
+ * fully ephemeral (state disabled by config). The refusal is
+ * thrown BY NAME — `code` is exactly the manifest's refusal
+ * string — at the shared composition choke points on PortThink
+ * (scheduler arming, the workspace port), so every subclass
+ * inherits the enforcement and no state-dependent work starts
+ * silently on an ephemeral instance.
+ */
+export class PortCapabilityRefusalError extends Error {
+  readonly code: string;
+  readonly capability: CapabilityId;
+  constructor(refusal: string, className: string, capability: CapabilityId) {
+    super(
+      `${refusal}: ${className} cannot serve "${capability}" while state is ` +
+        "disabled by config (fully ephemeral instance)",
+    );
+    this.name = "PortCapabilityRefusalError";
+    this.code = refusal;
+    this.capability = capability;
+  }
+}
+
+/**
  * Think base for port-backed agents. A migrating agent class extends
  * PortThink (not raw Think) and exposes its port hooks object; the
  * class's domain methods keep the port's beforeTurn/onChatResponse/
@@ -264,10 +292,40 @@ export class PortThink extends Think<any> {
    * PortThink subclass. Backed by Think's `_hostReadFile` /
    * `_hostWriteFile` / `_hostDeleteFile` / `_hostListFiles` plus the
    * Durable Object's SQLite/KV storage.
+   *
+   * Issue #3923: the returned port is guarded by the state
+   * requires-edge — workspace requires `state` (#3741), so on a
+   * fully ephemeral instance (state disabled by config) every
+   * method refuses by name (PortCapabilityRefusalError) BEFORE
+   * the underlying port touches storage. This one wrap is the
+   * workspace choke point: the turn tool builder
+   * (getPortWorkspaceTools), the /workspace HTTP channel
+   * (handlePortWorkspace), the actor-port facet
+   * (createThinkActorPort), and direct subclass use all consume
+   * this getter.
    */
   get workspacePort(): ActorWorkspacePort {
     if (!this._workspacePort) {
-      this._workspacePort = createThinkActorWorkspace(this);
+      const port = createThinkActorWorkspace(this);
+      const assertServable = () => this.assertPortCapabilityServable("workspace");
+      this._workspacePort = {
+        readFile: async (path, scopeId) => {
+          assertServable();
+          return port.readFile(path, scopeId);
+        },
+        writeFile: async (path, content, scopeId) => {
+          assertServable();
+          return port.writeFile(path, content, scopeId);
+        },
+        deleteFile: async (path, scopeId) => {
+          assertServable();
+          return port.deleteFile(path, scopeId);
+        },
+        listFiles: async (dir, scopeId) => {
+          assertServable();
+          return port.listFiles(dir, scopeId);
+        },
+      };
     }
     return this._workspacePort;
   }
@@ -309,6 +367,75 @@ export class PortThink extends Think<any> {
       (manifest.capabilities as Record<string, { state: string }>)[capability] ??
       (manifest.tools as Record<string, { state: string }>)[capability];
     return entry?.state !== "disabled-by-config";
+  }
+
+  /**
+   * Issue #3923 (follow-on of #3741) — the named requires-edge
+   * refusal this instance's resolved manifest carries for
+   * `capability` (`capability_requires_state:<capability>`), or
+   * undefined when the capability can serve. A refusal exists
+   * exactly when the capability is enabled for the class, declares
+   * `requires: ["state"]`, and this resolution disables `state` —
+   * the instance runs fully ephemeral, so the capability's
+   * state-backed work must refuse by name rather than start.
+   */
+  portCapabilityRefusal(capability: CapabilityId): string | undefined {
+    const refusal = `capability_requires_state:${capability}`;
+    return this.getPortCapabilityManifest().refusals.includes(refusal)
+      ? refusal
+      : undefined;
+  }
+
+  /**
+   * Issue #3923 — throw the named requires-edge refusal for
+   * `capability` (PortCapabilityRefusalError) when this instance
+   * cannot serve it; a no-op otherwise. The enforcement primitive
+   * the base's choke points (scheduler arming, the workspace
+   * port) share, and the one a class-level work-start (e.g.
+   * PaymentsAgent.processPaidRequest) asserts at its own entry.
+   */
+  assertPortCapabilityServable(capability: CapabilityId): void {
+    const refusal = this.portCapabilityRefusal(capability);
+    if (refusal) {
+      throw new PortCapabilityRefusalError(refusal, this.constructor.name, capability);
+    }
+  }
+
+  /**
+   * Issue #3923 — scheduler arming, enforced at the base. Every
+   * arming path in the fleet funnels through these two SDK
+   * methods: the ActorSchedulePort facet (createCfActorSchedule
+   * delegates to agent.schedule), the classes' own inline port
+   * facets and direct scheduleEvery loop starts, the
+   * NLQ execution port (which consumes those facets), and Think's
+   * declared-task arming (`getScheduledTasks` occurrences are
+   * armed via this.schedule — inside a best-effort startup step,
+   * so a refusal there never bricks the instance). The scheduler
+   * requires `state` (#3741): its rows live in Durable Object
+   * storage, so on a fully ephemeral instance arming refuses by
+   * name BEFORE the SDK persists anything. When no refusal
+   * applies (production posture) the override is a pure
+   * pass-through with identical arguments.
+   */
+  override async schedule<T = string>(
+    when: Date | string | number,
+    callback: keyof this,
+    payload?: T,
+    options?: ScheduleOptions,
+  ): Promise<Schedule<T>> {
+    this.assertPortCapabilityServable("scheduler");
+    return super.schedule(when, callback, payload, options);
+  }
+
+  /** Issue #3923 — see schedule(): the repeating-arming twin. */
+  override async scheduleEvery<T = string>(
+    intervalSeconds: number,
+    callback: keyof this,
+    payload?: T,
+    options?: { retry?: RetryOptions; _idempotent?: boolean },
+  ): Promise<Schedule<T>> {
+    this.assertPortCapabilityServable("scheduler");
+    return super.scheduleEvery(intervalSeconds, callback, payload, options);
   }
 
   /**
@@ -577,6 +704,16 @@ export class PortThink extends Think<any> {
     request: Request,
     endpoint: "files" | "file"
   ): Promise<Response> {
+    // Issue #3923: on a fully ephemeral instance (state disabled
+    // by config) the channel refuses BY NAME in its own idiom —
+    // a 403 JSON refusal carrying the manifest's refusal string —
+    // before the lifecycle boot, so the instance is never woken
+    // into state-backed work. (The workspacePort guard remains
+    // the backstop for programmatic consumers.)
+    const refusal = this.portCapabilityRefusal("workspace");
+    if (refusal) {
+      return Response.json({ ok: false, error: refusal }, { status: 403 });
+    }
     if (!this.isPortCapabilityEnabled("workspace")) {
       return Response.json(
         { ok: false, error: "Workspace capability is disabled by configuration." },

@@ -141,6 +141,12 @@ export interface StockCopilotStatus {
   };
   universe?: string[];
   universePreset?: string | null;
+  /** #3936: where the reported universe came from — the stored index
+   *  membership, the labelled preset fallback, or the configured list. */
+  universeSource?: "configured" | "stored-index" | "preset-fallback";
+  universeStale?: boolean;
+  universeSnapshotDate?: string | null;
+  universeFallbackReason?: string | null;
   strategies?: string[];
   status: StockCopilotStatusKind;
   /** #3451: the effective trading selection the next cycle runs

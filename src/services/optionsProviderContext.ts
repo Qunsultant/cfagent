@@ -4,7 +4,8 @@
  *
  * This module is the pure plumbing the options surfaces consume: tenant
  * provider resolution with the provider design's fail-open fallback to
- * the platform defaults (#3812: etrade data provider / alpaca broker),
+ * the platform defaults (#3812 for the broker, #3990 for the data
+ * provider: alpaca / alpaca),
  * conditional surface gating points, a coded capability-unavailable
  * path, and provenance stamping of `dataProviderId`/`brokerId` onto a run
  * record's provenance object.
@@ -28,12 +29,23 @@
  * Capability matrix (provider design §3, grounded in
  * `src/trading/dataProviders/adapters.ts`, not wished): etrade and public
  * declare quotes + optionsChains; yahoo declares quotes + historicalBars +
- * fundamentals (no optionsChains — Yahoo cannot fix options chains);
- * nasdaq declares screenUniverse only; alpaca declares quotes +
- * historicalBars + fundamentals (no optionsChains). News is contract-only
- * and declared by no adapter, so it is unavailable for every provider.
+ * fundamentals + news (#3932); nasdaq declares screenUniverse only;
+ * alpaca declares quotes + historicalBars + optionsChains (#3990 — the
+ * data adapter wires the repo's own Alpaca options read path) and does
+ * NOT declare fundamentals (its getFundamentals throws — no live
+ * source; ADR 0019: Yahoo covers fundamentals, never faked).
+ * Yahoo options chains exist only through Yahoo's unofficial
+ * v7/finance/options endpoint (cookie+crumb, ToS risk) and are NOT
+ * wired — an explicit decision, not an oversight (#3990).
  * An unknown provider declares nothing: it never silently gains a capability
  * and never silently falls back to E*TRADE chains.
+ *
+ * The map below is a projection of the adapter declarations, not a
+ * second source of truth: tests/data_provider_capabilities_3990.test.ts
+ * constructs every adapter with defaults and asserts the map equals
+ * the adapters' declared capabilities, capability by capability —
+ * drift fails the test. Change the adapters; the map follows in the
+ * same PR.
  *
  * Wiring (this slice, not the draft): the options feed gate
  * (`src/agents/routes/optionsProviderGate.ts`, delegated from
@@ -61,7 +73,7 @@ import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 
 // Issue #3812: the defaults are slice 1's values, derived — never a second
 // hardcoded copy. The broker default is Alpaca in paper mode; the data
-// provider default stays etrade.
+// provider default is Alpaca too since #3990 (one provider on both axes).
 export const DEFAULT_DATA_PROVIDER_ID = DEFAULT_TENANT_PROVIDERS.dataProviderId;
 export const DEFAULT_BROKER_ID = DEFAULT_TENANT_PROVIDERS.brokerId;
 
@@ -71,9 +83,9 @@ export type { BrokerId, DataProviderCapability };
 const DATA_PROVIDER_CAPABILITIES: Record<DataProviderId, readonly DataProviderCapability[]> = {
   etrade: ["quotes", "optionsChains"],
   public: ["quotes", "optionsChains"],
-  yahoo: ["quotes", "historicalBars", "fundamentals"],
+  yahoo: ["quotes", "historicalBars", "fundamentals", "news"],
   nasdaq: ["screenUniverse"],
-  alpaca: ["quotes", "historicalBars", "fundamentals"],
+  alpaca: ["quotes", "historicalBars", "optionsChains"],
 };
 
 export interface TenantProviderContext {
@@ -105,8 +117,8 @@ function normalizeId<T extends string>(value: unknown, known: readonly T[], fall
 
 /**
  * Resolve a tenant's provider/broker context from a stored settings row (or
- * its absence). Resolution fails OPEN to the platform defaults (#3812:
- * etrade data provider / alpaca broker) — an absent row, a pre-migration
+ * its absence). Resolution fails OPEN to the platform defaults (#3812 for
+ * the broker, #3990 for the data provider: alpaca / alpaca) — an absent row, a pre-migration
  * row, or a store read failure must not take down a surface that worked
  * before (provider design §1/§6).
  * This is resolution, not settings validation: the settings route itself

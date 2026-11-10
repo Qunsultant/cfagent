@@ -1,8 +1,10 @@
 /**
  * UX uniformity, epic #3046 slice #3047 — conformance gates.
  *
- * A page that diverges must fail CI, not just look wrong. Three gates
- * share one scanner (no drift between them):
+ * A page that diverges must fail CI, not just look wrong. Four gates:
+ * the first three share one scanner (no drift between them); the
+ * fourth adds its own className scanner (same comment/string
+ * discipline):
  *  1. Route→shell: every nav route renders inside a PageShell (or a
  *     PageTemplate, which renders PageShell — #3131), or is
  *     listed in ux_shell_exceptions_3047.json (migration with a tracking
@@ -24,6 +26,42 @@
  *     inline-style idiom (section container, error/empty states, run
  *     rows); converting the whole panel to primitives is S5 surface
  *     work, not S3; no other inline styles added.
+ *     Issue #3996 raises ScheduledGoalsPanel 28 -> 34: the new
+ *     "Built-in goal" dropdown notices and the "Seed all built-in
+ *     goals" section follow the panel's existing inline-style idiom
+ *     (section heading, note/error divs, result rows); converting the
+ *     whole panel to primitives is S5 surface work, not this slice;
+ *     no other inline styles added.
+ *  4. Interior consistency (S-U1, #3991): every routable surface
+ *     uses PageSection or is registered in
+ *     ux_shell_exceptions_3047.json (`interiors`), and interiors are
+ *     primitives-only or registered per file with a disposition
+ *     (migration with a tracking slice, or exception with
+ *     justification). A registered file whose bespoke-class count
+ *     rises above its registered snapshot fails; a registered file
+ *     whose PageSection count falls below its snapshot fails; a
+ *     registered file that becomes fully conforming (≥1 PageSection,
+ *     zero bespoke classes) fails until it flips to the conforming
+ *     map. Register-and-burn-down: the gate lands green with the
+ *     full exception set, and migration slices burn it down.
+ *     Measured 2026-11-10 on main 299f2aa4: 70 surface files — 8
+ *     conforming, 62 registered (26 tracked by #3051 hub interiors,
+ *     36 by the #3695 program). Worst offenders: MarketDataResearchHub
+ *     364 bespoke classes, WorkflowsHub 178, ScannerPanel 152,
+ *     ETradeTradingHub host 150, DataProvidersPanel 119.
+ *     Scanner finding (confirmed 2026-11-10): ScannerPanel.tsx:615
+ *     uses class `scanner-export-csv`, which has no definition in any
+ *     client .css — a dead class. It counts as 1 bespoke token here;
+ *     removal is migration-slice work, not this gate.
+ *     Out of file scope, by design: Chat.tsx (the host — its audit/nlq
+ *     inline entries are covered as register slice entries, and the
+ *     chat conversation itself stays the routes-register exception);
+ *     the login page (server-rendered); the top-level
+ *     LlmOptionsIdeasPanel.tsx re-export stub; OptionsCriteriaPanel.tsx
+ *     (nested component inside RawContractsScreener, not a surface).
+ *     "Bespoke" means a className token not starting with `ui-`;
+ *     counts are token occurrences in className attribute values
+ *     only (prose in other strings is not a class).
  *
  * Scanner discipline copied from the #2283 no-native-alert pin:
  * comments stripped (line comments guarded so https:// survives),
@@ -142,6 +180,18 @@ function findViolations(
     .map((e) => e.id);
 }
 
+interface InteriorEntry {
+  kind: "migration" | "exception";
+  reason: string;
+  slice?: number;
+  /** PageSection count at registration (floor ratchet). */
+  sections: number;
+  /** Bespoke className token occurrences at registration (ceiling ratchet). */
+  bespokeClasses: number;
+  /** TAB_CONTENT slice in Chat.tsx (audit/nlq); the key is the route id. */
+  chatEntry?: string;
+}
+
 interface ShellRegister {
   routes: Record<string, { kind: string; reason: string; slice?: number }>;
   subTabs: Record<
@@ -155,6 +205,7 @@ interface ShellRegister {
       inline?: boolean;
     }
   >;
+  interiors: Record<string, InteriorEntry>;
 }
 
 function loadRegister(): ShellRegister {
@@ -302,6 +353,271 @@ function parseTradingSubTabs(hubSrc: string): string[] {
   const end = hubSrc.indexOf(";", start);
   const block = hubSrc.slice(start, end);
   return [...block.matchAll(/"([a-z0-9-]+)"/g)].map((m) => m[1]);
+}
+
+/** S-U1 interior-consistency gate (#3991). A surface conforms when its
+ *  file renders ≥1 PageSection and zero bespoke classes. */
+const CONFORMING_INTERIORS: string[] = [
+  "src/client/OptionsScreenerPage.tsx",
+  "src/client/ProductCatalogPanel.tsx",
+  "src/client/PaymentWorkflowAssurance.tsx",
+  "src/client/WorkflowCatalogPage.tsx",
+  "src/client/BillingServicingPanel.tsx",
+  "src/client/TrackRecordPanel.tsx",
+  "src/client/ScreeningReviewPanel.tsx",
+  "src/client/FirstRunScreen.tsx",
+];
+
+/** Every routable surface file (measured 2026-11-10 on main 299f2aa4):
+ *  route files, sub-tab files, hub files, hub-view files, admin
+ *  sections, schedules files, FirstRunScreen, and the hub host. A new
+ *  surface joins this list (conforming map or register) in the same PR
+ *  that adds it. */
+const INTERIOR_SURFACE_FILES: string[] = [
+  // Routes (CONFORMING_ROUTES).
+  "src/client/AgentsPanel.tsx",
+  "src/client/ApprovalsPanel.tsx",
+  "src/client/QueuesPage.tsx",
+  "src/client/chat/tabs/EndpointsTab.tsx",
+  "src/client/options/flows/OptionsFlowsHub.tsx",
+  "src/client/OptionsScreenerPage.tsx",
+  "src/client/PlatformAdminPage.tsx",
+  "src/client/ProductCatalogPanel.tsx",
+  "src/client/PaymentWorkflowAssurance.tsx",
+  "src/client/CheckoutPanel.tsx",
+  "src/client/MarketDataResearchHub.tsx",
+  "src/client/search/SearchHub.tsx",
+  "src/client/WorkflowRunsPanel.tsx",
+  "src/client/WorkflowCatalogPage.tsx",
+  "src/client/WorkflowsHub.tsx",
+  "src/client/PaymentsPage.tsx",
+  "src/client/SocialPostingPanel.tsx",
+  "src/client/SchedulesHome.tsx",
+  "src/client/chat/tabs/AdsTab.tsx",
+  "src/client/chat/tabs/ReferralsTab.tsx",
+  "src/client/chat/tabs/RevenueTab.tsx",
+  "src/client/DocsAndReportsPanel.tsx",
+  "src/client/BillingServicingPanel.tsx",
+  "src/client/RiskAnalysisPanel.tsx",
+  // Trading sub-tabs (CONFORMING_SUB_TABS).
+  "src/client/TrackRecordPanel.tsx",
+  "src/client/OrderTicketPanel.tsx",
+  "src/client/components/AutopilotControlCenter.tsx",
+  "src/client/GoalScreenPanel.tsx",
+  "src/client/ReportsPanel.tsx",
+  "src/client/ScreeningReviewPanel.tsx",
+  "src/client/PortfolioPanel.tsx",
+  "src/client/LedgerPanel.tsx",
+  "src/client/OmnichannelPanel.tsx",
+  "src/client/VoicePanel.tsx",
+  // Hub hosts (register.subTabs shape files).
+  "src/client/OptionsHub.tsx",
+  "src/client/ScreenersHub.tsx",
+  "src/client/StockHub.tsx",
+  // Hub views.
+  "src/client/IvHistoryPanel.tsx",
+  "src/client/ScannerPanel.tsx",
+  "src/client/options/OptionsResearchPanel.tsx",
+  "src/client/options/ResearchRunsPanel.tsx",
+  "src/client/options/DiscoveryRunsPanel.tsx",
+  "src/client/options/RawContractsScreener.tsx",
+  "src/client/options/LlmOptionsIdeasPanel.tsx",
+  "src/client/ScreenerResultsView.tsx",
+  "src/client/RunDetailView.tsx",
+  "src/client/MorningDigest.tsx",
+  "src/client/PatternsPanel.tsx",
+  "src/client/PresetsPanel.tsx",
+  "src/client/ScreenerPresetManager.tsx",
+  "src/client/StockCriteriaPanel.tsx",
+  // Platform Admin sections.
+  "src/client/AccountAdminPanel.tsx",
+  "src/client/AlpacaSignInCard.tsx",
+  "src/client/ApiKeysPanel.tsx",
+  "src/client/AsyncJobsPanel.tsx",
+  "src/client/ChannelsAdminPanel.tsx",
+  "src/client/DataLifecyclePanel.tsx",
+  "src/client/DataProvidersPanel.tsx",
+  "src/client/DownloadsPanel.tsx",
+  "src/client/FreeRunAllowanceSection.tsx",
+  "src/client/IaaaAdminPanel.tsx",
+  "src/client/PlatformAdminPanel.tsx",
+  "src/client/TenantAdminPanel.tsx",
+  "src/client/UserAdminPanel.tsx",
+  // Schedules views.
+  "src/client/ScheduleQueueView.tsx",
+  "src/client/ScheduleRunLedgerPanel.tsx",
+  "src/client/ScheduledGoalsPanel.tsx",
+  "src/client/SchedulesPanel.tsx",
+  // Non-nav surface + hub host.
+  "src/client/FirstRunScreen.tsx",
+  "src/client/ETradeTradingHub.tsx",
+];
+
+/** Read one quoted string literal starting at text[i]. */
+function readQuoted(text: string, i: number): { lit: string; next: number } {
+  const q = text[i];
+  let j = i + 1;
+  let out = "";
+  while (j < text.length && text[j] !== q) {
+    if (text[j] === "\\" && j + 1 < text.length) {
+      j += 2;
+      continue;
+    }
+    out += text[j];
+    j++;
+  }
+  return { lit: out, next: j + 1 };
+}
+
+/** Static segments of the template literal starting at text[i];
+ *  ${...} interpolations are code, not classes, so they are skipped. */
+function readTemplateStatic(
+  text: string,
+  i: number,
+): { lits: string[]; next: number } {
+  let j = i + 1;
+  const lits: string[] = [];
+  let buf = "";
+  while (j < text.length && text[j] !== "`") {
+    if (text[j] === "\\" && j + 1 < text.length) {
+      buf += text[j + 1];
+      j += 2;
+      continue;
+    }
+    if (text[j] === "$" && text[j + 1] === "{") {
+      lits.push(buf);
+      buf = "";
+      let depth = 1;
+      j += 2;
+      while (j < text.length && depth > 0) {
+        if (text[j] === "{") depth++;
+        else if (text[j] === "}") depth--;
+        j++;
+      }
+      continue;
+    }
+    buf += text[j];
+    j++;
+  }
+  lits.push(buf);
+  return { lits, next: j + 1 };
+}
+
+/** String literals inside the braced expression starting at text[i]
+ *  (balanced braces; quoted literals whole, template literals static
+ *  segments only). */
+function readBraced(
+  text: string,
+  i: number,
+): { lits: string[]; next: number } {
+  let depth = 0;
+  const lits: string[] = [];
+  let j = i;
+  while (j < text.length) {
+    const ch = text[j];
+    if (ch === "{") {
+      depth++;
+      j++;
+    } else if (ch === "}") {
+      depth--;
+      j++;
+      if (depth === 0) break;
+    } else if (ch === '"' || ch === "'") {
+      const r = readQuoted(text, j);
+      lits.push(r.lit);
+      j = r.next;
+    } else if (ch === "`") {
+      const r = readTemplateStatic(text, j);
+      lits.push(...r.lits);
+      j = r.next;
+    } else {
+      j++;
+    }
+  }
+  return { lits, next: j };
+}
+
+/** String literals that are className attribute values. Only className=
+ *  attributes count: prose in other strings is not a class. Comments
+ *  are stripped so commented-out classNames do not count. */
+function classNameLiterals(src: string): string[] {
+  const text = stripComments(src);
+  const lits: string[] = [];
+  const re = /className\s*=\s*/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    let i = m.index + m[0].length;
+    while (text[i] === " " || text[i] === "\t") i++;
+    if (i >= text.length) break;
+    const ch = text[i];
+    if (ch === '"' || ch === "'") {
+      const r = readQuoted(text, i);
+      lits.push(r.lit);
+      re.lastIndex = r.next;
+    } else if (ch === "{") {
+      const r = readBraced(text, i);
+      lits.push(...r.lits);
+      re.lastIndex = r.next;
+    }
+  }
+  return lits;
+}
+
+/** className token occurrences: a token starting with `ui-` is a
+ *  utility; anything else is bespoke. */
+function countInteriorClasses(src: string): { ui: number; bespoke: number } {
+  let ui = 0;
+  let bespoke = 0;
+  for (const lit of classNameLiterals(src)) {
+    for (const tok of lit.split(/\s+/)) {
+      if (!tok) continue;
+      if (tok.startsWith("ui-")) ui++;
+      else bespoke++;
+    }
+  }
+  return { ui, bespoke };
+}
+
+function isInteriorConforming(sections: number, bespoke: number): boolean {
+  return sections >= 1 && bespoke === 0;
+}
+
+interface InteriorCheck {
+  id: string;
+  sections: number;
+  bespoke: number;
+  entry?: InteriorEntry;
+  conformingTarget: string;
+}
+
+/** Pure checker shared by the real gate and the synthetic test. */
+function interiorViolations(checks: InteriorCheck[]): string[] {
+  const violations: string[] = [];
+  for (const c of checks) {
+    if (!c.entry) {
+      if (!isInteriorConforming(c.sections, c.bespoke)) {
+        violations.push(
+          `${c.id}: no PageSection or primitives-only interior and not registered ` +
+            `(sections=${c.sections}, bespoke=${c.bespoke})`,
+        );
+      }
+      continue;
+    }
+    if (c.bespoke > c.entry.bespokeClasses) {
+      violations.push(
+        `${c.id}: bespoke classes rose ${c.entry.bespokeClasses} -> ${c.bespoke}`,
+      );
+    }
+    if (c.sections < c.entry.sections) {
+      violations.push(
+        `${c.id}: PageSections fell ${c.entry.sections} -> ${c.sections}`,
+      );
+    }
+    if (isInteriorConforming(c.sections, c.bespoke)) {
+      violations.push(`${c.id}: fully conforming now; ${c.conformingTarget}`);
+    }
+  }
+  return violations;
 }
 
 describe("route shell conformance (#3047)", () => {
@@ -578,5 +894,194 @@ describe("per-file inline-style budget (#3047)", () => {
       (p) => !existsSync(join(HERE, p)),
     );
     expect(missing).toEqual([]);
+  });
+});
+
+describe("interior consistency (#3991, S-U1)", () => {
+  it("every routable surface uses PageSection or is registered; interiors are primitives-only or registered", () => {
+    const register = loadRegister();
+    const interiors = register.interiors ?? {};
+    const chatSrc = readFileSync(join(CLIENT_DIR, "Chat.tsx"), "utf8");
+    const entries = parseTabContentEntries(chatSrc);
+    const checks: InteriorCheck[] = [];
+    const seen = new Set<string>();
+    for (const file of INTERIOR_SURFACE_FILES) {
+      seen.add(file);
+      const src = readFileSync(join(HERE, file), "utf8");
+      const sections = countOccurrences(clean(src), "<PageSection");
+      const { bespoke } = countInteriorClasses(src);
+      checks.push({
+        id: file,
+        sections,
+        bespoke,
+        entry: interiors[file],
+        conformingTarget: "flip to CONFORMING_INTERIORS",
+      });
+    }
+    // Chat.tsx inline entries (audit/nlq): measured as slices, not
+    // files — the host file is out of scope by design.
+    for (const id of CHAT_INLINE_ROUTES) {
+      const slice = entries.get(id) ?? "";
+      const sections = countOccurrences(clean(slice), "<PageSection");
+      const { bespoke } = countInteriorClasses(slice);
+      checks.push({
+        id,
+        sections,
+        bespoke,
+        entry: interiors[id],
+        conformingTarget: "remove the register entry",
+      });
+    }
+    const violations = interiorViolations(checks);
+    // Completeness: registry-tied files must be in the surface set.
+    for (const file of Object.values(CONFORMING_ROUTES)) {
+      if (!seen.has(file))
+        violations.push(`${file}: route file with no interior bucket`);
+    }
+    for (const file of Object.values(CONFORMING_SUB_TABS)) {
+      if (!seen.has(file))
+        violations.push(`${file}: sub-tab file with no interior bucket`);
+    }
+    for (const entry of Object.values(register.subTabs)) {
+      if (entry.file && !seen.has(entry.file))
+        violations.push(`${entry.file}: hub file with no interior bucket`);
+    }
+    // The chat conversation stays a registered exception (routes register).
+    if (register.routes.chat?.kind !== "exception") {
+      violations.push("chat: conversation surface lost its routes exception");
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("register interior entries are tracked and live", () => {
+    const register = loadRegister();
+    const interiors = register.interiors ?? {};
+    const problems: string[] = [];
+    for (const [id, entry] of Object.entries(interiors)) {
+      if (!entry.reason)
+        problems.push(`${id}: interior entry without reason`);
+      if (entry.kind !== "migration" && entry.kind !== "exception")
+        problems.push(`${id}: bad kind ${entry.kind}`);
+      if (entry.kind === "migration" && typeof entry.slice !== "number")
+        problems.push(`${id}: migration without tracking slice`);
+      if (typeof entry.sections !== "number" || entry.sections < 0)
+        problems.push(`${id}: bad sections snapshot`);
+      if (
+        typeof entry.bespokeClasses !== "number" ||
+        entry.bespokeClasses < 0
+      )
+        problems.push(`${id}: bad bespokeClasses snapshot`);
+      if (entry.chatEntry) {
+        if (entry.chatEntry !== id)
+          problems.push(`${id}: chatEntry must name its own slice`);
+      } else if (!existsSync(join(HERE, id))) {
+        problems.push(`${id}: interior entry, file missing`);
+      }
+    }
+    const registered = new Set(
+      Object.keys(interiors).filter((k) => !interiors[k].chatEntry),
+    );
+    for (const file of INTERIOR_SURFACE_FILES) {
+      if (!CONFORMING_INTERIORS.includes(file) && !registered.has(file)) {
+        problems.push(`${file}: surface file with no bucket`);
+      }
+      if (CONFORMING_INTERIORS.includes(file) && registered.has(file)) {
+        problems.push(`${file}: claimed by both conforming map and register`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it("gate bites: unregistered, regressed, and newly-conforming interiors are violations", () => {
+    expect(
+      interiorViolations([
+        {
+          id: "fake",
+          sections: 0,
+          bespoke: 5,
+          conformingTarget: "flip",
+        },
+      ]),
+    ).toEqual([
+      "fake: no PageSection or primitives-only interior and not registered (sections=0, bespoke=5)",
+    ]);
+    expect(
+      interiorViolations([
+        {
+          id: "fake",
+          sections: 1,
+          bespoke: 0,
+          conformingTarget: "flip",
+        },
+      ]),
+    ).toEqual([]);
+    expect(
+      interiorViolations([
+        {
+          id: "fake",
+          sections: 0,
+          bespoke: 3,
+          entry: {
+            kind: "migration",
+            reason: "r",
+            slice: 3695,
+            sections: 0,
+            bespokeClasses: 5,
+          },
+          conformingTarget: "flip",
+        },
+      ]),
+    ).toEqual([]);
+    expect(
+      interiorViolations([
+        {
+          id: "fake",
+          sections: 0,
+          bespoke: 6,
+          entry: {
+            kind: "migration",
+            reason: "r",
+            slice: 3695,
+            sections: 0,
+            bespokeClasses: 5,
+          },
+          conformingTarget: "flip",
+        },
+      ]),
+    ).toEqual(["fake: bespoke classes rose 5 -> 6"]);
+    expect(
+      interiorViolations([
+        {
+          id: "fake",
+          sections: 0,
+          bespoke: 0,
+          entry: {
+            kind: "migration",
+            reason: "r",
+            slice: 3695,
+            sections: 2,
+            bespokeClasses: 5,
+          },
+          conformingTarget: "flip",
+        },
+      ]),
+    ).toEqual(["fake: PageSections fell 2 -> 0"]);
+    expect(
+      interiorViolations([
+        {
+          id: "fake",
+          sections: 2,
+          bespoke: 0,
+          entry: {
+            kind: "migration",
+            reason: "r",
+            slice: 3695,
+            sections: 2,
+            bespokeClasses: 5,
+          },
+          conformingTarget: "flip to CONFORMING_INTERIORS",
+        },
+      ]),
+    ).toEqual(["fake: fully conforming now; flip to CONFORMING_INTERIORS"]);
   });
 });

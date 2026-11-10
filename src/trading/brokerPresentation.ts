@@ -96,6 +96,26 @@ const PRESENTATIONS: Readonly<Record<BrokerId, BrokerPresentation>> = {
       live: "API key pair verified for live trading.",
     },
   },
+  // Issue #3990: Public has no paper trading, so the TEST-mode words
+  // must never say "paper" — the tenant previews in TEST and places
+  // only in live mode. The token is a personal access token with a
+  // bounded lifetime (5–1440 min per Public's docs), so neither
+  // session sentence claims permanence.
+  public: {
+    known: true,
+    label: "Public.com",
+    icon: "🌐",
+    deskName: "Public.com Voice Trading Desk",
+    deskAgentName: "Public.com Voice Desk",
+    botName: "PublicAgent",
+    modeBadge: { paper: "PREVIEW ONLY — NO PAPER TRADING", live: "LIVE TRADING" },
+    modeWord: { paper: "Preview only", live: "Live trading" },
+    modeShort: { paper: "Preview", live: "Live" },
+    sessionCopy: {
+      paper: "Personal access token active — no paper trading on Public.com; orders place only in live mode.",
+      live: "Personal access token active; orders place with real money.",
+    },
+  },
 };
 
 /**

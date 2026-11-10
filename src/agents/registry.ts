@@ -776,6 +776,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "alpaca_place_bracket_ladder",
       "alpaca_cancel_bracket_ladder",
       "alpaca_get_quote",
+      "alpaca_get_option_chain",
       "alpaca_preview_order",
       "foss_get_quote",
       "foss_company_fundamentals",
@@ -793,6 +794,25 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     ],
     notes:
       "The foss_* names are deprecated aliases (#1906) wrapping the canonical commands; each foss_* alias is superseded by the canonical market_data_*/alpaca_* name for the same command. Alias removal is a follow-up slice.",
+  },
+  {
+    // Issue #3990: the Public.com copilot tools are their own family —
+    // the Public analogue of the Alpaca tools in the market-data
+    // family, but on the Public MCP transport (data allow-list + a
+    // separate trading allow-list) with preview-first placement and
+    // no paper mode (FAILURE_PUBLIC_NO_PAPER_MODE in TEST).
+    id: "public-mcp-commands",
+    name: "Public.com MCP commands",
+    source: "src/mcps/openaimp/publicCommands.ts",
+    status: "live",
+    commands: [
+      "public_get_quote",
+      "public_preview_order",
+      "public_place_order",
+      "public_orders",
+      "public_cancel_order",
+    ],
+    commandSources: [{ file: "src/mcps/openaimp/publicCommands.ts", kind: "readonly-name" }],
   },
   {
     // Issue #3883: order cancellation is its own family — one engine, one
@@ -2125,6 +2145,10 @@ export type {
   AgentCapabilityManifest,
   CapabilityEntry,
   CapabilityState,
+  PlatformCapability,
+  PlatformCapabilityMechanism,
+  PlatformCapabilitySurface,
+  PlatformCapabilityTerm,
 } from "../actors/capabilityManifest";
 
 /**
@@ -2142,6 +2166,15 @@ export function capabilitiesForClass(className: string): AgentCapabilityManifest
     bindings: agent.bindings,
   });
 }
+
+/**
+ * The platform capabilities the registry join renders (#3700) —
+ * re-exported from the manifest module, the fleet's single read
+ * surface for capabilities. A platform capability belongs to no
+ * class: it is a shared Technology Platform product every domain
+ * platform consumes.
+ */
+export { platformCapabilities } from "../actors/capabilityManifest";
 
 // ---------------------------------------------------------------------------
 // Typed accessors — the queryable shape later slices consume.

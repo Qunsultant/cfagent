@@ -1,10 +1,12 @@
 /**
  * Options Screener product programme slice 2 (issue #2598) — the options
  * feed gate. Pins:
- * - the gate decision is null for chain providers (etrade, public) and
- *   the coded FAILURE_DATA_PROVIDER_UNAVAILABLE response (single
- *   resolver, catalog httpStatus) for yahoo / alpaca / nasdaq / unknown
- *   — never a silent E*TRADE feed under another provider's name;
+ * - the gate decision is null for chain providers (etrade, public,
+ *   alpaca — alpaca joined in #3990 via the repo's own Alpaca options
+ *   read path) and the coded FAILURE_DATA_PROVIDER_UNAVAILABLE
+ *   response (single resolver, catalog httpStatus) for yahoo /
+ *   nasdaq / unknown — never a silent E*TRADE feed under another
+ *   provider's name;
  * - the handler returns null without touching the store for non-gated
  *   paths (stored-run reads, catalog, config) and for gated paths under
  *   the fail-open default (unbound store resolves etrade/etrade);
@@ -48,13 +50,13 @@ const notGated: Array<[string, string]> = [
 
 describe("options feed gate decision", () => {
   it("passes chain providers through untouched", () => {
-    for (const dataProviderId of ["etrade", "public"]) {
+    for (const dataProviderId of ["etrade", "public", "alpaca"]) {
       expect(optionsFeedGateResponse({ dataProviderId, brokerId: "etrade" })).toBeNull();
     }
   });
 
   it("returns the coded unavailable response for non-chain providers", async () => {
-    for (const dataProviderId of ["yahoo", "alpaca", "nasdaq", "bogus"]) {
+    for (const dataProviderId of ["yahoo", "nasdaq", "bogus"]) {
       const res = optionsFeedGateResponse({ dataProviderId, brokerId: "etrade" });
       expect(res).not.toBeNull();
       expect(res!.status).toBe(502);

@@ -704,6 +704,9 @@ const EXPECTED_INVENTORY = [
   "handleBrokerScreenRoutes :: endsWith(\"/broker/screen\")",
   // Issue #3351: the credential surface for a key-pair broker.
   "handleBrokerConnectRoutes :: endsWith(\"/broker/connect/alpaca\")",
+  // Issue #3990: the neutral connect read for the Public broker
+  // (personal-token status; the paste itself lives at /api/public/connect).
+  "handleBrokerConnectRoutes :: endsWith(\"/broker/connect/public\")",
   "handleBrokerConnectRoutes :: endsWith(\"/broker/disconnect/alpaca\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/options/\")",

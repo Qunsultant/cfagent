@@ -16,6 +16,7 @@
 import { TradingPlatformRegistry } from "./registry";
 import { ETradeTradingPlatform } from "./etrade/platform";
 import { AlpacaTradingPlatform } from "./alpaca/platform";
+import { PublicTradingPlatform } from "./public/platform";
 import { assertBrokerCatalogComplete } from "./brokerCatalog";
 
 // Register default pluggable platforms (unchanged)
@@ -25,6 +26,13 @@ TradingPlatformRegistry.register("etrade", (env, orm, userLogin, overrideEnv, st
 TradingPlatformRegistry.register(
   "alpaca",
   (env, orm, userLogin, overrideEnv) => new AlpacaTradingPlatform(env, orm, userLogin, overrideEnv),
+);
+// Issue #3990: Public as a live broker — the platform is constructed
+// from the same factory signature; its environment resolves TEST
+// (preview-only, no paper mode) or PROD (live) from overrideEnv.
+TradingPlatformRegistry.register(
+  "public",
+  (env, orm, userLogin, overrideEnv) => new PublicTradingPlatform(env, orm, userLogin, overrideEnv),
 );
 TradingPlatformRegistry.register("sandbox", (env, orm, userLogin, overrideEnv, storage) => new ETradeTradingPlatform(env, orm, userLogin, overrideEnv, undefined, storage));
 
@@ -69,6 +77,7 @@ export * from "./agent";
 export * from "./etrade/client";
 export * from "./etrade/platform";
 export * from "./alpaca/platform";
+export * from "./public/platform";
 export * from "./alpaca/fillLots";
 export * from "./alpaca/occSymbol";
 // Issue #3351: the sign-in surface. Exported through the boundary so route

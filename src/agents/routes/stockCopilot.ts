@@ -46,6 +46,7 @@ import {
   resolveCopilotTradingSelection,
 } from "../copilotTradingMode";
 import type { CommercialStore } from "../../data/commercialPorts";
+import { SqlIndexListStore } from "../../data/doSqliteIndexListAdapter";
 import {
   createStockCopilotActivityPort,
   createStockCopilotControlPort,
@@ -85,8 +86,7 @@ import {
 import {
   COPILOT_UNIVERSE_SETTING_KEY,
   COPILOT_STRATEGIES_SETTING_KEY,
-  resolveCopilotUniverse,
-  resolveCopilotUniversePreset,
+  resolveCopilotUniverseFull,
   resolveCopilotStrategies,
   parseUniverseInput,
   parseStrategiesInput,
@@ -300,10 +300,16 @@ export async function handleStockCopilotRoutes(
         env: ctx.env,
         readSettingRaw: ctx.readSettingRaw,
       });
-      const universe = resolveCopilotUniverse({
+      // Issue #3936: the status reports the SAME resolution the cycle runs —
+      // the index's stored membership when it is fresh, the labelled fallback
+      // (with its reason) when it is not. The sync preset alone would name an
+      // index while showing a hand-written subset.
+      const universeResolution = await resolveCopilotUniverseFull({
         readSettingRaw: ctx.readSettingRaw,
         env: ctx.env,
+        indexListStore: new SqlIndexListStore(ctx.sql as never),
       });
+      const universe = universeResolution.symbols;
       return Response.json({
         flagEnabled,
         paused,
@@ -319,7 +325,11 @@ export async function handleStockCopilotRoutes(
           env: ctx.env,
         }),
         universe,
-        universePreset: resolveCopilotUniversePreset(universe),
+        universePreset: universeResolution.preset,
+        universeSource: universeResolution.source,
+        universeStale: universeResolution.stale,
+        universeSnapshotDate: universeResolution.snapshotDate,
+        universeFallbackReason: universeResolution.reason,
         strategies: resolveCopilotStrategies({
           readSettingRaw: ctx.readSettingRaw,
           env: ctx.env,
@@ -626,10 +636,12 @@ export async function handleStockCopilotRoutes(
       env: ctx.env,
       readSettingRaw: ctx.readSettingRaw,
     });
-    const resolvedUniverse = resolveCopilotUniverse({
+    const resolvedUniverseResolution = await resolveCopilotUniverseFull({
       env: ctx.env,
       readSettingRaw: ctx.readSettingRaw,
+      indexListStore: new SqlIndexListStore(ctx.sql as never),
     });
+    const resolvedUniverse = resolvedUniverseResolution.symbols;
     const resolvedStrategies = resolveCopilotStrategies({
       env: ctx.env,
       readSettingRaw: ctx.readSettingRaw,
@@ -653,7 +665,10 @@ export async function handleStockCopilotRoutes(
       ...(hasUniverse
         ? {
             universe: resolvedUniverse,
-            universePreset: resolveCopilotUniversePreset(resolvedUniverse),
+            universePreset: resolvedUniverseResolution.preset,
+            universeSource: resolvedUniverseResolution.source,
+            universeSnapshotDate: resolvedUniverseResolution.snapshotDate,
+            universeFallbackReason: resolvedUniverseResolution.reason,
           }
         : {}),
       ...(hasStrategies ? { strategies: resolvedStrategies } : {}),

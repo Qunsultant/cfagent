@@ -62,11 +62,19 @@ import {
   AlpacaExecuteOrderCommand,
   AlpacaPlaceBracketLadderCommand,
   AlpacaCancelBracketLadderCommand,
+  AlpacaGetOptionChainCommand,
   AlpacaGetQuoteCommand,
   AlpacaPreviewOrderCommand,
   DeprecatedToolAlias,
 } from "./marketDataCommands";
 import { TradingLimitsCommand } from "./tradingLimitCommands";
+import {
+  PublicCancelOrderCommand,
+  PublicGetQuoteCommand,
+  PublicOrdersCommand,
+  PublicPlaceOrderCommand,
+  PublicPreviewOrderCommand,
+} from "./publicCommands";
 import {
   AlpacaCancelAllCommand,
   AlpacaCancelOrderCommand,
@@ -1770,6 +1778,9 @@ export class McpToolFactory {
     // copilot's broker is Alpaca, so its quote/preview legs run here
     // instead of reaching for the E*TRADE tools.
     this.registerTool(new AlpacaGetQuoteCommand());
+    // #4014: the broker's own option chain, so a multi-leg strategy can be
+    // priced without an E*TRADE-backed data provider.
+    this.registerTool(new AlpacaGetOptionChainCommand());
     this.registerTool(new AlpacaPreviewOrderCommand());
     // Issue #3888: the externalized limits, readable and changeable
     // from chat so an answer about a cap cites the configuration.
@@ -1782,6 +1793,15 @@ export class McpToolFactory {
     this.registerTool(new AlpacaCancelTickerCommand());
     // Issue #3885: cancel every open order — two-step, capped, token-bound.
     this.registerTool(new AlpacaCancelAllCommand());
+    // Issue #3990: Public.com as a live broker — the five tools the
+    // catalog's public copilot block names, routing through the
+    // neutral public platform (preview-first placement; TEST refuses
+    // with FAILURE_PUBLIC_NO_PAPER_MODE).
+    this.registerTool(new PublicGetQuoteCommand());
+    this.registerTool(new PublicPreviewOrderCommand());
+    this.registerTool(new PublicPlaceOrderCommand());
+    this.registerTool(new PublicOrdersCommand());
+    this.registerTool(new PublicCancelOrderCommand());
 
     // #1906: deprecated aliases for the renamed market-data tools above.
     // Same commands, legacy names; use canonical tool names instead.

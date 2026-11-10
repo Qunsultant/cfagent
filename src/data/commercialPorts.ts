@@ -158,15 +158,19 @@ export interface TenantProviders {
 
 /**
  * Defaults for a tenant with no settings row. Issue #3812 (owner rule on
- * #3451): the platform's default BROKER is Alpaca, in paper mode. The
- * data provider stays etrade, preserving the pre-existing behaviour for
- * every data read; the trading default is now the copilot's broker, so
- * the settings menu, the manual routes, and the copilot resolver agree.
+ * #3451): the platform's default BROKER is Alpaca, in paper mode. Issue
+ * #3990 moves the data provider to Alpaca as well, so the pair is one
+ * provider on both axes: the Alpaca data adapter now declares and serves
+ * optionsChains (the repo's own Alpaca options read path), which is what
+ * the options gate requires — a default tenant's chains no longer depend
+ * on E*TRADE data, and no tenant silently mixes two firms' data and money
+ * paths. Fundamentals for an Alpaca-default tenant come from Yahoo by
+ * design (ADR 0019; the registry's fundamentals route is Yahoo).
  * Paper is not stored here: it is the mode default (TEST) applied by the
  * trade-environment resolver, so live remains an explicit act.
  */
 export const DEFAULT_TENANT_PROVIDERS: TenantProviders = {
-  dataProviderId: "etrade",
+  dataProviderId: "alpaca",
   brokerId: "alpaca",
 };
 

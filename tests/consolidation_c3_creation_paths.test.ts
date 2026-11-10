@@ -89,6 +89,10 @@ const ARMING_SITES: Record<string, { count: number; role: string }> = {
     count: 2,
     role: "actor schedule port bindings onto the agent's SDK schedule methods (delegation, not arming — #1738)",
   },
+  "src/actors/thinkAdapter.ts": {
+    count: 2,
+    role: "PortThink base schedule/scheduleEvery overrides: the fleet's single arming funnel, delegating to the SDK methods after the #3923 state-off enforcement check (delegation, not arming — the choke point that refuses capability_requires_state:scheduler on ephemeral instances, #3741/#3923)",
+  },
   "src/agents/ticker-agent.ts": {
     count: 1,
     role: "ticker tick-push arm (pushTicks every 5s — quote streaming, not a screening schedule; no builder payload — #2230)",

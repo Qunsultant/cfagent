@@ -20,7 +20,7 @@
 
 import type { AgentContext, ScheduleOptions } from "agents";
 import type { DatabaseORM } from "../../orm";
-import { TradingPlatformRegistry } from "../../trading";
+import { TradingPlatformRegistry, type DataProviderId } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import type {
   AgentName,
@@ -35,6 +35,8 @@ import type {
   PipelineStage,
 } from "../../types";
 import { recordScreeningActivity } from "../../services/screeningActivity";
+import { buildFeedJobRegistry } from "../../services/feedJobs";
+import { FEED_PIPELINE_CATALOG, resolveFeedJob } from "../../services/feedPipelineJobs";
 import { recordJobOutcome } from "../../services/jobOutcomes";
 import {
   buildLedgerLinkage,
@@ -481,6 +483,210 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
   }
 }
 
+/** Issue #4002: the reap message for a row this recovery closes —
+ *  names the cause (the executor died with its host at a restart)
+ *  with the last-activity evidence, never the generic
+ *  unknown-outcome text. The sweep and read path keep the generic
+ *  message: they decide on age, not on a restart. */
+function orphanedReapMessage(
+  lastActivityAt: string | null,
+  rearmedAs?: string,
+  recording?: { feedJobId?: string | null; pipelineRunId?: string | null },
+): string {
+  const base = `Orphaned by a host restart: the executor died with its host before a result was recorded (last activity ${lastActivityAt ?? "unknown"}). The run never recorded a result.`;
+  let message = rearmedAs ? `${base} Re-armed as job ${rearmedAs}; the work continues there.` : base;
+  // Issue #4002 (recording slice): the ids the row must carry.
+  // The Workflow Runs view renders the row's error, so the feed
+  // job id (+ pipeline run id when known) is visible there even
+  // when no artifact was stored. Only the parts known are
+  // named; nothing is invented.
+  if (recording?.feedJobId) {
+    message += ` Feed job ${recording.feedJobId}`;
+    if (recording.pipelineRunId) message += `; pipeline run ${recording.pipelineRunId}`;
+    message += ".";
+  }
+  return message;
+}
+
+/** Issue #4002: parse a row's stored payload, or null when it is
+ *  not valid JSON — an unparseable row can never be re-armed. */
+function parseRowPayload(row: Record<string, unknown>): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(String(row.payload_json ?? "")) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Issue #4002: is this payload a pipeline feed-job dispatch at
+ *  all — the shape, without the re-arm's payment guard? Two
+ *  shapes: the HTTP feed-run route (the POST
+ *  /data-providers/:id/feed-run the workflow runs show) and the
+ *  MCP run_feed_job tool (the copilot-dispatched shape — the
+ *  sentiment run). The recording slice uses this shape alone:
+ *  identification is always safe, even for a row that must
+ *  never be re-executed. */
+function isFeedDispatchShape(capability: string, payload: Record<string, unknown>): boolean {
+  if (capability === "http.request") {
+    if (
+      payload.method !== "POST" ||
+      typeof payload.pathAndQuery !== "string"
+    ) {
+      return false;
+    }
+    // The provider-level feed-run route.
+    if (/^\/data-providers\/[^/]+\/feed-run$/.test(payload.pathAndQuery)) return true;
+    // Issue #4002 (third slice): the per-job feed-jobs action
+    // route — run / retry / resume execute the pipeline (a long
+    // dispatch, orphanable like a feed-run). Pause / cancel are
+    // fast control calls and are excluded.
+    return /^\/data-providers\/[^/]+\/feed-jobs\/[^/]+\/(run|retry|resume)$/.test(
+      payload.pathAndQuery,
+    );
+  }
+  if (capability === "mcp.tool") {
+    return payload.toolName === "run_feed_job";
+  }
+  return false;
+}
+
+/** Issue #4002: is this payload a resumable pipeline feed-job
+ *  dispatch? Both are side-effect-free re-executions of a feed
+ *  read: no order, no payment, no mutation beyond the persisted
+ *  dataset the run itself writes. A payload carrying a consumed
+ *  paymentSignature is never resumable (the #3907 rule);
+ *  anything else reaps as before. */
+function isResumableFeedDispatch(capability: string, payload: Record<string, unknown>): boolean {
+  const args = payload.arguments;
+  const signature =
+    args && typeof args === "object"
+      ? (args as Record<string, unknown>).paymentSignature
+      : undefined;
+  if (typeof signature === "string" && signature.trim() !== "") return false;
+  return isFeedDispatchShape(capability, payload);
+}
+
+/** Issue #4002 (recording slice): the feed job id a feed
+ *  dispatch resolves to — the id the Workflow Runs view and the
+ *  audits must carry, because the dispatch itself records no job
+ *  id anywhere. HTTP: the provider in the feed-run path -> the
+ *  registry's forSource (the same rule the route uses, so the id
+ *  is the one the run actually executed). MCP: the run_feed_job
+ *  source argument -> resolveFeedJob (exact id / alias), falling
+ *  back to forSource. Pure, no I/O. Null when nothing resolves
+ *  — never invented. */
+function resolveFeedDispatchJobId(
+  env: Env,
+  capability: string,
+  payload: Record<string, unknown>,
+): string | null {
+  const knobs: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
+    if (typeof value === "string") knobs[key] = value;
+  }
+  const registry = buildFeedJobRegistry(knobs);
+  if (capability === "http.request") {
+    const path = payload.pathAndQuery;
+    if (typeof path !== "string") return null;
+    // Issue #4002 (third slice): the per-job feed-jobs action
+    // route names its job id in the path — validated by EXACT
+    // catalog match, never taken on trust (a row for an
+    // unregistered id records nothing). resolveFeedJob's alias /
+    // containing fallbacks are for copilot queries, not path
+    // segments: a near-miss id must never silently resolve to
+    // another job (#2144 no-silent-substitution).
+    const feedJobsMatch =
+      /^\/data-providers\/[^/]+\/feed-jobs\/([^/]+)\/(run|retry|resume)$/.exec(path);
+    if (feedJobsMatch) {
+      return FEED_PIPELINE_CATALOG.find((e) => e.jobId === feedJobsMatch[1])?.jobId ?? null;
+    }
+    const match = /^\/data-providers\/([^/]+)\/feed-run$/.exec(path);
+    if (!match) return null;
+    // Same cast as the route (dataProviders.ts:965): the path
+    // segment is a provider id by construction, and forSource
+    // returns undefined for anything unregistered.
+    return registry.forSource(match[1] as DataProviderId)?.id ?? null;
+  }
+  if (capability === "mcp.tool") {
+    const args = payload.arguments;
+    const source =
+      args && typeof args === "object"
+        ? (args as Record<string, unknown>).source
+        : undefined;
+    if (typeof source !== "string" || !source.trim()) return null;
+    return (
+      resolveFeedJob(source)?.jobId ??
+      registry.forSource(source as DataProviderId)?.id ??
+      null
+    );
+  }
+  return null;
+}
+
+/** Issue #4002 (recording slice): the pipeline run id for a
+ *  feed job, read from the pipeline host through the existing
+ *  getFeedJobSurfaceStatus door method (pipeline.currentRunId
+ *  comes from the instance record, not artifacts, so it survives
+ *  the host's orphan settle). Accepted ONLY when the run started
+ *  before the executor's last activity (runStartedAt <=
+ *  lastActivityAt): a run that started after is a LATER run of
+ *  the same job, not this row's orphan, and must never be
+ *  attributed to it. Best-effort: any failure (no binding, door
+ *  throws, no pipeline, no runStartedAt, guard fails) returns
+ *  null — the recovery never fails because the lookup failed,
+ *  and the feed job id is still recorded. */
+async function resolveFeedDispatchPipelineRunId(
+  env: Env,
+  feedJobId: string,
+  lastActivityAt: string | null,
+): Promise<string | null> {
+  try {
+    const ns = env.SCHEDULED_AGENT;
+    if (!ns) return null;
+    const door = ns.get(ns.idFromName("default")) as unknown as {
+      getFeedJobSurfaceStatus(jobId: string): Promise<{
+        pipeline?: { currentRunId?: string | null; runStartedAt?: string | null } | null;
+      } | null>;
+    };
+    const view = await door.getFeedJobSurfaceStatus(feedJobId);
+    const pipeline = view?.pipeline;
+    if (!pipeline?.currentRunId) return null;
+    const runStartedAt = pipeline.runStartedAt;
+    if (typeof runStartedAt !== "string" || !runStartedAt) return null;
+    if (!lastActivityAt) return null;
+    const startedMs = Date.parse(runStartedAt);
+    const lastMs = Date.parse(lastActivityAt);
+    if (Number.isNaN(startedMs) || Number.isNaN(lastMs)) return null;
+    if (startedMs > lastMs) return null;
+    return pipeline.currentRunId;
+  } catch {
+    return null;
+  }
+}
+
+/** Issue #4002: how many re-arms have already been spawned from
+ *  this row — counted over the session's rows, mirroring
+ *  retryAsyncJob's duplicate-retry scan (a sibling in queued /
+ *  running / completed whose payload carries recoveryRearmOf for
+ *  this row). Unparseable siblings cannot be re-arms. */
+function countRecoveryRearms(ctx: AsyncJobsContext, jobId: string): number {
+  const prior = ports(ctx).read.listSessionPayloads(ctx.sessionKey()) as unknown as Array<
+    Record<string, unknown>
+  >;
+  let count = 0;
+  for (const candidate of prior) {
+    if (!["queued", "running", "completed"].includes(String(candidate.status))) continue;
+    try {
+      const parsed = JSON.parse(String(candidate.payload_json)) as { recoveryRearmOf?: unknown };
+      if (parsed?.recoveryRearmOf === jobId) count++;
+    } catch {
+      // An unparseable sibling payload cannot be a re-arm of this row.
+    }
+  }
+  return count;
+}
+
 /** Issue #3907: fail-fast recovery for orphaned `running` rows —
  *  called from OrchestratorAgent.onStart next to
  *  recoverQueuedAsyncJobs. A row whose executor died with the DO
@@ -489,28 +695,115 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
  *  closes that window at startup. Only stale-heartbeat rows are
  *  failed (the same bound as the reap); fresh-heartbeat rows are
  *  left alone — their executor may still be alive in a hibernated
- *  isolate. Never re-runs a row: a paid mcp.tool job is never
- *  silently re-executed. Idempotent by the guarded failRunning
- *  transition (reapStaleRunning, same message/code as the reap);
- *  per-row try/catch so one bad row never fails startup. */
+ *  isolate. Issue #4002: a stale row whose work is a resumable
+ *  pipeline feed-job dispatch is RE-ARMED (same payload, retryOf
+ *  + recoveryRearmOf link, capped at two re-arms per chain) and
+ *  the original row is failed with the cataloged
+ *  FAILURE_ASYNC_JOB_ORPHANED code naming the restart; every
+ *  other stale row reaps with that code too, never the generic
+ *  unknown-outcome code. A paid row is never re-armed (its x402
+ *  signature was consumed — the #3907 rule). Idempotent by the
+ *  guarded failRunning transition (reapStaleRunning, same
+ *  message/code as the reap); per-row try/catch so one bad row
+ *  never fails startup. */
 export async function recoverStaleRunningAsyncJobs(
   ctx: AsyncJobsContext,
-): Promise<{ examined: number; failed: number }> {
+): Promise<{ examined: number; failed: number; rearmed: number }> {
   ctx.ensureTables();
   const rows = ports(ctx).read.listRunning(ctx.sessionKey(), STALE_SWEEP_BATCH_LIMIT) as unknown as Array<Record<string, unknown>>;
   const nowMs = Date.now();
   let failed = 0;
+  let rearmed = 0;
   for (const row of rows) {
     const jobId = String(row.job_id);
     try {
       if (row.status !== "running" || typeof row.started_at !== "string") continue;
       if (!isHeartbeatStale(row, nowMs)) continue;
+      const lastActivityAt =
+        typeof row.last_activity_at === "string" && row.last_activity_at
+          ? row.last_activity_at
+          : typeof row.started_at === "string"
+            ? row.started_at
+            : null;
+      // Issue #4002: re-arm a resumable feed dispatch before
+      // reaping the original — the re-armed row replays the same
+      // dispatch once the pipeline host has settled its orphan
+      // (its onStart precedes any dispatch). A failed re-arm
+      // falls through to the reap below: the row is never left
+      // running on a submit failure.
+      let rearmedJobId: string | undefined;
+      let rearmCount = 0;
+      const payload = parseRowPayload(row);
+      const isFeedDispatch = payload
+        ? isFeedDispatchShape(String(row.capability), payload)
+        : false;
+      if (payload && isResumableFeedDispatch(String(row.capability), payload)) {
+        const ownRearmCount =
+          typeof payload.recoveryRearmCount === "number" ? payload.recoveryRearmCount : 0;
+        if (ownRearmCount + countRecoveryRearms(ctx, jobId) < RECOVERY_REARM_CAP) {
+          try {
+            const graph = jobGraphFields(row);
+            const submission = {
+              capability: String(row.capability),
+              payload: {
+                ...payload,
+                retryOf: jobId,
+                recoveryRearmOf: jobId,
+                recoveryRearmCount: ownRearmCount + 1,
+              },
+              displayName: String(row.display_name),
+              parentJobId: graph.parentJobId,
+              jobKind: graph.jobKind,
+              channel: graph.channel,
+              stage: graph.stage,
+              chainId: graph.chainId,
+              // Issue #3810: a re-arm keeps the source row's
+              // provenance — the retry is the same run,
+              // re-attempted, not a new trigger.
+              trigger: graph.trigger ?? undefined,
+              triggeredBy: graph.triggeredBy ?? undefined,
+              scheduleId: graph.scheduleId ?? undefined,
+            } as unknown as AsyncJobSubmission;
+            const submitted = await submitAsyncJob(ctx, submission);
+            rearmedJobId = submitted.jobId;
+            rearmCount = ownRearmCount + 1;
+          } catch (error) {
+            structuredLog.error("asyncJobs.recover_stale_running_job_rearm_failed", {
+              message: `[OrchestratorAgent] Stale running-job re-arm failed for job ${jobId} (reaping instead):`,
+              jobId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+      // Issue #4002 (recording slice): resolve the feed job id +
+      // pipeline run id for the row's error column and the audits
+      // — a failed feed-run that stored no artifact is otherwise
+      // unidentifiable beyond its provider. The door read is
+      // best-effort and guarded (a later run is never attributed
+      // to this row); a lookup failure records the job id alone.
+      let feedJobId: string | null = null;
+      let pipelineRunId: string | null = null;
+      if (isFeedDispatch && payload) {
+        feedJobId = resolveFeedDispatchJobId(ctx.env, String(row.capability), payload);
+        if (feedJobId) {
+          pipelineRunId = await resolveFeedDispatchPipelineRunId(
+            ctx.env,
+            feedJobId,
+            lastActivityAt,
+          );
+        }
+      }
       const completedAt = new Date(nowMs).toISOString();
+      const message = orphanedReapMessage(lastActivityAt, rearmedJobId, {
+        feedJobId,
+        pipelineRunId,
+      });
       const written = ports(ctx).queue.reapStaleRunning(
         jobId,
-        STALE_RUNNING_REAP_MESSAGE,
+        message,
         completedAt,
-        FAILURE_ASYNC_JOB_FAILED_CODE,
+        FAILURE_ASYNC_JOB_ORPHANED_CODE,
       );
       if (written === 1) {
         const toolName = toolNameFromRow(row);
@@ -518,16 +811,26 @@ export async function recoverStaleRunningAsyncJobs(
           jobId,
           capability: String(row.capability),
           ...(toolName ? { tool: toolName } : {}),
-          error: STALE_RUNNING_REAP_MESSAGE,
-          errorCode: FAILURE_ASYNC_JOB_FAILED_CODE,
-          lastActivityAt:
-            typeof row.last_activity_at === "string" && row.last_activity_at
-              ? row.last_activity_at
-              : typeof row.started_at === "string"
-                ? row.started_at
-                : null,
+          error: message,
+          errorCode: FAILURE_ASYNC_JOB_ORPHANED_CODE,
+          lastActivityAt,
+          ...(rearmedJobId ? { rearmedAs: rearmedJobId } : {}),
+          ...(feedJobId ? { feedJobId } : {}),
+          ...(pipelineRunId ? { pipelineRunId } : {}),
         });
         failed++;
+        if (rearmedJobId) {
+          ctx.audit("async_job.retried", "orchestrator", {
+            jobId,
+            retryJobId: rearmedJobId,
+            capability: String(row.capability),
+            recoveredBy: "stale_running_recovery",
+            recoveryRearmCount: rearmCount,
+            ...(feedJobId ? { feedJobId } : {}),
+            ...(pipelineRunId ? { pipelineRunId } : {}),
+          });
+          rearmed++;
+        }
       }
     } catch (error) {
       structuredLog.error("asyncJobs.recover_stale_running_job_failed", {
@@ -537,7 +840,7 @@ export async function recoverStaleRunningAsyncJobs(
       });
     }
   }
-  return { examined: rows.length, failed };
+  return { examined: rows.length, failed, rearmed };
 }
 
 /** Issue #2567: what the stuck-running alert carries — the run's
@@ -716,6 +1019,19 @@ const STALE_SWEEP_BATCH_LIMIT = 100;
  *  cataloged code. The single outcome catalog is the resolver;
  *  this constant is the fallback, never an invented code. */
 const FAILURE_ASYNC_JOB_FAILED_CODE = "FAILURE_ASYNC_JOB_FAILED";
+
+/** Issue #4002: the cataloged code for a row whose executor died
+ *  with its host (a deploy restart) — registered in
+ *  src/outcomes/outcomeCatalog.json. The onStart recovery below
+ *  is the only path that names it: a stale heartbeat at host
+ *  start means the executor is dead, not that the leg failed. */
+const FAILURE_ASYNC_JOB_ORPHANED_CODE = "FAILURE_ASYNC_JOB_ORPHANED";
+
+/** Issue #4002: how many times the onStart recovery re-arms one
+ *  orphaned dispatch chain before it reaps instead — a run that
+ *  orphans twice in a row is failing for a reason a re-arm cannot
+ *  fix, so the third orphan is a visible failure, not a loop. */
+const RECOVERY_REARM_CAP = 2;
 
 /** Issue #3811: heartbeat interval while a job runs — the #624
  *  research-task precedent (2 minutes). */

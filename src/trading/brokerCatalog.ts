@@ -17,7 +17,7 @@
  * program's "no edits to shared paths" goal.
  *
  * Vocabulary, fixed here so the rest of the tree can stop inventing it:
- *   - BrokerId          which firm executes (etrade, alpaca) — never an environment.
+ *   - BrokerId          which firm executes (etrade, alpaca, public) — never an environment.
  *   - TradingEnvironment the platform's environment token (TEST, PROD) — what
  *                       existing routes and settings already carry.
  *   - TradingType       what the user is doing (paper, live) — the user-facing
@@ -25,7 +25,7 @@
  */
 
 /** Brokers with a registered `ITradingPlatform`. Never an environment. */
-export type BrokerId = "etrade" | "alpaca";
+export type BrokerId = "etrade" | "alpaca" | "public";
 
 /** The platform environment token carried by routes/settings today. */
 export type TradingEnvironment = "TEST" | "PROD";
@@ -34,7 +34,7 @@ export type TradingEnvironment = "TEST" | "PROD";
 export type TradingType = "paper" | "live";
 
 /** How this broker authenticates. Each kind has exactly one seam (#2755). */
-export type BrokerCredentialKind = "oauth1_per_login" | "api_key_pair";
+export type BrokerCredentialKind = "oauth1_per_login" | "api_key_pair" | "personal_token";
 
 /** Asset classes the platform can route orders for. */
 export type BrokerAssetClass = "equity" | "options";
@@ -186,6 +186,17 @@ const CREDENTIAL_GUIDANCE: Readonly<Record<BrokerId, BrokerCredentialGuidance>> 
     summary:
       "Alpaca signs in with an API key pair for the selected trading type. The key and secret are entered once by the user — the server verifies them against Alpaca before storing, and the secret is never shown again.",
   },
+  // Issue #3990: Public signs in with ONE pasted personal access
+  // token (no key pair, no OAuth grant that works in practice — the
+  // metadata-document flow is refused by Public's authorization
+  // server; see publicOAuth.ts). The token is verified against the
+  // hosted MCP server (tools/list) before it is stored.
+  public: {
+    kind: "personal_token",
+    envNames: { paper: [], live: [] },
+    summary:
+      "Public.com signs in with a personal access token: create one on the API settings page of your Public account and paste it here. The server verifies it against Public's MCP server before storing, and the token is never shown again.",
+  },
 };
 
 /** The sign-in this broker requires. Total by type: every broker answers. */
@@ -310,6 +321,82 @@ export const BROKER_CATALOG = {
         place: "alpaca_place_order",
         orders: "alpaca_orders",
         cancel: "alpaca_cancel_bracket_ladder",
+      },
+    },
+  },
+  // Issue #3990: Public.com as a live broker. The trading surface
+  // is Public's hosted MCP server (mcp_json_rpc); quotes and chains
+  // ride the data adapter over the same transport.
+  public: {
+    id: "public",
+    label: "Public.com",
+    credentialKind: "personal_token",
+    assetClasses: ["equity", "options"],
+    // Public has NO paper trading mode. TEST resolves to the paper
+    // bucket for the platform's mode machinery (the type stays
+    // total, and every mode call site keeps working), and placement
+    // in TEST is refused with FAILURE_PUBLIC_NO_PAPER_MODE at the
+    // platform seam — the refusal, not the mapping, is the honest
+    // statement. PROD is live, an explicit act.
+    tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
+    supports: {
+      quote: true,
+      detailedQuote: true,
+      accounts: true,
+      positions: true,
+      // No tax-lot endpoint verified on the MCP surface.
+      positionLots: false,
+      // Issue #3324's reasoning holds here too: the risk model is
+      // the platform's, fed by this broker's own book, chains, and
+      // spot price.
+      portfolioRisk: true,
+      optionChains: true,
+      optionExpireDates: true,
+      orderPreview: true,
+      orderPlace: true,
+      // Issue #3990 Slice D: the platform implements screenMarkets
+      // (NeutralMarketScreener over its own quotes), so screening is
+      // declared — a Public tenant can screen on Public.com.
+      marketScreening: true,
+      // The scanner / IV-history / discovery engines compose on the
+      // broker's own chains (OptionChainSource / platformChainSource),
+      // and Public serves chains — so they are true here, fed by
+      // Public's chains, never another broker's.
+      optionsScanner: true,
+      ivHistory: true,
+      // Issue #3359: Public serves order history (get_orders). No
+      // get_history tool is verified, so account activity is a
+      // stated gap; there is no watchlists or alerts tool either.
+      orderHistory: true,
+      accountActivity: false,
+      alerts: false,
+      watchlists: false,
+      orderCancel: true,
+      optionsDiscovery: true,
+    },
+    statusVocabulary: {
+      protocol: "mcp_json_rpc",
+      mode: { paper: "mcp_remote", live: "mcp_remote" },
+      environment: { paper: "paper", live: "live" },
+    },
+    copilot: {
+      supported: true,
+      // The autonomous cycle may run on Public: in TEST it previews
+      // and refuses placement with the named outcome; in PROD it
+      // places, which is the user's explicit live act.
+      autonomousCycle: true,
+      bracketOrders: "native",
+      percentBrackets: true,
+      // Bars do not come from Public (no bars tool on the MCP
+      // surface) — they come from the tenant's data provider
+      // (alpaca by default), so the bars provider is hybrid.
+      barsProvider: "hybrid",
+      tools: {
+        quote: "public_get_quote",
+        preview: "public_preview_order",
+        place: "public_place_order",
+        orders: "public_orders",
+        cancel: "public_cancel_order",
       },
     },
   },

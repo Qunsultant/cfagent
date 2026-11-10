@@ -120,7 +120,11 @@ describe("scheduled stock Yahoo fallback (#1527)", () => {
   // the fallback marker, and emits the normal failure event.
   it("a guard-blocked run fails loud with the coded guard error and never screens via Yahoo (#3655)", async () => {
     const { service, publish, audit, runScreen } = fallbackService(async () => yahooSuccessResult());
-    const result = await service.autonomousMarketScreen({});
+    // Issue #3990: the guard runs only for etrade-provider runs, and
+    // the platform default is alpaca now — a bare {} no longer
+    // reaches the guard. These tests pin the E*TRADE guard, so the
+    // provider is named explicitly.
+    const result = await service.autonomousMarketScreen({ provider: "etrade" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("FAILURE_AUTH_NO_SESSION");
     expect(runScreen).not.toHaveBeenCalled();
@@ -142,7 +146,7 @@ describe("scheduled stock Yahoo fallback (#1527)", () => {
     const { service, publish, runScreen } = fallbackService(async () => yahooSuccessResult());
     const shardSubmit = vi.fn(async () => ({ jobId: "never" }));
     (service as any).shardSubmit = shardSubmit;
-    const result = await service.autonomousMarketScreen({ sharded: true });
+    const result = await service.autonomousMarketScreen({ sharded: true, provider: "etrade" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("FAILURE_AUTH_NO_SESSION");
     expect(shardSubmit).not.toHaveBeenCalled();
@@ -160,7 +164,7 @@ describe("scheduled stock Yahoo fallback (#1527)", () => {
     const { service, publish, runScreen } = fallbackService(async () => {
       throw new Error("Yahoo quotes unavailable");
     });
-    const result = await service.autonomousMarketScreen({});
+    const result = await service.autonomousMarketScreen({ provider: "etrade" });
     expect(result.success).toBe(false);
     expect(runScreen).not.toHaveBeenCalled();
     const events = publish.mock.calls.map((c) => c[0]);

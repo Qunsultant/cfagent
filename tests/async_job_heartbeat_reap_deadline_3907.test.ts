@@ -324,21 +324,29 @@ describe("execution deadline (#3907)", () => {
 });
 
 describe("orphaned-running recovery (#3907)", () => {
-  it("fails fast only stale-heartbeat rows, leaves live ones running, never re-runs", async () => {
+  it("fails fast only stale-heartbeat rows, leaves live ones running, never re-runs a generic row", async () => {
     const h = makeHarness();
     seedRow(h.db, { jobId: "job-orphan", startedAt: isoAgo(3 * HOUR), lastActivityAt: isoAgo(30 * MIN) });
     seedRow(h.db, { jobId: "job-alive", startedAt: isoAgo(3 * HOUR), lastActivityAt: isoAgo(MIN) });
 
     const result = await recoverStaleRunningAsyncJobs(h.ctx);
-    expect(result).toEqual({ examined: 2, failed: 1 });
+    expect(result).toEqual({ examined: 2, failed: 1, rearmed: 0 });
     expect(rowStatus(h.db, "job-orphan").status).toBe("failed");
-    expect(rowStatus(h.db, "job-orphan").error).toBe(REAP_MESSAGE);
+    // Issue #4002: the recovery reaps with the named orphan
+    // verdict, not the generic unknown-outcome message — the
+    // cause is the host restart, with the last activity as
+    // evidence. (Resumable feed dispatches ARE re-armed now;
+    // that carve-out is pinned in
+    // tests/async_job_recovery_rearm_4002.test.ts — this generic
+    // row is not one.)
+    expect(rowStatus(h.db, "job-orphan").error).toContain("Orphaned by a host restart");
     expect(rowStatus(h.db, "job-alive").status).toBe("running");
     // The recovery audit is the reap's audit, with the tool omitted
     // for a non-MCP row.
     const failed = h.audits.filter((a) => a.type === "async_job.failed");
     expect(failed).toHaveLength(1);
     expect(failed[0].payload.jobId).toBe("job-orphan");
+    expect(failed[0].payload.errorCode).toBe("FAILURE_ASYNC_JOB_ORPHANED");
   });
 
   it("is idempotent: a second run fails nothing", async () => {
@@ -348,7 +356,7 @@ describe("orphaned-running recovery (#3907)", () => {
 
     await recoverStaleRunningAsyncJobs(h.ctx);
     const second = await recoverStaleRunningAsyncJobs(h.ctx);
-    expect(second).toEqual({ examined: 1, failed: 0 });
+    expect(second).toEqual({ examined: 1, failed: 0, rearmed: 0 });
     expect(rowStatus(h.db, "job-alive-2").status).toBe("running");
   });
 });

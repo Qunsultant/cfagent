@@ -1,0 +1,3 @@
+### Fixed
+
+- A failed feed-run now records its feed job id and pipeline run id even when no artifact was stored: the onStart recovery resolves the job id from the dispatch (HTTP feed-run path or the MCP `run_feed_job` source) and reads the pipeline run id from the pipeline host through the existing feed-job surface door, accepting it only when the run started before the executor's last activity, and carries both ids in the row's error column and the `async_job.failed` / `async_job.retried` audits; the Workflow Runs list title now names the feed job id for feed-run rows. The feed-job surface view exposes the instance's `runStartedAt` for the guard (#4002).

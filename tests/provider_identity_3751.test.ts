@@ -119,7 +119,10 @@ describe("#3751 identity in the tenant provider context", () => {
   it("absent/unknown input yields the DEFAULT providers' identities, flagged fellBack (Q2)", () => {
     for (const input of [undefined, null, {}, { dataProviderId: "bogus", brokerId: "bogus" }]) {
       const ctx = resolveTenantProviderContext(input as never);
-      expect(ctx.dataProviderDisplayName).toBe("E*TRADE");
+      // Issue #3990: the default data provider is alpaca now (the
+      // broker default was already alpaca) — the fallback identity
+      // follows the platform default, not a hardcoded etrade.
+      expect(ctx.dataProviderDisplayName).toBe("Alpaca");
       expect(ctx.brokerDisplayName).toBe("Alpaca");
       expect(ctx.dataProviderFellBack).toBe(true);
       expect(ctx.brokerFellBack).toBe(true);
@@ -220,10 +223,10 @@ describe("#3751 GET providers route serves identity", () => {
     const body = (await res!.json()) as Record<string, unknown> & {
       identity?: Record<string, unknown>;
     };
-    expect(body.dataProviderId).toBe("etrade");
+    expect(body.dataProviderId).toBe("alpaca");
     expect(body.brokerId).toBe("alpaca");
     expect(body.identity).toEqual({
-      dataProviderDisplayName: "E*TRADE",
+      dataProviderDisplayName: "Alpaca",
       brokerDisplayName: "Alpaca",
       dataProviderFellBack: false,
       brokerFellBack: false,

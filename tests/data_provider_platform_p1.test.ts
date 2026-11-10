@@ -629,10 +629,14 @@ describe("capability routing resolution (issue #1118, owner correction)", () => 
     const { configs } = enableAll(sql);
     // Quotes: a stored route DOES declare yahoo as gap-fill, but the
     // owner ruling suppresses it — live quote rows are never
-    // gap-filled. The policy is quotes-scoped: fundamentals keeps its
-    // declared alpaca gap-fill, and historicalBars still has no
-    // gap-fill declared at all despite multiple enabled providers
-    // existing.
+    // gap-filled. The policy is quotes-scoped: historicalBars still
+    // has no gap-fill declared at all despite multiple enabled
+    // providers existing. Fundamentals: a stored route DOES declare
+    // alpaca as gap-fill, but alpaca no longer serves fundamentals
+    // (#3990: the declaration was false — its getFundamentals throws,
+    // ADR 0019 — so the registry omits the unservable gap-fill,
+    // never fatal). No provider other than the yahoo primary declares
+    // fundamentals, so there is no servable gap-fill for it at all.
     upsertCapabilityRoute(sql, {
       capability: "quotes",
       primaryProviderId: "etrade",
@@ -646,8 +650,8 @@ describe("capability routing resolution (issue #1118, owner correction)", () => 
     const routes = listCapabilityRoutes(sql);
     expect(registry.resolveRoute("quotes", configs, routes).gapFill).toBeUndefined();
     expect(
-      registry.resolveRoute("fundamentals", configs, routes).gapFill?.id
-    ).toBe("alpaca");
+      registry.resolveRoute("fundamentals", configs, routes).gapFill
+    ).toBeUndefined();
     expect(
       registry.resolveRoute("historicalBars", configs, routes).gapFill
     ).toBeUndefined();
@@ -767,9 +771,12 @@ describe("data provider adapters (issue #1118)", () => {
     ).toEqual(["quotes", "historicalBars", "fundamentals", "news"]);
     // #3932: the Yahoo adapter declares news (Yahoo News search);
     // Alpaca declares none — no news fetcher is supplied for it.
+    // #3990: Alpaca declares optionsChains (the repo's own Alpaca
+    // options read path) and NOT fundamentals — its getFundamentals
+    // throws (ADR 0019: Yahoo covers fundamentals, never faked).
     expect(
       createAlpacaDataProvider(fakeMarketDataProvider("alpaca")).capabilities
-    ).toEqual(["quotes", "historicalBars", "fundamentals"]);
+    ).toEqual(["quotes", "historicalBars", "optionsChains"]);
     expect(
       createNasdaqDataProvider(async () => nasdaqListingsFixture).capabilities
     ).toEqual(["screenUniverse"]);
@@ -811,9 +818,14 @@ describe("data provider adapters (issue #1118)", () => {
       expect(bars.providerId).toBe(id);
       expect(bars.capability).toBe("historicalBars");
       expect(bars.result).toBe(marketDataBarsFixture);
-      const fundamentals = await provider.getFundamentals!("AAPL");
-      expect(fundamentals.providerId).toBe(id);
-      expect(fundamentals.result).toBe(marketDataFundamentalsFixture);
+      // #3990: fundamentals is declared only where served — Yahoo
+      // declares it, Alpaca does not (its getFundamentals throws, so
+      // the method is absent, not a throwing stub).
+      if (provider.capabilities.includes("fundamentals")) {
+        const fundamentals = await provider.getFundamentals!("AAPL");
+        expect(fundamentals.providerId).toBe(id);
+        expect(fundamentals.result).toBe(marketDataFundamentalsFixture);
+      }
     }
   });
 
@@ -850,7 +862,32 @@ describe("data provider conformance kit (issue #1118)", () => {
           },
         ],
       }),
-      createAlpacaDataProvider(fakeMarketDataProvider("alpaca")),
+      // #3990: the Alpaca adapter declares optionsChains, so the kit
+      // probes it — the default (real) source would call Alpaca's live
+      // API (blocked in tests, #411), so the chain source is injected
+      // (a conformant chain: symbol echo + pairs array), mirroring the
+      // Yahoo news injection above.
+      createAlpacaDataProvider(fakeMarketDataProvider("alpaca"), undefined, {
+        optionsChain: {
+          getChain: async () => ({
+            symbol: "AAPL",
+            underlyingPrice: 100,
+            pairs: [
+              {
+                call: {
+                  optionType: "CALL",
+                  strikePrice: 100,
+                  symbol: "AAPL260320C00100000",
+                  bid: 1,
+                  ask: 1.2,
+                  lastPrice: 1.1,
+                },
+              },
+            ],
+          }),
+          getExpiryDates: async () => [{ year: 2026, month: 3, day: 20 }],
+        } as never,
+      }),
       createNasdaqDataProvider(async () => nasdaqListingsFixture),
     ];
     for (const adapter of adapters) {
