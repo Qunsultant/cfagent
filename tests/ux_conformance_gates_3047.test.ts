@@ -26,6 +26,12 @@
  *     inline-style idiom (section container, error/empty states, run
  *     rows); converting the whole panel to primitives is S5 surface
  *     work, not S3; no other inline styles added.
+ *     Issue #3996 raises ScheduledGoalsPanel 28 -> 34: the new
+ *     "Built-in goal" dropdown notices and the "Seed all built-in
+ *     goals" section follow the panel's existing inline-style idiom
+ *     (section heading, note/error divs, result rows); converting the
+ *     whole panel to primitives is S5 surface work, not this slice;
+ *     no other inline styles added.
  *  4. Interior consistency (S-U1, #3991): every routable surface
  *     uses PageSection or is registered in
  *     ux_shell_exceptions_3047.json (`interiors`), and interiors are
