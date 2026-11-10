@@ -1,0 +1,3 @@
+### Fixed
+
+- **Case-only file collisions no longer break the Windows typecheck (#4028):** `src/client/SchedulesHome.tsx` + `schedulesHome.ts` and `TradeExecutionPreview.tsx` + `tradeExecutionPreview.ts` differed only by case, so Linux CI resolved them exactly while `tsc` on a case-insensitive filesystem reported TS1149/TS2724 and every Windows typecheck had to be filtered by hand. The module halves are now `schedulesHomeView.ts` and `tradeExecutionPreviewModel.ts` (imports updated in `Chat.tsx`, `SchedulesHome.tsx`, `TradeExecutionPreview.tsx`), and `tsc --noEmit` is clean on Windows. Pinned by `tests/no_case_collisions_4028.test.ts`, which fails if any `src/` directory ever holds two names that differ only by case.
