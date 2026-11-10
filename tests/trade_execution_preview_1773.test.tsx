@@ -6,7 +6,7 @@ import {
   buildExecutePayload,
   buildTradeExecutionPreview,
   type TradeExecutionDraft,
-} from "../src/client/tradeExecutionPreview";
+} from "../src/client/tradeExecutionPreviewModel";
 import { TradeExecutionPreview } from "../src/client/TradeExecutionPreview";
 
 /**
