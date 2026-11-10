@@ -78,6 +78,7 @@ import {
 import type { DataProvider, DataResult, QuoteResult } from "../src/trading/dataProviders/contract";
 import type {
   MarketDataResearchCompanyFundamentals,
+  MarketDataResearchHistoricalBar,
   MarketDataResearchQuote,
 } from "../src/types";
 import type { Env } from "../src/types";
@@ -138,6 +139,28 @@ async function makeStub() {
         capability: "fundamentals",
         result: { symbol, marketCap: 1_000_000, peTrailing: 25 } as MarketDataResearchCompanyFundamentals,
       }) as DataResult<MarketDataResearchCompanyFundamentals>,
+    // #3931: the technicals node pulls daily bars through the
+    // historicalBars capability — 30 live bars, closes 100..129.
+    getHistoricalBars: async (symbol: string) => {
+      const bars: MarketDataResearchHistoricalBar[] = [];
+      for (let i = 0; i < 30; i++) {
+        const close = 100 + i;
+        bars.push({
+          provenance: "live",
+          timestamp: new Date(T0 - (30 - 1 - i) * 24 * 3600_000).toISOString(),
+          open: close - 0.5,
+          high: close + 1,
+          low: close - 1,
+          close,
+          volume: 1_000_000,
+        });
+      }
+      return {
+        providerId: "yahoo",
+        capability: "historicalBars",
+        result: bars,
+      } as DataResult<MarketDataResearchHistoricalBar[]>;
+    },
   };
   const feedRegistry = buildFeedJobRegistry({});
   const stores = createInMemoryJobPipelineStores();

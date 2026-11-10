@@ -311,7 +311,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
     }
   });
 
-  it("registerSchedules registers the full plane incl. deliver (37 declarations)", async () => {
+  it("registerSchedules registers the full plane incl. deliver (38 declarations)", async () => {
     const h = await makeHarness();
     const specs: Array<{ jobId: string }> = [];
     const registrations = await h.control.registerSchedules({
@@ -320,7 +320,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(37);
+    expect(registrations).toHaveLength(38);
     expect(specs.map((s) => s.jobId)).toContain(DELIVER_ID);
   });
 });

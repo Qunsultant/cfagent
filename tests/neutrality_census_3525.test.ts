@@ -246,6 +246,19 @@ function measure(): Map<string, number> {
  * (the incident sentence names the fundamentals feed job and the quotes dataset
  * without the provider brand), so the row is the rule line alone. Seed pin
  * totals move 1125/8757 -> 1126/8758.
+ * Baseline update (#3931, 2026-11-10): the parameterized Yahoo technicals job
+ * joins the feed workflow — one registry definition in the feed-job registry,
+ * one entry in the feed pipeline catalog, the persisted-first read in the
+ * screener's history deps, the ATR field in the technicals computation, and
+ * the ATR column + persisted-source labels in the screener results view.
+ * All six files are the provider-id registries / the provider's own
+ * history-and-technicals modules (INTEGRATION at seed: naming the provider
+ * is their job), and the only growth is the new job's own id/label lines,
+ * the persisted-read wiring, and the source labels: 6 raises
+ * (feedJobs.ts/yahoo 14->18, feedPipelineJobs.ts/yahoo 23->27,
+ * feedPipelineJobs.ts/nasdaq 18->19, platformHistory.ts/yahoo 21->24,
+ * technicals.ts/yahoo 9->12, ScreenerResultsView.tsx/yahoo 5->8).
+ * Recorded-seed totals move 1131/8832 -> 1131/8850.
  * Baseline update (#3751, 2026-11-09): ProviderIdentity — the display-name
  * data of the tenant-provider server module is restructured into the ONE
  * identity map (INTEGRATION: naming the provider is that module's job) and
@@ -430,7 +443,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/PortfolioRiskPanel.tsx", "alpaca", 1],
   ["src/client/PortfolioRiskPanel.tsx", "etrade", 14],
   ["src/client/SchedulesHome.tsx", "etrade", 1],
-  ["src/client/ScreenerResultsView.tsx", "yahoo", 5],
+  ["src/client/ScreenerResultsView.tsx", "yahoo", 8],
   ["src/client/SettingsMenu.tsx", "etrade", 1],
   ["src/client/StockCopilotPanel.tsx", "alpaca", 3],
   ["src/client/StockCriteriaPanel.tsx", "etrade", 1],
@@ -904,12 +917,12 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/feedJobs.ts", "alpaca", 5],
   ["src/services/feedJobs.ts", "etrade", 5],
   ["src/services/feedJobs.ts", "nasdaq", 9],
-  ["src/services/feedJobs.ts", "yahoo", 14],
+  ["src/services/feedJobs.ts", "yahoo", 18],
   ["src/services/feedPipelineJobs.ts", "alpaca", 5],
   ["src/services/feedPipelineJobs.ts", "etrade", 4],
-  ["src/services/feedPipelineJobs.ts", "nasdaq", 18],
+  ["src/services/feedPipelineJobs.ts", "nasdaq", 19],
   ["src/services/feedPipelineJobs.ts", "public.com", 2],
-  ["src/services/feedPipelineJobs.ts", "yahoo", 23],
+  ["src/services/feedPipelineJobs.ts", "yahoo", 27],
   ["src/services/feedProviderWiring.ts", "alpaca", 2],
   ["src/services/feedProviderWiring.ts", "etrade", 4],
   ["src/services/feedProviderWiring.ts", "nasdaq", 1],
@@ -1073,7 +1086,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/optionsReportPdf.ts", "etrade", 2],
   ["src/trading/optionsReportXlsx.ts", "etrade", 1],
   ["src/trading/optionsScreener.ts", "etrade", 17],
-  ["src/trading/platformHistory.ts", "yahoo", 21],
+  ["src/trading/platformHistory.ts", "yahoo", 24],
   ["src/trading/quotePolicies.ts", "etrade", 6],
   ["src/trading/registry.ts", "etrade", 2],
   ["src/trading/screener.ts", "etrade", 10],
@@ -1100,7 +1113,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/stockQuoteSource.ts", "etrade", 2],
   ["src/trading/technicals.ts", "alpaca", 2],
   ["src/trading/technicals.ts", "etrade", 1],
-  ["src/trading/technicals.ts", "yahoo", 9],
+  ["src/trading/technicals.ts", "yahoo", 12],
   ["src/trading/universes.ts", "etrade", 4],
   ["src/trading/universes.ts", "yahoo", 1],
   ["src/trading/voice/agent.ts", "etrade", 31],

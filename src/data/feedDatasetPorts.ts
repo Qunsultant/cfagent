@@ -35,6 +35,7 @@
 import type {
   DataProviderId,
   FundamentalsResult,
+  HistoricalBarsResult,
   IndexId,
   QuoteResult,
 } from "../trading";
@@ -99,6 +100,17 @@ export interface FeedDatasetArtifact {
    * exactly the way a quotes copy is.
    */
   fundamentals?: FeedFundamentalsRow[];
+  /**
+   * #3931 (sub-issue of #3929): the technicals dataset's rows —
+   * one per symbol, the provider's daily bars verbatim as
+   * returned (live bars only — the producing job skips a symbol
+   * whose bars are not all live, never persists generated bars).
+   * Present only on technicals-dataset artifacts; quotes and
+   * fundamentals artifacts omit it. The store's row count counts
+   * bars rows too, so a technicals copy is usable exactly the
+   * way a quotes copy is.
+   */
+  bars?: FeedDailyBarRow[];
   run: FeedDatasetRunRecord;
   createdAt: string;
 }
@@ -109,10 +121,20 @@ export interface FeedFundamentalsRow {
   fundamentals: FundamentalsResult;
 }
 
-/** Rows a stored artifact carries (quotes + fundamentals) — the
+/** One symbol's daily-bar history in a technicals-dataset artifact. */
+export interface FeedDailyBarRow {
+  symbol: string;
+  bars: HistoricalBarsResult;
+}
+
+/** Rows a stored artifact carries (quotes + fundamentals + bars) — the
  *  count every adapter persists and every status surface shows. */
 export function feedDatasetRowCount(artifact: FeedDatasetArtifact): number {
-  return artifact.quotes.length + (artifact.fundamentals?.length ?? 0);
+  return (
+    artifact.quotes.length +
+    (artifact.fundamentals?.length ?? 0) +
+    (artifact.bars?.length ?? 0)
+  );
 }
 
 export interface FeedDatasetStoreOptions {

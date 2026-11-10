@@ -274,7 +274,7 @@ describe("analyze pipeline catalog + resolution (#3537)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(23);
+    expect(registrations).toHaveLength(24);
     expect(specs.map((s) => s.jobId)).toContain(ANALYZE_ID);
   });
 });

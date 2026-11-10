@@ -35,6 +35,7 @@ import {
   resolveRunUniverse,
   runFeedFundamentalsJob,
   runFeedJob,
+  runFeedTechnicalsJob,
   FEED_JOB_CODES,
   type FeedJobDefinition,
   type FeedJobRegistry,
@@ -97,6 +98,16 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     // input serves any stored list.
     label: "Yahoo fundamentals — parameterized (default Nasdaq-100)",
     aliases: ["fundamentals", "yahoo fundamentals"],
+  },
+  {
+    jobId: "yahoo-nasdaq100-technicals",
+    sourceId: "yahoo",
+    dataset: "technicals",
+    // #3931: ONE parameterized technicals job — the label
+    // names the DEFAULT universe (nasdaq100); a run's universe
+    // input serves any stored list.
+    label: "Yahoo technicals — parameterized (default Nasdaq-100)",
+    aliases: ["technicals", "yahoo technicals"],
   },
   {
     jobId: "yahoo-sp100-quotes",
@@ -342,7 +353,7 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     if (!provider) throw feedNotConfigured(def.id, `a capture-wired provider for "${def.sourceId}"`);
 
     // #3930: the run's universe input (a parameterized job —
-    // fundamentals): the step param names the stored index
+    // fundamentals, technicals): the step param names the stored index
     // list; absent ⇒ the definition's universe. Resolved (and
     // refused by name when unknown or unsupported) BEFORE any
     // refresh or fetch, so the refresh, the shard partition,
@@ -388,7 +399,9 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     const result: FeedRunResult =
       def.dataset === "fundamentals"
         ? await runFeedFundamentalsJob(deps.registry, { provider, universeStore: deps.universeStore, datasetStore: deps.datasetStore }, def.id, runOpts)
-        : await runFeedJob(deps.registry, { provider, universeStore: deps.universeStore, datasetStore: deps.datasetStore }, def.id, runOpts);
+        : def.dataset === "technicals"
+          ? await runFeedTechnicalsJob(deps.registry, { provider, universeStore: deps.universeStore, datasetStore: deps.datasetStore }, def.id, runOpts)
+          : await runFeedJob(deps.registry, { provider, universeStore: deps.universeStore, datasetStore: deps.datasetStore }, def.id, runOpts);
     if (result.status === "failed") {
       // The feed run recorded its own failure in the dataset
       // store; the pipeline run fails with the same coded error

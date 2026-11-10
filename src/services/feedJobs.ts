@@ -23,7 +23,7 @@
  * - The universe is a STORED index list (indexListPorts —
  *   the platform's snapshot-dated membership): the job
  *   definition's universe, or — for a parameterized job
- *   (#3930, fundamentals) — the run input's list. No list ⇒
+ *   (#3930 fundamentals; #3931 technicals) — the run input's list. No list ⇒
  *   a typed FEED_UNIVERSE_MISSING failure, never an
  *   invented universe.
  *
@@ -33,6 +33,8 @@
  * contract violations throw (unknown job id — a caller bug).
  */
 import {
+  HISTORY_BAR_LIMIT,
+  marketDataResearchBarsToDailyBars,
   scrubFailureMessage,
   SECTOR_IDS,
   type DataProvider,
@@ -40,10 +42,12 @@ import {
   type DataProviderId,
   type IndexId,
   type QuoteResult,
+  type YahooDailyBar,
 } from "../trading";
 import {
   feedDatasetRowCount,
   resolveFeedQuotesFromArtifact,
+  type FeedDailyBarRow,
   type FeedDatasetArtifact,
   type FeedDatasetRunRecord,
   type FeedDatasetStore,
@@ -70,6 +74,8 @@ export const FEED_JOB_CODES = {
   fetchFailed: "FEED_FETCH_FAILED",
   fundamentalsUnsupported: "FEED_PROVIDER_FUNDAMENTALS_UNSUPPORTED",
   noFundamentalsReturned: "FEED_NO_FUNDAMENTALS_RETURNED",
+  historicalBarsUnsupported: "FEED_PROVIDER_HISTORICAL_BARS_UNSUPPORTED",
+  noBarsReturned: "FEED_NO_BARS_RETURNED",
 } as const;
 export type FeedJobCode = (typeof FEED_JOB_CODES)[keyof typeof FEED_JOB_CODES];
 
@@ -111,7 +117,7 @@ export function isKnownIndexId(value: unknown): value is IndexId {
 /**
  * #3930 — resolve the stored index list a run pulls: the run
  * input when the job is parameterized (the gap-filling jobs —
- * fundamentals today), else the definition's universe. A
+ * fundamentals and technicals), else the definition's universe. A
  * universe input on a non-parameterized job, and an input
  * naming no known index, both refuse by name (a caller or
  * configuration bug — never a silent default, never a list
@@ -133,7 +139,7 @@ export function resolveRunUniverse(
   if (!isKnownIndexId(rawUniverse)) {
     throw new FeedJobError(
       FEED_JOB_CODES.universeUnknown,
-      `"${String(rawUniverse)}" is not a known index id; a fundamentals run's universe input must name a stored index list (nasdaq100, sp100, sp500, dow, sp400, …).`,
+      `"${String(rawUniverse)}" is not a known index id; a parameterized run's universe input must name a stored index list (nasdaq100, sp100, sp500, dow, sp400, …).`,
     );
   }
   return rawUniverse;
@@ -171,10 +177,10 @@ export interface FeedJobDefinition {
   /**
    * #3930 — the job's universe is a RUN INPUT, not a fixed
    * property: the definition's universe is the DEFAULT input
-   * (nasdaq100 for fundamentals); a run may name any stored
+   * (nasdaq100 for the gap-filling jobs); a run may name any stored
    * index list instead. Only the gap-filling jobs set this
-   * (fundamentals today; technicals and sentiment in #3931 /
-   * #3932) — quotes jobs stay one definition per universe.
+   * (fundamentals, #3930; technicals, #3931; sentiment in #3932) —
+   * quotes jobs stay one definition per universe.
    */
   parameterizedUniverse?: boolean;
   /** Declared pull cadence — the scheduling slice's input. */
@@ -251,6 +257,7 @@ export function resolveFeedJobStaleMinutes(
 
 export const YAHOO_NASDAQ100_QUOTES_JOB_ID = "yahoo-nasdaq100-quotes";
 export const YAHOO_NASDAQ100_FUNDAMENTALS_JOB_ID = "yahoo-nasdaq100-fundamentals";
+export const YAHOO_NASDAQ100_TECHNICALS_JOB_ID = "yahoo-nasdaq100-technicals";
 export const YAHOO_SP100_QUOTES_JOB_ID = "yahoo-sp100-quotes";
 export const YAHOO_SP500_QUOTES_JOB_ID = "yahoo-sp500-quotes";
 export const YAHOO_DOW_QUOTES_JOB_ID = "yahoo-dow-quotes";
@@ -349,6 +356,35 @@ export function buildFeedJobRegistry(
     ),
   });
   registry.register({
+    id: YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
+    sourceId: "yahoo",
+    dataset: "technicals",
+    elements: ["historicalBars"],
+    // #3931 — ONE technicals job, parameterized, on the same
+    // idiom as the fundamentals job: the id names the DEFAULT
+    // universe (nasdaq100, kept for lineage), and a run's
+    // `universe` input names the stored index list it actually
+    // pulls. There is no per-universe technicals job
+    // (Correction 2, #3931 comment 6760545755): the same job
+    // serves nasdaq100, sp100, sp500, dow, sp400, and any other
+    // stored list. It persists the daily bars the live history
+    // fetch already retrieves (HISTORY_BAR_LIMIT bars per
+    // symbol, live bars only) so enrich and the UX both read
+    // from the same persisted copy.
+    universe: { kind: "index", index: "nasdaq100", label: "Nasdaq-100" },
+    parameterizedUniverse: true,
+    cadenceMinutes: resolveFeedJobCadenceMinutes(
+      env,
+      YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
+      FEED_JOB_DEFAULTS.cadenceMinutes,
+    ),
+    staleAfterMinutes: resolveFeedJobStaleMinutes(
+      env,
+      YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
+      FEED_JOB_DEFAULTS.staleAfterMinutes,
+    ),
+  });
+  registry.register({
     id: YAHOO_SP100_QUOTES_JOB_ID,
     sourceId: "yahoo",
     dataset: "quotes",
@@ -431,7 +467,7 @@ export interface RunFeedJobOptions {
   runId?: string;
   /**
    * #3930 — the run's universe input (a parameterized job
-   * only — fundamentals today): the stored index list the run
+   * only — the gap-filling jobs): the stored index list the run
    * pulls, as an IndexId. Absent ⇒ the definition's universe
    * (nasdaq100 for the fundamentals job). A value on a
    * non-parameterized job, or an unknown index id, refuses by
@@ -878,6 +914,286 @@ export async function runFeedFundamentalsJob(
     errorMessage: null,
     universe,
   });
+}
+
+/**
+ * #3931 (sub-issue of #3929) — the technicals feed run: the same
+ * contract as runFeedFundamentalsJob, over the provider's
+ * historicalBars capability. The job persists the daily bars the
+ * live history fetch already retrieves (HISTORY_BAR_LIMIT bars
+ * per symbol, the same window the screener's live technicals leg
+ * fetches), so enrich and the UX both read from the same persisted
+ * copy. Honesty rules are the fundamentals run's, unchanged: the
+ * universe is the stored index list; provenance is verified per
+ * envelope; a run that fetched nothing is a FAILED run; per-symbol
+ * failures are named in missingSymbols, never silently dropped.
+ * Bars that are not all live (the provider's generated fallback)
+ * are skipped per symbol — the live-only rule from #1331, applied
+ * at persist time: generated bars are never persisted as data.
+ */
+export async function runFeedTechnicalsJob(
+  registry: FeedJobRegistry,
+  deps: FeedJobDeps,
+  jobId: string,
+  opts: RunFeedJobOptions = {},
+): Promise<FeedRunResult> {
+  const def = registry.get(jobId);
+  if (!def) {
+    throw new FeedJobError(
+      FEED_JOB_CODES.jobNotFound,
+      `No feed job is registered with id "${jobId}".`,
+    );
+  }
+  const now = opts.now ?? (() => new Date());
+  const startedAt = now();
+  const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
+  const trigger = opts.trigger ?? "manual";
+
+  const record = async (args: {
+    status: FeedDatasetRunRecord["status"];
+    rows: FeedDailyBarRow[];
+    requested: number;
+    missingSymbols: string[];
+    codedError: string | null;
+    errorMessage: string | null;
+    universe: FeedDatasetArtifact["universe"];
+  }): Promise<FeedRunResult> => {
+    const finishedAt = now();
+    const run: FeedDatasetRunRecord = {
+      runId,
+      trigger,
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      status: args.status,
+      requested: args.requested,
+      received: args.rows.length,
+      failed: args.requested - args.rows.length,
+      missingSymbols: args.missingSymbols,
+      codedError: args.codedError,
+      errorMessage: args.errorMessage,
+    };
+    const artifact = await deps.datasetStore.store({
+      jobId: def.id,
+      sourceId: def.sourceId,
+      dataset: def.dataset,
+      elements: [...def.elements],
+      universe: args.universe,
+      providerId: def.sourceId,
+      asOf: finishedAt.toISOString(),
+      quotes: [],
+      bars: args.rows,
+      run,
+      nowIso: finishedAt.toISOString(),
+    });
+    if (args.status === "failed") {
+      structuredLog.warn(FEED_JOB_RUN_FAILED, {
+        message: `[feedJobs] ${FEED_JOB_RUN_FAILED}`,
+        jobId: def.id,
+        runId,
+        code: args.codedError,
+        requested: args.requested,
+      });
+    }
+    return {
+      jobId: def.id,
+      runId,
+      status: args.status,
+      artifactId: artifact.id,
+      requested: run.requested,
+      received: run.received,
+      failed: run.failed,
+      missingSymbols: run.missingSymbols,
+      codedError: run.codedError,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+    };
+  };
+
+  // 1. Universe — the stored index list, never an invented one
+  //    (a configured subset partitions it, as in the quotes run).
+  // #3931: the run input names the list — the parameterized
+  // job serves any stored list; absent ⇒ the default universe.
+  const universeIndex = resolveRunUniverse(def, opts.universe);
+  const universeLabel = labelForRunUniverse(registry, universeIndex);
+  const list = await deps.universeStore.latest(universeIndex);
+  let symbols = list
+    ? Array.from(
+        new Set(
+          list.symbols
+            .map((m) => m.symbol.toUpperCase().trim())
+            .filter((s) => s.length > 0),
+        ),
+      )
+    : [];
+  if (opts.symbols && list) {
+    const wanted = new Set(
+      opts.symbols.map((s) => s.toUpperCase().trim()).filter((s) => s.length > 0),
+    );
+    symbols = symbols.filter((s) => wanted.has(s));
+  }
+  const universe: FeedDatasetArtifact["universe"] = {
+    kind: "index",
+    index: universeIndex,
+    label: universeLabel,
+    snapshotDate: list?.snapshotDate ?? null,
+    sourceLabel: list?.sourceLabel ?? null,
+    size: symbols.length,
+  };
+  if (!list || symbols.length === 0) {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: 0,
+      missingSymbols: [],
+      codedError: FEED_JOB_CODES.universeMissing,
+      errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
+      universe,
+    });
+  }
+
+  // 2. The capability contract: no historicalBars method ⇒ a named
+  //    refusal recorded as the run, never a fabricated dataset.
+  if (typeof deps.provider.getHistoricalBars !== "function") {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: symbols.length,
+      missingSymbols: symbols,
+      codedError: FEED_JOB_CODES.historicalBarsUnsupported,
+      errorMessage: `Provider "${def.sourceId}" does not implement historicalBars; the feed job cannot pull its dataset.`,
+      universe,
+    });
+  }
+
+  // 3. Fetch per symbol through the port — the same window the
+  //    live technicals leg fetches (HISTORY_BAR_LIMIT daily bars).
+  //    A symbol whose fetch throws, whose envelope names another
+  //    provider, or whose bars are not all live is a missing
+  //    symbol with the failure counted — one bad symbol never
+  //    poisons the rows already pulled, and generated bars are
+  //    never persisted as data.
+  const rows: FeedDailyBarRow[] = [];
+  const missingSymbols: string[] = [];
+  let firstError: string | null = null;
+  for (const symbol of symbols) {
+    try {
+      const envelope = await deps.provider.getHistoricalBars(
+        symbol,
+        "1D",
+        HISTORY_BAR_LIMIT,
+        {
+          runId,
+          tenantId: opts.tenantId ?? "default",
+          ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+        },
+      );
+      if (envelope.providerId !== def.sourceId) {
+        missingSymbols.push(symbol);
+        firstError ??= `Provider envelope named "${envelope.providerId}" for a "${def.sourceId}" feed job; the result was refused, not relabelled.`;
+        continue;
+      }
+      if (envelope.result == null || envelope.result.length === 0) {
+        missingSymbols.push(symbol);
+        continue;
+      }
+      if (!marketDataResearchBarsToDailyBars(envelope.result)) {
+        missingSymbols.push(symbol);
+        firstError ??= `Provider "${def.sourceId}" returned non-live bars for "${symbol}"; the symbol was skipped, not persisted as data.`;
+        continue;
+      }
+      rows.push({ symbol, bars: envelope.result });
+    } catch (err) {
+      missingSymbols.push(symbol);
+      firstError ??= scrubFailureMessage(
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  if (rows.length === 0) {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: symbols.length,
+      missingSymbols,
+      codedError: FEED_JOB_CODES.noBarsReturned,
+      errorMessage:
+        firstError ??
+        `Provider "${def.sourceId}" returned no daily bars for the ${universeLabel} universe; nothing was persisted as data.`,
+      universe,
+    });
+  }
+  return record({
+    status: missingSymbols.length > 0 ? "partial" : "completed",
+    rows,
+    requested: symbols.length,
+    missingSymbols,
+    codedError: null,
+    errorMessage: null,
+    universe,
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* The persisted-technicals read — the UX's primary source (#3931)     */
+/* ------------------------------------------------------------------ */
+
+/** One persisted-technicals read: bars by symbol + provenance. */
+export interface PersistedTechnicalsRead {
+  /** Daily bars per symbol (live bars only, converted). */
+  barsBySymbol: Map<string, YahooDailyBar[]>;
+  /** The UX label for these bars (names the persisted source). */
+  label: string;
+  /** When the bars were fetched (the producing run's finish time). */
+  asOf: string;
+  /** The universe whose copy this is (bars are per-symbol facts;
+   *  the universe names which list the job pulled, not a filter). */
+  universeIndex: IndexId;
+  universeLabel: string;
+  ageSeconds: number;
+  /** True when the copy is older than the caller's bound (or,
+   *  absent a bound, reported false — staleness is judged only
+   *  against a bound the caller actually set). */
+  stale: boolean;
+}
+
+/**
+ * Read the newest usable technicals copy: the persisted bars the
+ * UX reads as its primary source. A read NEVER fetches — the store
+ * is the only input. Absent or unusable ⇒ undefined (the caller
+ * falls back to the live fetch); a stale copy is returned WITH
+ * stale: true so the caller can fall back to live instead of
+ * serving old bars as current. Symbols whose stored bars are not
+ * all live are skipped (defense in depth — the producing job
+ * already refuses them at persist time).
+ */
+export async function readPersistedTechnicalsBars(
+  store: FeedDatasetStore,
+  args: {
+    maxAgeSeconds?: number;
+    nowMs: number;
+  },
+): Promise<PersistedTechnicalsRead | undefined> {
+  const artifact = await store.latestUsable("yahoo", "technicals");
+  if (!artifact || !artifact.bars || artifact.bars.length === 0) return undefined;
+  const barsBySymbol = new Map<string, YahooDailyBar[]>();
+  for (const row of artifact.bars) {
+    const daily = marketDataResearchBarsToDailyBars(row.bars);
+    if (daily) barsBySymbol.set(row.symbol.toUpperCase(), daily);
+  }
+  if (barsBySymbol.size === 0) return undefined;
+  const asOfMs = Date.parse(artifact.asOf);
+  const ageSeconds = Number.isNaN(asOfMs)
+    ? 0
+    : Math.max(0, Math.floor((args.nowMs - asOfMs) / 1000));
+  return {
+    barsBySymbol,
+    label: `Persisted Yahoo daily bars (as of ${artifact.asOf.slice(0, 10)})`,
+    asOf: artifact.asOf,
+    universeIndex: artifact.universe.index,
+    universeLabel: artifact.universe.label,
+    ageSeconds,
+    stale: args.maxAgeSeconds !== undefined && ageSeconds > args.maxAgeSeconds,
+  };
 }
 
 /* ------------------------------------------------------------------ */

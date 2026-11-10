@@ -210,6 +210,7 @@ describe("feed pipeline catalog + resolution (#3535)", () => {
     expect(FEED_PIPELINE_CATALOG.map((e) => e.jobId)).toEqual([
       "yahoo-nasdaq100-quotes",
       "yahoo-nasdaq100-fundamentals",
+      "yahoo-nasdaq100-technicals",
       "yahoo-sp100-quotes",
       "yahoo-sp500-quotes",
       "yahoo-dow-quotes",
@@ -237,7 +238,7 @@ describe("feed pipeline catalog + resolution (#3535)", () => {
 
   it("every catalog job is a valid J1 definition by configuration alone", () => {
     const raws = buildAllFeedPipelineJobDefinitions({});
-    expect(raws).toHaveLength(9);
+    expect(raws).toHaveLength(10);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("feed");
@@ -262,7 +263,7 @@ describe("feed pipeline catalog + resolution (#3535)", () => {
       }),
     });
     const first = await ensureFeedPipelineJobs(control, stores, {});
-    expect(first).toHaveLength(9);
+    expect(first).toHaveLength(10);
     const versions = new Map<string, number>();
     for (const def of await stores.definitions.listDefinitions()) {
       versions.set(def.jobId, def.version);
@@ -459,7 +460,7 @@ describe("feed job management through the control plane (#3535)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(9);
+    expect(registrations).toHaveLength(10);
     expect(specs.every((s) => s.nodePath === "")).toBe(true);
     expect(specs.map((s) => s.jobId).sort()).toEqual(
       FEED_PIPELINE_CATALOG.map((e) => e.jobId).sort(),

@@ -186,6 +186,42 @@ export interface YahooHistoryDeps {
    * never a throw: per-symbol failures stay per-symbol.
    */
   fetchBars: (symbol: string) => Promise<YahooDailyBar[] | null>;
+  /**
+   * #3931 — the source label for the bars fetchBars would return
+   * for a symbol (the label computeTechnicals carries onto the
+   * technicals, so the UX names the source). Absent ⇒ the live
+   * default ("Yahoo Finance"). The persisted-first wrapper sets
+   * this for symbols served from the persisted technicals dataset.
+   */
+  originFor?: (symbol: string) => string | null;
+}
+
+/**
+ * #3931 — persisted-first history deps: the persisted technicals
+ * dataset is the PRIMARY source, the live fetch the fallback.
+ * A symbol the persisted map carries is served from the map (no
+ * live call at all) and labelled with the persisted label; every
+ * other symbol falls through to the live deps unchanged. The live
+ * implementation is NOT deleted — it is the fallback, and the
+ * only source when no persisted map is supplied.
+ */
+export interface PersistedTechnicalsBars {
+  barsBySymbol: Map<string, YahooDailyBar[]>;
+  /** Label for persisted bars, e.g. "Persisted Yahoo daily bars (as of 2026-11-07)". */
+  label: string;
+}
+
+export function withPersistedBarsFirst(
+  live: YahooHistoryDeps,
+  persisted: PersistedTechnicalsBars,
+): YahooHistoryDeps {
+  const key = (symbol: string) => symbol.toUpperCase().trim();
+  return {
+    fetchBars: async (symbol: string) =>
+      persisted.barsBySymbol.get(key(symbol)) ?? live.fetchBars(symbol),
+    originFor: (symbol: string) =>
+      persisted.barsBySymbol.has(key(symbol)) ? persisted.label : null,
+  };
 }
 
 /**
@@ -288,7 +324,10 @@ export async function fetchPlatformTechnicalsBatch(
       batch.map(async (sym) => {
         try {
           const bars = await deps.fetchBars(sym);
-          return computeTechnicals(sym, bars);
+          // #3931: the origin label rides onto the technicals so
+          // the UX names the persisted source; absent ⇒ the live
+          // default ("Yahoo Finance").
+          return computeTechnicals(sym, bars, undefined, deps.originFor?.(sym) ?? undefined);
         } catch {
           return computeTechnicals(sym, null);
         }

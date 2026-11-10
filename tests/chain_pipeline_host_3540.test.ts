@@ -113,17 +113,18 @@ describe("the composed chains on the host (#3540)", () => {
       "deliver",
     ]);
     expect(view.stages.every((s) => s.status === "not-run")).toBe(true);
-    expect(view.stages.find((s) => s.stage === "deliver")?.nodePath).toBe("0/0/0/0/0");
+    expect(view.stages.find((s) => s.stage === "deliver")?.nodePath).toBe("0/0/0/0/0/0");
   });
 
   it("stage addressing resolves node paths and refuses by name", () => {
     const { ctx } = makeHostContext();
     expect(pipelineChainStageNodePath(ctx, CHAIN_ID, "feed")).toBe("");
-    expect(pipelineChainStageNodePath(ctx, CHAIN_ID, "enrich")).toBe("0/0");
-    expect(pipelineChainStageNodePath(ctx, CHAIN_ID, "deliver")).toBe("0/0/0/0/0");
-    // #3930: the alpaca chain folds the fundamentals node in,
-    // so its deliver stage sits one level deeper than before.
-    expect(pipelineChainStageNodePath(ctx, "alpaca-nasdaq100-quotes-pipeline", "deliver")).toBe("0/0/0/0/0");
+    expect(pipelineChainStageNodePath(ctx, CHAIN_ID, "enrich")).toBe("0/0/0");
+    expect(pipelineChainStageNodePath(ctx, CHAIN_ID, "deliver")).toBe("0/0/0/0/0/0");
+    // #3930/#3931: the alpaca chain folds the fundamentals and
+    // technicals nodes in, so its deliver stage sits two levels
+    // deeper than the five-node chain.
+    expect(pipelineChainStageNodePath(ctx, "alpaca-nasdaq100-quotes-pipeline", "deliver")).toBe("0/0/0/0/0/0");
     expect(() => pipelineChainStageNodePath(ctx, CHAIN_ID, "publish")).toThrow(
       /PIPELINE_CHAIN_STAGE_UNKNOWN/,
     );
