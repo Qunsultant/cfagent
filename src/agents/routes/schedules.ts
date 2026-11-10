@@ -220,18 +220,20 @@ export function makeRunScheduleCallback(
  * fallback for callers that carry no identity, never an override of one.
  * A context login such as an agent identity ("openaimp") therefore cannot
  * shadow the signed-in owner and send the credential lookup to the wrong
- * connection (alpaca:TEST:openaimp has no stored credential for the owner).
+ * connection (the stale connection has no stored credential for the owner).
  */
+type ScheduleEnv = "TEST" | "PROD";
+
 export function resolveTrustedScheduleIdentity(input: {
   headerLogin: string | null | undefined;
   headerEnvironment: string;
-  context?: { userLogin?: string; environment?: ETradeEnvironment } | null;
-  configuredEnvironment: ETradeEnvironment;
-}): { userLogin: string; environment: ETradeEnvironment } {
+  context?: { userLogin?: string; environment?: ScheduleEnv } | null;
+  configuredEnvironment: ScheduleEnv;
+}): { userLogin: string; environment: ScheduleEnv } {
   const headerLogin = isLoginShaped(input.headerLogin) ? input.headerLogin : "";
   const headerEnv =
     input.headerEnvironment === "TEST" || input.headerEnvironment === "PROD"
-      ? (input.headerEnvironment as ETradeEnvironment)
+      ? (input.headerEnvironment as ScheduleEnv)
       : undefined;
   return {
     userLogin: headerLogin || input.context?.userLogin || "",
@@ -673,13 +675,13 @@ export async function handleSchedulesRoutes(
         // verified identity; the stored screener context is per-instance
         // and can be stale (a previous login, or an agent identity such as
         // "openaimp"). Letting the context win made creation look for
-        // credentials under the wrong login (alpaca:TEST:openaimp) and
+        // credentials under the wrong connection and
         // refuse every schedule the signed-in owner tried to create.
         const trusted = resolveTrustedScheduleIdentity({
           headerLogin: headerUserLogin,
           headerEnvironment,
           context,
-          configuredEnvironment: resolveEnvironmentConfig(ctx.env).name as ETradeEnvironment,
+          configuredEnvironment: resolveEnvironmentConfig(ctx.env).name as ScheduleEnv,
         });
         const trustedUserLogin = trusted.userLogin;
         const trustedEnvironment = trusted.environment;
