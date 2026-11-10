@@ -132,10 +132,14 @@ describe("the panel follows the broker (#3356)", () => {
 
 describe("the hub gates on the catalogue (#3356)", () => {
   it("asks the catalogue whether the broker can risk-report, and passes the broker", () => {
+    // #3050 PR5: the portfolio sub-tab moved out of the hub into PortfolioPanel;
+    // the catalogue gate travels with it. Same assertions, new host.
     const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
-    expect(hub).toContain('brokerSupports(riskBroker, "portfolioRisk")');
-    expect(hub).toContain("broker={riskBroker}");
+    const panel = readFileSync("src/client/PortfolioPanel.tsx", "utf8");
+    const src = hub + panel;
+    expect(src).toContain('brokerSupports(riskBroker, "portfolioRisk")');
+    expect(src).toContain("broker={riskBroker}");
     // The removed defect: a broker name standing in for a capability.
-    expect(hub).not.toContain('selectedBroker === "etrade" ? (\n              <PortfolioRiskPanel');
+    expect(src).not.toContain('selectedBroker === "etrade" ? (\n              <PortfolioRiskPanel');
   });
 });
