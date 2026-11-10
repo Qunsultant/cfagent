@@ -307,11 +307,11 @@ const FLEET_DEFAULT_POSTURE: Record<CapabilityId, CapabilityEntry> = {
   ),
   webFetch: entry(
     "enabled",
-    "Provided by PortThink (#3494): every PortThink turn that runs through port hooks carries the web_fetch tool (getPortWebTools over src/services/webFetch.ts, #2760) unless a class already supplies it. Fetched content is untrusted data. AGENT_CAPABILITIES_DISABLED withdraws it.",
+    "Provided by PortThink (#3494, #3934): the web_fetch tool (getPortWebTools over src/services/webFetch.ts, #2760) composes onto every PortThink class — a chat turn that runs through port hooks carries it (beforeTurn), and a class with no chat turn carries it on its execution surface (getExecutionTools) — unless the class already supplies it. Fetched content is untrusted data. AGENT_CAPABILITIES_DISABLED withdraws it.",
   ),
   webSearch: entry(
     "enabled",
-    "Provided by PortThink (#3495): every PortThink turn that runs through port hooks carries the web_search tool (getPortWebTools over src/services/webSearch.ts, #2731). It fails loud with web_search_provider_not_configured until the provider key is set; the provider decision is #3501.",
+    "Provided by PortThink (#3495, #3934): the web_search tool (getPortWebTools over src/services/webSearch.ts, #2731) composes onto every PortThink class — a chat turn through port hooks (beforeTurn), and a class with no chat turn on its execution surface (getExecutionTools). It fails loud with web_search_provider_not_configured until the provider key is set; the provider decision is #3501.",
     { prerequisite: "BRAVE_SEARCH_API_KEY" },
   ),
   aiSearch: entry(
@@ -382,6 +382,15 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
       "enabled",
       "This class is the fleet's browser surface: fetch, inspect, and screenshot over the BROWSER rendering binding declared in wrangler.jsonc. A per-agent browser tool for every class lands as S9 (#3493).",
     ),
+    webFetch: entry(
+      "enabled",
+      "Composed on this class's execution surface (#3934): BrowserAgent hosts no chat turn, so the port's turn hook never fires for it; getExecutionTools composes web_fetch here, behind the same capability gate (isPortCapabilityEnabled), additively. Fetched content is untrusted data. AGENT_CAPABILITIES_DISABLED withdraws it.",
+    ),
+    webSearch: entry(
+      "enabled",
+      "Composed on this class's execution surface (#3934): the port's turn hook never fires for a class with no chat turn; getExecutionTools composes web_search here, behind the same capability gate. It fails loud with web_search_provider_not_configured until the provider key is set; the provider decision is #3501.",
+      { prerequisite: "BRAVE_SEARCH_API_KEY" },
+    ),
   },
   SlackAgent: {
     slack: entry(
@@ -401,6 +410,15 @@ export const PORT_THINK_CAPABILITY_BASE: Record<
       "unavailable",
       "Cloudflare Containers configuration declared in wrangler.jsonc for SandboxAgent (cloudflare/debian-trixie). At runtime without an active container, commands return executed:false honestly (#121); full container execution runs in Workers Paid container runtime.",
       { unavailableReason: "sandbox_container_backend_not_configured" },
+    ),
+    webFetch: entry(
+      "enabled",
+      "Composed on this class's execution surface (#3934): SandboxAgent hosts no chat turn, so the port's turn hook never fires for it; getExecutionTools composes web_fetch here, behind the same capability gate (isPortCapabilityEnabled), additively. Fetched content is untrusted data. AGENT_CAPABILITIES_DISABLED withdraws it.",
+    ),
+    webSearch: entry(
+      "enabled",
+      "Composed on this class's execution surface (#3934): the port's turn hook never fires for a class with no chat turn; getExecutionTools composes web_search here, behind the same capability gate. It fails loud with web_search_provider_not_configured until the provider key is set; the provider decision is #3501.",
+      { prerequisite: "BRAVE_SEARCH_API_KEY" },
     ),
   },
 };
