@@ -48,6 +48,14 @@ import { ETradeBrowserService } from "../services/browserAgent";
  * likewise stays unconfigured here (no getModel/tools/system prompt)
  * — giving it a model now would be new behavior, not preservation,
  * and belongs to a future turn slice, not this migration.
+ *
+ * Issue #3934: this class hosts no chat turn, so the port's turn
+ * hook never fires for it — the web_fetch / web_search
+ * capabilities are composed on its execution surface instead
+ * (PortThink.getExecutionTools, the same builder and the same
+ * capability gate as the turn path). The surface is inherited
+ * deliberately: BrowserAgent ships no AI SDK tools of its own, so
+ * overriding it would only restate the base.
  */
 export class BrowserAgent extends PortThink {
   private browserService?: ETradeBrowserService;
