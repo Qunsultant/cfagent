@@ -239,7 +239,10 @@ describe("#3923 state-off — stateless work runs fully ephemeral", () => {
         new Response("plain body", { status: 200, headers: { "content-type": "text/plain" } }),
     );
     const { ctx, calls } = spyCtx();
-    const agent = new ResearchAgent(ctx, STATE_OFF_ENV);
+    // WEB_SEARCH_PROVIDERS: "" — since #3935 the default chain always
+    // includes keyless DuckDuckGo, so an explicitly empty provider list
+    // is the not-configured state this test asserts against.
+    const agent = new ResearchAgent(ctx, { ...STATE_OFF_ENV, WEB_SEARCH_PROVIDERS: "" });
     const baseline = totalCalls(calls);
 
     const tools = agent.getPortWebTools() as Record<string, any>;
