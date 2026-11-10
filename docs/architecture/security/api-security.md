@@ -124,3 +124,33 @@ Rules:
   never claimed here; that check belongs to the owner.
 - **No secret value is ever recorded here.** Names, directions, and
   enablement states only.
+
+## 7. Slack credentials: what is wired, and what is deliberately not (#3952)
+
+Four Slack Worker secrets reach the deployment through
+`.github/workflows/deploy.yml`, all as `optional_secret` pushes — an absent
+value is reported in the job summary and leaves the channel in its
+fail-closed state, never a deploy failure.
+
+| Worker secret | Read by | Absence means |
+| --- | --- | --- |
+| `SLACK_SIGNING_SECRET` | `src/security/webhookSecurity.ts` (`gateSlackRequest`), `src/agents/slackAgent.ts` | The inbound channel refuses every request (`/slack/*`); no signature check can pass. |
+| `SLACK_BOT_TOKEN` | `src/services/slackFiles.ts`, `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/trading/slack/agent.ts`, delivery jobs | The outbound bot-API leg is skipped; delivery surfaces report "no Slack transport configured" by name. The snap's bot leg also needs a channel passed per call — it has no `SLACK_CHANNEL` fallback. |
+| `SLACK_CLIENT_ID` | `src/server/routes/messaging.ts` (`/slack/install`) | The install route answers 500 naming the missing variable. |
+| `SLACK_CLIENT_SECRET` | `src/server/routes/messaging.ts` (`/slack/oauth_callback`) | The OAuth callback cannot exchange the code; installation fails at that step. |
+
+**Deliberately not synced** (setting them on the Worker would configure
+nothing the code reads):
+
+- `SLACK_APP_TOKEN` — Slack Socket Mode only. This Worker serves Slack
+  over HTTP events and the interactions endpoint, so an app-level token
+  has no consumer here.
+- `SLACK_VERIFICATION_TOKEN` — deprecated by Slack and superseded by
+  request signing. Accepting it as a second verification path would
+  weaken `gateSlackRequest`, not extend it.
+- `SLACK_APP_ID` — no code path reads it; the install URL is built from
+  the client id (`ETradeSlackTradingService.getInstallUrl`).
+
+Wiring any of the three is a code change first (the reader), then a
+deploy.yml line — never a deployment setting that silently implies a
+capability.

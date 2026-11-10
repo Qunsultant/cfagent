@@ -151,3 +151,47 @@ describe("scripts/ci/put-secret.sh (#590)", () => {
     expect(helper).toContain("GITHUB_STEP_SUMMARY");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Slack credentials (#3952)
+// ---------------------------------------------------------------------------
+
+describe("deploy.yml — Slack credentials (#3952)", () => {
+  // The four names the Worker code reads. Presence in the sync list is
+  // what makes a GitHub secret reach the deployment at all.
+  const WIRED = [
+    "SLACK_BOT_TOKEN",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET",
+  ];
+
+  // Names with no reader in src/: syncing them would configure nothing
+  // the code implements (api-security.md §7 records the reasons).
+  const NOT_WIRED = ["SLACK_APP_TOKEN", "SLACK_VERIFICATION_TOKEN", "SLACK_APP_ID"];
+
+  it("syncs each Slack credential the code reads, as an optional push", () => {
+    for (const name of WIRED) {
+      expect(workflow, `${name}: no GitHub-secret source`).toContain(`secrets.${name}`);
+      expect(workflow, `${name}: not pushed`).toContain(`optional_secret ${name} `);
+      // Optional, never required: absence is a reported fail-closed state,
+      // not a reason to fail a code deploy.
+      expect(workflow, `${name}: must not be required`).not.toContain(`require_secret ${name} `);
+    }
+  });
+
+  it("does not push the three names no code path reads", () => {
+    for (const name of NOT_WIRED) {
+      expect(workflow, `${name}: has no reader — do not sync it`).not.toContain(`secret ${name} `);
+      expect(workflow, `${name}: has no reader — do not sync it`).not.toContain(`secrets.${name}`);
+    }
+  });
+
+  it("keeps the Slack pushes in the existing core-secrets step (no seventh step)", () => {
+    const core = section("\n  sync-secrets:", "\n      - name: Set E*TRADE secrets");
+    for (const name of WIRED) {
+      expect(core, `${name} belongs to the core step`).toContain(`optional_secret ${name} `);
+    }
+    expect(workflow.match(/source scripts\/ci\/put-secret\.sh/g) ?? []).toHaveLength(6);
+  });
+});
