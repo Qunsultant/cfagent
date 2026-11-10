@@ -785,7 +785,20 @@ export interface Env {
   EMAIL?: any;
   EMAIL_SECRET?: string;
   EMAIL_AGENT_ADDRESS?: string;
-  // Cloudflare Slack Agent Configuration
+  // Cloudflare Slack Agent Configuration (#3952)
+  //
+  // The four names below are what the Worker code reads, and what
+  // .github/workflows/deploy.yml pushes as OPTIONAL secrets: absence is
+  // a reported, fail-closed state, never a deploy failure. Without
+  // SLACK_SIGNING_SECRET the inbound channel refuses; without
+  // SLACK_BOT_TOKEN the outbound legs report no Slack transport; and
+  // /slack/install answers 500 naming SLACK_CLIENT_ID.
+  //
+  // Deliberately NOT wired, so no config claims a capability the code
+  // does not have: SLACK_APP_TOKEN (Socket Mode — this Worker serves
+  // Slack over HTTP events), SLACK_VERIFICATION_TOKEN (deprecated;
+  // SLACK_SIGNING_SECRET is the verification path), SLACK_APP_ID (no
+  // code path reads it).
   SLACK_CLIENT_ID?: string;
   SLACK_CLIENT_SECRET?: string;
   SLACK_SIGNING_SECRET?: string;

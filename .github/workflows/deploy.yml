@@ -191,6 +191,10 @@ jobs:
           S_SCREENER_EMAIL_TO: ${{ secrets.SCREENER_EMAIL_TO }}
           S_CHANNEL_EMAIL_PRINCIPALS: ${{ secrets.CHANNEL_EMAIL_PRINCIPALS }}
           S_THINK_WEBHOOK_SECRET: ${{ secrets.THINK_WEBHOOK_SECRET }}
+          S_SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          S_SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+          S_SLACK_CLIENT_ID: ${{ secrets.SLACK_CLIENT_ID }}
+          S_SLACK_CLIENT_SECRET: ${{ secrets.SLACK_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           source scripts/ci/put-secret.sh
@@ -231,6 +235,21 @@ jobs:
           # (503) until the operator sets the GitHub secret, so
           # absence is reported here, never a sync failure.
           optional_secret THINK_WEBHOOK_SECRET "$S_THINK_WEBHOOK_SECRET"
+
+          # Slack channel credentials (#3952). All four are optional:
+          # absence is a reported, fail-closed state, never a deploy
+          # failure. Without SLACK_SIGNING_SECRET the inbound channel
+          # refuses every request; without SLACK_BOT_TOKEN the outbound
+          # legs report "no Slack transport configured" by name; and
+          # /slack/install answers 500 naming SLACK_CLIENT_ID. The three
+          # names this Worker does not read (SLACK_APP_TOKEN for Socket
+          # Mode, the deprecated SLACK_VERIFICATION_TOKEN, and
+          # SLACK_APP_ID) are deliberately not synced — see
+          # docs/architecture/security/api-security.md §7.
+          optional_secret SLACK_BOT_TOKEN "$S_SLACK_BOT_TOKEN"
+          optional_secret SLACK_SIGNING_SECRET "$S_SLACK_SIGNING_SECRET"
+          optional_secret SLACK_CLIENT_ID "$S_SLACK_CLIENT_ID"
+          optional_secret SLACK_CLIENT_SECRET "$S_SLACK_CLIENT_SECRET"
 
       - name: Set E*TRADE secrets on Cloudflare Worker [${{ needs.load-environment.outputs.target_env }}]
         env:
