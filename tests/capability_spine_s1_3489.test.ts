@@ -162,8 +162,8 @@ describe("capability resolution: truthful defaults (#3489)", () => {
     expect(m.capabilities.lifecycle.state).toBe("enabled");
     expect(m.capabilities.webSockets.state).toBe("enabled");
     expect(m.tools.workspace.state).toBe("enabled");
-    expect(m.tools.webFetch.state).toBe("not-implemented");
-    expect(m.tools.webSearch.state).toBe("not-implemented");
+    expect(m.tools.webFetch.state).toBe("enabled");
+    expect(m.tools.webSearch.state).toBe("enabled");
     expect(m.tools.payments.state).toBe("not-implemented");
   });
 

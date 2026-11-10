@@ -148,7 +148,11 @@ describe("#1958 report asset agent migrates to PortThink", () => {
       expect(await inst.beforeTurn(thinkCtx())).toEqual({ instructions: "one-shot" });
       expect(seen).toHaveLength(0);
       // The override is consumed: the next turn delegates again.
-      expect(await inst.beforeTurn(thinkCtx())).toEqual({ instructions: "from hooks" });
+      // The consumed one-shot makes the next turn delegate to the hooks again; the
+      // hooks' config passes through intact and PortThink adds only the web tools (#3494/#3495).
+      const delegated: any = await inst.beforeTurn(thinkCtx());
+      expect(delegated).toMatchObject({ instructions: "from hooks" });
+      expect(Object.keys(delegated.tools).sort()).toEqual(["web_fetch", "web_search"]);
       expect(seen).toHaveLength(1);
     });
 
@@ -160,7 +164,10 @@ describe("#1958 report asset agent migrates to PortThink", () => {
           return { instructions: "do it", maxSteps: 2 };
         },
       });
-      expect(await inst.beforeTurn(thinkCtx())).toEqual({ instructions: "do it", maxSteps: 2 });
+      const config: any = await inst.beforeTurn(thinkCtx());
+      // Hook-supplied fields pass through exactly; PortThink adds only the web tools (#3494/#3495).
+      expect(config).toMatchObject({ instructions: "do it", maxSteps: 2 });
+      expect(Object.keys(config.tools).sort()).toEqual(["web_fetch", "web_search"]);
       expect(seen).toHaveLength(1);
       expect(seen[0].system).toBe("sys");
       expect(seen[0].messages).toEqual([{ role: "user", content: "hi" }]);
