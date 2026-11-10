@@ -1320,11 +1320,18 @@ carry explicit TBD rows: absence is visible, never omitted.
 
 Technology Platform (owner: CTO):
 
+The CTO rows below were added 2026-11-10; their statuses are as of that date.
+
 | Product | Purpose | Status | Tracking |
 | --- | --- | --- | --- |
 | Generic workflow capability | The one durable workflow engine as a tenant-configurable platform product | Partial — engine Live in pipeline use; the product itself Filed | #3700 |
 | Generic scheduling capability | The scheduling plane as a technology-platform product | Filed | #3709 |
 | Tenant-instantiable pipeline capability | Platform-tenant instantiation of the pipeline, aligned to the platform model | Filed | #3692 (under #3687) |
+| Composable workflow platform | Reusable, composable workflow Blocks: the saga decomposed into capabilities, a Block registry, and spec-driven generation | Partial — Phase A (decomposition) merged; Block registry, generation, agentic legs, and composition proof Filed | #2770 |
+| One workflow for all four families | One staged producer/consumer workflow for stocks, options, strategy, and goal screens on the shared stage-message contract | Partial — merged; 15-factor profile NOT COMPLIANT (9 PASS / 6 PARTIAL); live proof pending | #3186 (closed) |
+| Unified Goal Screener (NextGenTP first product) | Goal-thesis screens end to end on the one workflow: schedule → queues → feed → gather → store → serve → deliver | Partial — phases 1–4 merged; audited-ship pending CISO+CDO sign-off; live two-thesis proof pending | #1972 |
+| Paid screener-to-trade saga | Cross-domain paid screener run → trade, with payment gate, journey gate, per-order approvals, and failure credit | Partial — implementation PASS; close pending owner steps (price approval, live paid run, risk-stage live proof) | #2041 |
+| Live job updates on one contract | One contract for live job updates: shared polling, Agent WebSocket push, webhook subscriptions | Partial — polling convergence merged; WebSocket push and webhooks Filed | #2376 |
 
 Agentic Platform (owner: CAIO; parent product issue #3701):
 
@@ -1800,8 +1807,10 @@ owner's word, not on this document.
   model, each product registered and statused like §12.2's
   rows.
 - **Roadmap:** #3700 and #3709 (Technology Platform); the
-  eleven #3701 children (Agentic Platform — filed; their build
-  sequence is **TBD**); #3687's chain for tenant instantiation;
+  Technology Platform (CTO) products defined in §12.2 (this
+  update, 2026-11-10); the eleven #3701 children (Agentic
+  Platform — filed; their build sequence is **TBD**); #3687's
+  chain for tenant instantiation;
   the Security & trust platform's products defined in §12.2
   (this issue, #3851); the Product & experience (CPO)
   platform's products defined in §12.2 (this issue, #3856);
