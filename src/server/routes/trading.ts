@@ -17,6 +17,7 @@
  */
 
 import type { Env } from "../../types";
+import { DEFAULT_SCHEDULES } from "../../schedule";
 import { OPERATION_CATALOG } from "../../orchestrate";
 import { SCHEDULE_SYSTEMS, WORKER_CRON_TRIGGERS_INVENTORY } from "../../services/scheduleSystems";
 import { actorGateway } from "../../services/cloudflareActorGateway";
@@ -86,6 +87,15 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
           })),
         );
         return Response.json({ ok: true, operations });
+      }
+      // Issue #3996 — built-in goals for the goals UI dropdown +
+      // seed-all button. Session-gated like every other
+      // /api/schedule/* route above (unauthenticated → 401); the
+      // list is read from DEFAULT_SCHEDULES at request time, never
+      // hardcoded in the client, so the UI tracks src/schedule.ts
+      // exactly.
+      if (path === "/api/schedule/builtin-goals" && request.method === "GET") {
+        return Response.json({ ok: true, goals: DEFAULT_SCHEDULES });
       }
       if (path === "/api/schedule/goals" && request.method === "POST") {
         const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
