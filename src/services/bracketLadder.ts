@@ -23,6 +23,43 @@ export interface BracketLadderRung {
   clientOrderId: string;
 }
 
+/**
+ * Resolve a ladder's exit distances from EITHER absolute deltas or percent
+ * inputs. No default is invented: before this, `take_profit_delta` fell back
+ * to 1.00 and `stop_loss_delta` to 2.00, so a caller that thought in
+ * percents (the #3812 order-preview vocabulary) silently got a +$1.00 /
+ * -$2.00 bracket on any entry price. On a live AAPL ladder that produced
+ * +0.29% / -0.56% exits where +4% / -2% were asked for.
+ */
+export function resolveLadderExitDeltas(input: {
+  basePrice: number;
+  takeProfitDelta?: number;
+  stopLossDelta?: number;
+  takeProfitPct?: number;
+  stopLossPct?: number;
+}): { takeProfitDelta: number; stopLossDelta: number } {
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const takeProfitDelta =
+    input.takeProfitDelta ??
+    (input.takeProfitPct !== undefined
+      ? round((input.basePrice * input.takeProfitPct) / 100)
+      : undefined);
+  const stopLossDelta =
+    input.stopLossDelta ??
+    (input.stopLossPct !== undefined
+      ? round((input.basePrice * input.stopLossPct) / 100)
+      : undefined);
+  if (takeProfitDelta === undefined || stopLossDelta === undefined) {
+    throw new Error(
+      "Bracket ladder requires exit distances: pass take_profit_delta/stop_loss_delta or take_profit_pct/stop_loss_pct. No default exit is invented.",
+    );
+  }
+  if (!(takeProfitDelta > 0) || !(stopLossDelta > 0)) {
+    throw new Error("Bracket ladder exit distances must both be positive.");
+  }
+  return { takeProfitDelta, stopLossDelta };
+}
+
 export interface BracketLadderSpec {
   symbol: string;
   side: "buy" | "sell";
