@@ -89,6 +89,9 @@ describe("Cloudflare Browser Agent & Independent Slack Agent", () => {
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
     ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
+    // Issue #3937: the Slack desk is an E*TRADE service, so the test
+    // tenant selects etrade explicitly — the platform default is alpaca now.
+    BROKER_ID: "etrade",
     SLACK_SIGNING_SECRET: "test_slack_signing_secret_999",
     SLACK_BOT_TOKEN: "xoxb-test-bot-token-999",
     SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/T00/B00/X00",

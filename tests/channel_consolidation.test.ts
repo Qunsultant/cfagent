@@ -105,6 +105,9 @@ const baseEnv = (overrides: Partial<Env> = {}): Env =>
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
     ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
+    // Issue #3937: the Slack desk is an E*TRADE service, so the test
+    // tenant selects etrade explicitly — the platform default is alpaca now.
+    BROKER_ID: "etrade",
     EMAIL_AGENT_ADDRESS: "trade@agent.openaimp.com",
     SLACK_SIGNING_SECRET: SECRET,
     SLACK_BOT_TOKEN: "xoxb-test-1262",

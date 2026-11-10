@@ -294,6 +294,22 @@ function measure(): Map<string, number> {
  * identifier rows are added. Net zero on the census population
  * (11 moved, 11 new); the platform slice grows 186 -> 189 rows and its
  * total 1039 -> 1050 lines, the integration total 6526 -> 6515.
+ * Baseline update (#3937, 2026-11-10): cancel-ticker / cancel-all serve
+ * the selected broker, so the route dispatches the cancel port by broker
+ * id — one more comparison (the helper dispatch) while the two retired
+ * alpaca-only gates are replaced by the two ledger conditionals, net
+ * brokerOrders.ts alpaca 6->7. Dispositioned INTEGRATION (the #3883
+ * note above the row): selecting the engine by broker id is the
+ * route's job. The surrounding comments were neutralized instead
+ * (five prose mentions), and the cancel engine's own rows do not move.
+ * Baseline update (#3937, 2026-11-10): the hub's diagnostics fallback is
+ * the platform default (alpaca), not the legacy etrade fallback, so
+ * ETradeTradingHub.tsx alpaca 23->24 while etrade 114->103 shrinks via
+ * #3050's move. Dispositioned INTEGRATION — the fallback names the broker
+ * the diagnostics run against, which is the hub integration's job. The
+ * panel itself shrinks (AlpacaBrokerPanel.tsx alpaca 38->8, etrade 4->3)
+ * and needs no baseline change. The broker panel mount moved to
+ * PortfolioPanel.tsx (#3050); the selected broker is passed there.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -591,7 +607,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/brokerOptions.ts", "etrade", 3],
   // #3883 INTEGRATION: the cancel route selects the engine by broker id, so
   // one comparison names it (the surrounding wording stays neutral).
-  ["src/agents/routes/brokerOrders.ts", "alpaca", 6],
+  // #3937: the per-broker port selection adds one more comparison (the
+  // helper dispatch); the two retired alpaca-only gates are replaced by
+  // the two ledger conditionals, so the net is 6 -> 7.
+  ["src/agents/routes/brokerOrders.ts", "alpaca", 7],
   ["src/agents/routes/brokerOrders.ts", "etrade", 31],
   ["src/agents/routes/brokerReads.ts", "alpaca", 1],
   ["src/agents/routes/brokerReads.ts", "etrade", 1],
@@ -681,7 +700,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/ETradeDynamicMenu.tsx", "alpaca", 23],
   ["src/client/ETradeDynamicMenu.tsx", "etrade", 37],
   ["src/client/ETradeDynamicMenu.tsx", "yahoo", 6],
-  ["src/client/ETradeTradingHub.tsx", "alpaca", 23],
+  // #3937 INTEGRATION: the diagnostics fallback names the platform default
+  // broker (the legacy etrade fallback is gone); the comment was neutralized.
+  ["src/client/ETradeTradingHub.tsx", "alpaca", 24],
   ["src/client/ETradeTradingHub.tsx", "etrade", 103],
   ["src/client/ProviderConnectivityDashboard.tsx", "etrade", 20],
   ["src/client/SchedulesPanel.tsx", "etrade", 7],

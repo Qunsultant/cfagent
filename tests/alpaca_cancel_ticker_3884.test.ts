@@ -178,11 +178,17 @@ describe("#3884 — records and surfaces", () => {
     }
   });
 
-  it("the route exposes the ticker scope and refuses another broker by name", () => {
+  it("the route exposes the ticker scope and serves the selected broker (#3937)", () => {
+    // Issue #3937: the alpaca-only gate is gone — the route resolves the
+    // cancel port per broker (Alpaca keeps its service port; any other
+    // broker with the capability runs the same engine over its adapter),
+    // and only a broker WITHOUT the capability is refused by name.
     const source = readFileSync("src/agents/routes/brokerOrders.ts", "utf8");
     expect(source).toContain('path.endsWith("/broker/orders/cancel-ticker")');
-    expect(source).toContain("cancelTickerOrders(createCancelBrokerPort(ctx.env)");
+    expect(source).toContain("cancelTickerOrders(port,");
+    expect(source).toContain("cancelPortForBroker(");
     expect(source).toContain("provider_unsupported");
+    expect(source).not.toContain('broker !== "alpaca"');
   });
 
   it("the tool resolves limits from the caller's own settings, not a literal", () => {

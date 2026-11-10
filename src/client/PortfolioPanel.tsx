@@ -247,7 +247,7 @@ export function PortfolioPanel({
             {selectedBroker === "etrade" ? (
               <AccountPanels activeEnv={activeEnv} onUnreadAlertsChange={onUnreadAlertsChange} />
             ) : (
-              <AlpacaBrokerPanel activeEnv={activeEnv} />
+              <AlpacaBrokerPanel broker={selectedBroker} activeEnv={activeEnv} />
             )}
           </ErrorBoundary>
 

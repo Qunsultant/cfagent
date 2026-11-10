@@ -98,8 +98,12 @@ describe("broker unavailable code", () => {
 });
 
 describe("resolveTenantBroker fail-open", () => {
-  it("defaults to the legacy etrade when the store is absent", async () => {
-    await expect(resolveTenantBroker({} as never)).resolves.toBe("etrade");
+  it("defaults to the platform default broker (alpaca) when the store is absent", async () => {
+    // Issue #3937 (user decision 2026-11-10): the GLOBAL default is
+    // alpaca/paper — the legacy etrade fallback is gone, so every surface
+    // (neutral routes, legacy E*TRADE surfaces, email/Slack/voice, options
+    // routes, copilot resolver, panels) resolves the same broker.
+    await expect(resolveTenantBroker({} as never)).resolves.toBe("alpaca");
   });
 });
 
