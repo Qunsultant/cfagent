@@ -1196,6 +1196,10 @@ export class AlpacaPlaceBracketLadderCommand implements IMcpToolCommand {
       take_profit_delta: { type: "number", description: "Profit target distance from tier entry price" },
       takeProfitDelta: { type: "number", description: "CamelCase alias for take_profit_delta" },
       stop_loss_delta: { type: "number", description: "Protective stop distance from tier entry price" },
+      take_profit_pct: { type: "number", description: "Profit target as a percent of the tier entry (e.g. 4 for +4%); converted to an absolute delta" },
+      takeProfitPct: { type: "number", description: "CamelCase alias for take_profit_pct" },
+      stop_loss_pct: { type: "number", description: "Protective stop as a percent of the tier entry (e.g. 2 for -2%); converted to an absolute delta" },
+      stopLossPct: { type: "number", description: "CamelCase alias for stop_loss_pct" },
       stopLossDelta: { type: "number", description: "CamelCase alias for stop_loss_delta" },
       direction: {
         type: "string",
@@ -1216,6 +1220,8 @@ export class AlpacaPlaceBracketLadderCommand implements IMcpToolCommand {
       continuation_increment: { type: "number", description: "baseBreakout: price advance from the last rung needed to place the next one" },
       step_price: { type: "number", description: "baseBreakout: the price observed now (defaults to the confirmation close)" },
       ladder_id: { type: "string", description: "baseBreakout: resume this ladder (from a previous call's ladderId)" },
+      idempotency_key: { type: "string", description: "Retry key: the same key reuses the ladder id and its client order ids, so a retry cannot place a second ladder" },
+      idempotencyKey: { type: "string", description: "CamelCase alias for idempotency_key" },
       minute_et: { type: "number", description: "baseBreakout: minutes after midnight ET, for the session window check" },
       base: {
         type: "object",
@@ -1281,12 +1287,21 @@ export class AlpacaPlaceBracketLadderCommand implements IMcpToolCommand {
       return executeBaseBreakoutLadder(input, context);
     }
 
-    const { executeBracketLadder } = await import("../../services/bracketLadder");
+    const { executeBracketLadder, resolveLadderExitDeltas } = await import(
+      "../../services/bracketLadder"
+    );
     const basePrice = input.base_price ?? input.basePrice ?? 100.0;
     const stepIncrement = input.step_increment ?? input.stepIncrement ?? 1.0;
     const quantityPerTier = input.qty_per_tier ?? input.quantityPerTier ?? 1;
-    const takeProfitDelta = input.take_profit_delta ?? input.takeProfitDelta ?? 1.0;
-    const stopLossDelta = input.stop_loss_delta ?? input.stopLossDelta ?? 2.0;
+    // #4014 follow-up: exits are never invented. Absolute deltas or the
+    // #3812 percent vocabulary; anything else refuses before a rung is placed.
+    const { takeProfitDelta, stopLossDelta } = resolveLadderExitDeltas({
+      basePrice,
+      takeProfitDelta: input.take_profit_delta ?? input.takeProfitDelta,
+      stopLossDelta: input.stop_loss_delta ?? input.stopLossDelta,
+      takeProfitPct: input.take_profit_pct ?? input.takeProfitPct,
+      stopLossPct: input.stop_loss_pct ?? input.stopLossPct,
+    });
 
     const receipt = await executeBracketLadder(
       {
@@ -1299,6 +1314,7 @@ export class AlpacaPlaceBracketLadderCommand implements IMcpToolCommand {
         quantities: input.quantities,
         takeProfitDelta,
         stopLossDelta,
+        idempotencyKey: input.idempotency_key ?? input.idempotencyKey,
         direction: input.direction || "ascending",
         timeInForce: input.time_in_force || "day",
         extendedHours: input.extended_hours,
