@@ -49,6 +49,7 @@ import {
 } from "./workflowLifecycle";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import { buildFeedJobRegistry } from "./feedJobs";
+import { FEED_PIPELINE_CATALOG } from "./feedPipelineJobs";
 import type { DataProviderId } from "../trading";
 
 export type WorkflowRunTrigger = "manual" | "scheduled" | "autonomous" | "webhook" | "agent" | "unknown";
@@ -1096,6 +1097,18 @@ export function httpRequestRunIdentity(job: WorkflowRunJobRow): { title: string 
   if (feedRunMatch && method) {
     const jobId = buildFeedJobRegistry({})
       .forSource(feedRunMatch[1] as DataProviderId)?.id;
+    if (jobId) return { title: `${method} ${pathOnly} — ${jobId}` };
+  }
+  // Issue #4002 (third slice): the per-job feed-jobs action
+  // path names its job id in the path — validated by EXACT
+  // catalog match, never taken on trust (resolveFeedJob's alias
+  // / containing fallbacks are for copilot queries, not path
+  // segments); pause / cancel fall through (no pipeline
+  // execution to name).
+  const feedJobsMatch =
+    /^\/data-providers\/[^/]+\/feed-jobs\/([^/]+)\/(run|retry|resume)$/.exec(pathOnly);
+  if (feedJobsMatch && method) {
+    const jobId = FEED_PIPELINE_CATALOG.find((e) => e.jobId === feedJobsMatch[1])?.jobId;
     if (jobId) return { title: `${method} ${pathOnly} — ${jobId}` };
   }
   if (!str(job.display_name) && method && pathOnly) {

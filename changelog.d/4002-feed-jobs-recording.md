@@ -1,0 +1,3 @@
+### Fixed
+
+- The #4002 recording fix now also covers per-job runs dispatched through the REST feed-jobs route (`POST /data-providers/:id/feed-jobs/:jobId/run|retry|resume`): the onStart recovery resolves the feed job id from the path (validated by exact catalog match, never taken on trust) and records it plus the pipeline run id in the row's error column and the audits, and the Workflow Runs list title names the job id for those rows. `pause`/`cancel` are fast control calls and are excluded. The synchronous MCP `run_feed_job` path leaves no async-job row to record on (the tool executes inline) and is named as a follow-up in the #4002 RCA addendum, not covered here (#4002).

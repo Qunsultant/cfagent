@@ -36,7 +36,7 @@ import type {
 } from "../../types";
 import { recordScreeningActivity } from "../../services/screeningActivity";
 import { buildFeedJobRegistry } from "../../services/feedJobs";
-import { resolveFeedJob } from "../../services/feedPipelineJobs";
+import { FEED_PIPELINE_CATALOG, resolveFeedJob } from "../../services/feedPipelineJobs";
 import { recordJobOutcome } from "../../services/jobOutcomes";
 import {
   buildLedgerLinkage,
@@ -529,10 +529,20 @@ function parseRowPayload(row: Record<string, unknown>): Record<string, unknown> 
  *  never be re-executed. */
 function isFeedDispatchShape(capability: string, payload: Record<string, unknown>): boolean {
   if (capability === "http.request") {
-    return (
-      payload.method === "POST" &&
-      typeof payload.pathAndQuery === "string" &&
-      /^\/data-providers\/[^/]+\/feed-run$/.test(payload.pathAndQuery)
+    if (
+      payload.method !== "POST" ||
+      typeof payload.pathAndQuery !== "string"
+    ) {
+      return false;
+    }
+    // The provider-level feed-run route.
+    if (/^\/data-providers\/[^/]+\/feed-run$/.test(payload.pathAndQuery)) return true;
+    // Issue #4002 (third slice): the per-job feed-jobs action
+    // route — run / retry / resume execute the pipeline (a long
+    // dispatch, orphanable like a feed-run). Pause / cancel are
+    // fast control calls and are excluded.
+    return /^\/data-providers\/[^/]+\/feed-jobs\/[^/]+\/(run|retry|resume)$/.test(
+      payload.pathAndQuery,
     );
   }
   if (capability === "mcp.tool") {
@@ -579,6 +589,18 @@ function resolveFeedDispatchJobId(
   if (capability === "http.request") {
     const path = payload.pathAndQuery;
     if (typeof path !== "string") return null;
+    // Issue #4002 (third slice): the per-job feed-jobs action
+    // route names its job id in the path — validated by EXACT
+    // catalog match, never taken on trust (a row for an
+    // unregistered id records nothing). resolveFeedJob's alias /
+    // containing fallbacks are for copilot queries, not path
+    // segments: a near-miss id must never silently resolve to
+    // another job (#2144 no-silent-substitution).
+    const feedJobsMatch =
+      /^\/data-providers\/[^/]+\/feed-jobs\/([^/]+)\/(run|retry|resume)$/.exec(path);
+    if (feedJobsMatch) {
+      return FEED_PIPELINE_CATALOG.find((e) => e.jobId === feedJobsMatch[1])?.jobId ?? null;
+    }
     const match = /^\/data-providers\/([^/]+)\/feed-run$/.exec(path);
     if (!match) return null;
     // Same cast as the route (dataProviders.ts:965): the path

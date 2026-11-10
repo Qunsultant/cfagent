@@ -88,4 +88,45 @@ describe("feed-run list titles carry the feed job id (#4002)", () => {
     });
     expect(httpRequestRunIdentity(job)?.title).toBe("Market data comparison — MSFT, TSLA");
   });
+
+  it("a per-job run dispatched through the feed-jobs route titles with its job id", () => {
+    const job = httpJob({
+      job_id: "feed-jobs-run-1",
+      display_name: "POST /data-providers/yahoo/feed-jobs/yahoo-nasdaq100-sentiment/run",
+      payload: {
+        method: "POST",
+        pathAndQuery: "/data-providers/yahoo/feed-jobs/yahoo-nasdaq100-sentiment/run",
+        body: "{}",
+      },
+    });
+    expect(httpRequestRunIdentity(job)?.title).toBe(
+      "POST /data-providers/yahoo/feed-jobs/yahoo-nasdaq100-sentiment/run — yahoo-nasdaq100-sentiment",
+    );
+  });
+
+  it("a feed-jobs pause row falls through to the display name (no pipeline execution to name)", () => {
+    const job = httpJob({
+      job_id: "feed-jobs-pause-1",
+      display_name: "POST /data-providers/yahoo/feed-jobs/yahoo-nasdaq100-quotes/pause",
+      payload: {
+        method: "POST",
+        pathAndQuery: "/data-providers/yahoo/feed-jobs/yahoo-nasdaq100-quotes/pause",
+        body: "{}",
+      },
+    });
+    expect(httpRequestRunIdentity(job)).toBeNull();
+  });
+
+  it("a feed-jobs run for an unregistered job id falls through (no silent substitution to another job)", () => {
+    const job = httpJob({
+      job_id: "feed-jobs-bogus-1",
+      display_name: "POST /data-providers/yahoo/feed-jobs/yahoo-no-such-job/run",
+      payload: {
+        method: "POST",
+        pathAndQuery: "/data-providers/yahoo/feed-jobs/yahoo-no-such-job/run",
+        body: "{}",
+      },
+    });
+    expect(httpRequestRunIdentity(job)).toBeNull();
+  });
 });
