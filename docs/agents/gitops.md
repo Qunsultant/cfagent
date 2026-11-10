@@ -597,6 +597,38 @@ Run affected tests and required repository checks.
 
 For prose-only documentation, static configuration, generated output, or other changes where classic TDD does not fit, use appropriate validation and document the exception.
 
+### Static gates: lint and coverage (#3926)
+
+Two decisions, recorded here because they change how every future PR is
+checked. Both were adopted after measuring the suite: 1,391 test files,
+14,940 test statements, no linter and no coverage report.
+
+**Lint — adopted as a ratchet.** `eslint.config.mjs` enables
+defect-class rules only: a finding is always a bug (`debugger`, `eval`,
+`new Function`, duplicate keys or case labels, unreachable code,
+self-assignment and self-comparison, an async promise executor, a
+`${...}` in a non-template string, an unmodified loop condition, and so
+on). Style, naming and formatting are deliberately out of scope —
+`tsc --noEmit` owns types, and no formatter is enforced. The gate lints
+**only the files a PR changes** (`scripts/lint-changed.mjs`, wired into
+`Fast gates`), so an untouched legacy file never blocks a PR and
+touching a file adopts it into the ratchet. Recorded backlog at
+adoption: **31 findings across 23 files**, listed by
+`npm run lint:audit`; paying it down is #3926's follow-up and MUST NOT
+ride along in a delivery slice.
+
+**Coverage — adopted as a report, not a gate.** Shard 1 runs with the
+v8 provider and publishes a `coverage-shard-1` artifact (7-day
+retention). The report is **partial by construction** — only the files
+that shard executed — and carries no threshold, because a threshold
+needs a recorded baseline first. A whole-suite merged report
+(`vitest --merge-reports` across the shards) and the baseline that
+would justify a gate are #3926's remaining work.
+
+The rule for both: a new gate MUST NOT be able to fail a PR for code the
+PR did not touch. Ratchet first, threshold later, baseline recorded in
+between.
+
 ### Reuse before you build
 
 Every change MUST start from what already exists. Locate the capability, then extend it in preference to adding another path beside it. Parallel and near-duplicate implementations are the most expensive rework this repository produces: they drift silently, they disagree at the edges, and every later change must be made twice to stay consistent.

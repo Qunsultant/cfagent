@@ -183,6 +183,13 @@ jobs:
       - name: 🔍 TypeScript Strict Type Check
         run: npm run typecheck
 
+      - name: 🧹 Lint changed files (ratchet, #3926)
+        # Defect-class rules only, and only on the files this PR touches: an
+        # untouched legacy file never blocks a PR, and new code must be clean.
+        env:
+          LINT_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: node scripts/lint-changed.mjs
+
       - name: 🧷 Pin suites (accounting, censuses, router inventory, policy gate)
         run: npm run test:pins
 
@@ -232,7 +239,28 @@ jobs:
 
 
       - name: 🧪 Execute Vitest Shard ${{ matrix.shard }}/4
+        if: matrix.shard != 1
         run: npx vitest run --shard=${{ matrix.shard }}/4 --reporter=verbose
+
+      # #3926: shard 1 runs with coverage and publishes the report. This is a
+      # PARTIAL report (the files shard 1 executed), published as an artifact
+      # for visibility, with no threshold: a gate needs a recorded baseline
+      # first. A whole-suite merged report is the follow-up in #3926.
+      - name: 📊 Vitest Shard 1/4 with coverage
+        if: matrix.shard == 1
+        run: |
+          npx vitest run --shard=1/4 --reporter=verbose \
+            --coverage --coverage.provider=v8 \
+            --coverage.reporter=json-summary --coverage.reporter=text-summary \
+            --coverage.reportsDirectory=coverage
+
+      - name: 📤 Upload coverage (partial — shard 1/4)
+        if: matrix.shard == 1 && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-1
+          path: coverage/
+          retention-days: 7
 
 
   # ── Job 3: test suite sharded across 4 parallel runners (Tests MQ) ──
