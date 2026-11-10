@@ -199,6 +199,10 @@ describe("worker /slack/* routes — mandatory gate (#147)", () => {
   function makeServerEnv(secret?: string) {
     const forwarded: ForwardedCall[] = [];
     const env: any = {
+      // Issue #3937: the forwarded Slack paths reach the E*TRADE desk, so
+      // the test tenant selects etrade explicitly — the platform default
+      // is alpaca now.
+      BROKER_ID: "etrade",
       ORCHESTRATOR_AGENT: {
         idFromName: (name: string) => name,
         get: (id: string) => ({
@@ -412,6 +416,9 @@ describe("SlackAgent.onRequest — mandatory gate (#147)", () => {
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
     ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
+    // Issue #3937: the Slack desk is an E*TRADE service, so the test
+    // tenant selects etrade explicitly — the platform default is alpaca now.
+    BROKER_ID: "etrade",
     SLACK_BOT_TOKEN: "xoxb-test-bot-token-147",
     SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/T00/B00/X00",
   };

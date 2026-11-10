@@ -47,6 +47,12 @@ const platform = {
     account: { accountId: "acct-1", accountKey: "k1", accountDesc: "Alpaca Paper", accountType: "INDIVIDUAL" },
     positions: [{ symbol: "AAPL", description: "Apple", quantity: 3, pricePaid: 100, costBasis: 300 }],
   })),
+  // Issue #3937: the E*TRADE adapter now implements these; the spy stands
+  // in for whichever platform the registry returns.
+  getOrderHistory: vi.fn(async () => [{ orderId: 1, orderType: "EQ", status: "OPEN", orderAction: "BUY", quantity: 10, symbol: "AAPL" }]),
+  getAccountActivity: vi.fn(async () => [{ activityId: "t-1", activityType: "Buy", activityDate: 1780000000000, netAmount: -3423.7 }]),
+  getWatchlists: vi.fn(async () => [{ watchlistId: "w-1", name: "Core", symbols: ["AAPL"], source: "etrade_api" }]),
+  getAlerts: vi.fn(async () => [{ id: 1, createTime: 1780000000000, subject: "Price alert: AAPL", status: "UNREAD" }]),
 };
 
 let getPlatform: ReturnType<typeof vi.spyOn>;
@@ -122,12 +128,69 @@ describe("a broker that cannot answer says so (#2853)", () => {
     }
   });
 
-  it("answers 501 when the platform omits the method at runtime", async () => {
+  it("answers 501 with the not-implemented code when the platform omits the method at runtime", async () => {
+    // Issue #3937: a capability the catalog declares but the platform
+    // does not implement is a DISTINCT code from provider_unsupported —
+    // "declared but unimplemented" must never be indistinguishable from
+    // "genuinely unsupported".
     getPlatform.mockImplementation(() => ({ getAccounts: undefined, getPositions: platform.getPositions }) as any);
     const { request, url } = req("/broker/accounts");
     const res = await handleBrokerReadsRoutes(request, url, url.pathname, "sid", ctx());
     expect(res!.status).toBe(501);
-    expect((await res!.json()).code).toBe("provider_unsupported");
+    const body = await res!.json();
+    expect(body.code).toBe("BROKER_CAPABILITY_NOT_IMPLEMENTED");
+    expect(body.broker).toBe("alpaca");
+    expect(body.message).toContain("Accounts");
+  });
+});
+
+describe("the alerts read rides the selected broker (#3937)", () => {
+  it("serves E*TRADE alerts through /api/broker/alerts when that is the selection", async () => {
+    tenant.broker = "etrade";
+    const { request, url } = req("/broker/alerts");
+    const res = await handleBrokerReadsRoutes(request, url, url.pathname, "sid", ctx());
+    expect(res!.status).toBe(200);
+    const body = await res!.json();
+    expect(body.broker).toBe("etrade");
+    expect(body.alerts).toEqual([expect.objectContaining({ subject: "Price alert: AAPL" })]);
+    expect(getPlatform.mock.calls[0][0]).toBe("etrade");
+  });
+
+  it("answers 501 provider_unsupported for Alpaca, whose catalog says no alerts", async () => {
+    tenant.broker = "alpaca";
+    const { request, url } = req("/broker/alerts");
+    const res = await handleBrokerReadsRoutes(request, url, url.pathname, "sid", ctx());
+    expect(res!.status).toBe(501);
+    const body = await res!.json();
+    expect(body).toMatchObject({ code: "provider_unsupported", broker: "alpaca", retryable: false });
+    expect(getPlatform).not.toHaveBeenCalled();
+  });
+
+  it("answers 501 with the not-implemented code when the platform omits getAlerts", async () => {
+    tenant.broker = "etrade";
+    getPlatform.mockImplementation(() => ({ getAccounts: platform.getAccounts }) as any);
+    const { request, url } = req("/broker/alerts");
+    const res = await handleBrokerReadsRoutes(request, url, url.pathname, "sid", ctx());
+    expect(res!.status).toBe(501);
+    expect((await res!.json()).code).toBe("BROKER_CAPABILITY_NOT_IMPLEMENTED");
+  });
+});
+
+describe("the E*TRADE history reads ride the selected broker (#3937)", () => {
+  it("serves order history, activity, and watchlists for the etrade selection", async () => {
+    tenant.broker = "etrade";
+    for (const [path, key] of [
+      ["/broker/orders/history", "orders"],
+      ["/broker/activities", "activities"],
+      ["/broker/watchlists", "watchlists"],
+    ] as const) {
+      const { request, url } = req(path);
+      const res = await handleBrokerReadsRoutes(request, url, url.pathname, "sid", ctx());
+      expect(res!.status).toBe(200);
+      const body = await res!.json();
+      expect(body.broker).toBe("etrade");
+      expect(body[key]).toHaveLength(1);
+    }
   });
 });
 

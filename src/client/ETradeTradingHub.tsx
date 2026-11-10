@@ -1163,7 +1163,9 @@ export function ETradeTradingHub({
   };
 
   const runDiagnostics = async (brokerIdOverride?: string, override?: string) => {
-    const brokerToUse = brokerIdOverride || selectedBroker || "etrade";
+    // Issue #3937: the default is the platform default, not the legacy
+    // fallback — diagnostics run against the selected broker.
+    const brokerToUse = brokerIdOverride || selectedBroker || "alpaca";
     const envToUse = override || activeEnv;
     setDiagnosticsLoading(true);
     try {

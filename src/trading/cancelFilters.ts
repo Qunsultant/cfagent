@@ -22,6 +22,8 @@
  *     order is a bracket, and cancelling it cancels its children.
  */
 
+import type { BrokerRemoteOrder } from "../types";
+
 /**
  * The classes a caller may name. `simple` is the broker's own word for a
  * single order; `market`/`limit`/`stop`/`stop_limit` are the *type* of such
@@ -146,8 +148,7 @@ export function normalizeCancelStatus(rawStatus: unknown): CancelOrderStatus {
  * `lad_1730000000000_ab12cd-r3` → `lad_1730000000000_ab12cd`. The ladder
  * stamps its rung ids as `<ladderId>-r<N>` (#3673), so the prefix is the
  * batch identity a filter can name. A row without that shape has no ladder.
- */
-export function parseLadderId(clientOrderId: string | null | undefined): string | null {
+ */export function parseLadderId(clientOrderId: string | null | undefined): string | null {
   const id = String(clientOrderId ?? "").trim();
   if (!id) return null;
   const match = /^(lad_.+)-r\d+$/.exec(id);
@@ -242,6 +243,66 @@ export function mapAlpacaOrderList(rows: readonly any[]): CancelableOrder[] {
 /** The parent that declares this order as a leg, when one is present in the list. */
 export function findParentOrder(orderId: string, orders: readonly CancelableOrder[]): CancelableOrder | null {
   return orders.find((candidate) => candidate.legIds.includes(orderId)) ?? null;
+}
+
+/**
+ * Issue #3937 — map one broker remote order (the neutral
+ * ITradingPlatform seam: getOrderHistory) onto the cancel record.
+ *
+ * A remote order is always a simple single order: the seam carries no
+ * legs, no client order id, and no ladder, so none is inferred. The
+ * cancel class comes from the broker's PRICE type (market / limit /
+ * stop / stop_limit) — the remote row's `orderType` is the security
+ * type (EQ), not the order's type, so it must never feed the class.
+ * The status classifies from the broker's own status word: OPEN and
+ * INDIVIDUAL_FILLS (a partially filled order is still cancellable) are
+ * open, EXECUTED / CANCELLED / REJECTED are terminal, and anything else
+ * is unknown — a cancel decision on an unknown status refuses.
+ */
+function classifyRemoteOrderStatus(status: unknown, rawStatus: string): CancelOrderStatus {
+  const word = String(status ?? rawStatus ?? "").trim().toUpperCase();
+  if (word === "OPEN" || word === "INDIVIDUAL_FILLS") return "open";
+  if (word === "EXECUTED" || word === "CANCELLED" || word === "REJECTED") return "terminal";
+  return "unknown";
+}
+
+export function mapBrokerRemoteOrderRow(order: BrokerRemoteOrder): CancelableOrder {
+  const rawStatus = String(order.rawStatus ?? order.status ?? "").trim();
+  const orderType = String(order.priceType ?? "").trim().toLowerCase();
+  const cancelClass: CancelOrderClass = (SIMPLE_TYPE_CLASSES as readonly string[]).includes(orderType)
+    ? (orderType as CancelOrderClass)
+    : "simple";
+  const action = String(order.orderAction ?? "").trim().toUpperCase();
+  const side: CancelableOrder["side"] =
+    action === "BUY" || action === "BUY_TO_COVER" ? "buy" : action === "SELL" || action === "SELL_SHORT" ? "sell" : "unknown";
+  return {
+    orderId: String(order.orderId ?? "").trim(),
+    symbol: String(order.symbol ?? "").trim().toUpperCase(),
+    side,
+    brokerOrderClass: "simple",
+    cancelClass,
+    orderType,
+    rawStatus,
+    status: classifyRemoteOrderStatus(order.status, rawStatus),
+    clientOrderId: null,
+    ladderId: null,
+    legIds: [],
+    role: "single",
+    parentId: null,
+    placedAt: typeof order.placedTime === "number" && Number.isFinite(order.placedTime) ? order.placedTime : null,
+    quantity: typeof order.quantity === "number" && Number.isFinite(order.quantity) ? order.quantity : null,
+    notional: typeof order.orderValue === "number" && Number.isFinite(order.orderValue) ? order.orderValue : null,
+  };
+}
+
+/**
+ * Map a broker's whole remote-order list. Every row is a simple single
+ * order, so there is no leg wiring to do — the list form exists so the
+ * engine can take a port's rows without knowing which broker they came
+ * from.
+ */
+export function mapBrokerRemoteOrderList(rows: readonly BrokerRemoteOrder[]): CancelableOrder[] {
+  return rows.map((row) => mapBrokerRemoteOrderRow(row));
 }
 
 /** The declared legs of a compound order, as ids. */

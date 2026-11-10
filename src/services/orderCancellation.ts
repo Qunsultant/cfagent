@@ -29,11 +29,12 @@
  * refuses — "cancel everything" must never run unbounded.
  */
 
-import type { Env } from "../types";
+import type { Env, BrokerRemoteOrder } from "../types";
 import { MarketDataResearchService } from "./marketDataResearch";
 import { CANCEL_ALL_PREVIEW_TTL_MS, type CancelPreviewStore } from "./cancelPreviewStore";
 import { recordTradingRunOutcome, alpacaModeFromEnv } from "./tradingRunOutcome";
 import type { SqlStorage } from "../orm";
+import type { ITradingPlatform } from "../trading";
 import {
   type CancelableOrder,
   type CancelFilter,
@@ -45,6 +46,8 @@ import {
   findParentOrder,
   mapAlpacaOrderList,
   mapAlpacaOrderRow,
+  mapBrokerRemoteOrderList,
+  mapBrokerRemoteOrderRow,
   resolveCancelTargets,
   tradingLimitEnvVar,
   TRADING_LIMITS_SETTING_KEY,
@@ -55,6 +58,24 @@ export interface CancelBrokerPort {
   getOrder(orderId: string): Promise<{ success: boolean; order?: any; message?: string; httpStatus?: number }>;
   listOpenOrders(): Promise<{ success: boolean; orders?: any[]; message?: string; httpStatus?: number }>;
   cancelOrder(orderId: string): Promise<{ success: boolean; orderId: string; message: string; httpStatus?: number }>;
+  /**
+   * Issue #3937: how the port's raw rows map onto CancelableOrder. The
+   * service port's row shape is the default; a port over the neutral
+   * platform seam supplies the remote-order mapping instead, so the
+   * engine never has to know which broker it cancels on.
+   */
+  mapOrderList?: (rows: any[]) => CancelableOrder[];
+  mapOrderRow?: (row: any) => CancelableOrder;
+}
+
+/** The row mapping a port's rows use: its own, or the service-port default. */
+function mapPortOrderList(port: CancelBrokerPort, rows: any[]): CancelableOrder[] {
+  return (port.mapOrderList ?? mapAlpacaOrderList)(rows);
+}
+
+/** The single-row twin of mapPortOrderList. */
+function mapPortOrderRow(port: CancelBrokerPort, row: any): CancelableOrder {
+  return (port.mapOrderRow ?? mapAlpacaOrderRow)(row);
 }
 
 /** The broker port over the one service the ladder already uses (#3673). */
@@ -64,6 +85,64 @@ export function createCancelBrokerPort(env: Env): CancelBrokerPort {
     getOrder: (orderId) => service.getAlpacaOrder(orderId),
     listOpenOrders: () => service.getAlpacaOrders("open"),
     cancelOrder: (orderId) => service.cancelAlpacaOrder(orderId),
+  };
+}
+
+/**
+ * Issue #3937: the cancel port over a neutral platform adapter.
+ *
+ * The same engine, the same receipts — but the rows come from the
+ * broker's own adapter instead of the service port: the open list is
+ * getOrderHistory("open"), a single read is getOrderHistory("all") with
+ * the id found in it (the neutral seam has no single-order read), and
+ * the cancel is cancelOrderRemote. A missing method is a failed read,
+ * never an empty list: the engine's receipts must say the broker could
+ * not be read, not that it holds no orders.
+ *
+ * Bracket-leg semantics do NOT ride this port: remote orders are simple
+ * single orders by construction (mapBrokerRemoteOrderRow), so the service
+ * port stays for the broker whose rows carry legs, and this one serves
+ * every other broker with orderCancel.
+ */
+export function createPlatformCancelPort(platform: ITradingPlatform): CancelBrokerPort {
+  return {
+    getOrder: async (orderId) => {
+      try {
+        if (typeof platform.getOrderHistory !== "function") {
+          return { success: false, message: "The selected broker does not expose order history, so the order could not be read." };
+        }
+        const orders = await platform.getOrderHistory("all");
+        const found = orders.find((order) => String(order.orderId) === orderId);
+        if (!found) return { success: false, message: `Order ${orderId} was not found.`, httpStatus: 404 };
+        return { success: true, order: found };
+      } catch (err) {
+        return { success: false, message: err instanceof Error ? err.message : "The order could not be read." };
+      }
+    },
+    listOpenOrders: async () => {
+      try {
+        if (typeof platform.getOrderHistory !== "function") {
+          return { success: false, message: "The selected broker does not expose order history, so its open orders could not be read." };
+        }
+        const orders = await platform.getOrderHistory("open");
+        return { success: true, orders };
+      } catch (err) {
+        return { success: false, message: err instanceof Error ? err.message : "The open orders could not be read." };
+      }
+    },
+    cancelOrder: async (orderId) => {
+      try {
+        if (typeof platform.cancelOrderRemote !== "function") {
+          return { success: false, orderId, message: "The selected broker does not expose order cancellation." };
+        }
+        const result = await platform.cancelOrderRemote(orderId);
+        return { success: result.success, orderId, message: result.message };
+      } catch (err) {
+        return { success: false, orderId, message: err instanceof Error ? err.message : "The cancel failed." };
+      }
+    },
+    mapOrderList: (rows) => mapBrokerRemoteOrderList(rows as BrokerRemoteOrder[]),
+    mapOrderRow: (row) => mapBrokerRemoteOrderRow(row as BrokerRemoteOrder),
   };
 }
 
@@ -289,8 +368,8 @@ export async function cancelSingleOrder(
 
   // Whether the row is a leg is answered by the parents' own records.
   const openList = await port.listOpenOrders();
-  const openOrders = openList.success && Array.isArray(openList.orders) ? mapAlpacaOrderList(openList.orders) : [];
-  const mappedFromRead = mapAlpacaOrderRow(read.order);
+  const openOrders = openList.success && Array.isArray(openList.orders) ? mapPortOrderList(port, openList.orders) : [];
+  const mappedFromRead = mapPortOrderRow(port, read.order);
   const parent = findParentOrder(mappedFromRead.orderId, openOrders);
   const target: CancelableOrder = {
     ...mappedFromRead,
@@ -432,7 +511,7 @@ export async function cancelScopedOrders(
     };
   }
 
-  const orders = mapAlpacaOrderList(listed.orders);
+  const orders = mapPortOrderList(port, listed.orders);
   const resolution: CancelFilterResolution = resolveCancelTargets(orders, options.filter);
   const planned: ScopedCancelTarget[] = resolution.targets.map((order) => ({
     orderId: order.orderId,
@@ -653,7 +732,7 @@ export async function cancelAllOrders(
     // Re-read the live state so each target is cancelled with its real class
     // and role; an id that is no longer open is refused, not guessed at.
     const listed = await port.listOpenOrders();
-    const live = listed.success && Array.isArray(listed.orders) ? mapAlpacaOrderList(listed.orders) : [];
+    const live = listed.success && Array.isArray(listed.orders) ? mapPortOrderList(port, listed.orders) : [];
     const targets: CancelableOrder[] = [];
     const vanished: ScopedCancelFailure[] = [];
     for (const id of record.ids) {
@@ -724,7 +803,7 @@ export async function cancelAllOrders(
     };
   }
 
-  const orders = mapAlpacaOrderList(listed.orders);
+  const orders = mapPortOrderList(port, listed.orders);
   const resolution = resolveCancelTargets(orders, {});
   if (!resolution.matched) {
     return {
@@ -813,6 +892,13 @@ export function recordCancelOutcome(
   receipt: CancelReceipt,
   origin: string,
   env?: Partial<Env>,
+  /**
+   * Issue #3937: the ledger identity of the broker the cancel ran on.
+   * Omitted, the row keeps the service-port default (the MCP tools'
+   * rows); a neutral route passes the resolved broker and its mode, so
+   * a cancel is never recorded under another broker's name.
+   */
+  ledger?: { broker?: string; mode?: "live" | "paper" },
 ): void {
   const orderId = receipt.target?.orderId;
   if (!orderId) return;
@@ -822,8 +908,8 @@ export function recordCancelOutcome(
     action: "cancel",
     symbol: receipt.target?.symbol,
     orderClass: receipt.target?.orderClass,
-    broker: "alpaca",
-    mode: env ? alpacaModeFromEnv(env) : undefined,
+    broker: ledger?.broker ?? "alpaca",
+    mode: ledger?.mode ?? (env ? alpacaModeFromEnv(env) : undefined),
     codedError: receipt.code,
     origin,
     cancelOutcome: receipt.success ? "cancelled" : "cancel_failed",
@@ -842,6 +928,8 @@ export function recordScopedCancelOutcome(
   origin: string,
   env?: Partial<Env>,
   runId?: string,
+  /** Issue #3937: the ledger identity — see recordCancelOutcome. */
+  ledger?: { broker?: string; mode?: "live" | "paper" },
 ): void {
   const id = runId ?? `${receipt.action}:${new Date().toISOString()}`;
   recordTradingRunOutcome(sql, {
@@ -849,8 +937,8 @@ export function recordScopedCancelOutcome(
     status: receipt.success ? "completed" : "failed",
     action: receipt.action,
     symbol: receipt.filter.symbol ? String(receipt.filter.symbol).toUpperCase() : undefined,
-    broker: "alpaca",
-    mode: env ? alpacaModeFromEnv(env) : undefined,
+    broker: ledger?.broker ?? "alpaca",
+    mode: ledger?.mode ?? (env ? alpacaModeFromEnv(env) : undefined),
     codedError: receipt.code,
     origin,
     cancelOutcome: receipt.success ? "cancelled" : "cancel_failed",

@@ -173,7 +173,10 @@ async function seedD1Store(mock: MockD1Database, date: string, atmIv: number): P
 
 function routeCtx(env: Record<string, unknown>): never {
   return {
-    env,
+    // Issue #3937: the IV-history read serves the selected broker's
+    // series, so the test tenant selects etrade explicitly (an explicit
+    // env wins) — the platform default is alpaca now.
+    env: { BROKER_ID: "etrade", ...env },
     getOrm: () => ({ watchlists: { findMany: () => [] } }),
   } as never;
 }
