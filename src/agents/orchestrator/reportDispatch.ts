@@ -25,7 +25,9 @@ import {
   resolveCanonicalReportBodyWithBackfill,
   sha256Hex,
   storeReportAtGenerationWithR2,
+  type CanonicalStoreResult,
   type RefreshCanonicalPdfFieldsResult,
+  type ScheduledReportInput,
 } from "../../services/scheduledReports";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -426,6 +428,32 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
   } catch {
     // Non-critical: persistence failure must not break the screen.
   }
+}
+
+/**
+ * Issue #3940 (#3550 precondition (a)) — store a pipeline
+ * generate report's canonical copy through the one seam. The
+ * J generate stage's tenant-aware leg calls this through the
+ * OrchestratorAgent.recordPipelineGenerateReport door, so the
+ * canonical row lands in THIS (the report-owning tenant's)
+ * Orchestrator DO's mas_reports — the store the Reports read
+ * path queries — in both pipeline residencies. The input
+ * already carries its resolved owner (the leg resolved it
+ * per job); an owner-less input is refused with null, never
+ * filed under a default tenant.
+ */
+export async function persistPipelineGenerateReportCanonical(
+  ctx: ReportDispatchContext,
+  input: ScheduledReportInput,
+): Promise<CanonicalStoreResult | null> {
+  if (!input?.userLogin) {
+    structuredLog.error("reportDispatch.pipeline_generate_report_store_refused", {
+      message:
+        "[reportDispatch] Pipeline generate report store refused: no owning userLogin.",
+    });
+    return null;
+  }
+  return storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, input);
 }
 
 /**
