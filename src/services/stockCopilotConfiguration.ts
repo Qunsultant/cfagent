@@ -10,7 +10,7 @@
 
 import type { Env } from "../types";
 import type { IndexListStore } from "../data/indexListPorts";
-import type { IndexId } from "../trading/indexMembership";
+import type { IndexId } from "../trading";
 import { resolveStoredIndexList } from "./indexListConsumer";
 import {
   SANDBOX_STRATEGY_IDS,
