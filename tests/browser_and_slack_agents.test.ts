@@ -267,6 +267,9 @@ describe("Cloudflare Browser Agent & Independent Slack Agent", () => {
       const envWithoutWebhook: Env = {
         ...mockEnv,
         SLACK_WEBHOOK_URL: undefined,
+        // #3980: the bot-API leg posts to a CHANNEL; the fallback under test
+        // is the bot TOKEN, so supply the channel the deployment would.
+        SLACK_CHANNEL: "#desk",
         SLACK_BOT_TOKEN: "xoxb-fallback-bot-token",
       };
 
@@ -288,6 +291,8 @@ describe("Cloudflare Browser Agent & Independent Slack Agent", () => {
       expect(result.success).toBe(true);
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
+      // #3980: the resolved channel reaches chat.postMessage.
+      expect(JSON.parse(String(calledInit?.body)).channel).toBe("#desk");
       expect(calledUrl).toBe("https://slack.com/api/chat.postMessage");
       expect(calledInit?.headers).toEqual(
         expect.objectContaining({
