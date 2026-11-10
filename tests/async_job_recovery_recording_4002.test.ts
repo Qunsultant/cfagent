@@ -344,4 +344,118 @@ describe("onStart recovery records the feed job id + pipeline run id (#4002)", (
     const failed = h.audits.filter((a) => a.type === "async_job.failed");
     expect(failed[0].payload.feedJobId).toBeUndefined();
   });
+
+  it("a per-job run dispatched through the feed-jobs route records both ids (the job id is in the path)", async () => {
+    const h = makeHarness(
+      doorEnv({
+        jobId: "yahoo-nasdaq100-sentiment",
+        pipeline: {
+          state: "failed",
+          currentRunId: "run-sentiment-2",
+          runStartedAt: isoAgo(23 * 60 * 1000),
+          lastRunStatus: "failed",
+          lastRunAt: isoAgo(5 * 60 * 1000),
+          stages: [],
+        },
+      }),
+    );
+    seedRow(h.db, {
+      jobId: "job-feed-jobs-run",
+      startedAt: isoAgo(23 * 60 * 1000),
+      // Run started 23m ago; executor alive 7m ago — the run is
+      // this row's orphan (see the Yahoo test above).
+      lastActivityAt: isoAgo(7 * MIN),
+      capability: "http.request",
+      payloadJson: JSON.stringify({
+        method: "POST",
+        pathAndQuery: "/data-providers/yahoo/feed-jobs/yahoo-nasdaq100-sentiment/run",
+        headers: {},
+        body: "{}",
+      }),
+    });
+
+    const result = await recoverStaleRunningAsyncJobs(h.ctx);
+    expect(result).toEqual({ examined: 1, failed: 1, rearmed: 1 });
+
+    const error = rowError(h.db, "job-feed-jobs-run");
+    expect(error).toContain("yahoo-nasdaq100-sentiment");
+    expect(error).toContain("run-sentiment-2");
+    const failed = h.audits.filter((a) => a.type === "async_job.failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0].payload.feedJobId).toBe("yahoo-nasdaq100-sentiment");
+    expect(failed[0].payload.pipelineRunId).toBe("run-sentiment-2");
+  });
+
+  it("a feed-jobs retry row records the same way (it re-dispatches the job)", async () => {
+    const h = makeHarness(doorEnv(orphanView()));
+    seedRow(h.db, {
+      jobId: "job-feed-jobs-retry",
+      startedAt: isoAgo(23 * 60 * 1000),
+      lastActivityAt: isoAgo(7 * MIN),
+      capability: "http.request",
+      payloadJson: JSON.stringify({
+        method: "POST",
+        pathAndQuery: "/data-providers/yahoo/feed-jobs/yahoo-nasdaq100-quotes/retry",
+        headers: {},
+        body: "{}",
+      }),
+    });
+
+    await recoverStaleRunningAsyncJobs(h.ctx);
+
+    const error = rowError(h.db, "job-feed-jobs-retry");
+    expect(error).toContain("yahoo-nasdaq100-quotes");
+    expect(error).toContain("run-orphan-1");
+    const failed = h.audits.filter((a) => a.type === "async_job.failed");
+    expect(failed[0].payload.feedJobId).toBe("yahoo-nasdaq100-quotes");
+    expect(failed[0].payload.pipelineRunId).toBe("run-orphan-1");
+  });
+
+  it("a feed-jobs pause row records nothing (a fast control call, not a pipeline execution)", async () => {
+    const h = makeHarness(doorEnv(orphanView()));
+    seedRow(h.db, {
+      jobId: "job-feed-jobs-pause",
+      startedAt: isoAgo(23 * 60 * 1000),
+      lastActivityAt: isoAgo(30 * MIN),
+      capability: "http.request",
+      payloadJson: JSON.stringify({
+        method: "POST",
+        pathAndQuery: "/data-providers/yahoo/feed-jobs/yahoo-nasdaq100-quotes/pause",
+        headers: {},
+        body: "{}",
+      }),
+    });
+
+    const result = await recoverStaleRunningAsyncJobs(h.ctx);
+    expect(result).toEqual({ examined: 1, failed: 1, rearmed: 0 });
+
+    const error = rowError(h.db, "job-feed-jobs-pause");
+    expect(error).not.toContain("yahoo-nasdaq100-quotes");
+    const failed = h.audits.filter((a) => a.type === "async_job.failed");
+    expect(failed[0].payload.feedJobId).toBeUndefined();
+    expect(failed[0].payload.pipelineRunId).toBeUndefined();
+  });
+
+  it("a feed-jobs run for an unregistered job id records nothing (the id is validated, never taken on trust)", async () => {
+    const h = makeHarness(doorEnv(orphanView()));
+    seedRow(h.db, {
+      jobId: "job-feed-jobs-bogus",
+      startedAt: isoAgo(23 * 60 * 1000),
+      lastActivityAt: isoAgo(30 * MIN),
+      capability: "http.request",
+      payloadJson: JSON.stringify({
+        method: "POST",
+        pathAndQuery: "/data-providers/yahoo/feed-jobs/yahoo-no-such-job/run",
+        headers: {},
+        body: "{}",
+      }),
+    });
+
+    await recoverStaleRunningAsyncJobs(h.ctx);
+
+    const error = rowError(h.db, "job-feed-jobs-bogus");
+    expect(error).not.toContain("yahoo-no-such-job");
+    const failed = h.audits.filter((a) => a.type === "async_job.failed");
+    expect(failed[0].payload.feedJobId).toBeUndefined();
+  });
 });
