@@ -132,6 +132,79 @@ export interface ActorWebhookEvent {
   url: URL;
 }
 
+/**
+ * An inbound email handed to an actor's onEmail hook (issue
+ * #3490). The port parses the raw message BEFORE dispatch (PostalMime
+ * over the SDK bridge's raw bytes), so the hook only ever sees the
+ * parsed form: sender/recipients/subject/body/headers. `from`/`to`
+ * are the transport addresses; `secureRouted` is true when the
+ * mail arrived on the signed-reply leg (verified X-Agent-*
+ * headers). The reply/send/forward/setReject members are the SDK's
+ * send/reply path bound to this message (see PortThink.onEmail):
+ * `reply` answers through the SDK's replyToEmail (signed when the
+ * mail was secure-routed), `send` sends fresh mail through the
+ * SDK's sendEmail over the EMAIL binding, `forward` and
+ * `setReject` are the bridge operations. A hook that needs the
+ * untouched bytes uses `getRaw`.
+ */
+export interface ActorEmailEvent {
+  /** The sender address (transport `From`). */
+  from: string;
+  /** The recipient address (transport `To` — the `<agent>+<instance>` channel address). */
+  to: string;
+  /** The parsed subject (empty when the message carries none). */
+  subject: string;
+  /** The parsed plain-text body (empty when the message carries none). */
+  text: string;
+  /** The parsed HTML body (empty when the message carries none). */
+  html: string;
+  /** The parsed headers, lowercase keys, in wire order. */
+  headers: Array<{ key: string; value: string }>;
+  /** The raw message size in bytes, as the SDK reported it. */
+  rawSize: number;
+  /** True when the mail arrived on the verified signed-reply leg. */
+  secureRouted: boolean;
+  /** The untouched raw message bytes. */
+  getRaw: () => Promise<Uint8Array>;
+  /** Reject the message with a reason (the sender sees a bounce). */
+  setReject: (reason: string) => void;
+  /** Forward the message to another recipient (the SDK bridge). */
+  forward: (rcptTo: string, headers?: Headers) => Promise<unknown>;
+  /**
+   * Reply to this message through the SDK's replyToEmail: the
+   * reply is addressed and threaded by the SDK, and signed when
+   * the inbound mail was secure-routed (pass `secret` then, or
+   * explicit `null` to opt out of signing).
+   */
+  reply: (options: {
+    fromName: string;
+    subject?: string;
+    body: string;
+    contentType?: string;
+    headers?: Record<string, string>;
+    secret?: string | null;
+  }) => Promise<void>;
+  /**
+   * Send fresh mail through the SDK's sendEmail over the EMAIL
+   * binding. `from` defaults to this instance's channel address
+   * (`<agent-kebab>+<instance>@<domain>`), so replies route back
+   * to this instance. Fails loud when the binding is absent.
+   */
+  send: (options: {
+    to: string | string[];
+    subject: string;
+    text?: string;
+    html?: string;
+    from?: string | { email: string; name?: string };
+    replyTo?: string | { email: string; name?: string };
+    cc?: string | string[];
+    bcc?: string | string[];
+    inReplyTo?: string;
+    headers?: Record<string, string>;
+    secret?: string;
+  }) => Promise<unknown>;
+}
+
 /** Turn result handed to onChatResponse. */
 export interface ChatResponseResult {
   status: "completed" | "error";
@@ -234,6 +307,21 @@ export interface ActorTurnHooks {
    * docs idiom).
    */
   onWebhook?(event: ActorWebhookEvent): Promise<Response | void> | Response | void;
+  /**
+   * Inbound email (issue #3490): the port parses the raw message
+   * and dispatches it to this hook. Absent hook = the port
+   * ACCEPTS the message and no-ops (logged, no processing) — the
+   * deliberate difference from onWebhook, which refuses (405)
+   * without a hook: email is a store-and-forward channel, and
+   * every agent HAS it by default; an agent opts into behavior
+   * by implementing the hook. The hook is invoked exactly like
+   * the other port hooks (a method call on this object), so the
+   * fleet's closure idiom applies: a hook defined in the actor's
+   * constructor closes over the actor and may end in
+   * `this.setState(...)`, reaching the base Agent's state
+   * broadcast untouched.
+   */
+  onEmail?(event: ActorEmailEvent): Promise<void> | void;
   maxSteps?: number;
 }
 

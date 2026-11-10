@@ -44,9 +44,13 @@
  *    `schedule` / `scheduleEvery`, `getConnections`, and the email
  *    ingress (`routeAgentEmail` + the `_onEmail` override point).
  *    `agents/voice` exports the `withVoice` mixin; `agents/email`
- *    exports the resolvers. None of the channel mixins/hooks are
- *    adopted by any fleet class yet — adoption is S2/S3/S5's work,
- *    and the manifest says so per class.
+ *    exports the resolvers. The email channel IS adopted at the
+ *    port since S2 (#3490: onEmail hook + routeAgentEmail wiring +
+ *    send/reply over the EMAIL binding); no fleet class defines
+ *    onEmail behavior yet — the orchestrator carries a no-behavior
+ *    stub — so per-copilot email behavior is each copilot's own
+ *    follow-on. The remaining channel mixins/hooks are unadopted
+ *    — adoption is S3/S5's work, and the manifest says so per class.
  *  - @cloudflare/think 0.23.0 gives every Think agent a workspace
  *    (`workspace: ThinkWorkspace`, defaulting to a
  *    @cloudflare/computer Workspace over the DO's storage) and
@@ -260,8 +264,9 @@ const FLEET_DEFAULT_POSTURE: Record<CapabilityId, CapabilityEntry> = {
     { prerequisite: THINK_WEBHOOK_SECRET_ENV },
   ),
   email: entry(
-    "not-implemented",
-    "No email hook exists on the port. The pinned SDK surface exists (agents 0.32.0: routeAgentEmail + the Agent._onEmail override point) but no class wires it; the platform's email traffic runs through the #1262 Worker forwarder pipeline, which is not this capability. Lands as S2 (#3490).",
+    "enabled",
+    "Exposed by PortThink by default (#3490): the Worker's email handler routes `<agent-kebab>+<instance>@<domain>` mail through the SDK's routeAgentEmail to the addressed instance, and PortThink parses it (PostalMime) and dispatches it to the port hooks' onEmail; an agent without the hook no-ops safely (accepted, logged). Outbound rides the SDK's sendEmail/replyToEmail over the EMAIL send_email binding. Mail only ARRIVES once the owner-side Cloudflare Email Service routing exists (subaddressing enabled + one rule per agent base local part, e.g. `orchestrator-agent@agent.openaimp.com` -> Worker) — the code posture cannot see that rule, so the manifest reports the binding truth and the PR/docs name the rule as the owner step. Lands as S2 (#3490).",
+    { prerequisite: "EMAIL" },
   ),
   slack: entry(
     "not-implemented",
@@ -440,6 +445,20 @@ const PREREQUISITE_CHECKS: Record<
   [THINK_WEBHOOK_SECRET_ENV]: {
     isMet: (env) => resolveThinkWebhookSecret(env) !== undefined,
     unavailableReason: "webhook_secret_not_configured",
+  },
+  // Issue #3490 — the email channel's prerequisite is the EMAIL
+  // send_email binding (wrangler.jsonc), not an env var: the
+  // capability entry records the binding name, and the check is a
+  // live binding (an object with a send function). The binding
+  // gates the OUTBOUND path; inbound dispatch needs no binding,
+  // but the manifest reports the channel unavailable without it —
+  // a channel that can receive but never answer is not live.
+  EMAIL: {
+    isMet: (env) => {
+      const binding = env.EMAIL as { send?: unknown } | undefined;
+      return binding !== undefined && typeof binding.send === "function";
+    },
+    unavailableReason: "email_send_binding_not_configured",
   },
 };
 

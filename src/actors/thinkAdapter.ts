@@ -104,6 +104,37 @@
  * hook — the same precondition the turn path documents above for
  * RPC. setState is never wrapped or mediated: a hook calling it
  * uses the base Agent's own method and broadcast, untouched.
+ *
+ * Email channel (issue #3490): email is the other built-in Agent
+ * channel (Agents docs, agent-class/communication-channels/
+ * email) — inbound mail routed to one instance by
+ * `routeAgentEmail`, handled in the agent, sent via the
+ * `send_email` binding. Think extends Agent, so every PortThink
+ * agent HAS the channel by construction; PortThink exposes it by
+ * default: the SDK's `_onEmail` calls this class's `onEmail`
+ * (the AgentEmail object), which parses the raw message in the
+ * port (PostalMime over the bridge's raw bytes) and dispatches
+ * to the port hooks' onEmail. The pipeline order: capability
+ * gate first (disabled by AGENT_CAPABILITIES_DISABLED ->
+ * setReject with the named reason, the fail-loud posture — the
+ * mail is refused, not silently dropped); parse (unparseable ->
+ * setReject, the hook never sees a corrupt message); no onEmail
+ * hook -> safe no-op (accepted, logged, no processing) — the
+ * DELIBERATE difference from webhooks, which refuse (405)
+ * without a hook: email is store-and-forward, and the issue
+ * requires the channel present by default with opt-in behavior.
+ * Lifecycle boot before the hook, same precondition as the turn
+ * and webhook paths (routeAgentEmail arrives over RPC, which
+ * bypasses the lifecycle startup fetch runs). A throwing hook is
+ * caught and logged; it never takes the DO down. Outbound, the
+ * port exposes the SDK's send/reply path: `sendPortEmail`
+ * delegates to the base Agent's sendEmail over the env EMAIL
+ * binding (failing loud with email_send_binding_not_configured
+ * when the binding is absent), defaulting From to this
+ * instance's channel address so replies route back; the event's
+ * `reply` delegates to replyToEmail. The Worker entry (server.ts)
+ * decides which mail is agent mail (src/actors/
+ * agentEmailRouting.ts); the NLQ pipeline is untouched.
  */
 import { Think } from "@cloudflare/think";
 import type {
@@ -144,6 +175,9 @@ export type {
 export type { SkillSource } from "@cloudflare/think";
 import type { ToolSet, UIMessage } from "ai";
 import { z } from "zod";
+import PostalMime from "postal-mime";
+import type { AgentEmail } from "agents/email";
+import { DEFAULT_EMAIL_FROM } from "../services/cloudflareEmailSender";
 import {
   createCfActorSchedule,
   createCfActorSession,
@@ -159,6 +193,7 @@ import type {
   ActorSessionPort,
   ActorTurnHooks,
   ActorTurnPort,
+  ActorEmailEvent,
   ActorWebhookEvent,
   ActorWorkspacePort,
   ChatResponseResult,
@@ -190,6 +225,7 @@ import {
   type AgentCapabilityManifest,
   type CapabilityId,
 } from "./capabilityManifest";
+import { agentNameToKebabCase } from "./agentEmailRouting";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { fetchWebPage, WebFetchError } from "../services/webFetch";
@@ -646,6 +682,167 @@ export class PortThink extends Think<any> {
         source,
       });
       return new Response("Webhook handler failed", { status: 500 });
+    }
+  }
+
+  /**
+   * Issue #3490: this instance's email channel address — the
+   * address the Worker resolver keys on, and the default From for
+   * outbound agent mail, so replies route back to this instance:
+   * `<agent-kebab>+<instance>@<domain>`. The domain is the
+   * platform's email domain, taken from EMAIL_AGENT_ADDRESS when
+   * set, else the DEFAULT_EMAIL_FROM domain (agent.openaimp.com).
+   * The instance name is the DO instance name (this.name); a
+   * nameless instance addresses as `default`.
+   */
+  getPortEmailChannelAddress(): string {
+    const domain =
+      (this as unknown as { env?: { EMAIL_AGENT_ADDRESS?: string } }).env
+        ?.EMAIL_AGENT_ADDRESS?.split("@")[1]
+        ?.trim() || DEFAULT_EMAIL_FROM.split("@")[1];
+    const instance = (this.name || "default").trim() || "default";
+    return `${agentNameToKebabCase(this.constructor.name)}+${instance}@${domain}`;
+  }
+
+  /**
+   * Issue #3490: send fresh mail through the SDK's sendEmail over
+   * the env EMAIL binding. The repo's EmailSender port
+   * (src/services/cloudflareEmailSender.ts) stays the ONLY repo
+   * module that calls `EMAIL.send` directly — this delegates to
+   * the SDK method, which performs the binding call inside the
+   * SDK; the SDK additionally injects the agent routing headers
+   * (X-Agent-Name, X-Agent-ID, signed when `secret` is given) so
+   * replies route back to this instance. Fails loud with the
+   * manifest's named reason when the binding is absent, never a
+   * silent non-send.
+   */
+  async sendPortEmail(options: {
+    to: string | string[];
+    subject: string;
+    text?: string;
+    html?: string;
+    from?: string | { email: string; name?: string };
+    replyTo?: string | { email: string; name?: string };
+    cc?: string | string[];
+    bcc?: string | string[];
+    inReplyTo?: string;
+    headers?: Record<string, string>;
+    secret?: string;
+  }): Promise<unknown> {
+    const binding = (
+      this as unknown as { env?: { EMAIL?: { send?: unknown } } }
+    ).env?.EMAIL;
+    if (!binding || typeof binding.send !== "function") {
+      throw new Error(
+        "email_send_binding_not_configured: the email channel needs the EMAIL send_email binding (wrangler.jsonc) to send; refusing to pretend the mail was sent (#3490)",
+      );
+    }
+    return this.sendEmail({
+      binding: binding as never,
+      to: options.to,
+      from: options.from ?? this.getPortEmailChannelAddress(),
+      subject: options.subject,
+      text: options.text,
+      html: options.html,
+      replyTo: options.replyTo,
+      cc: options.cc,
+      bcc: options.bcc,
+      inReplyTo: options.inReplyTo,
+      headers: options.headers,
+      secret: options.secret,
+    });
+  }
+
+  /**
+   * Issue #3490: the SDK's inbound-email entry point. The base
+   * Agent's `_onEmail` calls this method when present (agents
+   * 0.32.0: `if ("onEmail" in this && typeof this.onEmail ===
+   * "function") return this._tryCatch(() => this.onEmail(email))`),
+   * with the AgentEmail object (transport addresses + headers +
+   * the bridge: getRaw/setReject/forward/reply). This method is
+   * the port's parse-and-dispatch: capability gate, PostalMime
+   * parse of the raw bytes, then the port hooks' onEmail. See the
+   * file header for the pipeline order and the deliberate
+   * no-hook no-op (accepted, logged) versus the webhook 405.
+   */
+  async onEmail(email: AgentEmail): Promise<void> {
+    const hooks = this.portHooks;
+    if (!this.isPortCapabilityEnabled("email")) {
+      structuredLog.warn("portthink.email_refused_disabled", {
+        message:
+          `[PortThink] email refused for ${this.constructor.name}: ` +
+          "the email capability is disabled by configuration (AGENT_CAPABILITIES_DISABLED) — the channel fails loud",
+        from: email.from,
+        to: email.to,
+      });
+      email.setReject(
+        "email_channel_disabled_by_config: the email capability is disabled by configuration for this agent (#3490)",
+      );
+      return;
+    }
+    let parsed: {
+      subject?: string;
+      text?: string;
+      html?: string;
+      headers?: Array<{ key: string; value: string }>;
+    };
+    try {
+      const raw = await email.getRaw();
+      parsed = await PostalMime.parse(raw);
+    } catch (err) {
+      structuredLog.error("portthink.email_unparseable", {
+        message: `[PortThink] email unparseable for ${this.constructor.name} — refusing without dispatching to the hook`,
+        error: err instanceof Error ? err.message : String(err),
+        from: email.from,
+        to: email.to,
+      });
+      email.setReject(
+        "email_unparseable: the message could not be parsed, so no agent hook ran (#3490)",
+      );
+      return;
+    }
+    if (!hooks?.onEmail) {
+      structuredLog.info("portthink.email_accepted_no_hook", {
+        message:
+          `[PortThink] email accepted for ${this.constructor.name} with no onEmail hook — no processing (the channel is present by default; behavior is opt-in)`,
+        from: email.from,
+        to: email.to,
+        subject: parsed.subject ?? "",
+      });
+      return;
+    }
+    // Lifecycle boot (the adapter's standing precondition, see the
+    // file header): routeAgentEmail arrives over RPC, which
+    // bypasses the lifecycle startup fetch runs — boot explicitly,
+    // idempotent, before the hook can touch Think state.
+    await (
+      this as unknown as { lifecycle?: { start?: () => Promise<unknown> } }
+    ).lifecycle?.start?.();
+    const event: ActorEmailEvent = {
+      from: email.from,
+      to: email.to,
+      subject: parsed.subject ?? "",
+      text: parsed.text ?? "",
+      html: parsed.html ?? "",
+      headers: (parsed.headers ?? []).map((h) => ({ key: h.key, value: h.value })),
+      rawSize: email.rawSize,
+      secureRouted: email._secureRouted ?? false,
+      getRaw: () => email.getRaw(),
+      setReject: (reason) => email.setReject(reason),
+      forward: (rcptTo, headers) => email.forward(rcptTo, headers),
+      reply: (options) => this.replyToEmail(email, options),
+      send: (options) => this.sendPortEmail(options),
+    };
+    try {
+      await hooks.onEmail(event);
+    } catch (err) {
+      structuredLog.error("portthink.email_hook_failed", {
+        message: `[PortThink] email hook failed for ${this.constructor.name}`,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack?.slice(0, 1000) : undefined,
+        from: email.from,
+        to: email.to,
+      });
     }
   }
 }

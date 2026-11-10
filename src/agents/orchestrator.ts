@@ -7,7 +7,7 @@ import type {
 } from "../actors/actorPorts";
 import { createCfActorSession } from "../actors/cfAgentsAdapter";
 import { PortThink, createThinkActorTurn, type SkillSource, type ThinkScheduledTasks } from "../actors/thinkAdapter";
-import type { ActorSessionPort, ActorTurnHooks, ActorTurnPort, ActorWebhookEvent } from "../actors/actorPorts";
+import type { ActorSessionPort, ActorTurnHooks, ActorTurnPort, ActorEmailEvent, ActorWebhookEvent } from "../actors/actorPorts";
 import type { ToolSet } from "ai";
 import { getWorkersAIModel } from "./model";
 import { resolveScreenerAgentName } from "./screenerAgentName";
@@ -380,6 +380,11 @@ export class OrchestratorAgent extends PortThink {
       // Issue #3471: the settings-change webhook (the port verifies
       // and dispatches it, #3474) — the Stock Copilot push leg.
       onWebhook: (event) => this.portOnSettingsWebhook(event),
+      // Issue #3490: the email channel's first consumer is the
+      // orchestrator's hook stub (no behavior) — the port accepts
+      // and logs the mail, and real per-copilot email behavior is
+      // each copilot's own follow-on.
+      onEmail: (event) => this.portOnEmail(event),
       maxSteps: this.maxSteps,
     };
   }
@@ -410,6 +415,20 @@ export class OrchestratorAgent extends PortThink {
       },
       event,
     );
+  }
+
+  /**
+   * Issue #3490: the email channel's first consumer — a stub with
+   * NO behavior, by design. The port has already accepted, parsed,
+   * and logged the mail; this hook exists so the orchestrator's
+   * instances are addressable on the channel
+   * (`orchestrator-agent+<login>@<domain>`) and so the no-hook
+   * no-op is a deliberate opt-in point, not an accident. Real
+   * per-copilot email behavior is each copilot's own follow-on
+   * and lands on this hook, not beside it.
+   */
+  private async portOnEmail(_event: ActorEmailEvent): Promise<void> {
+    return;
   }
 
   private createActorTurnRunner(): ActorTurnPort {

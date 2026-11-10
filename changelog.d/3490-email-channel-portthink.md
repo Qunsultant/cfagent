@@ -1,0 +1,3 @@
+### Added
+
+- **Email channel on PortThink (Qunsultant/cfagent#3490):** the `onEmail` port hook (parsed in the port, safe no-op without a hook), Worker `email`-handler routing through the SDK's `routeAgentEmail` for `<agent>+<instance>@<domain>` mail, outbound `sendEmail`/`replyToEmail` over the `EMAIL` send binding, and the S1 capability manifest flipping email from `not-implemented` to `enabled` (`unavailable` without the binding). The NLQ email pipeline is untouched; mail arrives only after the owner-side Cloudflare Email Service routing (subaddressing enabled + one rule per agent base local part to the Worker) is created.
