@@ -34,12 +34,13 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { Badge, Button, Card, EmptyState, Modal, Notice, Spinner } from "./components/ui";
 import { formatCountdown } from "./PendingReviewQueue";
-import { BROKER_OPTIONS } from "./tenantProviders";
+import { currentBrokerLabel } from "./tenantProviders";
 
 /** Issue #3089: broker label for a stored draft. Legacy rows carry no
  * broker — every pre-S3 draft is E*TRADE. */
 export function brokerLabelForTrade(trade: { broker?: string | null }): string {
-  return BROKER_OPTIONS.find((o) => o.id === trade.broker)?.label ?? "E*TRADE";
+  if (!trade.broker) return "E*TRADE";
+  return currentBrokerLabel(trade.broker);
 }
 
 /** The preview flow's HITL window: draft created at preview, schedule fires 900s later. */

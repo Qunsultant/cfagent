@@ -21,7 +21,10 @@
     "test:watch": "vitest",
     "check": "node scripts/gen-design-tokens.mjs --check && npm run typecheck && npm run test:ci && npm run build",
     "tokens:gen": "node scripts/gen-design-tokens.mjs",
-    "parity": "node scripts/parity.mjs"
+    "parity": "node scripts/parity.mjs",
+    "lint:changed": "node scripts/lint-changed.mjs",
+    "lint:audit": "node scripts/lint-changed.mjs --all",
+    "test:coverage": "vitest run --coverage --coverage.provider=v8 --coverage.reporter=json-summary --coverage.reporter=text-summary --coverage.reportsDirectory=coverage"
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.126",
@@ -51,8 +54,13 @@
     "@cloudflare/workers-types": "5.20261031.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.72.2",
+    "@typescript-eslint/parser": "^8.72.2",
     "@vitejs/plugin-react": "^4.3.0",
+    "@vitest/coverage-v8": "^5.0.3",
+    "eslint": "^9.39.5",
     "jsdom": "^30.1.3",
+    "just-bash": "^3.6.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "vitest": "^5.0.3",

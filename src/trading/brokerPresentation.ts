@@ -30,6 +30,8 @@ export interface BrokerPresentation {
   readonly known: boolean;
   /** The broker's own name, e.g. "E*TRADE". Never an environment. */
   readonly label: string;
+  /** The glyph the settings pills and header render for this broker. */
+  readonly icon: string;
   /** e.g. "Alpaca Voice Trading Desk". */
   readonly deskName: string;
   /** The transcript speaker, e.g. "Alpaca Voice Desk". */
@@ -49,6 +51,12 @@ export interface BrokerPresentation {
    */
   readonly modeWord: Readonly<Record<TradingType, string>>;
   /**
+   * The mode as the single short word the header badge, the environment
+   * toggle, and the trigger title render ("Paper" / "Sandbox" / "Live").
+   * Same per-broker noun as modeWord, without the phrase around it.
+   */
+  readonly modeShort: Readonly<Record<TradingType, string>>;
+  /**
    * How a connected session is described. E*TRADE's OAuth token dies at
    * midnight Eastern; Alpaca's key pair has no expiry, so it must not borrow
    * that sentence.
@@ -61,11 +69,13 @@ const PRESENTATIONS: Readonly<Record<BrokerId, BrokerPresentation>> = {
   etrade: {
     known: true,
     label: "E*TRADE",
+    icon: "⚡",
     deskName: "E*TRADE Voice Trading Desk",
     deskAgentName: "E*TRADE Voice Desk",
     botName: "ETradeAgent",
     modeBadge: { paper: "PAPER TRADING SANDBOX", live: "LIVE BROKERAGE" },
     modeWord: { paper: "Paper sandbox", live: "Live execution" },
+    modeShort: { paper: "Sandbox", live: "Live" },
     sessionCopy: {
       paper: "Access token active until midnight Eastern Time.",
       live: "Access token active until midnight Eastern Time.",
@@ -74,11 +84,13 @@ const PRESENTATIONS: Readonly<Record<BrokerId, BrokerPresentation>> = {
   alpaca: {
     known: true,
     label: "Alpaca",
+    icon: "🦙",
     deskName: "Alpaca Voice Trading Desk",
     deskAgentName: "Alpaca Voice Desk",
     botName: "AlpacaAgent",
     modeBadge: { paper: "PAPER TRADING", live: "LIVE TRADING" },
     modeWord: { paper: "Paper trading", live: "Live trading" },
+    modeShort: { paper: "Paper", live: "Live" },
     sessionCopy: {
       paper: "API key pair verified for paper trading.",
       live: "API key pair verified for live trading.",
@@ -94,11 +106,13 @@ const PRESENTATIONS: Readonly<Record<BrokerId, BrokerPresentation>> = {
 const UNKNOWN_PRESENTATION: BrokerPresentation = {
   known: false,
   label: "Selected broker",
+  icon: "",
   deskName: "Voice Trading Desk",
   deskAgentName: "Voice Desk",
   botName: "TradingAgent",
   modeBadge: { paper: "PAPER TRADING", live: "LIVE TRADING" },
-    modeWord: { paper: "Paper trading", live: "Live trading" },
+  modeWord: { paper: "Paper trading", live: "Live trading" },
+  modeShort: { paper: "Paper", live: "Live" },
   sessionCopy: { paper: "Session active.", live: "Session active." },
 };
 

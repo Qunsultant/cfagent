@@ -16,6 +16,7 @@
 import { useEffect, useState } from "react";
 import { csrfHeaders } from "./apiFetch";
 import { isBrokerId, type BrokerId } from "../trading";
+import { brokerOptions } from "./brokerOptions";
 
 export { isBrokerId, type BrokerId };
 
@@ -86,16 +87,11 @@ export const DATA_PROVIDER_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "alpaca", label: "Alpaca" },
 ];
 
-export const BROKER_OPTIONS: Array<{ id: string; label: string }> = [
-  { id: "etrade", label: "E*TRADE" },
-  { id: "alpaca", label: "Alpaca" },
-];
-
 /**
  * Issue #3751: the client identity projection — the label a surface
  * renders for a provider/broker id. The served identity (from the
  * server's one identity map) wins when the id IS the state's current
- * selection; otherwise the pre-load mirror lists above; otherwise
+ * selection; otherwise the catalog-derived broker list (#3855); otherwise
  * the raw id (today's fallback — an unknown id is never dressed up
  * with a guessed brand). Names resolve at render time from ids.
  */
@@ -107,7 +103,7 @@ export function labelForDataProvider(state: TenantProvidersState, id: string): s
 /** The broker twin of labelForDataProvider. */
 export function labelForBroker(state: TenantProvidersState, id: string): string {
   if (id === state.brokerId && state.brokerDisplayName) return state.brokerDisplayName;
-  return BROKER_OPTIONS.find((o) => o.id === id)?.label ?? id;
+  return brokerOptions().find((o) => o.id === id)?.label ?? id;
 }
 
 let memoryState: TenantProvidersState | null = null;

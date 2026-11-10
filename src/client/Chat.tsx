@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { startPolling } from "./polling";
 import { getPollingConfig } from "./pollingConfig";
 import { useAutoRefresh } from "./autoRefresh";
-import { useTenantProviders, BROKER_OPTIONS, brokerUnavailableNotice, isBrokerId } from "./tenantProviders";
+import { useTenantProviders, labelForBroker, brokerUnavailableNotice, isBrokerId } from "./tenantProviders";
 import { BRAND } from "./branding";
 import { apiFetch as fetch } from "./apiFetch";
 import { McpApiExplorer } from "./McpApiExplorer";
@@ -207,7 +207,7 @@ export function Chat({ user }: { user: User }) {
   // from here via the props below.
   const [autoRefreshState, setAutoRefreshState] = useAutoRefresh();
   const [tenantProviders] = useTenantProviders();
-  const selectedBrokerLabel = BROKER_OPTIONS.find((o) => o.id === tenantProviders.brokerId)?.label ?? tenantProviders.brokerId;
+  const selectedBrokerLabel = labelForBroker(tenantProviders, tenantProviders.brokerId);
   const autoRefreshEnabled = autoRefreshState.enabled;
   const autoRefreshInterval = autoRefreshState.interval;
   const tickerEnabled = useTickerEnabled();

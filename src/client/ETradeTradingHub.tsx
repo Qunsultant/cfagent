@@ -7,7 +7,7 @@ import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, FieldShell, useToast } from "./components/ui";
 import { getRoute } from "./routes";
 import { parseTabFromSearch, subscribeToRouteChanges } from "./router";
-import { readTenantProvidersState, useTenantProviders, BROKER_OPTIONS } from "./tenantProviders";
+import { readTenantProvidersState, useTenantProviders, labelForBroker, currentBrokerLabel } from "./tenantProviders";
 import {
   ETradeQuote,
   ScreenedStockItem,
@@ -1635,7 +1635,7 @@ export function ETradeTradingHub({
       // Issue #3089: preview routes through the selected broker, not
       // the hardwired E*TRADE route.
       const brokerId = readTenantProvidersState().brokerId;
-      const brokerLabel = BROKER_OPTIONS.find((o) => o.id === brokerId)?.label ?? brokerId;
+      const brokerLabel = labelForBroker(readTenantProvidersState(), brokerId);
       const resp = await fetch("/api/broker/order/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-environment": activeEnv },
@@ -1742,7 +1742,7 @@ export function ETradeTradingHub({
         setLastExecutionResult(null);
         setOrderError("Fresh preview ready — review the updated execution preview above, then approve to submit. Nothing has been executed.");
       } else {
-        const previewBrokerLabel = BROKER_OPTIONS.find((o) => o.id === readTenantProvidersState().brokerId)?.label ?? presentation.label;
+        const previewBrokerLabel = currentBrokerLabel(readTenantProvidersState().brokerId);
         setOrderError(freshDraft.error || `Failed to generate fresh preview on ${previewBrokerLabel}`);
       }
     } catch (err: any) {
@@ -2710,7 +2710,7 @@ export function ETradeTradingHub({
                   {/* Preset Quick Chips */}
                   <div className="omnichannel-chip-row">
                     <Button
-                      onClick={() => handleSimulateSlack("@${presentation.botName} quote NVDA")}
+                      onClick={() => handleSimulateSlack(`@${presentation.botName} quote NVDA`)}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2718,7 +2718,7 @@ export function ETradeTradingHub({
                       📈 Quote NVDA
                     </Button>
                     <Button
-                      onClick={() => handleSimulateSlack("@${presentation.botName} screen stocks priced between $20 and $200")}
+                      onClick={() => handleSimulateSlack(`@${presentation.botName} screen stocks priced between $20 and $200`)}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2726,7 +2726,7 @@ export function ETradeTradingHub({
                       🔍 Screen Price Range
                     </Button>
                     <Button
-                      onClick={() => handleSimulateSlack("@${presentation.botName} preview buy 10 NVDA limit 125.00")}
+                      onClick={() => handleSimulateSlack(`@${presentation.botName} preview buy 10 NVDA limit 125.00`)}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
@@ -2734,7 +2734,7 @@ export function ETradeTradingHub({
                       ⚡ Buy 10 NVDA Ticket
                     </Button>
                     <Button
-                      onClick={() => handleSimulateSlack("@${presentation.botName} show my portfolio positions")}
+                      onClick={() => handleSimulateSlack(`@${presentation.botName} show my portfolio positions`)}
                       variant="secondary"
                       tone="subtle"
                       size="sm"
