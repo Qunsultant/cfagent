@@ -45,7 +45,7 @@ export interface ScreeningIndicators {
    * must read the sourced news sentiment instead.
    */
   dayAction: Sentiment;
-  /** @deprecated Use `dayAction` — the same price-derived label
+  /** @deprecated Superseded by `dayAction` in this file — the same price-derived label
    *  under its honest name. Never present this as sentiment. */
   sentiment: Sentiment;
   /** Strong directional move (|change%| >= 2%), either direction. */
@@ -95,7 +95,7 @@ export function classifyDayAction(
   return "neutral";
 }
 
-/** @deprecated Use `classifyDayAction` — same value, honest name. */
+/** @deprecated Superseded by `classifyDayAction` in this file — same value, honest name. */
 export function classifySentiment(
   changePercent: number,
   config: ScreenerConfig = DEFAULT_SCREENER_CONFIG
