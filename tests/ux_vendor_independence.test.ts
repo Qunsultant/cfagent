@@ -37,7 +37,14 @@ describe("UX Vendor Independence & Capability Representation (Issues #1322 & #13
   });
 
   it("ETradeTradingHub.tsx presents omnichannel trading desks and institutional execution ledger", () => {
-    const content = read("src/client/ETradeTradingHub.tsx");
+    // #3050 PR5: the omnichannel, voice, and ledger sub-tabs moved out of the
+    // hub into their own panels. Same assertions, new hosts — the hub plus
+    // the panels it renders.
+    const content =
+      read("src/client/ETradeTradingHub.tsx") +
+      read("src/client/OmnichannelPanel.tsx") +
+      read("src/client/VoicePanel.tsx") +
+      read("src/client/LedgerPanel.tsx");
     expect(content).not.toContain("Cloudflare Agents SDK");
     expect(content).not.toContain("Cloudflare Email Trading Agent");
     expect(content).not.toContain("Cloudflare Slack Trading Agent");

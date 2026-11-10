@@ -266,9 +266,24 @@ function measure(): Map<string, number> {
  * AlpacaCancelAllControl.tsx alpaca 8 - #3885's own disposition).
  * Net composed vs the ship-time main (1127 rows / 8769 lines on the
  * tip's own baseline): rows 1127 -> 1127, lines 8769 -> 8770.
+ * Baseline update (#3050, 2026-11-10): the hub's last four inline
+ * sub-tabs move into shell panels (PortfolioPanel, LedgerPanel,
+ * OmnichannelPanel, VoicePanel). The moved markup is the Hub's, so its
+ * 11 provider-brand lines relocate with it (Hub etrade 114->103, an
+ * INTEGRATION shrink) and the panels carry exactly those 11 lines
+ * (PortfolioPanel 5, OmnichannelPanel 3, VoicePanel 3; LedgerPanel none)
+ * — provider-subject panels and code identifiers, the S2 client-copy
+ * PLATFORM deferral territory per the OrderTicketPanel precedent, not
+ * framing. The panels' props interfaces were neutralized instead of
+ * baselined: the Broker* aliases (BrokerAccount, BrokerPosition,
+ * BrokerQuote, BrokerOrderDraft — the ETrade* names are deprecated
+ * aliases for them) and onTradeOrder/onNavigateOrder props, so no new
+ * identifier rows are added. Net zero on the census population
+ * (11 moved, 11 new); the platform slice grows 186 -> 189 rows and its
+ * total 1039 -> 1050 lines, the integration total 6526 -> 6515.
  */
 const BASELINE: Array<[string, string, number]> = [
-  // ---- PLATFORM (186 rows / 1039 lines) ----
+  // ---- PLATFORM (189 rows / 1050 lines) ----
   ["README.md", "etrade", 3],
   ["README.md", "yahoo", 1],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "alpaca", 8],
@@ -405,11 +420,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/IvHistoryPanel.tsx", "etrade", 3],
   ["src/client/MarketDataResearchHub.tsx", "alpaca", 55],
   ["src/client/MarketDataResearchHub.tsx", "etrade", 8],
+  ["src/client/OmnichannelPanel.tsx", "etrade", 3],
   ["src/client/MarketDataResearchHub.tsx", "yahoo", 30],
   ["src/client/OptionsScreenerPage.tsx", "etrade", 1],
   ["src/client/OrderTicketPanel.tsx", "alpaca", 7],
   ["src/client/OrderTicketPanel.tsx", "etrade", 21],
   ["src/client/PlatformAdminPanel.tsx", "etrade", 18],
+  ["src/client/PortfolioPanel.tsx", "etrade", 5],
   ["src/client/PortfolioRiskPanel.tsx", "alpaca", 1],
   ["src/client/PortfolioRiskPanel.tsx", "etrade", 14],
   ["src/client/SchedulesHome.tsx", "etrade", 1],
@@ -418,6 +435,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/StockCopilotPanel.tsx", "alpaca", 3],
   ["src/client/StockCriteriaPanel.tsx", "etrade", 1],
   ["src/client/StockHub.tsx", "etrade", 1],
+  ["src/client/VoicePanel.tsx", "etrade", 3],
   ["src/client/WorkflowsHub.tsx", "alpaca", 14],
   ["src/client/WorkflowsHub.tsx", "etrade", 21],
   ["src/client/WorkflowsHub.tsx", "nasdaq", 15],
@@ -456,7 +474,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
 
-  // ---- INTEGRATION (678 rows / 6526 lines) ----
+  // ---- INTEGRATION (678 rows / 6515 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -651,7 +669,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/ETradeDynamicMenu.tsx", "etrade", 37],
   ["src/client/ETradeDynamicMenu.tsx", "yahoo", 6],
   ["src/client/ETradeTradingHub.tsx", "alpaca", 23],
-  ["src/client/ETradeTradingHub.tsx", "etrade", 114],
+  ["src/client/ETradeTradingHub.tsx", "etrade", 103],
   ["src/client/ProviderConnectivityDashboard.tsx", "etrade", 20],
   ["src/client/SchedulesPanel.tsx", "etrade", 7],
   ["src/client/TradingApprovalsQueue.tsx", "etrade", 7],
@@ -1439,11 +1457,11 @@ const BASELINE: Array<[string, string, number]> = [
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
 const PLATFORM_KEYS = new Set(
-  BASELINE.slice(0, 186).map(([f, t]) => `${f}\t${t}`),
+  BASELINE.slice(0, 189).map(([f, t]) => `${f}\t${t}`),
 );
 // #3917: derived, not a hand-maintained literal — the platform slice is the
-// first 186 rows, so its total follows from them.
-const PLATFORM_BASELINE_TOTAL = BASELINE.slice(0, 186).reduce((sum, [, , count]) => sum + count, 0);
+// first 189 rows, so its total follows from them.
+const PLATFORM_BASELINE_TOTAL = BASELINE.slice(0, 189).reduce((sum, [, , count]) => sum + count, 0);
 
 describe("#3525 S6 shrink-only provider-brand census pin", () => {
   const measured = measure();

@@ -44,12 +44,14 @@ describe("the section nav follows the broker (#3367)", () => {
   });
 
   it("names only ids that exist in the panel that renders that broker", () => {
-    // `section-positions` is the hub's own table (the shared position list), the
-    // rest live in the panels. Both halves are part of "what E*TRADE renders".
+    // The portfolio sub-tab's sections live in PortfolioPanel (#3050 PR5);
+    // the rest live in the hub and the account/risk panels. All of them are
+    // part of "what E*TRADE renders".
     const etradeIds = new Set([
       ...idsFor("src/client/ETradeTradingHub.tsx"),
       ...idsFor("src/client/AccountPanels.tsx"),
       ...idsFor("src/client/PortfolioRiskPanel.tsx"),
+      ...idsFor("src/client/PortfolioPanel.tsx"),
     ]);
     for (const section of brokerSectionNav("etrade")) {
       expect(etradeIds.has(section.id), `etrade ${section.id}`).toBe(true);

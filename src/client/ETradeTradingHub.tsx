@@ -62,6 +62,10 @@ import { ReportsPanel } from "./ReportsPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
 import { TrackRecordPanel } from "./TrackRecordPanel";
 import { OrderTicketPanel } from "./OrderTicketPanel";
+import { PortfolioPanel } from "./PortfolioPanel";
+import { LedgerPanel } from "./LedgerPanel";
+import { OmnichannelPanel } from "./OmnichannelPanel";
+import { VoicePanel } from "./VoicePanel";
 import { OptionsHub, type OptionsHubTab } from "./OptionsHub";
 import { StockHub, type StockHubTab } from "./StockHub";
 import { ETradeDynamicMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
@@ -2275,789 +2279,83 @@ export function ETradeTradingHub({
 
       {/* SUBTAB 3: PORTFOLIO & POSITIONS */}
       {effectiveSubTab === "portfolio" && (
-        <div className="trading-section portfolio-section">
-          {/* Universal Hero Header */}
-          <div className="tab-hero-header portfolio-hero-header">
-            <div className="hero-text-block">
-              <div className="hero-badge-row">
-                <span className="hero-badge">💼 PORTFOLIO &amp; HOLDINGS</span>
-                <span className="hero-badge" data-broker={selectedBroker}>{presentation.label}</span>
-                <span className={`hero-badge ${isLive ? "badge-live" : "badge-paper"}`}>
-                  {brokerModeBadge(selectedBroker, isLive ? "live" : "paper")}
-                </span>
-                <span className="hero-badge badge-pro">HITL ATTESTED</span>
-              </div>
-              <h3>{brokerLabel} Portfolio Holdings &amp; Open Positions</h3>
-              <p>
-                Inspect real-time equity &amp; options holdings, cost basis, unrealized gain/loss, asset allocations, and portfolio Greeks across your connected {brokerLabel} brokerage desk.
-              </p>
-            </div>
-            <div className="hero-actions-row">
-              <Button
-                className="btn-options-refresh"
-                variant="secondary"
-                size="sm"
-                onClick={() => fetchPositions()}
-                disabled={positionsLoading}
-                title={`Refresh live portfolio positions from ${brokerLabel}`}
-               loading={positionsLoading}>
-                <span className={positionsLoading ? "strat-spin" : ""}>↻</span>
-                <span>{"Refresh Positions"}</span>
-              </Button>
-              <Button variant="trade"
-                type="button"
-                onClick={() => handleNavigateSubTab("order")}
-                title="Open Fast Order Ticket to execute a trade"
-              >
-                ⚡ Fast Order Ticket
-              </Button>
-              {!isLive && (
-                selectedBroker === "etrade" ? (
-                  <Button variant="secondary"
-                    type="button"
-                    onClick={handleSeedDemoPortfolio}
-                    title="Load curated paper trading positions (NVDA, AAPL, MSFT, SPY) to explore"
-                  >
-                    🌱 {positions.length === 0 ? "Load Demo Holdings" : "Reset Demo Holdings"}
-                  </Button>
-                ) : null
-              )}
-            </div>
-          </div>
-
-          <div className="portfolio-summary-row">
-            {(() => {
-              const summary = portfolioSummary(account, positions);
-              const hasDayGain = summary.dayGain !== null;
-              const isGain = (summary.dayGain ?? 0) >= 0;
-              // Issue #3417: every figure comes from the SELECTED broker's own
-              // read, and an unreported figure prints an em dash. "$0.00" for a
-              // funded account was the defect — a zero is a claim.
-              return (
-                <>
-                  <div className="port-summary-card">
-                    <span className="summary-title">Portfolio Equity</span>
-                    <span className="summary-amount">{formatMoney(summary.equity)}</span>
-                    <span className={`summary-change ${hasDayGain ? (isGain ? "positive" : "negative") : ""}`}>
-                      {hasDayGain
-                        ? `${formatSignedMoney(summary.dayGain)} today`
-                        : `${brokerLabel} did not report a day P&L for this account`}
-                    </span>
-                  </div>
-                  <div className="port-summary-card">
-                    <span className="summary-title">Available Cash</span>
-                    <span className="summary-amount">{formatMoney(summary.cash)}</span>
-                    <span className="summary-change">
-                      {summary.cash === null
-                        ? `Not reported by ${brokerLabel}`
-                        : isLive
-                          ? `${brokerLabel} purchasing power`
-                          : "Paper capital ready"}
-                    </span>
-                  </div>
-                  <div className="port-summary-card">
-                    <span className="summary-title">Buying Power</span>
-                    <span className="summary-amount">{formatMoney(summary.buyingPower)}</span>
-                    <span className="summary-change">
-                      {summary.buyingPower === null
-                        ? `Not reported by ${brokerLabel}`
-                        : account?.marginBuyingPower
-                          ? "Margin buying power"
-                          : "Cash buying power"}
-                    </span>
-                  </div>
-                  <div className="port-summary-card">
-                    <span className="summary-title">Active Positions</span>
-                    {/* Issue #3880: before the first read lands the count is
-                        unknown, not zero — "0" is a claim about the account. */}
-                    <span className="summary-amount">
-                      {summary.reported ? summary.positionCount : "—"}
-                    </span>
-                    <span className="summary-change">
-                      {summary.reported
-                        ? `${summary.optionCount} options · ${summary.equityCount} equities & ETFs`
-                        : `Not read yet from ${brokerLabel} — use ↻ Refresh Positions`}
-                    </span>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-
-          <div className="portfolio-table-wrap" id="section-positions" style={{ scrollMarginTop: 80 }}>
-            <Table
-                      columns={[
-                        { key: "symbol", header: "Symbol & Company", render: (pos: any) => (<><div className="ticker-company"><span className="ticker-badge">{pos.symbol}</span><span className="company-title">{pos.securityType === "OPTN" ? `${pos.optionType || "Option"} ${safePriceFormat(pos.strikePrice, 2, "$0.00")} · ${pos.expirationDate || "Expiry unavailable"}` : pos.description}</span></div>{pos.securityType === "OPTN" && <span className="position-type-badge">{pos.positionType === "SHORT" ? "Short option" : "Long option"}</span>}</>) },
-                        { key: "qty", header: "Quantity", render: (pos: any) => <span className="qty-val">{pos.quantity} {pos.securityType === "OPTN" ? "contracts" : "shares"}</span> },
-                        { key: "cost", header: "Avg Cost Basis", render: (pos: any) => <span>{safePriceFormat(pos.costBasis ?? pos.pricePaid, 2, "$0.00")}</span> },
-                        { key: "price", header: "Current Price", render: (pos: any) => <span className="price-tag">{safePriceFormat(pos.currentPrice ?? pos.marketPrice, 2, "$0.00")}</span> },
-                        { key: "mkt", header: "Total Market Value", render: (pos: any) => <span className="mkt-val">${Number(pos.marketValue ?? (Number(pos.currentPrice ?? pos.marketPrice ?? 0) * Number(pos.quantity ?? 0))).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> },
-                        { key: "unreal", header: "Unrealized Gain / Loss", render: (pos: any) => { const g = Number(pos.unrealizedGainLoss ?? pos.totalGain ?? 0); const gp = Number(pos.unrealizedGainLossPercent ?? pos.totalGainPercent ?? 0); const isPos = g >= 0; return <span className={`change-pill ${isPos ? "positive" : "negative"}`}>{isPos ? "+" : ""}${safeNumberFormat(g)} ({isPos ? "+" : ""}{safeNumberFormat(gp)}%)</span>; } },
-                        { key: "day", header: "Day's Gain", render: (pos: any) => { const d = Number(pos.daysGain ?? 0); const dp = Number(pos.daysGainPercent ?? 0); const isPos = d >= 0; return <span className={`change-pill ${isPos ? "positive" : "negative"}`}>{isPos ? "+" : ""}${safeNumberFormat(d)} ({isPos ? "+" : ""}{safeNumberFormat(dp)}%)</span>; } },
-                        { key: "actions", header: "Actions", render: (pos: any) => { const costBasis = Number(pos.costBasis ?? pos.pricePaid ?? 0); const curPrice = Number(pos.currentPrice ?? pos.marketPrice ?? 0); const mktVal = Number(pos.marketValue ?? (curPrice * Number(pos.quantity ?? 0))); const unrealizedGain = Number(pos.unrealizedGainLoss ?? pos.totalGain ?? 0); return (<div className="table-actions-cell">{pos.securityType === "OPTN" && pos.optionType && pos.strikePrice && pos.expirationDate ? (<Button variant="danger" tone="subtle" size="sm" type="button" onClick={() => handleCloseOptionPosition(pos)} title="Build a broker-priced closing order for this option position">- Close Option</Button>) : pos.securityType === "OPTN" ? (<span className="position-action-unavailable" title="The broker did not return enough contract details to build a closing order.">Contract details unavailable</span>) : (<><Button variant="trade" tone="subtle" size="sm" type="button" onClick={() => handleQuickTrade(pos, "BUY")} title="Add more shares">+ Buy</Button><Button variant="danger" tone="subtle" size="sm" type="button" onClick={() => handleQuickTrade(pos, "SELL")} title="Sell to close position">- Close</Button></>)}<Button variant="warning" tone="subtle" size="sm" type="button" onClick={() => { setRiskSubject({ title: `${pos.quantity}x ${pos.symbol} (${pos.description || "Long Equity"})`, underlyingSymbol: pos.symbol, underlyingPrice: curPrice, strategyType: "Long Equity Position", sentiment: "bullish", quantity: pos.quantity, positionType: "EQUITY", costBasis: costBasis, unrealizedPnL: unrealizedGain, maxLoss: mktVal, maxProfit: null, breakevens: [costBasis], breakevenText: `Cost basis: ${safePriceFormat(costBasis)}/share` }); }} title="Analyze position risk profile and hedging strategies">🛡️ Risk</Button></div>); } },
-                      ]}
-                      rows={positions}
-                      rowKey={(pos: any) => pos.symbol}
-                      empty={positionsLoading ? (
-                        <Spinner label="Loading portfolio positions" />
-                      ) : (
-                        <EmptyState
-                          icon="💼"
-                          title="No Active Holdings Found"
-                          description={
-                            isLive
-                              ? `No active positions found in your connected live ${brokerLabel} brokerage account. Use the Fast Order Ticket to build and preview an order.`
-                              : (selectedBroker === "etrade"
-                                ? "Your paper trading sandbox has no open positions. Place a paper trade or load curated demo holdings (NVDA, AAPL, MSFT, SPY) to explore portfolio analytics, charts, and Greeks."
-                                : `Your ${brokerLabel} paper trading sandbox has no open positions. Place a paper trade to explore portfolio analytics, charts, and Greeks.`)
-                          }
-                          action={
-                            <div style={{ display: "flex", gap: "var(--space-3)", justifyContent: "center", flexWrap: "wrap" }}>
-                              <Button variant="trade" onClick={() => handleNavigateSubTab("order")}>
-                                ⚡ Build Order Ticket
-                              </Button>
-                              {!isLive && (
-                                selectedBroker === "etrade" ? (
-                                  <Button variant="secondary" onClick={handleSeedDemoPortfolio}>
-                                    🌱 Load Curated Demo Positions
-                                  </Button>
-                                ) : null
-                              )}
-                            </div>
-                          }
-                        />
-                      )}
-                    />
-          </div>
-
-          {/* Portfolio Risk (issue #63): surfaces the #34/#35/#36/#54 backends —
-              aggregates, hedge drafts with HITL preview hand-off, correlation
-              flags, and portfolio-aware sizing. */}
-          {/* Section nav (issue #69) */}
-          <nav className="portfolio-section-nav" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "1.25rem" }}>
-            {/* Issue #3367: the chips follow the broker being rendered. A chip that
-                scrolls to a section this broker's panel does not render is a dead
-                control, and the list used to be E*TRADE's for every broker. */}
-            {brokerSectionNav(selectedBroker).map(({ label, id }) => (
-              <Button
-                variant="secondary"
-                size="sm"
-                key={id}
-                style={{ padding: "var(--space-1-5) var(--space-3)", borderRadius: 999, border: "1px solid var(--color-border-medium)", background: "var(--color-muted)", color: "inherit", cursor: "pointer", fontSize: "var(--font-size-body-sm)" }}
-                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              >
-                {label}
-              </Button>
-            ))}
-          </nav>
-
-          <ErrorBoundary label="Account panels (alerts, transactions, watchlists, orders)">
-            {selectedBroker === "etrade" ? (
-              <AccountPanels activeEnv={activeEnv} onUnreadAlertsChange={onUnreadAlertsChange} />
-            ) : (
-              <AlpacaBrokerPanel activeEnv={activeEnv} />
-            )}
-          </ErrorBoundary>
-
-          <ErrorBoundary label="Portfolio Risk panel">
-            {/* Issue #3356: the catalogue decides whether risk is served, and the
-                panel reads the SELECTED broker's book. A broker that declares no risk
-                model gets a named notice instead of another broker's numbers. */}
-            {riskBroker && brokerSupports(riskBroker, "portfolioRisk") ? (
-              <PortfolioRiskPanel activeEnv={activeEnv} onPreviewHedge={handleTradeOrder} broker={riskBroker} />
-            ) : (
-              <Notice tone="neutral" title="Portfolio risk analytics are not available for this broker">
-                The selected broker declares no portfolio risk model. No other broker's positions are
-                substituted for it.
-              </Notice>
-            )}
-          </ErrorBoundary>
-        </div>
+        <PortfolioPanel
+          activeEnv={activeEnv}
+          account={account}
+          positions={positions}
+          positionsLoading={positionsLoading}
+          fetchPositions={fetchPositions}
+          presentation={presentation}
+          brokerLabel={brokerLabel}
+          selectedBroker={selectedBroker}
+          isLive={isLive}
+          onUnreadAlertsChange={onUnreadAlertsChange}
+          riskBroker={riskBroker}
+          onTradeOrder={handleTradeOrder}
+          onNavigateOrder={() => handleNavigateSubTab("order")}
+          handleSeedDemoPortfolio={handleSeedDemoPortfolio}
+          handleQuickTrade={handleQuickTrade}
+          handleCloseOptionPosition={handleCloseOptionPosition}
+          setRiskSubject={setRiskSubject}
+        />
       )}
 
       {/* SUBTAB 4: ORDER HISTORY LEDGER */}
       {effectiveSubTab === "ledger" && (
-        <Card className="trading-section">
-          <div className="ledger-header-row">
-            <h4>📜 Order Execution Ledger (Audited Trade Records)</h4>
-            <Button
-              variant="secondary"
-              disabled={ordersLoading}
-              onClick={fetchOrders}
-             loading={ordersLoading}>
-              {"🔄 Refresh Ledger"}
-            </Button>
-          </div>
-
-          <div className="ledger-table-wrap">
-            <Table
-                      columns={[
-                        { key: "id", header: "Order ID", render: (ord: any) => <code>{ord.id}</code> },
-                        { key: "symbol", header: "Symbol", render: (ord: any) => <span className="ticker-badge">{ord.symbol}</span> },
-                        { key: "action", header: "Action", render: (ord: any) => <span className={`action-pill ${ord.action.toLowerCase()}`}>{ord.action}</span> },
-                        { key: "qty", header: "Shares", render: (ord: any) => <>{ord.quantity}</> },
-                        { key: "price", header: "Price", render: (ord: any) => <>{safePriceFormat(ord.price)}</> },
-                        { key: "total", header: "Total Value", render: (ord: any) => <>{ord.totalValue != null && Number.isFinite(Number(ord.totalValue)) ? `$${Number(ord.totalValue).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</> },
-                        { key: "status", header: "Status", render: (ord: any) => <span className={`tx-status-pill ${ord.status}`}>{ord.status.toUpperCase()}</span> },
-                        { key: "ref", header: "Broker Ref", render: (ord: any) => <code className="broker-ref-snippet">{ord.orderRef || "—"}</code> },
-                        { key: "did", header: "Proposer DID", render: (ord: any) => <code className="did-snippet" title={ord.proposerDid}>{ord.proposerDid.replace("did:agent:openaimp:", "")}</code> },
-                        { key: "date", header: "Date & Time", render: (ord: any) => <span className="time-snippet">{new Date(ord.createdAt).toLocaleString()}</span> },
-                        { key: "actions", header: "Action", render: (ord: any) => <Button variant="warning" tone="subtle" size="sm" type="button" onClick={() => { setRiskSubject({ title: `${ord.action} ${ord.quantity}x ${ord.symbol}`, underlyingSymbol: ord.symbol, underlyingPrice: ord.price, strategyType: `${ord.action} Trade`, sentiment: ord.action.toLowerCase().includes("buy") ? "bullish" : "bearish", quantity: ord.quantity, positionType: "EQUITY", maxLoss: ord.totalValue, breakevens: [ord.price], breakevenText: `Price: ${safePriceFormat(ord.price)}` }); }} title="Analyze risk profile for this ledger trade">🛡️ Risk</Button> },
-                      ]}
-                      rows={orders}
-                      rowKey={(ord: any) => ord.id}
-                      empty={ordersLoading ? <Spinner label="Loading orders ledger" /> : <EmptyState title="No trade orders recorded yet." />}
-                    />
-          </div>
-        </Card>
+        <LedgerPanel
+          orders={orders}
+          ordersLoading={ordersLoading}
+          fetchOrders={fetchOrders}
+          setRiskSubject={setRiskSubject}
+        />
       )}
 
       {/* Omnichannel Trading Desks (Autonomous Email & Slack Desks) */}
       {effectiveSubTab === "omnichannel" && (
-        <div className="tab-pane active omnichannel-pane">
-          {/* Issue #3429: the desks execute against E*TRADE, so another broker is told\n              before it types a command — the backend refuses the same request. */}
-          {selectedBroker !== "etrade" && (
-            <Notice tone="warning" title={`${presentation.label} does not run these desks`}>
-              The email, Slack and voice desks execute against E*TRADE. Nothing here is previewed or\n              routed for {presentation.label}; use the Trading Hub order ticket or the neutral order API.
-            </Notice>
-          )}
-          {/* Header Card */}
-          <div className="omnichannel-header-card">
-            <div className="omnichannel-header-top">
-              <div>
-                <span className="omnichannel-header-badge">
-                  Autonomous Multi-Agent Architecture
-                </span>
-                <h3 className="omnichannel-header-title">
-                  💬 Omnichannel Trading Desks (Email &amp; Slack)
-                </h3>
-                <p className="omnichannel-header-desc">
-                  Autonomous market research, quoting, and Human-in-the-Loop order drafting via Inbound Email and Slack Bot communication channels. All orders require explicit human authorization before live {presentation.label} execution.
-                </p>
-              </div>
-              <div className="omnichannel-header-status">
-                <span className="omnichannel-live-badge">
-                  ✓ {presentation.label} REST API · {isLive ? "LIVE" : "PAPER"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="omnichannel-grid">
-            {/* Channel 1: Autonomous Email Trading Desk */}
-            <div className="omnichannel-card">
-              <div className="omnichannel-card-header">
-                <h4 className="omnichannel-card-title email">
-                  <span>✉️</span> Autonomous Email Trading Desk
-                </h4>
-                <span className="omnichannel-badge-subtle cyan">
-                  send_email &amp; PostalMime
-                </span>
-              </div>
-
-              <div className="omnichannel-meta-box">
-                <div style={{ marginBottom: "0.4rem" }}>
-                  <strong>Inbound Address:</strong> <code>trade@agent.openaimp.com</code>
-                </div>
-                <div style={{ marginBottom: "0.4rem" }}>
-                  <strong>Security Guarantee:</strong> Stamped with Trading DID (<code>did:agent:openaimp:trading</code>).
-                </div>
-                <div>
-                  <strong>Commands:</strong> <code>Quote &lt;SYMBOL&gt;</code>, <code>Screen stocks priced between $20 and $200</code>, <code>Preview Buy 10 NVDA limit 125</code>, <code>APPROVE &lt;orderId&gt;</code>.
-                </div>
-              </div>
-
-              {/* Email Simulator Form */}
-              <div className="omnichannel-simulator-card">
-                <h5 className="omnichannel-simulator-title">
-                  🧪 Interactive Email Simulator
-                </h5>
-                <div className="omnichannel-form-group">
-                  <div>
-                    <TextInput label="From (Sender Email):" id="omni-email-from"
-                      type="email"
-                      value={emailFrom}
-                      onChange={(e) => setEmailFrom(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <TextInput label="Subject:" id="omni-email-subject"
-                      type="text"
-                      value={emailSubject}
-                      onChange={(e) => setEmailSubject(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <TextInput label="Email Body:" id="omni-email-body"
-                      multiline
-                      rows={2}
-                      value={emailBody}
-                      onChange={(e) => setEmailBody(e.target.value)}
-                    />
-                  </div>
-
-                  {/* Preset Quick Chips */}
-                  <div className="omnichannel-chip-row">
-                    <Button
-                      onClick={() => { setEmailSubject("Quote NVDA"); setEmailBody("What is the current price and technicals?"); }}
-                      variant="secondary"
-                      tone="subtle"
-                      size="sm"
-                    >
-                      📈 Quote NVDA
-                    </Button>
-                    <Button
-                      onClick={() => { setEmailSubject("Screen stock price range"); setEmailBody("Show stocks priced between $20 and $200"); }}
-                      variant="secondary"
-                      tone="subtle"
-                      size="sm"
-                    >
-                      🔍 Screen Price Range
-                    </Button>
-                    <Button
-                      onClick={() => { setEmailSubject("Order Preview"); setEmailBody("Buy 10 shares of NVDA limit 125.00"); }}
-                      variant="secondary"
-                      tone="subtle"
-                      size="sm"
-                    >
-                      🛡️ Buy 10 NVDA
-                    </Button>
-                    {activeDraft && (
-                      <Button
-                        onClick={() => { setEmailSubject("Order Approval"); setEmailBody(`APPROVE ${activeDraft.orderId}`); }}
-                        variant="primary"
-                        tone="subtle"
-                        size="sm"
-                      >
-                        ✓ APPROVE {activeDraft.orderId}
-                      </Button>
-                    )}
-                  </div>
-
-                  <Button
-                    disabled={emailLoading}
-                    onClick={handleSimulateEmail}
-                    variant="primary"
-                   loading={emailLoading}>
-                    {"⚡ Send Test Email to Agent"}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Email Result Output */}
-              {emailResult && (
-                <div className="omnichannel-result-box">
-                  <div className="omnichannel-result-header">
-                    <span className="omnichannel-result-title">Agent Email Reply:</span>
-                    <span className="omnichannel-result-action">
-                      {emailResult.actionType || "reply"}
-                    </span>
-                  </div>
-                  <h6 className="omnichannel-result-subject">
-                    Subject: {emailResult.responseSubject}
-                  </h6>
-                  {emailResult.responseHtml ? (
-                    <div
-                      className="omnichannel-result-html"
-                      dangerouslySetInnerHTML={{ __html: emailResult.responseHtml }}
-                    />
-                  ) : (
-                    <pre className="omnichannel-result-pre">
-                      {emailResult.responseText}
-                    </pre>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Channel 2: Autonomous Slack Trading Desk */}
-            <div className="omnichannel-card">
-              <div className="omnichannel-card-header">
-                <h4 className="omnichannel-card-title slack">
-                  <span>🤖</span> Autonomous Slack Trading Desk
-                </h4>
-                <span className="omnichannel-badge-subtle purple">
-                  Events &amp; Block Kit
-                </span>
-              </div>
-
-              <div className="omnichannel-meta-box">
-                <div style={{ marginBottom: "0.4rem" }}>
-                  <strong>Event Request URL:</strong> <code className="slack-url">https://agent.openaimp.com/slack/events</code>
-                </div>
-                <div style={{ marginBottom: "0.4rem" }}>
-                  <strong>Interactivity URL:</strong> <code className="slack-url">https://agent.openaimp.com/slack/interactions</code>
-                </div>
-                <div>
-                  <strong>OAuth App Install:</strong> <a href="/slack/install" target="_blank" rel="noreferrer" className="slack-install-link">Install to Workspace</a>
-                </div>
-              </div>
-
-              {/* Slack Simulator Form */}
-              <div className="omnichannel-simulator-card">
-                <h5 className="omnichannel-simulator-title">
-                  🧪 Interactive Slack Bot Simulator
-                </h5>
-                <div className="omnichannel-form-group">
-                  <div>
-                    <TextInput label="Slack Message / Mention:" id="omni-slack-message"
-                      type="text"
-                      value={slackPrompt}
-                      onChange={(e) => setSlackPrompt(e.target.value)}
-                    />
-                  </div>
-
-                  {/* Preset Quick Chips */}
-                  <div className="omnichannel-chip-row">
-                    <Button
-                      onClick={() => handleSimulateSlack(`@${presentation.botName} quote NVDA`)}
-                      variant="secondary"
-                      tone="subtle"
-                      size="sm"
-                    >
-                      📈 Quote NVDA
-                    </Button>
-                    <Button
-                      onClick={() => handleSimulateSlack(`@${presentation.botName} screen stocks priced between $20 and $200`)}
-                      variant="secondary"
-                      tone="subtle"
-                      size="sm"
-                    >
-                      🔍 Screen Price Range
-                    </Button>
-                    <Button
-                      onClick={() => handleSimulateSlack(`@${presentation.botName} preview buy 10 NVDA limit 125.00`)}
-                      variant="secondary"
-                      tone="subtle"
-                      size="sm"
-                    >
-                      ⚡ Buy 10 NVDA Ticket
-                    </Button>
-                    <Button
-                      onClick={() => handleSimulateSlack(`@${presentation.botName} show my portfolio positions`)}
-                      variant="secondary"
-                      tone="subtle"
-                      size="sm"
-                    >
-                      💼 Portfolio
-                    </Button>
-                  </div>
-
-                  <Button
-                    disabled={slackLoading}
-                    onClick={() => handleSimulateSlack()}
-                    variant="primary"
-                   loading={slackLoading}>
-                    {"⚡ Simulate Slack Message"}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Slack Block Kit Card Viewer */}
-              {slackResult?.response && (
-                <div className="omnichannel-slack-viewer">
-                  <div className="omnichannel-slack-user-header">
-                    <span style={{ fontSize: "var(--font-size-title)" }}>🤖</span>
-                    <div>
-                      <strong className="slack-bot-name">{presentation.botName}</strong>{" "}
-                      <span className="slack-app-tag">APP</span>
-                      <span className="slack-time">Just now</span>
-                    </div>
-                  </div>
-
-                  <div className="omnichannel-slack-body">
-                    {slackResult.response.blocks?.map((block: any, bIdx: number) => {
-                      if (block.type === "header") {
-                        return <h5 key={bIdx} className="slack-block-heading">{block.text?.text}</h5>;
-                      }
-                      if (block.type === "section" && block.fields) {
-                        return (
-                          <div key={bIdx} className="slack-block-fields">
-                            {block.fields.map((f: any, fIdx: number) => (
-                              <div key={fIdx} className="omnichannel-slack-field">
-                                {f.text?.split("\n").map((line: string, lIdx: number) => (
-                                  <div key={lIdx}>{line.replace(/\*/g, "")}</div>
-                                ))}
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      }
-                      if (block.type === "section" && block.text) {
-                        return <p key={bIdx} className="slack-block-text">{block.text.text?.replace(/\*/g, "")}</p>;
-                      }
-                      if (block.type === "actions") {
-                        return (
-                          <div key={bIdx} className="slack-actions-row">
-                            {block.elements?.map((btn: any, btnIdx: number) => (
-                              <Button
-                                variant={btn.style === "primary" ? "primary" : "danger"}
-                                key={btnIdx}
-                                disabled={slackActionLoading}
-                                onClick={() => handleSlackActionButton(btn.action_id, btn.value)}
-                                style={{
-                                  background: btn.style === "primary" ? "var(--color-success)" : "var(--color-danger)",
-                                  color: "var(--color-text-inverse)",
-                                  border: "none",
-                                  borderRadius: "var(--radius-xs, 4px)",
-                                  padding: "var(--space-1-5) var(--space-3)",
-                                  fontWeight: "bold",
-                                  fontSize: "var(--font-size-body-sm)",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {btn.text?.text}
-                              </Button>
-                            ))}
-                          </div>
-                        );
-                      }
-                      if (block.type === "context") {
-                        return (
-                          <div key={bIdx} className="slack-context-row">
-                            {block.elements?.[0]?.text?.replace(/`/g, "")}
-                          </div>
-                        );
-                      }
-                      return null;
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <OmnichannelPanel
+          presentation={presentation}
+          selectedBroker={selectedBroker}
+          isLive={isLive}
+          emailFrom={emailFrom}
+          setEmailFrom={setEmailFrom}
+          emailSubject={emailSubject}
+          setEmailSubject={setEmailSubject}
+          emailBody={emailBody}
+          setEmailBody={setEmailBody}
+          emailLoading={emailLoading}
+          emailResult={emailResult}
+          handleSimulateEmail={handleSimulateEmail}
+          activeDraft={activeDraft}
+          slackPrompt={slackPrompt}
+          setSlackPrompt={setSlackPrompt}
+          slackLoading={slackLoading}
+          slackResult={slackResult}
+          handleSimulateSlack={handleSimulateSlack}
+          handleSlackActionButton={handleSlackActionButton}
+          slackActionLoading={slackActionLoading}
+        />
       )}
 
       {/* Autonomous Voice Trading Desk */}
       {effectiveSubTab === "voice" && (
-        <div className="tab-pane active voice-pane">
-          {/* Issue #3429: the voice desk is E*TRADE\x27s service; say so for another broker. */}
-          {selectedBroker !== "etrade" && (
-            <Notice tone="warning" title={`${presentation.label} does not run the voice desk`}>
-              The voice desk executes against E*TRADE. Nothing spoken here is previewed or routed for\n              {presentation.label}; use the Trading Hub order ticket or the neutral order API.
-            </Notice>
-          )}
-          {/* Header Card */}
-          <div className="voice-header-card">
-            <div className="voice-header-top">
-              <div>
-                <span className="voice-header-badge">
-                  Real-Time Voice Architecture
-                </span>
-                <h3 className="voice-header-title">
-                  <span>🎙️</span> {presentation.deskName}
-                </h3>
-                <p className="voice-header-desc">
-                  Real-time conversational voice trading with speech synthesis and recognition. Verbal quote inquiries, technical screening, and strict two-stage verbal Human-in-the-Loop order drafting.
-                </p>
-              </div>
-              <div className="voice-header-status">
-                <span className={`voice-status-pill ${voiceStatus}`}>
-                  <span className={`voice-status-dot ${voiceStatus}`} />
-                  {voiceStatus.toUpperCase()}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="voice-main-grid">
-            {/* Visualizer & Mic Control Bar */}
-            <div className="voice-control-card">
-              <div className="voice-control-actions">
-                <Button
-                  type="button"
-                  onClick={handleToggleVoiceRecording}
-                  variant={speechRecognitionActive ? "danger" : "primary"}
-                >
-                  <span>{speechRecognitionActive ? "🛑 Stop Listening" : "🎙️ Push to Talk / Speak"}</span>
-                </Button>
-
-                <Button
-                  type="button"
-                  onClick={() => setVoiceIsMuted(!voiceIsMuted)}
-                  variant="secondary"
-                >
-                  {voiceIsMuted ? "🔇 Voice Muted" : "🔊 Audio On"}
-                </Button>
-              </div>
-
-              {/* Animated Audio Visualizer Bars */}
-              <div className="voice-visualizer-bars">
-                {[12, 24, 38, 20, 32, 16, 28, 36, 18, 26, 34, 14].map((h, i) => (
-                  <div
-                    key={i}
-                    className={`voice-vbar ${voiceStatus}`}
-                    style={{
-                      height: voiceStatus === "speaking" || voiceStatus === "listening" ? `${Math.max(8, (h * (voiceStatus === "listening" ? 1.2 : 0.9)))}px` : "6px",
-                    }}
-                  />
-                ))}
-              </div>
-
-              {/* Issue #3796: a named voice failure (the endpoint's
-                  code) is a visible state, like the composer's —
-                  never a silent fallback to the other backend. */}
-              {voiceFailureCode && (
-                <Notice tone="danger">
-                  Voice failed ({voiceFailureCode}). Nothing was sent — type
-                  your prompt below or use the quick chips instead.
-                </Notice>
-              )}
-
-              {/* Interim Real-Time Transcript Display */}
-              {voiceInterim && (
-                <div className="voice-interim-box">
-                  🎙️ <em>{voiceInterim}…</em>
-                </div>
-              )}
-
-              {/* Quick Spoken Chips */}
-              <div className="voice-chips-row">
-                <Button
-                  onClick={() => handleVoiceTurn("What is Nvidia trading at?")}
-                  variant="secondary"
-                  tone="subtle"
-                  size="sm"
-                >
-                  📈 "What is Nvidia trading at?"
-                </Button>
-                <Button
-                  onClick={() => handleVoiceTurn("Screen stocks priced between $20 and $200")}
-                  variant="secondary"
-                  tone="subtle"
-                  size="sm"
-                >
-                  🔍 "Screen price range"
-                </Button>
-                <Button
-                  onClick={() => handleVoiceTurn("What is my portfolio balance?")}
-                  variant="secondary"
-                  tone="subtle"
-                  size="sm"
-                >
-                  💼 "Check portfolio balance"
-                </Button>
-                <Button
-                  onClick={() => handleVoiceTurn("Buy 10 shares of NVDA at market")}
-                  variant="primary"
-                  tone="subtle"
-                  size="sm"
-                >
-                  ⚡ "Buy 10 NVDA at market"
-                </Button>
-                {activeDraft && (
-                  <>
-                    <Button
-                      onClick={() => handleVoiceTurn(`Confirm order ${activeDraft.orderId}`)}
-                      variant="primary"
-                      tone="subtle"
-                      size="sm"
-                    >
-                      ✓ "Confirm order {activeDraft.orderId}"
-                    </Button>
-                    <Button
-                      onClick={() => handleVoiceTurn(`Cancel order ${activeDraft.orderId}`)}
-                      variant="danger"
-                      tone="subtle"
-                      size="sm"
-                    >
-                      ✕ "Cancel order {activeDraft.orderId}"
-                    </Button>
-                  </>
-                )}
-              </div>
-
-              {/* Text Fallback Input Box */}
-              <form
-                onSubmit={(e) => { e.preventDefault(); handleVoiceTurn(); }}
-                className="voice-input-form"
-              >
-                <TextInput
-                  type="text"
-                  placeholder="Or type a spoken command: e.g. 'What is Apple trading at?' or 'Buy 10 NVDA at market'"
-                  value={voiceInputText}
-                  onChange={(e) => setVoiceInputText(e.target.value)}
-                  className="voice-text-input"
-                />
-                <Button
-                  type="submit"
-                  disabled={voiceLoading || !voiceInputText.trim()}
-                  className="btn-voice-send"
-                  variant="primary"
-                 loading={voiceLoading}>
-                  {"Send Voice Turn"}
-                </Button>
-              </form>
-            </div>
-
-            {/* Conversation Feed */}
-            <div className="voice-feed-card">
-              <h5 className="voice-feed-title">
-                <span>💬</span> Live Voice Conversation History
-              </h5>
-
-              <div className="voice-feed-scroll">
-                {voiceTranscript.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`voice-turn ${msg.role === "user" ? "user-turn" : "bot-turn"}`}
-                  >
-                    <div className="voice-turn-meta">
-                      <span>{msg.role === "user" ? "👤 Trader (Voice)" : `🤖 ${presentation.deskAgentName}`}</span>
-                      <span>• {msg.timestamp}</span>
-                    </div>
-
-                    <div className={`voice-bubble ${msg.role === "user" ? "user-bubble" : "bot-bubble"}`}>
-                      <div>{msg.text}</div>
-
-                      {/* Embedded HITL Order Preview Card in Voice Feed */}
-                      {msg.actionType === "preview" && msg.orderDraft && (
-                        <div className="voice-order-preview-box">
-                          <div className="voice-order-preview-title">
-                            🛡️ Order Preview Staged (HITL Required)
-                          </div>
-                          <div className="voice-order-preview-details">
-                            <div><strong>Order ID:</strong> <code>{msg.orderDraft.orderId}</code></div>
-                            <div><strong>Action:</strong> {msg.orderDraft.action} {msg.orderDraft.quantity} {msg.orderDraft.quantity === 1 ? "share" : "shares"} of {msg.orderDraft.symbol} {msg.orderDraft.orderType === "LIMIT" ? `(LIMIT @ ${safePriceFormat(msg.orderDraft.limitPrice || msg.orderDraft.estimatedPrice)})` : "(MARKET)"}</div>
-                            <div><strong>Estimated Total:</strong> {safePriceFormat(msg.orderDraft.estimatedTotal)} USD</div>
-                          </div>
-                          {/* Issue #1773 (OWASP ASI-02): the voice
-                              approve path shows the same exact
-                              payload, fees, and slippage limits. */}
-                          <TradeExecutionPreview draft={msg.orderDraft} />
-                          <div className="voice-order-preview-actions">
-                            <Button
-                              onClick={() => handleVoiceOrderAction("approve", msg.orderDraft.orderId)}
-                              variant="primary"
-                              tone="subtle"
-                            >
-                              ✓ Voice Approve &amp; Execute
-                            </Button>
-                            <Button
-                              onClick={() => handleVoiceOrderAction("cancel", msg.orderDraft.orderId)}
-                              variant="danger"
-                              tone="subtle"
-                            >
-                              ✕ Cancel Draft
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Embedded Execution Receipt */}
-                      {msg.actionType === "approval" && msg.brokerOrderRef && (
-                        <div className="voice-receipt-box">
-                          ✓ Broker Ref: <code>{msg.brokerOrderRef}</code> • Status: <strong>EXECUTED</strong>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <VoicePanel
+          presentation={presentation}
+          selectedBroker={selectedBroker}
+          voiceStatus={voiceStatus}
+          speechRecognitionActive={speechRecognitionActive}
+          handleToggleVoiceRecording={handleToggleVoiceRecording}
+          voiceIsMuted={voiceIsMuted}
+          setVoiceIsMuted={setVoiceIsMuted}
+          voiceFailureCode={voiceFailureCode}
+          voiceInterim={voiceInterim}
+          handleVoiceTurn={handleVoiceTurn}
+          activeDraft={activeDraft}
+          voiceInputText={voiceInputText}
+          setVoiceInputText={setVoiceInputText}
+          voiceLoading={voiceLoading}
+          voiceTranscript={voiceTranscript}
+          handleVoiceOrderAction={handleVoiceOrderAction}
+        />
       )}
       </PageShell>
 

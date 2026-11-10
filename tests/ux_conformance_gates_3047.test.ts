@@ -227,6 +227,10 @@ const CONFORMING_SUB_TABS: Record<string, string> = {
   "goal-screen": "src/client/GoalScreenPanel.tsx",
   "reports": "src/client/ReportsPanel.tsx",
   "review": "src/client/ScreeningReviewPanel.tsx",
+  "portfolio": "src/client/PortfolioPanel.tsx",
+  "ledger": "src/client/LedgerPanel.tsx",
+  "omnichannel": "src/client/OmnichannelPanel.tsx",
+  "voice": "src/client/VoicePanel.tsx",
 };
 
 const EXPECTED_TAB_CONTENT_KEYS = [
