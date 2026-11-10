@@ -151,3 +151,54 @@ describe("scripts/ci/put-secret.sh (#590)", () => {
     expect(helper).toContain("GITHUB_STEP_SUMMARY");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Slack credentials (#3952)
+// ---------------------------------------------------------------------------
+
+describe("deploy.yml — Slack credentials (#3952)", () => {
+  // The whole Slack credential set (#3974, owner direction): synced now so
+  // enabling a channel later is configuration only. Presence in the sync
+  // list is what makes a GitHub secret reach the deployment at all.
+  const WIRED = [
+    "SLACK_APP_ID",
+    "SLACK_APP_TOKEN",
+    "SLACK_BOT_TOKEN",
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_VERIFICATION_TOKEN",
+  ];
+
+  it("syncs each Slack credential the code reads, as an optional push", () => {
+    for (const name of WIRED) {
+      expect(workflow, `${name}: no GitHub-secret source`).toContain(`secrets.${name}`);
+      expect(workflow, `${name}: not pushed`).toContain(`optional_secret ${name} `);
+      // Optional, never required: absence is a reported fail-closed state,
+      // not a reason to fail a code deploy.
+      expect(workflow, `${name}: must not be required`).not.toContain(`require_secret ${name} `);
+    }
+  });
+
+  it("keeps the staged names deployed rather than skipped", () => {
+    // Three of the seven have no reader yet (#3974). They stay in the sync
+    // list deliberately; the doc records that they configure nothing until
+    // a reader lands, so the deployment never claims a channel it lacks.
+    const doc = readFileSync(
+      new URL("../docs/architecture/security/api-security.md", import.meta.url),
+      "utf-8",
+    );
+    expect(doc).toContain("Staged: deployed, no reader yet");
+    for (const name of ["SLACK_APP_ID", "SLACK_APP_TOKEN", "SLACK_VERIFICATION_TOKEN"]) {
+      expect(doc, `${name} must be recorded as staged`).toContain(name);
+    }
+  });
+
+  it("keeps the Slack pushes in the existing core-secrets step (no seventh step)", () => {
+    const core = section("\n  sync-secrets:", "\n      - name: Set E*TRADE secrets");
+    for (const name of WIRED) {
+      expect(core, `${name} belongs to the core step`).toContain(`optional_secret ${name} `);
+    }
+    expect(workflow.match(/source scripts\/ci\/put-secret\.sh/g) ?? []).toHaveLength(6);
+  });
+});

@@ -191,6 +191,13 @@ jobs:
           S_SCREENER_EMAIL_TO: ${{ secrets.SCREENER_EMAIL_TO }}
           S_CHANNEL_EMAIL_PRINCIPALS: ${{ secrets.CHANNEL_EMAIL_PRINCIPALS }}
           S_THINK_WEBHOOK_SECRET: ${{ secrets.THINK_WEBHOOK_SECRET }}
+          S_SLACK_APP_ID: ${{ secrets.SLACK_APP_ID }}
+          S_SLACK_APP_TOKEN: ${{ secrets.SLACK_APP_TOKEN }}
+          S_SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          S_SLACK_CLIENT_ID: ${{ secrets.SLACK_CLIENT_ID }}
+          S_SLACK_CLIENT_SECRET: ${{ secrets.SLACK_CLIENT_SECRET }}
+          S_SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+          S_SLACK_VERIFICATION_TOKEN: ${{ secrets.SLACK_VERIFICATION_TOKEN }}
         run: |
           set -euo pipefail
           source scripts/ci/put-secret.sh
@@ -231,6 +238,24 @@ jobs:
           # (503) until the operator sets the GitHub secret, so
           # absence is reported here, never a sync failure.
           optional_secret THINK_WEBHOOK_SECRET "$S_THINK_WEBHOOK_SECRET"
+
+          # Slack channel credentials (#3974). Owner direction: sync the
+          # WHOLE Slack credential set now, so enabling a channel later is
+          # configuration only and never needs another deploy change. All
+          # seven are optional — absence is reported in the job summary and
+          # leaves the channel in its own fail-closed state, never a deploy
+          # failure. Four have readers today (signing secret, bot token,
+          # client id, client secret); three are staged for a reader that
+          # does not exist yet (app id, app token, verification token) and
+          # configure nothing until that code lands — see
+          # docs/architecture/security/api-security.md §7.
+          optional_secret SLACK_APP_ID "$S_SLACK_APP_ID"
+          optional_secret SLACK_APP_TOKEN "$S_SLACK_APP_TOKEN"
+          optional_secret SLACK_BOT_TOKEN "$S_SLACK_BOT_TOKEN"
+          optional_secret SLACK_CLIENT_ID "$S_SLACK_CLIENT_ID"
+          optional_secret SLACK_CLIENT_SECRET "$S_SLACK_CLIENT_SECRET"
+          optional_secret SLACK_SIGNING_SECRET "$S_SLACK_SIGNING_SECRET"
+          optional_secret SLACK_VERIFICATION_TOKEN "$S_SLACK_VERIFICATION_TOKEN"
 
       - name: Set E*TRADE secrets on Cloudflare Worker [${{ needs.load-environment.outputs.target_env }}]
         env:
