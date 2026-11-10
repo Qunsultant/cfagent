@@ -10,6 +10,8 @@ import {
   triggerGoal,
   removeGoal,
   listOperations,
+  listBuiltinGoals,
+  addBuiltinGoals,
   addResourceGoals,
   RESOURCE_GOALS_PRESET,
   type ScheduledGoal,
@@ -25,7 +27,7 @@ import {
 import { listGoalRuns, type JobRunRecord } from "./jobsApi";
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
 import { ledgerLinkageCell, ledgerLinkageTitle } from "./ScheduleRunLedgerPanel";
-import { TextInput, Select, Button, Modal } from "./components/ui";
+import { TextInput, Select, Button, Checkbox, Modal } from "./components/ui";
 import { DelegationContractPreview } from "./DelegationContractPreview";
 import { buildDelegationContract } from "./delegationContract";
 
@@ -50,10 +52,19 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
     operation: "",
     budgetCents: "",
     timeZone: "UTC",
+    enabled: true,
   });
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState("");
   const [presetResults, setPresetResults] = useState<PresetGoalResult[] | null>(null);
+  // Issue #3996 — built-in goals read from the server (single
+  // source of truth: src/schedule.ts DEFAULT_SCHEDULES via GET
+  // /api/schedule/builtin-goals, never a client-side copy).
+  const [builtinGoals, setBuiltinGoals] = useState<ScheduledGoal[]>([]);
+  const [builtinLoadError, setBuiltinLoadError] = useState("");
+  const [builtinSelection, setBuiltinSelection] = useState("");
+  const [builtinNotice, setBuiltinNotice] = useState("");
+  const [seedResults, setSeedResults] = useState<PresetGoalResult[] | null>(null);
   const [removeTarget, setRemoveTarget] = useState<ScheduledGoal | null>(null);
 
   const refresh = useCallback(async () => {
@@ -84,10 +95,27 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
     }
   }, []);
 
+  // Issue #3996 — the built-in read is separate from the goals
+  // read on purpose, like the runs read above: a built-in-read
+  // failure must never fail the goals list (the dropdown and the
+  // seed-all button simply stay empty, with a note in their
+  // section).
+  const refreshBuiltin = useCallback(async () => {
+    try {
+      const builtins = await listBuiltinGoals();
+      setBuiltinGoals(builtins.goals);
+      setBuiltinLoadError("");
+    } catch (cause) {
+      setBuiltinGoals([]);
+      setBuiltinLoadError(cause instanceof Error ? cause.message : "Could not load built-in goals.");
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
     void refreshRuns();
-  }, [refresh, refreshRuns]);
+    void refreshBuiltin();
+  }, [refresh, refreshRuns, refreshBuiltin]);
 
   const withBusy = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -134,9 +162,48 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
         cron: form.cron,
         operation: form.operation,
         budgetCents: Math.floor(budgetCents),
+        enabled: form.enabled,
         ...(timeZone ? { timeZone } : {}),
       });
-      setForm({ id: "", name: "", cron: "", operation: "", budgetCents: "", timeZone: "UTC" });
+      setForm({ id: "", name: "", cron: "", operation: "", budgetCents: "", timeZone: "UTC", enabled: true });
+      setBuiltinSelection("");
+      setBuiltinNotice("");
+    });
+  };
+
+  // Issue #3996 — picking a built-in goal pre-fills the Add-goal
+  // form from its canonical definition. A definition without a
+  // timeZone leaves the form's current value (UTC by default) —
+  // none is invented. A goal that already exists is surfaced, not
+  // filled in: the operator cannot submit a duplicate from here.
+  const selectBuiltin = (id: string) => {
+    setBuiltinSelection(id);
+    if (!id) {
+      setBuiltinNotice("");
+      return;
+    }
+    const goal = builtinGoals.find((g) => g.id === id);
+    if (!goal) return;
+    if (goals.some((g) => g.id === id)) {
+      setBuiltinNotice(`"${goal.name}" (${goal.id}) already exists — it will not be added again.`);
+      return;
+    }
+    setBuiltinNotice("");
+    setForm({
+      id: goal.id,
+      name: goal.name,
+      cron: goal.cron,
+      operation: goal.operation,
+      budgetCents: String(goal.budgetCents),
+      timeZone: goal.timeZone ?? form.timeZone,
+      enabled: goal.enabled,
+    });
+  };
+
+  const submitSeedAll = async () => {
+    setSeedResults(null);
+    await withBusy("seed", async () => {
+      setSeedResults(await addBuiltinGoals(builtinGoals, goals.map((g) => g.id)));
     });
   };
 
@@ -243,6 +310,29 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
       <h3 style={{ margin: "20px 0 12px" }}>Add goal</h3>
       {formError && <div style={{ color: "var(--color-danger)", marginBottom: 8 }}>{formError}</div>}
       <div style={{ display: "grid", gap: "var(--space-2)", maxWidth: 520 }}>
+        {/* Issue #3996: built-in goal dropdown — pre-fills the form
+            below from the server-read canonical definitions; the
+            operator reviews and submits via the existing Add goal
+            button. */}
+        <Select
+          label="Built-in goal"
+          aria-label="Built-in goal"
+          value={builtinSelection}
+          disabled={builtinGoals.length === 0}
+          onChange={(e) => selectBuiltin(e.target.value)}
+        >
+          <option value="">{builtinGoals.length === 0 ? "Could not load built-in goals" : "Select a built-in goal…"}</option>
+          {builtinGoals.map((goal) => {
+            const exists = goals.some((g) => g.id === goal.id);
+            return (
+              <option key={goal.id} value={goal.id}>
+                {`${goal.name} (${goal.id})${exists ? " — already added" : ""}${!goal.enabled ? " — disabled by design" : ""}`}
+              </option>
+            );
+          })}
+        </Select>
+        {builtinNotice && <div style={{ fontSize: 13, opacity: 0.8 }}>{builtinNotice}</div>}
+        {builtinLoadError && <div style={{ fontSize: 13, opacity: 0.8 }}>{builtinLoadError}</div>}
         <TextInput style={inputStyle} placeholder="id (e.g. weekly-report)" value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} />
         <TextInput style={inputStyle} placeholder="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         <TextInput style={inputStyle} placeholder='cron (e.g. "0 6 * * *")' value={form.cron} onChange={(e) => setForm({ ...form, cron: e.target.value })} />
@@ -264,6 +354,13 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
         </Select>
         <TextInput style={inputStyle} placeholder="budget in cents (e.g. 500)" value={form.budgetCents} onChange={(e) => setForm({ ...form, budgetCents: e.target.value })} />
         <TextInput placeholder="timeZone (IANA, e.g. UTC)" value={form.timeZone} onChange={(e) => setForm({ ...form, timeZone: e.target.value })} />
+        {/* Issue #3996: the enabled state is part of the form, so a
+            pre-filled disabled-by-design goal is visibly disabled
+            before submit and the submit carries it to the server
+            (addGoal honors `enabled`; the server-side default used
+            to be enabled, so a form without this toggle could never
+            add a disabled goal). */}
+        <Checkbox aria-label="Enabled" label="Enabled" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
         {/* Issue #1773 (HAX #1 scope disclosure): the Delegation
             Contract preview for exactly what adding this goal
             authorizes, built from the form + the loaded catalog
@@ -333,6 +430,38 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
       <div>
         <Button disabled={!!busy} onClick={() => void submitPreset()} loading={busy === "preset"}>
           {"Add SessionStore resource goals"}
+        </Button>
+      </div>
+
+      {/* Issue #3996: seed all built-in goals — adds every missing
+          built-in goal in DEFAULT_SCHEDULES order, skipping ones
+          that already exist, and reports per-goal results. The
+          disabled-by-design goals seed as disabled; the operator
+          enables them later once their prerequisites are in place. */}
+      <h3 style={{ margin: "20px 0 12px" }}>Seed all built-in goals</h3>
+      <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 8 }}>
+        Adds every missing built-in goal (daily QA sweep, opportunity hunt, daily social post,
+        the three SessionStore resource goals, the two index-list refresh goals, and feed
+        refresh). Goals that already exist are skipped, not duplicated. The daily social post
+        and the ETF-holdings refresh seed as disabled.
+      </div>
+      {seedResults && (
+        <div style={{ marginBottom: 8 }}>
+          {seedResults.map((r) => (
+            <div key={r.id} style={{ fontSize: 13, marginBottom: 4 }}>
+              <code>{r.id}</code> —{" "}
+              {r.status === "added"
+                ? "Added"
+                : r.status === "skipped"
+                  ? `already exists (skipped): ${r.reason}`
+                  : `Failed: ${r.error}`}
+            </div>
+          ))}
+        </div>
+      )}
+      <div>
+        <Button disabled={!!busy || builtinGoals.length === 0} onClick={() => void submitSeedAll()} loading={busy === "seed"}>
+          {"Seed all built-in goals"}
         </Button>
       </div>
 
