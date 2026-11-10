@@ -96,7 +96,9 @@ import {
 } from "../../breakers/marketDataBreakerWrapper";
 import type { CircuitBreaker } from "../../breakers/breakerPorts";
 import type {
+  DataNewsArticle,
   DataProvider,
+  DataProviderCapability,
   DataResult,
   DataRunContext,
   OptionsChainRequest,
@@ -677,6 +679,18 @@ export interface MarketDataProviderOptions {
    * tests pass no breaker and are unaffected.
    */
   breaker?: CircuitBreaker;
+  /**
+   * #3932 — the news fetcher, when this adapter serves the news
+   * capability. Supplied, the adapter declares "news" and serves
+   * getNews through it (tracked + captured like every other
+   * capability); absent, the capability is not declared (ISP —
+   * the Alpaca adapter passes none). The Yahoo adapter defaults
+   * this to fetchYahooNewsArticles below.
+   */
+  news?: (
+    symbol: string,
+    runContext?: DataRunContext,
+  ) => Promise<DataNewsArticle[]>;
 }
 
 function createMarketDataProvider(
@@ -746,10 +760,16 @@ function createMarketDataProvider(
   const batchProvider = effectiveProvider as IMarketDataProvider & {
     getQuotes?: (symbols: string[]) => Promise<import("../../types").MarketDataResearchQuote[]>;
   };
+  const newsFetcher = options?.news;
+  // #3932: "news" is declared exactly when a news fetcher is
+  // supplied (ISP — the Yahoo adapter supplies one, Alpaca none).
+  const capabilities: readonly DataProviderCapability[] = newsFetcher
+    ? ["quotes", "historicalBars", "fundamentals", "news"]
+    : ["quotes", "historicalBars", "fundamentals"];
   return {
     id,
     name,
-    capabilities: ["quotes", "historicalBars", "fundamentals"] as const,
+    capabilities,
     isConfigured: () => effectiveProvider.isConfigured(env),
     getQuote: async (symbol: string, runContext?: DataRunContext) => {
       const result = await trackedFetch(outcomeRecorder, meta("quotes", { symbol }, runContext), () =>
@@ -779,6 +799,22 @@ function createMarketDataProvider(
       await captureFetch("fundamentals", { symbol }, result, runContext);
       return tag(id, "fundamentals", result);
     },
+    // #3932 — news, served through the injected fetcher (the
+    // Yahoo adapter defaults it to fetchYahooNewsArticles). The
+    // method exists exactly when the capability is declared.
+    ...(newsFetcher
+      ? {
+          getNews: async (symbol: string, runContext?: DataRunContext) => {
+            const result = await trackedFetch(
+              outcomeRecorder,
+              meta("news", { symbol }, runContext),
+              () => newsFetcher(symbol, runContext),
+            );
+            await captureFetch("news", { symbol }, result, runContext);
+            return tag(id, "news", result);
+          },
+        }
+      : {}),
     ...(typeof batchProvider.getQuotes === "function"
       ? {
           getQuotesBatch: async (symbols: string[], runContext?: DataRunContext) => {
@@ -811,6 +847,86 @@ export interface YahooDataProviderOptions {
    * (same semantics as MarketDataProviderOptions.breaker).
    */
   breaker?: CircuitBreaker;
+  /**
+   * #3932 — the news fetcher, injectable for tests (a stub
+   * returning fixture articles). Absent, the Yahoo News search
+   * fetch below serves the capability.
+   */
+  news?: (
+    symbol: string,
+    runContext?: DataRunContext,
+  ) => Promise<DataNewsArticle[]>;
+}
+
+/**
+ * #3932 (sub-issue of #3929) — the Yahoo News fetch behind the
+ * adapter's news capability: the Yahoo Finance search endpoint's
+ * news items for one symbol, normalized to DataNewsArticle. The
+ * call mirrors #132's fetchRealMarketNews proven shape (the same
+ * endpoint, the same User-Agent, quotesCount=1) — the live-UI
+ * fetch in flowService.ts stays untouched; this is the
+ * provider-port fetch the sentiment feed job runs through.
+ * A failed Yahoo response THROWS (the job records it as a
+ * per-symbol failure, never as an empty feed); a 200 with no
+ * news returns [] (no news for the symbol is a named gap, not
+ * an error). Items without a headline are skipped — an article
+ * without a headline is not a conformant article.
+ */
+export async function fetchYahooNewsArticles(
+  symbol: string,
+  newsCount = 5,
+): Promise<DataNewsArticle[]> {
+  const clean = symbol.toUpperCase().trim();
+  const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(clean)}&quotesCount=1&newsCount=${newsCount}`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Yahoo news search failed for "${clean}" (HTTP ${res.status})`,
+    );
+  }
+  const data: unknown = await res.json();
+  const rawNews: unknown[] = Array.isArray(
+    (data as { news?: unknown } | null)?.news,
+  )
+    ? (data as { news: unknown[] }).news
+    : [];
+  const now = Date.now();
+  const articles: DataNewsArticle[] = [];
+  for (const [idx, raw] of rawNews.entries()) {
+    const item = raw as Record<string, unknown>;
+    const headline = typeof item.title === "string" ? item.title.trim() : "";
+    if (!headline) continue;
+    const pubSeconds =
+      typeof item.providerPublishTime === "number" &&
+      item.providerPublishTime > 0
+        ? item.providerPublishTime
+        : null;
+    const article: DataNewsArticle = {
+      headline,
+      source:
+        typeof item.publisher === "string" && item.publisher.trim() !== ""
+          ? item.publisher
+          : "Yahoo News",
+      publishedAt:
+        pubSeconds !== null
+          ? new Date(pubSeconds * 1000).toISOString()
+          : new Date(now - idx * 180000).toISOString(),
+      symbol: clean,
+      ...(typeof item.link === "string" && item.link !== ""
+        ? { url: item.link }
+        : {}),
+      ...(typeof item.summary === "string" && item.summary !== ""
+        ? { summary: item.summary }
+        : {}),
+    };
+    articles.push(article);
+  }
+  return articles;
 }
 
 /** Yahoo adapter — wraps YahooFinanceProvider (the market-data "yfinance" impl). */
@@ -819,7 +935,16 @@ export function createYahooDataProvider(
   env?: Env,
   options?: YahooDataProviderOptions
 ): DataProvider {
-  return createMarketDataProvider("yahoo", "Yahoo Finance", provider, env, options);
+  return createMarketDataProvider("yahoo", "Yahoo Finance", provider, env, {
+    ...options,
+    // #3932 — the Yahoo adapter declares news by default, served
+    // by the Yahoo News search fetch (default 5 articles per
+    // symbol); tests inject a stub. The wrapper adapts the
+    // fetcher's (symbol, count) shape to the options' (symbol,
+    // runContext) shape — the adapter's tracking/capture wraps
+    // the call, so the fetcher itself takes no run context.
+    news: options?.news ?? ((symbol: string) => fetchYahooNewsArticles(symbol)),
+  });
 }
 
 /** Alpaca adapter — wraps AlpacaMarketDataProvider. */
@@ -844,12 +969,21 @@ export async function verifyYahooDataProvider(
   options?: {
     provider?: IMarketDataProvider;
     outcomeRecorder?: FetchOutcomeRecorder;
+    /** #3932 — injectable news fetcher (tests stub it; production
+     *  uses the Yahoo News search fetch by default). */
+    news?: (
+      symbol: string,
+      runContext?: DataRunContext,
+    ) => Promise<DataNewsArticle[]>;
   }
 ): Promise<{ ok: boolean; summary: string }> {
   const adapter = createYahooDataProvider(
     options?.provider ?? new YahooFinanceProvider(env),
     env,
-    { outcomeRecorder: options?.outcomeRecorder }
+    {
+      outcomeRecorder: options?.outcomeRecorder,
+      ...(options?.news ? { news: options.news } : {}),
+    }
   );
   if (!adapter.isConfigured(env)) {
     return {

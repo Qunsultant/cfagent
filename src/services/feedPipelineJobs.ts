@@ -27,6 +27,7 @@
  * Nasdaq-100 universe copy, the copy every quotes job reads.
  */
 import type { DataProvider, DataProviderId } from "../trading";
+import type { Env } from "../types";
 import type { IndexListStore } from "../data/indexListPorts";
 import type { FeedDatasetStore } from "../data/feedDatasetPorts";
 import {
@@ -35,6 +36,7 @@ import {
   resolveRunUniverse,
   runFeedFundamentalsJob,
   runFeedJob,
+  runFeedSentimentJob,
   runFeedTechnicalsJob,
   FEED_JOB_CODES,
   type FeedJobDefinition,
@@ -108,6 +110,16 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     // input serves any stored list.
     label: "Yahoo technicals — parameterized (default Nasdaq-100)",
     aliases: ["technicals", "yahoo technicals"],
+  },
+  {
+    jobId: "yahoo-nasdaq100-sentiment",
+    sourceId: "yahoo",
+    dataset: "sentiment",
+    // #3932: ONE parameterized sentiment job — the label
+    // names the DEFAULT universe (nasdaq100); a run's universe
+    // input serves any stored list.
+    label: "Yahoo sentiment — parameterized (default Nasdaq-100)",
+    aliases: ["sentiment", "yahoo sentiment"],
   },
   {
     jobId: "yahoo-sp100-quotes",
@@ -302,6 +314,14 @@ export interface FeedStepDeps {
   shardsFor?: (jobId: string) => Promise<readonly string[]>;
   /** The acting login threaded into provider run contexts, when the host has one. */
   userLogin?: string;
+  /**
+   * #3932 — the Worker env the sentiment job classifies
+   * through (the #132 classifier needs the AI binding via the
+   * gateway port). Optional: a host without it runs the
+   * sentiment job honestly unassessed (rows persist with
+   * method "unavailable"); the other feed jobs ignore it.
+   */
+  env?: Env;
 }
 
 /** The coded refusal every unwired feed step fails its run with. */
@@ -353,7 +373,7 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     if (!provider) throw feedNotConfigured(def.id, `a capture-wired provider for "${def.sourceId}"`);
 
     // #3930: the run's universe input (a parameterized job —
-    // fundamentals, technicals): the step param names the stored index
+    // fundamentals, technicals, sentiment): the step param names the stored index
     // list; absent ⇒ the definition's universe. Resolved (and
     // refused by name when unknown or unsupported) BEFORE any
     // refresh or fetch, so the refresh, the shard partition,
@@ -427,7 +447,14 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
         ? await runFeedFundamentalsJob(deps.registry, runnerDeps, def.id, runOpts)
         : def.dataset === "technicals"
           ? await runFeedTechnicalsJob(deps.registry, runnerDeps, def.id, runOpts)
-          : await runFeedJob(deps.registry, runnerDeps, def.id, runOpts);
+          : def.dataset === "sentiment"
+            ? await runFeedSentimentJob(
+                deps.registry,
+                { ...runnerDeps, ...(deps.env ? { env: deps.env } : {}) },
+                def.id,
+                runOpts,
+              )
+            : await runFeedJob(deps.registry, runnerDeps, def.id, runOpts);
     if (result.status === "failed") {
       // The feed run recorded its own failure in the dataset
       // store; the pipeline run fails with the same coded error

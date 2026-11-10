@@ -214,6 +214,11 @@ export function feedStepDepsForScheduledAgent(
       );
     },
     ...(userLogin ? { userLogin } : {}),
+    // #3932 — the Worker env the sentiment job classifies
+    // through (the #132 classifier's AI binding, via the
+    // gateway port). The host always has it; without it the
+    // sentiment run would persist unassessed rows.
+    env: ctx.env,
   };
 }
 

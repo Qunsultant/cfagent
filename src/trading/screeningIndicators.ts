@@ -35,7 +35,18 @@ export interface ScreeningIndicators {
   momentum: number;
   /** Intraday trend position: 0 = at day low, 1 = at day high. */
   intradayPosition: number | null;
-  /** 6-level sentiment from day action. */
+  /**
+   * #3932 — the 6-level day-action label from the day's
+   * changePercent: the price-derived heuristic, renamed so it
+   * is never presented as sentiment data. `sentiment` below is
+   * the deprecated alias of this same value, kept so existing
+   * readers keep working while they migrate — new code reads
+   * `dayAction`, and anything presenting a value AS sentiment
+   * must read the sourced news sentiment instead.
+   */
+  dayAction: Sentiment;
+  /** @deprecated Use `dayAction` — the same price-derived label
+   *  under its honest name. Never present this as sentiment. */
   sentiment: Sentiment;
   /** Strong directional move (|change%| >= 2%), either direction. */
   directional: boolean;
@@ -66,7 +77,13 @@ export interface QuoteSnapshot {
 
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
-export function classifySentiment(
+/**
+ * #3932 — the 6-level day-action label from the day's
+ * changePercent. This is a price-derived heuristic, NOT news
+ * sentiment: the name says so. (The old name, classifySentiment,
+ * is kept as a deprecated alias below.)
+ */
+export function classifyDayAction(
   changePercent: number,
   config: ScreenerConfig = DEFAULT_SCREENER_CONFIG
 ): Sentiment {
@@ -76,6 +93,14 @@ export function classifySentiment(
   if (changePercent <= -c.sentimentStrongPct) return "very_bearish";
   if (changePercent <= -c.sentimentMildPct) return "bearish";
   return "neutral";
+}
+
+/** @deprecated Use `classifyDayAction` — same value, honest name. */
+export function classifySentiment(
+  changePercent: number,
+  config: ScreenerConfig = DEFAULT_SCREENER_CONFIG
+): Sentiment {
+  return classifyDayAction(changePercent, config);
 }
 
 export function classifyRangeZone(
@@ -120,7 +145,7 @@ export function computeScreeningIndicators(
       ? clamp01((q.lastPrice - q.week52Low) / (q.week52High - q.week52Low))
       : null;
 
-  const sentiment = classifySentiment(q.changePercent, config);
+  const sentiment = classifyDayAction(q.changePercent, config);
   const directional = Math.abs(q.changePercent) >= config.indicators.directionalPct;
   const rangeZone = classifyRangeZone(rangePosition, config);
   const valueZone = classifyValueZone(q.peRatio, rangePosition, config);
@@ -144,6 +169,9 @@ export function computeScreeningIndicators(
     momentum: Number(q.changePercent.toFixed(2)),
     intradayPosition:
       intradayPosition != null ? Number(intradayPosition.toFixed(2)) : null,
+    // #3932: dayAction is the canonical name; sentiment stays
+    // as the deprecated alias of the same value.
+    dayAction: sentiment,
     sentiment,
     directional,
     rangePosition:

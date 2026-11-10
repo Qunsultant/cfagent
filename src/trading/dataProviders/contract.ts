@@ -25,9 +25,12 @@
  * shapes. Adapters return the wrapped implementations' results
  * UNCHANGED (parity pinned, the #1103 adapter method) — consolidation
  * here names the shapes under one contract; it does not convert between
- * them. `news` has a contract shape but no declaring adapter yet:
- * the public integration (#1247) declares quotes + optionsChains
- * only, so news remains contract-only.
+ * them. `news` was contract-only until #3932 (sub-issue of
+ * #3929): the Yahoo adapter now declares it, served by the
+ * Yahoo News search feed (`v1/finance/search`, the same feed
+ * #132's fetchRealMarketNews reads) — see
+ * `fetchYahooNewsArticles` in adapters.ts. No other adapter
+ * declares news yet.
  *
  * Composition + provenance (owner correction, comment 6358714200 on
  * #1116): screening does not pick one winning provider — it COMPOSES
@@ -136,9 +139,10 @@ export type HistoricalBarsResult = MarketDataResearchHistoricalBar[];
 export type FundamentalsResult = MarketDataResearchCompanyFundamentals;
 
 /**
- * news — contract-only in this slice: no existing provider surface is
- * wrapped yet, so no adapter declares it. The shape is the minimal
- * normalized article the platform will require of any news provider.
+ * news — the minimal normalized article the platform requires
+ * of any news provider. #3932: served by the Yahoo adapter
+ * (fetchYahooNewsArticles in adapters.ts, over the Yahoo News
+ * search feed); the conformance kit probes headline + publishedAt.
  */
 export interface DataNewsArticle {
   headline: string;

@@ -111,6 +111,17 @@ export interface FeedDatasetArtifact {
    * way a quotes copy is.
    */
   bars?: FeedDailyBarRow[];
+  /**
+   * #3932 (sub-issue of #3929): the sentiment dataset's rows —
+   * one per symbol, the news sentiment the producing job assessed
+   * over the provider's real news feed (Yahoo News, classified by
+   * the #132 batched LLM classifier — see feedJobs.ts). Present
+   * only on sentiment-dataset artifacts; quotes, fundamentals,
+   * and technicals artifacts omit it. The store's row count
+   * counts sentiment rows too, so a sentiment copy is usable
+   * exactly the way a quotes copy is.
+   */
+  sentiment?: FeedSentimentRow[];
   run: FeedDatasetRunRecord;
   createdAt: string;
 }
@@ -127,13 +138,51 @@ export interface FeedDailyBarRow {
   bars: HistoricalBarsResult;
 }
 
-/** Rows a stored artifact carries (quotes + fundamentals + bars) — the
+/**
+ * #3932 — one symbol's assessed news sentiment in a
+ * sentiment-dataset artifact. The assessment follows #145's
+ * provenance + honest-degradation pattern: `label` is the
+ * aggregate of the fetched headlines' LLM labels (or null when
+ * the headlines were fetched but no assessment was produced —
+ * the AI binding absent, the gate off, or the model call failed),
+ * `score` is the bull/bear balance in [-1, 1] (or null with an
+ * unassessed row), `method` names how the label was produced
+ * ("llm" + `model`, or "unavailable"), `headlines` is the
+ * evidence the label rests on (capped by the producing job),
+ * and `source` names the feed ("yahoo-news"). A row with a null
+ * label is a REAL row — the symbol is covered by the dataset,
+ * the assessment is what is missing — never a fabricated label.
+ */
+export interface PersistedSentiment {
+  label: "bullish" | "bearish" | "neutral" | null;
+  score: number | null;
+  method: "llm" | "unavailable";
+  model?: string;
+  headlineCount: number;
+  headlines: Array<{
+    headline: string;
+    source: string;
+    publishedAt: string;
+    url?: string;
+  }>;
+  source: "yahoo-news";
+  asOf: string;
+}
+
+/** One symbol's assessed sentiment in a sentiment-dataset artifact. */
+export interface FeedSentimentRow {
+  symbol: string;
+  sentiment: PersistedSentiment;
+}
+
+/** Rows a stored artifact carries (quotes + fundamentals + bars + sentiment) — the
  *  count every adapter persists and every status surface shows. */
 export function feedDatasetRowCount(artifact: FeedDatasetArtifact): number {
   return (
     artifact.quotes.length +
     (artifact.fundamentals?.length ?? 0) +
-    (artifact.bars?.length ?? 0)
+    (artifact.bars?.length ?? 0) +
+    (artifact.sentiment?.length ?? 0)
   );
 }
 

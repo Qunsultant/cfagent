@@ -136,7 +136,9 @@ function stockToRow(stock: Row): string[] {
     num2(stock.lastPrice),
     num2(stock.changePercent),
     cell(gapVal),
-    cell((indicators.sentiment ?? "neutral").replace(/_/g, " ")),
+    // #3932: sourced news sentiment or "-" — never the
+    // price-derived day action, and never a "neutral" default.
+    cell(indicators.sentiment != null ? String(indicators.sentiment).replace(/_/g, " ") : "-"),
     cell(grades.quantRating || "-"),
     cell(grades.value || "-"),
     cell(grades.momentum || "-"),

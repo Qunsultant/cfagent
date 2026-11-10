@@ -34,6 +34,7 @@ import { buildGenerateJobRegistry } from "../src/services/generateJobs";
 import { buildDeliverJobRegistry } from "../src/services/deliverJobs";
 import {
   buildFeedJobRegistry as buildFeedRegistry,
+  YAHOO_NASDAQ100_SENTIMENT_JOB_ID,
   YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
   type FeedJobDefinition,
 } from "../src/services/feedJobs";
@@ -72,6 +73,7 @@ import {
 import type {
   DataProvider,
   DataResult,
+  NewsResult,
   QuoteResult,
 } from "../src/trading/dataProviders/contract";
 import type {
@@ -86,6 +88,7 @@ const SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMZN"];
 const FEED_ID = "yahoo-nasdaq100-quotes";
 const FUND_ID = "yahoo-nasdaq100-fundamentals";
 const TECH_ID = YAHOO_NASDAQ100_TECHNICALS_JOB_ID;
+const SENT_ID = YAHOO_NASDAQ100_SENTIMENT_JOB_ID;
 const ENRICH_ID = `${FEED_ID}-enrich`;
 const ANALYZE_ID = `${ENRICH_ID}-analyze`;
 const GENERATE_ID = `${ANALYZE_ID}-generate`;
@@ -114,7 +117,7 @@ function fakeProvider(id: DataProvider["id"]): DataProvider {
   return {
     id,
     name: id,
-    capabilities: ["quotes", "historicalBars", "fundamentals"],
+    capabilities: ["quotes", "historicalBars", "fundamentals", "news"],
     isConfigured: () => true,
     getQuotesBatch: async (symbols: string[]) => {
       const wanted = new Set(symbols.map((s) => s.toUpperCase()));
@@ -151,6 +154,23 @@ function fakeProvider(id: DataProvider["id"]): DataProvider {
         result: bars,
       } as DataResult<MarketDataResearchHistoricalBar[]>;
     },
+    // #3932: the sentiment node pulls headlines through the
+    // news capability — one fixture headline per symbol. No AI
+    // binding in this harness, so the rows persist unclassified
+    // (method "unavailable") and the job still completes.
+    getNews: async (symbol: string) =>
+      ({
+        providerId: id,
+        capability: "news",
+        result: [
+          {
+            headline: `${symbol} reports quarterly results`,
+            source: "Yahoo Finance",
+            publishedAt: iso(T0),
+            symbol,
+          },
+        ],
+      }) as DataResult<NewsResult>,
   };
 }
 
@@ -261,10 +281,13 @@ describe("pipeline chain registry + catalog (#3540)", () => {
     const yahoo = registry.forId(CHAIN_ID)!;
     expect(yahoo.fundamentalsJobId).toBe(FUND_ID);
     expect(yahoo.technicalsJobId).toBe(TECH_ID);
+    // #3932: and the parameterized sentiment node, the same way.
+    expect(yahoo.sentimentJobId).toBe(SENT_ID);
     expect(yahoo.nodes.map((n) => n.jobId)).toEqual([
       FEED_ID,
       FUND_ID,
       TECH_ID,
+      SENT_ID,
       ENRICH_ID,
       ANALYZE_ID,
       GENERATE_ID,
@@ -278,10 +301,11 @@ describe("pipeline chain registry + catalog (#3540)", () => {
       "0/0/0/0",
       "0/0/0/0/0",
       "0/0/0/0/0/0",
+      "0/0/0/0/0/0/0",
     ]);
     expect(chainStageNodePath(yahoo, "feed")).toBe("");
-    expect(chainStageNodePath(yahoo, "enrich")).toBe("0/0/0");
-    expect(chainStageNodePath(yahoo, "deliver")).toBe("0/0/0/0/0/0");
+    expect(chainStageNodePath(yahoo, "enrich")).toBe("0/0/0/0");
+    expect(chainStageNodePath(yahoo, "deliver")).toBe("0/0/0/0/0/0/0");
     const alpaca = registry.forId("alpaca-nasdaq100-quotes-pipeline")!;
     // #3930: every chain folds the parameterized fundamentals
     // node in — the alpaca chain's fundamentals node runs the
@@ -289,17 +313,20 @@ describe("pipeline chain registry + catalog (#3540)", () => {
     expect(alpaca.fundamentalsJobId).toBe(FUND_ID);
     // #3931: and the parameterized technicals node, the same way.
     expect(alpaca.technicalsJobId).toBe(TECH_ID);
-    expect(alpaca.nodes).toHaveLength(7);
+    // #3932: and the parameterized sentiment node, the same way.
+    expect(alpaca.sentimentJobId).toBe(SENT_ID);
+    expect(alpaca.nodes).toHaveLength(8);
     expect(alpaca.nodes.map((n) => n.jobId)).toEqual([
       "alpaca-nasdaq100-quotes",
       FUND_ID,
       TECH_ID,
+      SENT_ID,
       "alpaca-nasdaq100-quotes-enrich",
       "alpaca-nasdaq100-quotes-enrich-analyze",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate-deliver",
     ]);
-    expect(chainStageNodePath(alpaca, "deliver")).toBe("0/0/0/0/0/0");
+    expect(chainStageNodePath(alpaca, "deliver")).toBe("0/0/0/0/0/0/0");
     expect(registry.forStageJob(DELIVER_ID)?.id).toBe(CHAIN_ID);
     expect(registry.forFeedJob(FEED_ID)?.id).toBe(CHAIN_ID);
   });
@@ -352,9 +379,9 @@ describe("pipeline chain definitions (#3540)", () => {
         (r) => (r as { jobId: string }).jobId === CHAIN_ID,
       ),
     );
-    // Walk the nesting: feed (root) → fundamentals → enrich →
-    // analyze → generate → deliver, each the single child of
-    // the stage before it.
+    // Walk the nesting: feed (root) → fundamentals → technicals
+    // → sentiment → enrich → analyze → generate → deliver, each
+    // the single child of the stage before it.
     const kinds: string[] = [];
     const steps: Array<string | undefined> = [];
     const params: Array<unknown> = [];
@@ -369,12 +396,14 @@ describe("pipeline chain definitions (#3540)", () => {
       "feed",
       "feed",
       "feed",
+      "feed",
       "enrich",
       "analyze",
       "generate",
       "deliver",
     ]);
     expect(steps).toEqual([
+      "feed.pull",
       "feed.pull",
       "feed.pull",
       "feed.pull",
@@ -387,10 +416,11 @@ describe("pipeline chain definitions (#3540)", () => {
     expect(params[0]).toMatchObject({ feedJobId: FEED_ID });
     expect(params[1]).toMatchObject({ feedJobId: FUND_ID });
     expect(params[2]).toMatchObject({ feedJobId: TECH_ID });
-    expect(params[6]).toMatchObject({ deliverJobId: DELIVER_ID });
+    expect(params[3]).toMatchObject({ feedJobId: SENT_ID });
+    expect(params[7]).toMatchObject({ deliverJobId: DELIVER_ID });
   });
 
-  it("ensure is idempotent and registerSchedules declares the whole plane (45)", async () => {
+  it("ensure is idempotent and registerSchedules declares the whole plane (46)", async () => {
     const h = await makeHarness();
     const first = await h.stores.definitions.getDefinition(CHAIN_ID);
     await ensureChainPipelineJobs(h.control, h.stores, {});
@@ -399,7 +429,9 @@ describe("pipeline chain definitions (#3540)", () => {
     const registrations = await h.control.registerSchedules({
       schedule: async (spec) => `reg:${spec.jobId}:${spec.nodePath}`,
     });
-    expect(registrations).toHaveLength(45);
+    // #3932: one more job on the plane — the parameterized
+    // sentiment job (one definition, folded into every chain).
+    expect(registrations).toHaveLength(46);
     const chainRegs = registrations.filter((r) => r.jobId.endsWith("-pipeline"));
     expect(chainRegs).toHaveLength(7);
     expect(chainRegs.every((r) => r.nodePath === "")).toBe(true);

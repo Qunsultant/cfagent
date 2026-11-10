@@ -22,7 +22,13 @@
  *   compute over the persisted daily-bar history the technicals
  *   job persists (#3931) — and stay named-unavailable, with the
  *   coded reason, where no technicals copy exists for the job's
- *   universe or a symbol's bars are too short.
+ *   universe or a symbol's bars are too short. Sentiment (#3932)
+ *   is the sourced news sentiment the sentiment job persists
+ *   (label + score + method + headline evidence) — and stays
+ *   named-unavailable, with the coded reason, where no sentiment
+ *   copy exists, a symbol is uncovered, or the row was fetched
+ *   but never assessed. The price-derived day-action label is
+ *   the `dayAction` element, never presented as sentiment.
  * - A missing persisted input refuses BY NAME
  *   (ENRICH_INPUT_MISSING, fail-closed — the stage_input_missing
  *   pattern): the failed run is recorded on the enriched store
@@ -52,6 +58,7 @@ import {
   feedDatasetRowCount,
   type FeedDatasetArtifact,
   type FeedDatasetStore,
+  type FeedSentimentRow,
 } from "../data/feedDatasetPorts";
 import {
   type EnrichedDatasetArtifact,
@@ -108,13 +115,22 @@ export const ENRICH_SNAPSHOT_ELEMENTS = [
 ] as const;
 
 /** Screening elements: the platform's snapshot screening
- *  indicators (#261), computed by computeScreeningIndicators. */
+ *  indicators (#261), computed by computeScreeningIndicators.
+ *  #3932: the price-derived day-action label is `dayAction`
+ *  (the old `sentiment` element name, renamed — the value is
+ *  the day's changePercent classified, not news sentiment). */
 export const ENRICH_SCREENING_ELEMENTS = [
-  "sentiment",
+  "dayAction",
   "rangeZone",
   "valueZone",
   "screenScore",
 ] as const;
+
+/** Sentiment element: the sourced news sentiment joined from
+ *  the persisted sentiment dataset (#3932) — one label per
+ *  symbol where the dataset carries it, a named gap where it
+ *  does not. Never computed from the quote. */
+export const ENRICH_SENTIMENT_ELEMENTS = ["sentiment"] as const;
 
 /** Fundamentals elements: joined from a persisted fundamentals
  *  dataset (the enrichFrom sources), by symbol. */
@@ -153,11 +169,13 @@ export const ENRICH_ALL_ELEMENTS: readonly string[] = [
   ...ENRICH_FUNDAMENTALS_ELEMENTS,
   ...ENRICH_SERIES_ELEMENTS,
   ...ENRICH_HISTORY_ELEMENTS,
+  ...ENRICH_SENTIMENT_ELEMENTS,
 ];
 
 const FUNDAMENTALS_SET = new Set<string>(ENRICH_FUNDAMENTALS_ELEMENTS);
 const SERIES_SET = new Set<string>(ENRICH_SERIES_ELEMENTS);
 const HISTORY_SET = new Set<string>(ENRICH_HISTORY_ELEMENTS);
+const SENTIMENT_SET = new Set<string>(ENRICH_SENTIMENT_ELEMENTS);
 
 /** Coded gap reasons (externalized vocabulary). */
 export const ENRICH_GAP_REASONS = {
@@ -167,6 +185,15 @@ export const ENRICH_GAP_REASONS = {
    *  (RSI needs 15 bars, MACD 27, ATR 14) — a named gap, never
    *  a value estimated from a short window (#3931). */
   insufficientDailyBars: "insufficient_daily_bars",
+  /** No usable sentiment copy resolved for the job's universe
+   *  (#3932) — the sentiment element is unavailable for the
+   *  whole artifact, never failed, never guessed. */
+  requiresSentimentDataset: "requires_sentiment_dataset",
+  /** The sentiment dataset carries the symbol, but its row was
+   *  fetched and never assessed (method "unavailable" — no AI
+   *  binding, the gate off, or a failed model call) — a named
+   *  gap, never a guessed label (#3932). */
+  sentimentUnclassified: "sentiment_unclassified",
   fieldNotInSnapshot: "field_not_in_snapshot",
   joinDatasetMissing: "join_dataset_missing",
   symbolNotInJoinDataset: "symbol_not_in_join_dataset",
@@ -338,6 +365,27 @@ export function resolveTechnicalsJoinMode(
   return "auto";
 }
 
+/**
+ * #3932 — the per-job sentiment-join mode, from
+ * ENRICH_JOB_<JOB_ID>_SENTIMENT_JOIN: "auto" (default —
+ * join the parameterized sentiment dataset for the job's
+ * own universe when one is registered), "on" (the same join,
+ * pinned explicitly), "off" (no sentiment element — the
+ * pre-#3932 behavior, where the price-derived label was
+ * presented as sentiment, is NOT kept: with the join off the
+ * sentiment element is simply not computed, and the
+ * day-action label carries the heuristic under its own name).
+ * An unknown value falls back to "auto" (the minutes-knob idiom).
+ */
+export function resolveSentimentJoinMode(
+  env: Record<string, string | undefined>,
+  jobId: string,
+): "auto" | "on" | "off" {
+  const raw = env[knobKey(jobId, "SENTIMENT_JOIN")];
+  if (raw === "off" || raw === "on" || raw === "auto") return raw;
+  return "auto";
+}
+
 export const ENRICH_JOB_DEFAULTS = {
   cadenceMinutes: 60,
   staleAfterMinutes: 180,
@@ -345,24 +393,29 @@ export const ENRICH_JOB_DEFAULTS = {
 
 /**
  * The built-in registry: one enrich job per QUOTES feed job in
- * the #3530 registry (the fundamentals and technicals jobs are
- * enrichment SOURCES, not targets; the universe job's product is
- * the stored index list, not a feed-dataset artifact). #3930: every
- * quotes job joins the parameterized fundamentals dataset for
- * ITS OWN universe — the join is by symbol and by universe, so
- * a broker chain carries the 14 fundamentals elements exactly
- * where the persisted dataset carries the symbol, and named
- * gaps where it does not. #3931: every quotes job ALSO joins the
- * parameterized technicals dataset for ITS OWN universe, and
- * carries rsi / macd / atr computed from the persisted daily
+ * the #3530 registry (the fundamentals, technicals, and sentiment
+ * jobs are enrichment SOURCES, not targets; the universe job's
+ * product is the stored index list, not a feed-dataset artifact).
+ * #3930: every quotes job joins the parameterized fundamentals
+ * dataset for ITS OWN universe — the join is by symbol and by
+ * universe, so a broker chain carries the 14 fundamentals
+ * elements exactly where the persisted dataset carries the symbol,
+ * and named gaps where it does not. #3931: every quotes job ALSO
+ * joins the parameterized technicals dataset for ITS OWN universe,
+ * and carries rsi / macd / atr computed from the persisted daily
  * bars (values where the dataset carries the symbol, named gaps
- * where it does not). The per-job FUNDAMENTALS_JOIN and
- * TECHNICALS_JOIN knobs ("auto" | "on" | "off", default "auto")
+ * where it does not). #3932: every quotes job ALSO joins the
+ * parameterized sentiment dataset for ITS OWN universe, and
+ * carries the sourced news sentiment (label + score + source +
+ * method) where the dataset carries the symbol, named gaps where
+ * it does not. The per-job FUNDAMENTALS_JOIN, TECHNICALS_JOIN,
+ * and SENTIMENT_JOIN knobs ("auto" | "on" | "off", default "auto")
  * opt one job out of a join; an unknown value falls back to
  * "auto". Every job's element set is the default snapshot +
  * screening + series set (plus the fundamentals elements for
  * jobs with a fundamentals join source, plus the history
- * elements for jobs with a technicals join source).
+ * elements for jobs with a technicals join source, plus the
+ * sentiment element for jobs with a sentiment join source).
  */
 export function buildEnrichJobRegistry(
   env: Record<string, string | undefined>,
@@ -374,6 +427,9 @@ export function buildEnrichJobRegistry(
   const technicalsJobs = feedRegistry
     .list()
     .filter((j) => j.dataset === "technicals");
+  const sentimentJobs = feedRegistry
+    .list()
+    .filter((j) => j.dataset === "sentiment");
   const registry = new EnrichJobRegistry();
   for (const feed of feedRegistry.list()) {
     if (feed.dataset !== "quotes") continue;
@@ -398,14 +454,27 @@ export function buildEnrichJobRegistry(
             dataset: job.dataset,
             universe: feed.universe.index,
           }));
+    // #3932: the sentiment join — same shape as the other
+    // joins, its own knob, its own universe-matched copy.
+    const sentimentFrom: EnrichJoinSource[] =
+      resolveSentimentJoinMode(env, id) === "off"
+        ? []
+        : sentimentJobs.map((job) => ({
+            feedJobId: job.id,
+            sourceId: job.sourceId,
+            dataset: job.dataset,
+            universe: feed.universe.index,
+          }));
     const enrichFrom: EnrichJoinSource[] = [
       ...fundamentalsFrom,
       ...technicalsFrom,
+      ...sentimentFrom,
     ];
     const defaults = [
       ...ENRICH_DEFAULT_ELEMENTS,
       ...(fundamentalsFrom.length ? [...ENRICH_FUNDAMENTALS_ELEMENTS] : []),
       ...(technicalsFrom.length ? [...ENRICH_HISTORY_ELEMENTS] : []),
+      ...(sentimentFrom.length ? [...ENRICH_SENTIMENT_ELEMENTS] : []),
     ];
     registry.register({
       id,
@@ -566,12 +635,25 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
   // mislabel fundamentals gaps as join_dataset_missing (and vice versa).
   // joinDatasetMissing stays the any-missing flag that drives partial status.
   let fundamentalsJoinMissing = false;
+  // #3932 — the persisted sentiment rows, by symbol, from the
+  // sentiment join artifact(s). A row whose label is null was
+  // fetched but never assessed (method "unavailable") — it IS a
+  // row (the symbol is covered), and the per-row branch below
+  // records it as a sentiment_unclassified gap, never a guess.
+  const sentimentBySymbol = new Map<string, FeedSentimentRow>();
+  let sentimentJoinPresent = false;
   for (const source of input.enrichFrom) {
     const artifact = input.joinArtifacts.get(source.feedJobId);
     if (!artifact) {
       joinDatasetMissing = true;
       if (source.dataset === "fundamentals") fundamentalsJoinMissing = true;
       continue;
+    }
+    if (source.dataset === "sentiment") {
+      sentimentJoinPresent = true;
+      for (const row of artifact.sentiment ?? []) {
+        sentimentBySymbol.set(row.symbol.toUpperCase(), row);
+      }
     }
     const bySymbol = new Map<string, Record<string, unknown>>();
     for (const row of artifact.fundamentals ?? []) {
@@ -585,6 +667,19 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
       if (!FUNDAMENTALS_SET.has(element)) continue;
       gaps.push({ element, reason: ENRICH_GAP_REASONS.joinDatasetMissing, symbols: [] });
     }
+  }
+  // #3932 — no sentiment copy at all: the sentiment element is
+  // unavailable for the whole artifact (one gap entry, not one
+  // per symbol) — the join may be configured but unresolved, or
+  // the knob may have been off while the element was requested
+  // explicitly. Either way the gap is named, never guessed.
+  const wantsSentiment = elements.some((e) => SENTIMENT_SET.has(e));
+  if (wantsSentiment && !sentimentJoinPresent) {
+    gaps.push({
+      element: "sentiment",
+      reason: ENRICH_GAP_REASONS.requiresSentimentDataset,
+      symbols: [],
+    });
   }
 
   // Snapshot series closes per symbol, chronological.
@@ -644,6 +739,42 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
         : null;
 
     for (const element of elements) {
+      // #3932 — the sourced sentiment element: the joined
+      // row's label + score + provenance, never computed from
+      // the quote. No row for this symbol: named gap (the
+      // whole-artifact gap above already covers the no-copy-at-
+      // all case, so this branch only fires with a copy
+      // present). A row whose label is null was fetched but
+      // never assessed: sentiment_unclassified, never a guess.
+      if (SENTIMENT_SET.has(element)) {
+        const row = sentimentBySymbol.get(fields.symbol);
+        if (!row) {
+          coverage[element].unavailable++;
+          unavailable.push(element);
+          if (sentimentJoinPresent) {
+            joinMissing.add(fields.symbol);
+            noteGap(
+              element,
+              ENRICH_GAP_REASONS.symbolNotInJoinDataset,
+              fields.symbol,
+            );
+          }
+          continue;
+        }
+        if (row.sentiment.label === null) {
+          mark(element, false, ENRICH_GAP_REASONS.sentimentUnclassified);
+          continue;
+        }
+        features.sentiment = row.sentiment.label;
+        if (row.sentiment.score !== null) {
+          features.sentimentScore = round6(row.sentiment.score);
+        }
+        features.sentimentSource = row.sentiment.source;
+        features.sentimentMethod = row.sentiment.method;
+        if (row.sentiment.model) features.sentimentModel = row.sentiment.model;
+        mark(element, true);
+        continue;
+      }
       if (HISTORY_SET.has(element)) {
         // No bars for this symbol: named gap (the whole-artifact
         // gap above already covers the no-copy-at-all case, so
@@ -771,7 +902,7 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
               : null,
           );
           break;
-        case "sentiment":
+        case "dayAction":
         case "rangeZone":
         case "valueZone":
         case "screenScore": {
@@ -788,8 +919,8 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
             averageVolume: fields.averageVolume ?? undefined,
           });
           const value =
-            element === "sentiment"
-              ? indicators.sentiment
+            element === "dayAction"
+              ? indicators.dayAction
               : element === "rangeZone"
                 ? indicators.rangeZone
                 : element === "valueZone"

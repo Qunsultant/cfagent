@@ -23,7 +23,8 @@
  * - The universe is a STORED index list (indexListPorts —
  *   the platform's snapshot-dated membership): the job
  *   definition's universe, or — for a parameterized job
- *   (#3930 fundamentals; #3931 technicals) — the run input's list. No list ⇒
+ *   (#3930 fundamentals; #3931 technicals; #3932 sentiment) —
+ *   the run input's list. No list ⇒
  *   a typed FEED_UNIVERSE_MISSING failure, never an
  *   invented universe.
  *
@@ -34,13 +35,16 @@
  */
 import {
   HISTORY_BAR_LIMIT,
+  classifyNewsSentiment,
   marketDataResearchBarsToDailyBars,
   scrubFailureMessage,
   SECTOR_IDS,
   type DataProvider,
   type DataProviderCapability,
   type DataProviderId,
+  type FlowSentiment,
   type IndexId,
+  type NewsFlowItem,
   type QuoteResult,
   type YahooDailyBar,
 } from "../trading";
@@ -53,10 +57,13 @@ import {
   type FeedDatasetStore,
   type FeedFundamentalsRow,
   type FeedQuotesResolution,
+  type FeedSentimentRow,
+  type PersistedSentiment,
 } from "../data/feedDatasetPorts";
 import type { IndexListStore } from "../data/indexListPorts";
 import { executeIndexListRefreshJob } from "./indexListJob";
 import type { IndexListFetchService } from "./indexListProducer";
+import type { Env } from "../types";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -79,6 +86,8 @@ export const FEED_JOB_CODES = {
   noFundamentalsReturned: "FEED_NO_FUNDAMENTALS_RETURNED",
   historicalBarsUnsupported: "FEED_PROVIDER_HISTORICAL_BARS_UNSUPPORTED",
   noBarsReturned: "FEED_NO_BARS_RETURNED",
+  newsUnsupported: "FEED_PROVIDER_NEWS_UNSUPPORTED",
+  noNewsReturned: "FEED_NO_NEWS_RETURNED",
 } as const;
 export type FeedJobCode = (typeof FEED_JOB_CODES)[keyof typeof FEED_JOB_CODES];
 
@@ -120,7 +129,7 @@ export function isKnownIndexId(value: unknown): value is IndexId {
 /**
  * #3930 — resolve the stored index list a run pulls: the run
  * input when the job is parameterized (the gap-filling jobs —
- * fundamentals and technicals), else the definition's universe. A
+ * fundamentals, technicals, and sentiment), else the definition's universe. A
  * universe input on a non-parameterized job, and an input
  * naming no known index, both refuse by name (a caller or
  * configuration bug — never a silent default, never a list
@@ -182,7 +191,7 @@ export interface FeedJobDefinition {
    * property: the definition's universe is the DEFAULT input
    * (nasdaq100 for the gap-filling jobs); a run may name any stored
    * index list instead. Only the gap-filling jobs set this
-   * (fundamentals, #3930; technicals, #3931; sentiment in #3932) —
+   * (fundamentals, #3930; technicals, #3931; sentiment, #3932) —
    * quotes jobs stay one definition per universe.
    */
   parameterizedUniverse?: boolean;
@@ -261,6 +270,7 @@ export function resolveFeedJobStaleMinutes(
 export const YAHOO_NASDAQ100_QUOTES_JOB_ID = "yahoo-nasdaq100-quotes";
 export const YAHOO_NASDAQ100_FUNDAMENTALS_JOB_ID = "yahoo-nasdaq100-fundamentals";
 export const YAHOO_NASDAQ100_TECHNICALS_JOB_ID = "yahoo-nasdaq100-technicals";
+export const YAHOO_NASDAQ100_SENTIMENT_JOB_ID = "yahoo-nasdaq100-sentiment";
 export const YAHOO_SP100_QUOTES_JOB_ID = "yahoo-sp100-quotes";
 export const YAHOO_SP500_QUOTES_JOB_ID = "yahoo-sp500-quotes";
 export const YAHOO_DOW_QUOTES_JOB_ID = "yahoo-dow-quotes";
@@ -388,6 +398,36 @@ export function buildFeedJobRegistry(
     ),
   });
   registry.register({
+    id: YAHOO_NASDAQ100_SENTIMENT_JOB_ID,
+    sourceId: "yahoo",
+    dataset: "sentiment",
+    elements: ["news"],
+    // #3932 — ONE sentiment job, parameterized, on the same
+    // idiom as the fundamentals and technicals jobs: the id
+    // names the DEFAULT universe (nasdaq100, kept for
+    // lineage), and a run's `universe` input names the stored
+    // index list it actually pulls. There is no per-universe
+    // sentiment job (Correction 2, #3932 comments 6760487336
+    // + 6760547214): the same job serves nasdaq100, sp100,
+    // sp500, dow, sp400, and any other stored list. It fetches
+    // the Yahoo News feed per symbol and classifies the
+    // headlines with the #132 batched LLM classifier, so enrich
+    // and the UX both read sourced sentiment from the same
+    // persisted copy.
+    universe: { kind: "index", index: "nasdaq100", label: "Nasdaq-100" },
+    parameterizedUniverse: true,
+    cadenceMinutes: resolveFeedJobCadenceMinutes(
+      env,
+      YAHOO_NASDAQ100_SENTIMENT_JOB_ID,
+      FEED_JOB_DEFAULTS.cadenceMinutes,
+    ),
+    staleAfterMinutes: resolveFeedJobStaleMinutes(
+      env,
+      YAHOO_NASDAQ100_SENTIMENT_JOB_ID,
+      FEED_JOB_DEFAULTS.staleAfterMinutes,
+    ),
+  });
+  registry.register({
     id: YAHOO_SP100_QUOTES_JOB_ID,
     sourceId: "yahoo",
     dataset: "quotes",
@@ -477,6 +517,15 @@ export interface FeedJobDeps {
     store: IndexListStore;
     service: IndexListFetchService;
   } | null;
+  /**
+   * #3932 — the Worker env the sentiment job classifies
+   * through (the #132 classifier needs the AI binding via the
+   * gateway port). Optional: absent ⇒ the classifier degrades
+   * honestly (rows persist with method "unavailable" — the
+   * news was fetched, the assessment is absent, never guessed).
+   * The other feed jobs ignore it.
+   */
+  env?: Env;
 }
 
 export interface RunFeedJobOptions {
@@ -1240,6 +1289,358 @@ export async function runFeedTechnicalsJob(
   });
 }
 
+/**
+ * #3932 — headlines classified per LLM call. The #132
+ * discipline is batched, never per-headline: one gateway call
+ * carries a bounded chunk of headlines (20 × ≤300 chars ≈
+ * 7k chars of prompt), so a full-universe run classifies in a
+ * handful of calls instead of one call per headline — and never
+ * one unbounded call for the whole universe either.
+ */
+export const SENTIMENT_CLASSIFY_BATCH_SIZE = 20;
+
+/** Headlines fetched per symbol per run (the adapter's fetch window). */
+export const SENTIMENT_NEWS_PER_SYMBOL = 5;
+
+/**
+ * #3932 — aggregate one symbol's classified headline labels
+ * into the persisted sentiment value: the bull/bear balance
+ * (bullish +1, neutral 0, bearish −1, mean over the classified
+ * headlines, rounded to 6 decimals) and the label it supports
+ * (bullish at +1/3 and above, bearish at −1/3 and below,
+ * neutral between — a tied or balanced feed is neutral, never
+ * a coin flip). No labels ⇒ { label: null, score: null } (the
+ * feed was fetched but nothing was assessed — the caller
+ * records method "unavailable", never a guessed label).
+ */
+export function aggregateHeadlineSentiment(labels: readonly FlowSentiment[]): {
+  label: PersistedSentiment["label"];
+  score: number | null;
+} {
+  if (labels.length === 0) return { label: null, score: null };
+  let balance = 0;
+  for (const label of labels) {
+    if (label === "bullish") balance += 1;
+    else if (label === "bearish") balance -= 1;
+  }
+  const raw = balance / labels.length;
+  const score = Math.round(raw * 1e6) / 1e6;
+  const label: PersistedSentiment["label"] =
+    raw >= 1 / 3 ? "bullish" : raw <= -1 / 3 ? "bearish" : "neutral";
+  return { label, score };
+}
+
+/**
+ * #3932 (sub-issue of #3929) — the sentiment feed run: the same
+ * contract as runFeedFundamentalsJob, over the provider's news
+ * capability. Per symbol the job fetches the Yahoo News feed
+ * (SENTIMENT_NEWS_PER_SYMBOL recent headlines) and classifies
+ * them with the #132 batched LLM classifier (classifyNewsSentiment
+ * — one gateway call per bounded chunk, the #881 instruction/data
+ * separation inside), then persists one row per symbol with the
+ * aggregate label + score + method + headline evidence.
+ * Honesty rules are the fundamentals run's, unchanged: the
+ * universe is the stored index list; provenance is verified per
+ * envelope; a run that fetched nothing is a FAILED run;
+ * per-symbol failures are named in missingSymbols, never
+ * silently dropped. And #145's honest degradation: without an
+ * AI binding (no env, the gate off, a failed model call) the
+ * headlines still persist — with method "unavailable" and a
+ * null label — so enrich can name the gap instead of guessing.
+ */
+export async function runFeedSentimentJob(
+  registry: FeedJobRegistry,
+  deps: FeedJobDeps,
+  jobId: string,
+  opts: RunFeedJobOptions = {},
+): Promise<FeedRunResult> {
+  const def = registry.get(jobId);
+  if (!def) {
+    throw new FeedJobError(
+      FEED_JOB_CODES.jobNotFound,
+      `No feed job is registered with id "${jobId}".`,
+    );
+  }
+  const now = opts.now ?? (() => new Date());
+  const startedAt = now();
+  const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
+  const trigger = opts.trigger ?? "manual";
+
+  const record = async (args: {
+    status: FeedDatasetRunRecord["status"];
+    rows: FeedSentimentRow[];
+    requested: number;
+    missingSymbols: string[];
+    codedError: string | null;
+    errorMessage: string | null;
+    universe: FeedDatasetArtifact["universe"];
+  }): Promise<FeedRunResult> => {
+    const finishedAt = now();
+    const run: FeedDatasetRunRecord = {
+      runId,
+      trigger,
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      status: args.status,
+      requested: args.requested,
+      received: args.rows.length,
+      failed: args.requested - args.rows.length,
+      missingSymbols: args.missingSymbols,
+      codedError: args.codedError,
+      errorMessage: args.errorMessage,
+    };
+    const artifact = await deps.datasetStore.store({
+      jobId: def.id,
+      sourceId: def.sourceId,
+      dataset: def.dataset,
+      elements: [...def.elements],
+      universe: args.universe,
+      providerId: def.sourceId,
+      asOf: finishedAt.toISOString(),
+      quotes: [],
+      sentiment: args.rows,
+      run,
+      nowIso: finishedAt.toISOString(),
+    });
+    if (args.status === "failed") {
+      structuredLog.warn(FEED_JOB_RUN_FAILED, {
+        message: `[feedJobs] ${FEED_JOB_RUN_FAILED}`,
+        jobId: def.id,
+        runId,
+        code: args.codedError,
+        requested: args.requested,
+      });
+    }
+    return {
+      jobId: def.id,
+      runId,
+      status: args.status,
+      artifactId: artifact.id,
+      requested: run.requested,
+      received: run.received,
+      failed: run.failed,
+      missingSymbols: run.missingSymbols,
+      codedError: run.codedError,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+    };
+  };
+
+  // 1. Universe — the stored index list, never an invented one
+  //    (a configured subset partitions it, as in the quotes run).
+  // #3932: the run input names the list — the parameterized
+  // job serves any stored list; absent ⇒ the default universe.
+  const universeIndex = resolveRunUniverse(def, opts.universe);
+  const universeLabel = labelForRunUniverse(registry, universeIndex);
+  // #3932 + #3982: same cold-store hydration as the quotes,
+  // fundamentals, and technicals runs (#3976/#3982) — the
+  // sentiment runner resolves its universe through the shared
+  // helper, never a bare read.
+  const { list, refreshError } = await resolveUniverseListWithHydration(
+    deps,
+    universeIndex,
+  );
+  let symbols = symbolsOfList(list);
+  if (opts.symbols && list) {
+    const wanted = new Set(
+      opts.symbols.map((s) => s.toUpperCase().trim()).filter((s) => s.length > 0),
+    );
+    symbols = symbols.filter((s) => wanted.has(s));
+  }
+  const universe: FeedDatasetArtifact["universe"] = {
+    kind: "index",
+    index: universeIndex,
+    label: universeLabel,
+    snapshotDate: list?.snapshotDate ?? null,
+    sourceLabel: list?.sourceLabel ?? null,
+    size: symbols.length,
+  };
+  if (!list || symbols.length === 0) {
+    if (refreshError !== undefined) {
+      return record({
+        status: "failed",
+        rows: [],
+        requested: 0,
+        missingSymbols: [],
+        codedError: FEED_JOB_CODES.universeRefreshFailed,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
+        universe,
+      });
+    }
+    return record({
+      status: "failed",
+      rows: [],
+      requested: 0,
+      missingSymbols: [],
+      codedError: FEED_JOB_CODES.universeMissing,
+      errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
+      universe,
+    });
+  }
+
+  // 2. The capability contract: no news method ⇒ a named
+  //    refusal recorded as the run, never a fabricated dataset.
+  if (typeof deps.provider.getNews !== "function") {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: symbols.length,
+      missingSymbols: symbols,
+      codedError: FEED_JOB_CODES.newsUnsupported,
+      errorMessage: `Provider "${def.sourceId}" does not implement news; the feed job cannot pull its dataset.`,
+      universe,
+    });
+  }
+
+  // 3. Fetch the news per symbol through the port. A symbol
+  //    whose fetch throws, whose envelope names another
+  //    provider, or whose feed is empty is a missing symbol
+  //    with the failure counted — one bad symbol never poisons
+  //    the rows already pulled.
+  const articlesBySymbol = new Map<
+    string,
+    Array<{ headline: string; source: string; publishedAt: string; url?: string }>
+  >();
+  const missingSymbols: string[] = [];
+  let firstError: string | null = null;
+  for (const symbol of symbols) {
+    try {
+      const envelope = await deps.provider.getNews(symbol, {
+        runId,
+        tenantId: opts.tenantId ?? "default",
+        ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+      });
+      if (envelope.providerId !== def.sourceId) {
+        missingSymbols.push(symbol);
+        firstError ??= `Provider envelope named "${envelope.providerId}" for a "${def.sourceId}" feed job; the result was refused, not relabelled.`;
+        continue;
+      }
+      const articles = (envelope.result ?? []).slice(0, SENTIMENT_NEWS_PER_SYMBOL);
+      if (articles.length === 0) {
+        missingSymbols.push(symbol);
+        continue;
+      }
+      articlesBySymbol.set(
+        symbol,
+        articles.map((a) => ({
+          headline: a.headline,
+          source: a.source,
+          publishedAt: a.publishedAt,
+          ...(a.url ? { url: a.url } : {}),
+        })),
+      );
+    } catch (err) {
+      missingSymbols.push(symbol);
+      firstError ??= scrubFailureMessage(
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  if (articlesBySymbol.size === 0) {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: symbols.length,
+      missingSymbols,
+      codedError: FEED_JOB_CODES.noNewsReturned,
+      errorMessage:
+        firstError ??
+        `Provider "${def.sourceId}" returned no news for the ${universeLabel} universe; nothing was persisted as data.`,
+      universe,
+    });
+  }
+
+  // 4. Classify the fetched headlines with the #132 batched
+  //    classifier, in bounded chunks. classifyNewsSentiment
+  //    never throws and leaves failures "unavailable" — the
+  //    gate off, no AI binding, a quota error, or a malformed
+  //    reply all degrade to unassessed rows, never guessed
+  //    labels. Items are keyed `news-<SYMBOL>-<index>` so the
+  //    labels map back to their symbol.
+  const items: NewsFlowItem[] = [];
+  const itemSymbol: string[] = [];
+  for (const [symbol, articles] of articlesBySymbol) {
+    for (const [idx, a] of articles.entries()) {
+      const publishedMs = Date.parse(a.publishedAt);
+      items.push({
+        id: `news-${symbol}-${idx}`,
+        time: new Date(Number.isNaN(publishedMs) ? Date.now() : publishedMs).toISOString(),
+        timestamp: Number.isNaN(publishedMs) ? Date.now() : publishedMs,
+        headline: a.headline,
+        symbols: [symbol],
+        source: a.source,
+        sentiment: "neutral",
+        sentimentMethod: "unavailable",
+        ...(a.url ? { url: a.url } : {}),
+      });
+      itemSymbol.push(symbol);
+    }
+  }
+  for (let i = 0; i < items.length; i += SENTIMENT_CLASSIFY_BATCH_SIZE) {
+    await classifyNewsSentiment(
+      deps.env,
+      items.slice(i, i + SENTIMENT_CLASSIFY_BATCH_SIZE),
+    );
+  }
+
+  // 5. Aggregate per symbol over the headlines the model
+  //    actually labelled. A symbol whose headlines were all
+  //    left unassessed persists with method "unavailable" and
+  //    a null label — the news is the row's evidence, the
+  //    assessment is honestly absent.
+  const finishedAt = now();
+  const asOf = finishedAt.toISOString();
+  const rows: FeedSentimentRow[] = [];
+  for (const [symbol, articles] of articlesBySymbol) {
+    const labels: FlowSentiment[] = [];
+    let model: string | undefined;
+    items.forEach((item, i) => {
+      if (itemSymbol[i] !== symbol) return;
+      if (item.sentimentMethod !== "llm") return;
+      labels.push(item.sentiment);
+      model ??= item.sentimentModel;
+    });
+    if (labels.length === 0) {
+      rows.push({
+        symbol,
+        sentiment: {
+          label: null,
+          score: null,
+          method: "unavailable",
+          headlineCount: articles.length,
+          headlines: articles,
+          source: "yahoo-news",
+          asOf,
+        },
+      });
+      continue;
+    }
+    const { label, score } = aggregateHeadlineSentiment(labels);
+    rows.push({
+      symbol,
+      sentiment: {
+        label,
+        score,
+        method: "llm",
+        ...(model ? { model } : {}),
+        headlineCount: articles.length,
+        headlines: articles,
+        source: "yahoo-news",
+        asOf,
+      },
+    });
+  }
+  return record({
+    status: missingSymbols.length > 0 ? "partial" : "completed",
+    rows,
+    requested: symbols.length,
+    missingSymbols,
+    codedError: null,
+    errorMessage: null,
+    universe,
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* The persisted-technicals read — the UX's primary source (#3931)     */
 /* ------------------------------------------------------------------ */
@@ -1295,6 +1696,70 @@ export async function readPersistedTechnicalsBars(
   return {
     barsBySymbol,
     label: `Persisted Yahoo daily bars (as of ${artifact.asOf.slice(0, 10)})`,
+    asOf: artifact.asOf,
+    universeIndex: artifact.universe.index,
+    universeLabel: artifact.universe.label,
+    ageSeconds,
+    stale: args.maxAgeSeconds !== undefined && ageSeconds > args.maxAgeSeconds,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* The persisted-sentiment read — the UX's primary source (#3932)      */
+/* ------------------------------------------------------------------ */
+
+/** One persisted-sentiment read: rows by symbol + provenance. */
+export interface PersistedSentimentRead {
+  /** Assessed sentiment per symbol (labelled and unassessed
+   *  rows alike — the caller distinguishes them by the row's
+   *  method, never by absence from the map). */
+  sentimentBySymbol: Map<string, FeedSentimentRow>;
+  /** The UX label for these rows (names the persisted source). */
+  label: string;
+  /** When the rows were assessed (the producing run's finish time). */
+  asOf: string;
+  /** The universe whose copy this is (rows are per-symbol facts;
+   *  the universe names which list the job pulled, not a filter). */
+  universeIndex: IndexId;
+  universeLabel: string;
+  ageSeconds: number;
+  /** True when the copy is older than the caller's bound (or,
+   *  absent a bound, reported false — staleness is judged only
+   *  against a bound the caller actually set). */
+  stale: boolean;
+}
+
+/**
+ * Read the newest usable sentiment copy: the persisted rows the
+ * UX reads as its primary source. A read NEVER fetches — the store
+ * is the only input. Absent or unusable ⇒ undefined (the caller
+ * shows a named gap, never the price-derived heuristic); a stale
+ * copy is returned WITH stale: true so the caller can show the
+ * gap instead of serving old sentiment as current.
+ */
+export async function readPersistedSentiment(
+  store: FeedDatasetStore,
+  args: {
+    maxAgeSeconds?: number;
+    nowMs: number;
+  },
+): Promise<PersistedSentimentRead | undefined> {
+  const artifact = await store.latestUsable("yahoo", "sentiment");
+  if (!artifact || !artifact.sentiment || artifact.sentiment.length === 0) {
+    return undefined;
+  }
+  const sentimentBySymbol = new Map<string, FeedSentimentRow>();
+  for (const row of artifact.sentiment) {
+    sentimentBySymbol.set(row.symbol.toUpperCase(), row);
+  }
+  if (sentimentBySymbol.size === 0) return undefined;
+  const asOfMs = Date.parse(artifact.asOf);
+  const ageSeconds = Number.isNaN(asOfMs)
+    ? 0
+    : Math.max(0, Math.floor((args.nowMs - asOfMs) / 1000));
+  return {
+    sentimentBySymbol,
+    label: `Yahoo News (persisted sentiment, as of ${artifact.asOf.slice(0, 10)})`,
     asOf: artifact.asOf,
     universeIndex: artifact.universe.index,
     universeLabel: artifact.universe.label,

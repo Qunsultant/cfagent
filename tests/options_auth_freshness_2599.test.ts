@@ -17,9 +17,9 @@
  *   A blocked manual error never claims an alert was sent: the
  *   manual guard sends none (the 401 is the notice; the scheduled
  *   guard keeps one-alert-per-episode).
- * - Yahoo declares quotes / historicalBars / fundamentals only —
- *   no optionsChains — so no options path may substitute Yahoo
- *   data for broker chains.
+ * - Yahoo declares quotes / historicalBars / fundamentals / news
+ *   only — no optionsChains — so no options path may substitute
+ *   Yahoo data for broker chains.
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -281,7 +281,7 @@ describe("record-layer freshness derivation (#2599 F1)", () => {
 });
 
 describe("never Yahoo-substituted chains", () => {
-  it("the Yahoo adapter declares quotes/bars/fundamentals only — no optionsChains", () => {
+  it("the Yahoo adapter declares quotes/bars/fundamentals/news only — no optionsChains", () => {
     const inner = {
       providerId: "yfinance",
       name: "yfinance (fake)",
@@ -291,10 +291,13 @@ describe("never Yahoo-substituted chains", () => {
       getHistoricalBars: vi.fn(async (symbol: string) => [{ symbol }]),
     };
     const adapter = createYahooDataProvider(inner as never);
+    // #3932: news joins the declared capabilities (Yahoo News
+    // search); the pin is still the absence of optionsChains.
     expect(adapter.capabilities).toEqual([
       "quotes",
       "historicalBars",
       "fundamentals",
+      "news",
     ]);
     expect(adapter.capabilities).not.toContain("optionsChains");
   });

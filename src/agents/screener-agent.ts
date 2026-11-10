@@ -30,7 +30,9 @@ import { ETradeService } from "../services/etrade";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import {
   buildFeedJobRegistry,
+  readPersistedSentiment,
   readPersistedTechnicalsBars,
+  YAHOO_NASDAQ100_SENTIMENT_JOB_ID,
   YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
 } from "../services/feedJobs";
 import { createScreenRunLockPort } from "../data/createScreenRunLockPorts";
@@ -68,6 +70,7 @@ import {
   selectStandouts,
   buildAllStocks,
   attachFactorGrades,
+  attachPersistedSentiment,
   attachTechnicals,
   toOpportunityStock,
   type ScannedStock,
@@ -307,6 +310,14 @@ export interface ScreenerRunResult {
    * coverage rides the same record (same bars).
    */
   technicalsCoverage?: { symbols: number; withMacd: number; withGap: number; withAtr?: number };
+  /**
+   * #3932: sentiment coverage for this run — how many quoted
+   * symbols the persisted sentiment copy actually labelled.
+   * Recorded so a sentiment gap is data (a run with zero
+   * coverage shows "—" on every row with the reason visible
+   * in the run record, instead of a silent heuristic).
+   */
+  sentimentCoverage?: { symbols: number; withSentiment: number };
   /** Per-run PDF key populated by persistRun after the PDF is stored. */
   pdfKey?: string;
   /** Issue #822: explicit PDF generation status. 'failed' means generatePdfAsset
@@ -1353,6 +1364,40 @@ export class ScreenerAgent extends PortThink {
       } catch {
         // Persisted read unavailable — the live fallback stands.
       }
+      // Issue #3932: persisted sentiment is the PRIMARY source
+      // for this run's sentiment column — the sentiment job's
+      // stored rows, read once up front. A fresh copy labels
+      // every symbol it carries (no live call at all for those
+      // symbols); a missing or stale copy leaves the column a
+      // named gap ("—"), never the price-derived heuristic.
+      // The read never fails the screen: any failure here
+      // leaves every row unlabelled, honestly.
+      let persistedSentiment: Awaited<
+        ReturnType<typeof readPersistedSentiment>
+      > = undefined;
+      try {
+        const datasetStore = createFeedDatasetAdapter(this.env);
+        if (datasetStore) {
+          const envStrings: Record<string, string | undefined> = {};
+          for (const [key, value] of Object.entries(
+            this.env as unknown as Record<string, unknown>,
+          )) {
+            if (typeof value === "string") envStrings[key] = value;
+          }
+          const sentimentDef = buildFeedJobRegistry(envStrings).get(
+            YAHOO_NASDAQ100_SENTIMENT_JOB_ID,
+          );
+          const read = await readPersistedSentiment(datasetStore, {
+            ...(sentimentDef
+              ? { maxAgeSeconds: sentimentDef.staleAfterMinutes * 60 }
+              : {}),
+            nowMs: Date.now(),
+          });
+          if (read && !read.stale) persistedSentiment = read;
+        }
+      } catch {
+        // Persisted read unavailable — the sentiment column gaps.
+      }
       // Provider-scoped acquisition (#261, #1007). Symbols come from
       // the listings directory (membership, not market data) for both
       // providers; quotes come from the named provider or nothing.
@@ -1435,12 +1480,28 @@ export class ScreenerAgent extends PortThink {
       await this.emitStageBoundary(timestamp, userLogin, "rankAndGrade", {
         symbols: gradedStocks.length,
       });
-      const allStocks = attachTechnicals(gradedStocks, technicalsBySymbol);
+      const technicalsAttached = attachTechnicals(gradedStocks, technicalsBySymbol);
+      // #3932: persisted news sentiment joins the rows — the
+      // sentiment column is sourced or a named gap, never the
+      // price-derived day action (which rides as dayAction).
+      const allStocks = persistedSentiment
+        ? attachPersistedSentiment(
+            technicalsAttached,
+            persistedSentiment.sentimentBySymbol,
+            persistedSentiment.label,
+          )
+        : technicalsAttached;
+      const sentimentCoverage = {
+        symbols: acquired.quotes.length,
+        withSentiment: allStocks.filter((s) => s.indicators.sentiment !== null)
+          .length,
+      };
       await this.emitStageBoundary(timestamp, userLogin, "enrich", {
         symbols: allStocks.length,
         withMacd: technicalsCoverage.withMacd,
         withGap: technicalsCoverage.withGap,
         withAtr: technicalsCoverage.withAtr,
+        withSentiment: sentimentCoverage.withSentiment,
       });
       const bySymbol = new Map(allStocks.map((s) => [s.symbol, s]));
       let opportunities = selectStandouts(
@@ -1450,7 +1511,7 @@ export class ScreenerAgent extends PortThink {
         const opp = toOpportunityStock(s);
         const graded = bySymbol.get(s.symbol);
         return graded
-          ? { ...opp, factorGrades: graded.factorGrades, technicals: graded.technicals }
+          ? { ...opp, factorGrades: graded.factorGrades, technicals: graded.technicals, indicators: graded.indicators }
           : opp;
       });
       // Issue #2869 slice 2 — standouts selected (the
@@ -1518,6 +1579,8 @@ export class ScreenerAgent extends PortThink {
         allStocks,
         discoveryMessage: acquired.discovery.message,
         technicalsCoverage,
+        // #3932: persisted-sentiment coverage for this run.
+        sentimentCoverage,
         filterSummary: screenResult.filterSummary,
         ...(acquired.partial ? { partial: acquired.partial } : {}),
         // Issue #728: rejection reasons for the Slack breakdown.

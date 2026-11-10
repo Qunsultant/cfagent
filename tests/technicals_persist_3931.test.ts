@@ -43,6 +43,7 @@ import {
   FEED_JOB_CODES,
   readPersistedTechnicalsBars,
   runFeedTechnicalsJob,
+  YAHOO_NASDAQ100_SENTIMENT_JOB_ID,
   YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
   type FeedJobDefinition,
 } from "../src/services/feedJobs";
@@ -100,6 +101,7 @@ import type { MarketDataResearchHistoricalBar } from "../src/types";
 const T0 = Date.parse("2026-11-07T12:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
 const TECH_ID = YAHOO_NASDAQ100_TECHNICALS_JOB_ID;
+const SENT_ID = YAHOO_NASDAQ100_SENTIMENT_JOB_ID;
 const NASDAQ_SYMBOLS = ["AAPL", "MSFT"];
 const SP100_SYMBOLS = ["AAPL", "XOM"];
 
@@ -278,6 +280,55 @@ function fundamentalsArtifact(
         recommendationKey: "buy",
       },
     })) as unknown as FeedDatasetStoreInput["fundamentals"],
+    run: runRecord(runId, atMs, rows.length),
+    nowIso: iso(atMs + 1000),
+  } as unknown as FeedDatasetStoreInput;
+}
+
+/** #3932: the sentiment join's persisted copy — sourced news
+ *  sentiment per symbol (label + score + provenance), the same
+ *  shape the sentiment job persists. */
+function sentimentArtifact(
+  runId: string,
+  atMs: number,
+  index: IndexId,
+  rows: Array<{ symbol: string; label: "bullish" | "bearish" | "neutral"; score: number }>,
+): FeedDatasetStoreInput {
+  return {
+    sourceId: "yahoo",
+    dataset: "sentiment",
+    jobId: SENT_ID,
+    elements: ["news"],
+    universe: {
+      kind: "index",
+      index,
+      label: INDEX_LABELS[index],
+      snapshotDate: "2026-11-02",
+      sourceLabel: `Wikipedia (${INDEX_LABELS[index]} table)`,
+      size: rows.length,
+    },
+    providerId: "yahoo",
+    asOf: iso(atMs + 1000),
+    quotes: [],
+    sentiment: rows.map((r) => ({
+      symbol: r.symbol,
+      sentiment: {
+        label: r.label,
+        score: r.score,
+        method: "llm",
+        model: "fixture-model",
+        headlineCount: 1,
+        headlines: [
+          {
+            headline: `${r.symbol} reports quarterly results`,
+            source: "Yahoo Finance",
+            publishedAt: iso(atMs),
+          },
+        ],
+        source: "yahoo-news",
+        asOf: iso(atMs + 1000),
+      },
+    })),
     run: runRecord(runId, atMs, rows.length),
     nowIso: iso(atMs + 1000),
   } as unknown as FeedDatasetStoreInput;
@@ -538,16 +589,18 @@ describe("the enrich join computes rsi / macd / atr from persisted bars (#3931)"
       ENRICH_JOB_ALPACA_NASDAQ100_QUOTES_ENRICH_TECHNICALS_JOIN: "off",
     });
     const alpaca = off.get("alpaca-nasdaq100-quotes-enrich")!;
-    expect(alpaca.enrichFrom.map((s) => s.dataset)).toEqual(["fundamentals"]);
+    // The knob is per join: opting the technicals join out
+    // leaves the fundamentals and sentiment joins in place.
+    expect(alpaca.enrichFrom.map((s) => s.dataset)).toEqual(["fundamentals", "sentiment"]);
     for (const element of ENRICH_HISTORY_ELEMENTS) {
       expect(alpaca.elements).not.toContain(element);
     }
     // The knob is per job: the other broker jobs keep the join.
-    expect(off.get("etrade-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(2);
+    expect(off.get("etrade-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(3);
     const bogus = buildEnrichJobRegistry({
       ENRICH_JOB_ALPACA_NASDAQ100_QUOTES_ENRICH_TECHNICALS_JOIN: "bogus",
     });
-    expect(bogus.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(2);
+    expect(bogus.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toHaveLength(3);
   });
 
   it("a broker enrich run carries rsi / macd / atr from the persisted bars", async () => {
@@ -570,6 +623,14 @@ describe("the enrich join computes rsi / macd / atr from persisted bars (#3931)"
       technicalsArtifact("feed-t", T0, "nasdaq100", [
         { symbol: "AAPL", bars: risingBars("AAPL") },
         { symbol: "MSFT", bars: risingBars("MSFT") },
+      ]),
+    );
+    // #3932: and the sentiment join, so the run completes on
+    // all three joins.
+    await datasetStore.store(
+      sentimentArtifact("feed-s", T0, "nasdaq100", [
+        { symbol: "AAPL", label: "bullish", score: 1 },
+        { symbol: "MSFT", label: "bearish", score: -0.5 },
       ]),
     );
     const enrichedStore = new InMemoryEnrichedDatasetStore();
@@ -760,6 +821,20 @@ describe("the enrich join computes rsi / macd / atr from persisted bars (#3931)"
         { symbol: "MSFT", peTrailing: 22 },
       ]),
     );
+    // #3932: and the sentiment join for both universes, so both
+    // enrich runs complete on all three joins.
+    await datasetStore.store(
+      sentimentArtifact("feed-s-sp", T0, "sp100", [
+        { symbol: "AAPL", label: "bullish", score: 1 },
+        { symbol: "XOM", label: "neutral", score: 0 },
+      ]),
+    );
+    await datasetStore.store(
+      sentimentArtifact("feed-s-nq", T0 + 60_000, "nasdaq100", [
+        { symbol: "AAPL", label: "bullish", score: 1 },
+        { symbol: "MSFT", label: "bearish", score: -0.5 },
+      ]),
+    );
     const enrichedStore = new InMemoryEnrichedDatasetStore();
     const registry = buildEnrichJobRegistry({});
     const sp100 = await runEnrichJob(
@@ -780,11 +855,14 @@ describe("every chain folds the technicals node in (#3931)", () => {
     const registry = buildPipelineChainRegistry({});
     for (const chain of registry.list()) {
       expect(chain.technicalsJobId).toBe(TECH_ID);
+      // #3932: the sentiment node follows the technicals node.
+      expect(chain.sentimentJobId).toBe(SENT_ID);
       const ids = chain.nodes.map((n) => n.jobId);
       expect(ids).toEqual([
         chain.feedJobId,
         "yahoo-nasdaq100-fundamentals",
         TECH_ID,
+        SENT_ID,
         chain.enrichJobId,
         chain.analyzeJobId,
         chain.generateJobId,
@@ -831,10 +909,10 @@ describe("every chain folds the technicals node in (#3931)", () => {
         (n) => n.params?.feedJobId === TECH_ID,
       )?.params,
     ).toMatchObject({ feedJobId: TECH_ID, universe: "sp100" });
-    // The alpaca chain now carries seven nodes (fundamentals +
-    // technicals fold in).
-    expect(walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!)).toHaveLength(7);
-    expect(walk(byId.get("yahoo-nasdaq100-quotes-pipeline")!)).toHaveLength(7);
+    // The alpaca chain now carries eight nodes (fundamentals,
+    // technicals, and sentiment fold in, #3932).
+    expect(walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
+    expect(walk(byId.get("yahoo-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
   });
 });
 

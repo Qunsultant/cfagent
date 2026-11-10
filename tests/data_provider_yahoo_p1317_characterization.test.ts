@@ -188,7 +188,7 @@ describe("characterization: screenerPipeline yahoo mode (pre-#1317 behaviour)", 
 });
 
 describe("characterization: P1 platform yahoo adapter parity", () => {
-  it("quotes/bars/fundamentals pass through by reference with the yahoo envelope", async () => {
+  it("quotes/bars/fundamentals/news pass through by reference with the yahoo envelope", async () => {
     const marketDataResearch = fixtureMarketData();
     const adapter = createYahooDataProvider(marketDataResearch);
     const q = await adapter.getQuote!("AAPL");
@@ -205,7 +205,9 @@ describe("characterization: P1 platform yahoo adapter parity", () => {
     expect(f.providerId).toBe("yahoo");
     expect(f.capability).toBe("fundamentals");
     expect(f.result.companyName).toBe("AAPL Inc.");
-    expect(adapter.capabilities).toEqual(["quotes", "historicalBars", "fundamentals"]);
+    // #3932: the Yahoo adapter declares news (Yahoo News search);
+    // this test never calls getNews, so no fetch is stubbed here.
+    expect(adapter.capabilities).toEqual(["quotes", "historicalBars", "fundamentals", "news"]);
     expect(adapter.isConfigured()).toBe(true);
   });
 });

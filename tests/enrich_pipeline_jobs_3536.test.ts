@@ -256,7 +256,7 @@ describe("enrich pipeline catalog + resolution (#3536)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(17);
+    expect(registrations).toHaveLength(18);
     expect(specs.map((s) => s.jobId)).toContain(ENRICH_ID);
   });
 });

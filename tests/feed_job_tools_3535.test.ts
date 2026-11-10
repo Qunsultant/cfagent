@@ -177,7 +177,7 @@ describe("feed-job copilot tools (#3535)", () => {
   it("list_feed_jobs returns every feed job's merged view", async () => {
     const { context } = await makeContext();
     const result = (await new ListFeedJobsCommand().execute({}, context)) as any;
-    expect(result.jobs).toHaveLength(10);
+    expect(result.jobs).toHaveLength(11);
     expect(result.jobs.map((j: any) => j.jobId)).toContain("nasdaq-nasdaq100-universe");
   });
 

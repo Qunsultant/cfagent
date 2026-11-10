@@ -58,9 +58,16 @@ export const SCREENER_FORMULA_DOCUMENTATION: ColumnFormulaDocumentation[] = [
   {
     columnName: "Sentiment",
     fieldKey: "indicators.sentiment",
-    provenance: "Intraday Price Action Dynamics",
-    formula: "IF changePercent >= +3.0% -> 'very bullish'; IF >= +0.5% -> 'bullish'; IF <= -3.0% -> 'very bearish'; IF <= -0.5% -> 'bearish'; ELSE -> 'neutral'",
-    description: "Directional sentiment classification derived from price velocity and day-action momentum.",
+    // #3932 — sourced, not price-derived: the sentiment job's
+    // persisted Yahoo News rows, LLM-classified per headline
+    // and aggregated per symbol (mean of +1/0/-1, bullish at
+    // >= +1/3, bearish at <= -1/3, else neutral). "-" when no
+    // persisted copy covers the symbol. The price-derived
+    // day-action label is a different field (indicators.dayAction)
+    // and is never presented as sentiment.
+    provenance: "Yahoo News (query2.finance.yahoo.com/v1/finance/search), persisted sentiment dataset",
+    formula: "Per headline: LLM classifies bullish (+1) / neutral (0) / bearish (-1); per symbol: score = mean(headline scores), label bullish if score >= +1/3, bearish if score <= -1/3, else neutral",
+    description: "Sourced news sentiment from the persisted sentiment dataset (Yahoo News headlines, LLM-classified); '-' when no persisted copy covers the symbol.",
   },
   {
     columnName: "Quant Rating",
@@ -158,7 +165,9 @@ export function generateScreenerXlsx(result: ScreenerRunResult): Uint8Array {
       "Price": Number(s.lastPrice.toFixed(2)),
       "Chg%": Number(s.changePercent.toFixed(2)),
       "Gap%": gapVal,
-      "Sentiment": (s.indicators?.sentiment ?? "neutral").replace(/_/g, " "),
+      // #3932: sourced news sentiment or "-" — never the
+      // price-derived day action, and never a "neutral" default.
+      "Sentiment": s.indicators?.sentiment != null ? s.indicators.sentiment.replace(/_/g, " ") : "-",
       "Quant Rating": s.factorGrades?.quantRating || "-",
       "Value Grade": s.factorGrades?.value || "-",
       "Momentum Grade": s.factorGrades?.momentum || "-",

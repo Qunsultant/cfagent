@@ -513,17 +513,21 @@ describe("data provider registry (issue #1118)", () => {
     const registry = registryWithRealAdapters();
     enableProvider(sql, "etrade");
     enableProvider(sql, "yahoo");
-    enableProvider(sql, "nasdaq");
     enableProvider(sql, "alpaca");
+    // #3932: "news" is no longer the unserved capability — the
+    // Yahoo adapter declares it now, so resolving it succeeds
+    // with yahoo enabled. "screenUniverse" is served only by
+    // nasdaq, which stays disabled here, so it is the unserved
+    // capability this test pins.
     let caught: unknown;
     try {
-      registry.resolve("news", listProviderConfigs(sql));
+      registry.resolve("screenUniverse", listProviderConfigs(sql));
     } catch (err) {
       caught = err;
     }
     expect(caught).toBeInstanceOf(DataProviderNotFoundError);
-    expect((caught as DataProviderNotFoundError).capability).toBe("news");
-    expect((caught as Error).message).toMatch(/news/);
+    expect((caught as DataProviderNotFoundError).capability).toBe("screenUniverse");
+    expect((caught as Error).message).toMatch(/screenUniverse/);
   });
 
   // Premise updated by #1247 (disclosed): a production Public adapter
@@ -760,7 +764,9 @@ describe("data provider adapters (issue #1118)", () => {
     ).toEqual(["quotes", "optionsChains"]);
     expect(
       createYahooDataProvider(fakeMarketDataProvider("yfinance")).capabilities
-    ).toEqual(["quotes", "historicalBars", "fundamentals"]);
+    ).toEqual(["quotes", "historicalBars", "fundamentals", "news"]);
+    // #3932: the Yahoo adapter declares news (Yahoo News search);
+    // Alpaca declares none — no news fetcher is supplied for it.
     expect(
       createAlpacaDataProvider(fakeMarketDataProvider("alpaca")).capabilities
     ).toEqual(["quotes", "historicalBars", "fundamentals"]);
@@ -830,7 +836,20 @@ describe("data provider conformance kit (issue #1118)", () => {
   it("passes all four real adapters on every capability they declare", async () => {
     const adapters: DataProvider[] = [
       createETradeDataProvider(fakeETradeService() as any),
-      createYahooDataProvider(fakeMarketDataProvider("yfinance")),
+      // #3932: the Yahoo adapter's news capability is served by
+      // the live Yahoo News fetch in production — in tests the
+      // fetcher is injected (a live fetch is blocked, #411), so
+      // the conformance kit probes the stub, not the network.
+      createYahooDataProvider(fakeMarketDataProvider("yfinance"), undefined, {
+        news: async (symbol: string) => [
+          {
+            headline: `${symbol} surges on strong earnings`,
+            source: "Yahoo Finance",
+            publishedAt: new Date().toISOString(),
+            symbol,
+          },
+        ],
+      }),
       createAlpacaDataProvider(fakeMarketDataProvider("alpaca")),
       createNasdaqDataProvider(async () => nasdaqListingsFixture),
     ];
