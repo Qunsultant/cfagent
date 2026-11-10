@@ -97,6 +97,8 @@ It should not mean replacing every service with an LLM.
 
 This gives every platform an agentic interface and improvement capability without allowing model reasoning to become the final authority for financial arithmetic, authorization, or transaction state.
 
+The workflow-execution layer is realized as one product: the **Generic workflow capability** (#3700) — the one workflow engine as a shared Technology Platform product (owner: Technology Platform, the CTO shared runtime). Its capabilities, in this model's own terms, are durable state, tasks, dependencies, approvals, and cancellation; its surfaces are the stage operations, the job plane, the stage chains, and the run records. Every domain platform consumes the same engine — there is no per-platform engine. Family adoption onto the product is tracked separately (#3549, #3550–#3555) and tenant instantiation separately (#3687); neither is absorbed into the product.
+
 ### One enterprise architecture, not ten isolated stacks
 
 Treat these as logical platforms with explicit contracts—not necessarily separate deployments.

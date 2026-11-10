@@ -11,7 +11,9 @@
  * identity record (getIdentityRecord), and its capability manifest
  * (capabilitiesForClass, Uniform Copilot Standard S1 #3489), each door joined with its
  * S19 cost-budget record — and copies nothing into a second
- * hand-maintained list. tests/mesh_agents_view_s20_2469.test.ts
+ * hand-maintained list. The platform capabilities
+ * (platformCapabilities, #3700) ride as a top-level section,
+ * derived from the manifest module. tests/mesh_agents_view_s20_2469.test.ts
  * drift-pins the payload against the registry module, so the
  * served data cannot silently diverge from the record.
  *
@@ -34,6 +36,7 @@ import {
   capabilityDoorsForClass,
   doorCostBudget,
   getIdentityRecord,
+  platformCapabilities,
   type AgentCapabilityManifest,
   type MeshAgentEntry,
   type MeshCapabilityDoorEntry,
@@ -45,6 +48,7 @@ import {
   type MeshToolFamilyEntry,
   type MeshTraceSpineEntry,
   type MeshWorkflowEntry,
+  type PlatformCapability,
 } from "../agents/registry";
 
 /** One fleet class as the view serves it: the registry entry, its
@@ -85,6 +89,12 @@ export interface MeshRegistryView {
   surfaces: MeshSurfaceEntry[];
   doors: MeshDoorView[];
   workflows: MeshWorkflowEntry[];
+  /**
+   * The platform capabilities (#3700) — shared Technology Platform
+   * products, derived from the manifest module via
+   * platformCapabilities(), never a hard-coded list in this view.
+   */
+  platformCapabilities: PlatformCapability[];
   channels: MeshChannelEntry[];
   toolFamilies: MeshToolFamilyEntry[];
   programme: {
@@ -141,6 +151,7 @@ export function buildMeshRegistryView(): MeshRegistryView {
     surfaces: [...MESH_SURFACES],
     doors: MESH_DOORS.map((door) => ({ ...door, budget: doorCostBudget(door.id) })),
     workflows: [...MESH_WORKFLOWS],
+    platformCapabilities: platformCapabilities(),
     channels: [...MESH_CHANNELS],
     toolFamilies: [...MESH_TOOL_FAMILIES],
     programme: {

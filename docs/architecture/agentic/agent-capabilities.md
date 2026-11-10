@@ -152,6 +152,8 @@ one stage contract, two executors):
   per-report indexing outcomes, #2347, are the pattern), so a stage
   can be re-run, audited, and resumed — never silently lost.
 
+**Generic workflow capability** — the one workflow engine as a shared Technology Platform product (issue #3700; owner: Technology Platform, the CTO shared runtime). What it is: the stage contract + stage runner (#2869/#2601), the job plane (#3533), the stage chains, and the uniform stage control — productized as a platform capability, not a per-programme construction. How a platform or tenant consumes it: define stages/jobs → execute under ExecutionContext → control via the uniform stage operations (run, re-run, stop, resume, cancel, schedule, re-schedule at run id + stage id); evidence lands on the evidence plane as run records, checkpoints, and provenance. Its capabilities, in platforms.md's own terms: durable state, tasks, dependencies, approvals, cancellation. **Live** — the machinery is live in pipeline use (J1–J7, #3534–#3540) and the product registration lands in #3700. Family adoption is tracked separately (#3549, #3550–#3555) and tenant instantiation separately (#3687).
+
 **Scheduling** binds the two: a schedule fires a turn or a workflow
 on an instance (production runs two system screen schedules hourly).
 Cadence is configuration — the copilot's cadence externalization is

@@ -2125,6 +2125,10 @@ export type {
   AgentCapabilityManifest,
   CapabilityEntry,
   CapabilityState,
+  PlatformCapability,
+  PlatformCapabilityMechanism,
+  PlatformCapabilitySurface,
+  PlatformCapabilityTerm,
 } from "../actors/capabilityManifest";
 
 /**
@@ -2142,6 +2146,15 @@ export function capabilitiesForClass(className: string): AgentCapabilityManifest
     bindings: agent.bindings,
   });
 }
+
+/**
+ * The platform capabilities the registry join renders (#3700) —
+ * re-exported from the manifest module, the fleet's single read
+ * surface for capabilities. A platform capability belongs to no
+ * class: it is a shared Technology Platform product every domain
+ * platform consumes.
+ */
+export { platformCapabilities } from "../actors/capabilityManifest";
 
 // ---------------------------------------------------------------------------
 // Typed accessors — the queryable shape later slices consume.
