@@ -1113,16 +1113,14 @@ export async function runFeedTechnicalsJob(
   // job serves any stored list; absent ⇒ the default universe.
   const universeIndex = resolveRunUniverse(def, opts.universe);
   const universeLabel = labelForRunUniverse(registry, universeIndex);
-  const list = await deps.universeStore.latest(universeIndex);
-  let symbols = list
-    ? Array.from(
-        new Set(
-          list.symbols
-            .map((m) => m.symbol.toUpperCase().trim())
-            .filter((s) => s.length > 0),
-        ),
-      )
-    : [];
+  // #3982: same cold-store hydration as the quotes and
+  // fundamentals runs (#3976) — the technicals runner resolves
+  // its universe through the shared helper, never a bare read.
+  const { list, refreshError } = await resolveUniverseListWithHydration(
+    deps,
+    universeIndex,
+  );
+  let symbols = symbolsOfList(list);
   if (opts.symbols && list) {
     const wanted = new Set(
       opts.symbols.map((s) => s.toUpperCase().trim()).filter((s) => s.length > 0),
@@ -1138,6 +1136,17 @@ export async function runFeedTechnicalsJob(
     size: symbols.length,
   };
   if (!list || symbols.length === 0) {
+    if (refreshError !== undefined) {
+      return record({
+        status: "failed",
+        rows: [],
+        requested: 0,
+        missingSymbols: [],
+        codedError: FEED_JOB_CODES.universeRefreshFailed,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
+        universe,
+      });
+    }
     return record({
       status: "failed",
       rows: [],
