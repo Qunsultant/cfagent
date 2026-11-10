@@ -84,6 +84,100 @@ export const STOCK_COPILOT_TASK_ID = "stock-copilot-paper-cycle";
 export const STOCK_COPILOT_SCHEDULE = DEFAULT_STOCK_COPILOT_SCHEDULE;
 
 /**
+ * Issue #4001 (follow-up): the dispatch-boundary probe. The 11:05
+ * slot ran under the #4008 fix and left zero trace, so the firing is
+ * now marked in DO KV storage — a sink the sql write path cannot
+ * swallow — before any cycle work runs. The marker is a single
+ * latest-firing value (overwrite, not a ledger): the newest firing
+ * is the one the status read must answer for.
+ */
+export const STOCK_COPILOT_CYCLE_FIRING_PROBE_KEY = "stock-copilot-cycle-last-firing";
+
+/** One recorded handler entry for the copilot cycle task. */
+export interface CopilotCycleFiringProbe {
+  taskId: string;
+  scheduledFor: number;
+  occurrenceKey: string;
+  receivedAt: string;
+}
+
+/** The dispatch evidence the status read surfaces for the cycle. */
+export interface CopilotCycleDispatchProbe {
+  /** The latest firing the handler actually entered, or null. */
+  lastFiringAttempt: CopilotCycleFiringProbe | null;
+  /** The last reason the task was not declared, or null. */
+  lastNotDeclared: { cause: CopilotNonDeclarationCause; atMs: number } | null;
+}
+
+/** Narrow structural type for the DO storage KV surface the probe uses. */
+export interface CopilotProbeStorage {
+  get: (key: string) => Promise<unknown>;
+  put: (key: string, value: unknown) => Promise<void>;
+}
+
+function readFiringProbeState(value: unknown): CopilotCycleFiringProbe | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.taskId !== "string" || !v.taskId) return null;
+  if (typeof v.scheduledFor !== "number" || !Number.isFinite(v.scheduledFor)) {
+    return null;
+  }
+  if (typeof v.occurrenceKey !== "string" || !v.occurrenceKey) return null;
+  if (typeof v.receivedAt !== "string" || !v.receivedAt) return null;
+  return {
+    taskId: v.taskId,
+    scheduledFor: v.scheduledFor,
+    occurrenceKey: v.occurrenceKey,
+    receivedAt: v.receivedAt,
+  };
+}
+
+/**
+ * Mark one handler entry in KV storage. Best-effort by design — a
+ * storage handle without the KV surface, or a failed write, never
+ * throws, so the probe cannot break the cycle it observes.
+ */
+export async function recordCopilotCycleFiringAttempt(
+  storage: CopilotProbeStorage | undefined | null,
+  probe: CopilotCycleFiringProbe,
+): Promise<void> {
+  if (!storage || typeof storage.put !== "function") return;
+  try {
+    await storage.put(STOCK_COPILOT_CYCLE_FIRING_PROBE_KEY, probe);
+  } catch {
+    // Best-effort: the probe is a discriminator, not the firing
+    // itself — a failed write must never break the cycle.
+  }
+}
+
+/**
+ * Read the dispatch evidence for the status surface. Total: a
+ * missing storage handle, a missing key, a malformed value, or a
+ * failed read all report nulls, never throw.
+ */
+export async function readCopilotCycleDispatchProbe(
+  storage: Pick<CopilotProbeStorage, "get"> | undefined | null,
+): Promise<CopilotCycleDispatchProbe> {
+  const empty: CopilotCycleDispatchProbe = {
+    lastFiringAttempt: null,
+    lastNotDeclared: null,
+  };
+  if (!storage || typeof storage.get !== "function") return empty;
+  try {
+    const [firing, notDeclared] = await Promise.all([
+      storage.get(STOCK_COPILOT_CYCLE_FIRING_PROBE_KEY),
+      storage.get(COPILOT_NOT_DECLARED_KEY),
+    ]);
+    return {
+      lastFiringAttempt: readFiringProbeState(firing),
+      lastNotDeclared: readNotDeclaredState(notDeclared),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/**
  * Issue #3788: dedup for the non-declaration audit — one audit per
  * cause class, re-emitted only when the cause changes or 24h pass, so
  * declaration reconciliation never spams audit. Durable in the
@@ -364,6 +458,23 @@ export async function declareStockCopilotTasks(
     [STOCK_COPILOT_TASK_ID]: {
       schedule: cadence.effective as any,
       handler: async (taskCtx: ThinkScheduledTaskContext): Promise<void> => {
+        // Issue #4001 (follow-up): the dispatch-boundary probe. The
+        // 11:05 slot ran under the #4008 fix and left zero trace, so
+        // the firing is marked in DO KV storage — a sink the sql
+        // write path cannot swallow — before any cycle work runs. A
+        // later firing with a probe but no ledger row names the sql
+        // write path; a firing with no probe names the
+        // declaration/dispatch path. Best-effort: the write never
+        // throws, so it cannot break the cycle.
+        await recordCopilotCycleFiringAttempt(
+          ctx.agentCtx?.storage as unknown as CopilotProbeStorage | undefined,
+          {
+            taskId: taskCtx.taskId,
+            scheduledFor: taskCtx.scheduledFor,
+            occurrenceKey: taskCtx.occurrenceKey,
+            receivedAt: new Date().toISOString(),
+          },
+        );
         await runStockCopilotCycleForInstance(ctx, executionContext, taskCtx).catch(
           (err: unknown) => {
             // Issue #3788: best-effort still — a throw here would invite
