@@ -34,17 +34,13 @@
  */
 import {
   scrubFailureMessage,
+  SECTOR_IDS,
   type DataProvider,
   type DataProviderCapability,
   type DataProviderId,
   type IndexId,
   type QuoteResult,
 } from "../trading";
-// #3930 — SECTOR_IDS from its defining module, not the ../trading
-// barrel: tests/mock boundaries stub the barrel (e.g. the #1727
-// modes suite), and a module-scope spread of a stubbed export
-// fails collection. The leaf module is pure (no I/O, no bindings).
-import { SECTOR_IDS } from "../trading/indexMembership";
 import {
   feedDatasetRowCount,
   resolveFeedQuotesFromArtifact,
