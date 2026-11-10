@@ -1220,6 +1220,8 @@ export class AlpacaPlaceBracketLadderCommand implements IMcpToolCommand {
       continuation_increment: { type: "number", description: "baseBreakout: price advance from the last rung needed to place the next one" },
       step_price: { type: "number", description: "baseBreakout: the price observed now (defaults to the confirmation close)" },
       ladder_id: { type: "string", description: "baseBreakout: resume this ladder (from a previous call's ladderId)" },
+      idempotency_key: { type: "string", description: "Retry key: the same key reuses the ladder id and its client order ids, so a retry cannot place a second ladder" },
+      idempotencyKey: { type: "string", description: "CamelCase alias for idempotency_key" },
       minute_et: { type: "number", description: "baseBreakout: minutes after midnight ET, for the session window check" },
       base: {
         type: "object",
@@ -1312,6 +1314,7 @@ export class AlpacaPlaceBracketLadderCommand implements IMcpToolCommand {
         quantities: input.quantities,
         takeProfitDelta,
         stopLossDelta,
+        idempotencyKey: input.idempotency_key ?? input.idempotencyKey,
         direction: input.direction || "ascending",
         timeInForce: input.time_in_force || "day",
         extendedHours: input.extended_hours,
