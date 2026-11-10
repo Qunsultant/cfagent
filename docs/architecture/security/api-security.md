@@ -135,10 +135,14 @@ deploy failure.
 | Worker secret | Read by | Absence means |
 | --- | --- | --- |
 | `SLACK_SIGNING_SECRET` | `src/security/webhookSecurity.ts` (`gateSlackRequest`), `src/agents/slackAgent.ts` | The inbound channel refuses every request under `/slack/*`; no signature check can pass. |
-| `SLACK_BOT_TOKEN` | `src/services/slackFiles.ts`, `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/trading/slack/agent.ts`, delivery jobs | The outbound bot-API leg is skipped and delivery surfaces report "no Slack transport configured" by name. The snap's bot leg takes its channel per call — it has no `SLACK_CHANNEL` fallback. |
+| `SLACK_BOT_TOKEN` | `src/services/slackFiles.ts`, `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/trading/slack/agent.ts`, delivery jobs | The outbound bot-API leg is skipped and delivery surfaces report "no Slack transport configured" by name. Its destination resolves as caller → `SLACK_CHANNEL` → `SCREENER_SLACK_CHANNEL` (#3980); nothing resolving is the named `slack_channel_not_configured` refusal, never a post to an undefined channel. |
 | `SLACK_CLIENT_ID` | `src/server/routes/messaging.ts` (`/slack/install`) | The install route answers 500 naming the missing variable. |
 | `SLACK_CLIENT_SECRET` | `src/server/routes/messaging.ts` (`/slack/oauth_callback`) | The OAuth code exchange cannot run; installation stops at that step. |
 | `SLACK_WEBHOOK_URL` | `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/services/deliverJobs.ts` | The webhook leg is skipped; delivery falls through to the remaining transports. Synced since #3980 — it was read but never deployed, so setting it changed nothing. |
+
+`SLACK_CHANNEL` / `SCREENER_SLACK_CHANNEL` are destinations, not
+credentials; they are pushed with the set so a bot-token deployment has a
+default channel without a second configuration step.
 
 ### Staged: deployed, no reader yet
 
