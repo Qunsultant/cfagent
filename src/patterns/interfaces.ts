@@ -54,6 +54,16 @@ export interface McpToolContext {
    */
   scopedChatNlqModes?: import("../config/chatNlqModes").ChatNlqScopedModes;
   /**
+   * #3922: optional per-login settings reader (the hosting
+   * instance's mas_settings read, the readSettingRaw idiom),
+   * populated by the execution-context owners on the
+   * Orchestrator instance (chat turn, async-job executor, /mcp
+   * route). The mesh screen door forwards it so the screener
+   * ND gate's stored layer (#3741) resolves at the door;
+   * unset → that gate stays env-only, exactly as before.
+   */
+  readSettingRaw?: (key: string) => string | null;
+  /**
    * #2488: binding-seam overrides for the mesh screen door
    * (run_stock_screen), populated ONLY by test harnesses through
    * the executor-shaped context. Production contexts (turn,

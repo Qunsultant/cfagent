@@ -228,3 +228,29 @@ export function resolveScreenerNdGateResolved(deps: {
     },
   );
 }
+
+/** The gate's public shape plus the one resolver's named source. */
+export interface ResolvedScreenerNdGateForHost extends ResolvedScreenerNdGate {
+  /** The layer that decided: "stored" | "env" | "default" | "pin". */
+  source: AgentConfigResolution["source"];
+}
+
+/**
+ * Issue #3922 — the gate resolution for a production host: the
+ * full layered entry when the host supplies a settings reader
+ * (stored > env > built-in off, source named), and exactly the
+ * env-only resolution when it does not — the resolver skips the
+ * stored layer without a reader, so a reader that finds no
+ * stored value resolves byte-identically to
+ * resolveScreenerNdGateFromEnv. Hosts wire their per-login
+ * reader through this one helper so every seam reads the gate
+ * the same way.
+ */
+export function resolveScreenerNdGateForHost(deps: {
+  env?: unknown;
+  readSettingRaw?: (key: string) => string | null;
+  className?: string;
+}): ResolvedScreenerNdGateForHost {
+  const resolved = resolveScreenerNdGateResolved(deps);
+  return { ...toResolvedScreenerNdGate(resolved), source: resolved.source };
+}

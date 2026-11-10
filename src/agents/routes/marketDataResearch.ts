@@ -69,6 +69,14 @@ export interface MarketDataResearchRouteContext {
   ): void;
   /** #1727: optional session/user carriers for the market-data switches (run comes from query `?mode=`, global env from `env`). Populated by the execution-context owner; unset carriers fall through to env. See src/config/marketDataModes.ts. */
   scopedMarketDataModes?: import("../../config/marketDataModes").MarketDataScopedModes;
+  /**
+   * Issue #3922: optional per-login settings reader (owner:
+   * OrchestratorAgent — the readSettingRaw idiom), forwarded
+   * to the spec builder's mode admission and the execution
+   * broker so the screener ND gate's stored layer resolves on
+   * this route too. Absent → env-only admission, as before.
+   */
+  readSettingRaw?: ((key: string) => string | null) | undefined;
   /** Screener agent (owner: OrchestratorAgent.getScreenerAgent) — issue #1007: the market-data screen runs through the one pipeline via this agent, with the Yahoo data-source adapter as its provider. */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
   /** Canonical-copy screener persistence (owner: OrchestratorAgent.persistScreenerReportCanonical) — the REST idiom the E*TRADE screen route stores through. */
@@ -328,6 +336,7 @@ export async function handleMarketDataCompareScreenRoutes(
         query: url.searchParams,
         asyncRequested,
         source: "market-data",
+        readSettingRaw: ctx.readSettingRaw,
       });
       if (!specResult.ok) {
         return Response.json({ error: specResult.error }, { status: 400 });
@@ -361,6 +370,7 @@ export async function handleMarketDataCompareScreenRoutes(
         const started = await startStockScreenWorkflowOrNull({
           env: ctx.env,
           spec,
+          readSettingRaw: ctx.readSettingRaw,
           // Market-data previously passed no environment /
           // portfolioContext keys; broker omits them here.
           userLogin,

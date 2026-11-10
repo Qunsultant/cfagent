@@ -86,6 +86,14 @@ export interface McpChatNlqRouteContext {
    */
   getStorage?(): any;
   env: Env;
+  /**
+   * Issue #3922: optional per-login settings reader (owner:
+   * OrchestratorAgent — the readSettingRaw idiom), forwarded
+   * into the MCP tool context so the mesh screen door's ND
+   * gate resolves its stored layer on this surface. Absent →
+   * the gate stays env-only, exactly as before.
+   */
+  readSettingRaw?: ((key: string) => string | null) | undefined;
   audit(
     type: string,
     agent: AgentName | "judge" | "nlq" | "orchestrator",
@@ -205,6 +213,9 @@ export async function handleMcpChatNlqRoutes(
           // door_unavailable. Optional (getStorage?.()) so mock ctxs
           // without it degrade to today's honest refusal.
           storage: ctx.getStorage?.(),
+          // Issue #3922: the settings reader carrier, forwarded
+          // into the tool context (see the route context field).
+          ...(ctx.readSettingRaw ? { readSettingRaw: ctx.readSettingRaw } : {}),
           // #1744: the calling principal, resolved from the
           // Worker-forwarded identity headers (x-user-login always,
           // x-principal-kind session|api-key). No login resolves to

@@ -113,7 +113,7 @@ import {
 } from "../../services/scheduledReports";
 import { createFeatureFlagPort } from "../../features/createFeatureFlagPort";
 import {
-  resolveScreenerNdGateFromEnv,
+  resolveScreenerNdGateForHost,
   screenerNdConfigErrorEvent,
 } from "../../config/screenerModes";
 import {
@@ -302,6 +302,14 @@ export interface MeshScreenDoorContext extends MeshScreenDoorSeams {
    * recorded break), never stamped after the fact.
    */
   traceparent?: () => string | undefined;
+  /**
+   * Issue #3922: the hosting instance's per-login settings
+   * reader — the ND gate then resolves through the one
+   * resolver's stored layer (`screener_nd_mode:<class>`, then
+   * the bare key) ahead of the env flag. Absent → the gate is
+   * env-only, exactly as before this wiring.
+   */
+  readSettingRaw?: (key: string) => string | null;
 }
 
 /**
@@ -335,6 +343,11 @@ export function meshScreenDoorContextFromMcp(context: McpToolContext): MeshScree
       return sql;
     },
     traceparent: context.traceparent,
+    // Issue #3922: forward the tool context's settings reader
+    // (populated by the execution-context owners on the
+    // orchestrator instance) so the ND gate's stored layer
+    // serves at this door.
+    ...(context.readSettingRaw ? { readSettingRaw: context.readSettingRaw } : {}),
     ...(context.meshScreenDoorSeams ?? {}),
   };
 }
@@ -396,7 +409,7 @@ export async function runStockScreenViaDoor(
   }
   let screenIntent: string | undefined;
   if (ndRequested) {
-    const gate = resolveScreenerNdGateFromEnv(ctx.env);
+    const gate = resolveScreenerNdGateForHost({ env: ctx.env, readSettingRaw: ctx.readSettingRaw });
     if (gate.invalid) {
       structuredLog.warn("meshScreenDoor.nd_mode_invalid_value", {
         message: `[mesh-screen-door] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,

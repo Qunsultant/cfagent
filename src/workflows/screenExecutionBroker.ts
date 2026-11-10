@@ -215,6 +215,14 @@ export async function startStockScreenWorkflowOrNull(args: {
   environment?: "TEST" | "PROD";
   /** Optional: E*TRADE passes its flag; market-data passed none. */
   portfolioContext?: boolean;
+  /**
+   * Issue #3922: the hosting instance's per-login settings
+   * reader, forwarded to the default starter so the ND
+   * backstop gate resolves through the stored layer. An
+   * injected starter keeps its own (env, command) contract.
+   * Absent → the env-only backstop, exactly as before.
+   */
+  readSettingRaw?: (key: string) => string | null;
   /** Injectable for tests; defaults to tryStartScreenerWorkflow. */
   starter?: ScreenWorkflowStarter;
 }): Promise<ScreenExecutionBrokerResult | null> {
@@ -227,7 +235,10 @@ export async function startStockScreenWorkflowOrNull(args: {
   // migration follow-up; no live caller passed goal specs to
   // the broker before this change.
   if (!spec.asyncRequested) return null;
-  const starter = args.starter ?? tryStartScreenerWorkflow;
+  const starter =
+    args.starter ??
+    ((env: Env, command: WorkflowJobCommand) =>
+      tryStartScreenerWorkflow(env, command, { readSettingRaw: args.readSettingRaw }));
   // ND throw propagates by design — see module header.
   // Issue #2373 (Slice A): the command comes from the one
   // spec -> command mapping above, shared with the paid seam.

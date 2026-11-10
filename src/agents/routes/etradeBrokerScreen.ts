@@ -233,6 +233,7 @@ export async function executeEtradeScreen(args: {
       userLogin,
       environment: requestedEnv,
       portfolioContext,
+      readSettingRaw: ctx.readSettingRaw,
     });
     if (started) {
       ctx.audit("etrade.screen_enqueued", "trading", {

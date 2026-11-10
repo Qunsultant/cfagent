@@ -669,6 +669,9 @@ export class OrchestratorAgent extends PortThink {
     return {
       env: this.env,
       agentCtx: this.ctx,
+      // Issue #3922: the instance's settings reader, forwarded
+      // into mcp.tool executions (the ND gate's stored layer).
+      readSettingRaw: (key) => this.readSettingRaw(key),
       ensureTables: () => this.ensureTables(),
       sessionKey: () => this.sessionKey(),
       schedule: (when, callback, payload, options) => this.schedule(when, callback as keyof this, payload, options),
@@ -777,6 +780,9 @@ export class OrchestratorAgent extends PortThink {
   private chatTurnHelpersContext(): ChatTurnHelpersContext {
     return {
       env: this.env,
+      // Issue #3922: the instance's settings reader, forwarded
+      // into the turn's tool context (the ND gate's stored layer).
+      readSettingRaw: (key) => this.readSettingRaw(key),
       ensureTables: () => this.ensureTables(),
       getOrm: () => this.getOrm(),
       // Issue #1686: the DO blob handle, so chat-turn tool screens
