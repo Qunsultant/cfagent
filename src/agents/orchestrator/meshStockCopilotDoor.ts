@@ -69,9 +69,7 @@ import {
 import {
   COPILOT_UNIVERSE_SETTING_KEY,
   COPILOT_STRATEGIES_SETTING_KEY,
-  resolveCopilotUniverse,
   resolveCopilotUniverseFull,
-  resolveCopilotUniversePreset,
   resolveCopilotStrategies,
   parseUniverseInput,
   parseStrategiesInput,
@@ -515,7 +513,10 @@ export async function getStockCopilotStatusViaDoor(
     autopilot,
     rsiMode,
     universe,
-    universePreset: resolveCopilotUniversePreset(universe),
+    // #3936: the preset comes from the resolution, not from matching the
+    // symbol array — a stored 100-member list never equals a preset array,
+    // and matching it would report `null` for a correctly resolved index.
+    universePreset: universeResolution.preset,
     universeSource: universeResolution.source,
     universeStale: universeResolution.stale,
     universeSnapshotDate: universeResolution.snapshotDate,
@@ -794,7 +795,7 @@ export async function controlStockCopilotViaDoor(
     autopilot,
     rsiMode,
     universe,
-    universePreset: resolveCopilotUniversePreset(universe),
+    universePreset: universeResolution.preset,
     universeSource: universeResolution.source,
     universeStale: universeResolution.stale,
     universeSnapshotDate: universeResolution.snapshotDate,

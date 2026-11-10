@@ -86,9 +86,7 @@ import {
 import {
   COPILOT_UNIVERSE_SETTING_KEY,
   COPILOT_STRATEGIES_SETTING_KEY,
-  resolveCopilotUniverse,
   resolveCopilotUniverseFull,
-  resolveCopilotUniversePreset,
   resolveCopilotStrategies,
   parseUniverseInput,
   parseStrategiesInput,
@@ -327,7 +325,7 @@ export async function handleStockCopilotRoutes(
           env: ctx.env,
         }),
         universe,
-        universePreset: resolveCopilotUniversePreset(universe),
+        universePreset: universeResolution.preset,
         universeSource: universeResolution.source,
         universeStale: universeResolution.stale,
         universeSnapshotDate: universeResolution.snapshotDate,
@@ -667,7 +665,7 @@ export async function handleStockCopilotRoutes(
       ...(hasUniverse
         ? {
             universe: resolvedUniverse,
-            universePreset: resolveCopilotUniversePreset(resolvedUniverse),
+            universePreset: resolvedUniverseResolution.preset,
             universeSource: resolvedUniverseResolution.source,
             universeSnapshotDate: resolvedUniverseResolution.snapshotDate,
             universeFallbackReason: resolvedUniverseResolution.reason,
