@@ -785,23 +785,31 @@ export interface Env {
   EMAIL?: any;
   EMAIL_SECRET?: string;
   EMAIL_AGENT_ADDRESS?: string;
-  // Cloudflare Slack Agent Configuration (#3952)
+  // Cloudflare Slack Agent Configuration (#3974)
   //
-  // The four names below are what the Worker code reads, and what
-  // .github/workflows/deploy.yml pushes as OPTIONAL secrets: absence is
-  // a reported, fail-closed state, never a deploy failure. Without
-  // SLACK_SIGNING_SECRET the inbound channel refuses; without
-  // SLACK_BOT_TOKEN the outbound legs report no Slack transport; and
-  // /slack/install answers 500 naming SLACK_CLIENT_ID.
+  // The whole Slack credential set is pushed to the Worker by
+  // .github/workflows/deploy.yml as OPTIONAL secrets, so enabling a
+  // channel later is configuration only: absence is a reported,
+  // fail-closed state, never a deploy failure.
   //
-  // Deliberately NOT wired, so no config claims a capability the code
-  // does not have: SLACK_APP_TOKEN (Socket Mode — this Worker serves
-  // Slack over HTTP events), SLACK_VERIFICATION_TOKEN (deprecated;
-  // SLACK_SIGNING_SECRET is the verification path), SLACK_APP_ID (no
-  // code path reads it).
+  // Readers that exist TODAY: SLACK_SIGNING_SECRET (inbound request
+  // signing — without it the inbound channel refuses), SLACK_BOT_TOKEN
+  // (bot-API delivery — without it the legs report no Slack transport),
+  // SLACK_CLIENT_ID / SLACK_CLIENT_SECRET (the /slack/install route and
+  // its OAuth callback), and SLACK_WEBHOOK_URL (webhook delivery).
+  //
+  // Staged, no reader yet — present in the deployment so a reader can
+  // land without a second config change: SLACK_APP_ID, SLACK_APP_TOKEN
+  // (Socket Mode; this Worker serves Slack over HTTP events) and
+  // SLACK_VERIFICATION_TOKEN (deprecated by Slack — request signing is
+  // the verification path, and this token must not be added as a
+  // second one).
+  SLACK_APP_ID?: string;
+  SLACK_APP_TOKEN?: string;
   SLACK_CLIENT_ID?: string;
   SLACK_CLIENT_SECRET?: string;
   SLACK_SIGNING_SECRET?: string;
+  SLACK_VERIFICATION_TOKEN?: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_WEBHOOK_URL?: string;
   // Cloudflare Voice Agent Configuration
