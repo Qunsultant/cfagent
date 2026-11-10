@@ -213,6 +213,32 @@ export function makeRunScheduleCallback(
  * fallthrough); returns a Response when one of the owned paths matches, or
  * null to continue sequential matching.
  */
+/**
+ * Issue #4004 follow-up — which identity a schedule-creation request acts
+ * as. The header is the Worker-established identity for this request and
+ * wins whenever it is usable; the per-instance screener context is the
+ * fallback for callers that carry no identity, never an override of one.
+ * A context login such as an agent identity ("openaimp") therefore cannot
+ * shadow the signed-in owner and send the credential lookup to the wrong
+ * connection (alpaca:TEST:openaimp has no stored credential for the owner).
+ */
+export function resolveTrustedScheduleIdentity(input: {
+  headerLogin: string | null | undefined;
+  headerEnvironment: string;
+  context?: { userLogin?: string; environment?: ETradeEnvironment } | null;
+  configuredEnvironment: ETradeEnvironment;
+}): { userLogin: string; environment: ETradeEnvironment } {
+  const headerLogin = isLoginShaped(input.headerLogin) ? input.headerLogin : "";
+  const headerEnv =
+    input.headerEnvironment === "TEST" || input.headerEnvironment === "PROD"
+      ? (input.headerEnvironment as ETradeEnvironment)
+      : undefined;
+  return {
+    userLogin: headerLogin || input.context?.userLogin || "",
+    environment: headerEnv || input.context?.environment || input.configuredEnvironment,
+  };
+}
+
 export async function handleSchedulesRoutes(
   request: Request,
   url: URL,
@@ -642,12 +668,21 @@ export async function handleSchedulesRoutes(
         // payload.userLogin to select another account's E*TRADE credentials.
         const context = await ctx.getScreenerExecutionContext();
         const headerUserLogin = request.headers.get("x-user-login") || "";
-        const trustedUserLogin = context?.userLogin || (isLoginShaped(headerUserLogin) ? headerUserLogin : "");
         const headerEnvironment = (request.headers.get("x-environment") || "").toUpperCase();
-        const trustedEnvironment = context?.environment ||
-          (headerEnvironment === "TEST" || headerEnvironment === "PROD"
-            ? headerEnvironment
-            : resolveEnvironmentConfig(ctx.env).name as ETradeEnvironment);
+        // #4004 follow-up: the Worker-established header is THIS request's
+        // verified identity; the stored screener context is per-instance
+        // and can be stale (a previous login, or an agent identity such as
+        // "openaimp"). Letting the context win made creation look for
+        // credentials under the wrong login (alpaca:TEST:openaimp) and
+        // refuse every schedule the signed-in owner tried to create.
+        const trusted = resolveTrustedScheduleIdentity({
+          headerLogin: headerUserLogin,
+          headerEnvironment,
+          context,
+          configuredEnvironment: resolveEnvironmentConfig(ctx.env).name as ETradeEnvironment,
+        });
+        const trustedUserLogin = trusted.userLogin;
+        const trustedEnvironment = trusted.environment;
         if (ctx.accountScopedScheduleCallbacks.has(callback) && !trustedUserLogin) {
           return Response.json({ success: false, error: "An authenticated broker account is required to create screening schedules." }, { status: 401 });
         }
