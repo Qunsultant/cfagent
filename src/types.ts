@@ -101,13 +101,18 @@ export interface Env {
   // public endpoint is used, and absence = the MCP path is
   // unconfigured by decision, never an error.
   AI_SEARCH_MCP_ENDPOINT?: string;
-  // Issue #2731 (web_search): named web-search provider selection
-  // for the seam in src/services/webSearch.ts. Both optional —
-  // absence is the recorded production state, and the web_search
-  // tool then fails loud with web_search_provider_not_configured.
-  // Enablement is owner config only: wrangler secret put
-  // BRAVE_SEARCH_API_KEY (+ optionally WEB_SEARCH_PROVIDER).
+  // Issue #2731 (web_search) / #3935 (the provider chain) — the seam
+  // in src/services/webSearch.ts. All optional: the default chain is
+  // free/keyless first (SearXNG -> DuckDuckGo -> Brave), and the
+  // keyless DuckDuckGo provider needs no configuration at all, so
+  // web_search answers out of the box. WEB_SEARCH_PROVIDERS sets the
+  // order and the subset; WEB_SEARCH_PROVIDER is the legacy single
+  // selection, honoured only when the list is absent. An empty chain
+  // fails loud with web_search_provider_not_configured, and an
+  // exhausted chain with web_search_all_providers_failed.
+  WEB_SEARCH_PROVIDERS?: string;
   WEB_SEARCH_PROVIDER?: string;
+  SEARXNG_BASE_URL?: string;
   BRAVE_SEARCH_API_KEY?: string;
   // Issue #3489 (Uniform Copilot Standard S1) — externalized copilot
   // capability overrides (AOP, same idiom as the #2419 vars below).

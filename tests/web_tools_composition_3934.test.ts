@@ -68,7 +68,12 @@ describe("headless classes compose the web tools (#3934)", () => {
   });
 
   it("web_search keeps its named failure on both composition paths", async () => {
-    for (const agent of [browser(), sandbox()]) {
+    // #3935: the default chain is keyless-first, so the unconfigured
+    // case is an explicitly empty chain.
+    for (const agent of [
+      browser({ WEB_SEARCH_PROVIDERS: "" }),
+      sandbox({ WEB_SEARCH_PROVIDERS: "" }),
+    ]) {
       const tools = agent.getExecutionTools() as Record<string, any>;
       const out = await tools.web_search.execute({ query: "aapl" });
       expect(out).toMatchObject({ ok: false, error: "web_search_provider_not_configured" });

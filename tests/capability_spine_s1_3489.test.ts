@@ -142,7 +142,8 @@ describe("capability resolution: truthful defaults (#3489)", () => {
     expect(m.tools.workspace.state).toBe("enabled");
     expect(m.tools.webFetch.state).toBe("enabled");
     expect(m.tools.webSearch.state).toBe("enabled");
-    expect(m.tools.webSearch.prerequisite).toBe("BRAVE_SEARCH_API_KEY");
+    // #3935: no provider secret is required — the chain is keyless-first.
+    expect(m.tools.webSearch.prerequisite).toBeUndefined();
     expect(m.tools.payments.state).toBe("enabled");
     expect(m.tools.sandbox.state).toBe("not-implemented");
     expect(m.tools.browser.state).toBe("not-implemented");
@@ -244,10 +245,10 @@ describe("capability resolution: prerequisites (#3489)", () => {
     expect(m.channels.webhooks.state).toBe("unavailable");
   });
 
-  it("an env without BRAVE_SEARCH_API_KEY makes web_search unavailable with the service's named error", () => {
+  it("web_search needs no provider secret: an empty env resolves it enabled (#3935)", () => {
     const m = resolveAgentCapabilityManifest("OrchestratorAgent", { env: {} });
-    expect(m.tools.webSearch.state).toBe("unavailable");
-    expect(m.tools.webSearch.unavailableReason).toBe("web_search_provider_not_configured");
+    expect(m.tools.webSearch.state).toBe("enabled");
+    expect(m.tools.webSearch.unavailableReason).toBeUndefined();
   });
 
   it("an env with both secrets keeps both capabilities enabled", () => {
