@@ -1012,7 +1012,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/optionsAuthFreshness.ts", "etrade", 21],
   ["src/services/optionsAuthFreshness.ts", "yahoo", 1],
   ["src/services/optionsProviderContext.ts", "alpaca", 5],
-  ["src/services/optionsProviderContext.ts", "etrade", 14],
+  // #4014 INTEGRATION growth: optionsChainsServingProvider names the capable
+  // provider that actually serves a chain when the tenant's selection cannot.
+  ["src/services/optionsProviderContext.ts", "etrade", 16],
   ["src/services/optionsProviderContext.ts", "yahoo", 3],
   ["src/services/optionsServeRecord.ts", "etrade", 5],
   ["src/services/patternSignals.ts", "etrade", 1],

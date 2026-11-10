@@ -150,6 +150,53 @@ export function dataProviderSupportsCapability(
   return caps !== undefined && caps.includes(capability);
 }
 
+/**
+ * Issue #4014 — which provider actually serves an options chain.
+ *
+ * The capability matrix declares optionsChains for etrade/public only.
+ * Refusing every chain read when the tenant's SELECTED provider lacks it left
+ * the options screens (and the copilot) with no chain at all even though a
+ * capable provider was enabled — the failure behind the PMCC incident.
+ * Chains are served by a capable provider, and the substitution is NAMED:
+ * `requestedDataProviderId` keeps the tenant's selection visible, so no chain
+ * is ever labelled with a provider that did not serve it.
+ */
+export interface OptionsChainsServingProvider {
+  servingProviderId: DataProviderId;
+  requestedDataProviderId: string;
+  substituted: boolean;
+}
+
+export function optionsChainsServingProvider(
+  selectedDataProviderId: string,
+): OptionsChainsServingProvider {
+  if (dataProviderSupportsCapability(selectedDataProviderId, "optionsChains")) {
+    return {
+      servingProviderId: selectedDataProviderId as DataProviderId,
+      requestedDataProviderId: selectedDataProviderId,
+      substituted: false,
+    };
+  }
+  return {
+    servingProviderId: "etrade",
+    requestedDataProviderId: selectedDataProviderId,
+    substituted: true,
+  };
+}
+
+/** Provenance fields for a chain-serving run record (#4014). */
+export function optionsFeedProviderStamp(input: {
+  dataProviderId: string;
+  brokerId: string;
+}): { dataProviderId: DataProviderId; brokerId: BrokerId; requestedDataProviderId?: string } {
+  const serving = optionsChainsServingProvider(input.dataProviderId);
+  return {
+    dataProviderId: serving.servingProviderId,
+    brokerId: input.brokerId as BrokerId,
+    ...(serving.substituted ? { requestedDataProviderId: serving.requestedDataProviderId } : {}),
+  };
+}
+
 export interface CapabilityUnavailable {
   /** Existing catalog code (already in src/outcomes/outcomeCatalog.json); never a new catalog. */
   code: "FAILURE_DATA_PROVIDER_UNAVAILABLE";
