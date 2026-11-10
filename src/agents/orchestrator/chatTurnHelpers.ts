@@ -54,6 +54,13 @@ export interface ChatTurnHelpersContext {
    */
   turnUserLogin?: () => string | undefined;
   /**
+   * #3922: optional per-login settings reader (the hosting
+   * instance's mas_settings read), forwarded into the turn's
+   * tool context — the mesh screen door's ND gate resolves its
+   * stored layer through it. Unset → the gate stays env-only.
+   */
+  readSettingRaw?: (key: string) => string | null;
+  /**
    * #2428 (Agent Mesh S17): resolver for the current turn's mesh
    * traceparent (the orchestrator's turn stash, minted lazily on
    * first read so every tool built for the turn shares ONE trace).
@@ -110,6 +117,8 @@ export function createTurnTools(ctx: ChatTurnHelpersContext, requestId: string):
     storage: ctx.storage,
     requestId,
     facade,
+    // #3922: the settings reader carrier (see the context field).
+    ...(ctx.readSettingRaw ? { readSettingRaw: ctx.readSettingRaw } : {}),
     // #1744: agent-turn principal — the turn runs inside the
     // owner's own agent instance, so the instance boundary IS the
     // identity boundary. Threading the turn's userLogin into the

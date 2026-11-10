@@ -1,0 +1,3 @@
+### Added
+
+- The screener ND gate's stored layer (#3741) now serves in production: the mesh screen door, the REST screen routes' mode admission and spec builder, the execution broker, and the workflow-start backstop resolve the gate through the one resolver's full layering (stored `screener_nd_mode:<class>` / bare key ahead of the `SCREENER_ND_MODE` env flag) wherever the hosting instance supplies its per-login settings reader — carried on the MCP tool context (chat turn, async-job executor, /mcp route) and the route contexts in the established readSettingRaw idiom. Hosts without a reader (the workflow runtime seams) stay env-only, and with no stored value every resolution is identical to before. (#3922)

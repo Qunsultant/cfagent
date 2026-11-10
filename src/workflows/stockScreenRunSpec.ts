@@ -213,6 +213,13 @@ export function buildStockScreenRunSpec(args: {
   source: StockScreenSource;
   /** Pre-admitted mode (E*TRADE route: admitted before listings). */
   modeSelection?: ScreenModeSelection;
+  /**
+   * Issue #3922: the hosting instance's per-login settings
+   * reader, forwarded to the internal mode admission when no
+   * pre-admitted selection rides — the ND gate then resolves
+   * through the stored layer. Absent → env-only admission.
+   */
+  readSettingRaw?: (key: string) => string | null;
   /** Issue #2908 (G1): provenance the route knows; trigger defaults by source (goal -> "goal", else "manual"). */
   trigger?: StockScreenTrigger;
   userLogin?: string;
@@ -227,6 +234,7 @@ export function buildStockScreenRunSpec(args: {
     args.modeSelection ??
     admitScreenModeSelection(args.env, args.method, args.rawFilters, args.query, {
       asyncRequested: args.asyncRequested,
+      readSettingRaw: args.readSettingRaw,
     });
   if (!modeSelection.ok) {
     return { ok: false, error: modeSelection.error };

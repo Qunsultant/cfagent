@@ -236,6 +236,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   // sequential path.endsWith matching sequence; a non-null return matched.
   const mcpChatNlqResponse = await handleMcpChatNlqRoutes(request, url, path, sessionId, {
     getOrm: () => deps.getOrm(),
+    // Issue #3922: the instance's settings reader, forwarded
+    // into the MCP tool context (the ND gate's stored layer).
+    readSettingRaw: (key) => deps.readSettingRaw(key),
     getStorageSql: () => deps.ctx.storage.sql,
     // Issue #1661: DO blob handle for full capture on NLQ legs.
     getStorage: () => deps.ctx.storage,
@@ -464,6 +467,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   // a non-null return matched.
   const agenticPaymentsResponse = await handleAgenticPaymentsRoutes(request, url, path, sessionId, {
     env: deps.env,
+    // Issue #3922: the instance's settings reader (the ND
+    // backstop gate's stored layer on the redemption start).
+    readSettingRaw: (key) => deps.readSettingRaw(key),
     getOrm: () => deps.getOrm(),
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
   });
@@ -746,6 +752,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
 
   const marketDataResearchResponse = await handleMarketDataQuoteResearchRoutes(request, url, path, sessionId, {
     env: deps.env,
+    // Issue #3922: the instance's settings reader (the ND
+    // gate's stored layer for this route's mode admission).
+    readSettingRaw: (key) => deps.readSettingRaw(key),
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
     getScreenerAgent: (userLogin?: string) => deps.getScreenerAgent(userLogin),
     persistScreenerReportCanonical: (result) => deps.persistScreenerReportCanonical(result),
@@ -760,6 +769,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
 
   const marketDataScreeningResponse = await handleMarketDataCompareScreenRoutes(request, url, path, sessionId, {
     env: deps.env,
+    // Issue #3922: the instance's settings reader (the ND
+    // gate's stored layer for this route's mode admission).
+    readSettingRaw: (key) => deps.readSettingRaw(key),
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
     getScreenerAgent: (userLogin?: string) => deps.getScreenerAgent(userLogin),
     persistScreenerReportCanonical: (result) => deps.persistScreenerReportCanonical(result),

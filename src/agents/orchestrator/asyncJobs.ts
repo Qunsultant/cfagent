@@ -116,6 +116,14 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 export interface AsyncJobsContext {
   env: Env;
   agentCtx: AgentContext;
+  /**
+   * Issue #3922: optional per-login settings reader (the
+   * hosting instance's mas_settings read), forwarded into the
+   * mcp.tool execution context — the mesh screen door's ND
+   * gate resolves its stored layer through it when a queued
+   * screen executes. Absent → the gate stays env-only.
+   */
+  readSettingRaw?: (key: string) => string | null;
   ensureTables: () => AgentContext["storage"]["sql"];
   sessionKey: () => string;
   schedule: (when: Date | number | string, callback: string, payload?: unknown, options?: ScheduleOptions) => Promise<unknown>;
@@ -1555,6 +1563,9 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         // The scan mechanism itself is executing-pinned via the MCP leg
         // pin; this literal is source-pinned below (see the pin file).
         storage: ctx.agentCtx.storage,
+        // Issue #3922: the settings reader carrier (see the
+        // AsyncJobsContext field) for the ND gate's stored layer.
+        ...(ctx.readSettingRaw ? { readSettingRaw: ctx.readSettingRaw } : {}),
         }),
         executionDeadline.promise,
       ]);

@@ -282,6 +282,14 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 export interface AgenticPaymentsRouteContext {
   /** Worker environment (owner: OrchestratorAgent - was `this.env`). */
   env: Env;
+  /**
+   * Issue #3922: optional per-login settings reader (owner:
+   * OrchestratorAgent — the readSettingRaw idiom), forwarded
+   * to the workflow-start backstop: a redeemed command can
+   * carry the non-deterministic mode, so its gate resolves
+   * through the stored layer here too. Absent → env-only.
+   */
+  readSettingRaw?: ((key: string) => string | null) | undefined;
   /** ORM accessor (owner: OrchestratorAgent.getOrm - was `this.getOrm()`). */
   getOrm(): DatabaseORM;
   /** Audit funnel (owner: OrchestratorAgent.audit - was `this.audit`). */
@@ -1680,7 +1688,7 @@ export async function handleAgenticPaymentsRoutes(
           }
         }
         if (redeemed) {
-          const handle = await tryStartScreenerWorkflow(ctx.env, verifiedCommand);
+          const handle = await tryStartScreenerWorkflow(ctx.env, verifiedCommand, { readSettingRaw: ctx.readSettingRaw });
           if (!handle) {
             // Residual gap, stated plainly: the credit is claimed
             // but no run started. The audit row below is the

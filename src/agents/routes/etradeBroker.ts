@@ -281,7 +281,7 @@ export async function handleEtradeBrokerRoutes(
       const checkoutEmail = extractCheckoutEmail(request.method, filters, url.searchParams);
       // Issue #2530: dual-mode fields (distinct from the E01
       // `mode` switch below): ND refuses 400 before any path.
-      const modeSelection = admitScreenModeSelection(ctx.env, request.method, filters, url.searchParams, { asyncRequested });
+      const modeSelection = admitScreenModeSelection(ctx.env, request.method, filters, url.searchParams, { asyncRequested, readSettingRaw: ctx.readSettingRaw });
       if (!modeSelection.ok) {
         return Response.json({ error: modeSelection.error }, { status: 400 });
       }

@@ -16,7 +16,7 @@
 import type { Env } from "../types";
 import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
 import {
-  resolveScreenerNdGateFromEnv,
+  resolveScreenerNdGateForHost,
   screenerNdConfigErrorEvent,
 } from "../config/screenerModes";
 import { createWorkflowPorts } from "./createWorkflowPorts";
@@ -89,7 +89,16 @@ export function screenModeFieldsFromRequest(
 export function screenModeSelectionFromFields(
   env: unknown,
   fields: { screenMode?: unknown; screenIntent?: unknown },
-  opts?: { asyncRequested?: boolean },
+  opts?: {
+    asyncRequested?: boolean;
+    /**
+     * Issue #3922: the hosting instance's per-login settings
+     * reader, when the route can supply one — the ND gate then
+     * resolves through the one resolver's stored layer too.
+     * Absent → the env-only resolution, exactly as before.
+     */
+    readSettingRaw?: (key: string) => string | null;
+  },
 ): ScreenModeSelection {
   const { screenMode, screenIntent } = fields;
   if (screenMode === undefined || screenMode === "deterministic") {
@@ -108,7 +117,7 @@ export function screenModeSelectionFromFields(
       error: `screenMode must be "deterministic" or "non-deterministic" when present, got "${String(screenMode)}".`,
     };
   }
-  const gate = resolveScreenerNdGateFromEnv(env);
+  const gate = resolveScreenerNdGateForHost({ env, readSettingRaw: opts?.readSettingRaw });
   if (gate.invalid) {
     console.warn(
       `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
@@ -152,7 +161,11 @@ export function admitScreenModeSelection(
   method: string,
   body: { screenMode?: unknown; screenIntent?: unknown },
   query: URLSearchParams,
-  opts?: { asyncRequested?: boolean },
+  opts?: {
+    asyncRequested?: boolean;
+    /** Issue #3922: forwarded to screenModeSelectionFromFields. */
+    readSettingRaw?: (key: string) => string | null;
+  },
 ): ScreenModeSelection {
   const selection = screenModeSelectionFromFields(
     env,
@@ -170,6 +183,15 @@ export function admitScreenModeSelection(
 export async function tryStartScreenerWorkflow(
   env: Env,
   command: WorkflowJobCommand,
+  deps?: {
+    /**
+     * Issue #3922: the hosting instance's per-login settings
+     * reader, when the caller can supply one — the backstop
+     * gate then resolves through the stored layer too. Absent
+     * → the env-only resolution, exactly as before.
+     */
+    readSettingRaw?: (key: string) => string | null;
+  },
 ): Promise<WorkflowHandle | null> {
   // Issue #2530 backstop, BEFORE the fallback try/catch: an
   // ND command while the gate is closed THROWS instead of
@@ -179,7 +201,7 @@ export async function tryStartScreenerWorkflow(
   // not ask for. Wired seams refuse earlier (400); this is
   // the guarantee for every other present or future caller.
   if (command.screenMode === "non-deterministic") {
-    const gate = resolveScreenerNdGateFromEnv(env);
+    const gate = resolveScreenerNdGateForHost({ env, readSettingRaw: deps?.readSettingRaw });
     if (gate.invalid) {
       console.warn(
         `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
