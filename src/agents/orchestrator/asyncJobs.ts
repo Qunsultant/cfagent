@@ -481,6 +481,78 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
   }
 }
 
+/** Issue #4002: the reap message for a row this recovery closes —
+ *  names the cause (the executor died with its host at a restart)
+ *  with the last-activity evidence, never the generic
+ *  unknown-outcome text. The sweep and read path keep the generic
+ *  message: they decide on age, not on a restart. */
+function orphanedReapMessage(lastActivityAt: string | null, rearmedAs?: string): string {
+  const base = `Orphaned by a host restart: the executor died with its host before a result was recorded (last activity ${lastActivityAt ?? "unknown"}). The run never recorded a result.`;
+  return rearmedAs ? `${base} Re-armed as job ${rearmedAs}; the work continues there.` : base;
+}
+
+/** Issue #4002: parse a row's stored payload, or null when it is
+ *  not valid JSON — an unparseable row can never be re-armed. */
+function parseRowPayload(row: Record<string, unknown>): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(String(row.payload_json ?? "")) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Issue #4002: is this payload a resumable pipeline feed-job
+ *  dispatch? Two shapes: the HTTP feed-run route (the POST
+ *  /data-providers/:id/feed-run the workflow runs show) and the
+ *  MCP run_feed_job tool (the copilot-dispatched shape — the
+ *  sentiment run). Both are side-effect-free re-executions of a
+ *  feed read: no order, no payment, no mutation beyond the
+ *  persisted dataset the run itself writes. A payload carrying a
+ *  consumed paymentSignature is never resumable (the #3907 rule);
+ *  anything else reaps as before. */
+function isResumableFeedDispatch(capability: string, payload: Record<string, unknown>): boolean {
+  const args = payload.arguments;
+  const signature =
+    args && typeof args === "object"
+      ? (args as Record<string, unknown>).paymentSignature
+      : undefined;
+  if (typeof signature === "string" && signature.trim() !== "") return false;
+  if (capability === "http.request") {
+    return (
+      payload.method === "POST" &&
+      typeof payload.pathAndQuery === "string" &&
+      /^\/data-providers\/[^/]+\/feed-run$/.test(payload.pathAndQuery)
+    );
+  }
+  if (capability === "mcp.tool") {
+    return payload.toolName === "run_feed_job";
+  }
+  return false;
+}
+
+/** Issue #4002: how many re-arms have already been spawned from
+ *  this row — counted over the session's rows, mirroring
+ *  retryAsyncJob's duplicate-retry scan (a sibling in queued /
+ *  running / completed whose payload carries recoveryRearmOf for
+ *  this row). Unparseable siblings cannot be re-arms. */
+function countRecoveryRearms(ctx: AsyncJobsContext, jobId: string): number {
+  const prior = ports(ctx).read.listSessionPayloads(ctx.sessionKey()) as unknown as Array<
+    Record<string, unknown>
+  >;
+  let count = 0;
+  for (const candidate of prior) {
+    if (!["queued", "running", "completed"].includes(String(candidate.status))) continue;
+    try {
+      const parsed = JSON.parse(String(candidate.payload_json)) as { recoveryRearmOf?: unknown };
+      if (parsed?.recoveryRearmOf === jobId) count++;
+    } catch {
+      // An unparseable sibling payload cannot be a re-arm of this row.
+    }
+  }
+  return count;
+}
+
 /** Issue #3907: fail-fast recovery for orphaned `running` rows —
  *  called from OrchestratorAgent.onStart next to
  *  recoverQueuedAsyncJobs. A row whose executor died with the DO
@@ -489,28 +561,91 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
  *  closes that window at startup. Only stale-heartbeat rows are
  *  failed (the same bound as the reap); fresh-heartbeat rows are
  *  left alone — their executor may still be alive in a hibernated
- *  isolate. Never re-runs a row: a paid mcp.tool job is never
- *  silently re-executed. Idempotent by the guarded failRunning
- *  transition (reapStaleRunning, same message/code as the reap);
- *  per-row try/catch so one bad row never fails startup. */
+ *  isolate. Issue #4002: a stale row whose work is a resumable
+ *  pipeline feed-job dispatch is RE-ARMED (same payload, retryOf
+ *  + recoveryRearmOf link, capped at two re-arms per chain) and
+ *  the original row is failed with the cataloged
+ *  FAILURE_ASYNC_JOB_ORPHANED code naming the restart; every
+ *  other stale row reaps with that code too, never the generic
+ *  unknown-outcome code. A paid row is never re-armed (its x402
+ *  signature was consumed — the #3907 rule). Idempotent by the
+ *  guarded failRunning transition (reapStaleRunning, same
+ *  message/code as the reap); per-row try/catch so one bad row
+ *  never fails startup. */
 export async function recoverStaleRunningAsyncJobs(
   ctx: AsyncJobsContext,
-): Promise<{ examined: number; failed: number }> {
+): Promise<{ examined: number; failed: number; rearmed: number }> {
   ctx.ensureTables();
   const rows = ports(ctx).read.listRunning(ctx.sessionKey(), STALE_SWEEP_BATCH_LIMIT) as unknown as Array<Record<string, unknown>>;
   const nowMs = Date.now();
   let failed = 0;
+  let rearmed = 0;
   for (const row of rows) {
     const jobId = String(row.job_id);
     try {
       if (row.status !== "running" || typeof row.started_at !== "string") continue;
       if (!isHeartbeatStale(row, nowMs)) continue;
+      const lastActivityAt =
+        typeof row.last_activity_at === "string" && row.last_activity_at
+          ? row.last_activity_at
+          : typeof row.started_at === "string"
+            ? row.started_at
+            : null;
+      // Issue #4002: re-arm a resumable feed dispatch before
+      // reaping the original — the re-armed row replays the same
+      // dispatch once the pipeline host has settled its orphan
+      // (its onStart precedes any dispatch). A failed re-arm
+      // falls through to the reap below: the row is never left
+      // running on a submit failure.
+      let rearmedJobId: string | undefined;
+      let rearmCount = 0;
+      const payload = parseRowPayload(row);
+      if (payload && isResumableFeedDispatch(String(row.capability), payload)) {
+        const ownRearmCount =
+          typeof payload.recoveryRearmCount === "number" ? payload.recoveryRearmCount : 0;
+        if (ownRearmCount + countRecoveryRearms(ctx, jobId) < RECOVERY_REARM_CAP) {
+          try {
+            const graph = jobGraphFields(row);
+            const submission = {
+              capability: String(row.capability),
+              payload: {
+                ...payload,
+                retryOf: jobId,
+                recoveryRearmOf: jobId,
+                recoveryRearmCount: ownRearmCount + 1,
+              },
+              displayName: String(row.display_name),
+              parentJobId: graph.parentJobId,
+              jobKind: graph.jobKind,
+              channel: graph.channel,
+              stage: graph.stage,
+              chainId: graph.chainId,
+              // Issue #3810: a re-arm keeps the source row's
+              // provenance — the retry is the same run,
+              // re-attempted, not a new trigger.
+              trigger: graph.trigger ?? undefined,
+              triggeredBy: graph.triggeredBy ?? undefined,
+              scheduleId: graph.scheduleId ?? undefined,
+            } as unknown as AsyncJobSubmission;
+            const submitted = await submitAsyncJob(ctx, submission);
+            rearmedJobId = submitted.jobId;
+            rearmCount = ownRearmCount + 1;
+          } catch (error) {
+            structuredLog.error("asyncJobs.recover_stale_running_job_rearm_failed", {
+              message: `[OrchestratorAgent] Stale running-job re-arm failed for job ${jobId} (reaping instead):`,
+              jobId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
       const completedAt = new Date(nowMs).toISOString();
+      const message = orphanedReapMessage(lastActivityAt, rearmedJobId);
       const written = ports(ctx).queue.reapStaleRunning(
         jobId,
-        STALE_RUNNING_REAP_MESSAGE,
+        message,
         completedAt,
-        FAILURE_ASYNC_JOB_FAILED_CODE,
+        FAILURE_ASYNC_JOB_ORPHANED_CODE,
       );
       if (written === 1) {
         const toolName = toolNameFromRow(row);
@@ -518,16 +653,22 @@ export async function recoverStaleRunningAsyncJobs(
           jobId,
           capability: String(row.capability),
           ...(toolName ? { tool: toolName } : {}),
-          error: STALE_RUNNING_REAP_MESSAGE,
-          errorCode: FAILURE_ASYNC_JOB_FAILED_CODE,
-          lastActivityAt:
-            typeof row.last_activity_at === "string" && row.last_activity_at
-              ? row.last_activity_at
-              : typeof row.started_at === "string"
-                ? row.started_at
-                : null,
+          error: message,
+          errorCode: FAILURE_ASYNC_JOB_ORPHANED_CODE,
+          lastActivityAt,
+          ...(rearmedJobId ? { rearmedAs: rearmedJobId } : {}),
         });
         failed++;
+        if (rearmedJobId) {
+          ctx.audit("async_job.retried", "orchestrator", {
+            jobId,
+            retryJobId: rearmedJobId,
+            capability: String(row.capability),
+            recoveredBy: "stale_running_recovery",
+            recoveryRearmCount: rearmCount,
+          });
+          rearmed++;
+        }
       }
     } catch (error) {
       structuredLog.error("asyncJobs.recover_stale_running_job_failed", {
@@ -537,7 +678,7 @@ export async function recoverStaleRunningAsyncJobs(
       });
     }
   }
-  return { examined: rows.length, failed };
+  return { examined: rows.length, failed, rearmed };
 }
 
 /** Issue #2567: what the stuck-running alert carries — the run's
@@ -716,6 +857,19 @@ const STALE_SWEEP_BATCH_LIMIT = 100;
  *  cataloged code. The single outcome catalog is the resolver;
  *  this constant is the fallback, never an invented code. */
 const FAILURE_ASYNC_JOB_FAILED_CODE = "FAILURE_ASYNC_JOB_FAILED";
+
+/** Issue #4002: the cataloged code for a row whose executor died
+ *  with its host (a deploy restart) — registered in
+ *  src/outcomes/outcomeCatalog.json. The onStart recovery below
+ *  is the only path that names it: a stale heartbeat at host
+ *  start means the executor is dead, not that the leg failed. */
+const FAILURE_ASYNC_JOB_ORPHANED_CODE = "FAILURE_ASYNC_JOB_ORPHANED";
+
+/** Issue #4002: how many times the onStart recovery re-arms one
+ *  orphaned dispatch chain before it reaps instead — a run that
+ *  orphans twice in a row is failing for a reason a re-arm cannot
+ *  fix, so the third orphan is a visible failure, not a loop. */
+const RECOVERY_REARM_CAP = 2;
 
 /** Issue #3811: heartbeat interval while a job runs — the #624
  *  research-task precedent (2 minutes). */

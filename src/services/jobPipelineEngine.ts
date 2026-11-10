@@ -618,6 +618,49 @@ export class JobPipelineControl {
     return this.runJob(jobId, { trigger: "manual" });
   }
 
+  /**
+   * Issue #4002: settle pipeline runs orphaned by a host restart.
+   * Called from the pipeline host's onStart, after the job
+   * definitions are ensured. At host start no executor can still
+   * be running — a live run cannot survive its host's death — so
+   * every instance still marked `running` is settled as failed
+   * with a named orphan error, through the engine's own failure
+   * path (state + terminal run record + published transition),
+   * and the job is dispatchable again. Paused, queued, idle,
+   * completed, and failed instances are untouched: a paused run
+   * resumes from its checkpoint, a queued run is still owed its
+   * execution. Returns the settled job ids for the host's log.
+   */
+  async settleOrphanedRuns(): Promise<{ settled: string[] }> {
+    const definitions = await this.deps.stores.definitions.listDefinitions();
+    const settled: string[] = [];
+    for (const definition of definitions) {
+      const instance = await this.deps.stores.instances.getInstance(definition.jobId);
+      if (!instance || instance.state !== "running") continue;
+      const message =
+        `Orphaned by a host restart: the run was still 'running' when the pipeline host started, ` +
+        `so no executor can still be running it (run ${instance.currentRunId ?? "unknown"}, ` +
+        `started ${instance.runStartedAt ?? "unknown"}). The run never recorded a result.`;
+      const updated: JobInstanceRecord = {
+        ...instance,
+        state: "failed",
+        desiredState: "none",
+        lastError: message,
+      };
+      await this.setInstance(updated);
+      await publishJobStatus(this.deps.publisher, {
+        jobId: definition.jobId,
+        runId: instance.currentRunId ?? "unknown",
+        state: "failed",
+        at: this.iso(),
+        detail: message,
+      });
+      await this.recordTerminal(updated, "failed", message);
+      settled.push(definition.jobId);
+    }
+    return { settled };
+  }
+
   /** The status view: definition + live instance + run history from the one run-record machinery + per-stage states. */
   async getJob(jobId: string): Promise<JobStatusView> {
     const definition = await this.requireDefinition(jobId);

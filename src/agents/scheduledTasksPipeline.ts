@@ -505,6 +505,25 @@ export async function ensureScheduledAgentPipelineJobs(
 }
 
 /**
+ * Issue #4002: settle the pipeline runs orphaned by a host
+ * restart — the host-side half of the recovery. Called from
+ * ScheduledAgent.onStart: definitions are ensured first (a
+ * settle needs them to exist), then every instance still marked
+ * `running` is settled as failed with a named orphan error, so
+ * the jobs are dispatchable again. A dispatch forces the host
+ * to start, and onStart precedes any dispatch, so a re-armed
+ * feed run (see recoverStaleRunningAsyncJobs) never meets a
+ * still-wedged instance.
+ */
+export async function settleOrphanedPipelineRuns(
+  ctx: ScheduledTasksPipelineContext,
+): Promise<{ settled: string[] }> {
+  const control = createScheduledAgentPipelineControl(ctx);
+  await ensureScheduledAgentPipelineJobs(ctx, control);
+  return control.settleOrphanedRuns();
+}
+
+/**
  * Re-derive one chain's definition from the stage jobs'
  * definitions AS STORED on this host (a stage job reconfigured
  * through the control plane flows into its chain), refusing by
