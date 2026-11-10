@@ -1,0 +1,6 @@
+### Added (#3494, #3495)
+- **`web_fetch` and `web_search` as PortThink capabilities (`src/actors/thinkAdapter.ts`, `src/actors/capabilityManifest.ts`)**: `PortThink.getPortWebTools()` wraps the existing `fetchWebPage` and `executeWebSearch` services, and `PortThink.beforeTurn` adds both tools to any turn that runs through port hooks, so every such agent class inherits them with no per-class wiring. The addition is purely additive: a tool the turn already carries (the class's own, or the MCP-discovered `tool_openaimp_*` one) is never duplicated. Failures return the service's named error code (for example `web_search_provider_not_configured`); results are never fabricated.
+- The capability manifest now reports `webFetch` and `webSearch` as `enabled` for the fleet default (`webSearch` keeps its `BRAVE_SEARCH_API_KEY` prerequisite, so it resolves `unavailable` where the key is unset).
+
+### Fixed
+- `PortThink.isPortCapabilityEnabled` now honors `AGENT_CAPABILITIES_DISABLED` directly. Previously an explicit disable did not take effect for a capability whose manifest state was `unavailable` (a missing prerequisite), because the manifest only converts `enabled` entries to `disabled-by-config`. This also applies to the `workspace` capability.

@@ -306,12 +306,13 @@ const FLEET_DEFAULT_POSTURE: Record<CapabilityId, CapabilityEntry> = {
     "No per-agent browser for this class: browsing lives in the dedicated BrowserAgent. A per-agent browser tool lands as S9 (#3493).",
   ),
   webFetch: entry(
-    "not-implemented",
-    "The web_fetch tool exists on the platform surface (src/services/webFetch.ts, #2760) but is not wired as a per-agent capability for this class. Port-level availability lands as S10 (#3494).",
+    "enabled",
+    "Provided by PortThink (#3494): every PortThink turn that runs through port hooks carries the web_fetch tool (getPortWebTools over src/services/webFetch.ts, #2760) unless a class already supplies it. Fetched content is untrusted data. AGENT_CAPABILITIES_DISABLED withdraws it.",
   ),
   webSearch: entry(
-    "not-implemented",
-    "The web_search tool exists on the platform surface (src/services/webSearch.ts, #2731) but is not wired as a per-agent capability for this class. Port-level availability lands as S11 (#3495).",
+    "enabled",
+    "Provided by PortThink (#3495): every PortThink turn that runs through port hooks carries the web_search tool (getPortWebTools over src/services/webSearch.ts, #2731). It fails loud with web_search_provider_not_configured until the provider key is set; the provider decision is #3501.",
+    { prerequisite: "BRAVE_SEARCH_API_KEY" },
   ),
   aiSearch: entry(
     "not-implemented",
