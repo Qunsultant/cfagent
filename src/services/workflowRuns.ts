@@ -48,6 +48,8 @@ import {
   type WorkflowRunSchedule,
 } from "./workflowLifecycle";
 import { codedMessage } from "../outcomes/outcomeAspects";
+import { buildFeedJobRegistry } from "./feedJobs";
+import type { DataProviderId } from "../trading";
 
 export type WorkflowRunTrigger = "manual" | "scheduled" | "autonomous" | "webhook" | "agent" | "unknown";
 
@@ -1078,6 +1080,23 @@ export function httpRequestRunIdentity(job: WorkflowRunJobRow): { title: string 
   if (pathOnly.includes("/external-ads/click")) {
     const id = str(body?.id) ?? (query ? new URLSearchParams(query).get("id") : null);
     return { title: id ? `Ad click — ${id}` : "Ad click beacon" };
+  }
+  // Issue #4002 (recording slice): a feed-run row's list title
+  // carries the feed job id it executed — the route takes only a
+  // provider id and forSource() returns the first registered job
+  // for that source, so the title names the job the run actually
+  // was (quotes), not just the provider. The registry's identity
+  // is env-independent (env feeds cadence/stale only), so the
+  // empty-knobs registry resolves the same ids. An unregistered
+  // provider falls through to the existing behaviour — never an
+  // invented job id. This branch fires regardless of display
+  // name, like the market-data/ad branches above: feed-run rows
+  // already carry a "METHOD path" display name.
+  const feedRunMatch = /^\/data-providers\/([^/]+)\/feed-run$/.exec(pathOnly);
+  if (feedRunMatch && method) {
+    const jobId = buildFeedJobRegistry({})
+      .forSource(feedRunMatch[1] as DataProviderId)?.id;
+    if (jobId) return { title: `${method} ${pathOnly} — ${jobId}` };
   }
   if (!str(job.display_name) && method && pathOnly) {
     return { title: `${method} ${pathOnly}` };
