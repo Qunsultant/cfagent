@@ -581,3 +581,152 @@ export function resolveAgentCapabilityManifest(
     refusals: capabilityStateDependencyRefusals(split),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Platform capabilities — the products the fleet stands on (#3700).
+//
+// Unlike the per-agent manifest above, a platform capability belongs
+// to no class: it is a shared Technology Platform product every
+// domain platform consumes. The record lives in this module (the
+// #3489 capability-manifest machinery) so the registry join derives
+// it from one source of truth, never from a hard-coded list in the
+// view. The conformance suite (tests/generic_workflow_capability_
+// 3700.test.ts) pins every capability term to a real exported
+// mechanism: a named capability with no mechanism fails CI.
+// ---------------------------------------------------------------------------
+
+/** platforms.md §3's own capability terms for the workflow-execution layer. */
+export const PLATFORM_CAPABILITY_TERMS = [
+  "durable state",
+  "tasks",
+  "dependencies",
+  "approvals",
+  "cancellation",
+] as const;
+export type PlatformCapabilityTerm =
+  (typeof PLATFORM_CAPABILITY_TERMS)[number];
+
+export interface PlatformCapabilityMechanism {
+  /** Source file of the mechanism, repo-relative. */
+  module: string;
+  /** The exported mechanism (a class, function, or type). */
+  exportName: string;
+  /** A method/operation on the export, when the mechanism is an operation on it. */
+  member?: string;
+  /** What the mechanism provides for this term, and where its boundary is. */
+  note: string;
+}
+
+export interface PlatformCapabilitySurface {
+  id: string;
+  /** The door in plain language. */
+  door: string;
+  /** Source file of the door's mechanism, repo-relative. */
+  module: string;
+  /** The exported mechanism the door is served through. */
+  exportName: string;
+}
+
+export interface PlatformCapability {
+  id: string;
+  name: string;
+  /** The owning platform (platforms.md §3: the shared runtime provider). */
+  owner: string;
+  capabilities: Record<PlatformCapabilityTerm, PlatformCapabilityMechanism>;
+  surfaces: PlatformCapabilitySurface[];
+  consumption: {
+    /** Family adoption tracker + its adoption issues (linked, not absorbed). */
+    adoptions: string;
+    /** Tenant instantiation tracker (linked, not absorbed). */
+    tenantInstantiation: string;
+    /** False by construction: this slice registers the product; it absorbs no track. */
+    absorbs: false;
+  };
+}
+
+/**
+ * The Generic workflow capability (#3700): the one workflow engine
+ * (the #2869/#2601 stage contract + stage runner, the #3533 job
+ * plane, chains, uniform stage control) as a Technology Platform
+ * product. The engine already exists as machinery (J1–J7,
+ * #3534–#3540); this record is the productization — owner,
+ * capabilities in platforms.md's own terms, surfaces as its real
+ * doors. It is a shared Technology Platform product every domain
+ * platform consumes — not a CAIO asset and not a per-programme
+ * construction.
+ */
+export const GENERIC_WORKFLOW_CAPABILITY: PlatformCapability = {
+  id: "generic-workflow-capability",
+  name: "Generic workflow capability",
+  owner: "Technology Platform",
+  capabilities: {
+    "durable state": {
+      module: "src/workflows/stageRunnerCheckpoint.ts",
+      exportName: "createInMemoryStageCheckpointStore",
+      note: "Checkpoints persist per (runId, stage, unit) through the StageCheckpointStore seam (src/workflows/stageRunnerPorts.ts); the production adapter projects mas_async_jobs stage rows, and the job plane's adapter persists the checkpoint on the job instance record.",
+    },
+    tasks: {
+      module: "src/services/jobPipelineEngine.ts",
+      exportName: "createJobPipelineControl",
+      note: "Jobs are defined by configuration alone and run through the job plane (define / configure / run / pause / resume / cancel / retry); the workflow flow (src/workflows/jobPipelineWorkflowFlow.ts) dispatches through the same control plane.",
+    },
+    dependencies: {
+      module: "src/workflows/stageRunnerPorts.ts",
+      exportName: "assertStageRunnerPlan",
+      note: "A run plan carries its stage order, retry budgets, and pacing (RUNNER_STAGE_ORDER, planRun in src/workflows/stageRunnerPlan.ts); the plan asserts its order and refuses mixed-family plans.",
+    },
+    approvals: {
+      module: "src/services/jobPipelineEngine.ts",
+      exportName: "JobPipelineControl",
+      member: "pauseJob / resumeJob",
+      note: "The job-plane wait seam: a run paused at a boundary waits for the operator's decision and resumes from its checkpoint without re-executing completed steps. Workflow-level approval waits ride the Agents SDK step.waitForEvent substrate (trade/payment/saga flows: await-approval, await-payment-approval, await-journey-decision) — the engine carries the substrate; it does not re-implement the wait.",
+    },
+    cancellation: {
+      module: "src/services/jobPipelineEngine.ts",
+      exportName: "JobPipelineControl",
+      member: "cancelStage / cancelJob",
+      note: "Cancellation is terminal and surfaced: a cancelled stage settles its run cancelled with the stage named, and downstream stages never run.",
+    },
+  },
+  surfaces: [
+    {
+      id: "stage-ops",
+      door: "run / re-run / stop / resume / cancel / schedule / re-schedule at (runId, stageId)",
+      module: "src/services/jobPipelineEngine.ts",
+      exportName: "JobPipelineControl",
+    },
+    {
+      id: "job-plane",
+      door: "define / configure / run / pause / resume / cancel / retry jobs",
+      module: "src/services/jobPipelineEngine.ts",
+      exportName: "createJobPipelineControl",
+    },
+    {
+      id: "chains",
+      door: "stage chains: plan, order, retry, pacing",
+      module: "src/workflows/stageRunnerPlan.ts",
+      exportName: "planRun",
+    },
+    {
+      id: "run-records",
+      door: "run records: record / list / latest",
+      module: "src/data/jobRunRecordPorts.ts",
+      exportName: "JobRunRecordStore",
+    },
+  ],
+  consumption: {
+    adoptions:
+      "Family adoption onto the product is #3549 (#3550 stock, #3551 options, #3552 goal + strategy, #3553 trading, #3554 payment, #3555 saga) — linked, not absorbed.",
+    tenantInstantiation:
+      "Tenant instantiation of pipeline instances is #3687 — linked, not absorbed.",
+    absorbs: false,
+  },
+};
+
+/**
+ * The platform capabilities the registry join renders — derived
+ * from this module, never a hard-coded list in the view.
+ */
+export function platformCapabilities(): PlatformCapability[] {
+  return [GENERIC_WORKFLOW_CAPABILITY];
+}
