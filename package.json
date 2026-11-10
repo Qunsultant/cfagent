@@ -21,7 +21,10 @@
     "test:watch": "vitest",
     "check": "node scripts/gen-design-tokens.mjs --check && npm run typecheck && npm run test:ci && npm run build",
     "tokens:gen": "node scripts/gen-design-tokens.mjs",
-    "parity": "node scripts/parity.mjs"
+    "parity": "node scripts/parity.mjs",
+    "lint:changed": "node scripts/lint-changed.mjs",
+    "lint:audit": "node scripts/lint-changed.mjs --all",
+    "test:coverage": "vitest run --coverage --coverage.provider=v8 --coverage.reporter=json-summary --coverage.reporter=text-summary --coverage.reportsDirectory=coverage"
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.126",
