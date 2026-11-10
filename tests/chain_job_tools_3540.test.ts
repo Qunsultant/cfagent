@@ -75,7 +75,7 @@ import {
   ensureChainPipelineJobs,
   refreshChainDefinitionFromStoredStages,
 } from "../src/services/chainPipelineJobs";
-import type { DataProvider, DataResult, QuoteResult } from "../src/trading/dataProviders/contract";
+import type { DataProvider, DataResult, NewsResult, QuoteResult } from "../src/trading/dataProviders/contract";
 import type {
   MarketDataResearchCompanyFundamentals,
   MarketDataResearchHistoricalBar,
@@ -125,7 +125,7 @@ async function makeStub() {
   const provider: DataProvider = {
     id: "yahoo",
     name: "Yahoo Finance",
-    capabilities: ["quotes", "historicalBars", "fundamentals"],
+    capabilities: ["quotes", "historicalBars", "fundamentals", "news"],
     isConfigured: () => true,
     getQuotesBatch: async (symbols: string[]) =>
       ({
@@ -161,6 +161,23 @@ async function makeStub() {
         result: bars,
       } as DataResult<MarketDataResearchHistoricalBar[]>;
     },
+    // #3932: the sentiment node pulls headlines through the
+    // news capability — one fixture headline per symbol. No AI
+    // binding in this harness, so the rows persist unclassified
+    // (method "unavailable") and the job still completes.
+    getNews: async (symbol: string) =>
+      ({
+        providerId: "yahoo",
+        capability: "news",
+        result: [
+          {
+            headline: `${symbol} reports quarterly results`,
+            source: "Yahoo Finance",
+            publishedAt: new Date(T0).toISOString(),
+            symbol,
+          },
+        ],
+      }) as DataResult<NewsResult>,
   };
   const feedRegistry = buildFeedJobRegistry({});
   const stores = createInMemoryJobPipelineStores();

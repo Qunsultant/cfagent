@@ -31,7 +31,7 @@ import {
 const SOURCE_PROPERTY = {
   type: "string",
   description:
-    "The feed job's source or name: a provider (yahoo, alpaca, etrade, public), a universe (nasdaq100, sp100), \"fundamentals\" for the Yahoo fundamentals job, \"technicals\" for the Yahoo technicals job (persisted daily bars), or an exact feed job id (e.g. yahoo-nasdaq100-quotes).",
+    "The feed job's source or name: a provider (yahoo, alpaca, etrade, public), a universe (nasdaq100, sp100), \"fundamentals\" for the Yahoo fundamentals job, \"technicals\" for the Yahoo technicals job (persisted daily bars), \"sentiment\" for the Yahoo sentiment job (persisted news sentiment for enrich and the screener UX), or an exact feed job id (e.g. yahoo-nasdaq100-quotes).",
 } as const;
 
 export class RunFeedJobCommand
@@ -39,7 +39,7 @@ export class RunFeedJobCommand
 {
   readonly name = "run_feed_job";
   readonly description =
-    "Run a data-provider feed job now through the job pipeline (the ScheduledAgent host's control plane) and return its settled outcome plus its status. The run pulls the source's dataset through the provider port and persists it as the platform's local copy. Examples: source \"yahoo\" runs the Yahoo Nasdaq-100 quotes job; \"alpaca\", \"etrade\", \"public\" run those providers' quotes jobs; \"nasdaq100\" refreshes the stored Nasdaq-100 universe; \"sp100\" runs Yahoo quotes over the S&P 100; \"fundamentals\" runs the Yahoo fundamentals job; \"technicals\" runs the Yahoo technicals job (persisted daily bars for enrich RSI/MACD/ATR and the screener UX). Requires the chat turn's acting identity.";
+    "Run a data-provider feed job now through the job pipeline (the ScheduledAgent host's control plane) and return its settled outcome plus its status. The run pulls the source's dataset through the provider port and persists it as the platform's local copy. Examples: source \"yahoo\" runs the Yahoo Nasdaq-100 quotes job; \"alpaca\", \"etrade\", \"public\" run those providers' quotes jobs; \"nasdaq100\" refreshes the stored Nasdaq-100 universe; \"sp100\" runs Yahoo quotes over the S&P 100; \"fundamentals\" runs the Yahoo fundamentals job; \"technicals\" runs the Yahoo technicals job (persisted daily bars for enrich RSI/MACD/ATR and the screener UX); \"sentiment\" runs the Yahoo sentiment job (persisted news sentiment for enrich and the screener UX). Requires the chat turn's acting identity.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: { source: SOURCE_PROPERTY },
@@ -92,7 +92,7 @@ export class GetFeedJobStatusCommand
 export class ListFeedJobsCommand implements IMcpToolCommand<{}> {
   readonly name = "list_feed_jobs";
   readonly description =
-    "List every feed job (Yahoo quotes, fundamentals, and technicals, Yahoo S&P 100 quotes, Alpaca, E*TRADE, Public, and the Nasdaq-100 universe job) with its merged status: pipeline state, last run, rows persisted, freshness, and next scheduled run. Requires the chat turn's acting identity.";
+    "List every feed job (Yahoo quotes, fundamentals, technicals, and sentiment, Yahoo S&P 100 quotes, Alpaca, E*TRADE, Public, and the Nasdaq-100 universe job) with its merged status: pipeline state, last run, rows persisted, freshness, and next scheduled run. Requires the chat turn's acting identity.";
   readonly jsonSchema = { type: "object" as const, properties: {} };
   readonly zodSchema = z.object({});
 

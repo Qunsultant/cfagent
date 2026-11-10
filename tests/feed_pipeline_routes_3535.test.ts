@@ -222,6 +222,8 @@ describe("pipeline feed-jobs routes (#3535)", () => {
       "yahoo-nasdaq100-quotes",
       "yahoo-nasdaq100-fundamentals",
       "yahoo-nasdaq100-technicals",
+      // #3932: the parameterized sentiment job (one definition).
+      "yahoo-nasdaq100-sentiment",
       "yahoo-sp100-quotes",
       "yahoo-sp500-quotes",
       "yahoo-dow-quotes",
@@ -238,7 +240,7 @@ describe("pipeline feed-jobs routes (#3535)", () => {
     const body = (await res.json()) as any;
     const yahoo = body.providers.find((p: any) => p.id === "yahoo");
     expect(Array.isArray(yahoo.feedJobs)).toBe(true);
-    expect(yahoo.feedJobs).toHaveLength(6);
+    expect(yahoo.feedJobs).toHaveLength(7);
     expect(yahoo.feedJobs[0]).toMatchObject({ jobId: YAHOO_NASDAQ100_QUOTES_JOB_ID, feed: { state: "never-run" } });
   });
 

@@ -202,10 +202,10 @@ export function buildChainPipelineJobDefinition(
     }
     const transposed = cloneNode(stageDef.root);
     delete transposed.schedule;
-    if (node.jobId === chain.fundamentalsJobId || node.jobId === chain.technicalsJobId) {
-      // #3930 / #3931 — the gap-filling jobs are parameterized:
+    if (node.jobId === chain.fundamentalsJobId || node.jobId === chain.technicalsJobId || node.jobId === chain.sentimentJobId) {
+      // #3930 / #3931 / #3932 — the gap-filling jobs are parameterized:
       // the chain's universe is the input for THIS chain's
-      // fundamentals / technicals node (the standalone job
+      // fundamentals / technicals / sentiment node (the standalone job
       // definition carries no universe param — it defaults to
       // nasdaq100). Without this, every chain's gap-filling node
       // would pull the default list and its enrich join — which

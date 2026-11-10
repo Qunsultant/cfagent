@@ -77,7 +77,12 @@ describe("screenerPipeline — shared shaping (#259)", () => {
       lastPrice: 217.23,
       changePercent: -1.84,
       indicators: expect.objectContaining({
-        sentiment: expect.any(String),
+        // #3932: sentiment is sourced (null here — no persisted
+        // copy in this unit path); the price-derived label rides
+        // as dayAction.
+        sentiment: null,
+        dayAction: expect.any(String),
+        sentimentSource: null,
         directional: expect.any(Boolean),
         rangeZone: expect.any(String),
         valueZone: expect.any(String),

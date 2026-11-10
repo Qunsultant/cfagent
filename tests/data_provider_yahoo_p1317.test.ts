@@ -297,7 +297,22 @@ describe("lifecycle + routes: yahoo verifies, enables, and serves with health", 
     const sql = new MockSqlStorage();
     seedProviderConfigs(sql as never);
     expect(getProviderConfig(sql as never, "yahoo")?.lifecycleState).toBe("configured");
-    const verifier = () => verifyYahooDataProvider(undefined, { provider: fixtureMarketData() });
+    const verifier = () =>
+      verifyYahooDataProvider(undefined, {
+        provider: fixtureMarketData(),
+        // #3932: the verifier runs the conformance kit over the
+        // adapter, which now probes news — the live Yahoo News
+        // fetch is blocked in tests (#411), so the fetcher is
+        // injected (production uses the live fetch by default).
+        news: async (symbol: string) => [
+          {
+            headline: `${symbol} surges on strong earnings`,
+            source: "Yahoo Finance",
+            publishedAt: new Date().toISOString(),
+            symbol,
+          },
+        ],
+      });
     const verified = await transitionProvider(sql as never, "yahoo", "verify", "tester", {
       verifier: verifier as never,
     });
@@ -398,12 +413,28 @@ describe("route-table selection: yahoo mode resolves from the quotes route", () 
 });
 
 describe("conformance: yahoo adapter is a drop-in for the Market-data engine", () => {
-  it("passes the kit for quotes, historicalBars, and fundamentals", async () => {
-    const report = await runDataProviderConformance(createYahooDataProvider(fixtureMarketData()));
+  it("passes the kit for quotes, historicalBars, fundamentals, and news", async () => {
+    const report = await runDataProviderConformance(
+      createYahooDataProvider(fixtureMarketData(), undefined, {
+        // #3932: the kit now probes the news capability — the
+        // live Yahoo News fetch is blocked in tests (#411), so
+        // the fetcher is injected (production uses the live
+        // fetch by default).
+        news: async (symbol: string) => [
+          {
+            headline: `${symbol} surges on strong earnings`,
+            source: "Yahoo Finance",
+            publishedAt: new Date().toISOString(),
+            symbol,
+          },
+        ],
+      }),
+    );
     expect(report.ok).toBe(true);
     expect(report.checks.map((c) => c.capability).sort()).toEqual([
       "fundamentals",
       "historicalBars",
+      "news",
       "quotes",
     ]);
     expect(report.checks.every((c) => c.failures.length === 0)).toBe(true);

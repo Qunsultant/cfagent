@@ -88,6 +88,10 @@ export interface PipelineChainDefinition {
    *  the lineage's enrich job declares one; else null. #3931:
    *  every lineage declares it (one parameterized job). */
   technicalsJobId: string | null;
+  /** The sentiment feed job feeding the enrich join, when
+   *  the lineage's enrich job declares one; else null. #3932:
+   *  every lineage declares it (one parameterized job). */
+  sentimentJobId: string | null;
   enrichJobId: string;
   analyzeJobId: string;
   generateJobId: string;
@@ -110,8 +114,8 @@ export interface PipelineChainDefinition {
   /** The five stages, in chain order. */
   stages: PipelineChainStageRef[];
   /** Every child node of the chain job, in execution order
-   *  (the fundamentals and technicals nodes precede enrich,
-   *  folded to feed). */
+   *  (the fundamentals, technicals, and sentiment nodes precede
+   *  enrich, folded to feed). */
   nodes: PipelineChainNodeRef[];
 }
 
@@ -122,7 +126,8 @@ export interface PipelineChainDefinition {
  * of the stage before it — so the feed stage is the root (""),
  * the fundamentals input (when the lineage has one) is "0",
  * the technicals input (when the lineage has one) is "0/0",
- * enrich is "0/0/0" (or "0/0" / "0" without one or both), and
+ * the sentiment input (when the lineage has one) is "0/0/0",
+ * enrich is "0/0/0/0" (or shorter without one or more), and
  * so on.
  * Nesting is the shape the engine's hand-off rule assumes:
  * a stage's persisted input is its PARENT stage's output, and
@@ -243,6 +248,9 @@ export function buildPipelineChainRegistry(
     const technicalsJobId =
       enrich.enrichFrom.find((s) => s.dataset === "technicals")?.feedJobId ??
       null;
+    const sentimentJobId =
+      enrich.enrichFrom.find((s) => s.dataset === "sentiment")?.feedJobId ??
+      null;
     const id = `${feed.id}-pipeline`;
     const orderedNodes: Array<{
       stage: PipelineChainStageKind;
@@ -254,6 +262,9 @@ export function buildPipelineChainRegistry(
         : []),
       ...(technicalsJobId
         ? [{ stage: "feed" as const, jobId: technicalsJobId }]
+        : []),
+      ...(sentimentJobId
+        ? [{ stage: "feed" as const, jobId: sentimentJobId }]
         : []),
       { stage: "enrich", jobId: enrich.id },
       { stage: "analyze", jobId: analyze.id },
@@ -284,6 +295,7 @@ export function buildPipelineChainRegistry(
       feedJobId: feed.id,
       fundamentalsJobId,
       technicalsJobId,
+      sentimentJobId,
       enrichJobId: enrich.id,
       analyzeJobId: analyze.id,
       generateJobId: generate.id,

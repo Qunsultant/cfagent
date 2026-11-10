@@ -57,6 +57,7 @@ import {
 } from "./dataProviders/lifecycle";
 import type { ProviderConfigStore } from "../data/providerConfigPorts";
 import type { ProviderCaptureStore } from "../data/providerCapturePorts";
+import type { FeedSentimentRow } from "../data/feedDatasetPorts";
 import type { DataProviderPorts } from "../data/buildDataProviderPorts";
 import {
   createNasdaqDataProvider,
@@ -97,7 +98,25 @@ import type {
 /** One scanned symbol, JSON-safe. Superset of what the panel needs. */
 /** Screening indicators (issue #261) — E*TRADE-honest, methodology-labeled. */
 export interface ScreenedIndicators {
-  sentiment: string;
+  /**
+   * #3932 — the SOURCED news sentiment label (bullish / bearish /
+   * neutral, from the persisted sentiment dataset — Yahoo News,
+   * LLM-classified) when a persisted copy covers the symbol,
+   * else null (a named gap — the UX renders "—", never the
+   * price-derived label). Before #3932 this held the
+   * price-derived heuristic; that value is `dayAction` now.
+   */
+  sentiment: string | null;
+  /** #3932 — the price-derived day-action label (the old
+   *  `sentiment` value, renamed): the day's changePercent
+   *  classified. Never presented as sentiment. */
+  dayAction: string;
+  /**
+   * #3932 — provenance of `sentiment`: the persisted-sentiment
+   * label ("Yahoo News (persisted sentiment, as of …)") when
+   * sourced, else null.
+   */
+  sentimentSource: string | null;
   directional: boolean;
   rangeZone: string;
   valueZone: string;
@@ -2160,7 +2179,13 @@ export function toScannedStock(
     rsi14: screened?.rsi14 ?? null,
     source: quote.source || "unknown",
     indicators: {
-      sentiment: ind.sentiment,
+      // #3932: sentiment is sourced, attached by
+      // attachPersistedSentiment — the row builder carries no
+      // sourced value (null = no persisted coverage, a gap).
+      // The price-derived label rides as dayAction.
+      sentiment: null,
+      dayAction: ind.dayAction,
+      sentimentSource: null,
       directional: ind.directional,
       rangeZone: ind.rangeZone,
       valueZone: ind.valueZone,
@@ -2219,6 +2244,35 @@ export function attachTechnicals(
         gapDirection: t.gapDirection,
         historyBars: t.barsUsed,
         historySource: t.source,
+      },
+    };
+  });
+}
+
+/**
+ * #3932 — attach persisted news sentiment to screener rows.
+ * Returns new objects; input unmutated. A symbol the persisted
+ * copy carries WITH a label gets the sourced label + the
+ * source label; a symbol the copy does not carry, or whose row
+ * was fetched but never assessed (label null), keeps
+ * indicators.sentiment null — a named gap the UX renders "—",
+ * never the price-derived day action. The day action is
+ * untouched (it rides alongside under its own name).
+ */
+export function attachPersistedSentiment(
+  stocks: ScannedStock[],
+  sentimentBySymbol: ReadonlyMap<string, FeedSentimentRow>,
+  sourceLabel: string | null,
+): ScannedStock[] {
+  return stocks.map((s) => {
+    const row = sentimentBySymbol.get(s.symbol.toUpperCase());
+    if (!row || row.sentiment.label === null) return s;
+    return {
+      ...s,
+      indicators: {
+        ...s.indicators,
+        sentiment: row.sentiment.label,
+        sentimentSource: sourceLabel,
       },
     };
   });

@@ -10,7 +10,11 @@
  * RSI(14)/MACD/ATR(14) read the persisted Yahoo daily bars first (#3931:
  * the technicals job's stored copy, labelled as the source), with the live
  * Yahoo history fetch as the fallback when persisted data is absent or
- * stale; shown as "—" when unavailable rather than faked.
+ * stale; shown as "—" when unavailable rather than faked. Sentiment (#3932)
+ * is the sourced news sentiment: the sentiment job's persisted Yahoo News
+ * rows, LLM-classified, shown with their source; "—" when no persisted
+ * copy covers the symbol. The price-derived day-action label rides in its
+ * own "Day action" column and is never presented as sentiment.
  */
 
 import { useMemo, useState, type ReactElement } from "react";
@@ -46,7 +50,17 @@ export interface FactorGradesData {
 }
 
 export interface ScreenedIndicatorsData {
-  sentiment: string;
+  /**
+   * #3932 — the SOURCED news sentiment label (bullish / bearish /
+   * neutral) from the persisted sentiment dataset, or null when
+   * no persisted copy covers the symbol (rendered "—"). The
+   * price-derived label is `dayAction`, never this field.
+   */
+  sentiment: string | null;
+  /** #3932 — the price-derived day-action label (changePercent classified). */
+  dayAction: string;
+  /** #3932 — provenance of `sentiment` (the persisted-sentiment label), else null. */
+  sentimentSource: string | null;
   directional: boolean;
   rangeZone: string;
   valueZone: string;
@@ -178,6 +192,8 @@ function sortValue(row: { indicators?: ScreenedIndicatorsData } & Record<string,
     case "symbol":
       return row.symbol;
     case "sentiment":
+      // #3932: unlabelled rows sort at the neutral rank — a sort
+      // order only, never a presented value (the cell shows "—").
       return SENTIMENT_RANK[row.indicators?.sentiment ?? "neutral"] ?? 3;
     case "screenScore":
       return row.indicators?.screenScore ?? 0;
@@ -357,11 +373,20 @@ function ChangeValue({ value }: { value: number }) {
   );
 }
 
-function sentimentLabel(s?: string): string {
-  return (s ?? "neutral").replace(/_/g, " ");
+function sentimentLabel(s?: string | null): string {
+  // #3932: null = no persisted sentiment covers the symbol — a
+  // named gap, rendered "—", never the heuristic.
+  if (s == null) return "—";
+  return s.replace(/_/g, " ");
 }
 
-function sentimentColor(s?: string): string {
+/** #3932 — the same 6-level vocabulary, under its honest name. */
+function dayActionLabel(s?: string | null): string {
+  if (s == null) return "—";
+  return s.replace(/_/g, " ");
+}
+
+function sentimentColor(s?: string | null): string {
   switch (s) {
     case "very_bullish":
       return "var(--color-success)";
@@ -608,7 +633,8 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
                 columns={withSortAria<OpportunityRow>([
                   { key: "symbol", header: <SortLabel label="Symbol" k="symbol" {...opps} />, render: (o) => (<><strong>{o.symbol}</strong>{o.indicators?.directional && (<span title="Strong directional move (|change| ≥ 2%)" style={{ marginLeft: "0.3rem" }}>⚡</span>)}</>) },
                   { key: "company", header: "Company", render: (o) => o.companyName },
-                  { key: "sentiment", header: <SortLabel label="Sentiment" k="sentiment" {...opps} title="Day-action sentiment: very bearish → very bullish" />, render: (o) => (<span style={{ color: sentimentColor(o.indicators?.sentiment), fontWeight: 600 }}>{sentimentLabel(o.indicators?.sentiment)}</span>) },
+                  { key: "sentiment", header: <SortLabel label="Sentiment" k="sentiment" {...opps} title="News sentiment (Yahoo News, LLM-classified, from the persisted sentiment dataset); '—' when no persisted copy covers the symbol" />, render: (o) => (<span style={{ color: sentimentColor(o.indicators?.sentiment), fontWeight: 600 }} title={o.indicators?.sentimentSource ?? "No persisted sentiment for this symbol"}>{sentimentLabel(o.indicators?.sentiment)}</span>) },
+                  { key: "dayAction", header: (<span title="Day action: the day's changePercent classified (price-derived, not news sentiment)">Day action</span>), render: (o) => (<span title="Day action: the day's changePercent classified (price-derived, not news sentiment)">{dayActionLabel(o.indicators?.dayAction)}</span>) },
                   { key: "score", header: <SortLabel label="Score" k="screenScore" {...opps} title="Composite 0-100 screening score (heuristic)" />, render: (o) => (<strong>{o.indicators?.screenScore ?? "—"}</strong>) },
                   { key: "quant", header: <SortLabel label="Quant" k="quantRating" {...opps} title="Quant rating from graded factors (Strong Buy → Strong Sell)" />, render: (o) => (<span style={{ color: quantRatingColor(o.factorGrades?.quantRating), fontWeight: 700, whiteSpace: "nowrap" }}>{o.factorGrades?.quantRating ?? "—"}</span>) },
                   { key: "value", header: <SortLabel label="Val" k="valueGrade" {...opps} title="Value factor grade A+…F (P/E + 52-week position, relative)" />, render: (o) => (<GradeBadge grade={o.factorGrades?.value} />) },
@@ -647,7 +673,8 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
                     { key: "price", header: <SortLabel label="Price" k="lastPrice" {...all} />, render: (s) => ("$" + s.lastPrice.toFixed(2)) },
                     { key: "change", header: <SortLabel label="Change" k="changePercent" {...all} />, render: (s) => (<ChangeValue value={s.changePercent} />) },
                     { key: "gap", header: <SortLabel label="Gap" k="gapPercent" {...all} title="Overnight gap % (Yahoo)" />, render: (s) => (<GapValue t={s.technicals} />) },
-                    { key: "sentiment", header: <SortLabel label="Sentiment" k="sentiment" {...all} />, render: (s) => (<span style={{ color: sentimentColor(s.indicators?.sentiment) }}>{sentimentLabel(s.indicators?.sentiment)}</span>) },
+                    { key: "sentiment", header: <SortLabel label="Sentiment" k="sentiment" {...all} title="News sentiment (Yahoo News, LLM-classified, from the persisted sentiment dataset); '—' when no persisted copy covers the symbol" />, render: (s) => (<span style={{ color: sentimentColor(s.indicators?.sentiment) }} title={s.indicators?.sentimentSource ?? "No persisted sentiment for this symbol"}>{sentimentLabel(s.indicators?.sentiment)}</span>) },
+                    { key: "dayAction", header: (<span title="Day action: the day's changePercent classified (price-derived, not news sentiment)">Day action</span>), render: (s) => (<span title="Day action: the day's changePercent classified (price-derived, not news sentiment)">{dayActionLabel(s.indicators?.dayAction)}</span>) },
                     { key: "score", header: <SortLabel label="Score" k="screenScore" {...all} />, render: (s) => (<strong>{s.indicators?.screenScore ?? "—"}</strong>) },
                     { key: "quant", header: <SortLabel label="Quant" k="quantRating" {...all} />, render: (s) => (<span style={{ color: quantRatingColor(s.factorGrades?.quantRating), fontWeight: 700, whiteSpace: "nowrap" }}>{s.factorGrades?.quantRating ?? "—"}</span>) },
                     { key: "value", header: <SortLabel label="Val" k="valueGrade" {...all} />, render: (s) => (<GradeBadge grade={s.factorGrades?.value} />) },

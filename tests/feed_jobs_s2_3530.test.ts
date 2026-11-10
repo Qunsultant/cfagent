@@ -285,6 +285,9 @@ describe("feed job registry (#3530 S2)", () => {
       "yahoo-dow-quotes",
       "yahoo-nasdaq100-fundamentals",
       "yahoo-nasdaq100-quotes",
+      // #3932: one parameterized sentiment job (one definition,
+      // parameterized by universe — no per-universe copies).
+      "yahoo-nasdaq100-sentiment",
       "yahoo-nasdaq100-technicals",
       "yahoo-sp100-quotes",
       "yahoo-sp500-quotes",

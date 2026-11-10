@@ -67,6 +67,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 const FEED_ID = "yahoo-nasdaq100-quotes";
 const FUND_ID = "yahoo-nasdaq100-fundamentals";
 const TECH_ID = "yahoo-nasdaq100-technicals";
+const SENT_ID = "yahoo-nasdaq100-sentiment";
 const ENRICH_ID = `${FEED_ID}-enrich`;
 const ANALYZE_ID = `${ENRICH_ID}-analyze`;
 const CHAIN_ID = `${FEED_ID}-pipeline`;
@@ -132,6 +133,7 @@ describe("chain prerequisite (#3911)", () => {
     expect(yahoo.feedJobId).toBe(FEED_ID);
     expect(yahoo.fundamentalsJobId).toBe(FUND_ID);
     expect(yahoo.technicalsJobId).toBe(TECH_ID);
+    expect(yahoo.sentimentJobId).toBe(SENT_ID);
     expect(yahoo.stages.map((s) => [s.stage, s.jobId])).toEqual([
       ["feed", FEED_ID],
       ["enrich", ENRICH_ID],
@@ -139,14 +141,17 @@ describe("chain prerequisite (#3911)", () => {
       ["generate", `${ANALYZE_ID}-generate`],
       ["deliver", `${ANALYZE_ID}-generate-deliver`],
     ]);
-    // Fundamentals and technicals are the enrich joins, folded
-    // into the feed stage as nodes — never stage jobs of their own.
+    // Fundamentals, technicals, and sentiment are the enrich
+    // joins, folded into the feed stage as nodes — never stage
+    // jobs of their own.
     expect(yahoo.stages.map((s) => s.jobId)).not.toContain(FUND_ID);
     expect(yahoo.stages.map((s) => s.jobId)).not.toContain(TECH_ID);
+    expect(yahoo.stages.map((s) => s.jobId)).not.toContain(SENT_ID);
     expect(yahoo.nodes.map((n) => n.jobId)).toEqual([
       FEED_ID,
       FUND_ID,
       TECH_ID,
+      SENT_ID,
       ENRICH_ID,
       ANALYZE_ID,
       `${ANALYZE_ID}-generate`,
@@ -318,6 +323,76 @@ function technicalsInput(runId: string): FeedDatasetStoreInput {
   } as unknown as FeedDatasetStoreInput;
 }
 
+/** #3932: the sentiment join the enrich job declares — sourced
+ *  news sentiment per symbol (AAPL bullish, MSFT bearish),
+ *  persisted alongside the other joins so the enrich run
+ *  completes on all three joins. */
+function sentimentInput(runId: string): FeedDatasetStoreInput {
+  return {
+    sourceId: "yahoo" as DataProviderId,
+    dataset: "sentiment",
+    jobId: SENT_ID,
+    universe: {
+      kind: "index",
+      index: "nasdaq100" as IndexId,
+      label: "Nasdaq-100",
+      snapshotDate: "2026-11-02",
+      sourceLabel: "Wikipedia (Nasdaq-100 table)",
+      size: 2,
+    },
+    run: {
+      runId,
+      trigger: "manual",
+      startedAt: iso(T0),
+      finishedAt: iso(T0 + 1000),
+      status: "completed",
+      requested: 2,
+      received: 2,
+      failed: 0,
+      missingSymbols: [],
+      codedError: null,
+      errorMessage: null,
+    },
+    quotes: [],
+    sentiment: [
+      {
+        symbol: "AAPL",
+        sentiment: {
+          label: "bullish",
+          score: 1,
+          method: "llm",
+          model: "fixture-model",
+          headlineCount: 2,
+          headlines: [
+            { headline: "Acme surges on record earnings beat", source: "Yahoo Finance", publishedAt: iso(T0) },
+            { headline: "Acme jumps after strong guidance", source: "Yahoo Finance", publishedAt: iso(T0) },
+          ],
+          source: "yahoo-news",
+          asOf: iso(T0 + 1000),
+        },
+      },
+      {
+        symbol: "MSFT",
+        sentiment: {
+          label: "bearish",
+          score: -0.5,
+          method: "llm",
+          model: "fixture-model",
+          headlineCount: 2,
+          headlines: [
+            { headline: "Globex plunges after guidance cut", source: "Yahoo Finance", publishedAt: iso(T0) },
+            { headline: "Globex reports quarterly results", source: "Yahoo Finance", publishedAt: iso(T0) },
+          ],
+          source: "yahoo-news",
+          asOf: iso(T0 + 1000),
+        },
+      },
+    ],
+    asOf: iso(T0 + 1000),
+    nowIso: iso(T0 + 1000),
+  } as unknown as FeedDatasetStoreInput;
+}
+
 describe("the feed → enrich → analyze seam (#3911)", () => {
   it("a standalone feed run's quotes are enriched, then analyzed, by exact lineage", async () => {
     const datasetStore = new InMemoryFeedDatasetStore();
@@ -342,6 +417,9 @@ describe("the feed → enrich → analyze seam (#3911)", () => {
     // #3931: and the technicals join it declares — both joins
     // present, so the enrich run completes.
     await datasetStore.store(technicalsInput("feed-tech-3911"));
+    // #3932: and the sentiment join it declares — all three
+    // joins present, so the enrich run completes.
+    await datasetStore.store(sentimentInput("feed-sent-3911"));
 
     // Stage 2 — enrich: resolves the feed run's artifact by feed
     // job id and persists enriched rows naming that input.

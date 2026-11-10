@@ -87,6 +87,7 @@ import {
 import type {
   DataProvider,
   DataResult,
+  NewsResult,
   QuoteResult,
 } from "../src/trading/dataProviders/contract";
 import type {
@@ -188,7 +189,7 @@ async function makeHarness(opts: { gated?: boolean } = {}): Promise<Harness> {
   const fakeProvider = (id: DataProvider["id"]): DataProvider => ({
     id,
     name: id,
-    capabilities: ["quotes", "historicalBars", "fundamentals"],
+    capabilities: ["quotes", "historicalBars", "fundamentals", "news"],
     isConfigured: () => true,
     getQuotesBatch: async (symbols: string[]) => {
       quotesCalls += 1;
@@ -227,6 +228,23 @@ async function makeHarness(opts: { gated?: boolean } = {}): Promise<Harness> {
         result: bars,
       } as DataResult<MarketDataResearchHistoricalBar[]>;
     },
+    // #3932: the sentiment node pulls headlines through the
+    // news capability — one fixture headline per symbol. No AI
+    // binding in this harness, so the rows persist unclassified
+    // (method "unavailable") and the job still completes.
+    getNews: async (symbol: string) =>
+      ({
+        providerId: id,
+        capability: "news",
+        result: [
+          {
+            headline: `${symbol} reports quarterly results`,
+            source: "Yahoo Finance",
+            publishedAt: iso(T0),
+            symbol,
+          },
+        ],
+      }) as DataResult<NewsResult>,
   });
   const feedDeps: FeedStepDeps = {
     registry: buildFeedRegistry({}),

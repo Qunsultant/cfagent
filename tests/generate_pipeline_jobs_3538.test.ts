@@ -299,7 +299,7 @@ describe("generate pipeline catalog + resolution (#3538)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(31);
+    expect(registrations).toHaveLength(32);
     expect(specs.map((s) => s.jobId)).toContain(GENERATE_ID);
   });
 });

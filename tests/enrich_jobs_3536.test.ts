@@ -12,6 +12,7 @@ import {
   buildEnrichJobRegistry,
   buildEnrichStatus,
   computeEnrichment,
+  ENRICH_GAP_REASONS,
   ENRICH_JOB_CODES,
   EnrichJobError,
   EnrichJobRegistry,
@@ -138,19 +139,23 @@ describe("the element vocabulary (#3536)", () => {
     expect(yahoo.enrichFrom).toEqual([
       { feedJobId: "yahoo-nasdaq100-fundamentals", sourceId: "yahoo", dataset: "fundamentals", universe: "nasdaq100" },
       { feedJobId: "yahoo-nasdaq100-technicals", sourceId: "yahoo", dataset: "technicals", universe: "nasdaq100" },
+      { feedJobId: "yahoo-nasdaq100-sentiment", sourceId: "yahoo", dataset: "sentiment", universe: "nasdaq100" },
     ]);
     expect(yahoo.elements).toContain("peTrailing");
     // #3930: every quotes enrich job joins the parameterized
     // fundamentals dataset for its own universe (broker jobs
     // included — the join is no longer Yahoo-only).
     // #3931: and the parameterized technicals dataset, the same way.
+    // #3932: and the parameterized sentiment dataset, the same way.
     expect(registry.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toEqual([
       { feedJobId: "yahoo-nasdaq100-fundamentals", sourceId: "yahoo", dataset: "fundamentals", universe: "nasdaq100" },
       { feedJobId: "yahoo-nasdaq100-technicals", sourceId: "yahoo", dataset: "technicals", universe: "nasdaq100" },
+      { feedJobId: "yahoo-nasdaq100-sentiment", sourceId: "yahoo", dataset: "sentiment", universe: "nasdaq100" },
     ]);
     expect(registry.get("yahoo-sp100-quotes-enrich")!.enrichFrom).toEqual([
       { feedJobId: "yahoo-nasdaq100-fundamentals", sourceId: "yahoo", dataset: "fundamentals", universe: "sp100" },
       { feedJobId: "yahoo-nasdaq100-technicals", sourceId: "yahoo", dataset: "technicals", universe: "sp100" },
+      { feedJobId: "yahoo-nasdaq100-sentiment", sourceId: "yahoo", dataset: "sentiment", universe: "sp100" },
     ]);
     expect(registry.forFeedJob("yahoo-nasdaq100-quotes")?.id).toBe(
       "yahoo-nasdaq100-quotes-enrich",
@@ -177,7 +182,7 @@ describe("the computation (#3536)", () => {
       inputArtifact: input,
       seriesArtifacts: [input],
       joinArtifacts: new Map(),
-      elements: ["momentum", "intradayPosition", "dayRangePercent", "gapPercent", "relativeVolume", "vwapDeviationPercent", "spreadPercent", "rangePosition52w", "sentiment", "screenScore"],
+      elements: ["momentum", "intradayPosition", "dayRangePercent", "gapPercent", "relativeVolume", "vwapDeviationPercent", "spreadPercent", "rangePosition52w", "dayAction", "sentiment", "screenScore"],
       enrichFrom: [],
     });
     const aapl = out.rows.find((r) => r.symbol === "AAPL")!;
@@ -189,7 +194,16 @@ describe("the computation (#3536)", () => {
     expect(aapl.features.vwapDeviationPercent).toBeCloseTo((2 / 108) * 100, 5);
     expect(aapl.features.spreadPercent).toBeCloseTo((0.2 / 110) * 100, 5);
     expect(aapl.features.rangePosition52w).toBe(0.75);
-    expect(typeof aapl.features.sentiment).toBe("string");
+    // #3932: the price-derived label is dayAction now; sentiment
+    // is sourced — with no sentiment copy here it is absent and
+    // the gap is named, never guessed.
+    expect(typeof aapl.features.dayAction).toBe("string");
+    expect(aapl.features.sentiment).toBeUndefined();
+    expect(out.gaps).toContainEqual({
+      element: "sentiment",
+      reason: ENRICH_GAP_REASONS.requiresSentimentDataset,
+      symbols: [],
+    });
     expect(typeof aapl.features.screenScore).toBe("number");
     expect(out.elementCoverage.relativeVolume).toEqual({ computed: 2, unavailable: 0 });
   });

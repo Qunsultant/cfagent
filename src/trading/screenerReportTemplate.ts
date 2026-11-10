@@ -115,7 +115,9 @@ export function projectScreenerPdfRow(stock: ScreenerPdfRowInput): string[] {
       ? `${stock.changePercent >= 0 ? "+" : ""}${fmt(stock.changePercent, 1, "%")}`
       : "-",
     gapLabel(t),
-    (indicators.sentiment ?? "neutral").replace(/_/g, " "),
+    // #3932: sourced news sentiment or "-" — never the
+    // price-derived day action, and never a "neutral" default.
+    indicators.sentiment != null ? indicators.sentiment.replace(/_/g, " ") : "-",
     grades.quantRating ?? "-",
     grades.value ?? "-",
     grades.momentum ?? "-",
