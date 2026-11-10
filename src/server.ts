@@ -11,6 +11,7 @@ import { withErrorBoundary } from "./security/workerErrorBoundary";
 import { TICKER_INSTANCE_NAME } from "./agents/ticker-agent";
 
 import { handleCloudflareEmailMessage } from "./trading";
+import { routeAgentChannelEmail } from "./actors/agentEmailRouting";
 
 import {
   checkPublicRestThrottle,
@@ -287,6 +288,15 @@ export default {
   // and the error boundary still converts throws to 5xx.
   fetch: withRequestObservability(withErrorBoundary(handleFetch)),
   async email(message: any, env: Env, ctx?: any): Promise<void> {
+    // Issue #3490 (S2, epic #3488): agent-addressed mail
+    // (`<agent-kebab>+<instance>@<domain>`, a bound agent
+    // namespace in env) routes through the SDK's routeAgentEmail
+    // to the addressed PortThink instance's onEmail hook. Every
+    // other message falls through to the existing NLQ handler
+    // untouched — the NLQ pipeline never inspects `to` itself, so
+    // this gate is what keeps trade mail out of the agent
+    // channel, and it errs toward NLQ.
+    if (await routeAgentChannelEmail(message, env)) return;
     await handleCloudflareEmailMessage(message, env, ctx);
   },
   // Slice 8 (#2902): scheduled consumer moved to src/server/routes/queue.ts —

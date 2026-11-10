@@ -142,7 +142,7 @@ flowchart TB
     D1["Chat - Live"]
     D2["Voice - Live on copilots"]
     D3["Slack - Live"]
-    D4["Email - Filed, #3490"]
+    D4["Email - Live at the port, #3490"]
     D5["Webhooks - Partial, #3821"]
     D6["HTTP routes - Live"]
   end
@@ -440,7 +440,7 @@ plus its status:
 | Chat | The conversational turn on the orchestrator, one conversation across copilot registrations | Live |
 | Voice | The chat turn spoken: browser speech or the model backend behind the per-registration switch (the capabilities document's voice account owns the mechanism) | Live on copilots; generalizing the backend switch to other surfaces is Filed (#3796) |
 | Slack | A fleet agent owns the messaging channel; approvals and dispatches ride it | Live |
-| Email | Channel ingress for agent mail | Filed (S2, #3490) — not live, and not implied live anywhere in this document |
+| Email | Channel ingress for agent mail | Live at the port (S2, #3490) — mail arrives only after the operator creates the Email Service routing rule, and send needs the EMAIL binding; not implied live in production anywhere in this document |
 | Webhooks | Signed HTTP ingress dispatched as channel turns; fail-closed on signature (§10) | Partial — ingress Live; the production signing secret's sync is in flight (#3821) |
 | MCP (as a door) | The external boundary of §3.3 | Live |
 | Agent-to-agent / agent-as-a-tool | The mesh invocation surfaces of §3.1 | Live — on the transitional shared token until the S16 rollout (§10) |
@@ -1341,7 +1341,7 @@ Agentic Platform (owner: CAIO; parent product issue #3701):
 | MCP client | External tools in: discovery and invocation of external servers' tools | Partial — live on the orchestrator | #3703 |
 | Copilots | The uniform copilot capability across registrations | Live | #3704 |
 | Registry and manifests | The one registry every capability is declared in | Partial — manifest machinery landed; the capability-to-owner registry Filed | #3705 |
-| Invocation doors | Chat, HTTP, MCP, agent-to-agent, agent-as-a-tool, channel ingresses | Partial — the five mesh doors Live; the email channel ingress Filed | #3707 |
+| Invocation doors | Chat, HTTP, MCP, agent-to-agent, agent-as-a-tool, channel ingresses | Partial — the five mesh doors Live; the email channel ingress Live at the port (operator routing rule outstanding) | #3707 |
 | Lifecycle and scheduling | Agent lifecycle plus the one scheduling plane's agentic surface | Partial — scheduler Live fleet-wide; uniform lifecycle surfacing Partial (S6) | #3708 |
 | Evaluation and improvement | Golden-task evaluation and the governed improvement loop | Partial — the evaluation harness landed; promotion machinery Filed | #3711 |
 | Knowledge and retrieval | Agent memory and document retrieval | Partial — vector memory Live; AI Search live for new reports; the journaled indexing stage and historical backfill not built | #3712 |

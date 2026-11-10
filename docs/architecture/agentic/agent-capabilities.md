@@ -61,7 +61,7 @@ the port, so a channel built once is a channel every agent has.
 | Slack | Slack channel ingress and tools on the orchestrator and the Slack agent | **Live**; unification across all agents is S5 under epic #3488 |
 | MCP (as a door) | The platform MCP server (§4) — any MCP client invokes agent capabilities as tools | **Live** |
 | A2A / agent-as-a-tool | Agents invoke agents through the mesh doors (Agent Mesh program #2225) | **Live** on a transitional shared token; per-surface secrets rollout is operator-deferred |
-| Email | The SDK's email routing (`routeAgentEmail` → the agent's email handler) behind a port hook, plus a send binding | **Filed** — S2 #3490 (the Cloudflare Email Service routing rule is the operator step) |
+| Email | The SDK's email routing (`routeAgentEmail` → the agent's `onEmail` port hook, parsed in the port; `sendEmail`/`replyToEmail` over the `send_email` binding) | **Live** at the port (issue #3490); mail arrives only after the operator enables subaddressing and creates one routing rule per agent base local part (`orchestrator-agent@agent.openaimp.com` → Worker, so `orchestrator-agent+<login>@…` matches it and `message.to` preserves the `+<login>` detail), and send needs the `EMAIL` binding (the channel reports `unavailable` without it) |
 | Voice | The SDK voice surface (`agents/voice`) behind the port | **Filed** — S3 under epic #3488 |
 
 ## 2. Runtime capabilities
@@ -310,7 +310,7 @@ non-deterministic screener flag flip is CISO-gated).
 ## 8. Tracking map
 
 - **Epic #3488** — the Uniform Copilot Capability Standard: S1 #3489
-  (manifest, landed), S2 #3490 (email), S3 (voice), S4 (MCP client on
+  (manifest, landed), S2 #3490 (email, landed), S3 (voice), S4 (MCP client on
   the port), S5 (Slack), S6 (lifecycle), S7 #3491 (workspace), S8
   #3492 (sandbox), S9 #3493 (browser), S10 #3494 (web fetch), S11
   #3495 (web search), S12 #3496 (MCP server completeness), S13 #3497
