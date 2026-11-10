@@ -888,6 +888,31 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   font-family: var(--font-mono);
 }
 
+/* ---------- Template organisms II (#3133) ---------- */
+/* CardHeader: the one distributed header treatment — the order form
+ * card's header (OrderTicketPanel.tsx:371) and the risk panel's local
+ * CardHeader (RiskAnalysisPanel.tsx:70) rebuilt as a primitive. Title
+ * left (h4, title-sm, primary), muted subtitle under it, meta right
+ * (pushed by .ui-push, so a meta-only header still reads right — the
+ * autopilot chart card's timeframe pills). The h4 keeps its 0.25rem
+ * bottom margin only when something follows it, so a title-only
+ * header matches the risk panel's margin-free strong. No outer margin:
+ * spacing is the parent Stack's gap (§1.6b). */
+.ui-card-header h4 {
+  margin: 0;
+  font-size: var(--font-size-title-sm);
+  color: var(--color-text-primary);
+}
+
+.ui-card-header h4:not(:last-child) {
+  margin-bottom: 0.25rem;
+}
+
+.ui-card-header-subtitle {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}
+
 /* ---------- Toast (#2283) ---------- */
 /* The one familiar place for transient feedback. Fixed viewport, above
    the modal backdrop (z-index 9999), pointer-transparent except on the

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ContextStrip, KpiRibbon, SummaryCard, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
+import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ContextStrip, KpiRibbon, SummaryCard, CardHeader, WorkCard, DetailCard, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -471,6 +471,42 @@ describe("Template organisms I (#3132)", () => {
     expect(element.type).toBe(SummaryCard);
     expect(element.props.rows).toHaveLength(2);
     expect(element.props.total.value).toBe("$3,383.20");
+  });
+});
+
+describe("Template organisms II (#3133)", () => {
+  it("CardHeader carries the title/subtitle/meta contract", () => {
+    const element = React.createElement(CardHeader, {
+      title: "⚡ Options Order Ticket",
+      subtitle: "Broker-priced options strategy preview",
+      meta: "Refresh Quote",
+    });
+    expect(element.type).toBe(CardHeader);
+    expect(element.props.title).toBe("⚡ Options Order Ticket");
+    expect(element.props.subtitle).toBe("Broker-priced options strategy preview");
+    expect(element.props.meta).toBe("Refresh Quote");
+  });
+
+  it("WorkCard carries the header + input-flow contract", () => {
+    const element = React.createElement(
+      WorkCard,
+      { title: "⚡ Options Order Ticket", meta: "Refresh Quote" },
+      "order form fields",
+    );
+    expect(element.type).toBe(WorkCard);
+    expect(element.props.title).toBe("⚡ Options Order Ticket");
+    expect(element.props.children).toBe("order form fields");
+  });
+
+  it("DetailCard carries the header + content-block contract", () => {
+    const element = React.createElement(
+      DetailCard,
+      { title: "Strategy Equity vs S&P 500 Benchmark", meta: "1D 1W 1M" },
+      "equity chart",
+    );
+    expect(element.type).toBe(DetailCard);
+    expect(element.props.title).toBe("Strategy Equity vs S&P 500 Benchmark");
+    expect(element.props.children).toBe("equity chart");
   });
 });
 
