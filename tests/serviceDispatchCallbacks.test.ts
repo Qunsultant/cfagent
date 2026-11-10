@@ -60,6 +60,10 @@ function denialAudit(audit: ReturnType<typeof vi.fn>, reason: string): void {
   const denial = audit.mock.calls.find(([type]) => type === "schedule.dispatch_denied");
   expect(denial).toBeDefined();
   expect(denial![2]).toMatchObject({ reason });
+  // #4004: a denial must carry the action that clears it, not just its code.
+  const payload = denial![2] as { action?: unknown };
+  expect(typeof payload.action).toBe("string");
+  expect(String(payload.action).length).toBeGreaterThan(0);
 }
 
 describe("schedule callback dispatch enforcement (#2331 slice 2)", () => {

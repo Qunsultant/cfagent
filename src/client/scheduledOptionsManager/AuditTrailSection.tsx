@@ -36,6 +36,22 @@ export function AuditTrailSection({ auditLogs, loadingAudit }: AuditTrailSection
       ),
     },
     {
+      key: "reason",
+      header: "Reason",
+      render: (log) => {
+        const payload = log.payload || {};
+        const reason = payload.reason ? String(payload.reason) : null;
+        const detail = payload.detail ? String(payload.detail) : null;
+        const action = payload.action ? String(payload.action) : null;
+        if (!reason && !detail) return <span className="schedule-row-muted">—</span>;
+        return (
+          <code title={[detail, action].filter(Boolean).join(" ")}>
+            {reason ?? detail}
+          </code>
+        );
+      },
+    },
+    {
       key: "runId",
       header: "Run ID",
       render: (log) => <code>{(log.payload || {}).runId || "–"}</code>,

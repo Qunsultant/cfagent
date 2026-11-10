@@ -130,9 +130,32 @@ function auditCallbackDenial(
   callback: string,
   decision: { reason: DispatchDenialReason; detail?: string },
 ): void {
+  // A denial that names only its code is not diagnosable from the audit
+  // trail: the operator sees "schedule.dispatch_denied" with nothing to act
+  // on. Each reason carries the action that clears it, recorded here and
+  // rendered by the schedules audit trail.
+  const action: Record<DispatchDenialReason, string> = {
+    NO_IDENTITY:
+      "Recreate the schedule from an authenticated session so it carries a real owner login.",
+    SHARED_ADDRESS:
+      "The schedule resolved an instance address, not a user. Recreate it from an authenticated session.",
+    SERVICE_NOT_CONFIGURED:
+      "Run the schedule as its owner, or configure SERVICE_USER_LOGIN for unattended work.",
+    SERVICE_NOT_PROVISIONED:
+      "Provision the service identity with a live platform membership, or run the schedule as its owner.",
+    SERVICE_TENANT_MISMATCH:
+      "The service identity is bound to another tenant. Recreate the schedule under this tenant's identity.",
+    BROKER_REQUIRED:
+      "Attach the schedule to an owner identity: brokerage work never runs under the service identity.",
+    OWNER_MEMBERSHIP_REVOKED:
+      "The owner's membership is revoked or expired. Restore the membership, then resume the schedule.",
+    PDP_DENIED:
+      "The owner lacks task:create in this tenant. Grant the permission, then resume the schedule.",
+  };
   ctx.audit?.("schedule.dispatch_denied", "orchestrator", {
     callback,
     reason: decision.reason,
+    action: action[decision.reason],
     ...(decision.detail ? { detail: decision.detail } : {}),
   });
 }
