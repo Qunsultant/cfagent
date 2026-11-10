@@ -14,7 +14,7 @@ import { Card } from "./components/ui";
 import {
   buildTradeExecutionPreview,
   type TradeExecutionDraft,
-} from "./tradeExecutionPreview";
+} from "./tradeExecutionPreviewModel";
 
 export function TradeExecutionPreview({ draft }: { draft: TradeExecutionDraft }) {
   const preview = buildTradeExecutionPreview(draft);
