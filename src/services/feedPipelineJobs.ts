@@ -32,6 +32,7 @@ import type { FeedDatasetStore } from "../data/feedDatasetPorts";
 import {
   buildFeedJobRegistry,
   buildFeedStatus,
+  resolveRunUniverse,
   runFeedFundamentalsJob,
   runFeedJob,
   FEED_JOB_CODES,
@@ -91,7 +92,10 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "yahoo-nasdaq100-fundamentals",
     sourceId: "yahoo",
     dataset: "fundamentals",
-    label: "Yahoo fundamentals — Nasdaq-100",
+    // #3930: ONE parameterized fundamentals job — the label
+    // names the DEFAULT universe (nasdaq100); a run's universe
+    // input serves any stored list.
+    label: "Yahoo fundamentals — parameterized (default Nasdaq-100)",
     aliases: ["fundamentals", "yahoo fundamentals"],
   },
   {
@@ -337,12 +341,24 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     const provider = deps.providerFor(def);
     if (!provider) throw feedNotConfigured(def.id, `a capture-wired provider for "${def.sourceId}"`);
 
-    const existingList = await deps.universeStore.latest(def.universe.index);
+    // #3930: the run's universe input (a parameterized job —
+    // fundamentals): the step param names the stored index
+    // list; absent ⇒ the definition's universe. Resolved (and
+    // refused by name when unknown or unsupported) BEFORE any
+    // refresh or fetch, so the refresh, the shard partition,
+    // and the run all read the same list.
+    const universeParam =
+      typeof ctx.params.universe === "string" && ctx.params.universe.trim() !== ""
+        ? ctx.params.universe.trim().toLowerCase()
+        : undefined;
+    const effectiveUniverse = resolveRunUniverse(def, universeParam);
+
+    const existingList = await deps.universeStore.latest(effectiveUniverse);
     if ((!existingList || existingList.symbols.length === 0) && deps.indexRefresh) {
       await executeIndexListRefreshJob({
         store: deps.indexRefresh.store,
         service: deps.indexRefresh.service,
-        indices: [def.universe.index],
+        indices: [effectiveUniverse],
       }).catch(() => undefined);
     }
 
@@ -355,7 +371,7 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
       const shards =
         (await deps.shardsFor?.(def.id)) ??
         (Array.isArray(ctx.params.shards) ? (ctx.params.shards as string[]) : []);
-      const list = await deps.universeStore.latest(def.universe.index);
+      const list = await deps.universeStore.latest(effectiveUniverse);
       const universeSymbols = list
         ? list.symbols.map((m) => m.symbol.toUpperCase().trim()).filter(Boolean)
         : [];
@@ -366,6 +382,7 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
       trigger: "manual" as const,
       runId: ctx.runId,
       ...(deps.userLogin ? { userLogin: deps.userLogin } : {}),
+      ...(universeParam ? { universe: effectiveUniverse } : {}),
       ...(symbols ? { symbols } : {}),
     };
     const result: FeedRunResult =

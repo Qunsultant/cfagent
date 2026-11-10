@@ -194,6 +194,14 @@ export interface EnrichJoinSource {
   feedJobId: string;
   sourceId: DataProviderId;
   dataset: string;
+  /**
+   * #3930 — the universe whose copy of the join dataset this
+   * join reads: the join is by symbol AND by universe, so one
+   * parameterized job serving many lists never hands an enrich
+   * job another universe's copy. Absent ⇒ the enrich job's own
+   * universe (the built-in registry always names it).
+   */
+  universe?: IndexId;
 }
 
 /**
@@ -283,6 +291,24 @@ function resolveElementsKnob(
   );
 }
 
+/**
+ * #3930 — the per-job fundamentals-join mode, from
+ * ENRICH_JOB_<JOB_ID>_FUNDAMENTALS_JOIN: "auto" (default —
+ * join the parameterized fundamentals dataset for the job's
+ * own universe when one is registered), "on" (the same join,
+ * pinned explicitly), "off" (quotes-only — the pre-#3930
+ * behavior, kept behind the switch). An unknown value falls
+ * back to "auto" (the minutes-knob idiom).
+ */
+export function resolveFundamentalsJoinMode(
+  env: Record<string, string | undefined>,
+  jobId: string,
+): "auto" | "on" | "off" {
+  const raw = env[knobKey(jobId, "FUNDAMENTALS_JOIN")];
+  if (raw === "off" || raw === "on" || raw === "auto") return raw;
+  return "auto";
+}
+
 export const ENRICH_JOB_DEFAULTS = {
   cadenceMinutes: 60,
   staleAfterMinutes: 180,
@@ -292,32 +318,37 @@ export const ENRICH_JOB_DEFAULTS = {
  * The built-in registry: one enrich job per QUOTES feed job in
  * the #3530 registry (the fundamentals job is an enrichment
  * SOURCE, not a target; the universe job's product is the
- * stored index list, not a feed-dataset artifact). Yahoo jobs
- * join the persisted Yahoo fundamentals dataset; every job's
- * element set is the default snapshot + screening + series set
- * (plus the fundamentals elements for jobs with a join source).
+ * stored index list, not a feed-dataset artifact). #3930: every
+ * quotes job joins the parameterized fundamentals dataset for
+ * ITS OWN universe — the join is by symbol and by universe, so
+ * a broker chain carries the 14 fundamentals elements exactly
+ * where the persisted dataset carries the symbol, and named
+ * gaps where it does not. The per-job FUNDAMENTALS_JOIN knob ("auto" | "on" | "off",
+ * default "auto") opts one job out to quotes-only; an unknown
+ * value falls back to "auto". Every job's element set is the
+ * default snapshot + screening + series set (plus the
+ * fundamentals elements for jobs with a join source).
  */
 export function buildEnrichJobRegistry(
   env: Record<string, string | undefined>,
 ): EnrichJobRegistry {
   const feedRegistry = buildFeedJobRegistry(env);
-  const fundamentalsJob = feedRegistry
+  const fundamentalsJobs = feedRegistry
     .list()
-    .find((j) => j.dataset === "fundamentals");
+    .filter((j) => j.dataset === "fundamentals");
   const registry = new EnrichJobRegistry();
   for (const feed of feedRegistry.list()) {
     if (feed.dataset !== "quotes") continue;
     const id = `${feed.id}-enrich`;
     const enrichFrom: EnrichJoinSource[] =
-      feed.sourceId === "yahoo" && fundamentalsJob
-        ? [
-            {
-              feedJobId: fundamentalsJob.id,
-              sourceId: fundamentalsJob.sourceId,
-              dataset: fundamentalsJob.dataset,
-            },
-          ]
-        : [];
+      resolveFundamentalsJoinMode(env, id) === "off"
+        ? []
+        : fundamentalsJobs.map((job) => ({
+            feedJobId: job.id,
+            sourceId: job.sourceId,
+            dataset: job.dataset,
+            universe: feed.universe.index,
+          }));
     const defaults = enrichFrom.length
       ? [...ENRICH_DEFAULT_ELEMENTS, ...ENRICH_FUNDAMENTALS_ELEMENTS]
       : ENRICH_DEFAULT_ELEMENTS;
@@ -750,16 +781,26 @@ export function computeEnrichment(input: EnrichComputationInput): EnrichComputat
  * (source, dataset) bucket's history filtered to that job's own
  * artifacts — exact lineage, so a sibling job sharing the
  * bucket (Yahoo's two universes) is never silently substituted.
+ * #3930: a universe index narrows the match to that universe's
+ * copy — required now that ONE parameterized job persists a
+ * copy per universe into the same bucket; without it an enrich
+ * job could join another universe's dataset (values for the
+ * overlapping symbols, silent gaps for the rest).
  */
 export async function resolveFeedInputArtifact(
   store: FeedDatasetStore,
   feedJobId: string,
   sourceId: DataProviderId,
   dataset: string,
+  universeIndex?: IndexId,
 ): Promise<FeedDatasetArtifact | undefined> {
   const history = await store.listRuns(sourceId, dataset, 10);
   return history.find(
-    (a) => a.jobId === feedJobId && a.run.status !== "failed" && feedDatasetRowCount(a) > 0,
+    (a) =>
+      a.jobId === feedJobId &&
+      a.run.status !== "failed" &&
+      feedDatasetRowCount(a) > 0 &&
+      (universeIndex === undefined || a.universe.index === universeIndex),
   );
 }
 
@@ -949,6 +990,11 @@ export async function runEnrichJob(
       source.feedJobId,
       source.sourceId,
       source.dataset,
+      // #3930: the join reads the dataset copy for the enrich
+      // job's universe (the source names it explicitly, else
+      // the enrich job's own universe) — never the bucket's
+      // newest copy, which may belong to another universe.
+      source.universe ?? def.universe.index,
     );
     if (join) joinArtifacts.set(source.feedJobId, join);
   }

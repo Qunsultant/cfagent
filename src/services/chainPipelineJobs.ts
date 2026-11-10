@@ -50,7 +50,7 @@ import type {
   JobStatusView,
 } from "./jobPipelineEngine";
 import { withSchedulePreserved } from "./jobPipelineEngine";
-import { FEED_PIPELINE_CATALOG } from "./feedPipelineJobs";
+import { FEED_PIPELINE_CATALOG, FEED_PULL_STEP } from "./feedPipelineJobs";
 import { buildAllFeedPipelineJobDefinitions } from "./feedPipelineJobs";
 import { buildAllEnrichPipelineJobDefinitions } from "./enrichPipelineJobs";
 import { buildAllAnalyzePipelineJobDefinitions } from "./analyzePipelineJobs";
@@ -202,6 +202,23 @@ export function buildChainPipelineJobDefinition(
     }
     const transposed = cloneNode(stageDef.root);
     delete transposed.schedule;
+    if (node.jobId === chain.fundamentalsJobId) {
+      // #3930 — the fundamentals job is parameterized: the
+      // chain's universe is the input for THIS chain's
+      // fundamentals node (the standalone job definition
+      // carries no universe param — it defaults to nasdaq100).
+      // Without this, every chain's fundamentals node would
+      // pull the default list and its enrich join — which is
+      // universe-matched — would find no copy for its own
+      // universe.
+      const pull = transposed.steps?.find((s) => s.step === FEED_PULL_STEP);
+      if (!pull) {
+        throw new Error(
+          `Pipeline chain "${chain.id}": fundamentals node "${node.jobId}" has no "${FEED_PULL_STEP}" step to parameterize — the catalogs have drifted.`,
+        );
+      }
+      pull.params = { ...pull.params, universe: chain.universeIndex };
+    }
     return transposed;
   });
   // Fold from the last stage up: each node gains the next as

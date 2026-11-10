@@ -27,7 +27,7 @@
  * analyze.apply (#3537) plus generate.apply (#3538)
  * (createPipelineStepRegistry) — no second engine entry.
  */
-import type { DataProviderId } from "../trading";
+import type { DataProviderId, IndexId } from "../trading";
 import type { FeedDatasetStore } from "../data/feedDatasetPorts";
 import type { EnrichedDatasetStore } from "../data/enrichedDatasetPorts";
 import {
@@ -168,6 +168,10 @@ export function buildEnrichPipelineJobDefinition(
               feedJobId: s.feedJobId,
               sourceId: s.sourceId,
               dataset: s.dataset,
+              // #3930: the join universe rides the params so a
+              // re-derived chain and a reconfigured job keep
+              // joining their own universe's copy.
+              ...(s.universe ? { universe: s.universe } : {}),
             })),
           },
         },
@@ -270,7 +274,8 @@ function joinSourceParams(value: unknown): EnrichJoinSource[] | undefined {
     if (
       typeof e.feedJobId !== "string" ||
       typeof e.sourceId !== "string" ||
-      typeof e.dataset !== "string"
+      typeof e.dataset !== "string" ||
+      (e.universe !== undefined && typeof e.universe !== "string")
     ) {
       return undefined;
     }
@@ -278,6 +283,11 @@ function joinSourceParams(value: unknown): EnrichJoinSource[] | undefined {
       feedJobId: e.feedJobId,
       sourceId: e.sourceId as DataProviderId,
       dataset: e.dataset,
+      // #3930: the join universe, when the params name it —
+      // absent ⇒ the enrich job's own universe at run time.
+      ...(typeof e.universe === "string" && e.universe
+        ? { universe: e.universe as IndexId }
+        : {}),
     });
   }
   return out;
