@@ -2,12 +2,15 @@
  * Issue #3514 — Stock Copilot Dynamic Universe and Strategy Configuration.
  *
  * Externalizes universe and strategy settings to `mas_settings` per tenancy,
- * providing presets (NASDAQ100, SP100, MEGA_TECH, SEMIS) and dynamic lists
- * across all channel surfaces (Chat, Schedule, MCP, Webhook).
+ * providing presets (index-backed: NASDAQ100, SP100, SP500, DOW; symbol
+ * lists: MEGA_TECH, SEMIS) and dynamic lists across all channel surfaces
+ * (Chat, Schedule, MCP, Webhook). Issue #3936 made the index presets resolve
+ * their stored membership instead of a hand-written subset.
  */
 
 import type { Env } from "../types";
 import type { IndexListStore } from "../data/indexListPorts";
+import type { IndexId } from "../trading/indexMembership";
 import { resolveStoredIndexList } from "./indexListConsumer";
 import {
   SANDBOX_STRATEGY_IDS,
@@ -30,7 +33,25 @@ export const DEFAULT_COPILOT_STRATEGIES: readonly SandboxStrategyId[] = [
   "mean_reversion",
 ];
 
-export const PRESET_UNIVERSES: Record<string, readonly string[]> = {
+/**
+ * Issue #3936 — the index presets are INDEX-BACKED, not hand-written lists.
+ *
+ * A preset that carries an index name must resolve that index's stored
+ * membership; the symbol array it also declares is a **labelled fallback**
+ * for the case where no usable stored list exists, never a claim about the
+ * index's members. `DOW`/`SP500` fall back to the tracking ETF rather than an
+ * invented membership — a small, honest universe beats a fabricated 30/500.
+ */
+export const INDEX_PRESETS: Record<"NASDAQ100" | "SP100" | "SP500" | "DOW", IndexId> = {
+  NASDAQ100: "nasdaq100",
+  SP100: "sp100",
+  SP500: "sp500",
+  DOW: "dow",
+};
+
+export type IndexPresetName = keyof typeof INDEX_PRESETS;
+
+export const INDEX_PRESET_FALLBACKS: Record<IndexPresetName, readonly string[]> = {
   NASDAQ100: [
     "QQQ",
     "AAPL",
@@ -59,6 +80,14 @@ export const PRESET_UNIVERSES: Record<string, readonly string[]> = {
     "V",
     "UNH",
   ],
+  // No curated membership exists for these, and inventing one would be worse
+  // than a small honest universe: fall back to the index's tracking ETF.
+  SP500: ["SPY"],
+  DOW: ["DIA"],
+};
+
+/** Presets that are explicit symbol lists — they claim no index membership. */
+export const SYMBOL_PRESETS: Record<string, readonly string[]> = {
   MEGA_TECH: [
     "AAPL",
     "MSFT",
@@ -79,6 +108,20 @@ export const PRESET_UNIVERSES: Record<string, readonly string[]> = {
     "ARM",
   ],
 };
+
+/**
+ * Every preset a caller may name. Index presets map to their labelled
+ * fallback here so the synchronous parser still returns a bounded universe;
+ * `resolveCopilotUniverseFull` upgrades them to the stored membership.
+ */
+export const PRESET_UNIVERSES: Record<string, readonly string[]> = {
+  ...SYMBOL_PRESETS,
+  ...INDEX_PRESET_FALLBACKS,
+};
+
+export function isIndexPreset(name: string | null | undefined): name is IndexPresetName {
+  return typeof name === "string" && Object.prototype.hasOwnProperty.call(INDEX_PRESETS, name);
+}
 
 function normalizePresetKey(key: string): string {
   return key.trim().toUpperCase().replace(/[-_\s]/g, "");
@@ -189,28 +232,29 @@ export function resolveCopilotUniverse(opts?: {
 }
 
 /**
- * Issue #3899 (RC4) — the async full resolution of the copilot
- * universe. The sync `resolveCopilotUniverse` stays the preset
- * resolver (the status surface and every sync call site keep
- * reading the preset); this step runs where the cycle actually
- * runs, and only for the NASDAQ100 preset:
+ * Issue #3899 (RC4) / #3936 — the async full resolution of the copilot
+ * universe.
  *
- * - Stored list found and fresh ⇒ the full 100-member list
- *   (`source: "stored-nasdaq100"`).
- * - Stored list missing, stale, empty, or unreadable ⇒ the
- *   12-symbol preset as the LABELLED fallback (`source:
- *   "preset-fallback"`, `reason` names the cause, `stale` /
- *   `snapshotDate` name the stored list when one was found). A
- *   missing list is a named outcome, never a silent live fallback
- *   and never a silent no-op — the cycle still runs, on the
- *   labelled preset, and the caller audits the reason.
- * - Any other preset or explicit list ⇒ the configured symbols
- *   untouched (`source: "configured"`); the index store is never
- *   read, so a non-NASDAQ100 universe cannot fail on it.
+ * The synchronous `resolveCopilotUniverse` stays the preset parser: it
+ * returns the configured symbols (an index preset returns its labelled
+ * fallback array), and it is never read as membership. Where a universe is
+ * actually *reported* or *run*, this resolver is used:
+ *
+ * - an INDEX preset (`NASDAQ100`, `SP100`, `SP500`, `DOW`) whose stored list
+ *   is fresh ⇒ that index's full membership (`source: "stored-index"`);
+ * - stored list missing, stale, empty or unreadable ⇒ the preset's LABELLED
+ *   fallback (`source: "preset-fallback"`, `reason` names the cause, `stale`
+ *   and `snapshotDate` name the stored list when one was found). A missing
+ *   list is a named outcome, never a silent live fallback and never a silent
+ *   no-op — the cycle still runs, on the labelled fallback, and the caller
+ *   records the reason;
+ * - any other preset or explicit list ⇒ the configured symbols untouched
+ *   (`source: "configured"`); the index store is never read, so a non-index
+ *   universe cannot fail on it.
  */
 export type CopilotUniverseResolutionSource =
   | "configured"
-  | "stored-nasdaq100"
+  | "stored-index"
   | "preset-fallback";
 
 export interface CopilotUniverseResolution {
@@ -218,6 +262,8 @@ export interface CopilotUniverseResolution {
   source: CopilotUniverseResolutionSource;
   /** The preset the configured universe names, when one applies. */
   preset: string | null;
+  /** The index a preset resolves through, when one applies. */
+  index: IndexId | null;
   /** True when the stored list was found but stale (fallback path). */
   stale: boolean;
   /** Snapshot date of the stored list, when one was found. */
@@ -234,51 +280,61 @@ export async function resolveCopilotUniverseFull(opts?: {
 }): Promise<CopilotUniverseResolution> {
   const symbols = resolveCopilotUniverse(opts);
   const preset = resolveCopilotUniversePreset(symbols);
-  if (preset !== "NASDAQ100") {
+  // Narrow once into a typed local: `preset` is `string | null`, and the record
+  // lookups below need the union key, not the widened string.
+  const indexPreset: IndexPresetName | null = preset && isIndexPreset(preset) ? preset : null;
+  const index: IndexId | null = indexPreset ? INDEX_PRESETS[indexPreset] : null;
+
+  if (!indexPreset || !index) {
     return {
       symbols,
       source: "configured",
       preset,
+      index: null,
       stale: false,
       snapshotDate: null,
       reason: null,
     };
   }
+
+  const label = `${indexPreset} preset (${index})`;
+  const fallbackSymbols = [...INDEX_PRESET_FALLBACKS[indexPreset]];
   const fallback = (
     reason: string,
     stale = false,
     snapshotDate: string | null = null,
   ): CopilotUniverseResolution => ({
-    symbols: [...PRESET_UNIVERSES.NASDAQ100],
+    symbols: fallbackSymbols,
     source: "preset-fallback",
-    preset,
+    preset: indexPreset,
+    index,
     stale,
     snapshotDate,
     reason,
   });
+
   const store = opts?.indexListStore ?? null;
   if (!store) {
     return fallback(
-      "no index-list store available to resolve the stored nasdaq100 membership — using the labelled 12-symbol NASDAQ100 preset",
+      `no index-list store available to resolve the stored ${index} membership — using the labelled ${label}`,
     );
   }
+
   let resolved: Awaited<ReturnType<typeof resolveStoredIndexList>>;
   try {
-    resolved = await resolveStoredIndexList({ store, index: "nasdaq100" });
+    resolved = await resolveStoredIndexList({ store, index });
   } catch (err) {
     return fallback(
-      `stored nasdaq100 list could not be read (${err instanceof Error ? err.message : String(err)}) — using the labelled 12-symbol NASDAQ100 preset`,
+      `stored ${index} list could not be read (${err instanceof Error ? err.message : String(err)}) — using the labelled ${label}`,
     );
   }
   if (resolved.status === "missing") {
-    return fallback(
-      `${resolved.reason} — using the labelled 12-symbol NASDAQ100 preset`,
-    );
+    return fallback(`${resolved.reason} — using the labelled ${label}`);
   }
   const membership = resolved.membership;
   if (resolved.stale) {
     return fallback(
-      `stored nasdaq100 list is stale (snapshot ${membership.snapshotDate}) — using the labelled 12-symbol NASDAQ100 preset`,
+      `stored ${index} list is stale (snapshot ${membership.snapshotDate}) — using the labelled ${label}`,
       true,
       membership.snapshotDate,
     );
@@ -292,15 +348,16 @@ export async function resolveCopilotUniverseFull(opts?: {
   );
   if (stored.length === 0) {
     return fallback(
-      `stored nasdaq100 list is empty (snapshot ${membership.snapshotDate}) — using the labelled 12-symbol NASDAQ100 preset`,
+      `stored ${index} list is empty (snapshot ${membership.snapshotDate}) — using the labelled ${label}`,
       false,
       membership.snapshotDate,
     );
   }
   return {
     symbols: stored,
-    source: "stored-nasdaq100",
-    preset,
+    source: "stored-index",
+    preset: indexPreset,
+    index,
     stale: false,
     snapshotDate: membership.snapshotDate,
     reason: null,
