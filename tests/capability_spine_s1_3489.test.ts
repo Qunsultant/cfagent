@@ -12,12 +12,13 @@
  *    disabled-by-config / unavailable / not-implemented;
  *  - TRUTHFUL states, derived from the pinned SDK surface
  *    (agents 0.32.0 / @cloudflare/think 0.23.0) and repo evidence —
- *    the pins below record reality (email not-implemented
- *    fleet-wide until S2; voice not-implemented fleet-wide except
- *    OrchestratorAgent since S3 (#3720); the sandbox unavailable until a
- *    container backend is configured; webhooks enabled at the port
- *    since #3474 but unavailable in any env without
- *    THINK_WEBHOOK_SECRET), never the docs' aspirations;
+ *    the pins below record reality (email enabled at the port since
+ *    S2 (#3490), unavailable without the EMAIL send binding; voice
+ *    not-implemented fleet-wide except OrchestratorAgent since S3
+ *    (#3720); the sandbox unavailable until a container backend is
+ *    configured; webhooks enabled at the port since #3474 but
+ *    unavailable in any env without THINK_WEBHOOK_SECRET), never the
+ *    docs' aspirations;
  *  - resolution from externalized config (AOP, #2419 idiom):
  *    doctrine defaults (enabled unless explicitly disabled),
  *    per-agent overrides keyed by class or binding name, config
@@ -132,7 +133,8 @@ describe("capability resolution: truthful defaults (#3489)", () => {
     expect(m.channels.webhooks.state).toBe("enabled");
     expect(m.channels.webhooks.prerequisite).toBe("THINK_WEBHOOK_SECRET");
     expect(m.channels.slack.state).toBe("enabled");
-    expect(m.channels.email.state).toBe("not-implemented");
+    expect(m.channels.email.state).toBe("enabled");
+    expect(m.channels.email.prerequisite).toBe("EMAIL");
     expect(m.channels.voice.state).toBe("enabled");
     expect(m.capabilities.mcpClient.state).toBe("enabled");
     expect(m.capabilities.scheduler.state).toBe("enabled");
@@ -168,10 +170,18 @@ describe("capability resolution: truthful defaults (#3489)", () => {
     expect(m.tools.payments.state).toBe("not-implemented");
   });
 
-  it("email is not-implemented for EVERY PortThink class (S2 has not landed); voice is enabled only on OrchestratorAgent (S3, #3720)", () => {
+  it("email is enabled (code posture) for EVERY PortThink class since S2 (#3490); voice is enabled only on OrchestratorAgent (S3, #3720)", () => {
     for (const className of PORT_THINK_CLASSES) {
       const m = resolveAgentCapabilityManifest(className);
-      expect(m.channels.email.state, className).toBe("not-implemented");
+      expect(m.channels.email.state, className).toBe("enabled");
+      expect(m.channels.email.prerequisite, className).toBe("EMAIL");
+      // Without an env the prerequisite is recorded, not evaluated —
+      // but an env without the binding downgrades it truthfully.
+      const noBinding = resolveAgentCapabilityManifest(className, { env: {} });
+      expect(noBinding.channels.email.state, className).toBe("unavailable");
+      expect(noBinding.channels.email.unavailableReason, className).toBe(
+        "email_send_binding_not_configured",
+      );
       expect(m.channels.voice.state, className).toBe(
         className === "OrchestratorAgent" ? "enabled" : "not-implemented"
       );
@@ -258,6 +268,29 @@ describe("capability resolution: prerequisites (#3489)", () => {
     expect(m.channels.webhooks.state).toBe("enabled");
     expect(m.tools.webSearch.state).toBe("enabled");
   });
+
+  it("an env without the EMAIL send binding makes email unavailable with the port's named reason (#3490)", () => {
+    const m = resolveAgentCapabilityManifest("OrchestratorAgent", { env: {} });
+    expect(m.channels.email.state).toBe("unavailable");
+    expect(m.channels.email.unavailableReason).toBe("email_send_binding_not_configured");
+    expect(m.channels.email.prerequisite).toBe("EMAIL");
+  });
+
+  it("an env with the EMAIL send binding keeps email enabled (#3490)", () => {
+    const m = resolveAgentCapabilityManifest("OrchestratorAgent", {
+      env: { EMAIL: { send: async () => ({}) } },
+    });
+    expect(m.channels.email.state).toBe("enabled");
+    expect(m.channels.email.unavailableReason).toBeUndefined();
+  });
+
+  it("an EMAIL value without a send function is not the binding (#3490)", () => {
+    const m = resolveAgentCapabilityManifest("OrchestratorAgent", {
+      env: { EMAIL: {} },
+    });
+    expect(m.channels.email.state).toBe("unavailable");
+    expect(m.channels.email.unavailableReason).toBe("email_send_binding_not_configured");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -302,9 +335,18 @@ describe("capability resolution: AGENT_CAPABILITIES_DISABLED (#3489)", () => {
 
   it("config never enables or re-enables: disabling a not-implemented capability is a no-op", () => {
     const m = resolveAgentCapabilityManifest("OrchestratorAgent", {
+      disabledRaw: "*:observability",
+    });
+    expect(m.tools.observability.state).toBe("not-implemented");
+    expect(m.configIssues).toEqual([]);
+  });
+
+  it("email is enabled, so config CAN disable it (#3490: the switch withdraws the channel)", () => {
+    const m = resolveAgentCapabilityManifest("OrchestratorAgent", {
       disabledRaw: "*:email",
     });
-    expect(m.channels.email.state).toBe("not-implemented");
+    expect(m.channels.email.state).toBe("disabled-by-config");
+    expect(m.channels.email.disabledBy).toBe("*:email");
     expect(m.configIssues).toEqual([]);
   });
 
