@@ -25,6 +25,7 @@
  * (400 errors, or the candidate list).
  */
 
+import { optionsFeedProviderStamp } from "../../services/optionsProviderContext";
 import { unauthenticatedResponse } from "./routeIdentity";
 import type { EtradeOptionsRouteContext } from "./etradeOptions";
 import { ETradeService } from "../../services/etrade";
@@ -96,7 +97,7 @@ export async function runNoViewStrategies(
       .filter((e) => e.status !== "accepted")
       .map((e) => ({ id: e.id, reason: e.summary || e.reasons[0]?.reason || "not accepted" }));
     recordStrategyScreenRun(ctx.getOrm(), {
-      ...(await resolveTenantProviders(ctx.env)),
+      ...optionsFeedProviderStamp(await resolveTenantProviders(ctx.env)),
       userLogin,
       symbol: noViewReq.symbol,
       trigger: "manual",
