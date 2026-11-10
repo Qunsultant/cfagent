@@ -1,0 +1,3 @@
+### Workflow engine
+
+- **Tenant-aware canonical store leg for J-chain reports (#3940, #3550)** — the generate stage now resolves the report-owning tenant per job (the job's configured `GENERATE_JOB_<ID>_REPORT_OWNER_LOGIN`, else the seam's bound owner) and writes the canonical copy through the orchestrator door (`recordPipelineGenerateReport`), so a J-chain report's canonical row lands in `mas_reports` in both the workflow and host residencies instead of recording `not_wired`; a job with no resolvable tenant still records `not_wired` with the named reason `canonical_report_owner_unconfigured`.

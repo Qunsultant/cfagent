@@ -26,9 +26,15 @@
  *   ALSO go through its store machinery (storeReportAtGeneration,
  *   services/scheduledReports.ts) WHERE IT FITS: that seam
  *   requires a report-owning tenant login and that tenant's
- *   Orchestrator DO — preconditions a host binds into the
- *   canonical seam below when its residency owns reports.
- *   Where no host wires it, each report's canonical leg is
+ *   Orchestrator DO. Issue #3940 (#3550 option (a)) wires the
+ *   tenant-aware leg TO the engine: the generate stage resolves
+ *   the report-owning tenant per job (the job's configured
+ *   reportOwnerLogin, else the seam's bound owner) and writes
+ *   the canonical copy through the orchestrator door
+ *   (PipelineGenerateReportDoor), so the row lands in the
+ *   tenant's Orchestrator DO in both residencies — never in
+ *   the pipeline host's own store, where no Reports view reads.
+ *   Where no tenant resolves, each report's canonical leg is
  *   recorded not_wired with its coded reason (the #2347
  *   per-leg outcome discipline) — never silently skipped and
  *   never claimed as stored.
@@ -103,6 +109,12 @@ export const GENERATE_GAP_CODES = {
    *  residency (see the module header — the seam's
    *  preconditions are a report-owning tenant + its DO). */
   canonicalNotWired: "canonical_report_store_not_wired",
+  /** A seam IS wired, but no report-owning tenant resolves
+   *  for this job — neither the job's configured
+   *  reportOwnerLogin nor the seam's bound ownerLogin names
+   *  one (#3940). Named, never silent; the run still
+   *  completes with its generated output persisted. */
+  canonicalOwnerUnconfigured: "canonical_report_owner_unconfigured",
   /** The wired canonical seam returned no row (its own
    *  refusal, e.g. an owner-less write — the seam logs why). */
   canonicalStoreRefused: "canonical_report_store_refused",
@@ -212,12 +224,61 @@ export function validateGenerateFormats(formats: readonly string[]): string[] {
  * calls it once per report with the seam's own input shape —
  * the write side of the canonical machinery does not move
  * (one writer, generation-id idempotency, #2345/#2359).
+ *
+ * Issue #3940 (#3550 option (a)): the tenant-aware leg binds
+ * the seam over the ORCHESTRATOR DOOR instead of a sql
+ * handle (createTenantAwareCanonicalReportStore, below), so
+ * the canonical copy lands in the report-owning tenant's
+ * Orchestrator DO in both pipeline residencies — never in
+ * the pipeline host's own store, where no Reports view reads.
  */
 export interface CanonicalReportStoreSeam {
-  /** The report-owning tenant login this seam writes for. */
-  ownerLogin: string;
+  /** The report-owning tenant login this seam writes for —
+   *  the seam's bound owner: the fallback when a job names
+   *  no owner of its own (the leg resolves per job first).
+   *  Absent ⇒ the seam names no tenant; the leg resolves
+   *  the owner from the job's configured reportOwnerLogin,
+   *  else records not_wired with its coded reason. */
+  ownerLogin?: string;
   /** storeReportAtGeneration, host-bound. Never throws by contract. */
   store(input: ScheduledReportInput): Promise<CanonicalStoreResult | null>;
+}
+
+/**
+ * The orchestrator door the tenant-aware leg writes through
+ * (#3940): the generate stage never writes mas_reports
+ * directly — it calls the report-owning tenant's
+ * Orchestrator DO door, which stores through the one seam
+ * (storeReportAtGeneration) inside that DO. One method, the
+ * same shape as the screener's recordWorkflowScreenReport
+ * door (OrchestratorAgent.recordPipelineGenerateReport).
+ */
+export interface PipelineGenerateReportDoor {
+  recordPipelineGenerateReport(
+    input: ScheduledReportInput,
+  ): Promise<CanonicalStoreResult | null>;
+}
+
+/**
+ * The tenant-aware canonical leg (#3940, #3550 option (a)):
+ * build a seam whose store call writes through the
+ * orchestrator door (record) instead of a host-bound sql
+ * handle. The owner rides on the store input (the leg
+ * resolves it per job — the job's configured
+ * reportOwnerLogin first, this seam's bound owner second);
+ * ownerLogin here is that bound owner — the residency's
+ * fallback for jobs that name no owner of their own
+ * (the configured service identity where one exists),
+ * absent when the residency configures none.
+ */
+export function createTenantAwareCanonicalReportStore(args: {
+  ownerLogin?: string;
+  record: PipelineGenerateReportDoor["recordPipelineGenerateReport"];
+}): CanonicalReportStoreSeam {
+  return {
+    ...(args.ownerLogin !== undefined ? { ownerLogin: args.ownerLogin } : {}),
+    store: (input) => args.record(input),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -251,6 +312,13 @@ export interface GenerateJobDefinition {
   cadenceMinutes: number;
   /** Age past which the stored generated copy is labelled stale. */
   staleAfterMinutes: number;
+  /** The report-owning tenant this job's canonical copies
+   *  belong to (#3940): resolved from the per-job
+   *  GENERATE_JOB_<ID>_REPORT_OWNER_LOGIN knob. Absent ⇒ the
+   *  leg falls back to the seam's bound owner; when neither
+   *  names a tenant the leg records not_wired with its coded
+   *  reason. No default owner exists. */
+  reportOwnerLogin?: string;
 }
 
 /**
@@ -316,6 +384,17 @@ function resolveListKnob(
   return validate(raw.split(",").map((s) => s.trim()).filter(Boolean));
 }
 
+/** Resolve a per-job owner-login knob (#3940): trimmed,
+ *  blank/absent ⇒ undefined. No default owner exists. */
+function resolveOwnerLoginKnob(
+  env: Record<string, string | undefined>,
+  jobId: string,
+): string | undefined {
+  const raw = env[knobKey(jobId, "REPORT_OWNER_LOGIN")];
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
+  return trimmed ? trimmed : undefined;
+}
+
 export const GENERATE_JOB_DEFAULTS = {
   cadenceMinutes: 60,
   staleAfterMinutes: 180,
@@ -361,6 +440,7 @@ export function buildGenerateJobRegistry(
         "STALE_MINUTES",
         GENERATE_JOB_DEFAULTS.staleAfterMinutes,
       ),
+      reportOwnerLogin: resolveOwnerLoginKnob(env, id),
     });
   }
   return registry;
@@ -762,6 +842,24 @@ async function runCanonicalLeg(args: {
       reason: GENERATE_GAP_CODES.canonicalNotWired,
     };
   }
+  // #3940: the leg resolves the report-owning tenant per job —
+  // the job's configured reportOwnerLogin first, the seam's
+  // bound owner second. Neither naming a tenant is a named
+  // not_wired (never a default owner, never a silent skip);
+  // the run still completes with its generated output persisted.
+  const owner =
+    (typeof def.reportOwnerLogin === "string"
+      ? def.reportOwnerLogin.trim()
+      : "") ||
+    (typeof seam.ownerLogin === "string" ? seam.ownerLogin.trim() : "");
+  if (!owner) {
+    return {
+      status: "not_wired",
+      reportId: null,
+      fanoutCode: null,
+      reason: GENERATE_GAP_CODES.canonicalOwnerUnconfigured,
+    };
+  }
   try {
     const stored = await seam.store({
       runId,
@@ -769,7 +867,7 @@ async function runCanonicalLeg(args: {
       // the seam's generation-id idempotency makes a re-run over
       // the same persisted input converge on the same row.
       generationId: `pipeline-generate:${def.id}:${document.inputArtifactId}`,
-      userLogin: seam.ownerLogin,
+      userLogin: owner,
       title: document.title,
       source: GENERATE_CANONICAL_SOURCE,
       summary: document.summary,

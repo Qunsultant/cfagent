@@ -100,7 +100,7 @@ import { routeRequest, type RouteRequestDeps } from "./orchestrator/routeRequest
 import { submitChatTurn, awaitChatTurnSubmission, type DurableTurnContext, type SubmittedTurnHandle } from "./orchestrator/durableTurnSubmission";
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
-import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, refreshCanonicalPdfFields, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
+import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, persistPipelineGenerateReportCanonical, refreshCanonicalPdfFields, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
 import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, type ChatTurnHelpersContext } from "./orchestrator/chatTurnHelpers";
 import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, resolveStockCopilotMcpActivation, STOCK_COPILOT_SOURCE_TAB, type ChatNlqTurnGateResult, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
@@ -128,6 +128,8 @@ import {
   canonicalResearchEmailBody,
   canonicalResearchWebhookBody,
   storeReportAtGeneration,
+  type CanonicalStoreResult,
+  type ScheduledReportInput,
 } from "../services/scheduledReports";
 // Issue #359-01: reports + HITL routes live in src/agents/routes/reports.ts;
 // routeRequest delegates to handleReportsRoutes at the original position.
@@ -2019,6 +2021,18 @@ export class OrchestratorAgent extends PortThink {
 
   /** #2910 (G3): door — owner rides on the input; id or null, never delivers. */
   async recordWorkflowParentScreenReport(input: Parameters<typeof persistParentScreenReportCanonical>[1]): Promise<{ reportId: string } | null> { return persistParentScreenReportCanonical(this.reportDispatchContext(), input); }
+
+  /** #3940 (#3550 precondition (a)): door — the J generate
+   *  stage's tenant-aware canonical leg stores its canonical
+   *  copy through this door, so the row lands in this (the
+   *  report-owning tenant's) Orchestrator DO's mas_reports in
+   *  both pipeline residencies. Thin wrapper over the one
+   *  seam, like the screener doors above. */
+  async recordPipelineGenerateReport(
+    input: ScheduledReportInput,
+  ): Promise<CanonicalStoreResult | null> {
+    return persistPipelineGenerateReportCanonical(this.reportDispatchContext(), input);
+  }
 
   async deliverWorkflowScreenOutcome(
     outcome: ScreenerRunOutcome,

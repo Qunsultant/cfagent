@@ -24,7 +24,15 @@ import { ThinkWorkflow } from "@cloudflare/think/workflows";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { DefaultProgress } from "agents/workflows";
 import type { Env } from "../types";
-import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
+import { actorGateway } from "../services/cloudflareActorGateway";
+import {
+  getServiceUserLogin,
+  SHARED_ORCHESTRATOR_INSTANCE,
+} from "../security/serviceIdentity";
+import {
+  createJobPipelineStoresFromD1,
+  type JobPipelineStores,
+} from "../data/createJobPipelinePorts";
 import {
   createD1JobRunRecordDb,
   D1JobRunRecordStore,
@@ -34,7 +42,12 @@ import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import { buildEnrichJobRegistry } from "../services/enrichJobs";
 import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
-import { buildGenerateJobRegistry } from "../services/generateJobs";
+import {
+  buildGenerateJobRegistry,
+  createTenantAwareCanonicalReportStore,
+  type PipelineGenerateReportDoor,
+} from "../services/generateJobs";
+import type { GenerateStepDeps } from "../services/generatePipelineJobs";
 import { buildDeliverJobRegistry, createDeliverChannelSenders } from "../services/deliverJobs";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
@@ -57,6 +70,52 @@ import type { JobRunOutcome } from "../services/jobPipelineEngine";
 
 export type { JobPipelineWorkflowPayload } from "./jobPipelineWorkflowFlow";
 
+/** String-valued env entries (the registries' knob source). */
+function workflowEnvStrings(env: Env): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
+    if (typeof value === "string") out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * The generate-step wiring for this workflow residency
+ * (#3538, #3940) — the mirror of the host's
+ * generateStepDepsForScheduledAgent, so both residencies
+ * wire the SAME tenant-aware leg: the canonical copy
+ * writes through the orchestrator door into the
+ * report-owning tenant's Orchestrator DO, never into a
+ * store this residency owns. The leg resolves the tenant
+ * per job (the job's configured reportOwnerLogin, else
+ * this seam's bound owner — the configured service
+ * identity); a job with no resolvable tenant records
+ * not_wired with its coded reason.
+ */
+export function generateStepDepsForWorkflow(
+  env: Env,
+  stores: JobPipelineStores,
+): GenerateStepDeps {
+  return {
+    registry: buildGenerateJobRegistry(workflowEnvStrings(env)),
+    analyzedStore: createAnalyzedDatasetPorts(env),
+    generatedStore: createGeneratedDatasetPorts(env),
+    canonicalReportStore: createTenantAwareCanonicalReportStore({
+      ownerLogin: getServiceUserLogin(env) ?? undefined,
+      record: (input) => {
+        const door = actorGateway.stub<PipelineGenerateReportDoor>(
+          env.ORCHESTRATOR_AGENT,
+          SHARED_ORCHESTRATOR_INSTANCE,
+        );
+        return door.recordPipelineGenerateReport(input);
+      },
+    }),
+    shardsFor: async (jobId) =>
+      (await stores.definitions.getDefinition(jobId))?.config.processing
+        .shards ?? [],
+  };
+}
+
 /** Build the flow deps from the worker environment (adapter-side only). */
 export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   if (!env.AGENT_DB) {
@@ -69,10 +128,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   const stores = createJobPipelineStoresFromD1(db);
   const runRecords = new D1JobRunRecordStore(createD1JobRunRecordDb(db));
   const messaging = createJobPipelineMessaging(env);
-  const envStrings: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
-    if (typeof value === "string") envStrings[key] = value;
-  }
+  const envStrings = workflowEnvStrings(env);
   const universeStore = new D1IndexListStore(
     db as ConstructorParameters<typeof D1IndexListStore>[0],
   );
@@ -104,11 +160,15 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // analyze run dispatched here executes fully as well. The
     // generate step's dataset stores are both D1 (#3538), so a
     // generate run dispatched here also executes fully; its
-    // canonical report-store seam (mas_reports) is not wired in
-    // this residency — a workflow has no tenant's Orchestrator
-    // DO to write the canonical copy into — so each report's
-    // canonical leg is recorded not_wired with its coded reason
-    // on the generated artifact (generateJobs.ts carries the rule).
+    // canonical report-store seam (mas_reports) is wired
+    // through the tenant-aware leg (#3940) — the generate
+    // stage resolves the report-owning tenant per job and
+    // writes the canonical copy through the orchestrator
+    // door, so the row lands in the tenant's Orchestrator DO
+    // in this residency too. A job with no resolvable tenant
+    // records its canonical leg not_wired with its coded
+    // reason on the generated artifact (generateJobs.ts
+    // carries the rule).
     // The deliver step's dataset stores are both D1 too (#3539),
     // and its channel senders are env-built in this residency
     // exactly as on the host, so a deliver run dispatched here
@@ -154,15 +214,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],
       },
-      {
-        registry: buildGenerateJobRegistry(envStrings),
-        analyzedStore: createAnalyzedDatasetPorts(env),
-        generatedStore: createGeneratedDatasetPorts(env),
-        canonicalReportStore: null,
-        shardsFor: async (jobId) =>
-          (await stores.definitions.getDefinition(jobId))?.config.processing
-            .shards ?? [],
-      },
+      generateStepDepsForWorkflow(env, stores),
       {
         registry: buildDeliverJobRegistry(envStrings),
         generatedStore: createGeneratedDatasetPorts(env),
