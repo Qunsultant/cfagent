@@ -47,6 +47,10 @@ const INVENTORY: Record<string, string[]> = {
   "ContextStrip.tsx": ["ContextStrip"],
   "KpiRibbon.tsx": ["KpiRibbon"],
   "SummaryCard.tsx": ["SummaryCard"],
+  // #3133 template organisms II: card header, work card, detail card.
+  "CardHeader.tsx": ["CardHeader"],
+  "WorkCard.tsx": ["WorkCard"],
+  "DetailCard.tsx": ["DetailCard"],
   // #2283 global toast: the single home for transient feedback.
   "Toast.tsx": ["ToastProvider", "useToast"],
   // #2283 stream 5: anchored surfaces join as primitives.

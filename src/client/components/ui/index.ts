@@ -42,6 +42,10 @@
  *   bid-ask/status/source; #3132).
  * - KpiRibbon — responsive row of KPI cards (label/value/sub-trend; #3132).
  * - SummaryCard — label/value rows + emphasized total (#3132).
+ * - CardHeader — the one distributed header row (title left, meta
+ *   right; #3133).
+ * - WorkCard — input flow in one card with CardHeader (#3133).
+ * - DetailCard — any content block with CardHeader (#3133).
  * - Toast — the one global place for transient success/failure feedback
  *   (ToastProvider + useToast; auto-dismiss by tone, danger persists,
  *   hover/focus pause, Escape dismisses, role=status/alert announced).
@@ -83,6 +87,9 @@ export { PageTemplate, type PageTemplateProps, type PageTemplateSlots } from "./
 export { ContextStrip, type ContextStripProps, type ContextStripChangeTone } from "./ContextStrip";
 export { KpiRibbon, type KpiRibbonItem, type KpiRibbonProps, type KpiSubTone } from "./KpiRibbon";
 export { SummaryCard, type SummaryCardProps, type SummaryCardRow, type SummaryValueTone } from "./SummaryCard";
+export { CardHeader, type CardHeaderProps } from "./CardHeader";
+export { WorkCard, type WorkCardProps } from "./WorkCard";
+export { DetailCard, type DetailCardProps } from "./DetailCard";
 export { ToastProvider, useToast, type ToastTone, type ToastInput, type ToastApi } from "./Toast";
 export { Menu, type MenuProps, type MenuItem } from "./Menu";
 export { Popover, type PopoverProps } from "./Popover";
