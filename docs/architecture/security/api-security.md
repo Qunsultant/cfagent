@@ -124,10 +124,11 @@ Rules:
   never claimed here; that ## 7. Slack credentials: the whole set is deployed (#3974)
 
 Owner direction: the deployment carries the complete Slack credential
-set, so enabling a channel is configuration only. All seven reach the
-Worker as `optional_secret` pushes from `.github/workflows/deploy.yml` —
-an absent value is reported in the job summary and leaves the channel in
-its own fail-closed state, never a deploy failure.
+set, so enabling a channel is configuration only. All eight names reach
+the Worker as `optional_secret` pushes from
+`.github/workflows/deploy.yml` — an absent value is reported in the job
+summary and leaves the channel in its own fail-closed state, never a
+deploy failure.
 
 ### Readers that exist today
 
@@ -137,7 +138,7 @@ its own fail-closed state, never a deploy failure.
 | `SLACK_BOT_TOKEN` | `src/services/slackFiles.ts`, `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/trading/slack/agent.ts`, delivery jobs | The outbound bot-API leg is skipped and delivery surfaces report "no Slack transport configured" by name. The snap's bot leg takes its channel per call — it has no `SLACK_CHANNEL` fallback. |
 | `SLACK_CLIENT_ID` | `src/server/routes/messaging.ts` (`/slack/install`) | The install route answers 500 naming the missing variable. |
 | `SLACK_CLIENT_SECRET` | `src/server/routes/messaging.ts` (`/slack/oauth_callback`) | The OAuth code exchange cannot run; installation stops at that step. |
-| `SLACK_WEBHOOK_URL` | `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/services/deliverJobs.ts` | The webhook leg is skipped; delivery falls through to the remaining transports. |
+| `SLACK_WEBHOOK_URL` | `src/services/browserAgent.ts`, `src/services/screenerSlackDelivery.ts`, `src/services/deliverJobs.ts` | The webhook leg is skipped; delivery falls through to the remaining transports. Synced since #3980 — it was read but never deployed, so setting it changed nothing. |
 
 ### Staged: deployed, no reader yet
 

@@ -260,6 +260,12 @@ export class ETradeBrowserService {
     }
 
     const webhookUrl = options.webhookUrl || this.env?.SLACK_WEBHOOK_URL;
+    // #3980: the bot-API leg posts to a CHANNEL, and the caller may not
+    // pass one. Resolve it the way the trading and screener paths already
+    // do — caller first, then SLACK_CHANNEL, then SCREENER_SLACK_CHANNEL.
+    // A webhook ignores the field, so this never affects that leg.
+    const channel =
+      options.channel || this.env?.SLACK_CHANNEL || this.env?.SCREENER_SLACK_CHANNEL;
     const pageTitle = inspectRes.title || "Web Page";
     // Issue #120: only a real Browser Rendering capture may be called a
     // snapshot. A placeholder means no image of the page exists — say so.
@@ -308,7 +314,7 @@ export class ETradeBrowserService {
     }
 
     const payload = {
-      channel: options.channel,
+      channel,
       text: `${headerLine} (${url})`,
       blocks,
     };
@@ -330,6 +336,17 @@ export class ETradeBrowserService {
         return { success: false, url, error: err.message, timestamp };
       }
     } else if (this.env?.SLACK_BOT_TOKEN) {
+      if (!channel) {
+        return {
+          success: false,
+          url,
+          error:
+            "slack_channel_not_configured: the bot-API leg posts to a channel and none resolved — " +
+            "pass `channel`, or set SLACK_CHANNEL (or SCREENER_SLACK_CHANNEL) on the deployment. " +
+            "Nothing was sent to Slack.",
+          timestamp,
+        };
+      }
       try {
         const resp = await fetch("https://slack.com/api/chat.postMessage", {
           method: "POST",
@@ -542,6 +559,11 @@ export class ETradeBrowserService {
   ): Promise<BrowserAgentSnapResult> {
     const timestamp = tx.timestamp || new Date().toISOString();
     const webhookUrl = options.webhookUrl || this.env?.SLACK_WEBHOOK_URL;
+    // #3980: same resolution as the page-capture path — the bot-API leg
+    // needs a channel, the caller often supplies none, and the webhook
+    // and cfpay legs are unaffected by the field.
+    const channel =
+      options.channel || this.env?.SLACK_CHANNEL || this.env?.SCREENER_SLACK_CHANNEL;
     const isLive = tx.environment === "live" || tx.environment === "PROD";
     const statusUpper = (tx.status || "EXECUTED").toUpperCase();
     const actionUpper = (tx.action || "BUY").toUpperCase();
@@ -619,7 +641,7 @@ export class ETradeBrowserService {
     });
 
     const payload = {
-      channel: options.channel,
+      channel,
       text: `🧾 Transaction Snap: ${actionUpper} ${tx.quantity} ${tx.symbol} - ${statusUpper} (${totalFormatted})`,
       blocks,
     };
@@ -658,6 +680,19 @@ export class ETradeBrowserService {
         };
       }
     } else if (this.env?.SLACK_BOT_TOKEN) {
+      if (!channel) {
+        return {
+          success: false,
+          transactionId: tx.transactionId,
+          symbol: tx.symbol,
+          screenshotBase64,
+          error:
+            "slack_channel_not_configured: the bot-API leg posts to a channel and none resolved — " +
+            "pass `channel`, or set SLACK_CHANNEL (or SCREENER_SLACK_CHANNEL) on the deployment. " +
+            "The snap was prepared but nothing was sent to Slack.",
+          timestamp,
+        };
+      }
       try {
         const resp = await fetch("https://slack.com/api/chat.postMessage", {
           method: "POST",
@@ -673,7 +708,7 @@ export class ETradeBrowserService {
           success: verdict.accepted,
           transactionId: tx.transactionId,
           symbol: tx.symbol,
-          channel: options.channel,
+          channel,
           screenshotBase64,
           error: verdict.error,
           timestamp,
@@ -708,7 +743,7 @@ export class ETradeBrowserService {
           success: res.ok,
           transactionId: tx.transactionId,
           symbol: tx.symbol,
-          channel: options.channel,
+          channel,
           screenshotBase64,
           error: res.ok
             ? undefined
