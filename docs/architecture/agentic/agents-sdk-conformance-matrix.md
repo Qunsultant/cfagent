@@ -113,7 +113,7 @@ recovery column reads as it does.
 | `state` | 10 | 4 | 0 |
 | `connections` | 3 | 11 | 0 |
 | `scheduling` | 3 | 11 | 0 |
-| `recovery` | 5 | 9 | 0 |
+| `recovery` | 6 | 8 | 0 |
 | `sdk-state` | 7 | 7 | 0 |
 | `sessions` | 3 | 10 | 1 |
 | `routing` | 14 | 0 | 0 |
@@ -121,7 +121,7 @@ recovery column reads as it does.
 | `sdk-scheduling` | 2 | 12 | 0 |
 | `fibers` | 0 | 2 | 12 |
 | `skills` | 1 | 2 | 11 |
-| Total | 62 | 82 | 24 |
+| Total | 63 | 81 | 24 |
 
 168 cells (14 roster entries × 12 aspects), zero unclassified. The
 two honest headlines: **recovery has its first IMPLEMENTED cells** —
@@ -136,7 +136,9 @@ closed as IMPLEMENTED by #2733 and ResearchAgent's by #2761
 (tracker #2708 items A9/A10) — both start-up recovery over the
 class's own task ledger, terminally marking a dead incarnation's
 active records interrupted, instance replacement over the same
-durable store) — and **fibers
+durable store) — and ScheduledAgent's cell closed as IMPLEMENTED by
+#4002 (onStart settles orphaned `running` pipeline instances,
+terminally marking them failed with a named orphan error) — and **fibers
 is a GAP for every PortThink agent**, judged against the real SDK
 primitive. **Skills, added by S14 (#2417), was a GAP for every
 PortThink agent at classification** — classified before any
@@ -270,7 +272,7 @@ is recorded) — dispositions in their cells.
 | `state` | IMPLEMENTED | All instance-local ctx.storage: the goals key (seeded with DEFAULT_SCHEDULES on first read, :224-225), tick history, and synthesized schedules. |
 | `connections` | NOT-APPLICABLE | No turn path and no port hooks by design (class header); reachable via stub RPC from server.ts and, since #2341, from the orchestrator's chat turn through the G1 door (src/agents/orchestrator/meshDoors.ts). |
 | `scheduling` | IMPLEMENTED | It IS the user-visible goal catalogue (survey §4 ruling): the worker cron calls server.ts scheduled(), which invokes onCron() on the singleton; each due goal is budget-gated through PaymentsAgent before firing. The mechanism is the worker cron, deliberately not the SDK scheduler. |
-| `recovery` | NOT-APPLICABLE | No in-flight work to resume: each tick re-reads durable goal state from ctx.storage, and fired work is tracked as jobs/chains by the orchestrator. The virgin-instance seeding hazard is an addressing hazard, recorded under routing. |
+| `recovery` | IMPLEMENTED | On host start (#4002) ScheduledAgent settles orphaned `running` pipeline instances as failed with a named orphan error via recordTerminal, so the job is dispatchable again and a re-armed feed run completes; `paused`/`queued` instances are untouched. Each tick still re-reads durable goal state from ctx.storage, and fired work is tracked as jobs/chains by the orchestrator — the pipeline instances are the in-flight work this start-up recovery settles. Pinned by tests/pipeline_orphan_settle_host_4002.test.ts (host-level, DO SQLite) and tests/pipeline_orphan_settle_4002.test.ts (engine-level). |
 | `sdk-state` | IMPLEMENTED | Deliberate divergence, classified explicitly per the reference set (#2225 comment 6491152513): durable state is held through the actor-port state facet (createCfActorState over ctx.storage, src/actors/cfAgentsAdapter.ts:29-40) and Think's own storage use; the SDK setState API is unused (fleet pin: zero this.setState in agent sources). |
 | `sessions` | NOT-APPLICABLE | None by design; it holds goal state, not conversations. |
 | `routing` | IMPLEMENTED | Binding SCHEDULED_AGENT; singleton ('default') addressing from server.ts and the orchestrator's G1 chat door (#2341); A2A surface scheduled (registry), whose resolution pins the "default" instance — dispatch to any other instance name would seed pristine default goals. |

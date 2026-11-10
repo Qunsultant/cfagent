@@ -335,8 +335,8 @@ const MATRIX: MatrixRow[] = [
       scheduling: IMPL(
         "It IS the user-visible goal catalogue (survey §4 ruling): the worker cron calls server.ts scheduled(), which invokes onCron() on the singleton; each due goal is budget-gated through PaymentsAgent before firing. The mechanism is the worker cron, deliberately not the SDK scheduler.",
       ),
-      recovery: NA(
-        "No in-flight work to resume: each tick re-reads durable goal state from ctx.storage, and fired work is tracked as jobs/chains by the orchestrator. The virgin-instance seeding hazard is an addressing hazard, recorded under routing.",
+      recovery: IMPL(
+        "On host start (#4002) ScheduledAgent settles orphaned `running` pipeline instances as failed with a named orphan error via recordTerminal, so the job is dispatchable again and a re-armed feed run completes; `paused`/`queued` instances are untouched. Each tick still re-reads durable goal state from ctx.storage, and fired work is tracked as jobs/chains by the orchestrator — the pipeline instances are the in-flight work this start-up recovery settles. Pinned by tests/pipeline_orphan_settle_host_4002.test.ts (host-level, DO SQLite) and tests/pipeline_orphan_settle_4002.test.ts (engine-level).",
       ),
       "sdk-state": SDK_STATE_DIVERGENT,
       sessions: NA("None by design; it holds goal state, not conversations."),
@@ -905,10 +905,11 @@ describe("fleet fact pins (#2339)", () => {
     expect(sourcesWith("onConnect")).toEqual(["TickerAgent"]);
   });
 
-  it("onStart is defined by exactly OrchestratorAgent, ResearchAgent, ScreenerAgent and TickerAgent", () => {
+  it("onStart is defined by exactly OrchestratorAgent, ResearchAgent, ScheduledAgent, ScreenerAgent and TickerAgent", () => {
     expect(sourcesWith("onStart(").sort()).toEqual([
       "OrchestratorAgent",
       "ResearchAgent",
+      "ScheduledAgent",
       "ScreenerAgent",
       "TickerAgent",
     ]);
