@@ -420,6 +420,47 @@ export function StockCopilotPanel() {
         </>
       )}
 
+      <div className="scp-section-title">Loop status</div>
+      <div className="scp-feed">
+        <div className="scp-feed-row">
+          {status.lastCycle ? (
+            <>
+              <Badge size="xs" tone={OUTCOME_VIEW[status.lastCycle.outcome].tone}>
+                {OUTCOME_VIEW[status.lastCycle.outcome].label}
+              </Badge>
+              <span className="scp-feed-main">Last cycle</span>
+              <span className="scp-feed-time">{fmtCopilotTime(status.lastCycle.cycleAt)}</span>
+            </>
+          ) : (
+            <span className="scp-feed-main">Last cycle — No cycle recorded yet</span>
+          )}
+        </div>
+        <div className="scp-feed-row">
+          {status.lastCycleFiringAttempt ? (
+            <>
+              <span className="scp-feed-main">
+                Last firing — {status.lastCycleFiringAttempt.taskId}
+              </span>
+              <span className="scp-feed-time">
+                {fmtCopilotTime(new Date(status.lastCycleFiringAttempt.scheduledFor).toISOString())}
+              </span>
+            </>
+          ) : (
+            <span className="scp-feed-main">Last firing — No firing recorded yet</span>
+          )}
+        </div>
+        {status.lastCycleNotDeclared && (
+          <div className="scp-feed-row">
+            <span className="scp-feed-main">
+              Not declared — {status.lastCycleNotDeclared.cause}
+            </span>
+            <span className="scp-feed-time">
+              {fmtCopilotTime(new Date(status.lastCycleNotDeclared.atMs).toISOString())}
+            </span>
+          </div>
+        )}
+      </div>
+
       <div className="scp-section-title">Cycle activity</div>
       {status.activity.length === 0 ? (
         <EmptyState
