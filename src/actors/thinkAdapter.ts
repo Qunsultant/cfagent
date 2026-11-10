@@ -407,6 +407,33 @@ export class PortThink extends Think<any> {
     return tools as ToolSet;
   }
 
+  /**
+   * Issue #3934 (follow-on of #3494/#3495): the composed execution
+   * tool surface of any PortThink class — the class's own tools plus
+   * the port-supplied ones, each behind its capability gate.
+   *
+   * BrowserAgent and SandboxAgent are headless: their port hooks are
+   * deliberately unset, so `beforeTurn` never fires for them and the
+   * web tools materialized only for classes that host a chat turn.
+   * Capability availability is a manifest + resolver decision
+   * (`isPortCapabilityEnabled`), never a side effect of which
+   * composition mechanism a class happens to use — so this is where a
+   * headless class composes the same surface, through the same
+   * builder. Additive only: a tool the caller already supplies under
+   * the same name, or under the MCP-discovered `tool_openaimp_<name>`,
+   * always wins and is never duplicated.
+   */
+  getExecutionTools(base: Record<string, unknown> = {}): ToolSet {
+    const tools: Record<string, unknown> = { ...base };
+    const present = (name: string) =>
+      Object.prototype.hasOwnProperty.call(tools, name) ||
+      Object.prototype.hasOwnProperty.call(tools, `tool_openaimp_${name}`);
+    for (const [name, def] of Object.entries(this.getPortWebTools())) {
+      if (!present(name)) tools[name] = def;
+    }
+    return tools as ToolSet;
+  }
+
   setPortTurnOverride(config: ThinkTurnConfig | void): void {
     this.portTurnOverride = { installed: true, config };
   }
@@ -428,18 +455,21 @@ export class PortThink extends Think<any> {
     if (!this.portHooks) return undefined;
     const portConfig = await this.portHooks.beforeTurn(thinkTurnContextToPort(ctx));
     const mapped = portTurnConfigToThink(portConfig);
-    // #3494/#3495: every PortThink turn carries web_fetch / web_search
-    // under the capability config. Additive only — a class that already
-    // supplies the tool (own name, or the MCP-discovered openaimp one)
-    // is untouched, and a turn restricted via activeTools stays so.
-    const existing = ctx.tools ? Object.keys(ctx.tools) : [];
-    const hasWeb = (name: string) =>
-      existing.includes(name) || existing.includes(`tool_openaimp_${name}`);
+    // #3494/#3495, #3934: every PortThink turn carries web_fetch /
+    // web_search under the capability config, composed by the same
+    // builder a headless class uses (getExecutionTools) — one
+    // composition decision, not two. Additive only — a class that
+    // already supplies the tool (own name, or the MCP-discovered
+    // openaimp one) is untouched, and a turn restricted via
+    // activeTools stays so.
+    const turnTools: Record<string, unknown> = {
+      ...((ctx.tools ?? {}) as Record<string, unknown>),
+      ...((mapped as { tools?: Record<string, unknown> } | undefined)?.tools ?? {}),
+    };
+    const composed = this.getExecutionTools(turnTools) as Record<string, unknown>;
     const extra: Record<string, unknown> = {};
-    for (const [name, def] of Object.entries(this.getPortWebTools())) {
-      if (!hasWeb(name) && !(mapped && (mapped as { tools?: Record<string, unknown> }).tools?.[name])) {
-        extra[name] = def;
-      }
+    for (const [name, def] of Object.entries(composed)) {
+      if (!Object.prototype.hasOwnProperty.call(turnTools, name)) extra[name] = def;
     }
     if (Object.keys(extra).length === 0) return mapped;
     const base = (mapped ?? {}) as ThinkTurnConfig & { tools?: Record<string, unknown> };

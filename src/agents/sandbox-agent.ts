@@ -83,6 +83,14 @@ const DEGRADED_DETAIL =
   "Containers configuration for SandboxAgent in wrangler.jsonc (owner-chosen " +
   "image) and construct ETradeSandboxService with the bound container.";
 
+/**
+ * Issue #3934: this class hosts no chat turn, so the port's turn
+ * hook never fires for it — the web_fetch / web_search
+ * capabilities are composed on its execution surface instead
+ * (PortThink.getExecutionTools, the same builder and the same
+ * capability gate as the turn path), alongside the sandbox
+ * capability this class exists for.
+ */
 export class SandboxAgent extends PortThink {
   private sandboxService?: ETradeSandboxService;
 
