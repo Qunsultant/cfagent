@@ -42,6 +42,18 @@ import {
  */
 export const STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE = `- PIPELINE STAGE ORDER (#3911): pipeline cycles run the stages in order feed → enrich → analyze → generate → deliver — never skipping a stage. Never run analyze directly after feed: before analyze, a usable enriched dataset must exist — run enrich first (or check the enrich job's status via 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs'). The pipeline's feed input is the quotes job ('yahoo-nasdaq100-quotes'); the fundamentals job ('yahoo-nasdaq100-fundamentals'), the technicals job ('yahoo-nasdaq100-technicals'), and the sentiment job ('yahoo-nasdaq100-sentiment') are join sources for enrich, never the pipeline's feed input. For an end-to-end cycle prefer 'tool_openaimp_run_pipeline_chain' for 'yahoo nasdaq100 pipeline' (chain id 'yahoo-nasdaq100-quotes-pipeline'); per-stage runs use 'tool_openaimp_run_feed_job', 'tool_openaimp_run_enrich_job', 'tool_openaimp_run_analyze_job', 'tool_openaimp_run_generate_job', 'tool_openaimp_run_deliver_job' in that order, each consuming the previous stage's persisted output.`;
 
+/** Issue #4002 — every feed job IS monitorable through paths that
+ *  exist today, and the copilot must say so: the MCP status tool
+ *  'tool_openaimp_get_feed_job_status' (pipeline state, last run,
+ *  rows persisted, freshness, run history, next run), the REST
+ *  routes GET /data-providers/:id/feed and
+ *  GET /data-providers/:id/feed-jobs, the Schedules → Runs ledger
+ *  (?tab=schedules&view=runs), and Workflow Runs
+ *  (?tab=workflow-runs). Never say or claim a feed job has no
+ *  monitoring path — check these first and report what they show.
+ *  The sentiment job is monitored exactly this way. */
+export const STOCK_COPILOT_FEED_JOB_MONITORING_RULE = `- FEED-JOB MONITORING (#4002): every feed job is monitorable — never say or claim a feed job has no monitoring path or is unmonitorable. Check the feed job's status via 'tool_openaimp_get_feed_job_status' (pipeline state, last run, rows persisted, freshness, run history, next run), the REST routes GET /data-providers/:id/feed and GET /data-providers/:id/feed-jobs, the Schedules → Runs ledger (?tab=schedules&view=runs), or Workflow Runs (?tab=workflow-runs) — and report what they show. The sentiment job ('yahoo-nasdaq100-sentiment') is monitored exactly this way.`;
+
 export const STOCK_COPILOT_SYSTEM_ROLE = `You are the master orchestrator for Multi-Agent Studio (OpenAIMP), specialized in the Stock Copilot operational domain and powered by Cloudflare Agents, Durable Objects, and SQLite.`;
 
 function renderCapabilitiesFromBrokerTools(brokerTools: ResolvedPromptBrokerTools): string {
@@ -175,6 +187,7 @@ export function buildStockCopilotMcpSteering(cap: StockCopilotPromptCapability):
 - '${tool(cap.tools.preview)}' & '${tool(cap.tools.place)}': preview is a DRAFT with Agent DID attestation; place only after explicit human approval. ${orders}; ${cancel}.
 - BRACKET DRAFT PROTOCOL: a "+4% TP / -2% SL" limit buy is ONE preview call with orderType "LIMIT", takeProfitPercent 4, stopLossPercent 2. ${cap.percentBrackets ? "Percent exits are converted by the adapter from the user limit or live quote — never do the math or use placeholders." : "This broker does not accept percent exits; ask for absolute leg prices."} ${bracket}
 ${STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE}
+${STOCK_COPILOT_FEED_JOB_MONITORING_RULE}
 - HONEST EXECUTION: never claim an order was placed without a broker order id; a queued job receipt is not a placement. Report the exact refusal and the fix URL.
 - FIX URLS: broker connect at ?tab=trading (Alpaca paper: /api/broker/connect/alpaca?environment=TEST; live: ?environment=PROD); credits at ?tab=checkout&checkoutTab=topup; trace at ?tab=workflow-runs; data providers at ?tab=research; workflows at ?tab=workflows.
 - 'tool_openaimp_stock_copilot_remediate_gaps': when the user asks to fix platform gaps, invoke it directly.
@@ -203,6 +216,7 @@ export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation i
      - To inspect workflows and schedules: '[Open Workflows Hub](?tab=workflows)'
   2. Pinpoint exact diagnostic facts: Always state the exact target chain (e.g. 'nasdaq100 pipeline'), the active or settled frontier stage (feed, enrich, analyze, generate, deliver), stage unit counts, and any errors or rate limits. Never return vague promises without diagnostic facts.
 ${STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE}
+${STOCK_COPILOT_FEED_JOB_MONITORING_RULE}
 - ARCHITECTURAL RUNTIME INVARIANT: The platform runs strictly on Cloudflare Workers, Durable Objects (DO-SQLite), D1, KV, and Cloudflare Queues. There is NO Kafka, RabbitMQ, Celery, SQS, or Redis. Never hallucinate Kafka or suggest checking Kafka logs; all diagnostics and logs reside in DO-SQLite tables ('mas_events', 'audit_events', 'async_jobs') and Cloudflare Logging.`;
 
 export function buildStockCopilotSystemPrompt(input: OrchestratorPromptInput): string {

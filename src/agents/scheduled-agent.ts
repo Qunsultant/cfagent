@@ -92,6 +92,7 @@ import {
   pipelineJobIds,
   recordPipelineCompletion,
   refreshScheduledAgentChainDefinition,
+  settleOrphanedPipelineRuns,
   startPipelineJobWorkflow,
   type PipelineChainSurfaceView,
   type PipelineCompletionNote,
@@ -669,6 +670,36 @@ export class ScheduledAgent extends PortThink {
   /** Think scheduled-task declarations for the pipeline's jobs. */
   override async getScheduledTasks(): Promise<ThinkScheduledTasks> {
     return declarePipelineTasks(this.pipelineContext());
+  }
+
+  /**
+   * Issue #4002: Cloudflare Agents lifecycle — settle the
+   * pipeline runs orphaned by a host restart. A live run cannot
+   * survive its host's death, so any instance still marked
+   * `running` at start is settled as failed with a named orphan
+   * error, and the job is dispatchable again (a re-armed feed
+   * run from the Orchestrator's onStart recovery depends on
+   * this: the dispatch forces this host to start, and onStart
+   * precedes any dispatch). Best-effort by the same rule as the
+   * Orchestrator's onStart recoveries: a settle failure is
+   * logged and never fails startup.
+   */
+  override async onStart(props?: Record<string, unknown>): Promise<void> {
+    await super.onStart(props);
+    try {
+      const { settled } = await settleOrphanedPipelineRuns(this.pipelineContext());
+      if (settled.length > 0) {
+        structuredLog.info("scheduledAgent.on_start_orphaned_pipeline_runs_settled", {
+          message: `[ScheduledAgent][onStart] Settled ${settled.length} orphaned pipeline run(s) from a host restart:`,
+          settled,
+        });
+      }
+    } catch (error) {
+      structuredLog.error("scheduledAgent.on_start_orphaned_pipeline_runs_settle_failed", {
+        message: "[ScheduledAgent][onStart] Could not settle orphaned pipeline runs:",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** Run one pipeline job now and settle it; returns the outcome view. */

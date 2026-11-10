@@ -328,6 +328,13 @@ function measure(): Map<string, number> {
  * panel itself shrinks (AlpacaBrokerPanel.tsx alpaca 38->8, etrade 4->3)
  * and needs no baseline change. The broker panel mount moved to
  * PortfolioPanel.tsx (#3050); the selected broker is passed there.
+ * Baseline update (#4002, 2026-11-10): the feed-job monitoring rule
+ * names the sentiment job id the copilot must check verbatim, so the
+ * steering gains one Yahoo row in stockCopilotPrompt.ts — dispositioned
+ * INTEGRATION (a data-bearing identifier, not framing), the #3911
+ * precedent: the rule's prose comment was neutralized instead (it names
+ * the sentiment job without the provider brand), so the row is the rule
+ * line alone. One raise (stockCopilotPrompt.ts/yahoo 1->2).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -610,7 +617,10 @@ const BASELINE: Array<[string, string, number]> = [
   // the copilot must invoke verbatim (the quotes job, the fundamentals join, the
   // chain id) — data-bearing identifiers, not framing. The rule's prose comment
   // was neutralized instead (no provider name), so the row is the rule line alone.
-  ["src/agents/prompts/stockCopilotPrompt.ts", "yahoo", 1],
+  // #4002 INTEGRATION: the feed-job monitoring rule names the sentiment job id
+  // the copilot must check verbatim — same disposition; its prose comment was
+  // neutralized instead, so the row is the rule line alone.
+  ["src/agents/prompts/stockCopilotPrompt.ts", "yahoo", 2],
   ["src/agents/registry.ts", "etrade", 27],
   ["src/agents/registry.ts", "public.com", 1],
   ["src/agents/research-agent.ts", "etrade", 6],

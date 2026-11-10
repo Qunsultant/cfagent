@@ -1,0 +1,3 @@
+### Fixed
+
+- Yahoo feed-runs no longer fail with a bare `FAILURE_ASYNC_JOB_FAILED` and an unknown outcome when a deploy restarts their host: the onStart recovery re-arms resumable feed-job dispatches (the HTTP feed-run route and the MCP `run_feed_job` tool, paid rows never re-armed, capped at two re-arms per chain), the pipeline host settles its orphaned `running` instances at start, and every row the recovery closes carries the new cataloged `FAILURE_ASYNC_JOB_ORPHANED` code naming the restart. The Stock Copilot prompt now names the existing feed-job monitoring paths instead of claiming none exist (#4002).
