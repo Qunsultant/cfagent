@@ -1417,6 +1417,102 @@ export class AlpacaGetQuoteCommand implements IMcpToolCommand {
 }
 
 /**
+ * Issue #4014 — the Alpaca option-chain read.
+ *
+ * The Alpaca platform already assembles a chain from contracts +
+ * snapshots (#3233: getOptionExpireDates + getOptionChains, honesty rules
+ * in src/trading/alpaca/optionsData.ts). What was missing is a way for the
+ * copilot to READ it: the options-chain HTTP routes are the E*TRADE feed
+ * behind the tenant data-provider capability gate, so a tenant whose data
+ * provider is Alpaca had no chain at all and could not price a multi-leg
+ * strategy. This tool exposes the broker's own chain.
+ *
+ * Live-only, no substitutes: when Alpaca returns no chain or an empty one
+ * the command throws an explicit unavailable error — no invented strikes,
+ * no borrowed E*TRADE rows. A contract Alpaca cannot price is omitted by
+ * the platform, never emitted with fabricated numbers.
+ */
+export class AlpacaGetOptionChainCommand implements IMcpToolCommand {
+  readonly name = "alpaca_get_option_chain";
+  readonly description =
+    "Read a live Alpaca option chain for one underlying: expiry dates plus contracts with bid/ask, last price, and greeks/IV when Alpaca sends them. Live-only — when Alpaca serves no chain the command throws an explicit unavailable error instead of inventing prices. Use it to price multi-leg strategies (e.g. PMCC: buy a far-dated call, sell a near-dated call) before alpaca_preview_order.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      symbol: { type: "string", description: "Underlying ticker (e.g. QBTS, AAPL, NVDA)" },
+      expiration: { type: "string", description: "Optional expiry as YYYY-MM-DD; omit for the nearest expiry" },
+      type: { type: "string", enum: ["CALL", "PUT", "CALLPUT"], description: "Which side of the chain to read (default CALLPUT)" },
+    },
+    required: ["symbol"],
+  };
+
+  readonly zodSchema = z.object({
+    symbol: z.string().min(1).max(20).describe("Underlying ticker"),
+    expiration: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Expiry YYYY-MM-DD"),
+    type: z.enum(["CALL", "PUT", "CALLPUT"]).optional().default("CALLPUT").describe("Chain side"),
+  });
+
+  async execute(
+    input: { symbol: string; expiration?: string; type?: "CALL" | "PUT" | "CALLPUT" },
+    context: McpToolContext,
+  ) {
+    const symbol = requireMcpSymbol(input);
+    const { TradingPlatformRegistry } = await import("../../trading");
+    const platform = TradingPlatformRegistry.getPlatform(
+      "alpaca",
+      context.env,
+      context.orm,
+      context.sessionId,
+    );
+    // The platform interface marks the chain reads optional; a broker
+    // without them must say so rather than throw a TypeError the copilot
+    // misreads as a trading-service failure.
+    const readExpiries = platform.getOptionExpireDates?.bind(platform);
+    const readChain = platform.getOptionChains?.bind(platform);
+    if (!readExpiries || !readChain) {
+      throw new Error(
+        "Alpaca does not expose an option chain on this build; no chain was read.",
+      );
+    }
+    const expirations = await readExpiries(symbol);
+    const picked = input.expiration ??
+      (expirations[0]
+        ? `${String(expirations[0].year).padStart(4, "0")}-${String(expirations[0].month).padStart(2, "0")}-${String(expirations[0].day).padStart(2, "0")}`
+        : undefined);
+    const [year, month, day] = (picked ?? "").split("-").map((part) => Number(part));
+    const chain = await readChain({
+      symbol,
+      ...(Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)
+        ? { expiryYear: year, expiryMonth: month, expiryDay: day }
+        : {}),
+      chainType: input.type ?? "CALLPUT",
+    });
+    if (!chain || chain.pairs.length === 0) {
+      throw new Error(
+        `Alpaca returned no option chain for ${symbol}${picked ? ` at ${picked}` : ""}. No prices were invented.`,
+      );
+    }
+    context.audit?.("alpaca.option_chain_read", "trading", {
+      symbol,
+      expiration: picked ?? null,
+      pairs: chain.pairs.length,
+      underlyingPrice: chain.underlyingPrice,
+    });
+    return {
+      symbol,
+      provider: "alpaca",
+      provenance: "live" as const,
+      timestamp: new Date().toISOString(),
+      expiration: picked ?? null,
+      expirations,
+      underlyingPrice: chain.underlyingPrice,
+      pairs: chain.pairs,
+    };
+  }
+}
+
+/**
  * 13. Alpaca Preview Order Command (#3782)
  * Drafts an equity or options order proposal on Alpaca (the
  * copilot's broker) with Agent DID attestation — the Alpaca

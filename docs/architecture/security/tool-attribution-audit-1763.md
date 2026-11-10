@@ -99,6 +99,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `alpaca_orders` | mcp:read | L (I / R on other doors) |
 | `foss_alpaca_orders` (deprecated #1906 alias of `alpaca_orders`, same scope) | mcp:read | L (I / R on other doors) |
 | `alpaca_get_quote` | mcp:read | L (I / R on other doors) — live quote with provenance (#3782); the copilot's quote tool for its broker (#3451) |
+| `alpaca_get_option_chain` | mcp:read | L (I / R on other doors) — the broker's own live option chain (#4014): expiry dates + contracts with bid/ask, greeks and IV when sent; refuses with an explicit unavailable error instead of inventing prices, and is the chain source for multi-leg strategies (PMCC) when the tenant's data provider has no optionsChains |
 | `browser_inspect_page` | mcp:read | L (I / R on other doors) |
 | `web_fetch` | mcp:read | L (I / R on other doors) — the standalone unrendered page fetch (#2760, tracker #2708 A3): acting login carried in the tool audit from context only (no identity argument); failures propagate as named `web_fetch_*` errors, never fabricated content |
 | `get_feed_job_status` | mcp:read | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |

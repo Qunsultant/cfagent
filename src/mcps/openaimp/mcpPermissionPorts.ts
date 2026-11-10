@@ -181,6 +181,7 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // Issue #3782: the Alpaca quote tool is a read, like the other
   // Alpaca reads above.
   alpaca_get_quote: "mcp:read",
+  alpaca_get_option_chain: "mcp:read",
   // #1906: deprecated aliases for the renamed market-data tools above;
   // same scopes as their canonical tools. Use canonical names instead.
   // Removal is a follow-up slice.
