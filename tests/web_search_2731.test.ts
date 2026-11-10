@@ -3,12 +3,13 @@
  *
  * The registry's web-search family was recorded `absent` by S14
  * (#2417) because no web_search tool existed. This slice builds the
- * tool behind a named-provider seam (src/services/webSearch.ts):
- * the first provider is Brave Search API, which needs an API key
- * this deployment does not have. The contract pinned here is the
- * honesty contract, in both directions:
+ * tool behind a named-provider seam (src/services/webSearch.ts).
+ * Since #3935 that seam carries a provider CHAIN, free/keyless first
+ * (SearXNG → DuckDuckGo → Brave); this suite still pins the #2731
+ * honesty contract, in both directions, with the unconfigured case
+ * now expressed as an EMPTY chain:
  *
- *   - No provider configured → the call FAILS with the named error
+ *   - An empty provider chain → the call FAILS with the named error
  *     `web_search_provider_not_configured`. Never fabricated
  *     results, never a silent empty success.
  *   - Provider configured → results are the provider's, shaped
@@ -104,12 +105,14 @@ describe("web_search catalog registration (#2731)", () => {
 // ---------------------------------------------------------------------------
 
 describe("web_search provider resolution (#2731)", () => {
-  it("no provider configured: fails loud with the named error, and never calls fetch", async () => {
+  it("an empty provider chain: fails loud with the named error, and never calls fetch", async () => {
     const fetchSpy = vi.fn(async () => {
       throw new Error("fetch must not be called when unconfigured");
     });
     vi.stubGlobal("fetch", fetchSpy);
-    const ctx = makeContext({});
+    // #3935: the default chain is keyless-first, so "no provider
+    // configured" is now expressed as an explicitly empty chain.
+    const ctx = makeContext({ WEB_SEARCH_PROVIDERS: "" });
     const err = await new WebSearchCommand().execute({ query: "cloudflare workers" }, ctx).catch((e) => e);
     expect(err).toBeInstanceOf(WebSearchError);
     expect(err.code).toBe("web_search_provider_not_configured");
@@ -137,9 +140,13 @@ describe("web_search provider resolution (#2731)", () => {
     expect(err.message).toContain("BRAVE_SEARCH_API_KEY");
   });
 
-  it("resolveWebSearchProvider returns the configured provider", () => {
-    const provider = resolveWebSearchProvider({ BRAVE_SEARCH_API_KEY: "k" });
-    expect(provider.id).toBe("brave");
+  it("resolveWebSearchProvider returns the chain's head — free/keyless first", () => {
+    // #3935: a keyed Brave no longer outranks the keyless provider;
+    // the chain order decides, and the default order is free first.
+    expect(resolveWebSearchProvider({ BRAVE_SEARCH_API_KEY: "k" }).id).toBe("duckduckgo");
+    expect(
+      resolveWebSearchProvider({ WEB_SEARCH_PROVIDERS: "brave", BRAVE_SEARCH_API_KEY: "k" }).id,
+    ).toBe("brave");
   });
 });
 
@@ -151,7 +158,7 @@ describe("web_search with a configured Brave provider (#2731)", () => {
   it("returns shaped results with the provider named in-band, and audits the call", async () => {
     const { fn, calls } = braveFetch(BRAVE_FIXTURE);
     vi.stubGlobal("fetch", fn);
-    const ctx = makeContext({ BRAVE_SEARCH_API_KEY: "test-key" });
+    const ctx = makeContext({ WEB_SEARCH_PROVIDERS: "brave", BRAVE_SEARCH_API_KEY: "test-key" });
     const result = await new WebSearchCommand().execute({ query: "cloudflare workers" }, ctx);
     expect(result.provider).toBe("brave");
     expect(result.query).toBe("cloudflare workers");
@@ -184,17 +191,17 @@ describe("web_search with a configured Brave provider (#2731)", () => {
       },
     };
     const { fn, calls } = braveFetch(many);
-    const outcome = await executeWebSearch({ BRAVE_SEARCH_API_KEY: "k" }, "q", 50, fn);
+    const outcome = await executeWebSearch({ WEB_SEARCH_PROVIDERS: "brave", BRAVE_SEARCH_API_KEY: "k" }, "q", 50, fn);
     expect(outcome.count).toBe(10);
     expect(new URL(calls[0].url).searchParams.get("count")).toBe("10");
     const { fn: fn2 } = braveFetch(many);
-    const outcome2 = await executeWebSearch({ BRAVE_SEARCH_API_KEY: "k" }, "q", 0, fn2);
+    const outcome2 = await executeWebSearch({ WEB_SEARCH_PROVIDERS: "brave", BRAVE_SEARCH_API_KEY: "k" }, "q", 0, fn2);
     expect(outcome2.count).toBe(1);
   });
 
   it("an honestly-empty provider response is a real count: 0, not an error", async () => {
     const { fn } = braveFetch({ web: { results: [] } });
-    const outcome = await executeWebSearch({ BRAVE_SEARCH_API_KEY: "k" }, "obscure query", 5, fn);
+    const outcome = await executeWebSearch({ WEB_SEARCH_PROVIDERS: "brave", BRAVE_SEARCH_API_KEY: "k" }, "obscure query", 5, fn);
     expect(outcome.provider).toBe("brave");
     expect(outcome.count).toBe(0);
     expect(outcome.results).toEqual([]);
@@ -202,9 +209,13 @@ describe("web_search with a configured Brave provider (#2731)", () => {
 
   it("an HTTP failure is a named provider error — never an empty success", async () => {
     const { fn } = braveFetch({ error: "rate limited" }, 429);
-    const err = await executeWebSearch({ BRAVE_SEARCH_API_KEY: "k" }, "q", 5, fn).catch((e) => e);
+    const err = await executeWebSearch({ WEB_SEARCH_PROVIDERS: "brave", BRAVE_SEARCH_API_KEY: "k" }, "q", 5, fn).catch((e) => e);
     expect(err).toBeInstanceOf(WebSearchError);
-    expect(err.code).toBe("web_search_provider_error");
+    // #3935: an exhausted chain surfaces ONE aggregate error that
+    // carries the provider's own named code and reason.
+    expect(err.code).toBe("web_search_all_providers_failed");
+    expect(err.attempts).toHaveLength(1);
+    expect(err.attempts[0]).toMatchObject({ provider: "brave", code: "web_search_provider_error" });
     expect(err.message).toContain("brave");
     expect(err.message).toContain("429");
   });
@@ -213,16 +224,18 @@ describe("web_search with a configured Brave provider (#2731)", () => {
     const fn = vi.fn(async () => {
       throw new Error("socket boom");
     }) as unknown as typeof fetch;
-    const err = await executeWebSearch({ BRAVE_SEARCH_API_KEY: "k" }, "q", 5, fn).catch((e) => e);
+    const err = await executeWebSearch({ WEB_SEARCH_PROVIDERS: "brave", BRAVE_SEARCH_API_KEY: "k" }, "q", 5, fn).catch((e) => e);
     expect(err).toBeInstanceOf(WebSearchError);
-    expect(err.code).toBe("web_search_provider_error");
+    expect(err.code).toBe("web_search_all_providers_failed");
+    expect(err.attempts[0].reason).toContain("socket boom");
   });
 
   it("a contract-breaking payload is a named provider error, not empty results", async () => {
     const { fn } = braveFetch({ unexpected: true });
-    const err = await executeWebSearch({ BRAVE_SEARCH_API_KEY: "k" }, "q", 5, fn).catch((e) => e);
+    const err = await executeWebSearch({ WEB_SEARCH_PROVIDERS: "brave", BRAVE_SEARCH_API_KEY: "k" }, "q", 5, fn).catch((e) => e);
     expect(err).toBeInstanceOf(WebSearchError);
-    expect(err.code).toBe("web_search_provider_error");
+    expect(err.code).toBe("web_search_all_providers_failed");
+    expect(err.attempts[0]).toMatchObject({ provider: "brave", code: "web_search_provider_error" });
   });
 
   it("results missing url or title are dropped, never fabricated", async () => {
@@ -235,7 +248,7 @@ describe("web_search with a configured Brave provider (#2731)", () => {
         ],
       },
     });
-    const outcome = await executeWebSearch({ BRAVE_SEARCH_API_KEY: "k" }, "q", 5, fn);
+    const outcome = await executeWebSearch({ WEB_SEARCH_PROVIDERS: "brave", BRAVE_SEARCH_API_KEY: "k" }, "q", 5, fn);
     expect(outcome.count).toBe(1);
     expect(outcome.results[0].url).toBe("https://kept.example/");
   });
@@ -246,10 +259,12 @@ describe("web_search with a configured Brave provider (#2731)", () => {
 // ---------------------------------------------------------------------------
 
 describe("web-search registry family (#2731)", () => {
-  it("records degraded: the command surface is live, the provider backend is not configured", () => {
+  it("records live: the command surface is served and a keyless provider answers with no config", () => {
     const family = getToolFamily("web-search");
     expect(family).toBeDefined();
-    expect(family!.status).toBe("degraded");
+    // #3935: the keyless provider in the chain means the family has a
+    // working backend with zero configuration — no longer degraded.
+    expect(family!.status).toBe("live");
     expect(family!.commands).toEqual(["web_search"]);
     expect(family!.source).toContain("src/mcps/openaimp/webSearchCommands.ts");
     expect(family!.notes ?? "").toContain("BRAVE_SEARCH_API_KEY");

@@ -11,13 +11,13 @@
  * shape mirrors the sibling read commands ({query, count,
  * results}) with the producing provider named in-band.
  *
- * Failure honesty is the contract: with no provider key
- * configured (the production state until the owner sets the
- * BRAVE_SEARCH_API_KEY secret), the seam throws WebSearchError
- * `web_search_provider_not_configured` and this command lets it
- * propagate — after recording a `web_search.config_error` audit
- * event — rather than returning fabricated or silently-empty
- * results.
+ * Failure honesty is the contract (#2731, #3935): the seam walks a
+ * named-provider chain, free/keyless first. An empty chain throws
+ * WebSearchError `web_search_provider_not_configured`, an exhausted
+ * chain throws `web_search_all_providers_failed` with every
+ * attempt's reason, and this command lets either propagate — after
+ * recording a `web_search.config_error` audit event — rather than
+ * returning fabricated or silently-empty results.
  */
 import { z } from "zod";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
@@ -28,7 +28,7 @@ export class WebSearchCommand
 {
   readonly name = "web_search";
   readonly description =
-    "Search the open web through the configured named provider (Brave Search API) and return result titles, URLs, and snippets, with the provider named in the result. If no provider API key is configured, the call fails with a named web_search_provider_not_configured error — it never fabricates results. For platform documentation use query_platform_knowledge; for the internal corpus use knowledge_search.";
+    "Search the open web through the configured provider chain — free/keyless first: SearXNG (when SEARXNG_BASE_URL is set), DuckDuckGo (keyless), then Brave (when keyed) — and return result titles, URLs, and snippets with the provider that served named in the result. A provider failure falls through to the next; an empty chain fails with a named web_search_provider_not_configured error and an exhausted chain with web_search_all_providers_failed — it never fabricates results. For platform documentation use query_platform_knowledge; for the internal corpus use knowledge_search.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {

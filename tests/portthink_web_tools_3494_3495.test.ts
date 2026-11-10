@@ -51,8 +51,10 @@ describe("PortThink web tools (#3494/#3495)", () => {
     expect(Object.keys(none.getPortWebTools())).toEqual([]);
   });
 
-  it("web_search fails loud with the named code when no provider key is set", async () => {
-    const tools = new AnyAgent({}).getPortWebTools() as Record<string, any>;
+  it("web_search fails loud with the named code when the provider chain is empty", async () => {
+    // #3935: the default chain is keyless-first, so the unconfigured
+    // case is an explicitly empty chain.
+    const tools = new AnyAgent({ WEB_SEARCH_PROVIDERS: "" }).getPortWebTools() as Record<string, any>;
     const out = await tools.web_search.execute({ query: "aapl" });
     expect(out).toMatchObject({ ok: false, error: "web_search_provider_not_configured" });
   });
@@ -95,10 +97,13 @@ describe("PortThink web tools (#3494/#3495)", () => {
     expect(config).toEqual({ instructions: "own" });
   });
 
-  it("the manifest reports web tools enabled for a plain fleet class, search gated on its key", () => {
+  it("the manifest reports both web tools enabled for a plain fleet class — no key is required", () => {
     const m = resolveAgentCapabilityManifest("ResearchAgent", { env: {} });
     expect(m.tools.webFetch.state).toBe("enabled");
-    expect(m.tools.webSearch.state).toBe("unavailable");
-    expect(m.tools.webSearch.unavailableReason).toBe("web_search_provider_not_configured");
+    // #3935: the chain's keyless provider means web_search needs no
+    // provider secret, so the entry carries no prerequisite and
+    // resolves enabled against an empty env.
+    expect(m.tools.webSearch.state).toBe("enabled");
+    expect(m.tools.webSearch.prerequisite).toBeUndefined();
   });
 });
