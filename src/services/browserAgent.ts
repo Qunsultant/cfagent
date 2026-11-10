@@ -74,6 +74,47 @@ export function stripHtmlToText(html: string): string {
     .trim();
 }
 
+/**
+ * The receipt a snap's Slack leg must carry when the transport sends
+ * TEXT (the cfpay A2A leg) instead of Block Kit. The webhook and
+ * bot-token legs post the block payload; posting the one-line headline
+ * through the text leg and reporting success would overstate what
+ * Slack actually received, so the text leg carries the same fields.
+ */
+function transactionSnapReceiptText(
+  tx: TransactionSnapData,
+  parts: {
+    actionUpper: string;
+    statusUpper: string;
+    priceFormatted: string;
+    totalFormatted: string;
+    routing: string;
+    timestamp: string;
+  },
+): string {
+  const lines = [
+    `🧾 Transaction Receipt: ${parts.actionUpper} ${tx.quantity} ${tx.symbol} (${parts.statusUpper})`,
+    `• Status: ${parts.statusUpper}`,
+    `• Price / Order Type: ${parts.priceFormatted} (${(tx.orderType || "MARKET").toUpperCase()})`,
+    `• Total Consideration: ${parts.totalFormatted}`,
+    `• Broker Routing: ${parts.routing}`,
+  ];
+  if (tx.legs && tx.legs.length > 0) {
+    lines.push(
+      `• Legs: ${tx.legs
+        .map(
+          (leg, idx) =>
+            `L${idx + 1} ${leg.action} ${leg.symbol}${leg.strike ? ` @ $${leg.strike}` : ""}${
+              leg.expiry ? ` exp ${leg.expiry}` : ""
+            }`,
+        )
+        .join("; ")}`,
+    );
+  }
+  lines.push(`• TxID: ${tx.transactionId} • Timestamp: ${parts.timestamp}`);
+  return lines.join("\n");
+}
+
 export class ETradeBrowserService {
   constructor(private env?: Env) {}
 
@@ -307,7 +348,16 @@ export class ETradeBrowserService {
       try {
         const config = getCfpayConfig(this.env)!;
         const res = await cfpayPostToSlack(config, payload.text, options.channel);
-        return { success: res.ok, url, error: res.error, timestamp };
+        return {
+          success: res.ok,
+          url,
+          error: res.ok
+            ? undefined
+            : `slack_delivery_failed: ${
+                res.error ?? "the cfpay Slack agent did not confirm delivery"
+              }`,
+          timestamp,
+        };
       } catch (err: any) {
         return { success: false, url, error: err.message, timestamp };
       }
@@ -318,7 +368,10 @@ export class ETradeBrowserService {
       success: false,
       url,
       timestamp,
-      error: "Not delivered: no Slack webhook URL or bot token is configured (set SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN); nothing was sent to Slack.",
+      error:
+        "Not delivered: no Slack transport is configured — none of SLACK_WEBHOOK_URL, SLACK_BOT_TOKEN, " +
+        "or cfpay (CFPAY_OUTBOUND_TOKEN / CFPAY_A2A_TOKEN) is set, so nothing was sent to Slack. " +
+        "Set one of those to enable Slack delivery.",
     };
   }
 
@@ -492,6 +545,7 @@ export class ETradeBrowserService {
     const isLive = tx.environment === "live" || tx.environment === "PROD";
     const statusUpper = (tx.status || "EXECUTED").toUpperCase();
     const actionUpper = (tx.action || "BUY").toUpperCase();
+    const routingLabel = isLive ? "E*TRADE Live [PROD]" : "E*TRADE Sandbox [TEST]";
     const totalFormatted = tx.totalValue !== undefined
       ? `$${Math.abs(tx.totalValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
       : "N/A";
@@ -526,7 +580,7 @@ export class ETradeBrowserService {
           { type: "mrkdwn", text: `*Status:*\n${statusEmoji} *${statusUpper}*` },
           { type: "mrkdwn", text: `*Price / Order Type:*\n${priceFormatted} (${tx.orderType || "MARKET"})` },
           { type: "mrkdwn", text: `*Total Consideration:*\n*${totalFormatted}*` },
-          { type: "mrkdwn", text: `*Broker Routing:*\n${isLive ? "E*TRADE Live [PROD]" : "E*TRADE Sandbox [TEST]"}` },
+          { type: "mrkdwn", text: `*Broker Routing:*\n${routingLabel}` },
         ],
       },
     ];
@@ -636,14 +690,31 @@ export class ETradeBrowserService {
     } else if (getCfpayConfig(this.env)) {
       try {
         const config = getCfpayConfig(this.env)!;
-        const res = await cfpayPostToSlack(config, payload.text, options.channel);
+        // The cfpay leg sends TEXT, so it carries the receipt the block
+        // legs carry — not the one-line headline.
+        const res = await cfpayPostToSlack(
+          config,
+          transactionSnapReceiptText(tx, {
+            actionUpper,
+            statusUpper,
+            priceFormatted,
+            totalFormatted,
+            routing: routingLabel,
+            timestamp,
+          }),
+          options.channel,
+        );
         return {
           success: res.ok,
           transactionId: tx.transactionId,
           symbol: tx.symbol,
           channel: options.channel,
           screenshotBase64,
-          error: res.error,
+          error: res.ok
+            ? undefined
+            : `slack_delivery_failed: ${
+                res.error ?? "the cfpay Slack agent did not confirm delivery"
+              }`,
           timestamp,
         };
       } catch (err: any) {
@@ -664,7 +735,10 @@ export class ETradeBrowserService {
       transactionId: tx.transactionId,
       symbol: tx.symbol,
       screenshotBase64,
-      error: "Not delivered: no Slack webhook URL or bot token is configured (set SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN); the snap was prepared but nothing was sent to Slack.",
+      error:
+        "Not delivered: no Slack transport is configured — none of SLACK_WEBHOOK_URL, SLACK_BOT_TOKEN, " +
+        "or cfpay (CFPAY_OUTBOUND_TOKEN / CFPAY_A2A_TOKEN) is set, so the snap was prepared but " +
+        "nothing was sent to Slack. Set one of those to enable Slack delivery.",
       timestamp,
     };
   }
