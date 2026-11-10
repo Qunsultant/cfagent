@@ -777,7 +777,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/tenantProviders.ts", "public.com", 1],
   ["src/client/tenantProviders.ts", "yahoo", 1],
   ["src/client/tokens.css", "etrade", 5],
-  ["src/client/tradeExecutionPreview.ts", "etrade", 5],
+  ["src/client/tradeExecutionPreviewModel.ts", "etrade", 5],
   ["src/config/agenticPaymentsModes.ts", "etrade", 1],
   ["src/config/asyncJobModes.ts", "etrade", 5],
   ["src/config/cloudflareBrowserMiscModes.ts", "etrade", 15],

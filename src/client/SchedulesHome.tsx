@@ -40,7 +40,7 @@ import {
   parseSchedulesDeepLink,
   type SchedulesDeepLink,
   type SchedulesHomeView,
-} from "./schedulesHome";
+} from "./schedulesHomeView";
 
 const SCHEDULES_HOME_TABS: TabOption<SchedulesHomeView>[] = SCHEDULES_HOME_VIEWS.map(
   (id) => ({ id, label: SCHEDULES_HOME_VIEW_LABELS[id] }),
