@@ -224,11 +224,23 @@ export function StockCopilotPanel() {
   const statusView = STATUS_VIEW[status.status];
   const selectionLabel = copilotSelectionLabel(status);
   const effectiveCadence = status.cadence?.effective ?? "every 30 minutes";
+  const universeSymbols = status.universe ?? [];
+  const universeCount = universeSymbols.length;
+  const universeMemberWord = universeCount === 1 ? "member" : "members";
+  // #3936: name the resolution, not just the preset. "NASDAQ100 (12 symbols)"
+  // must read as the labelled fallback it is, and a stored list must show its
+  // member count and snapshot date.
   const universeLabel =
     status.universePreset && status.universePreset !== "DEFAULT"
-      ? `${status.universePreset} (${(status.universe ?? []).join(", ")})`
-      : status.universe && status.universe.length > 0
-        ? status.universe.join(", ")
+      ? status.universeSource === "stored-index"
+        ? `${status.universePreset} · ${universeCount} ${universeMemberWord}${
+            status.universeSnapshotDate ? ` · snapshot ${status.universeSnapshotDate}` : ""
+          }`
+        : status.universeSource === "preset-fallback"
+          ? `${status.universePreset} · ${universeCount}-symbol labelled fallback`
+          : `${status.universePreset} (${universeSymbols.join(", ")})`
+      : universeCount > 0
+        ? universeSymbols.join(", ")
         : "SPY, QQQ, AAPL, MSFT and NVDA";
 
   return (
@@ -322,6 +334,12 @@ export function StockCopilotPanel() {
           fired (or never recorded a firing). Check the runs view for
           the stock-copilot-paper-cycle job; the first cycle (or its
           named refusal) will appear here as the latest cycle.
+        </Notice>
+      )}
+      {status.universeSource === "preset-fallback" && (
+        <Notice tone="warning">
+          {`The ${status.universePreset ?? "configured"} universe is running on its labelled ${universeCount}-symbol fallback`}
+          {status.universeFallbackReason ? ` — ${status.universeFallbackReason}` : "."}
         </Notice>
       )}
       {status.paused && (
