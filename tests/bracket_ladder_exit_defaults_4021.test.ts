@@ -9,7 +9,10 @@
  * caller that names neither is refused before a rung is placed.
  */
 import { describe, it, expect } from "vitest";
-import { resolveLadderExitDeltas } from "../src/services/bracketLadder";
+import {
+  resolveLadderExitDeltas,
+  deriveLadderIdFromKey,
+} from "../src/services/bracketLadder";
 
 describe("Issue #4021 — ladder exit resolution", () => {
   it("keeps absolute deltas when given", () => {
@@ -51,5 +54,26 @@ describe("Issue #4021 — ladder exit resolution", () => {
     expect(() =>
       resolveLadderExitDeltas({ basePrice: 100, takeProfitDelta: 0, stopLossDelta: 2 }),
     ).toThrow(/must both be positive/);
+  });
+});
+
+describe("Issue #4022 — ladder idempotency", () => {
+  it("derives the same ladder id for the same key, so a retry cannot duplicate rungs", async () => {
+    const first = await deriveLadderIdFromKey("aapl-2026-11-10-bracket-1");
+    const second = await deriveLadderIdFromKey("aapl-2026-11-10-bracket-1");
+    expect(first).toBe(second);
+    expect(first).toMatch(/^lad_idem_[0-9a-f]{16}$/);
+  });
+
+  it("treats a padded key as the same request", async () => {
+    expect(await deriveLadderIdFromKey("  key-1  ")).toBe(
+      await deriveLadderIdFromKey("key-1"),
+    );
+  });
+
+  it("gives different keys different ladder ids", async () => {
+    expect(await deriveLadderIdFromKey("key-1")).not.toBe(
+      await deriveLadderIdFromKey("key-2"),
+    );
   });
 });

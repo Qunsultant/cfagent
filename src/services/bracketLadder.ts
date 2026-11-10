@@ -74,6 +74,8 @@ export interface BracketLadderSpec {
   timeInForce?: "day" | "gtc";
   extendedHours?: boolean;
   ladderId?: string;
+  /** #4022: retries with the same key reuse the ladder id (and its client order ids). */
+  idempotencyKey?: string;
 }
 
 export interface BracketLadderValidationResult {
@@ -352,12 +354,33 @@ export function buildLadderFromPatternRange(params: {
 /**
  * Executes a bracket ladder across the active broker via MarketDataResearchService.
  */
+/**
+ * Issue #4022 — stable ladder id from a caller's idempotency key.
+ *
+ * Retrying a ladder used to mint a fresh `lad_<timestamp>_<rand>` and place
+ * every rung again, which is how repeated attempts stacked duplicate AAPL
+ * orders. With a key, the ladder id — and therefore every rung's
+ * clientOrderId — is deterministic, so a retry cannot create a second set.
+ */
+export async function deriveLadderIdFromKey(key: string): Promise<string> {
+  const bytes = new TextEncoder().encode(key.trim());
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `lad_idem_${hex.slice(0, 16)}`;
+}
+
 export async function executeBracketLadder(
   spec: BracketLadderSpec,
   env: Env,
 ): Promise<BracketLadderReceipt> {
   const validation = validateBracketLadderSpec(spec);
-  const ladderId = spec.ladderId || `lad_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const ladderId =
+    spec.ladderId ||
+    (spec.idempotencyKey
+      ? await deriveLadderIdFromKey(spec.idempotencyKey)
+      : `lad_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
 
   if (!validation.valid) {
     return {
