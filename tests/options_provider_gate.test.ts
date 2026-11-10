@@ -53,17 +53,13 @@ describe("options feed gate decision", () => {
     }
   });
 
-  it("returns the coded unavailable response for non-chain providers", async () => {
+  it("serves non-chain selections through a capable provider (#4014)", () => {
+    // yahoo/nasdaq/alpaca declare no optionsChains, but a chain is still served
+    // by the capable provider and the run record names both (see
+    // tests/options_chain_serving_4014.test.ts). Refusing instead left the
+    // options screens with no chain at all.
     for (const dataProviderId of ["yahoo", "alpaca", "nasdaq", "bogus"]) {
-      const res = optionsFeedGateResponse({ dataProviderId, brokerId: "etrade" });
-      expect(res).not.toBeNull();
-      expect(res!.status).toBe(502);
-      const body = (await res!.json()) as Record<string, unknown>;
-      expect(body.code).toBe("FAILURE_DATA_PROVIDER_UNAVAILABLE");
-      expect(body.selectedDataProvider).toBe(dataProviderId);
-      expect(body.capability).toBe("optionsChains");
-      expect(typeof body.message).toBe("string");
-      expect(body.message as string).toContain("[FAILURE_DATA_PROVIDER_UNAVAILABLE]");
+      expect(optionsFeedGateResponse({ dataProviderId, brokerId: "etrade" })).toBeNull();
     }
   });
 });
