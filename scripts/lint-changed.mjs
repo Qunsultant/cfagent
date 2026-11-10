@@ -54,17 +54,29 @@ function resolveBase(explicit) {
   return null;
 }
 
-function changedFiles(base) {
-  const out = git([
-    "diff",
-    "--name-only",
-    "--diff-filter=ACMR",
-    ...(base ? [`${base}...HEAD`] : ["HEAD"]),
-  ]);
+function parseNames(out) {
   return out
     .split("\n")
     .map((line) => line.trim().replace(/\\/g, "/"))
     .filter((line) => line.length > 0 && LINTABLE.test(line));
+}
+
+/**
+ * Files this branch changes relative to the base.
+ *
+ * Three-dot (`base...HEAD`) is the precise form — it diffs from the merge base,
+ * so an unrelated change on the base never shows up. CI checks out shallow,
+ * where a fetched base commit has no merge base with HEAD; there the two-dot
+ * form (`base HEAD`) still compares the two trees, which is exactly the set of
+ * files the PR changed. Try the precise form first, fall back to the tree form.
+ */
+function changedFiles(base) {
+  if (!base) return parseNames(git(["diff", "--name-only", "--diff-filter=ACMR", "HEAD"]));
+  try {
+    return parseNames(git(["diff", "--name-only", "--diff-filter=ACMR", `${base}...HEAD`]));
+  } catch {
+    return parseNames(git(["diff", "--name-only", "--diff-filter=ACMR", base, "HEAD"]));
+  }
 }
 
 async function main() {
