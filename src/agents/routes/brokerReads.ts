@@ -10,6 +10,10 @@
  *   GET /broker/positions
  *   GET /broker/status
  *   GET /broker/quote?symbol=…
+ *   GET /broker/orders/history?status=open|closed|all (#3359)
+ *   GET /broker/activities?type=… (#3359)
+ *   GET /broker/watchlists (#3434)
+ *   GET /broker/alerts (#3937)
  *
  * Same shape as the options reads (#3233): the SELECTED broker serves the
  * call, the persisted trading environment is echoed, and a capability the
@@ -38,6 +42,7 @@ export interface BrokerReadsRouteContext {
 }
 
 const UNSUPPORTED_CODE = "provider_unsupported";
+const NOT_IMPLEMENTED_CODE = "BROKER_CAPABILITY_NOT_IMPLEMENTED";
 const ACCOUNTS_FAILED_CODE = "BROKER_ACCOUNTS_FAILED";
 const POSITIONS_FAILED_CODE = "BROKER_POSITIONS_FAILED";
 const STATUS_FAILED_CODE = "BROKER_STATUS_FAILED";
@@ -45,6 +50,7 @@ const QUOTE_FAILED_CODE = "BROKER_QUOTE_FAILED";
 const HISTORY_FAILED_CODE = "BROKER_ORDER_HISTORY_FAILED";
 const ACTIVITY_FAILED_CODE = "BROKER_ACTIVITY_FAILED";
 const WATCHLISTS_FAILED_CODE = "BROKER_WATCHLISTS_FAILED";
+const ALERTS_FAILED_CODE = "BROKER_ALERTS_FAILED";
 const FEATURE_DISABLED_CODE = "FEATURE_DISABLED";
 
 function unsupportedResponse(broker: string, capability: string): Response {
@@ -53,6 +59,25 @@ function unsupportedResponse(broker: string, capability: string): Response {
       code: UNSUPPORTED_CODE,
       broker,
       message: `${capability} are not available for the selected broker (${broker}); no other broker's data is used in its place.`,
+      retryable: false,
+    },
+    { status: 501 },
+  );
+}
+
+/**
+ * Issue #3937: a capability the catalog declares but the platform does not
+ * implement is a DISTINCT 501 from provider_unsupported. The two are
+ * different facts — "declared but unimplemented" is a bug to fix, "genuinely
+ * unsupported" is a contract decision — and the panel, the operator, and
+ * the issue tracker must be able to tell them apart.
+ */
+function notImplementedResponse(broker: string, capability: string): Response {
+  return Response.json(
+    {
+      code: NOT_IMPLEMENTED_CODE,
+      broker,
+      message: `${capability} are declared for the selected broker (${broker}) but the platform does not implement them yet; no other broker's data is used in its place.`,
       retryable: false,
     },
     { status: 501 },
@@ -118,7 +143,10 @@ export async function handleBrokerReadsRoutes(
   // Issue #3434: the broker's own saved lists. Declared per broker, like every
   // other read, so a broker without them answers by name instead of an empty table.
   const wantsWatchlists = path.endsWith("/broker/watchlists");
-  if (!wantsAccounts && !wantsPositions && !wantsStatus && !wantsQuote && !wantsOrderHistory && !wantsActivity && !wantsWatchlists)
+  // Issue #3937: the broker's own alerts. The selected broker either has
+  // them or the catalog gate below refuses it by name.
+  const wantsAlerts = path.endsWith("/broker/alerts");
+  if (!wantsAccounts && !wantsPositions && !wantsStatus && !wantsQuote && !wantsOrderHistory && !wantsActivity && !wantsWatchlists && !wantsAlerts)
     return null;
   if (request.method !== "GET") return null;
 
@@ -150,6 +178,9 @@ export async function handleBrokerReadsRoutes(
   if (wantsWatchlists && !brokerSupports(broker, "watchlists")) {
     return unsupportedResponse(broker, "Watchlists");
   }
+  if (wantsAlerts && !brokerSupports(broker, "alerts")) {
+    return unsupportedResponse(broker, "Alerts");
+  }
 
   // Issue #3293: validate the quote request before constructing the broker,
   // so a refusal never instantiates a platform it cannot use.
@@ -168,7 +199,7 @@ export async function handleBrokerReadsRoutes(
 
   if (wantsAccounts) {
     if (typeof platform.getAccounts !== "function") {
-      return unsupportedResponse(broker, "Accounts");
+      return notImplementedResponse(broker, "Accounts");
     }
     try {
       const result = await platform.getAccounts();
@@ -181,7 +212,7 @@ export async function handleBrokerReadsRoutes(
 
   if (wantsPositions) {
     if (typeof platform.getPositions !== "function") {
-      return unsupportedResponse(broker, "Positions");
+      return notImplementedResponse(broker, "Positions");
     }
     try {
       const result = await platform.getPositions();
@@ -197,7 +228,7 @@ export async function handleBrokerReadsRoutes(
   // different fact entirely.
   if (wantsOrderHistory) {
     if (typeof platform.getOrderHistory !== "function") {
-      return unsupportedResponse(broker, "Order history");
+      return notImplementedResponse(broker, "Order history");
     }
     const statusParam = String(url.searchParams.get("status") ?? "open").trim().toLowerCase();
     const status = statusParam === "closed" || statusParam === "all" ? statusParam : "open";
@@ -221,7 +252,7 @@ export async function handleBrokerReadsRoutes(
   // Issue #3359: the broker's own account activity, in its own vocabulary.
   if (wantsActivity) {
     if (typeof platform.getAccountActivity !== "function") {
-      return unsupportedResponse(broker, "Account activity");
+      return notImplementedResponse(broker, "Account activity");
     }
     const activityType = String(url.searchParams.get("type") ?? "").trim();
     try {
@@ -245,7 +276,7 @@ export async function handleBrokerReadsRoutes(
   // an empty array would read as "you saved nothing", which is a different fact.
   if (wantsWatchlists) {
     if (typeof platform.getWatchlists !== "function") {
-      return unsupportedResponse(broker, "Watchlists");
+      return notImplementedResponse(broker, "Watchlists");
     }
     try {
       const watchlists = await platform.getWatchlists();
@@ -257,6 +288,29 @@ export async function handleBrokerReadsRoutes(
           code: WATCHLISTS_FAILED_CODE,
           broker,
           message: `The selected broker (${broker}) could not list its watchlists: ${sentence(reason)}.`,
+          retryable: true,
+        },
+        { status: 502 },
+      );
+    }
+  }
+
+  // Issue #3937: the broker's own alerts. A failed read is a named failure;
+  // an empty array would read as "you have no alerts", which is a different fact.
+  if (wantsAlerts) {
+    if (typeof platform.getAlerts !== "function") {
+      return notImplementedResponse(broker, "Alerts");
+    }
+    try {
+      const alerts = await platform.getAlerts();
+      return Response.json({ broker, environment, alerts });
+    } catch (error) {
+      const reason = (error as Error)?.message || "the alerts read failed";
+      return Response.json(
+        {
+          code: ALERTS_FAILED_CODE,
+          broker,
+          message: `The selected broker (${broker}) could not list its alerts: ${sentence(reason)}.`,
           retryable: true,
         },
         { status: 502 },

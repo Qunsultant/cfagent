@@ -23,15 +23,17 @@
  * stays on the legacy E*TRADE route); remote orders and cancel stay
  * E*TRADE-only. The legacy /api/etrade/* routes are untouched.
  */
-import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports, BROKER_CATALOG, BROKER_UNAVAILABLE_CODE } from "../../trading";
+import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports, BROKER_CATALOG, BROKER_UNAVAILABLE_CODE, type BrokerId } from "../../trading";
 import { handleBrokerLimitRoutes } from "./brokerLimits";
 import {
   cancelAllOrders,
   cancelSingleOrder,
   cancelTickerOrders,
   createCancelBrokerPort,
+  createPlatformCancelPort,
   recordCancelOutcome,
   recordScopedCancelOutcome,
+  type CancelBrokerPort,
 } from "../../services/orderCancellation";
 import { createSqlCancelPreviewStore } from "../../services/cancelPreviewStore";
 import { resolveTradingLimits } from "../../trading";
@@ -61,6 +63,40 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 });
 
 export type BrokerOrderRouteContext = EtradeBrokerRouteContext;
+
+/**
+ * Issue #3937: the cancel port for the selected broker. The service-port
+ * broker keeps its service port — the bracket-leg semantics live in that
+ * broker's row shape, so the engine must keep reading those rows for
+ * that broker. Every other broker with the orderCancel capability runs
+ * the same engine over its platform adapter (list via getOrderHistory,
+ * cancel via cancelOrderRemote). Null when the adapter omits a method
+ * the engine needs: the caller answers
+ * BROKER_CAPABILITY_NOT_IMPLEMENTED, never provider_unsupported — the
+ * capability is declared, the implementation is what is missing.
+ */
+function cancelPortForBroker(
+  broker: BrokerId,
+  ctx: BrokerOrderRouteContext,
+  userLogin: string,
+  requestedEnv: "TEST" | "PROD" | undefined,
+): CancelBrokerPort | null {
+  if (broker === "alpaca") return createCancelBrokerPort(ctx.env);
+  const platform = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv);
+  if (typeof platform.getOrderHistory !== "function" || typeof platform.cancelOrderRemote !== "function") return null;
+  return createPlatformCancelPort(platform);
+}
+
+/**
+ * Issue #3937: the ledger identity for a scoped cancel on a broker other
+ * than the service-port broker — its own broker id, with the mode from
+ * the resolved trading environment (TEST is paper, PROD is live).
+ * Service-port rows keep their existing derivation (env vars) and do
+ * not use this.
+ */
+function scopedCancelLedger(broker: string, requestedEnv: "TEST" | "PROD" | undefined): { broker: string; mode: "live" | "paper" } {
+  return { broker, mode: requestedEnv === "PROD" ? "live" : "paper" };
+}
 
 /**
  * Issue #3232 (program #3216): the routed brokers come from the one broker
@@ -417,9 +453,11 @@ export async function handleBrokerOrderRoutes(
   }
 
   // Issue #3884/#3886: cancel every open order for one ticker, with the
-  // shared class/side/ladder filter. Alpaca is the broker that can list its
-  // own open orders for a symbol; any other broker is refused by name rather
-  // than asked to cancel someone else's orders.
+  // shared class/side/ladder filter. The SELECTED broker serves it (#3937):
+  // Alpaca through its service port, any other broker with the orderCancel
+  // capability through its platform adapter — and a broker without the
+  // capability is refused by name rather than asked to cancel someone
+  // else's orders.
   if (path.endsWith("/broker/orders/cancel-ticker") && request.method === "POST") {
     try {
       const body = (await request.json().catch(() => ({}))) as any;
@@ -431,7 +469,7 @@ export async function handleBrokerOrderRoutes(
       if (!userLogin) return unauthenticatedResponse();
 
       const broker = await resolveTenantBroker(ctx.env);
-      if (broker !== "alpaca") {
+      if (!brokerSupports(broker, "orderCancel")) {
         return Response.json(
           {
             code: "provider_unsupported",
@@ -443,12 +481,25 @@ export async function handleBrokerOrderRoutes(
         );
       }
 
+      const port = cancelPortForBroker(broker, ctx, userLogin, requestedEnv);
+      if (!port) {
+        return Response.json(
+          {
+            code: "BROKER_CAPABILITY_NOT_IMPLEMENTED",
+            broker,
+            message: `${broker} declares order cancellation but does not implement the reads it needs; no other broker was asked to cancel ${symbol}.`,
+            retryable: false,
+          },
+          { status: 501 },
+        );
+      }
+
       const limits = resolveTradingLimits({
         symbol,
         env: ctx.env,
         readSetting: (key) => ctx.readSettingRaw(key),
       });
-      const receipt = await cancelTickerOrders(createCancelBrokerPort(ctx.env), {
+      const receipt = await cancelTickerOrders(port, {
         symbol,
         orderClass: body.orderClass,
         orderSide: body.orderSide,
@@ -459,7 +510,18 @@ export async function handleBrokerOrderRoutes(
         limits,
       });
       if (!receipt.dryRun) {
-        recordScopedCancelOutcome(ctx.getOrm()?.getSql?.(), receipt, "broker_orders_cancel_ticker", ctx.env);
+        if (broker === "alpaca") {
+          recordScopedCancelOutcome(ctx.getOrm()?.getSql?.(), receipt, "broker_orders_cancel_ticker", ctx.env);
+        } else {
+          recordScopedCancelOutcome(
+            ctx.getOrm()?.getSql?.(),
+            receipt,
+            "broker_orders_cancel_ticker",
+            ctx.env,
+            undefined,
+            scopedCancelLedger(broker, requestedEnv),
+          );
+        }
       }
       const status = receipt.success ? 200 : receipt.code === "cancel_read_failed" ? 502 : 409;
       return Response.json(receipt, { status });
@@ -470,7 +532,8 @@ export async function handleBrokerOrderRoutes(
 
   // Issue #3885: cancel every open order. Always two steps — a bare call
   // returns the preview and a single-use token (code cancel_all_needs_preview),
-  // and only a call carrying that token cancels.
+  // and only a call carrying that token cancels. The SELECTED broker serves
+  // it (#3937), through the same per-broker port as the ticker cancel.
   if (path.endsWith("/broker/orders/cancel-all") && request.method === "POST") {
     try {
       const body = (await request.json().catch(() => ({}))) as any;
@@ -478,12 +541,25 @@ export async function handleBrokerOrderRoutes(
       if (!userLogin) return unauthenticatedResponse();
 
       const broker = await resolveTenantBroker(ctx.env);
-      if (broker !== "alpaca") {
+      if (!brokerSupports(broker, "orderCancel")) {
         return Response.json(
           {
             code: "provider_unsupported",
             broker,
             message: `${broker} does not expose a cancel-all here; no other broker was asked to cancel every open order.`,
+            retryable: false,
+          },
+          { status: 501 },
+        );
+      }
+
+      const port = cancelPortForBroker(broker, ctx, userLogin, requestedEnv);
+      if (!port) {
+        return Response.json(
+          {
+            code: "BROKER_CAPABILITY_NOT_IMPLEMENTED",
+            broker,
+            message: `${broker} declares order cancellation but does not implement the reads it needs; no other broker was asked to cancel every open order.`,
             retryable: false,
           },
           { status: 501 },
@@ -503,7 +579,7 @@ export async function handleBrokerOrderRoutes(
         readSetting: (key) => ctx.readSettingRaw(key),
       });
       const receipt = await cancelAllOrders(
-        createCancelBrokerPort(ctx.env),
+        port,
         {
           token: typeof body.confirm === "string" ? body.confirm : undefined,
           dryRun: body.dryRun === true,
@@ -513,13 +589,24 @@ export async function handleBrokerOrderRoutes(
         createSqlCancelPreviewStore(sql),
       );
       if (receipt.success || receipt.cancelled.length > 0 || receipt.refused.length > 0) {
-        recordScopedCancelOutcome(
-          sql,
-          receipt,
-          "broker_orders_cancel_all",
-          ctx.env,
-          `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`,
-        );
+        if (broker === "alpaca") {
+          recordScopedCancelOutcome(
+            sql,
+            receipt,
+            "broker_orders_cancel_all",
+            ctx.env,
+            `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`,
+          );
+        } else {
+          recordScopedCancelOutcome(
+            sql,
+            receipt,
+            "broker_orders_cancel_all",
+            ctx.env,
+            `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`,
+            scopedCancelLedger(broker, requestedEnv),
+          );
+        }
       }
       const status = receipt.success ? 200 : receipt.code === "cancel_read_failed" ? 502 : 409;
       return Response.json(receipt, { status });

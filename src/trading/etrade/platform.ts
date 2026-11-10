@@ -7,7 +7,7 @@
  * - Human-in-the-Loop (HITL) Execution Safety with W3C Agent DID Attestations.
  */
 
-import type { Env, ETradeQuote, ETradeAccount, ETradePosition, ETradePositionLot, ETradeOrderDraft, ETradeOrderExecutionResult, ETradeBrokerStatus, StockScreenerFilter, StockScreenResult, ETradeOptionChain, ETradeOptionExpireDate, BrokerCancelOrderResult } from "../../types";
+import type { Env, ETradeQuote, ETradeAccount, ETradePosition, ETradePositionLot, ETradeOrderDraft, ETradeOrderExecutionResult, ETradeBrokerStatus, StockScreenerFilter, StockScreenResult, ETradeOptionChain, ETradeOptionExpireDate, BrokerCancelOrderResult, BrokerActivity, BrokerAlert, BrokerRemoteOrder, BrokerWatchlist } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ExpectedTradeTerms, ITradingPlatform, OrderPreviewParams } from "../interfaces";
 import { etradeOrderKind, validateTradingOrderLegs } from "./optionOrders";
@@ -56,6 +56,25 @@ export function isLiveQuoteStatus(quoteStatus?: string): boolean {
  */
 export function isNonLivePricingQuoteStatus(quoteStatus?: string): boolean {
   return quoteStatus === STATIC_FALLBACK_QUOTE_STATUS || quoteStatus === "AUTH_REQUIRED";
+}
+
+/**
+ * Issue #3937: normalize a remote order row's verbatim status onto the
+ * neutral BrokerRemoteOrder union. The client maps the status word verbatim
+ * (`as any`), so a status the union does not model (e.g. EXPIRED) would
+ * otherwise leak through untyped. An unrecognised status is UNKNOWN with
+ * the broker's own word kept in rawStatus — the same contract as the
+ * #3359 mapper: an unrecognised status is never mapped onto OPEN
+ * or REJECTED, which would invent a fact.
+ */
+const KNOWN_REMOTE_ORDER_STATUSES = new Set(["OPEN", "EXECUTED", "CANCELLED", "INDIVIDUAL_FILLS", "REJECTED"]);
+
+function normalizeRemoteOrder(order: BrokerRemoteOrder): BrokerRemoteOrder {
+  const rawStatus = String(order.status ?? "");
+  if (KNOWN_REMOTE_ORDER_STATUSES.has(rawStatus)) {
+    return { ...order, status: rawStatus as BrokerRemoteOrder["status"] };
+  }
+  return { ...order, status: "UNKNOWN", rawStatus: order.rawStatus ?? rawStatus };
 }
 
 /** Disclosure appended to order previews priced from a non-live quote. */
@@ -396,6 +415,89 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     };
 
     return { account, positions: [] };
+  }
+
+  /**
+   * Issue #3937: the broker's own order history, mapped to neutral rows.
+   *
+   * The list call fetches WITHOUT a server status filter (count-bounded
+   * at 50, matching the orders draft limit): the list API's `status`
+   * filter semantics are not trusted, so the neutral
+   * "open" / "closed" / "all" split is applied client-side over the
+   * normalized status. Open is OPEN + INDIVIDUAL_FILLS (a partially
+   * filled order is still cancellable); closed is everything else.
+   *
+   * A failed read throws the client's lastError instead of returning an
+   * empty list that would read as "no orders" (#243/#517 pattern: the
+   * client returns [] with lastError set on failure; a genuine empty
+   * list carries no lastError).
+   */
+  async getOrderHistory(status: "open" | "closed" | "all" = "open"): Promise<BrokerRemoteOrder[]> {
+    const orders = await this.client.fetchOrders(undefined, { count: 50 });
+    if (orders.length === 0) {
+      const lastError = this.client.getLastError();
+      if (lastError) throw new Error(lastError);
+      return [];
+    }
+    const normalized = orders.map(normalizeRemoteOrder);
+    if (status === "all") return normalized;
+    if (status === "closed") return normalized.filter((o) => o.status !== "OPEN" && o.status !== "INDIVIDUAL_FILLS");
+    return normalized.filter((o) => o.status === "OPEN" || o.status === "INDIVIDUAL_FILLS");
+  }
+
+  /**
+   * Issue #3937: the broker's own account activity, in its own vocabulary.
+   *
+   * Maps a transaction row onto BrokerActivity. The flat transaction list
+   * carries no symbol / quantity / price, so none is invented — only what
+   * the row actually has (id, the broker's type word, date, amount). An
+   * activityType filters client-side by exact match on the broker's own
+   * word (the list API takes no type filter).
+   */
+  async getAccountActivity(activityType?: string): Promise<BrokerActivity[]> {
+    const transactions = await this.client.fetchTransactions(undefined, { count: 50 });
+    if (transactions.length === 0) {
+      const lastError = this.client.getLastError();
+      if (lastError) throw new Error(lastError);
+      return [];
+    }
+    const activities: BrokerActivity[] = transactions.map((t) => ({
+      activityId: t.transactionId,
+      activityType: t.transactionType,
+      activityDate: t.transactionDate,
+      netAmount: t.amount,
+    }));
+    return activityType ? activities.filter((a) => a.activityType === activityType) : activities;
+  }
+
+  /**
+   * Issue #3937: the account's own saved lists, verbatim from the broker.
+   * A business error from the client passes through (it already carries
+   * its coded message); a technical failure throws the lastError rather
+   * than returning an empty list that would read as "you saved nothing".
+   */
+  async getWatchlists(): Promise<BrokerWatchlist[]> {
+    const watchlists = await this.client.getWatchlists();
+    if (watchlists.length === 0) {
+      const lastError = this.client.getLastError();
+      if (lastError) throw new Error(lastError);
+      return [];
+    }
+    return watchlists;
+  }
+
+  /**
+   * Issue #3937: the broker's own alerts, verbatim from the broker.
+   * Count-bounded at 50, matching the alerts panel read.
+   */
+  async getAlerts(): Promise<BrokerAlert[]> {
+    const alerts = await this.client.fetchAlerts({ count: 50 });
+    if (alerts.length === 0) {
+      const lastError = this.client.getLastError();
+      if (lastError) throw new Error(lastError);
+      return [];
+    }
+    return alerts;
   }
 
   async previewOrder(params: OrderPreviewParams): Promise<ETradeOrderDraft> {

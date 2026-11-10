@@ -59,7 +59,9 @@ const baseCtx = (
   overrides: Partial<TradingIntegrationsRouteContext> = {}
 ): TradingIntegrationsRouteContext =>
   ({
-    env: {} as any,
+    // Issue #3937: the desks are E*TRADE services, so the test tenant
+    // selects etrade explicitly — the platform default is alpaca now.
+    env: { BROKER_ID: "etrade" } as any,
     getOrm: () => ({}) as any,
     audit: vi.fn(),
     agentCtx: {} as any,
@@ -171,6 +173,25 @@ describe("handleTradingIntegrationsRoutes behavior", () => {
     expect(
       await handleTradingIntegrationsRoutes(req("GET", "/api/trading/email/inbound"), urlOf("/api/trading/email/inbound"), "/api/trading/email/inbound", "s", ctx)
     ).toBeNull();
+  });
+
+  it("a non-E*TRADE tenant gets the coded desk refusal, never the service (#3937)", async () => {
+    // Issue #3937: the platform default is alpaca, so a tenant with no
+    // stored selection is refused by name on the E*TRADE desks — the
+    // service is never constructed and nothing is previewed or routed.
+    const ctx = baseCtx({ env: { BROKER_ID: "alpaca" } as any });
+    const res = await handleTradingIntegrationsRoutes(
+      req("POST", "/api/trading/email/inbound", { subject: "quote AAPL" }),
+      urlOf("/api/trading/email/inbound"),
+      "/api/trading/email/inbound",
+      "sess-1",
+      ctx
+    );
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(501);
+    const body = (await res!.json()) as any;
+    expect(body.code).toBe("BROKER_CHANNEL_UNAVAILABLE");
+    expect(body.broker).toBe("alpaca");
   });
 
   it("POST /trading/email/inbound dispatches the email service and audits (contract preserved)", async () => {

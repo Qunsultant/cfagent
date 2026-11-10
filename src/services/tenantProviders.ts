@@ -12,8 +12,10 @@
  *     route implementation in this build.
  * Defaults are etrade (data provider) / the platform default
  * broker (DEFAULT_TENANT_PROVIDERS.brokerId, commercialPorts.ts)
- * — issue #3812, owner rule on #3451. A store failure fails open
- * to etrade / the platform default broker for broker-handler reads
+ * — issue #3812, owner rule on #3451; issue #3937 (user decision
+ * 2026-11-10) makes that ONE default global: every surface resolves
+ * the selected broker the same way, and a store failure fails open
+ * to the platform default broker for broker-handler reads
  * (a store outage must not take down the surface that worked
  * before); the settings route itself fails closed with 503 when
  * unbound, following the auto-refresh route.
@@ -138,21 +140,32 @@ export async function resolveTenantBrokerSelection(env: unknown): Promise<Broker
 }
 
 /**
- * The concrete broker for a legacy surface. Issue #3812 keeps TWO defaults,
- * deliberately:
- * - the PLATFORM default (settings row, dynamic menu, copilot, TradingAgent
- *   baseline) is Alpaca in paper mode — `resolveTenantProviders` and the
- *   copilot resolver apply it;
- * - a LEGACY E*TRADE surface (email, Slack, voice, the E*TRADE options
- *   routes) keeps its pre-#3812 fallback when the tenant has stored NO
- *   selection, so those flows do not start calling Alpaca without a
- *   credential. A stored selection always wins.
- * A read failure is also the legacy fallback: these surfaces already
- * fail loudly when the broker is unreachable.
+ * The concrete broker for any surface that needs one. Issue #3937
+ * (user decision 2026-11-10) makes the platform default GLOBAL:
+ * there is ONE "no selection" default — the platform default broker
+ * (alpaca, in paper mode per #3451/#3857) — and every surface
+ * (neutral routes, legacy E*TRADE surfaces, email, Slack, voice,
+ * the E*TRADE options routes, the copilot resolver, the panels)
+ * resolves the selected broker through this function, so they can
+ * never disagree about which broker is selected again. A stored
+ * selection always wins; an env override wins over the store
+ * (resolveTenantBrokerSelection). This replaces the pre-#3937 legacy
+ * etrade fallback (#3812), which kept TWO defaults deliberately so
+ * legacy surfaces would not start calling Alpaca without a
+ * credential. That rationale is answered by the named refusal: a
+ * broker without a credential fails loudly with a coded outcome
+ * (FAILURE_BROKER_UNAVAILABLE / the adapter's credential error),
+ * never by substituting another broker's data. A read failure is
+ * also the platform default: these surfaces already fail loudly
+ * when the broker is unreachable.
  */
 export async function resolveTenantBroker(env: unknown): Promise<BrokerId> {
   const stored = await resolveTenantBrokerSelection(env);
-  return stored ?? "etrade";
+  // The default is declared as a plain string (TenantProviders is built
+  // from DB rows), so the same guard as the stored selection applies:
+  // a default that is not a known broker id falls back to the platform default.
+  const fallback = DEFAULT_TENANT_PROVIDERS.brokerId;
+  return stored ?? (isBrokerId(fallback) ? fallback : "alpaca");
 }
 
 /** Coded response for a broker surface the selected broker does not

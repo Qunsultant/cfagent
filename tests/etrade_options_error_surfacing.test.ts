@@ -124,6 +124,10 @@ function makeEnv(overrides: Record<string, unknown> = {}): Env {
     APP_NAME: "cfagent-test",
     APP_BASE_URL: "https://agent.openaimp.com",
     APP_ENV: "TEST",
+    // Issue #3937: the options routes serve the selected broker's
+    // platform, so the test tenant selects etrade explicitly — the
+    // platform default is alpaca now.
+    BROKER_ID: "etrade",
     ET_API_KEY: FAKE_KEY,
     ET_API_SECRET: FAKE_SECRET,
     ET_BASE_URL: "https://apisb.etrade.com/v1",
@@ -146,6 +150,10 @@ function makeBareEnv(): Env {
     APP_NAME: "cfagent-test",
     APP_BASE_URL: "https://agent.openaimp.com",
     APP_ENV: "TEST",
+    // Issue #3937: the options routes serve the selected broker's
+    // platform, so the test tenant selects etrade explicitly — the
+    // platform default is alpaca now.
+    BROKER_ID: "etrade",
     ET_BASE_URL: "https://apisb.etrade.com/v1",
     SESSION_STORE: sessionStoreNs,
     ETRADE_KV: kv,

@@ -18,6 +18,7 @@ import type {
   BrokerPositionLot,
   BrokerAccount,
   BrokerActivity,
+  BrokerAlert,
   BrokerWatchlist,
   BrokerRemoteOrder,
   BrokerStatus,
@@ -212,6 +213,14 @@ export interface ITradingPlatform {
   getAccountActivity?(activityType?: string): Promise<BrokerActivity[]>;
   /** Issue #3434: the account's own saved lists, in the broker's vocabulary. */
   getWatchlists?(): Promise<BrokerWatchlist[]>;
+  /**
+   * Issue #3937: the broker's own alerts. Optional for the same reason as
+   * every other capability: a broker without alerts omits it and the
+   * surface says so (a broker with alerts: false in the catalog keeps
+   * the honest named refusal), instead of an empty table reading like
+   * "no alerts".
+   */
+  getAlerts?(): Promise<BrokerAlert[]>;
 }
 
 export interface IMarketScreener {
