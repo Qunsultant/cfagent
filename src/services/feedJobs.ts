@@ -20,9 +20,11 @@
  *   run record) but never poisons reads (latestUsable skips it).
  * - Provenance is verified, not assumed: an envelope naming a
  *   different provider than the job's source fails the run.
- * - The universe is the STORED Nasdaq-100 index list
- *   (indexListPorts — the platform's snapshot-dated membership);
- *   no list ⇒ a typed FEED_UNIVERSE_MISSING failure, never an
+ * - The universe is a STORED index list (indexListPorts —
+ *   the platform's snapshot-dated membership): the job
+ *   definition's universe, or — for a parameterized job
+ *   (#3930, fundamentals) — the run input's list. No list ⇒
+ *   a typed FEED_UNIVERSE_MISSING failure, never an
  *   invented universe.
  *
  * Run outcomes are RETURNED, not thrown — the run record is the
@@ -38,6 +40,11 @@ import {
   type IndexId,
   type QuoteResult,
 } from "../trading";
+// #3930 — SECTOR_IDS from its defining module, not the ../trading
+// barrel: tests/mock boundaries stub the barrel (e.g. the #1727
+// modes suite), and a module-scope spread of a stubbed export
+// fails collection. The leaf module is pure (no I/O, no bindings).
+import { SECTOR_IDS } from "../trading/indexMembership";
 import {
   feedDatasetRowCount,
   resolveFeedQuotesFromArtifact,
@@ -60,6 +67,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 export const FEED_JOB_CODES = {
   jobNotFound: "FEED_JOB_NOT_FOUND",
   universeMissing: "FEED_UNIVERSE_MISSING",
+  universeUnknown: "FEED_UNIVERSE_UNKNOWN",
   batchUnsupported: "FEED_PROVIDER_BATCH_UNSUPPORTED",
   providerMismatch: "FEED_PROVIDER_MISMATCH",
   noQuotesReturned: "FEED_NO_QUOTES_RETURNED",
@@ -82,6 +90,76 @@ export class FeedJobError extends Error {
 }
 
 /**
+ * #3930 — the known index ids at runtime (the IndexId union's
+ * mirror: the base indices plus the sector keys). A run input
+ * naming anything outside this set is refused by name
+ * (FEED_UNIVERSE_UNKNOWN) — never resolved against a stored
+ * list it cannot name.
+ */
+const KNOWN_INDEX_IDS: ReadonlySet<string> = new Set<string>([
+  "dow",
+  "sp500",
+  "sp100",
+  "nasdaq100",
+  "russell2000",
+  "russell1000",
+  "sp400",
+  "russell3000",
+  ...SECTOR_IDS,
+]);
+
+export function isKnownIndexId(value: unknown): value is IndexId {
+  return typeof value === "string" && KNOWN_INDEX_IDS.has(value);
+}
+
+/**
+ * #3930 — resolve the stored index list a run pulls: the run
+ * input when the job is parameterized (the gap-filling jobs —
+ * fundamentals today), else the definition's universe. A
+ * universe input on a non-parameterized job, and an input
+ * naming no known index, both refuse by name (a caller or
+ * configuration bug — never a silent default, never a list
+ * the input did not name).
+ */
+export function resolveRunUniverse(
+  def: FeedJobDefinition,
+  rawUniverse: unknown,
+): IndexId {
+  if (rawUniverse === undefined || rawUniverse === null) {
+    return def.universe.index;
+  }
+  if (!def.parameterizedUniverse) {
+    throw new FeedJobError(
+      FEED_JOB_CODES.universeUnknown,
+      `Feed job "${def.id}" does not take a universe input; its universe is fixed to ${def.universe.index}.`,
+    );
+  }
+  if (!isKnownIndexId(rawUniverse)) {
+    throw new FeedJobError(
+      FEED_JOB_CODES.universeUnknown,
+      `"${String(rawUniverse)}" is not a known index id; a fundamentals run's universe input must name a stored index list (nasdaq100, sp100, sp500, dow, sp400, …).`,
+    );
+  }
+  return rawUniverse;
+}
+
+/**
+ * #3930 — the display label for a run's universe: the
+ * registry's own label when a job covers that universe, else
+ * the index id itself (the honest identifier, never a
+ * fabricated label).
+ */
+export function labelForRunUniverse(
+  registry: FeedJobRegistry,
+  universeIndex: IndexId,
+): string {
+  return (
+    registry.list().find((j) => j.universe.index === universeIndex)?.universe
+      .label ?? universeIndex
+  );
+}
+
+/**
  * The feed-job contract every source slice registers against:
  * a source, the dataset it maintains, the universe it covers,
  * and its cadence/freshness knobs (config-resolved, see
@@ -94,6 +172,15 @@ export interface FeedJobDefinition {
   dataset: string;
   elements: readonly DataProviderCapability[];
   universe: { kind: "index"; index: IndexId; label: string };
+  /**
+   * #3930 — the job's universe is a RUN INPUT, not a fixed
+   * property: the definition's universe is the DEFAULT input
+   * (nasdaq100 for fundamentals); a run may name any stored
+   * index list instead. Only the gap-filling jobs set this
+   * (fundamentals today; technicals and sentiment in #3931 /
+   * #3932) — quotes jobs stay one definition per universe.
+   */
+  parameterizedUniverse?: boolean;
   /** Declared pull cadence — the scheduling slice's input. */
   cadenceMinutes: number;
   /** Age past which the stored copy is labelled stale. */
@@ -245,7 +332,15 @@ export function buildFeedJobRegistry(
     sourceId: "yahoo",
     dataset: "fundamentals",
     elements: ["fundamentals"],
+    // #3930 — ONE fundamentals job, parameterized: the id
+    // names the DEFAULT universe (nasdaq100, kept for
+    // lineage), and a run's `universe` input names the stored
+    // index list it actually pulls. There is no per-universe
+    // fundamentals job (Correction 2, #3930 comment
+    // 6760544285): the same job serves nasdaq100, sp100,
+    // sp500, dow, sp400, and any other stored list.
     universe: { kind: "index", index: "nasdaq100", label: "Nasdaq-100" },
+    parameterizedUniverse: true,
     cadenceMinutes: resolveFeedJobCadenceMinutes(
       env,
       YAHOO_NASDAQ100_FUNDAMENTALS_JOB_ID,
@@ -338,6 +433,15 @@ export interface RunFeedJobOptions {
   userLogin?: string;
   tenantId?: string;
   runId?: string;
+  /**
+   * #3930 — the run's universe input (a parameterized job
+   * only — fundamentals today): the stored index list the run
+   * pulls, as an IndexId. Absent ⇒ the definition's universe
+   * (nasdaq100 for the fundamentals job). A value on a
+   * non-parameterized job, or an unknown index id, refuses by
+   * name (FEED_UNIVERSE_UNKNOWN).
+   */
+  universe?: IndexId;
   /**
    * #3535: pull only this subset of the universe (a sharded
    * pipeline run's partition). Provenance still names the stored
@@ -449,7 +553,11 @@ export async function runFeedJob(
   };
 
   // 1. Universe — the stored index list, never an invented one.
-  const list = await deps.universeStore.latest(def.universe.index);
+  // #3930: the run input names the list (parameterized jobs);
+  // absent ⇒ the definition's universe.
+  const universeIndex = resolveRunUniverse(def, opts.universe);
+  const universeLabel = labelForRunUniverse(registry, universeIndex);
+  const list = await deps.universeStore.latest(universeIndex);
   let symbols = list
     ? Array.from(
         new Set(
@@ -470,8 +578,8 @@ export async function runFeedJob(
   }
   const universe: FeedDatasetArtifact["universe"] = {
     kind: "index",
-    index: def.universe.index,
-    label: def.universe.label,
+    index: universeIndex,
+    label: universeLabel,
     snapshotDate: list?.snapshotDate ?? null,
     sourceLabel: list?.sourceLabel ?? null,
     size: symbols.length,
@@ -483,7 +591,7 @@ export async function runFeedJob(
       requested: 0,
       missingSymbols: [],
       codedError: FEED_JOB_CODES.universeMissing,
-      errorMessage: `No stored ${def.universe.label} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
+      errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
       universe,
     });
   }
@@ -560,7 +668,7 @@ export async function runFeedJob(
       requested: symbols.length,
       missingSymbols,
       codedError: FEED_JOB_CODES.noQuotesReturned,
-      errorMessage: `Provider "${def.sourceId}" returned no quotes for the ${def.universe.label} universe; nothing was persisted as data.`,
+      errorMessage: `Provider "${def.sourceId}" returned no quotes for the ${universeLabel} universe; nothing was persisted as data.`,
       universe,
     });
   }
@@ -667,7 +775,11 @@ export async function runFeedFundamentalsJob(
 
   // 1. Universe — the stored index list, never an invented one
   //    (a configured subset partitions it, as in the quotes run).
-  const list = await deps.universeStore.latest(def.universe.index);
+  // #3930: the run input names the list — the parameterized
+  // job serves any stored list; absent ⇒ the default universe.
+  const universeIndex = resolveRunUniverse(def, opts.universe);
+  const universeLabel = labelForRunUniverse(registry, universeIndex);
+  const list = await deps.universeStore.latest(universeIndex);
   let symbols = list
     ? Array.from(
         new Set(
@@ -685,8 +797,8 @@ export async function runFeedFundamentalsJob(
   }
   const universe: FeedDatasetArtifact["universe"] = {
     kind: "index",
-    index: def.universe.index,
-    label: def.universe.label,
+    index: universeIndex,
+    label: universeLabel,
     snapshotDate: list?.snapshotDate ?? null,
     sourceLabel: list?.sourceLabel ?? null,
     size: symbols.length,
@@ -698,7 +810,7 @@ export async function runFeedFundamentalsJob(
       requested: 0,
       missingSymbols: [],
       codedError: FEED_JOB_CODES.universeMissing,
-      errorMessage: `No stored ${def.universe.label} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
+      errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
       universe,
     });
   }
@@ -757,7 +869,7 @@ export async function runFeedFundamentalsJob(
       codedError: FEED_JOB_CODES.noFundamentalsReturned,
       errorMessage:
         firstError ??
-        `Provider "${def.sourceId}" returned no fundamentals for the ${def.universe.label} universe; nothing was persisted as data.`,
+        `Provider "${def.sourceId}" returned no fundamentals for the ${universeLabel} universe; nothing was persisted as data.`,
       universe,
     });
   }

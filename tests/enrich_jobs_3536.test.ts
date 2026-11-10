@@ -136,10 +136,18 @@ describe("the element vocabulary (#3536)", () => {
     ]);
     const yahoo = registry.get("yahoo-nasdaq100-quotes-enrich")!;
     expect(yahoo.enrichFrom).toEqual([
-      { feedJobId: "yahoo-nasdaq100-fundamentals", sourceId: "yahoo", dataset: "fundamentals" },
+      { feedJobId: "yahoo-nasdaq100-fundamentals", sourceId: "yahoo", dataset: "fundamentals", universe: "nasdaq100" },
     ]);
     expect(yahoo.elements).toContain("peTrailing");
-    expect(registry.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toEqual([]);
+    // #3930: every quotes enrich job joins the parameterized
+    // fundamentals dataset for its own universe (broker jobs
+    // included — the join is no longer Yahoo-only).
+    expect(registry.get("alpaca-nasdaq100-quotes-enrich")!.enrichFrom).toEqual([
+      { feedJobId: "yahoo-nasdaq100-fundamentals", sourceId: "yahoo", dataset: "fundamentals", universe: "nasdaq100" },
+    ]);
+    expect(registry.get("yahoo-sp100-quotes-enrich")!.enrichFrom).toEqual([
+      { feedJobId: "yahoo-nasdaq100-fundamentals", sourceId: "yahoo", dataset: "fundamentals", universe: "sp100" },
+    ]);
     expect(registry.forFeedJob("yahoo-nasdaq100-quotes")?.id).toBe(
       "yahoo-nasdaq100-quotes-enrich",
     );

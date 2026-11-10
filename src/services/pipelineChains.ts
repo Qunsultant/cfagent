@@ -16,11 +16,13 @@
  * This module is the registry half (the deliverJobs.ts idiom):
  * chain definitions DERIVED from the five stage registries —
  * never a second hand-written lineage table. The fundamentals
- * feed job joins the yahoo chain because the yahoo enrich job's
- * own `enrichFrom` declares it as a join source; there is no
- * provider special case here.
+ * feed job joins every chain whose enrich job declares it as
+ * a join source (the #3930 parameterized join — one job, the
+ * chain's universe as its input); there is no provider
+ * special case here.
  */
 import { buildFeedJobRegistry } from "./feedJobs";
+import type { IndexId } from "../trading";
 import { buildEnrichJobRegistry } from "./enrichJobs";
 import { buildAnalyzeJobRegistry } from "./analyzeJobs";
 import { buildGenerateJobRegistry } from "./generateJobs";
@@ -78,7 +80,8 @@ export interface PipelineChainDefinition {
   id: string;
   feedJobId: string;
   /** The fundamentals feed job feeding the enrich join, when
-   *  the lineage's enrich job declares one (yahoo); else null. */
+   *  the lineage's enrich job declares one; else null. #3930:
+   *  every lineage declares it (one parameterized job). */
   fundamentalsJobId: string | null;
   enrichJobId: string;
   analyzeJobId: string;
@@ -87,6 +90,12 @@ export interface PipelineChainDefinition {
   sourceId: string;
   dataset: string;
   universe: string;
+  /**
+   * #3930 — the chain's universe as an IndexId: the input the
+   * chain's fundamentals node runs with (the same job serves
+   * every universe; the node parameterizes it per chain).
+   */
+  universeIndex: IndexId;
   /** The chain's own cadence (the schedule on the chain job's
    *  root): the PIPELINE_CHAIN_<ID>_CADENCE_MINUTES knob, else
    *  the head feed job's cadence. Stage jobs keep their own
@@ -267,6 +276,7 @@ export function buildPipelineChainRegistry(
       sourceId: feed.sourceId,
       dataset: feed.dataset,
       universe: feed.universe.label,
+      universeIndex: feed.universe.index,
       cadenceMinutes: resolveMinutesKnob(
         env,
         id,

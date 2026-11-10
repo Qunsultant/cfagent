@@ -222,7 +222,7 @@ async function makeHarness(): Promise<Harness> {
 }
 
 describe("pipeline chain registry + catalog (#3540)", () => {
-  it("derives one chain per quotes lineage, with the yahoo fundamentals node from the enrich join", () => {
+  it("derives one chain per quotes lineage, with the fundamentals node from the enrich join", () => {
     const registry = buildPipelineChainRegistry({});
     expect(registry.list().map((c) => c.id)).toEqual([
       "yahoo-nasdaq100-quotes-pipeline",
@@ -255,9 +255,20 @@ describe("pipeline chain registry + catalog (#3540)", () => {
     expect(chainStageNodePath(yahoo, "enrich")).toBe("0/0");
     expect(chainStageNodePath(yahoo, "deliver")).toBe("0/0/0/0/0");
     const alpaca = registry.forId("alpaca-nasdaq100-quotes-pipeline")!;
-    expect(alpaca.fundamentalsJobId).toBeNull();
-    expect(alpaca.nodes).toHaveLength(5);
-    expect(chainStageNodePath(alpaca, "deliver")).toBe("0/0/0/0");
+    // #3930: every chain folds the parameterized fundamentals
+    // node in — the alpaca chain's fundamentals node runs the
+    // same job with the chain's universe as its input.
+    expect(alpaca.fundamentalsJobId).toBe(FUND_ID);
+    expect(alpaca.nodes).toHaveLength(6);
+    expect(alpaca.nodes.map((n) => n.jobId)).toEqual([
+      "alpaca-nasdaq100-quotes",
+      FUND_ID,
+      "alpaca-nasdaq100-quotes-enrich",
+      "alpaca-nasdaq100-quotes-enrich-analyze",
+      "alpaca-nasdaq100-quotes-enrich-analyze-generate",
+      "alpaca-nasdaq100-quotes-enrich-analyze-generate-deliver",
+    ]);
+    expect(chainStageNodePath(alpaca, "deliver")).toBe("0/0/0/0/0");
     expect(registry.forStageJob(DELIVER_ID)?.id).toBe(CHAIN_ID);
     expect(registry.forFeedJob(FEED_ID)?.id).toBe(CHAIN_ID);
   });
