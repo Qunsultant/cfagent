@@ -150,9 +150,15 @@ vi.mock("../src/trading", async () => {
   // Issue #3892: the placement schema derives its enum from the registry, so a
   // module-level stub of the trading boundary must expose it as well.
   const advanced = await vi.importActual<any>("../src/trading/advancedOrders");
+  // Issue #3930: services/feedJobs.ts spreads SECTOR_IDS at module scope
+  // (isKnownIndexId's runtime mirror of the IndexId union), so the stub
+  // must expose it or the file fails collection. Real values, via the
+  // defining leaf module — never a hardcoded copy of the list.
+  const membership = await vi.importActual<any>("../src/trading/indexMembership");
   return {
     parseStockScreenRequest: schemas.parseStockScreenRequest,
     ADVANCED_ORDER_TYPES: advanced.ADVANCED_ORDER_TYPES,
+    SECTOR_IDS: membership.SECTOR_IDS,
   };
 });
 
