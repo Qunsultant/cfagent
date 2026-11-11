@@ -4,13 +4,15 @@
   "main": "src/server.ts",
   "compatibility_date": "2026-10-31",
   "compatibility_flags": ["nodejs_compat"],
-  // Issue #4122 — cost guards taken from the two owner-supplied variants
-  // (nextgentp-cost-optimized-wrangler{,-v2}). cpu_ms caps a runaway
-  // invocation at 1s of CPU. The variants also proposed subrequests: 50,
-  // deliberately NOT applied: 50 is the Free-plan ceiling, it changes nothing
-  // there, and on a paid plan it would start failing the fan-out routes
-  // (screener, discovery, report delivery).
-  "limits": { "cpu_ms": 1000 },
+  // Issue #4128 - least-cost (C:/Users/spr9s/nextgentp-full-least-cost):
+  // no source maps in the upload; nothing at runtime reads them.
+  "upload_source_maps": false,
+  // Issue #4122 / #4128 — the CPU guard. #4122 shipped 1000ms; the least-cost
+  // target (nextgentp-full-least-cost) is 500ms, applied in #4128.
+  // subrequests: 50 from the same file is deliberately NOT applied: 50 is the
+  // Free-plan ceiling, it changes nothing there, and on a paid plan it would
+  // start failing the fan-out routes (screener, discovery, report delivery).
+  "limits": { "cpu_ms": 500 },
   // The custom domain is the only intended front door; workers.dev stays
   // closed so stray subdomain traffic cannot bill.
   "workers_dev": false,
@@ -146,16 +148,14 @@
     ]
   },
   // Issue #4112 (owner direction): the deployment provisions NO container.
-  // Cloudflare Containers bill while the application exists, and the
-  // deploy-time strip in scripts/ci/deploy-worker.mjs (#3789) only fires
-  // AFTER a 403 - with Containers permission on the token the block ships.
-  // To re-enable, uncomment and keep the sizing: ONE instance, smallest type.
+  // The block below is commented out, not deleted - uncomment it to restore
+  // the binding exactly as it was.
+  // If it is restored, cap it: "max_instances": 1, "instance_type": "lite"
+  // (one instance, smallest size - the only shape that may ship).
   // "containers": [
   //   {
   //     "class_name": "SandboxAgent",
-  //     "scheduling_policy": "durable_object",
-  //     "max_instances": 1,
-  //     "instance_type": "lite"
+  //     "scheduling_policy": "durable_object"
   //   }
   // ],
   // Issue #1169 (owner enablement, 2026-11-05) — the AI Search
@@ -273,8 +273,8 @@
     "AI_SEARCH_INSTANCE": "screener-search",
     // Issue #278: TTL cache for AI Search queries (in-isolate, per the
     // cache module's honesty note). 300000 = 5 minutes; 200 entries.
-    "AI_SEARCH_CACHE_TTL_MS": "300000",
-    "AI_SEARCH_CACHE_MAX_ENTRIES": "200",
+    "AI_SEARCH_CACHE_TTL_MS": "7200000",
+    "AI_SEARCH_CACHE_MAX_ENTRIES": "1000",
     // Issue #1169 enablement (owner direction 2026-11-04): knowledge
     // serving and AI Search report indexing are ON. The
     // ai_search_namespaces binding + instance configuration landed
@@ -359,22 +359,22 @@
     // absence means the pollingConfig defaults apply. Milliseconds,
     // except CHAT_AUTO_REFRESH_FLOOR_S (seconds, matching the stored
     // user interval). Rollback is unsetting the vars and redeploying.
-    "QUOTES_REST_FALLBACK_MS": "60000",
-    "QUOTES_WS_RECONNECT_BASE_MS": "1000",
-    "QUOTES_WS_RECONNECT_CAP_MS": "30000",
+    "QUOTES_REST_FALLBACK_MS": "300000",
+    "QUOTES_WS_RECONNECT_BASE_MS": "5000",
+    "QUOTES_WS_RECONNECT_CAP_MS": "120000",
     // Issue #4122 — cost: 30s -> 300s between options-flow polls.
-    "OPTIONS_FLOWS_POLL_MS": "300000",
+    "OPTIONS_FLOWS_POLL_MS": "600000",
     // Issue #4122 — cost: 60s -> 300s between latest-options polls.
-    "OPTIONS_LATEST_POLL_MS": "300000",
-    "CHAT_AUTO_REFRESH_FLOOR_S": "5",
-    "GOAL_TRACK_POLL_MS": "2000",
-    "GOAL_TRACK_DEADLINE_MS": "600000",
+    "OPTIONS_LATEST_POLL_MS": "600000",
+    "CHAT_AUTO_REFRESH_FLOOR_S": "30",
+    "GOAL_TRACK_POLL_MS": "60000",
+    "GOAL_TRACK_DEADLINE_MS": "3600000",
     // Issue #2443 — TickerAgent push cadence, seconds. Default 5s;
     // changing it changes live tick cadence (product call). Rollback
     // is unsetting the var and redeploying.
     // Issue #4122 — cost: 5s -> 60s cuts ticker DO activity (variants: 92%).
-    "TICKER_PUSH_INTERVAL_S": "60",
-    "MAS_MAX_STEPS": "4",
+    "TICKER_PUSH_INTERVAL_S": "300",
+    "MAS_MAX_STEPS": "2",
     "AI_MODEL": "@cf/zai-org/glm-4.7-flash",
     "CF_WALLET_NETWORK": "base-sepolia",
     "CF_WALLET_FACILITATOR": "https://x402.org/facilitator",
@@ -396,7 +396,7 @@
     // "0" (gating disabled) and redeploying — no code change. NOTE:
     // removing the var does NOT disable gating (the code default is
     // 30s); only "0" disables it.
-    "IAAA_WIRED_FRESHNESS_MS": "30000",
+    "IAAA_WIRED_FRESHNESS_MS": "120000",
     // Issue #3155 (Q9) — default grant lifetime in days for
     // non-platform-scope bindings without an explicit expiry.
     // Adopted initial value 90; "0" resolves to 90, never to
