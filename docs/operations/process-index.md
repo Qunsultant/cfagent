@@ -81,6 +81,17 @@ category is defined in the [taxonomy](process-taxonomy.md) so it
 exists before it is needed; the first autopilot process will be
 classified here when one is filed, not before.
 
+## Reference — runtime inventory
+
+Not a process, so not a row in the tables above — the single live
+inventory of everything that runs, with trigger, cadence, enabled
+state, and default source. Linked here because this index is the
+single entry point for operational guides.
+
+| Document | Owner | Status | Last verified |
+| --- | --- | --- | --- |
+| [Runtime inventory](runtime-inventory.md) | CFO-qunso | Current | 2026-11-11 |
+
 ## Gaps (named, not hidden)
 
 Every process above with status `Not yet documented` is a gap, with
