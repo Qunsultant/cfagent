@@ -731,7 +731,7 @@ describe("S3-P06 the goals view reads the one consolidated ledger (#3121)", () =
 });
 
 describe("S3-P08 the coverage map is seeded and its homeless rows are filed (#3121)", () => {
-  it("§9 maps every B-T3 capability to a home, and the homeless ones name their filed issue", () => {
+  it("§9 maps every B-T3 capability to a home; #3393 landed, #3394 still names its filed issue", () => {
     const doc = source("docs/architecture/scheduling/3121-s0-inventory.md");
     expect(doc).toContain("## 9. Capability-coverage map");
     expect(doc).toContain("LOSSLESS AND ADDITIVE");
@@ -748,11 +748,12 @@ describe("S3-P08 the coverage map is seeded and its homeless rows are filed (#31
     ]) {
       expect(map).toContain(id);
     }
-    // The S3 comb's two homeless capabilities are filed, not
-    // dropped — and the map says so with their numbers.
+    // The S3 comb's two homeless capabilities were filed, not
+    // dropped — and the map says so with their numbers. #3393
+    // landed; #3394 stays filed-open until its slice lands.
     expect(map).toContain("#3393");
     expect(map).toContain("#3394");
-    expect(map).toContain("Filed #3393 (open)");
+    expect(map).toContain("#3393 — landed");
     expect(map).toContain("Filed #3394 (open)");
   });
 });

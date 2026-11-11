@@ -180,3 +180,33 @@ describe("governed firing with a chain executor (#1523)", () => {
     expect(failed.record.firedAt).toBeFalsy();
   });
 });
+
+describe("one-shot executor failure records a consolidated-ledger row (#3393)", () => {
+  it("3393-P04 executor failure records a failure row with the error and no job", async () => {
+    const { ctx } = makeCtx();
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
+    const chain = compileGoal("Send yesterday's report by email", {
+      budgetCents: 1000,
+    });
+    if (!chain) throw new Error("one-shot chain did not compile");
+    await agent.synthesizeSchedule(chain, { id: "synth-3393-execfail" });
+    await agent.approveSynthesizedSchedule("synth-3393-execfail");
+    const failed = await agent.fireSynthesizedSchedule("synth-3393-execfail", {
+      chainExecutor: async () => {
+        throw new Error("serve shard boom");
+      },
+    });
+    expect(failed.fired).toBe(false);
+    expect(failed.reason).toMatch(/serve shard boom/);
+    const rows = (await agent.listJobRuns("synth-3393-execfail")) as any[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].outcome).toBe("failure");
+    expect(rows[0].error).toMatch(/serve shard boom/);
+    expect(rows[0].trigger).toBe("manual");
+    expect(rows[0].scheduleId).toBe("synth-3393-execfail");
+    expect(rows[0].asyncJobId).toBeNull();
+    expect(rows[0].workflowId).toBeNull();
+    expect(rows[0].jobId).toBe("synth-3393-execfail");
+    expect(rows[0].operation).toBe("chain.execute");
+  });
+});

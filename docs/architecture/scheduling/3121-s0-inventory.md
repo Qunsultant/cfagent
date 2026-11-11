@@ -119,6 +119,15 @@
   internal-only callbacks leave no per-run record). No file is deleted
   in S3; the store stays the DO `goals` key until #3123 unifies it
   (Phase 2).
+- **#3393 amendment (Slice #3393, #3121):** the direct one-shot
+  firing now records its ledger row — `fireSynthesizedSchedule`
+  records a `job_run_records` row (system `scheduled-agent-goal`)
+  at every terminal point (success + blocked / budget-rejected /
+  failed legs), with the §4 linkage resolved through
+  `buildLedgerLinkage` (trigger manual, scheduleId = record id,
+  asyncJobId = created job, workflowId null). The §9 row for the
+  B-T3-06 direct one-shot firing now reads landed. #3394 (B-T2-07)
+  stays open.
 - **S6 amendment (Slice S6, #3121 — final parity):** the §9 map is
   proved complete against §1 (§9.7 traces every §1 item plus the §2
   drift items and the §7 open items to a landed slice, a preserved
@@ -1036,7 +1045,7 @@ no home and no filed issue is a defect in the map.
 | In-flight firing claim, shared by cron and manual firings | B-T3-04 | `src/services/goalFiringClaims.ts` + `onCron` claim/release | S3 — landed (preserved verbatim) |
 | `pipeline:` goals run ordered stages in ONE firing, single budget check | B-T3-05 | `onCron` pipeline branch | S3 — landed (preserved verbatim) |
 | Synthesized schedules materialize first, fire via `onCron`; direct firing refused for recurring | B-T3-06 | `materializeSynthesizedSchedule` + governed `onCron` branch | S3 — landed (+ system provenance on materialization) |
-| Direct one-shot synthesized firing | B-T3-06 | `fireSynthesizedSchedule` (firing preserved) — but NO ledger row | **Filed #3393 (open)** — firing has a home, its ledger visibility does not |
+| Direct one-shot synthesized firing | B-T3-06 | `fireSynthesizedSchedule` records a `job_run_records` row (system `scheduled-agent-goal`) at every terminal point, via `buildLedgerLinkage` | #3393 — landed (success + blocked / budget-rejected / failed-legs rows; scheduleId = record id, asyncJobId = created job, workflowId null) |
 | Goal store: DO `goals` key, seeded from `DEFAULT_SCHEDULES` only when empty; 8 shipped ids | B-T3-07 | `ScheduledAgent` DO storage (unchanged) | Phase 2 #3123 (one schedule store) |
 | Per-run records for every goal firing terminal point | B-T3-08 | `recordGoalRun` → `buildJobRunRecord` via `buildLedgerLinkage` | S1 (columns); S3 (resolver) — landed |
 | Goal lifecycle audit events (`schedule.goal.*`) on every entry path | O2 | DO-side sink in the mutation methods | S1 (enumerated + route funnel); S3 (DO sink, #3312 fixed) — landed |
