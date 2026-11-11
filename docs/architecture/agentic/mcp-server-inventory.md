@@ -86,16 +86,15 @@ execution. Scope totals: 65 `mcp:read`, 27 `mcp:write`, 7 `mcp:execute`,
 | `mcp:payments` | 10 | `agentic_wallet_status`, `check_payment_budget`, `confirm_payment_draft`, `draft_payment`, `get_payment_budget`, `get_payment_gateways`, `get_payments_overview`, `get_transactions`, `paid_market_research`, `paid_options_screener` |
 | `mcp:admin` | 4 | `get_audit_events`, `get_revenue_summary`, `list_database_tables`, `query_table_data` |
 
-### 2.3 Synchronous vs queued — 82 synchronous, 52 queued
+### 2.3 Synchronous vs queued — 87 synchronous, 47 queued
 
-**82 tools are synchronous** (`SYNCHRONOUS_MCP_TOOLS`, plus the
+**87 tools are synchronous** (`SYNCHRONOUS_MCP_TOOLS`, plus the
 `LEGACY_BROKER_TOOL_PREFIX` arm of `isSynchronousMcpTool`,
 `src/config/asyncJobModes.ts`): the status reads, job retrieval, the broker
 read and trade paths, browser and web tools, and (from #4048) the Public
-account read, so a balance question is answered in the turn it is asked
-instead of returning a queue receipt.
+account read, so a balance question is answered in the turn it is asked; and (from #4102) the five Public copilot tools, so a quote or an order action answers in the turn instead of returning a queue receipt.
 
-The other **52 tools are queued** and return
+The other **47 tools are queued** and return
 `{ jobId, status: "queued" }` — a queue receipt, not a result. Results are
 retrieved via `get_async_job` / `list_async_jobs`.
 
