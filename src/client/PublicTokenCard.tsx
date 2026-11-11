@@ -27,6 +27,9 @@ interface TokenStatus {
   signedIn: boolean;
   method: "oauth" | "personal" | null;
   tokenHint: string | null;
+  /** #4035: when the credential was verified, and what it saw. */
+  verifiedAt?: string | null;
+  toolCount?: number;
 }
 
 type LoadState =
@@ -132,10 +135,22 @@ export function PublicTokenCard() {
         {load.state === "ready" && (
           <p>
             {load.status.configured
-              ? `Connected (${load.status.method ?? "personal"}${load.status.tokenHint ? `, ${load.status.tokenHint}` : ""}).`
+              ? `Connected (${load.status.method ?? "personal"}${load.status.tokenHint ? `, ${load.status.tokenHint}` : ""})${
+                  load.status.verifiedAt
+                    ? ` \u00b7 verified ${new Date(load.status.verifiedAt).toLocaleString()} \u00b7 ${load.status.toolCount ?? 0} tools`
+                    : ""
+                }.`
               : "Not connected."}
           </p>
         )}
+        {load.state === "ready" &&
+          load.status.configured &&
+          (load.status.toolCount ?? 0) === 0 && (
+            <Notice tone="warning">
+              Connected, but the last verification observed no tools. Reconnect, and if it persists the
+              token lacks the data scopes this app needs.
+            </Notice>
+          )}
         {formError && <Notice tone="danger">{formError}</Notice>}
         <TextInput
           type="password"
