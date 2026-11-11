@@ -30,6 +30,7 @@ import {
 } from "./optionsAuthFreshness";
 import type { SqlStorage } from "../orm";
 import type { ScreenerRunOutcome } from "./screenerFollowups";
+import type { ScheduledReportInput } from "./scheduledReports";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
@@ -151,6 +152,58 @@ export interface UnifiedOptionsRunRecord {
   provenance?: Record<string, unknown>;
 }
 
+/**
+ * The one normalization of a unified options run record into the
+ * canonical store's input (issue #4060): the record's fields map
+ * onto ScheduledReportInput — runId, generationId (the run id IS
+ * the generation id), title, source, summary, the record's fields
+ * nested under body, createdAt, owner — so the record shape rides
+ * EITHER transport unchanged: the direct store
+ * (recordUnifiedOptionsRun) and the engine's tenant-aware leg
+ * (recordUnifiedOptionsRunThroughLeg). One normalization, two
+ * transports; a second copy here would be a second source of
+ * truth for the row shape.
+ */
+export function unifiedOptionsRunRecordToStoreInput(
+  input: UnifiedOptionsRunRecord,
+): ScheduledReportInput & Record<string, unknown> {
+  return {
+    runId: input.runId,
+    generationId: input.generationId,
+    title: input.title,
+    source: input.source,
+    summary: input.summary,
+    body: {
+      trigger: input.trigger,
+      strategyMode: input.strategyMode,
+      ...(input.candidateLimit !== undefined ? { candidateLimit: input.candidateLimit } : {}),
+      ...(input.alternatives !== undefined ? { alternatives: input.alternatives } : {}),
+      ...(input.farDated !== undefined ? { farDated: input.farDated } : {}),
+      ...(input.allowedStrategiesResolved !== undefined ? { allowedStrategiesResolved: input.allowedStrategiesResolved } : {}),
+      symbol: input.symbol,
+      thesis: input.thesis,
+      scheduleId: input.scheduleId,
+      goalId: input.goalId,
+      scanRunId: input.scanRunId,
+      ...(input.filter !== undefined ? { filter: input.filter } : {}),
+      ...(input.result !== undefined ? { result: input.result } : {}),
+      ...(input.provenance !== undefined ? { provenance: input.provenance } : {}),
+      ...(input.pdfKey ? { pdfKey: input.pdfKey } : {}),
+      ...(input.pdfStatus ? { pdfStatus: input.pdfStatus } : {}),
+      ...(input.pdfError ? { pdfError: input.pdfError } : {}),
+      ...(input.xlsxKey ? { xlsxKey: input.xlsxKey } : {}),
+      ...(input.xlsxStatus ? { xlsxStatus: input.xlsxStatus } : {}),
+      ...(input.xlsxError ? { xlsxError: input.xlsxError } : {}),
+      ...(input.csvKey ? { csvKey: input.csvKey } : {}),
+      ...(input.csvStatus ? { csvStatus: input.csvStatus } : {}),
+      ...(input.csvError ? { csvError: input.csvError } : {}),
+      ...(input.reportUrl ? { reportUrl: input.reportUrl } : {}),
+    },
+    createdAt: input.createdAt,
+    userLogin: input.userLogin,
+  };
+}
+
 export function recordUnifiedOptionsRun(
   orm: OptionsCanonicalStore | null | undefined,
   input: UnifiedOptionsRunRecord,
@@ -158,41 +211,7 @@ export function recordUnifiedOptionsRun(
 ): { reportId: string; created: boolean } | null {
   return storeOptionsCanonicalReport(
     orm,
-    {
-      runId: input.runId,
-      generationId: input.generationId,
-      title: input.title,
-      source: input.source,
-      summary: input.summary,
-      body: {
-        trigger: input.trigger,
-        strategyMode: input.strategyMode,
-        ...(input.candidateLimit !== undefined ? { candidateLimit: input.candidateLimit } : {}),
-        ...(input.alternatives !== undefined ? { alternatives: input.alternatives } : {}),
-        ...(input.farDated !== undefined ? { farDated: input.farDated } : {}),
-        ...(input.allowedStrategiesResolved !== undefined ? { allowedStrategiesResolved: input.allowedStrategiesResolved } : {}),
-        symbol: input.symbol,
-        thesis: input.thesis,
-        scheduleId: input.scheduleId,
-        goalId: input.goalId,
-        scanRunId: input.scanRunId,
-        ...(input.filter !== undefined ? { filter: input.filter } : {}),
-        ...(input.result !== undefined ? { result: input.result } : {}),
-        ...(input.provenance !== undefined ? { provenance: input.provenance } : {}),
-        ...(input.pdfKey ? { pdfKey: input.pdfKey } : {}),
-        ...(input.pdfStatus ? { pdfStatus: input.pdfStatus } : {}),
-        ...(input.pdfError ? { pdfError: input.pdfError } : {}),
-        ...(input.xlsxKey ? { xlsxKey: input.xlsxKey } : {}),
-        ...(input.xlsxStatus ? { xlsxStatus: input.xlsxStatus } : {}),
-        ...(input.xlsxError ? { xlsxError: input.xlsxError } : {}),
-        ...(input.csvKey ? { csvKey: input.csvKey } : {}),
-        ...(input.csvStatus ? { csvStatus: input.csvStatus } : {}),
-        ...(input.csvError ? { csvError: input.csvError } : {}),
-        ...(input.reportUrl ? { reportUrl: input.reportUrl } : {}),
-      },
-      createdAt: input.createdAt,
-      userLogin: input.userLogin,
-    },
+    unifiedOptionsRunRecordToStoreInput(input),
     env,
   );
 }

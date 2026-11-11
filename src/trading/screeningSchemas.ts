@@ -1240,7 +1240,7 @@ export function buildSchedulePayload(
 /* ------------------------------------------------------------------ */
 
 /** The kind filter of GET /api/runs — the one Runs read surface over
- *  the four run stores. "all" is the unfiltered merge. */
+ *  the five run stores. "all" is the unfiltered merge. */
 export const runsListKindSchema = z.enum(["screener", "options_scanner", "discovery", "goal", "all"]);
 export type RunsListKind = z.infer<typeof runsListKindSchema>;
 

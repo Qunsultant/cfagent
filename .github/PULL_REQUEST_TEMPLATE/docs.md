@@ -51,3 +51,6 @@ How the change was checked (read-through, render check — no code or tests ride
 
 ## Process documentation impact
 Process documentation impact: <none, or what process docs this PR changes>
+
+## Out of scope
+Out of scope: <none, or [Out-of-Scope] sub-issue links — every item this PR leaves out of scope gets its own sub-issue titled `[Out-of-Scope] <thing>` (issue #4099)>

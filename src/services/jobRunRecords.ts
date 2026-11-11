@@ -54,6 +54,11 @@ const SYSTEMS: readonly string[] = [
   "orchestrator-schedule",
   // Issue #3534 (Pipeline J1) — pipeline jobs record through this machinery.
   "job-pipeline",
+  // Issue #3121 S6 (S5 decision 9 follow-up) — Worker-cron dispatches
+  // record through this machinery. Admitted now that #3650 has landed
+  // (Qunsultant/cfagent#3723); the S5 restamp in `buildCronDispatchRecord`
+  // is retained as-is (explicit system, zero behavior change).
+  "worker-cron",
 ];
 const OUTCOMES: readonly string[] = ["success", "failure", "skipped"];
 const TRIGGERS: readonly string[] = ["scheduled", "manual"];

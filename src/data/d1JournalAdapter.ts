@@ -25,7 +25,13 @@ import {
 import { agentJournalAccounts, agentJournalEntries } from "./drizzleSchema";
 import {
   applyMigrations,
+  MIGRATION_0007_COMMERCIAL_STORE,
+  MIGRATION_0008_SUBSCRIPTIONS,
+  MIGRATION_0012_NATIVE_LEDGER,
   MIGRATION_0009_JOURNAL,
+  MIGRATION_0011_PRICE_CATALOGUE,
+  MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
+  MIGRATION_0058_PRODUCT_VERSIONS,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -58,10 +64,21 @@ export function createD1JournalDb(d1: D1Database): JournalDb {
  * Idempotent schema-ensure: applies migration 0009 if unapplied,
  * then seeds the minimal chart (INSERT OR IGNORE — re-seeding is
  * a no-op). Money paths ensure; read paths may skip ensure when
- * the caller already ensured.
+ * the caller already ensured. Issue #3289: 0058 adds the
+ * per-charge recording columns to the journal entries, so its
+ * prerequisites (0007 accounts, 0008 plans, 0011 + 0027
+ * catalogue, 0012 native ledger) ride along.
  */
 export async function ensureJournalSchema(db: JournalDb): Promise<number[]> {
-  const applied = await applyMigrations(db as unknown as MigrationDb, [MIGRATION_0009_JOURNAL]);
+  const applied = await applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0007_COMMERCIAL_STORE,
+    MIGRATION_0008_SUBSCRIPTIONS,
+    MIGRATION_0009_JOURNAL,
+    MIGRATION_0011_PRICE_CATALOGUE,
+    MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
+    MIGRATION_0012_NATIVE_LEDGER,
+    MIGRATION_0058_PRODUCT_VERSIONS,
+  ]);
   const now = Date.now();
   for (const account of MINIMAL_CHART) {
     await db
@@ -83,6 +100,11 @@ function toEntry(raw: typeof agentJournalEntries.$inferSelect): JournalEntry {
     tenantId: raw.tenantId,
     runRequestId: raw.runRequestId,
     family: raw.family,
+    // Issue #3289: null on legacy rows (written before 0058)
+    // and on entries with no product/version (top-up).
+    productId: raw.productId ?? null,
+    versionId: raw.versionId ?? null,
+    priceUSD: raw.priceUSD ?? null,
     createdAtMs: raw.createdAtMs,
   };
 }
@@ -111,6 +133,11 @@ export class D1JournalAdapter implements JournalPort {
         tenantId: e.tenantId,
         runRequestId: e.runRequestId,
         family: e.family,
+        // Issue #3289: per-charge recording — null when the
+        // mapping carries none (top-up, legacy replays).
+        productId: e.productId ?? null,
+        versionId: e.versionId ?? null,
+        priceUSD: e.priceUSD ?? null,
         createdAtMs: now,
       };
       await this.db
@@ -125,6 +152,9 @@ export class D1JournalAdapter implements JournalPort {
           tenantId: record.tenantId,
           runRequestId: record.runRequestId,
           family: record.family,
+          productId: record.productId,
+          versionId: record.versionId,
+          priceUSD: record.priceUSD,
           createdAtMs: record.createdAtMs,
         })
         .onConflictDoNothing();

@@ -1,0 +1,3 @@
+### Changed
+
+- **GitOps: [Out-of-Scope] sub-issues for anything out of scope or not considered (#4099)**: gitops.md §5 now titles every excluded item's sub-issue `[Out-of-Scope] <thing>`, §9 gains an `Out of scope` PR-template section, and §15 gains an `Out-of-scope items filed` line; all six GitHub template files carry the same rule in sync. Policy Gate gains check (k): the PR body must carry an `Out of scope:` line (presence only; `None` is a valid value), with tests in `tests/policy_gate_guards.test.ts`. Rollout note: the gate runs the evaluator from trusted origin/main, so check (k) takes effect after this PR merges; PRs opened after the merge carry the line via the template, and already-open PRs pick it up on their next push. Qunsultant/cfagent#4099

@@ -58,6 +58,7 @@ import {
   type SubscriptionRecord,
   type SubscriptionStore,
 } from "../data/subscriptionPorts";
+import { assertPlanEffectiveAndApprovedForSegment } from "./subscriptionActivation";
 
 export interface TrialActivationInput {
   subs: SubscriptionStore;
@@ -103,12 +104,22 @@ export async function activateTrialSubscription(
 ): Promise<TrialActivationResult> {
   const { subs, store, userId, tenantId, plan } = input;
   const nowMs = input.nowMs ?? Date.now();
-  if (!plan.active) throw new Error(`Plan ${plan.id} is not active.`);
+  const existing = await store.getAccount(userId);
+  // Issue #3289: a trial starts the effective, approved version
+  // FOR THE BUYER'S SEGMENT (their account's segment, "default"
+  // when no account exists yet) — never a superseded, future,
+  // expired, or unapproved version. No payment has been taken,
+  // so refusing costs the buyer nothing.
+  await assertPlanEffectiveAndApprovedForSegment(
+    subs,
+    plan,
+    existing?.segment ?? "default",
+    nowMs,
+  );
   const trialDays = plan.trialDays;
   if (trialDays === null || trialDays === undefined || !Number.isInteger(trialDays) || trialDays < 1) {
     throw new Error(`Plan ${plan.id} offers no trial.`);
   }
-  const existing = await store.getAccount(userId);
   if (existing && existing.tenantId !== tenantId) {
     throw new Error("Tenant mismatch: subscription tenant must equal the verified account tenant.");
   }

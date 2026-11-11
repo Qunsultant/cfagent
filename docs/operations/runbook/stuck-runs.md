@@ -4,11 +4,15 @@ Operator runbook for async job runs (screens, reports, deliveries,
 and other `mas_async_jobs` work) that stay in `running` far longer
 than any healthy run. Filed under issue #2567 (programme #2494).
 
-**Standing decision (Phase 5 slice 6, #2000): no background
-sweeper.** The alert + reap + this runbook are the standing answer;
-see `stuck-sweeper-decision.md` (same folder) for the inventory,
-the evidence, the gaps left open, and what would reopen the
-decision.
+**Standing decision, corrected 2026-11-11 (#4134): there IS a
+background sweeper now.** The Phase 5 slice 6 decision (#2000 —
+"no background sweeper") was superseded 2026-11-08 by #3784
+(parent incident #3781): the 15-minute stale-async-job sweep
+(`sweepStaleAsyncJobs`, `src/agents/orchestrator/asyncJobs.ts`)
+is built and armed. The alert (30 min) + reap (2h) + this runbook
+remain the standing answer alongside the sweep; see
+`stuck-sweeper-decision.md` (same folder, marked SUPERSEDED) for
+the inventory, the evidence, and what reopened the decision.
 
 ## How a stuck run surfaces
 

@@ -32,6 +32,12 @@
 import type { ETradeOptionChain, OptionScreenFetchError, OptionScreenerFilter } from "../types";
 import type { OptionsCanonicalStore, UnifiedOptionsRunRecord } from "../services/optionsServeRecord";
 import { recordUnifiedOptionsRun } from "../services/optionsServeRecord";
+import type { CanonicalReportStoreSeam } from "../services/generateJobs";
+import {
+  OPTIONS_CANONICAL_LEG_REASONS,
+  recordUnifiedOptionsRunThroughLeg,
+  type OptionsCanonicalLegReport,
+} from "./optionsCanonicalLeg";
 import type { SagaTradeIntent } from "./sagaTradeLeg";
 import { assessSagaTradeRisk, type SagaRiskLimits } from "./sagaRiskStage";
 import {
@@ -95,8 +101,24 @@ export interface OptionsScreenPortDeps {
    * reason — the agent's own store is a different SQLite from the
    * goal run's, so writing there would be a second home, #783).
    * Absent, the persist stage records created:false / reportId:null.
+   *
+   * Legacy direct path, kept during migration (#4060): the manual
+   * entry now binds canonicalLeg instead, so no production caller
+   * passes this after #4060 — it stays for entries not yet on the
+   * leg. When both are bound the leg wins and this store is never
+   * called (one row, one transport).
    */
   canonical?: OptionsCanonicalStore;
+  /**
+   * The engine's tenant-aware canonical leg (#4060, #3940): when
+   * bound, the persist stage writes through it — the orchestrator
+   * door into the report-owning tenant's Orchestrator DO — instead
+   * of the direct store. The leg wins over `canonical` when both
+   * are bound. Absent with no `canonical`, the stage records the
+   * goal leg's honest omission (created:false, no mas_reports row)
+   * with its coded reason — never a silent skip.
+   */
+  canonicalLeg?: CanonicalReportStoreSeam;
   shapeReport: OptionsShapeReportFn;
   deliver: OptionsDeliverFn;
   /**
@@ -388,12 +410,41 @@ export function createOptionsScreenPorts(
                 : {}),
               userLogin: requireLogin(input),
             };
-        const stored = recordUnifiedOptionsRun(canonical, record);
+        // #4060: the canonical write rides the engine's tenant-aware
+        // leg when bound (the door into the report-owning tenant's
+        // Orchestrator DO); the leg wins over the direct store when
+        // both are bound — one row, one transport. With neither
+        // bound the stage records the goal leg's decided omission
+        // (created:false, no mas_reports row) with its coded reason.
+        // Either way the write never fails the run.
+        let created = false;
+        let reportId: string | null = null;
+        let canonicalLeg: OptionsCanonicalLegReport;
+        if (deps.canonicalLeg) {
+          const legResult = await recordUnifiedOptionsRunThroughLeg(deps.canonicalLeg, record);
+          created = legResult.created;
+          reportId = legResult.reportId;
+          canonicalLeg = {
+            status: legResult.status,
+            ...(legResult.reason ? { reason: legResult.reason } : {}),
+          };
+        } else if (canonical) {
+          const stored = recordUnifiedOptionsRun(canonical, record);
+          created = stored?.created ?? false;
+          reportId = stored?.reportId ?? null;
+          canonicalLeg = { status: "direct" };
+        } else {
+          canonicalLeg = {
+            status: "omitted",
+            reason: OPTIONS_CANONICAL_LEG_REASONS.omittedGoalLeg,
+          };
+        }
         return {
           terminal: "completed",
-          created: stored?.created ?? false,
-          reportId: stored?.reportId ?? null,
+          created,
+          reportId,
           record,
+          canonicalLeg,
         };
       },
       persist: (input, output) => persist(input, output),

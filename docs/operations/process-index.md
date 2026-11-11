@@ -60,7 +60,7 @@ guide.
 | --- | --- | --- | --- | --- | --- |
 | Coordinator dispatch + boundary reporting | Agentic | COO-spr9 | Not yet documented — #3466 | Not yet documented | — |
 | Proactivity handling (select / skip / send rules) | Agentic | COO-spr9 | Not yet documented — #3466 | Not yet documented | — |
-| Handover between agents (lanes) | Agentic | COO-spr9 | [handover-playbook.md](handover-playbook.md) | Current | 2026-11-11 |
+| Handover between agents (lanes) | Agentic | COO-spr9 | [handover-playbook.md](playbook/handover-playbook.md) | Current | 2026-11-11 |
 
 ## Non-deterministic — copilot
 
@@ -80,6 +80,17 @@ No process in the seed inventory is classified autopilot. The
 category is defined in the [taxonomy](process-taxonomy.md) so it
 exists before it is needed; the first autopilot process will be
 classified here when one is filed, not before.
+
+## Reference — runtime inventory
+
+Not a process, so not a row in the tables above — the single live
+inventory of everything that runs, with trigger, cadence, enabled
+state, and default source. Linked here because this index is the
+single entry point for operational guides.
+
+| Document | Owner | Status | Last verified |
+| --- | --- | --- | --- |
+| [Runtime inventory](runtime-inventory.md) | CFO-qunso | Current | 2026-11-11 |
 
 ## Gaps (named, not hidden)
 

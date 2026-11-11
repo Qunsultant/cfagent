@@ -129,6 +129,8 @@ describe("commercial account records (#2015)", () => {
       includedRunsRemaining: 4,
       // Issue #3245: no grant on this row reads as null.
       unlimitedFreeGrant: null,
+      // Issue #3289: the gate account carries the holder's segment.
+      segment: "default",
     });
     expect(toCommercialAccount("u9", null, "u9@example.com", "t9")).toEqual({
       userId: "u9",
@@ -137,6 +139,7 @@ describe("commercial account records (#2015)", () => {
       tier: "Free",
       creditsUSD: 0,
       includedRunsRemaining: 0,
+      segment: "default",
     });
   });
 });
@@ -194,8 +197,8 @@ describe("failure-credit claims and redemption (#2019)", () => {
     const { memory, d1 } = await makeStores();
     for (const store of [memory, d1]) {
       await seed(store);
-      expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-8", amountUSD: 0.1 });
-      expect(await store.findUnredeemedCredit("u1", "options")).toEqual({ creditRunId: "run-7", amountUSD: 0.05 });
+      expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-8", amountUSD: 0.1, productId: null, versionId: null, priceUSD: null });
+      expect(await store.findUnredeemedCredit("u1", "options")).toEqual({ creditRunId: "run-7", amountUSD: 0.05, productId: null, versionId: null, priceUSD: null });
       expect(await store.findUnredeemedCredit("u2", "goal")).toBeNull();
     }
   });
@@ -205,11 +208,11 @@ describe("failure-credit claims and redemption (#2019)", () => {
     for (const store of [memory, d1]) {
       await seed(store);
       await store.redeemCredit("run-8", "run-10");
-      expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-9", amountUSD: 0.1 });
+      expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-9", amountUSD: 0.1, productId: null, versionId: null, priceUSD: null });
       await expect(store.redeemCredit("run-8", "run-11")).rejects.toThrow(/already redeemed/);
       const again = await store.recordCreditClaim({ creditRunId: "run-9", userId: "u1", family: "goal", amountUSD: 0.1 });
       expect(again.creditRunId).toBe("run-9");
-      expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-9", amountUSD: 0.1 });
+      expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-9", amountUSD: 0.1, productId: null, versionId: null, priceUSD: null });
     }
   });
 });

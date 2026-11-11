@@ -154,6 +154,10 @@ describe("coverage consumption (#2015)", () => {
     });
     const out = await runPaymentWorkflowFlow(baseParams, deps, fakeStep());
     expect(out.status).toBe("screener_failed_credit_issued");
-    expect(issueFailureCredit).toHaveBeenCalledWith("run-1", 0.1);
+    expect(issueFailureCredit).toHaveBeenCalledWith("run-1", 0.1, {});
+    // Issue #3289 deviation 19: the draining cfpay gate never
+    // resolves a product/version, so the credit carries an empty
+    // version object here (the native gate's covered decisions
+    // carry the real product/version).
   });
 });

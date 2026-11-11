@@ -4,6 +4,18 @@
   "main": "src/server.ts",
   "compatibility_date": "2026-10-31",
   "compatibility_flags": ["nodejs_compat"],
+  // Issue #4128 - least-cost (C:/Users/spr9s/nextgentp-full-least-cost):
+  // no source maps in the upload; nothing at runtime reads them.
+  "upload_source_maps": false,
+  // Issue #4122 / #4128 — the CPU guard. #4122 shipped 1000ms; the least-cost
+  // target (nextgentp-full-least-cost) is 500ms, applied in #4128.
+  // subrequests: 50 from the same file is deliberately NOT applied: 50 is the
+  // Free-plan ceiling, it changes nothing there, and on a paid plan it would
+  // start failing the fan-out routes (screener, discovery, report delivery).
+  "limits": { "cpu_ms": 500 },
+  // The custom domain is the only intended front door; workers.dev stays
+  // closed so stray subdomain traffic cannot bill.
+  "workers_dev": false,
   "routes": [{ "pattern": "agent.openaimp.com", "custom_domain": true }],
   // Issue #329: only `/` and `/index.html` need the Worker (they inject the
   // session and render the landing page). Everything else that matches a file
@@ -136,16 +148,14 @@
     ]
   },
   // Issue #4112 (owner direction): the deployment provisions NO container.
-  // Cloudflare Containers bill while the application exists, and the
-  // deploy-time strip in scripts/ci/deploy-worker.mjs (#3789) only fires
-  // AFTER a 403 - with Containers permission on the token the block ships.
-  // To re-enable, uncomment and keep the sizing: ONE instance, smallest type.
+  // The block below is commented out, not deleted - uncomment it to restore
+  // the binding exactly as it was.
+  // If it is restored, cap it: "max_instances": 1, "instance_type": "lite"
+  // (one instance, smallest size - the only shape that may ship).
   // "containers": [
   //   {
   //     "class_name": "SandboxAgent",
-  //     "scheduling_policy": "durable_object",
-  //     "max_instances": 1,
-  //     "instance_type": "lite"
+  //     "scheduling_policy": "durable_object"
   //   }
   // ],
   // Issue #1169 (owner enablement, 2026-11-05) — the AI Search
@@ -202,20 +212,29 @@
     // instances and their stored state are untouched by it.
     { "tag": "v15", "renamed_classes": [{ "from": "SearchAgent", "to": "OrchestratorAgent" }] }
   ],
-  // Issue #606 (phase 4 of #415): no KV namespaces remain — sessions and
+  // Issue #606 (phase 4 of #415): no KV binding is declared — sessions and
   // E*TRADE credentials live in the SessionStore DO (#329), report PDFs
-  // in R2 (#605). The dashboard namespaces are deleted owner-side.
+  // in R2 (#605). Correction (#4120, audit 2026-11-11): two namespaces DO
+  // still exist in the account — AGENT_SESSIONS and SESSIONS — unbound and
+  // unused by this Worker. Deleting them is an owner action on Cloudflare,
+  // not a manifest change; the earlier "deleted owner-side" note was wrong.
   // Issue #257 (Assessment P1): explicit Workers Logs pipeline. `enabled` is the
   // shorthand for logs.enabled; `invocation_logs` captures one log per
   // invocation (request/response metadata + console output) visible under
-  // Observability > Logs. head_sampling_rate 1 = 100% sampled. No external
-  // destinations configured (no OpenTelemetry destination exists in the
-  // dashboard) — see docs/OBSERVABILITY.md.
+  // Observability > Logs. No external destinations are configured (no
+  // OpenTelemetry destination exists in the dashboard) — see
+  // docs/OBSERVABILITY.md. The sampling rate is set by #4131 below.
+  // Issue #4131 (owner direction): the LOWEST observability setting that
+  // still records something. 0.01 is Cloudflare's floor (1% of invocations),
+  // and persist: false keeps logs streaming without storing them. To silence
+  // it entirely, set enabled: false - that is the only lower step.
   "observability": {
     "enabled": true,
+    "head_sampling_rate": 0.01,
     "logs": {
       "invocation_logs": true,
-      "head_sampling_rate": 1
+      "head_sampling_rate": 0.01,
+      "persist": false
     }
   },
   // Issue #4112 (owner direction): NO schedules and NO triggers. Every cron
@@ -260,8 +279,8 @@
     "AI_SEARCH_INSTANCE": "screener-search",
     // Issue #278: TTL cache for AI Search queries (in-isolate, per the
     // cache module's honesty note). 300000 = 5 minutes; 200 entries.
-    "AI_SEARCH_CACHE_TTL_MS": "300000",
-    "AI_SEARCH_CACHE_MAX_ENTRIES": "200",
+    "AI_SEARCH_CACHE_TTL_MS": "7200000",
+    "AI_SEARCH_CACHE_MAX_ENTRIES": "1000",
     // Issue #1169 enablement (owner direction 2026-11-04): knowledge
     // serving and AI Search report indexing are ON. The
     // ai_search_namespaces binding + instance configuration landed
@@ -290,7 +309,8 @@
     // set. Rollback is unsetting this var and redeploying.
     "STOCK_COPILOT_PAPER_ENABLED": "1",
     // Issue #3728: Unconstrained continuous Stock Copilot trading around the clock (24/7).
-    "STOCK_COPILOT_AROUND_THE_CLOCK": "true",
+    // Issue #4122 — cost: idle outside market hours instead of polling all day.
+    "STOCK_COPILOT_AROUND_THE_CLOCK": "false",
     // Issue #3727 — copilot capability enablement (owner direction
     // 2026-11-07): every capability-gating switch is externalized
     // here and set so the copilots are fully functional/enabled —
@@ -345,19 +365,22 @@
     // absence means the pollingConfig defaults apply. Milliseconds,
     // except CHAT_AUTO_REFRESH_FLOOR_S (seconds, matching the stored
     // user interval). Rollback is unsetting the vars and redeploying.
-    "QUOTES_REST_FALLBACK_MS": "60000",
-    "QUOTES_WS_RECONNECT_BASE_MS": "1000",
-    "QUOTES_WS_RECONNECT_CAP_MS": "30000",
-    "OPTIONS_FLOWS_POLL_MS": "30000",
-    "OPTIONS_LATEST_POLL_MS": "60000",
-    "CHAT_AUTO_REFRESH_FLOOR_S": "5",
-    "GOAL_TRACK_POLL_MS": "2000",
-    "GOAL_TRACK_DEADLINE_MS": "600000",
+    "QUOTES_REST_FALLBACK_MS": "300000",
+    "QUOTES_WS_RECONNECT_BASE_MS": "5000",
+    "QUOTES_WS_RECONNECT_CAP_MS": "120000",
+    // Issue #4122 — cost: 30s -> 300s between options-flow polls.
+    "OPTIONS_FLOWS_POLL_MS": "600000",
+    // Issue #4122 — cost: 60s -> 300s between latest-options polls.
+    "OPTIONS_LATEST_POLL_MS": "600000",
+    "CHAT_AUTO_REFRESH_FLOOR_S": "30",
+    "GOAL_TRACK_POLL_MS": "60000",
+    "GOAL_TRACK_DEADLINE_MS": "3600000",
     // Issue #2443 — TickerAgent push cadence, seconds. Default 5s;
     // changing it changes live tick cadence (product call). Rollback
     // is unsetting the var and redeploying.
-    "TICKER_PUSH_INTERVAL_S": "5",
-    "MAS_MAX_STEPS": "4",
+    // Issue #4122 — cost: 5s -> 60s cuts ticker DO activity (variants: 92%).
+    "TICKER_PUSH_INTERVAL_S": "300",
+    "MAS_MAX_STEPS": "5",
     "AI_MODEL": "@cf/zai-org/glm-4.7-flash",
     "CF_WALLET_NETWORK": "base-sepolia",
     "CF_WALLET_FACILITATOR": "https://x402.org/facilitator",
@@ -379,7 +402,7 @@
     // "0" (gating disabled) and redeploying — no code change. NOTE:
     // removing the var does NOT disable gating (the code default is
     // 30s); only "0" disables it.
-    "IAAA_WIRED_FRESHNESS_MS": "30000",
+    "IAAA_WIRED_FRESHNESS_MS": "120000",
     // Issue #3155 (Q9) — default grant lifetime in days for
     // non-platform-scope bindings without an explicit expiry.
     // Adopted initial value 90; "0" resolves to 90, never to
@@ -415,8 +438,10 @@
     // trigger. No token → live publish errors honestly, never a
     // silent dry-run. Rollback is removing these two vars (or setting
     // them to "0") and redeploying — no code change.
-    "SOCIAL_POSTING_ENABLED": "1",
-    "SOCIAL_LIVE_PUBLISHING": "1",
+    // Issue #4122 — cost: no autonomous social posting.
+    "SOCIAL_POSTING_ENABLED": "0",
+    // Issue #4122 — cost: no live social publishing.
+    "SOCIAL_LIVE_PUBLISHING": "0",
     // Issue #1489: scope autonomous publishing to Threads only during
     // Threads-first rollout. Without this, config defaults to "threads,x",
     // attempting to publish to X where X_ACCESS_TOKEN is not configured.
@@ -455,7 +480,9 @@
     // Rollback is setting this var to "0" (or toggling off in Flagship dashboard).
     "FEATURE_MONETIZATION": "1",
     // Issue #3491 / #3492 / #3779 — Sandbox & Workspace enablement
-    "FEATURE_SANDBOX": "1",
+    // Issue #4122 (owner direction): the sandbox has no container (#4112),
+    // so the flag is off — the variants put it at "0" for the same reason.
+    "FEATURE_SANDBOX": "0",
     "FEATURE_WORKSPACE": "1",
     "WORKSPACE_ROOT": "/workspace"
   }

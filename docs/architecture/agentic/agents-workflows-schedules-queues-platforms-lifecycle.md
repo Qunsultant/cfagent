@@ -519,7 +519,7 @@ driver). The mechanics:
   `deps.datasetStore.store(...)` is the representative form.
   There is no tool layer anywhere in this path (§7.2).
 
-Uniform stage control — run / re-run / stop / resume / cancel /
+Uniform stage control — run / re-run / stop / resume / cancel / retire /
 schedule / re-schedule at (run, stage) granularity, with the
 meanings above — is the #3549 contract (absorbing #3069); the
 control plane is the one management surface the UX and the copilot

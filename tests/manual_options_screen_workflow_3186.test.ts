@@ -13,6 +13,13 @@
  * is the route's row - no duplicate. The #3072 end-of-run emitter
  * retires for this entry: the pipeline publishes per-stage
  * messages instead.
+ *
+ * Issue #4060: the manual entry's canonical write rides the
+ * engine's tenant-aware leg (the orchestrator door), so the fake
+ * ctx supplies the door — a namespace whose record writes through
+ * the real seam over this test's sql, the Orchestrator DO's storage
+ * in miniature. The pin's expectation is unchanged: one row, the
+ * pipeline's row, in the ctx's store.
  */
 import { describe, expect, it, afterEach } from "vitest";
 import type { ETradeOptionChain, ETradeOptionExpireDate } from "../src/types";
@@ -21,7 +28,27 @@ import { executeOptionsScreen } from "../src/agents/routes/etradeOptionsScreen";
 import { MockSqlStorage } from "./mock-sql";
 import { DatabaseORM } from "../src/orm";
 import { listJobOutcomes } from "../src/services/jobOutcomes";
+import {
+  storeReportAtGeneration,
+  type CanonicalStoreResult,
+  type ScheduledReportInput,
+} from "../src/services/scheduledReports";
 import type { OptionsStageStorage } from "../src/workflows/optionsScreenPorts";
+
+/** Issue #4060: the fake orchestrator door for the manual entry's
+ *  leg — a namespace whose record writes through the real canonical
+ *  seam over this test's sql. */
+function fakeOrchestratorDoor(sql: MockSqlStorage) {
+  return {
+    idFromName: (name: string) => name,
+    get: () => ({
+      recordPipelineGenerateReport: async (
+        input: ScheduledReportInput,
+      ): Promise<CanonicalStoreResult | null> =>
+        storeReportAtGeneration(sql as never, input),
+    }),
+  };
+}
 
 function expiryAtDte(dte: number): ETradeOptionExpireDate {
   const now = new Date();
@@ -90,7 +117,7 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
       getOptionsCsvByKey: async () => ({ bytes: new Uint8Array([1]), fileName: "options.csv" }),
     };
     const ctx = {
-      env: {},
+      env: { ORCHESTRATOR_AGENT: fakeOrchestratorDoor(sql) },
       getOrm: () => orm,
       agentCtx: { storage: { ...storage, sql } },
       ensureTables: () => sql,
@@ -182,7 +209,7 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
       getOptionsCsvByKey: async () => ({ bytes: new Uint8Array([1]), fileName: "options.csv" }),
     };
     const ctx = {
-      env: {},
+      env: { ORCHESTRATOR_AGENT: fakeOrchestratorDoor(sql) },
       getOrm: () => orm,
       agentCtx: { storage: { ...storage, sql } },
       ensureTables: () => sql,

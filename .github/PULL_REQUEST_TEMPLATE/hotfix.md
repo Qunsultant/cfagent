@@ -60,3 +60,6 @@ How to undo this PR if the fix makes things worse:
 
 ## Process documentation impact
 Process documentation impact: <none, or what process docs this PR changes>
+
+## Out of scope
+Out of scope: <none, or [Out-of-Scope] sub-issue links — every item this PR leaves out of scope gets its own sub-issue titled `[Out-of-Scope] <thing>` (issue #4099)>

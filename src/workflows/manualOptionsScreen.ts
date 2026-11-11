@@ -17,15 +17,27 @@
  *   deliver: Slack (follow-up bridge when the host provides it, else
  *     the A2A path with bytes re-fetched by key) + email (#1336) +
  *     the inline job outcome (bridge runs record through the job-tree
- *     hook instead - recording both would double the feed).
+ *     hook instead - recording both would double the feed). Every
+ *     send claims its (runId, destination) pair through the ONE
+ *     suppressor module (#4064, following #3943's re-homing): a
+ *     re-run/replay of the same run never re-sends to the same
+ *     destination; a failed send releases its claim so a retry may
+ *     send; a pair that cannot be attempted never claims.
  */
 import { deliverGatedSlack } from "../services/gatedSlackDelivery";
+import {
+  createDeliverySuppressor,
+  deliveryDestinationFor,
+  type DeliverySuppressor,
+} from "./screenDeliverySuppression";
 import { screenerOutcomeFromRunResult } from "../services/screenerFollowups";
 import { recordJobOutcome } from "../services/jobOutcomes";
 import {
   recordUnifiedOptionsRun,
   type UnifiedOptionsRunRecord,
 } from "../services/optionsServeRecord";
+import type { CanonicalReportStoreSeam } from "../services/generateJobs";
+import { recordUnifiedOptionsRunThroughLeg } from "./optionsCanonicalLeg";
 import { resolveTenantProviders } from "../services/tenantProviders";
 import {
   resolveTenantProviderContext,
@@ -77,6 +89,23 @@ export interface ManualOptionsScreenInput {
   screenUniverseLabel?: string;
   screenEmailTo?: string;
   deferDelivery?: boolean;
+  /**
+   * Issue #4064: the duplicate-delivery suppressor for this
+   * entry — the ONE module (screenDeliverySuppression), injected
+   * with the entry's store. The manual route injects the durable
+   * mas_delivery_claims store in the route DO's SQLite; absent
+   * ⇒ a fresh in-memory suppressor (the runDeliverJob fallback
+   * idiom): claims then hold only for this deliver fn's lifetime.
+   */
+  suppressor?: DeliverySuppressor;
+  /**
+   * The engine's tenant-aware canonical leg (#4060): when bound,
+   * the shapeReport re-record rides the same leg the persist stage
+   * used (one transport for the row); otherwise the legacy direct
+   * ORM write. The manual entry binds the same seam instance it
+   * passes to the persist stage.
+   */
+  canonicalLeg?: CanonicalReportStoreSeam;
 }
 
 function symbolsLabel(filter: OptionScreenerFilter, universeLabel?: string): string {
@@ -128,6 +157,10 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
   deliver: OptionsDeliverFn;
 } {
   const { ctx, screenFilter, screenPushToSlack, screenSlackChannel, screenUniverseLabel, screenEmailTo, deferDelivery } = input;
+  // Issue #4064: the duplicate-delivery suppressor for this entry
+  // — the ONE module, injected store. Absent ⇒ a fresh in-memory
+  // suppressor (the runDeliverJob fallback idiom).
+  const suppressor = input.suppressor ?? createDeliverySuppressor();
 
   const shapeReport: OptionsShapeReportFn = async ({ runId, userLogin, canonical, screen }) => {
     const result = (screen as { result: Record<string, unknown> }).result;
@@ -202,19 +235,39 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
     // fields onto the persist row - no second row. The filter +
     // result + provenance already ride the persist row (they are not
     // backfillable, so they were written by the record builder).
-    recordUnifiedOptionsRun(ctx.getOrm() as never, {
-      ...canonical.record,
-      pdfKey,
-      pdfStatus,
-      pdfError,
-      xlsxKey,
-      xlsxStatus,
-      xlsxError,
-      csvKey,
-      csvStatus,
-      csvError,
-      reportUrl,
-    }, ctx.env as never);
+    // #4060: when the entry bound the engine leg, the re-record
+    // rides the same leg (one transport for the row); otherwise the
+    // legacy direct ORM write. Either way the re-record never fails
+    // the run.
+    if (input.canonicalLeg) {
+      await recordUnifiedOptionsRunThroughLeg(input.canonicalLeg, {
+        ...canonical.record,
+        pdfKey,
+        pdfStatus,
+        pdfError,
+        xlsxKey,
+        xlsxStatus,
+        xlsxError,
+        csvKey,
+        csvStatus,
+        csvError,
+        reportUrl,
+      });
+    } else {
+      recordUnifiedOptionsRun(ctx.getOrm() as never, {
+        ...canonical.record,
+        pdfKey,
+        pdfStatus,
+        pdfError,
+        xlsxKey,
+        xlsxStatus,
+        xlsxError,
+        csvKey,
+        csvStatus,
+        csvError,
+        reportUrl,
+      }, ctx.env as never);
+    }
 
     // A failed format is partial + marked (issue #4067, #3072's
     // per-format rule): the stage records "partial" when any format
@@ -257,60 +310,95 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
     let slackState: string | undefined;
     let emailState: string | undefined;
     if (shouldNotifySlack && ctx.scheduleScreenerFollowups) {
-      await ctx.scheduleScreenerFollowups(
-        screenerOutcomeFromRunResult("options", {
-          success: true,
-          thesis: screenUniverseLabel,
-          totalScanned: shaped["totalUnderlyingsScanned"],
-          matchedCount: shaped["matchedCount"],
-          pdfKey: shaped["pdfKey"],
-          pdfStatus: shaped["pdfKey"] ? "generated" : undefined,
-          xlsxKey: shaped["xlsxKey"],
-          xlsxStatus: shaped["xlsxStatus"],
-          xlsxError: shaped["xlsxError"],
-          csvKey: shaped["csvKey"],
-          csvStatus: shaped["csvStatus"],
-          csvError: shaped["csvError"],
-          summary: `${shaped["totalUnderlyingsScanned"] ?? 0} underlyings scanned · ${shaped["totalContractsEvaluated"] ?? 0} contracts evaluated · ${shaped["matchedCount"] ?? 0} matched.`,
-        }, (ctx.env as { APP_BASE_URL?: string }).APP_BASE_URL),
-        userLogin,
-      );
+      // Issue #4064: claim (runId, slack) before scheduling the
+      // follow-up chain — a second deliver of the same run must
+      // not schedule a duplicate chain. The claim is taken only
+      // here, after the can-attempt checks above, so a deferred
+      // or Slack-disabled run never claims. The executor's own
+      // claim (followup.deliver, keyed by the follow-up job id —
+      // options outcomes carry no deliveryId) is a different key
+      // in the same table, so the two layers never suppress each
+      // other; each protects its own re-entry. A scheduling
+      // failure releases the claim so the retry may schedule
+      // (the recipient holds nothing yet); a successful schedule
+      // holds it — the chain owns the send from here.
+      if (!suppressor.tryClaim(runId, "slack")) {
+        slackState = "already_delivered";
+      } else {
+        try {
+          await ctx.scheduleScreenerFollowups(
+            screenerOutcomeFromRunResult("options", {
+              success: true,
+              thesis: screenUniverseLabel,
+              totalScanned: shaped["totalUnderlyingsScanned"],
+              matchedCount: shaped["matchedCount"],
+              pdfKey: shaped["pdfKey"],
+              pdfStatus: shaped["pdfKey"] ? "generated" : undefined,
+              xlsxKey: shaped["xlsxKey"],
+              xlsxStatus: shaped["xlsxStatus"],
+              xlsxError: shaped["xlsxError"],
+              csvKey: shaped["csvKey"],
+              csvStatus: shaped["csvStatus"],
+              csvError: shaped["csvError"],
+              summary: `${shaped["totalUnderlyingsScanned"] ?? 0} underlyings scanned · ${shaped["totalContractsEvaluated"] ?? 0} contracts evaluated · ${shaped["matchedCount"] ?? 0} matched.`,
+            }, (ctx.env as { APP_BASE_URL?: string }).APP_BASE_URL),
+            userLogin,
+          );
+        } catch (scheduleErr) {
+          suppressor.release(runId, "slack");
+          throw scheduleErr;
+        }
+      }
     } else if (shouldNotifySlack) {
-      const slackChannel =
-        screenSlackChannel ||
-        (ctx.env as { SCREENER_SLACK_CHANNEL?: string }).SCREENER_SLACK_CHANNEL ||
-        (ctx.env as { SLACK_CHANNEL?: string }).SLACK_CHANNEL;
-      const summary = `📊 Options Contract Screen — ${symbolsLabel(screenFilter, screenUniverseLabel)}\n${shaped["totalUnderlyingsScanned"] ?? 0} underlyings scanned · ${shaped["totalContractsEvaluated"] ?? 0} contracts evaluated · ${shaped["matchedCount"] ?? 0} matched.\n${String(shaped["filterSummary"] ?? "")}`;
-      try {
-        const agent = ctx.getScreenerAgent(userLogin);
-        const pdfData = shaped["pdfKey"] ? await agent.getPdfByKey(String(shaped["pdfKey"])) : null;
-        const xlsxData = shaped["xlsxKey"] ? await agent.getOptionsXlsxByKey(String(shaped["xlsxKey"])) : null;
-        const csvData = shaped["csvKey"] ? await agent.getOptionsCsvByKey(String(shaped["csvKey"])) : null;
-        const sent = await deliverGatedSlack(ctx.env, {
-          text: summary,
-          channel: slackChannel,
-          userLogin,
-          ...(pdfData
-            ? {
-                pdf: {
-                  bytes: pdfData.bytes,
-                  fileName: pdfData.fileName,
-                  title: `Options Contract Screen — ${new Date().toISOString().slice(0, 10)}`,
-                  comment: `📄 Options contract screener PDF\n\n${summary}`,
-                },
-              }
-            : {}),
-          ...(xlsxData
-            ? { files: [{ bytes: xlsxData.bytes, fileName: xlsxData.fileName, title: xlsxData.fileName }] }
-            : {}),
-          ...(csvData
-            ? { files: [{ bytes: csvData.bytes, fileName: csvData.fileName, title: csvData.fileName }] }
-            : {}),
-        });
-        slackState = sent.ok ? "sent" : "failed";
-        if (!sent.ok) console.warn("[Orchestrator] Slack A2A options contract PDF delivery failed:", sent.error);
-      } catch (slackErr) {
-        console.warn("[Orchestrator] Slack A2A options delivery error:", slackErr instanceof Error ? slackErr.message : String(slackErr));
+      // Issue #4064: claim (runId, slack) before the direct send;
+      // a held claim skips the send as already_delivered. A failed
+      // send releases the claim so a retry may send (the recipient
+      // holds nothing). The claim is taken only here, after the
+      // can-attempt checks above, so a Slack-disabled run never
+      // claims.
+      if (!suppressor.tryClaim(runId, "slack")) {
+        slackState = "already_delivered";
+      } else {
+        const slackChannel =
+          screenSlackChannel ||
+          (ctx.env as { SCREENER_SLACK_CHANNEL?: string }).SCREENER_SLACK_CHANNEL ||
+          (ctx.env as { SLACK_CHANNEL?: string }).SLACK_CHANNEL;
+        const summary = `📊 Options Contract Screen — ${symbolsLabel(screenFilter, screenUniverseLabel)}\n${shaped["totalUnderlyingsScanned"] ?? 0} underlyings scanned · ${shaped["totalContractsEvaluated"] ?? 0} contracts evaluated · ${shaped["matchedCount"] ?? 0} matched.\n${String(shaped["filterSummary"] ?? "")}`;
+        try {
+          const agent = ctx.getScreenerAgent(userLogin);
+          const pdfData = shaped["pdfKey"] ? await agent.getPdfByKey(String(shaped["pdfKey"])) : null;
+          const xlsxData = shaped["xlsxKey"] ? await agent.getOptionsXlsxByKey(String(shaped["xlsxKey"])) : null;
+          const csvData = shaped["csvKey"] ? await agent.getOptionsCsvByKey(String(shaped["csvKey"])) : null;
+          const sent = await deliverGatedSlack(ctx.env, {
+            text: summary,
+            channel: slackChannel,
+            userLogin,
+            ...(pdfData
+              ? {
+                  pdf: {
+                    bytes: pdfData.bytes,
+                    fileName: pdfData.fileName,
+                    title: `Options Contract Screen — ${new Date().toISOString().slice(0, 10)}`,
+                    comment: `📄 Options contract screener PDF\n\n${summary}`,
+                  },
+                }
+              : {}),
+            ...(xlsxData
+              ? { files: [{ bytes: xlsxData.bytes, fileName: xlsxData.fileName, title: xlsxData.fileName }] }
+              : {}),
+            ...(csvData
+              ? { files: [{ bytes: csvData.bytes, fileName: csvData.fileName, title: csvData.fileName }] }
+              : {}),
+          });
+          slackState = sent.ok ? "sent" : "failed";
+          if (!sent.ok) {
+            suppressor.release(runId, "slack");
+            console.warn("[Orchestrator] Slack A2A options contract PDF delivery failed:", sent.error);
+          }
+        } catch (slackErr) {
+          suppressor.release(runId, "slack");
+          console.warn("[Orchestrator] Slack A2A options delivery error:", slackErr instanceof Error ? slackErr.message : String(slackErr));
+        }
       }
     }
 
@@ -320,34 +408,50 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
         ctx.env as unknown as Record<string, unknown>,
       );
       if (emailTo) {
-        const symbols = symbolsLabel(screenFilter, screenUniverseLabel);
-        const emailSummary = `📊 Options Contract Screen — ${symbols}\n${shaped["totalUnderlyingsScanned"] ?? 0} underlyings scanned · ${shaped["totalContractsEvaluated"] ?? 0} contracts evaluated · ${shaped["matchedCount"] ?? 0} matched.\n${String(shaped["filterSummary"] ?? "")}`;
-        try {
-          const { ETradeEmailTradingService } = await import("../trading");
-          const emailService = new ETradeEmailTradingService(ctx.env as never, ctx.getOrm() as never, userLogin);
-          const agent = ctx.getScreenerAgent(userLogin);
-          const pdfData = shaped["pdfKey"] ? await agent.getPdfByKey(String(shaped["pdfKey"])) : null;
-          const xlsxData = shaped["xlsxKey"] ? await agent.getOptionsXlsxByKey(String(shaped["xlsxKey"])) : null;
-          const sent = await sendOptionsRunEmail(
-            {
-              cfpay: getCfpayConfig(ctx.env as never),
-              sendCfpay: (config, a) => cfpaySendEmail(config, a.to, a.subject, a.body),
-              sendCfpayWithAttachments: (config, a) => cfpaySendEmailWithAttachments(config, a),
-              sendLocal: (to, subject, html, text, attachments) => emailService.sendOutboundEmail(to, subject, html, text, attachments),
-            },
-            {
-              to: emailTo,
-              subject: `📊 Options Contract Screen — ${symbols} — ${new Date().toISOString().slice(0, 10)}`,
-              textBody: `${emailSummary}${shaped["reportUrl"] ? `\n\nPDF report: ${shaped["reportUrl"]}` : ""}`,
-              htmlBody: `${emailSummary.replace(/\n/g, "<br/>")}${shaped["reportUrl"] ? `<br/><br/>PDF report: ${shaped["reportUrl"]}` : ""}`,
-              ...(pdfData ? { pdf: { bytes: pdfData.bytes, fileName: pdfData.fileName } } : {}),
-              ...(xlsxData ? { xlsx: { bytes: xlsxData.bytes, fileName: xlsxData.fileName } } : {}),
-            },
-          );
-          emailState = sent.sent ? "sent" : "failed";
-          if (!sent.sent) console.warn("[Orchestrator] Manual options email delivery failed for", emailTo);
-        } catch (emailErr) {
-          console.warn("[Orchestrator] Manual options email error:", emailErr instanceof Error ? emailErr.message : String(emailErr));
+        // Issue #4064: claim (runId, email:<recipient>) before the
+        // send; a held claim skips the send as already_delivered.
+        // A failed send releases the claim so a retry may send.
+        // The claim is taken only here, after the recipient
+        // resolved — a pair that cannot be attempted never claims.
+        // Email runs only when the bridge does not own delivery,
+        // so this claim can never collide with the executor's.
+        const emailDestination = deliveryDestinationFor("email", emailTo);
+        if (!suppressor.tryClaim(runId, emailDestination)) {
+          emailState = "already_delivered";
+        } else {
+          const symbols = symbolsLabel(screenFilter, screenUniverseLabel);
+          const emailSummary = `📊 Options Contract Screen — ${symbols}\n${shaped["totalUnderlyingsScanned"] ?? 0} underlyings scanned · ${shaped["totalContractsEvaluated"] ?? 0} contracts evaluated · ${shaped["matchedCount"] ?? 0} matched.\n${String(shaped["filterSummary"] ?? "")}`;
+          try {
+            const { ETradeEmailTradingService } = await import("../trading");
+            const emailService = new ETradeEmailTradingService(ctx.env as never, ctx.getOrm() as never, userLogin);
+            const agent = ctx.getScreenerAgent(userLogin);
+            const pdfData = shaped["pdfKey"] ? await agent.getPdfByKey(String(shaped["pdfKey"])) : null;
+            const xlsxData = shaped["xlsxKey"] ? await agent.getOptionsXlsxByKey(String(shaped["xlsxKey"])) : null;
+            const sent = await sendOptionsRunEmail(
+              {
+                cfpay: getCfpayConfig(ctx.env as never),
+                sendCfpay: (config, a) => cfpaySendEmail(config, a.to, a.subject, a.body),
+                sendCfpayWithAttachments: (config, a) => cfpaySendEmailWithAttachments(config, a),
+                sendLocal: (to, subject, html, text, attachments) => emailService.sendOutboundEmail(to, subject, html, text, attachments),
+              },
+              {
+                to: emailTo,
+                subject: `📊 Options Contract Screen — ${symbols} — ${new Date().toISOString().slice(0, 10)}`,
+                textBody: `${emailSummary}${shaped["reportUrl"] ? `\n\nPDF report: ${shaped["reportUrl"]}` : ""}`,
+                htmlBody: `${emailSummary.replace(/\n/g, "<br/>")}${shaped["reportUrl"] ? `<br/><br/>PDF report: ${shaped["reportUrl"]}` : ""}`,
+                ...(pdfData ? { pdf: { bytes: pdfData.bytes, fileName: pdfData.fileName } } : {}),
+                ...(xlsxData ? { xlsx: { bytes: xlsxData.bytes, fileName: xlsxData.fileName } } : {}),
+              },
+            );
+            emailState = sent.sent ? "sent" : "failed";
+            if (!sent.sent) {
+              suppressor.release(runId, emailDestination);
+              console.warn("[Orchestrator] Manual options email delivery failed for", emailTo);
+            }
+          } catch (emailErr) {
+            suppressor.release(runId, emailDestination);
+            console.warn("[Orchestrator] Manual options email error:", emailErr instanceof Error ? emailErr.message : String(emailErr));
+          }
         }
       }
     }

@@ -119,6 +119,37 @@
   internal-only callbacks leave no per-run record). No file is deleted
   in S3; the store stays the DO `goals` key until #3123 unifies it
   (Phase 2).
+- **S6 amendment (Slice S6, #3121 — final parity):** the §9 map is
+  proved complete against §1 (§9.7 traces every §1 item plus the §2
+  drift items and the §7 open items to a landed slice, a preserved
+  capability, a filed open sub-issue, Phase 2/3, or an explicit
+  out-of-scope owner). Two stale
+  §9 rows are corrected against current main: U-07 (the Queues tab
+  `?tab=queues` is the T4 surface with S4 linkage landed — S4 never
+  moved the tab, the "until S4" phrasing is retired; the admin queue
+  is `?tab=schedules&view=queue`, S2) and U-08 (the workflow-runs
+  deep link `?run=` #2777/#3163 and the stamped `schedule_id`
+  schedule column #3810 are landed; the #3264 read-path gap's
+  remainder is mas_opportunity_scans joinability, #3314 open). One
+  §9 row S2 filed but never mapped is added: #3361 (preview-trade
+  candidate prefill lost in the de-hub). One new finding from the S6
+  comb is filed, not built: #4110 (the retired Platform Admin
+  scheduled-goals/jobs render blocks are unreachable but still
+  present — S2 removed them from the tab list only). The S5 decision
+  9 follow-up lands: `worker-cron` is admitted into the S1 ledger
+  builder's `SYSTEMS` allowlist now that #3650 has landed
+  (Qunsultant/cfagent#3723); the S5 restamp in
+  `buildCronDispatchRecord` is retained as-is. **Retired-module
+  determination: ZERO renames.** Every S0 old-home module still has
+  a live production importer (consumer analysis on main `7c461e5`,
+  pinned in `tests/schedule-3121-s6-parity.test.ts` S6-P07); S1–S5
+  migrated behavior in place, so the consolidated path IS those
+  modules plus the two new consolidated modules — no module's
+  capability has fully moved off it, and no retirement is invented.
+  The deprecation ledger therefore gains no #3121 entry in S6. No
+  file is deleted in S6; no firing time, cron expression, or payload
+  changes. #3121 itself stays open: deploy verification, live proof,
+  and the §15 completion report are still owed after S6 merges.
 
 ## 1. Re-verified inventory (fresh main)
 
@@ -978,7 +1009,7 @@ no home and no filed issue is a defect in the map.
 |------------|-------|-------------------|--------|
 | Worker cron triggers (3), dispatched into named scheduler entry points | T1, Q(b) | `wrangler.jsonc` crons → `scheduled()` dispatch → named entry points | S5 — landed |
 | `*/30` tick fan-out: ScheduledAgent tick + 6 piggyback dispatches (7 total), guards preserved | §1.2, D1 | `src/server.ts` `scheduled()` + `src/agents/scheduled-agent.ts` `onCron` | S3 (tick kind landed); S5 — landed (named entry points) |
-| Agent SDK alarm schedules (4 timing forms) | T2, B-T2-01 | `resolveTimingForm` (`src/services/consolidatedScheduling.ts`) + `/api/schedules` routes | S1 (classifier); S2 (surfaces) |
+| Agent SDK alarm schedules (4 timing forms) | T2, B-T2-01 | `resolveTimingForm` (`src/services/consolidatedScheduling.ts`) + `/api/schedules` routes | S1 — landed (classifier); S2 — landed (surfaces) |
 | Tick-polled goal schedules | T3, Q(a) | Tick-evaluated kind: `ScheduledAgent.onCron` via the S1 re-exports | S3 — landed |
 | Async-job follow-up chains | T4, Q(c) | `scheduleScreenerFollowups` behind the same ledger | S4 — landed |
 | Cloudflare Workflows as execution (not scheduling) | §1.1 | One durable execution path; `workflowId` linkage on ledger rows | S1 (linkage); S4 (chain stamping) — landed |
@@ -993,13 +1024,14 @@ no home and no filed issue is a defect in the map.
 | Admin Queue tab (dump/cancel-all/wipe/export/Track 1 recreate) | S4 (§1.3) | `?tab=schedules&view=queue` (`ScheduleQueueView`) | S2 — landed |
 | Unified Jobs UI (goals + schedules + crons, read-only merge) | §1.3 | `JobsPanel` over `listGoals` + `listGoalRuns` + `listScheduleRuns` | S0 — preserved (reads the S1 ledger) |
 | Read-only run history (`JobsPanel`, Autopilot, `WorkflowRunsPanel`) | §1.3 | Consolidated ledger reads | S1/S2 — landed |
+| Preview-trade candidate prefill from the schedules home | S2 (§8.3) | — lost in the S2 de-hub; no home — | **Filed #3361 (open)** |
 
 ### 9.3 Tick-polled goal behaviors (B-T3)
 
 | Capability | S0 id | Consolidated home | Status |
 |------------|-------|-------------------|--------|
 | Tick evaluation: every stored goal, disabled skipped unless forced, `isDue` gates firing | B-T3-01 | `onCron` via S1 re-exported `isDue` | S3 — landed |
-| `isDue` semantics + preserved `"0 */6 * * *"` never-due quirk + 23h guard | B-T3-02 | `src/schedule.ts` (source of truth), re-exported by `consolidatedScheduling.ts` | S1 (re-export); S3 (tick wired through it) |
+| `isDue` semantics + preserved `"0 */6 * * *"` never-due quirk + 23h guard | B-T3-02 | `src/schedule.ts` (source of truth), re-exported by `consolidatedScheduling.ts` | S1 — landed (re-export); S3 — landed (tick wired through it) |
 | Budget gate: one PaymentsAgent check per due goal per firing, bucket `AGENTIC_SPEND_AGENT_ID` | B-T3-03 | `onCron` budget check (O3 pinned S3-P02) | S3 — landed |
 | In-flight firing claim, shared by cron and manual firings | B-T3-04 | `src/services/goalFiringClaims.ts` + `onCron` claim/release | S3 — landed (preserved verbatim) |
 | `pipeline:` goals run ordered stages in ONE firing, single budget check | B-T3-05 | `onCron` pipeline branch | S3 — landed (preserved verbatim) |
@@ -1050,8 +1082,45 @@ no home and no filed issue is a defect in the map.
 |------------|-------|-------------------|--------|
 | `?tab=schedules` home + sub-routes (`list/runs/goals/queue`, `schedule=`/`run=` deep links) | U-01 | `SchedulesHome` | S2 (home); S3 (goals on primitives) — landed |
 | Retired duplicate addresses → home redirects | U-02/U-04/U-05/U-06 | `legacySchedulesRedirect` | S2 — landed |
-| `?tab=options&view=scheduled-screening` (U-03) | U-03 | Redirect to the home (owner-decided 2026-11-05) | U-03 redirect slice (parallel, not S3) |
-| Queues tab (async jobs, DLQ, approvals) | U-07 | `?tab=queues` (T4 lives here until S4) | S4 (planned) |
-| Workflow-runs deep link | U-08 | `WorkflowRunsPanel` (no schedule linkage — #3264 gap on the read path) | S4/S6 (planned) |
+| `?tab=options&view=scheduled-screening` (U-03) | U-03 | Redirect to the home (owner-decided 2026-11-05) | U-03 redirect slice — landed (parallel, not S3) |
+| Queues tab (async jobs, DLQ, approvals) | U-07 | `?tab=queues` (`QueuesPage`) — the T4 surface; the admin queue is `?tab=schedules&view=queue` (`ScheduleQueueView`, S2) | S4 — landed (chain linkage; the tab itself never moved — the "until S4" phrasing is retired in S6) |
+| Workflow-runs deep link | U-08 | `WorkflowRunsPanel`: `?tab=workflow-runs&run=<id>` deep link (#2777/#3163) + schedule column/filter reading stamped `schedule_id` (#3810) | landed via #2777/#3163 + #3810 (outside #3121 slices; verified in S6 — the #3264 gap's remainder is mas_opportunity_scans joinability, #3314 open) |
 | Per-run records API (`/api/schedules/runs?scheduleId=`) | U-09 | Joined by home deep links in S2 | S2 — landed |
 | Chat Scheduler sub-view (#3122, planned) | U-10 | Third `ChatSubView` | Phase 3 #3122 (planned) |
+
+### 9.7 S6 final parity — trace closure
+
+S6 proves the map complete. Every §1 item (§9.1–§9.6) now carries a
+landed slice, a filed open sub-issue, or a Phase 2/3 home; the two
+stale rows (U-07, U-08) are corrected above, and the one row S2
+filed but never mapped (#3361) is added in §9.2. The rows below
+close the trace for the items that live outside §1: the §2 drift
+items, the §7 open items, and the S6 comb's own finding. A row is
+complete when its Status names a landed slice, a preserved
+capability, a filed open issue,
+Phase 2/3, or an explicit out-of-scope owner (a named issue in
+another program) — that rule is pinned in
+`tests/schedule-3121-s6-parity.test.ts` (S6-P01), which parses every
+§9 table row and fails on any other status.
+
+| Capability | S0 id | Consolidated home | Status |
+|------------|-------|-------------------|--------|
+| Hung-timeout mechanism (SDK 30s default, per-job option) | §2 D6 / §7 O1 | `SDK_HUNG_TIMEOUT_DEFAULT_SECONDS` in `src/services/consolidatedScheduling.ts` | S1 — landed |
+| Hardcoded schedule defaults externalized (sweep interval, research fire hour, retention defaults, recovery bounds) | §2 D7 | #2366 S1 work (externalization) | out of scope — Qunsultant/cfagent#2366 S1 (S0 does not move them) |
+| Goal lifecycle audit events on every entry path (DO-side sink) | §7 O2 | DO-side sink in the mutation methods | S3 — landed (#3312 fixed; issue open until live proof) |
+| Per-tick budget accounting matches `onCron` exactly | §7 O3 | The consolidated tick IS `onCron` | S3 — landed |
+| `trigger` sits ALONGSIDE `triggeredBy` (O4 decision) | §7 O4 | `resolveLedgerTrigger` in `src/services/consolidatedScheduling.ts` | S1 — landed |
+| Retired Platform Admin scheduled-goals/jobs mounts removed (S2 half-done: tab list clean, render blocks remain) | §8.1 U-04/U-05 | — unreachable render blocks in `PlatformAdminPanel.tsx`; no live home — | **Filed #4110 (open)** |
+| Ledger / jobs / workflows / stages gaps from the operations doc | §9 / jobs-workflows-stages-01.md | — | **Filed #3640 (open)** + #3641–#3645 (open, unbuilt per owner direction) |
+| Seeded `opportunity-hunt` goal fails every firing (operation not registered) | §1.4 B-T3-07 | — no home — | **Filed #3652 (open)** |
+
+What stays open after S6 (the program does not close with this
+slice): the filed sub-issues #3393, #3394, #3314, #3313, #3312 (live
+proof only), #3361, #3640–#3645 (unbuilt per owner direction),
+#3652, #4110; the Phase 2 item B-T3-07 (goal store → #3123) and
+the Phase 3 item U-10 (Chat Scheduler sub-view → #3122). What S6
+deliberately does NOT do: no deprecation rename (zero modules
+proven retired — see the S6 amendment), no firing-time, cron, or
+payload change, no Phase 2/3 build, no build of any filed
+sub-issue. Deploy verification, live proof, and the §15 completion
+report for #3121 are still owed after S6 merges.

@@ -1,6 +1,9 @@
 /**
  * Issue #1057 (consolidation S5): GET /api/runs — the one Runs read
- * surface over the four run stores.
+ * surface over the four DO run stores. The fifth store — the engine's
+ * D1 job run records (#3946 Option B) — merges here too; its pins live
+ * in tests/run_recorder_two_ledgers_3946.test.ts, and this file pins
+ * the four DO stores' merge contract unchanged.
  *
  * Pinned through the real route module the server dispatches to
  * (handleReportsRoutes, the §17.3 route-test idiom):
@@ -165,7 +168,7 @@ async function call(path: string, ctx: ReportsRouteContext, init: RequestInit = 
 }
 
 describe("GET /api/runs (S5)", () => {
-  it("merges all four stores newest-first with canonical de-duplication", async () => {
+  it("merges all four DO stores newest-first with canonical de-duplication", async () => {
     const res = await call("/api/runs?kind=all", makeCtx(makeSql()), {
       headers: { "x-user-login": "alice" },
     });

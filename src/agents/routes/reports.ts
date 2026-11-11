@@ -23,6 +23,7 @@ import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import type { SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
 import type { RunSummary } from "../../services/runSummaries";
+import type { JobRunRecord } from "../../services/jobRunRecords";
 import {
   canonicalResearchEmailBody,
   canonicalResearchWebhookBody,
@@ -100,6 +101,13 @@ export interface ReportsRouteContext {
      *  dispatch vs a manual invocation (mounts pass the full env). */
     SERVICE_USER_LOGIN?: string;
   };
+  /**
+   * Issue #3946 (Option B): the engine's D1 run-record reader.
+   * Production builds this from env (listD1JobRunRecords); tests
+   * inject a mock list. A failing read is named in storeErrors and
+   * never hides the other ledgers.
+   */
+  jobRunRecordReader?: (limit: number) => Promise<JobRunRecord[]>;
   /**
    * Issue #3527 S5 — ORM accessor (owner: OrchestratorAgent.getOrm)
    * for the sweep's scheduled-job outcome recording (#2037 sink).
@@ -1130,6 +1138,20 @@ export async function handleReportsRoutes(
           // still yields a detail with those fields unknown.
         }
       }
+      // Issue #3946 (Option B): the engine's D1 run records join the
+      // detail lookup. Best-effort like scan/discovery above — the
+      // list surface names an unreadable D1 ledger in storeErrors.
+      try {
+        const { listD1JobRunRecords } = await import("../../services/jobRunRecordReads");
+        const { runSummaryFromJobRunRecord } = await import("../../services/runSummaries");
+        const records = ctx.jobRunRecordReader
+          ? await ctx.jobRunRecordReader(100)
+          : await listD1JobRunRecords(ctx.env, 100);
+        lists.push(records.map(runSummaryFromJobRunRecord));
+      } catch {
+        // Unreadable D1 ledger: the row stays unfound here; the list
+        // surface names the failure in storeErrors.
+      }
       const merged = mergeRunSummaries(lists, 100);
       const summary = merged.find((r) => r.runId === wanted || r.id === wanted);
       if (!summary) return Response.json({ error: "run not found" }, { status: 404 });
@@ -1141,9 +1163,10 @@ export async function handleReportsRoutes(
   }
 
   // Issue #1057 (consolidation S5): the one Runs read surface. Merges
-  // run summaries from all four run stores (mas_reports,
-  // mas_opportunity_scans, mas_discovery_runs, and the ScreenerAgent
-  // latest/history feed) into the single normalized shape defined in
+  // run summaries from all five run stores (mas_reports,
+  // mas_opportunity_scans, mas_discovery_runs, the ScreenerAgent
+  // latest/history feed, and the engine's D1 job run records —
+  // #3946 Option B) into the single normalized shape defined in
   // src/services/runSummaries.ts — newest first, de-duplicated on the
   // exact canonical joins (the canonical row wins). Scoping matches
   // each store's own route: canonical reports use the header login or
@@ -1233,6 +1256,23 @@ export async function handleReportsRoutes(
           const agent = ctx.getScreenerAgent(screenerLogin);
           const history = await agent.getHistory();
           return history.map(runSummaryFromScreenerRun);
+        });
+      }
+      // Issue #3946 (Option B): the engine's D1 run records join the
+      // merge under kind=all only — their kind is "report", which no
+      // other kind filter accepts, so they never leak into a
+      // kind-scoped read. An unreadable D1 ledger is named in
+      // storeErrors by readStore, never silently empty.
+      if (kind === "all") {
+        await readStore("jobRunRecords", async () => {
+          const { listD1JobRunRecordSummaries, runSummaryFromJobRunRecord } = await import(
+            "../../services/runSummaries"
+          );
+          if (ctx.jobRunRecordReader) {
+            const records = await ctx.jobRunRecordReader(limit);
+            return records.map(runSummaryFromJobRunRecord);
+          }
+          return listD1JobRunRecordSummaries(ctx.env, limit);
         });
       }
       const { mergeRunSummaries } = await import("../../services/runSummaries");
