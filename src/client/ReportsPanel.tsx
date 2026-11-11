@@ -3,8 +3,9 @@
  *
  * Issue #1057 (consolidation S5): this panel is the single run-history
  * UI. The list is served by GET /api/runs — the one Runs read surface
- * merging all four run stores (mas_reports, mas_opportunity_scans,
- * mas_discovery_runs, the ScreenerAgent feed) into the normalized
+ * merging all five run stores (mas_reports, mas_opportunity_scans,
+ * mas_discovery_runs, the ScreenerAgent feed, and the engine's D1 job
+ * run records — #3946 Option B) into the normalized
  * RunSummary shape — so options scans and discovery runs appear here
  * alongside canonical reports. Detail/download affordances are
  * unchanged: canonical-backed rows open the report detail by reportId

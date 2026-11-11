@@ -23,6 +23,8 @@
 import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
 import { createShardJobAdapter } from "../../data/createShardJobPorts";
 import type { ShardJobReader, ShardJobRow } from "../../data/shardJobPorts";
+import { listD1JobRunRecords } from "../../services/jobRunRecordReads";
+import type { JobRunRecord } from "../../services/jobRunRecords";
 import { listJobOutcomes } from "../../services/jobOutcomes";
 import { listScreeningActivity } from "../../services/screeningActivity";
 import { listScheduledReports } from "../../services/scheduledReports";
@@ -32,6 +34,7 @@ import { sagaAuditOwnerStub, type AuditOwnerStub } from "../../workflows/sagaJou
 import type { SqlStorage } from "../../orm";
 import {
   buildWorkflowRunsPage,
+  runFromJobRunRecord,
   runFromSagaChain,
   summarizeWorkflowRuns,
   type UnifiedWorkflowRunRecord,
@@ -66,6 +69,13 @@ export interface WorkflowRunsRouteContext {
    * is named in storeErrors and never hides the other runs.
    */
   scheduleReader?: () => Promise<unknown[]>;
+  /**
+   * Issue #3946 (Option B): the engine's D1 run-record reader.
+   * Production builds this from env (listD1JobRunRecords); tests
+   * inject a mock list. A failing read is named in storeErrors and
+   * never hides the other runs.
+   */
+  jobRunRecordReader?: (limit: number) => Promise<JobRunRecord[]>;
 }
 
 const DEFAULT_LIMIT = 40;
@@ -678,6 +688,30 @@ export async function handleWorkflowRunsRoutes(
     }
   }
 
+  // Issue #3946 (Option B): the engine's D1 run records join the
+  // list as their own runs — deployment-level, never attributed to
+  // the signed-in user (the D1 table carries no login column), and
+  // never owner-scoped, so this read needs env but no userLogin. A
+  // failed D1 read is named in storeErrors and never hides the
+  // other runs, exactly like the saga and schedule reads above.
+  let jobRunRecordRuns: WorkflowRun[] = [];
+  if (ctx.env !== undefined) {
+    try {
+      const reader =
+        ctx.jobRunRecordReader ??
+        ((readLimit: number) => listD1JobRunRecords(ctx.env, readLimit));
+      const records = await reader(
+        Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2)),
+      );
+      jobRunRecordRuns = records.map(runFromJobRunRecord);
+    } catch (err) {
+      storeErrors.jobRunRecords = err instanceof Error ? err.message : String(err);
+    }
+  } else {
+    storeErrors.jobRunRecords =
+      "skipped: no environment available to read the D1 job run records";
+  }
+
   // Saga chains (#2780) join BEFORE filter/slice (#2786 Part 2), and
   // Part 3 Docs attach + report-only minting happen inside the page
   // builder BEFORE filter/slice, so a saga run, a report run, a
@@ -699,7 +733,7 @@ export async function handleWorkflowRunsRoutes(
     nowMs: Date.now(),
     reportsOnly,
     reportDocs,
-    extraRuns: [...sagaRuns, ...scheduleRuns],
+    extraRuns: [...sagaRuns, ...scheduleRuns, ...jobRunRecordRuns],
   });
   return Response.json({
     count: page.runs.length,
