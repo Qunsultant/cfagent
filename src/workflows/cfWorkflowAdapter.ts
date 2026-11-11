@@ -78,14 +78,36 @@ async function fallbackWorkflowId(jobId: string): Promise<string> {
  * outage still fails loudly with the original error preserved
  * for the logs (inside the seam's start_failed message).
  */
+/**
+ * Issue #4140: the binding this adapter drives. ScreenerScreenWorkflow
+ * extends ThinkWorkflow, which extends AgentWorkflow - and AgentWorkflow's
+ * `_initAgent` runs BEFORE `run()` and throws when the workflow params lack
+ * `__agentName`, `__agentBinding` and `__workflowName`. A run started
+ * outside an agent (a route, the broker, the retired cron) therefore
+ * errored with zero steps and never reached run() - which is what every
+ * one of the 324 screener firings did.
+ */
+const DEFAULT_WORKFLOW_BINDING_NAME = "SCREENER_WORKFLOW";
+
 export async function startWorkflowInstance(
   binding: WorkflowBindingLike,
   command: WorkflowJobCommand,
+  workflowName: string = DEFAULT_WORKFLOW_BINDING_NAME,
 ): Promise<{ workflowId: string; existing: boolean; adoptedFallbackId?: boolean }> {
   return startManagedWorkflowInstance(binding, {
     id: workflowIdForJob(command.jobId),
     fallbackId: () => fallbackWorkflowId(command.jobId),
-    params: command,
+    // Issue #4140: satisfy AgentWorkflow's init so run() is reached at all.
+    // The workflow reads none of these itself; the run's identity is
+    // command.userLogin, validated in run() with no default identity
+    // (#1185). "system" is only the DO instance name when no login exists,
+    // and it never becomes the run owner.
+    params: {
+      ...command,
+      __agentName: command.userLogin || "system",
+      __agentBinding: "ORCHESTRATOR_AGENT",
+      __workflowName: workflowName,
+    },
   });
 }
 
