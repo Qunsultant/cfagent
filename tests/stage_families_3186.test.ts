@@ -163,6 +163,11 @@ describe("options pipeline stage ids pin to real calls (#3186 step 1)", () => {
     readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
 
   it("each pipeline stage names a call that exists in the source", () => {
+    // Issue #4067: these pins name the call the stage actually
+    // makes. The #3186 originals for persistCanonicalResults /
+    // shapeReport / deliver named legacy mappings (the scan-run
+    // store, the panel pipeline, the route's Slack call) - the
+    // stages never called them.
     const pins: Array<{ stageId: string; file: string; call: string }> = [
       { stageId: "plan", file: "src/trading/screeningSchemas.ts", call: "parseOptionsScreenRequest" },
       { stageId: "chainFetch", file: "src/trading/optionsScreener.ts", call: "fetchChainsForSymbol" },
@@ -173,9 +178,10 @@ describe("options pipeline stage ids pin to real calls (#3186 step 1)", () => {
       { stageId: "screen", file: "src/trading/optionsScreener.ts", call: "screenOptions" },
       { stageId: "screen", file: "src/trading/optionsScreener.ts", call: "evaluateChains" },
       { stageId: "risk", file: "src/workflows/sagaRiskStage.ts", call: "assessSagaTradeRisk" },
-      { stageId: "persistCanonicalResults", file: "src/data/doSqliteScanRunAdapter.ts", call: "mas_opportunity_scans" },
-      { stageId: "shapeReport", file: "src/trading/options/panelPipeline.ts", call: "runPanelPipeline" },
-      { stageId: "deliver", file: "src/agents/routes/etradeOptionsScreen.ts", call: "deliverGatedSlack" },
+      { stageId: "persistCanonicalResults", file: "src/workflows/optionsScreenPorts.ts", call: "recordUnifiedOptionsRun" },
+      { stageId: "shapeReport", file: "src/workflows/manualOptionsScreen.ts", call: "generateAndStoreOptionsXlsx" },
+      { stageId: "shapeReport", file: "src/workflows/manualOptionsScreen.ts", call: "generateAndStoreOptionsCsv" },
+      { stageId: "deliver", file: "src/workflows/manualOptionsScreen.ts", call: "deliverGatedSlack" },
     ];
     for (const pin of pins) {
       expect(OPTIONS_PIPELINE_STAGES).toContain(pin.stageId);

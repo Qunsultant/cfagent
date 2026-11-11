@@ -74,15 +74,29 @@ export type OptionsScreenPhase = (typeof OPTIONS_SCREEN_PHASES)[number];
  * Issue #3186 - the options pipeline's stage ids. The staged
  * producer/consumer pipeline supersedes the request handler as the
  * execution path, so its stages are the family's pipeline ids (the
- * #3191 phases above stay valid until step 3 retires them, when the
- * pipeline replaces the #3072 seam emitter entry by entry). Each id
- * pins to a real call (see tests/stage_families_3186.test.ts):
+ * #3191 phases above are retired since step 3d, when the pipeline
+ * replaced the #3072 seam emitter entry by entry). Each id pins to
+ * a real call (see tests/stage_families_3186.test.ts):
  * plan -> parseOptionsScreenRequest / optionsPlanBlock; chainFetch ->
  * fetchChainsForSymbol; enrich -> signal computation + enrichment
  * inside the screen path; screen -> screenOptions / evaluateChains;
- * risk -> assessSagaTradeRisk; persistCanonicalResults -> canonical
- * mas_opportunity_scans write; shapeReport -> runPanelPipeline;
- * deliver -> deliverScreenerToSlackA2A.
+ * risk -> assessSagaTradeRisk; persistCanonicalResults ->
+ * recordUnifiedOptionsRun -> the mas_reports canonical store (the
+ * scan-run store mas_opportunity_scans belongs to the
+ * scanner/strategy leg, not this stage); shapeReport -> the
+ * caller-supplied shapeReport fn (manual entry: PDF + XLSX + CSV
+ * per-format legs; goal leg: report section; panel/scanner legs:
+ * panel result); deliver -> the caller-supplied deliver fn (manual
+ * entry: deliverGatedSlack / follow-up bridge; goal leg:
+ * deferred-to-goal-run).
+ *
+ * Issue #4067 - this list IS the family's addressable vocabulary:
+ * the control plane addresses these 8 execution stages by
+ * (runId, stageId). The 4 display stages (feed/store/serve/deliver)
+ * partition them in the catalog (workflowCatalog.ts,
+ * options-screener entry) and are presentation only, never control
+ * addresses - see OPTIONS_ADDRESSABLE_STAGES /
+ * OPTIONS_DISPLAY_STAGES below.
  */
 export const OPTIONS_PIPELINE_STAGES = [
   "plan",
@@ -96,6 +110,31 @@ export const OPTIONS_PIPELINE_STAGES = [
 ] as const;
 
 export type OptionsPipelineStage = (typeof OPTIONS_PIPELINE_STAGES)[number];
+
+/**
+ * Issue #4067 - the options addressable vocabulary. Same array as
+ * OPTIONS_PIPELINE_STAGES, named for the concept the control plane
+ * imports: the stages a run executes, in pipeline order. The 4
+ * display stages are presentation only and are never in this set;
+ * stageMessage() refuses a display id for the options family
+ * (see tests/options_stage_vocabulary_4067.test.ts).
+ */
+export const OPTIONS_ADDRESSABLE_STAGES = OPTIONS_PIPELINE_STAGES;
+
+/**
+ * Issue #4067 - the 4 display stages the catalog partitions the 8
+ * execution stages under (workflowCatalog.ts, options-screener
+ * entry: feed covers plan/chainFetch/enrich/screen/risk; store
+ * covers persistCanonicalResults; serve covers shapeReport; deliver
+ * covers deliver). Presentation only - with one shared id: "deliver"
+ * is both the display stage and execution stage 8, so it IS
+ * addressable as the execution stage; "feed", "store" and "serve"
+ * have no execution-stage counterpart and are never control
+ * addresses.
+ */
+export const OPTIONS_DISPLAY_STAGES = ["feed", "store", "serve", "deliver"] as const;
+
+export type OptionsDisplayStage = (typeof OPTIONS_DISPLAY_STAGES)[number];
 
 /**
  * The per-run persisted-analysis key family (moved here from

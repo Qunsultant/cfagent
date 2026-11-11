@@ -204,7 +204,13 @@ const STOCK_SCREENER: WorkflowDeclaration = {
  * covers plan/chainFetch/enrich/screen/risk; store covers
  * persistCanonicalResults; serve covers shapeReport; deliver covers
  * deliver). The legacy #3191 phases are retired (their only publisher
- * was the #3072 emitter, called only by the manual handler). */
+ * was the #3072 emitter, called only by the manual handler).
+ * Issue #4067: the eight execution stages are the family's addressable
+ * vocabulary (what the control plane addresses by (runId, stageId));
+ * feed, store and serve are presentation only, never control
+ * addresses (deliver is the one id shared with execution stage 8).
+ * A failed report format is partial + marked, never
+ * stranding the formats that generated (#3072's per-format rule). */
 const OPTIONS_SCREENER: WorkflowDeclaration = {
   id: "options-screener",
   family: "options",
