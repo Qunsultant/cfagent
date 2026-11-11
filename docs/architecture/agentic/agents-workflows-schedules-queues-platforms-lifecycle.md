@@ -1506,6 +1506,76 @@ designated legal-accountable executive.
 | Legal research support | Research with recorded question, jurisdiction, provenance, conflicting authorities, and verification status per clo.md §4.2 | TBD — no filed product issue defines it as a standalone §12.2 product; within #2772's programme scope | — |
 | Governed legal-process improvement | The closed legal-process improvement cycle (L1–L3) and the improvement portfolio per clo.md §2, §12, and §15 | TBD — no filed product issue defines it as a standalone §12.2 product | — |
 
+Business architecture & commercial (CBO; parent programme #2012, platform programme #2218):
+
+The CBO platform commercializes the four screener families — stock, goal, options,
+strategy — behind one payment gate. The screeners themselves are not CBO products:
+the Unified Goal Screener is a Technology Platform product (#1972) and the Options
+Screener programme is a Finance & capital product (#2528); the rows below are the
+commercial products that price, entitle, and operate those screens. platforms.md §2
+defines this platform (BIZBOK capabilities and value streams; Business Model Canvas;
+commercial experiment design; measured on validated demand, realized contribution,
+partner benefit, and forecast calibration). The entity model of record is
+`docs/architecture/business/platform-entity-capability-map.md` (#3168, under #2218):
+login is a verified string with no user table; an account is one row per login
+carrying exactly one tenantId; a tenant is a referenced id, not a row; subscriptions
+are (user, tenant)-scoped. The entitlement definition of record is
+`docs/architecture/business/entitlements-01.md` (#3241, Status AGREED): allowances,
+tiers, grant/trial mechanics, approved subscription prices, and the open per-run
+prices. This section states the product inventory and points at those two documents;
+it does not restate them.
+
+Relationship to neighbouring rows, not a duplication: the Agentic Platform's "Agent
+payments" row (#3714) is the agent-initiated payments capability; the rows below
+are the commercial products whose prices, tiers, coverage, and operator surfaces
+that payment path enforces. The Technology Platform's "Paid screener-to-trade saga"
+row (#2041) is the cross-domain journey that consumes the gate; it is not
+re-described here.
+
+The CBO rows below were added 2026-11-11; their statuses are as of that date.
+
+| Product | Purpose | Status | Tracking |
+| --- | --- | --- | --- |
+| Native monetization gate | The one entitlement path for every paid screen: verified identity, flag, grant bounded by quota, free allowance, approved-price resolution, included runs, credits, checkout-or-skip | Live — gate order in `src/services/nativeMonetization.ts` `check()`: already-paid → flag OFF → grant bounded by approved-free quota → Free allowance → grant fall-through → approved price → included runs → credits → 402 checkout / coverage-required skip | #2012; #2373 |
+| Payment workflow | Gate → payment-or-coverage → screener, deterministic, no prompt in the money path; confirm by re-reading verified payment | Live — `src/workflows/paymentWorkflow.ts` (ThinkWorkflow; OrchestratorAgent is caller, not base class); consumes the gate only via `check()` / `confirmPaid()` | #2012 |
+| Price catalogue + approval | Operator price catalogue, one row per family; only APPROVED prices charge, fail-closed | Partial — catalogue and approval state Live (`src/data/priceCataloguePorts.ts`, #2547); seeds PROPOSED (stock $0.02 / goal $0.10 / options $0.05 / strategy $0.10), no per-run price approved, so no live charge is verified | #2185; #2547 |
+| Subscriptions (native Stripe one-time + Stripe Billing) | Subscription purchase and activation; plans as operator data | Partial — one-time purchase Live (`POST /payments/agentic/commercial/subscription/purchase`, `activateSubscription` grants tier + included runs); Billing purchase Live but confers tier only, never included runs ("Included-run bypass stays OFF"); no annual billing period in the plan shape | #2146; #2656 |
+| Free-run allowance + counter | Free tier runs any family up to the allowance, counted per product per month | Live — 10 runs per product per UTC calendar month, operator-managed and changeable (`src/data/freeRunCounterPorts.ts`, migrations 0043/0044); operator UI in Platform Admin → Free Runs | #3305; #3315 |
+| Unlimited-free grant | Operator grant: an approved account runs any family, any kind, price 0 | Live — account-row grant (migration 0040), gate honours it including recurring runs, bounded since #3263 by the per-service quota; no real account granted yet; approver decided: tenant admin | #3245 |
+| Approved-free per-service quota | Per-service cap per period bounding the unlimited-free grant | Live — default 10 runs per service per month, monthly window, operator data (`src/data/approvedFreeQuotaPorts.ts`, migrations 0054/0055); at the cap the run is refused 402, never over allowance | #3263 |
+| Operator subscription grant | Operator creates a real subscription row for a user, no checkout, no Stripe record | Live — `POST /payments/agentic/commercial/subscription/grant` (`src/services/subscriptionActivation.ts` `grantSubscription`); confers tier + included runs together; fail-closed with no account row; known edge: a grant overwrites `tierSource`, so the tier falls back to Free at expiry | #3244 |
+| Trial subscriptions | $0, no-payment trial: plan trial days as operator data, one trial per user per plan | Live — `POST /payments/agentic/commercial/subscription/trial` (`src/services/trialSubscriptionActivation.ts`, migration 0041 `trial_days`); confers tier + the plan's included runs; a missing account is auto-created server-side; trial runs join the fungible `includedRuns` counter (not clawed back, unspendable until Subscribed again) | #3243 |
+| Platform management (tenant, account, user admin) | Tenant create/list/settings, account administration, user lookup, channel enablement | Live — Platform Admin, 15 tabs (`src/client/PlatformAdminPage.tsx`): Tenants (#3115), Accounts (#3149), Users (#3109), Channels (#3169); tenant is a referenced id with no lifecycle state; memberships read-only, CISO-owned writes | #2218; #3115; #3149; #3109; #3169 |
+| Signup → trial onboarding flow | First-run flow: account created on entry, trial start-or-skip, brokerage connect, preferences saved, true summary | Live — 5-step FirstRunScreen with server-side onboarding state (migration 0042); account setup `POST /platform/accounts/setup`, idempotent, Free tier | #3256 |
+| Self-service top-up | A user funds their own credit balance through a native checkout, credited on verified payment only | Live — `POST /payments/agentic/commercial/top-up/checkout` + `POST /payments/agentic/commercial/top-up/confirm` (`src/agents/routes/agenticPayments.ts`, `topUpPorts`, migration 0048), wired into CheckoutPanel | #3262 |
+| Profile management | Display name + phone, self-service | Partial — display name + phone Live (`GET`/`POST /api/platform/accounts/profile`, `src/client/profileApi.ts`); email change unbuilt, touches IAAA/session, needs CISO review | #3261 |
+| Referral / invite codes | Extra free runs on top of sign-up and grants, by code | Filed — discussion later, no build | #3307 |
+| Upgrade offers | At the limit the user is asked to upgrade or buy credits, with a plan comparison | Filed — no upgrade/upsell UI exists today; the client maps any 402 to one fixed checkout message | #3246 |
+| Monthly + annual subscriptions | Monthly + annual plans; annual discount 15% as a PROPOSED configurable value | Filed — no billing period in the plan shape; annual dollar prices (Basic $509.90 / Premium $611.90) NOT owner-approved | #3357 |
+| Product configuration UI | Versioned products, effective-dated launches, legacy vs new customers on different products/versions; operates grandfathering | Filed — decided as a requirement, unbuilt | #3289 |
+| Free-for-lifetime | Access free forever; any activity requires payment | Filed — undecided option, distinct from the operator grant and the time-boxed trial | #3247 |
+
+Two open conformance points, live on main (recorded in entitlements-01.md §8;
+resolution is the owner's pick, not a slice decision): (1) `TRADING_PAID_SERVICES`
+(`src/services/agenticPayments.ts`) is a second hardcoded price source used by the
+NLQ/chat paid path; (2) the F3 stock-chat path reads the raw catalogue price with
+no approval check (`src/data/productAccess.ts`), while HTTP gates fail closed on
+PROPOSED prices. The Flagship monetization flag defaults ON in code since
+2026-11-01 (`src/features/cfFlagshipAdapter.ts`, #2742) — a code default only, not
+activation proof. Subscription prices are owner-approved (Free $0, Basic $49.99/mo,
+Premium $59.99/mo, with grandfathering); per-run prices are NOT approved
+(entitlements-01.md §8, §10). Whether any real account holds a grant, a
+subscription, or a trial, and whether the approved subscription prices are recorded
+in the live store, are operator data not verifiable from the repo
+(entitlements-01.md §12).
+
+The tenant-admin grant path is a DRAFT workspace artifact, not a product: DRAFT,
+not adopted, no issue filed, no build
+(`~/workspace/goals/platform-management/files/tenant-admin-grant-approval-path-draft.md`,
+2026-11-09). The decided approver is the tenant admin; how a tenant admin
+exercises it when the grant UI is Platform Admin only is the open question the
+draft addresses.
+
 All other platforms — products not yet defined (**TBD**
 placeholder rows; no filed product issues were found for these
 platforms in the 2026-11-09 survey):
@@ -1513,7 +1583,6 @@ platforms in the 2026-11-09 survey):
 | Platform | Product status |
 | --- | --- |
 | Organization & strategy (CEO) | TBD — products to be defined by the owning platform |
-| Business architecture & commercial (CBO) | TBD — products to be defined by the owning platform |
 | Operations & service delivery (COO) | TBD — products to be defined by the owning platform |
 | Investment & portfolio (CIO function) | TBD — products to be defined |
 | Research (Chief Research Officer / Chief Scientist function) | TBD — products to be defined |
@@ -1682,6 +1751,12 @@ this document's scope. The owning accounts, by subject:
 - **Data foundation:** the data-foundation decisions (0002,
   0022), the topology decision (0020), and the code standards'
   data-access volume — the foundation §2 area 7 builds on.
+- **Commercial platform and entitlements:** the business folder's
+  platform entity-capability map and the entitlements definition are
+  the owning accounts of the CBO platform's entity model (login,
+  account, tenant) and its entitlement rules (allowances, tiers,
+  grants, prices); §12.2's CBO rows cite them and do not restate
+  them.
 - **Resolvers and context:** the code standards' resolvers-and-
   context volume is the operational standard the #3741 resolver
   is built under; the architecture-boundaries and agentic-SaaS
@@ -1799,8 +1874,9 @@ owner's word, not on this document.
 
 - **Current:** §12.2's inventory — the Technology, Agentic,
   Security & trust, Product & experience (CPO), Finance &
-  capital (CFO), Data & knowledge (CDO), and Legal &
-  obligation (CLO) platform products
+  capital (CFO), Data & knowledge (CDO), Legal &
+  obligation (CLO), and Business architecture & commercial
+  (CBO) platform products
   filed or partial; all other
   platforms' products undefined.
 - **Future:** every platform productized under the platform
@@ -1819,6 +1895,8 @@ owner's word, not on this document.
   platform's products defined in §12.2 (this issue, #3864);
   the Legal & obligation (CLO) platform's products defined in
   §12.2 (this issue, #3867);
+  the Business architecture & commercial (CBO) platform's
+  products defined in §12.2 (this issue, #4062);
   product definition for the
   remaining platforms is **TBD**, owned by each platform.
 
