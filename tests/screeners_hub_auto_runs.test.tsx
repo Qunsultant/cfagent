@@ -149,7 +149,12 @@ async function renderHub() {
 }
 
 function runItems(): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>(".screener-run-item"));
+  // Runs are now primitive Buttons (S-U2 #3051) in the
+  // aria-labelled run-history list — no .screener-run-item class
+  // remains. The status badge inside each is a ui-badge.
+  return Array.from(
+    container.querySelectorAll<HTMLElement>('[aria-label="Screener run history"] button'),
+  );
 }
 
 function pdfHref(): string | null {
@@ -227,7 +232,7 @@ describe("StockHub autonomous run history (#125, moved by #2896)", () => {
       expect(text).toContain(`${run.totalScanned} scanned`);
       expect(text).toContain(`${run.matchedCount} matched`);
       expect(text).toContain(`${run.opportunities.length} standout`);
-      expect(items[i].querySelector(".screener-run-status")?.textContent).toBe(
+      expect(items[i].querySelector(".ui-badge")?.textContent).toBe(
         SCREEN_RUN_STATUS_LABELS[screenRunStatus(run)],
       );
     });
@@ -240,11 +245,11 @@ describe("StockHub autonomous run history (#125, moved by #2896)", () => {
     expect(items[3].textContent).not.toContain("ALL sector");
 
     // Status badges across the outcome spectrum.
-    expect(items[0].querySelector(".screener-run-status")?.textContent).toBe("Success");
-    expect(items[1].querySelector(".screener-run-status")?.textContent).toBe("Partial");
-    expect(items[2].querySelector(".screener-run-status")?.textContent).toBe("Failed");
+    expect(items[0].querySelector(".ui-badge")?.textContent).toBe("Success");
+    expect(items[1].querySelector(".ui-badge")?.textContent).toBe("Partial");
+    expect(items[2].querySelector(".ui-badge")?.textContent).toBe("Failed");
     // The quiet run is a run in the list — with its (zero) counts shown.
-    expect(items[3].querySelector(".screener-run-status")?.textContent).toBe("Success");
+    expect(items[3].querySelector(".ui-badge")?.textContent).toBe("Success");
     expect(items[3].textContent).toContain("0 standout");
   });
 
@@ -329,7 +334,11 @@ function stubRuns(runs: unknown[]) {
 }
 
 function panelEl(): HTMLElement {
-  const el = container.querySelector(".screener-feed-callout");
+  // The autonomous panel is now a primitive Card (S-U2 #3051) headed
+  // "🤖 Autonomous Screen" — no .screener-feed-callout class remains.
+  const el = Array.from(container.querySelectorAll<HTMLElement>(".ui-card")).find((c) =>
+    (c.textContent || "").includes("Autonomous Screen"),
+  );
   if (!el) throw new Error("autonomous panel not rendered");
   return el as HTMLElement;
 }

@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useState, createContext, useRef } from "react";
-import { Button, Checkbox, FieldShell, Select, Table, TextInput } from "../components/ui";
+import { Badge, Button, Card, Checkbox, DetailCard, FieldShell, Flex, Grid, Notice, PageSection, Select, Stack, Table, TextInput } from "../components/ui";
 import { subscribeToRouteChanges } from "../router";
 import { researchSurfaceForParam, researchParamForMode } from "./researchSurface";
 import { apiFetch as fetch } from "../apiFetch";
@@ -140,7 +140,7 @@ interface LlmInputPreview {
 function LlmInputPanel({ input }: { input?: LlmInputPreview }) {
   if (!input) return null;
   return (
-    <div className="options-llm-input">
+    <Card padding="sm">
       <p><b>Objective:</b> {input.objective}</p>
       <details>
         <summary>Input sent to the LLM ({input.contractCount} contracts, {input.candidateCount} candidate trades, ~{input.promptCharacters.toLocaleString()} characters)</summary>
@@ -153,7 +153,7 @@ function LlmInputPanel({ input }: { input?: LlmInputPreview }) {
         <p><b>Contract sample (first {input.contractsSample.length} of {input.contractCount}; full set is sent):</b></p>
         <pre>{JSON.stringify(input.contractsSample, null, 2)}</pre>
       </details>
-    </div>
+    </Card>
   );
 }
 
@@ -241,16 +241,17 @@ function BestTradeCard({
   onSendToBundle?: (candidate: StrategyCandidate) => void;
 }) {
   return (
-    <section className={`options-best-trade options-best-trade-${pick.status}`} role="region" aria-label="Best trade">
-      <header className="options-results-header">
-        <h2>{pick.status === "no_trade" ? "No qualifying trade" : `Best trade: ${pick.best?.candidate.label}`}</h2>
-        <span>{pick.status.replace("_", " ").toUpperCase()} · {pick.confidence} confidence · {pick.riskProfile} profile</span>
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
+    <section role="region" aria-label="Best trade">
+      <DetailCard
+        title={pick.status === "no_trade" ? "No qualifying trade" : `Best trade: ${pick.best?.candidate.label}`}
+        meta={<span>{pick.status.replace("_", " ").toUpperCase()} · {pick.confidence} confidence · {pick.riskProfile} profile</span>}
+      >
+      <Stack gap="2">
+      <Flex gap="2" align="center" wrap>
           {pick.best && onPreview && <Button type="button" onClick={() => onPreview(pick.best!.candidate)}>⚡ Open in Fast Order Ticket</Button>}
           {pick.best && onEvaluateLlm && (
             <Button
               type="button"
-              className="options-eval-llm-btn"
               onClick={() => onEvaluateLlm(candidateToEval(pick.best!.candidate))}
               title="Evaluate this top trade recommendation with neural strategy AI against complete option chains"
             >
@@ -271,19 +272,21 @@ function BestTradeCard({
               📦 Send to bundle builder
             </Button>
           )}
-        </div>
-      </header>
+      </Flex>
       {/* Issue #1773 (HAX #9): the confidence rating travels with its
           method breakdown — margin, liquidity, POP, freshness, and
           blockers — never as a single unexplained number. */}
       <ConfidenceMethodBreakdown pick={pick} />
-      <ul className="options-explanations">{pick.rationale.map((line) => <li key={line}>{line}</li>)}</ul>
-      {pick.blockers.length > 0 && <ul className="options-warnings">{pick.blockers.map((b) => <li key={b}>{b}</li>)}</ul>}
+      <ul>{pick.rationale.map((line) => <li key={line}>{line}</li>)}</ul>
+      {pick.blockers.length > 0 && (
+        <Notice tone="warning">
+          <ul>{pick.blockers.map((b) => <li key={b}>{b}</li>)}</ul>
+        </Notice>
+      )}
       {pick.tradePlan && pick.tradePlan.length > 0 && (
-        <div className="options-scenario-table-wrap">
+        <Stack gap="1">
           <h4>Trade plan (preview only, requires your approval)</h4>
           <Table
-            className="options-scenario-table"
             columns={[
               { key: "action", header: "Action", render: (leg) => leg.action },
               { key: "qty", header: "Qty", render: (leg) => leg.quantity },
@@ -296,25 +299,22 @@ function BestTradeCard({
             rows={pick.tradePlan}
             rowKey={(leg) => `${leg.contract}:${leg.action}`}
           />
-        </div>
+        </Stack>
       )}
       {pick.best && <StrategyCard candidate={pick.best.candidate} onPreview={onPreview} onEvaluateLlm={onEvaluateLlm} onRiskAnalysis={onRiskAnalysis} onSendToBundle={onSendToBundle} />}
       {pick.alternatives.length > 0 && (
-        <details className="options-excluded">
+        <details>
           <summary>{pick.alternatives.length} runner-up trades</summary>
-          <div className="options-scenario-table-wrap">
             <Table
-                className="options-scenario-table"
                 columns={[
                   { key: "rank", header: "#", render: (alt) => alt.rank },
                   { key: "strategy", header: "Strategy", render: (alt) => (
-                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1-5)" }}>
+                    <Flex gap="1-5" align="center">
                                           <span>{alt.candidate.label}</span>
                                           {onEvaluateLlm && (
                                             <Button
                                               type="button"
-                                              className="options-eval-llm-btn"
-                                              style={{ padding: "var(--space-0-5) var(--space-1-5)", fontSize: "var(--font-size-micro)" }}
+                                              size="sm"
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 onEvaluateLlm(candidateToEval(alt.candidate));
@@ -336,7 +336,7 @@ function BestTradeCard({
                                               🛡️ Risk
                                             </Button>
                                           )}
-                                        </div>
+                                        </Flex>
                   ) },
                   { key: "expiry", header: "Expiry", render: (alt) => alt.candidate.expirationDate },
                   { key: "maxLoss", header: "Max loss", render: (alt) => dollars(alt.candidate.maxLoss) },
@@ -349,10 +349,11 @@ function BestTradeCard({
                 onRowClick={onPreview ? (alt) => onPreview(alt.candidate) : undefined}
                 rowTitle="Open in Fast Order Ticket"
               />
-          </div>
         </details>
       )}
       <p className="ui-footnote">{pick.disclaimer}</p>
+      </Stack>
+      </DetailCard>
     </section>
   );
 }
@@ -361,26 +362,26 @@ function RecommendationComparison({ data, onPreview }: { data: ComparisonData; o
   const llmById = new Map((data.llm.ranked || []).map((item) => [item.candidateId, item]));
 
   return (
-    <section className="options-comparison" aria-label="Quant and LLM recommendation comparison">
-      <header className="options-results-header">
-        <h2>Quant vs. AI ranking</h2>
-        <span>{data.llm.model || "Neural Strategy Model"} · {data.quant.candidateCount} shared candidates</span>
-      </header>
+    <section aria-label="Quant and LLM recommendation comparison">
+      <DetailCard
+        title="Quant vs. AI ranking"
+        meta={<span>{data.llm.model || "Neural Strategy Model"} · {data.quant.candidateCount} shared candidates</span>}
+      >
+      <Stack gap="2">
       <LlmInputPanel input={data.llmInput} />
       {data.quantStrategyPool && data.quantStrategyPool.length > 0 && (
-        <details className="options-excluded">
+        <details>
           <summary>{data.quantStrategyPool.length} strategy types evaluated by the quant engine</summary>
           <ul>{data.quantStrategyPool.map((s) => <li key={s.type}>{s.label}: {s.generated} trades generated, best score {s.bestScore.toFixed(1)}</li>)}</ul>
         </details>
       )}
-      <p className="options-comparison-note">
+      <p className="ui-meta">
         Both rank the same quant-generated, risk-screened trades from the same option-chain snapshot. The AI score is an analytical assessment, not a pricing model or forecast.
       </p>
-      {data.llm.status === "error" && <div className="options-error" role="alert">Quant results are available, but the LLM ranking failed: {data.llm.error}</div>}
+      {data.llm.status === "error" && <Notice tone="danger">Quant results are available, but the LLM ranking failed: {data.llm.error}</Notice>}
       {data.quant.ranked.length === 0 ? <p>No quant candidates passed the request constraints.</p> : (
-        <div className="options-table-scroll">
+        <Card padding="sm">
           <Table
-            className="options-comparison-table"
             columns={[
               { key: "strategy", header: "Strategy", render: (item) => item.candidate.label },
               { key: "legs", header: "Trade (legs)", render: (item) => legsText(item.candidate) },
@@ -397,12 +398,14 @@ function RecommendationComparison({ data, onPreview }: { data: ComparisonData; o
             onRowClick={onPreview ? (item) => onPreview(item.candidate) : undefined}
             rowTitle="Open in Fast Order Ticket"
           />
-        </div>
+        </Card>
       )}
       {data.llm.status === "complete" && (data.llm.ranked || []).length === 0 && data.quant.ranked.length > 0 && (
         <p>The LLM returned no ranking for this candidate set.</p>
       )}
-      <p className="options-assumptions">Research comparison only; neither ranking is personalized financial advice or an instruction to trade. Verify live quotes and all assumptions before acting.</p>
+      <p className="ui-meta">Research comparison only; neither ranking is personalized financial advice or an instruction to trade. Verify live quotes and all assumptions before acting.</p>
+      </Stack>
+      </DetailCard>
     </section>
   );
 }
@@ -493,7 +496,7 @@ function PayoffGraph({ candidate }: { candidate: StrategyCandidate }) {
   const points = [{ x: lo, y: pnlAt(lo) }, ...inside.map((p) => ({ x: p.underlyingPrice, y: p.pnl })), { x: hi, y: pnlAt(hi) }];
 
   return (
-    <div className="options-payoff-wrap">
+    <Stack gap="2">
       <UniversalChart
         mode="payoff"
         points={points}
@@ -504,7 +507,7 @@ function PayoffGraph({ candidate }: { candidate: StrategyCandidate }) {
         ariaLabel={`${candidate.label} profit and loss at expiration`}
       />
       <TextInput label={`Range ±${rangePct}%`} type="range" min={2} max={50} step={1} value={rangePct} onChange={(event) => setRangePct(Number(event.target.value))} />
-    </div>
+    </Stack>
   );
 }
 
@@ -534,10 +537,10 @@ function LegEditor({ legs, original, contracts, onChange }: {
   const changed = legs.some((leg, index) => leg.symbol !== original[index]?.symbol);
 
   return (
-    <div className="options-leg-editor">
+    <Stack gap="2">
       {legs.map((leg, index) => {
         if (leg.optionType === "STOCK") {
-          return <div className="options-leg-edit" key={`${leg.symbol}:${index}`}><strong>{leg.side} {leg.quantity} shares</strong></div>;
+          return <Card padding="sm" key={`${leg.symbol}:${index}`}><strong>{leg.side} {leg.quantity} shares</strong></Card>;
         }
         const sameType = contracts.filter((contract) => contract.optionType === leg.optionType);
         const expiries = Array.from(new Set([...sameType.map((contract) => contract.expirationDate), leg.expirationDate])).sort();
@@ -552,7 +555,7 @@ function LegEditor({ legs, original, contracts, onChange }: {
           replaceLeg(index, best);
         };
         return (
-          <div className="options-leg-edit" key={`${index}:${leg.optionType}:${leg.side}`}>
+          <Card padding="sm" key={`${index}:${leg.optionType}:${leg.side}`}>
             <strong>{leg.side} {leg.quantity} {leg.optionType}</strong>
             <Select label="Expiry" value={leg.expirationDate} onChange={(event) => pick(event.target.value, leg.strike)}>
               {expiries.map((expiry) => <option key={expiry} value={expiry}>{expiry}</option>)}
@@ -567,11 +570,11 @@ function LegEditor({ legs, original, contracts, onChange }: {
               onChange={(event) => pick(leg.expirationDate, strikes[Number(event.target.value)])}
             />
             <span>Entry ${leg.entryPrice.toFixed(2)} <small>({leg.side === "BUY" ? "ask" : "bid"} {leg.bid.toFixed(2)} / {leg.ask.toFixed(2)})</small></span>
-          </div>
+          </Card>
         );
       })}
-      {changed && <Button type="button" className="options-leg-reset" onClick={() => onChange(original)}>Reset to suggested legs</Button>}
-    </div>
+      {changed && <Button type="button" onClick={() => onChange(original)}>Reset to suggested legs</Button>}
+    </Stack>
   );
 }
 
@@ -633,23 +636,22 @@ function StrategyCard({
   const targetScenarios = scenarioValues.filter((scenario) => scenario.daysToExpiry === valuationDays);
 
   return (
-    <article className="options-candidate">
-      <header className="options-candidate-header">
-        <div>
-          <div className="options-rank">RESEARCH CANDIDATE {candidate.rank}</div>
-          <h3>{candidate.label}</h3>
-          <p>{candidate.symbol} ${candidate.underlyingPrice.toFixed(2)} · Expiry {candidate.expirationDate} · Ranked score {candidate.score.toFixed(1)}/100</p>
-        </div>
-        <div className="options-candidate-badges">
-          <span className={`options-freshness-tag ${candidate.dataFreshness.toLowerCase()}`}>
+    <article>
+      <DetailCard
+        title={candidate.label}
+        subtitle={`${candidate.symbol} $${candidate.underlyingPrice.toFixed(2)} · Expiry ${candidate.expirationDate} · Ranked score ${candidate.score.toFixed(1)}/100`}
+        meta={<Badge tone="neutral">RESEARCH CANDIDATE {candidate.rank}</Badge>}
+      >
+      <Stack gap="2">
+      <Flex gap="1" align="center" wrap>
+          <Badge tone={candidate.dataFreshness === "FRESH" ? "success" : candidate.dataFreshness === "STALE" ? "warning" : "neutral"}>
             {candidate.dataFreshness === "FRESH" ? "Fresh quotes" : candidate.dataFreshness === "STALE" ? "Stale quotes" : "Quote age unknown"}
-          </span>
-          <div className="options-risk-tag">Max loss {dollars(candidate.maxLoss)}</div>
+          </Badge>
+          <Badge tone="neutral">Max loss {dollars(candidate.maxLoss)}</Badge>
           {onPreview && <Button type="button" onClick={() => onPreview(candidate)}>⚡ Open in Fast Order Ticket</Button>}
           {onEvaluateLlm && (
             <Button
               type="button"
-              className="options-eval-llm-btn"
               onClick={() => onEvaluateLlm(candidateToEval(candidate))}
               title="Evaluate this strategy with neural strategy AI against raw and normalized options chains"
             >
@@ -675,41 +677,40 @@ function StrategyCard({
               {"↻ Refresh option prices"}
             </Button>
           )}
-        </div>
-      </header>
-      {chain?.refreshedAt && <p className="options-assumptions">Prices refreshed at {chain.refreshedAt}.{missingLegs > 0 ? ` ${missingLegs} leg(s) are no longer in the refreshed chain and keep their previous prices.` : ""}</p>}
-      {chain?.refreshError && <p className="options-error" role="alert">{chain.refreshError}</p>}
-      {modified && <p className="options-assumptions">Showing your adjusted legs (suggested ranking score and explanations refer to the original legs).</p>}
+        </Flex>
+      {chain?.refreshedAt && <p className="ui-meta">Prices refreshed at {chain.refreshedAt}.{missingLegs > 0 ? ` ${missingLegs} leg(s) are no longer in the refreshed chain and keep their previous prices.` : ""}</p>}
+      {chain?.refreshError && <Notice tone="danger">{chain.refreshError}</Notice>}
+      {modified && <p className="ui-meta">Showing your adjusted legs (suggested ranking score and explanations refer to the original legs).</p>}
 
       <LegEditor legs={legs} original={suggested.legs} contracts={contracts ?? []} onChange={setLegs} />
 
-      <div className="options-summary-strip">
-        <div><span>{candidate.netDebit >= 0 ? "NET DEBIT" : "NET CREDIT"}</span><strong>{dollars(Math.abs(candidate.netDebit))}</strong></div>
-        <div><span>EST. MARGIN</span><strong>{estimatedMargin(candidate)}</strong></div>
-        <div><span>MAX LOSS</span><strong className="options-negative">{dollars(candidate.maxLoss)}</strong></div>
-        <div><span>MAX PROFIT</span><strong className="options-positive">{candidate.maxProfitUnbounded ? "Unlimited" : dollars(candidate.maxProfit)}</strong></div>
-        <div><span>CHANCE OF PROFIT</span><strong>{(candidate.modelImpliedProbabilityOfProfit * 100).toFixed(1)}% <small>model</small></strong></div>
-        <div><span>BREAKEVEN</span><strong>{breakevenText(candidate)}</strong></div>
-      </div>
+      <Grid columns={3} gap="2">
+        <Stack gap="1"><span className="ui-meta-sm">{candidate.netDebit >= 0 ? "NET DEBIT" : "NET CREDIT"}</span><strong>{dollars(Math.abs(candidate.netDebit))}</strong></Stack>
+        <Stack gap="1"><span className="ui-meta-sm">EST. MARGIN</span><strong>{estimatedMargin(candidate)}</strong></Stack>
+        <Stack gap="1"><span className="ui-meta-sm">MAX LOSS</span><strong className="ui-danger">{dollars(candidate.maxLoss)}</strong></Stack>
+        <Stack gap="1"><span className="ui-meta-sm">MAX PROFIT</span><strong className="ui-success">{candidate.maxProfitUnbounded ? "Unlimited" : dollars(candidate.maxProfit)}</strong></Stack>
+        <Stack gap="1"><span className="ui-meta-sm">CHANCE OF PROFIT</span><strong>{(candidate.modelImpliedProbabilityOfProfit * 100).toFixed(1)}% <small>model</small></strong></Stack>
+        <Stack gap="1"><span className="ui-meta-sm">BREAKEVEN</span><strong>{breakevenText(candidate)}</strong></Stack>
+      </Grid>
 
       <PayoffGraph candidate={candidate} />
 
-      <div className="options-risk-grid">
-        <div><span>Target-date modeled P/L</span><strong className={candidate.targetPnl >= 0 ? "options-positive" : "options-negative"}>{dollars(candidate.targetPnl)}</strong></div>
-        <div><span>Target reward / risk</span><strong>{candidate.targetRewardRisk.toFixed(2)}x</strong></div>
-        <div><span>Liquidity score</span><strong>{candidate.liquidityScore.toFixed(1)}/100</strong></div>
-      </div>
+      <Grid columns={3} gap="2">
+        <Stack gap="1"><span className="ui-meta-sm">Target-date modeled P/L</span><strong className={candidate.targetPnl >= 0 ? "ui-success" : "ui-danger"}>{dollars(candidate.targetPnl)}</strong></Stack>
+        <Stack gap="1"><span className="ui-meta-sm">Target reward / risk</span><strong>{candidate.targetRewardRisk.toFixed(2)}x</strong></Stack>
+        <Stack gap="1"><span className="ui-meta-sm">Liquidity score</span><strong>{candidate.liquidityScore.toFixed(1)}/100</strong></Stack>
+      </Grid>
 
-      <details className="options-detail">
+      <details>
         <summary>Scenarios, Greeks, and score</summary>
-        <div className="options-detail-content">
-          <div className="options-greeks">
+        <Stack gap="2">
+          <Flex gap="2" align="center" wrap>
             <span>Net Δ {candidate.netGreeks.delta.toFixed(2)}</span>
             <span>Γ {candidate.netGreeks.gamma.toFixed(3)}</span>
             <span>Θ {candidate.netGreeks.theta.toFixed(2)}/day</span>
             <span>Vega {candidate.netGreeks.vega.toFixed(2)}</span>
-          </div>
-          <div className="options-score-grid">
+          </Flex>
+          <Grid columns={3} gap="1">
             <span>Thesis alignment <b>{candidate.scoreBreakdown.thesisAlignment.toFixed(0)}</b></span>
             <span>Target reward/risk <b>{candidate.scoreBreakdown.targetRewardRisk.toFixed(0)}</b></span>
             <span>Liquidity <b>{candidate.scoreBreakdown.liquidity.toFixed(0)}</b></span>
@@ -719,12 +720,11 @@ function StrategyCard({
             <span>Cushion <b>{candidate.scoreBreakdown.cushion.toFixed(0)}</b></span>
             <span>Capital eff. <b>{candidate.scoreBreakdown.capitalEfficiency.toFixed(0)}</b></span>
             <span>Quote freshness <b>{candidate.scoreBreakdown.freshness.toFixed(0)}</b></span>
-          </div>
+          </Grid>
           {targetScenarios.length > 0 && (
-            <div className="options-scenario-table-wrap">
+            <Stack gap="1">
               <h4>Modeled P/L near target date · IV unchanged</h4>
               <Table
-                className="options-scenario-table"
                 columns={[
                   { key: "underlying", header: "Underlying", render: (scenario) => `$${scenario.underlyingPrice.toFixed(2)}` },
                   { key: "pnl", header: "Modeled P/L", render: (scenario) => dollars(scenario.pnl) },
@@ -732,13 +732,15 @@ function StrategyCard({
                 rows={targetScenarios}
                 rowKey={(scenario) => `${scenario.underlyingPrice}:${scenario.daysToExpiry}`}
               />
-            </div>
+            </Stack>
           )}
-          <ul className="options-explanations">{candidate.explanations.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-          <ul className="options-warnings">{candidate.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-          <p className="options-assumptions">{candidate.assumptions.join(" ")}</p>
-        </div>
+          <ul>{candidate.explanations.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+          <Notice tone="warning"><ul>{candidate.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></Notice>
+          <p className="ui-meta">{candidate.assumptions.join(" ")}</p>
+        </Stack>
       </details>
+      </Stack>
+      </DetailCard>
     </article>
   );
 }
@@ -1154,10 +1156,10 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
 
   return (
     <ChainContext.Provider value={chainValue}>
-    <section className="trading-section options-research-section">
-      {screenMeta?.validationError && <p className="options-error" role="alert">{screenMeta.validationError}</p>}
+    <Stack gap="2">
+      {screenMeta?.validationError && <Notice tone="danger">{screenMeta.validationError}</Notice>}
       {Array.isArray(screenMeta?.fetchErrors) && screenMeta.fetchErrors.length > 0 && (
-        <p className="options-error" role="alert">Option chain data problem: {screenMeta.fetchErrors.map((item: { symbol?: string; reason?: string }) => `${item.symbol ?? ""} ${item.reason ?? ""}`.trim()).join("; ")}</p>
+        <Notice tone="danger">Option chain data problem: {screenMeta.fetchErrors.map((item: { symbol?: string; reason?: string }) => `${item.symbol ?? ""} ${item.reason ?? ""}`.trim()).join("; ")}</Notice>
       )}
 
       {/* Issue #2954: the host's tab row replaces this bar when hidden. */}
@@ -1221,20 +1223,20 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           },
         ]}
         rightContent={
-          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2-5)" }}>
+          <Flex gap="2-5" align="center">
             <CopilotTriggerButton label="✨ Ask Copilot" />
             {screenMeta && (
-              <div className="options-scan-meta-pill" title="Screen evaluation metrics">
+              <Badge tone="neutral" title="Screen evaluation metrics">
                 {screenMeta.contractsEvaluated} eval · {screenMeta.contractsMatched} eligible
-              </div>
+              </Badge>
             )}
-          </div>
+          </Flex>
         }
       />
       )}
 
       {researchMode === "discovery" && (
-        <>
+        <PageSection title="Strategy discovery">
           <div id="options-research-strategy">
             <StrategyDiscoveryPanel
               initialSymbol={symbol.trim() || "TSLA"}
@@ -1251,10 +1253,11 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           <div id="options-research-runs">
             <DiscoveryRunsPanel activeEnv={activeEnv} userLogin={userLogin} />
           </div>
-        </>
+        </PageSection>
       )}
 
       {researchMode === "contracts" && (
+        <PageSection title="Contracts screener">
         <RawContractsScreener
           activeEnv={activeEnv}
           userLogin={userLogin}
@@ -1262,35 +1265,39 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           onPreviewTrade={onPreviewTrade}
           onSendPrompt={onSendPrompt}
         />
+        </PageSection>
       )}
 
       {researchMode === "llm-ideas" && (
-        <LlmOptionsIdeasPanel activeEnv={activeEnv} userLogin={userLogin} />
+        <PageSection title="AI strategy ideas">
+          <LlmOptionsIdeasPanel activeEnv={activeEnv} userLogin={userLogin} />
+        </PageSection>
       )}
 
       {researchMode === "nlq" && (
-        <>
-          <details className="options-workflow-drawer">
+        <PageSection title="Natural language screen">
+          <details>
         <summary>Workflow guide &amp; example requests</summary>
-        <div className="options-workflow" aria-label="Options research workflow">
+        <Stack gap="2" aria-label="Options research workflow">
           {workflowSteps.map((s) => (
-            <div className="options-workflow-step" key={s.step}>
-              <h4><span className="options-workflow-num">{s.step}</span> {s.title}</h4>
+            <Card padding="sm" key={s.step}>
+              <h4><Badge tone="neutral">{s.step}</Badge> {s.title}</h4>
               <p>{s.blurb}</p>
-              <div className="options-nlq-examples">
+              <Stack gap="1">
                 {s.examples.map((example) => (
-                  <span className="options-example-row" key={example}>
+                  <Flex gap="1" align="center" wrap key={example}>
                     <Button type="button" onClick={() => loadExample(example)}>{example}</Button>
-                    {onSendPrompt && <Button type="button" className="options-example-chat" title="Send this request to the shared Chat" onClick={() => onSendPrompt(example, "E*TRADE · Auto Options Research")}>💬 Chat</Button>}
-                  </span>
+                    {onSendPrompt && <Button type="button" title="Send this request to the shared Chat" onClick={() => onSendPrompt(example, "E*TRADE · Auto Options Research")}>💬 Chat</Button>}
+                  </Flex>
                 ))}
-              </div>
-            </div>
+              </Stack>
+            </Card>
           ))}
-          <p className="options-workflow-hint">Click an example to load it into the screen fields, or use 💬 Chat to send it to the shared Chat.</p>
-        </div>
+          <p className="ui-meta">Click an example to load it into the screen fields, or use 💬 Chat to send it to the shared Chat.</p>
+        </Stack>
       </details>
-      <form className="options-nlq-form" onSubmit={submitNaturalLanguage}>
+      <form onSubmit={submitNaturalLanguage}>
+        <Stack gap="2">
         <TextInput label="Natural-language options screen"
           value={nlqQuery}
           onChange={(event) => setNlqQuery(event.target.value)}
@@ -1318,16 +1325,16 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
         <Button type="submit" disabled={!nlqQuery.trim() || nlqLoading} loading={nlqLoading}>
           {"Run options screen"}
         </Button>
+        </Stack>
       </form>
-      {nlqError && <p className="options-error" role="alert">{nlqError}</p>}
+      {nlqError && <Notice tone="danger">{nlqError}</Notice>}
       {nlqResult && (
-        <div className="options-nlq-result" role="status">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "var(--space-2)", marginBottom: "0.4rem" }}>
+        <Stack gap="2" role="status">
+          <Flex gap="2" align="center" justify="between" wrap>
             <strong>{nlqResult.count ?? 0} result rows</strong>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+            <Flex gap="2" align="center">
               <Button
                 type="button"
-                className="options-eval-llm-btn"
                 onClick={() => {
                   setEvaluatingStrategy({
                     symbol: symbol.trim() || (nlqResult.rows?.[0]?.symbol as string) || "NVDA",
@@ -1347,32 +1354,15 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
                 userLogin={userLogin}
                 label="📥 Download Data"
               />
-            </div>
-          </div>
+            </Flex>
+          </Flex>
           {nlqResult.llmValidation && (
-            <div
-              className="options-nlq-validation-tag"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "var(--space-2)",
-                background: "var(--color-accent-subtle)",
-                border: "1px solid var(--color-border-focus)",
-                borderRadius: "var(--radius-sm, 6px)",
-                padding: "var(--space-1-5) var(--space-2-5)",
-                fontSize: "var(--font-size-body-sm)",
-                color: "var(--color-accent)",
-                marginBottom: "0.55rem",
-                width: "100%",
-                boxSizing: "border-box",
-              }}
-            >
-              <span>🧠 <strong>AI Validated:</strong></span>
-              <span style={{ color: "var(--color-text-secondary)" }}>{nlqResult.llmValidation.interpretation}</span>
+            <Notice tone="info">
+              <span>🧠 <strong>AI Validated:</strong></span> {nlqResult.llmValidation.interpretation}
               {nlqResult.llmValidation.corrected && (
-                <span style={{ color: "var(--color-success)", fontSize: "0.75rem", fontWeight: 700, marginLeft: "auto" }}>✓ Intent Protected</span>
+                <span className="ui-success"> ✓ Intent Protected</span>
               )}
-            </div>
+            </Notice>
           )}
           {nlqResult.provenance?.bestTrade && (
             <BestTradeCard
@@ -1387,9 +1377,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
             <StrategyLedgerTable rows={nlqResult.rows} />
           )}
           {Array.isArray(nlqResult.rows) && nlqResult.rows.length > 0 && !Array.isArray(nlqResult.rows[0]?.candidateStrategies) && (
-            <div className="options-scenario-table-wrap">
               <Table
-            className={`options-scenario-table${Object.prototype.hasOwnProperty.call(nlqResult.rows[0], "reason") ? " options-evaluation-ledger-table" : ""}`}
             columns={Object.keys(nlqResult.rows[0]).map((key) => ({
               key,
               header: key,
@@ -1398,24 +1386,24 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
             rows={nlqResult.rows}
             rowKey={(row: Record<string, unknown>, index) => `${row.contractSymbol || row.symbol || "row"}:${index}`}
           />
-            </div>
           )}
           {Array.isArray(nlqResult.rejections) && nlqResult.rejections.length > 0 && (
-            <details className="options-excluded">
+            <details>
               <summary>View quote and filter rejections</summary>
               <ul>{nlqResult.rejections.slice(0, 8).map((rejection: any, index: number) => (
                 <li key={`${rejection.contractSymbol}:${index}`}>{rejection.contractSymbol}: {rejection.reason}</li>
               ))}</ul>
             </details>
           )}
-        </div>
+        </Stack>
       )}
-        </>
+        </PageSection>
       )}
 
       {researchMode === "custom" && (
-        <>
-      <form className="options-request-form" onSubmit={submit}>
+        <PageSection title="Custom thesis & strategy universe">
+      <form onSubmit={submit}>
+        <Stack gap="2">
         <TextInput label="Underlying" required maxLength={10} value={symbol} onChange={(event) => setSymbol(event.target.value)} placeholder="Ticker" />
         <Select label="Thesis" value={thesis} onChange={(event) => setThesis(event.target.value as OptionThesis)}>
           <option value="bullish">Bullish</option>
@@ -1425,7 +1413,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
         </Select>
         <TextInput label="Target price" required type="number" min="0.01" step="0.01" value={targetPrice} onChange={(event) => setTargetPrice(event.target.value)} placeholder="Price at target date" />
         <FieldShell id="options-target-date" label="Target date (type YYYY-MM-DD or pick)">
-        <div className="options-date-row">
+        <Flex gap="2" align="center">
           <TextInput
             required
             type="text"
@@ -1436,7 +1424,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
             onChange={(event) => setTargetDate(event.target.value)}
           />
           <TextInput type="date" aria-label="Pick target date" value={/^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? targetDate : ""} onChange={(event) => event.target.value && setTargetDate(event.target.value)} />
-        </div>
+        </Flex>
         </FieldShell>
         <Select label="Expected IV" value={expectedIvDirection} onChange={(event) => setExpectedIvDirection(event.target.value as ExpectedIvDirection)}>
           <option value="rise">Rise</option>
@@ -1466,17 +1454,17 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           <option value="exclude">Exclude until event data can be checked</option>
         </Select>
 
-        <fieldset className="options-strategy-picker">
+        <fieldset>
           <legend>Allowed strategy templates</legend>
           <Checkbox label={<span><strong>All strategies ({defaultRegistry.ids().length})</strong></span>} checked={allowedStrategies.includes("all")} onChange={() => setAllowedStrategies(allowedStrategies.includes("all") ? [] : ["all"])} />
           {!allowedStrategies.includes("all") && Object.entries(strategyGroups).map(([category, choices]) => (
             <details key={category}>
               <summary>{category.replace(/_/g, " ")} ({choices.length})</summary>
-              <div className="options-strategy-options">
+              <Stack gap="1">
                 {choices.map((choice) => (
                   <Checkbox key={choice.id} label={choice.label} checked={allowedStrategies.includes(choice.id)} onChange={() => toggleStrategy(choice.id)} />
                 ))}
-              </div>
+              </Stack>
             </details>
           ))}
         </fieldset>
@@ -1487,12 +1475,12 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           <option value="aggressive">Aggressive (favor reward/risk)</option>
         </Select>
 
-        <div className="options-form-footer" id="options-research-custom-actions">
+        <Stack gap="2" id="options-research-custom-actions">
           <p>All thresholds and search/result limits are set above. Stale/unknown quote ages are labeled and scored, not excluded on age alone. Zero-bid, crossed, and adjusted contracts are excluded as invalid/non-standard instruments.</p>
           {!canRun && (
-            <p className="options-error" role="status">
+            <Notice tone="info">
               Buttons unlock once you enter: {[!symbol.trim() && "Underlying", !targetPrice && "Target price", allowedStrategies.length === 0 && "at least one strategy"].filter(Boolean).join(", ")}.
-            </p>
+            </Notice>
           )}
           <Button type="submit" disabled={loading || !canRun} loading={loading}>
             {"Rank research candidates"}
@@ -1506,10 +1494,11 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
           <Button type="button" disabled={loading || !canRun} onClick={() => void runThreeWay()} loading={loading}>
             {"Compare generators (LLM / Quant / Hybrid)"}
           </Button>
-        </div>
+        </Stack>
+        </Stack>
       </form>
 
-      {error && <div className="options-error" role="alert">{error}</div>}
+      {error && <Notice tone="danger">{error}</Notice>}
       {bestTrade && (
         <BestTradeCard
           pick={bestTrade}
@@ -1520,29 +1509,29 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
         />
       )}
       {stagedBundle && (
-        <div className="options-assumptions" role="status">
+        <p className="ui-meta" role="status">
           Staged for the bundle builder: {stagedBundle.label} — open Portfolio &amp; Risk to build its bundle.
-        </div>
+        </p>
       )}
       {comparison && <RecommendationComparison data={comparison} onPreview={previewTrade} />}
       {threeWay && <ThreeWayComparison data={threeWay} activeEnv={activeEnv} userLogin={userLogin} />}
       {(result?.evaluations || evaluations).length > 0 && <EvaluationTable evaluations={result?.evaluations || evaluations} />}
       {result && (
-        <div className="options-results">
-          <div className="options-results-header">
+        <Stack gap="2">
+          <Flex gap="2" align="center" justify="between" wrap>
             <h2>{result.candidates.length ? `${result.candidates.length} ranked candidates` : "No candidates pass the constraints"}</h2>
-            <span>{result.modelVersion} · {new Date(result.generatedAt).toLocaleString()}</span>
-          </div>
-          <div className="options-score-policy">
+            <span className="ui-meta-sm">{result.modelVersion} · {new Date(result.generatedAt).toLocaleString()}</span>
+          </Flex>
+          <p className="ui-meta">
             Score weights: thesis {Math.round(result.scoreWeights.thesisAlignment * 100)}% · target R/R {Math.round(result.scoreWeights.targetRewardRisk * 100)}% · liquidity {Math.round(result.scoreWeights.liquidity * 100)}% · IV {Math.round(result.scoreWeights.volatilityAlignment * 100)}% · theta {Math.round(result.scoreWeights.thetaBurden * 100)}% · freshness {Math.round(result.scoreWeights.freshness * 100)}% · POP {Math.round(result.scoreWeights.popAlignment * 100)}% · cushion {Math.round(result.scoreWeights.cushion * 100)}% · capital eff. {Math.round(result.scoreWeights.capitalEfficiency * 100)}%
-          </div>
+          </p>
           {(screenMeta?.quoteQuality?.staleContractsReturned > 0 || screenMeta?.quoteQuality?.unknownFreshnessContracts > 0) && (
-            <div className="options-stale-banner" role="alert">
+            <Notice tone="warning">
               <strong>Quote freshness warning: returned contracts remain visible.</strong>
               <span>
                 {screenMeta.quoteQuality.staleContractsReturned} stale and {screenMeta.quoteQuality.unknownFreshnessContracts} timestamp-unknown contracts are shown. The freshest stale quote is {Math.round(screenMeta.quoteQuality.freshestStaleQuoteAgeSeconds || 0).toLocaleString()} seconds old; {screenMeta.quoteQuality.maxAgeSeconds ?? 60}s is the freshness reference. Strategy scores are reduced for stale or unknown data; verify current quotes before acting.
               </span>
-            </div>
+            </Notice>
           )}
           {result.candidates.map((candidate) => (
             <StrategyCard
@@ -1555,21 +1544,21 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
             />
           ))}
           {result.excluded.length > 0 && (
-            <details className="options-excluded">
+            <details>
               <summary>{result.excluded.reduce((sum, entry) => sum + entry.count, 0)} strategy combinations excluded</summary>
               <ul>{result.excluded.slice(0, 12).map((entry) => <li key={entry.reason}>{entry.reason} ({entry.count})</li>)}</ul>
             </details>
           )}
           {excludedContracts.length > 0 && (
-            <details className="options-excluded">
+            <details>
               <summary>{excludedContracts.length} option contracts failed screening</summary>
               <ul>{excludedContracts.slice(0, 12).map((entry) => <li key={`${entry.contractSymbol}:${entry.reason}`}>{entry.contractSymbol}: {entry.reason}</li>)}</ul>
             </details>
           )}
-          <ul className="options-result-assumptions">{result.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul>
-        </div>
+          <ul>{result.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul>
+        </Stack>
       )}
-        </>
+        </PageSection>
       )}
 
       <ResearchReportActions
@@ -1620,7 +1609,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
         subject={riskSubject}
         onSendPrompt={onSendPrompt}
       />
-    </section>
+    </Stack>
     </ChainContext.Provider>
   );
 }
@@ -1665,13 +1654,11 @@ function StrategyLedgerTable({ rows }: { rows: Array<Record<string, any>> }) {
   };
 
   return (
-    <div className="options-scenario-table-wrap">
       <Table
-            className="options-scenario-table options-evaluation-ledger-table strategy-ledger-table"
             columns={ledgerColumns.map((column) => ({
               key: column.key,
               header: (
-                <Button type="button" className="ledger-sort" onClick={() => sortBy(column.key)}>
+                <Button type="button" variant="ghost" size="sm" onClick={() => sortBy(column.key)}>
                   {column.label}{sortKey === column.key ? (direction === "asc" ? " ▲" : " ▼") : ""}
                 </Button>
               ),
@@ -1684,9 +1671,9 @@ function StrategyLedgerTable({ rows }: { rows: Array<Record<string, any>> }) {
                   case "failed": return String(row.failed);
                   case "reason": return String(row.reason);
                   case "candidateStrategies": return (
-                    <ul className="ledger-candidates">
+                    <ul>
                                       {(row.candidateStrategies as LedgerCandidate[]).map((candidate) => (
-                                        <li key={candidate.id} className={`ledger-candidate ledger-${candidate.status}`}>
+                                        <li key={candidate.id}>
                                           <a
                                             href={`/strategies/${candidate.id}.html`}
                                             target="_blank"
@@ -1695,8 +1682,8 @@ function StrategyLedgerTable({ rows }: { rows: Array<Record<string, any>> }) {
                                           >
                                             {candidate.name}
                                           </a>
-                                          <span className="ledger-verdict">{candidate.status === "accepted" ? "PASSED" : candidate.status === "rejected" ? "FAILED" : "SKIPPED"}</span>
-                                          <span className="ledger-why">{candidate.why}</span>
+                                          <Badge tone={candidate.status === "accepted" ? "success" : candidate.status === "rejected" ? "danger" : "neutral"}>{candidate.status === "accepted" ? "PASSED" : candidate.status === "rejected" ? "FAILED" : "SKIPPED"}</Badge>
+                                          <span className="ui-meta-sm">{candidate.why}</span>
                                         </li>
                                       ))}
                                     </ul>
@@ -1708,18 +1695,17 @@ function StrategyLedgerTable({ rows }: { rows: Array<Record<string, any>> }) {
             rows={sorted}
             rowKey={(row) => String(row.category)}
           />
-    </div>
   );
 }
 
 function EvaluationTable({ evaluations }: { evaluations: StrategyEvaluation[] }) {
   const counts = evaluations.reduce((acc, e) => ({ ...acc, [e.status]: (acc[e.status] || 0) + 1 }), {} as Record<string, number>);
   return (
-    <details className="options-excluded" open>
+    <details open>
       <summary>
         Strategies evaluated: {evaluations.length} ({counts.accepted || 0} accepted, {counts.rejected || 0} rejected, {counts.skipped || 0} skipped)
       </summary>
-      <div className="options-table-scroll">
+      <Card padding="sm">
         <Table
             columns={[
               { key: "strategy", header: "Strategy", render: (e) => e.label },
@@ -1732,7 +1718,7 @@ function EvaluationTable({ evaluations }: { evaluations: StrategyEvaluation[] })
             rows={evaluations}
             rowKey={(e) => e.id}
           />
-      </div>
+      </Card>
     </details>
   );
 }

@@ -2,12 +2,17 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
+  Card,
+  CardHeader,
   FieldShell,
   Flex,
+  Grid,
   Notice,
+  PageSection,
   PageShell,
   Select,
   Stack,
+  SummaryCard,
   TabPanel,
   Tabs,
   TextInput,
@@ -203,7 +208,6 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
         orderAssetClass === "options" ? "options" : "stock";
       if (assetTab !== activeTab) handleTabChange(assetTab);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // After mount: follow the hub's asset class whenever it moves
@@ -221,7 +225,6 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
     const assetTab: OrderTicketTab =
       orderAssetClass === "options" ? "options" : "stock";
     if (assetTab !== activeTab) handleTabChange(assetTab);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderAssetClass]);
 
   // Risk seed (#3125): the ticket as a RiskSubject. An equity ticket
@@ -364,49 +367,50 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
           active={activeTab !== "risk"}
           retain
         >
-          <div className="trading-section order-ticket-section">
-            <div className="order-ticket-layout">
+          <PageSection>
+            <Grid columns={2} gap="2">
               {/* Left: Interactive Order Ticket Form */}
-              <div className="order-form-card">
-                <Flex justify="between" align="start" wrap gap="2" className="card-header-styled">
-                  <div>
-                    <h4>⚡ {orderAssetClass === "options" ? "Options Order Ticket" : "Equity / ETF Order Ticket"}</h4>
-                    <span className="header-subtitle">
-                      {orderAssetClass === "options"
-                        ? "Broker-priced options strategy preview with human approval required"
-                        : orderContext?.optionLegs?.length
-                          ? "Stock strategy preview with human approval required"
-                          : "Zero-commission equity trading with agentic DID stamping"}
-                    </span>
-                    {/* Issue #3669: broker + mode badges, as the portfolio
-                        branch has — the ticket used to show neither, so a
-                        tenant could not tell which broker or mode an order
-                        would use. The mode comes from the TEST/PROD
-                        selection the hub passes in, not from a broker
-                        status read (see hub orderTradingType). */}
+              <Card padding="md">
+                <Stack gap="2">
+                {/* Issue #3669: broker + mode badges, as the portfolio
+                    branch has — the ticket used to show neither, so a
+                    tenant could not tell which broker or mode an order
+                    would use. The mode comes from the TEST/PROD
+                    selection the hub passes in, not from a broker
+                    status read (see hub orderTradingType). */}
+                <CardHeader
+                  title={`⚡ ${orderAssetClass === "options" ? "Options Order Ticket" : "Equity / ETF Order Ticket"}`}
+                  subtitle={
+                    orderAssetClass === "options"
+                      ? "Broker-priced options strategy preview with human approval required"
+                      : orderContext?.optionLegs?.length
+                        ? "Stock strategy preview with human approval required"
+                        : "Zero-commission equity trading with agentic DID stamping"
+                  }
+                  belowSubtitle={
                     <Flex gap="2" wrap>
                       <Badge tone="accent" title={`Broker: ${brokerId}`}>{brokerLabel}</Badge>
                       <Badge tone={tradingType === "live" ? "warning" : "success"}>{brokerModeBadge(brokerId, tradingType)}</Badge>
                     </Flex>
-                  </div>
-                  {orderSymbol && (
-                    <Button
-                      className="btn-options-refresh"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => fetchSymbolQuote(orderSymbol)}
-                      disabled={quoteLoading}
-                      title={`Refresh live quote for ${orderSymbol}`}
-                     loading={quoteLoading}>
-                      <span className={quoteLoading ? "strat-spin" : ""}>↻</span>
-                      <span>{"Refresh Quote"}</span>
-                    </Button>
-                  )}
-                </Flex>
+                  }
+                  meta={
+                    orderSymbol ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => fetchSymbolQuote(orderSymbol)}
+                        disabled={quoteLoading}
+                        title={`Refresh live quote for ${orderSymbol}`}
+                       loading={quoteLoading}>
+                        <span>↻</span>
+                        <span>{"Refresh Quote"}</span>
+                      </Button>
+                    ) : undefined
+                  }
+                />
 
                 {orderError && (orderAssetClass === "options" ? (
-                  <div className="options-preview-error" role="alert">
-                    <strong>Options preview failed. No order was created or submitted.</strong>
+                  <Notice tone="danger" title="Options preview failed. No order was created or submitted.">
                     <span>{/unapproved options position|options approval levels/i.test(orderError)
                       ? `${brokerLabel} says this strategy is not approved for the account, or conflicts with current positions or open orders. Review the account’s options approval and open orders with ${brokerLabel}.`
                       : "Review the contract details and correct the issue before requesting another broker preview."}</span>
@@ -414,23 +418,26 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                       <summary>Broker response</summary>
                       <p>{orderError}</p>
                     </details>
-                  </div>
-                ) : <div className="form-error-alert" role="alert">⚠️ {orderError}</div>)}
+                  </Notice>
+                ) : <Notice tone="danger">⚠️ {orderError}</Notice>)}
                 {orderContext && (
-                  <div className="options-order-context">
-                    <strong>{orderContext.assetClass === "options" ? "Options strategy" : "From Strategy Research"}</strong>
-                    <span>{orderContext.label}</span>
+                  <Stack gap="2">
+                    <CardHeader
+                      title={orderContext.assetClass === "options" ? "Options strategy" : "From Strategy Research"}
+                      subtitle={orderContext.label}
+                    />
                     {orderAssetClass === "options" && orderContext.assetClass === "options" ? (
-                      <div className="options-leg-editor" aria-label="Edit option strategy legs">
-                        <div className="options-leg-editor-heading">
-                          <div>
-                            <strong>Build your order</strong>
-                            <span>Review and edit every contract before requesting {brokerLabel}’s preview.</span>
-                          </div>
-                          <Button type="button" variant="secondary" size="sm" className="options-leg-add" onClick={addOptionLeg} disabled={orderLegs.length >= 4 || orderLegs.some((leg) => leg.securityType === "EQ")}>
-                            + Add leg
-                          </Button>
-                        </div>
+                      <Card padding="sm">
+                        <Stack gap="2">
+                        <CardHeader
+                          title="Build your order"
+                          subtitle={`Review and edit every contract before requesting ${brokerLabel}’s preview.`}
+                          meta={
+                            <Button type="button" variant="secondary" size="sm" onClick={addOptionLeg} disabled={orderLegs.length >= 4 || orderLegs.some((leg) => leg.securityType === "EQ")}>
+                              + Add leg
+                            </Button>
+                          }
+                        />
                         <Flex gap="2" wrap align="end">
                           <Select
                             label="Build from strategy"
@@ -462,8 +469,13 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         </Flex>
                         {builderNotice && <Notice tone="warning">{builderNotice}</Notice>}
                         {orderLegs.map((leg, index) => (
-                          <div className="options-leg-row" key={`option-leg-${index}`}>
-                            <div className="options-leg-title"><strong>Leg {index + 1}</strong><span>{leg.securityType === "OPTN" ? "OPTION" : "STOCK"}</span></div>
+                          <Card padding="sm" key={`option-leg-${index}`}>
+                            <Stack gap="2">
+                            <Flex gap="1" align="center" wrap>
+                              <strong>Leg {index + 1}</strong>
+                              <Badge tone="neutral" size="xs">{leg.securityType === "OPTN" ? "OPTION" : "STOCK"}</Badge>
+                            </Flex>
+                            <Flex gap="2" wrap align="end">
                             <Select label="Side" value={leg.side} onChange={(event) => updateOptionLeg(index, { side: event.target.value as "BUY" | "SELL" })}>
                               <option value="BUY">Buy</option><option value="SELL">Sell</option>
                             </Select>
@@ -475,25 +487,28 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                               <TextInput label="Expiration" type="date" value={leg.expirationDate || ""} onChange={(event) => updateOptionLeg(index, { expirationDate: event.target.value })} />
                             </>}
                             <TextInput label={leg.securityType === "OPTN" ? "Contracts" : "Shares"} type="number" min="1" step="1" value={leg.quantity} onChange={(event) => updateOptionLeg(index, { quantity: Math.max(1, Number.parseInt(event.target.value, 10) || 1) })} />
-                            <Button type="button" variant="danger" tone="subtle" size="sm" className="options-leg-remove" onClick={() => removeOptionLeg(index)} aria-label={`Remove leg ${index + 1}`} disabled={(orderContext.optionLegs?.length ?? 0) <= 1}>Remove</Button>
-                          </div>
+                            <Button type="button" variant="danger" tone="subtle" size="sm" onClick={() => removeOptionLeg(index)} aria-label={`Remove leg ${index + 1}`} disabled={(orderContext.optionLegs?.length ?? 0) <= 1}>Remove</Button>
+                            </Flex>
+                            </Stack>
+                          </Card>
                         ))}
-                        <p className="options-leg-editor-help">1. Edit the contracts and net limit. 2. Request {brokerLabel}’s preview. 3. Review and approve only if the broker accepts it. Nothing is submitted before your approval; {brokerLabel} still validates account approval, buying power, and existing positions.</p>
-                      </div>
+                        <p className="ui-footnote">1. Edit the contracts and net limit. 2. Request {brokerLabel}’s preview. 3. Review and approve only if the broker accepts it. Nothing is submitted before your approval; {brokerLabel} still validates account approval, buying power, and existing positions.</p>
+                        </Stack>
+                      </Card>
                     ) : (
                       <ul>{orderContext.legs.map((leg) => <li key={leg}>{leg}</li>)}</ul>
                     )}
-                  </div>
+                  </Stack>
                 )}
 
-                <form onSubmit={handlePreviewOrder} className="order-ticket-form">
+                <form onSubmit={handlePreviewOrder}>
+                  <Stack gap="2">
                   {/* Symbol and Instant Quote */}
-                  <div className="form-group">
+                  <Stack gap="2">
                     <FieldShell id="etrade-order-symbol" label={orderAssetClass === "options" ? "Underlying Symbol" : "Ticker Symbol"}>
-                      <div className="symbol-input-row">
+                      <Flex gap="1" align="center">
                         <TextInput
                           type="text"
-                          className="ticker-input"
                           placeholder="e.g. NVDA, AAPL"
                           value={orderSymbol}
                           // Issue #3038: the symbol stays read-only only
@@ -514,7 +529,6 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                           onBlur={() => fetchSymbolQuote(orderSymbol)}
                         />
                         <Button
-                          className="btn-peek-quote"
                           variant="secondary"
                           size="sm"
                           disabled={quoteLoading}
@@ -523,7 +537,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                          loading={quoteLoading}>
                           {"🔍 Get Live Quote"}
                         </Button>
-                      </div>
+                      </Flex>
                     </FieldShell>
                     {/* Issue #3669: the connect notice follows the SELECTED
                         broker. It used to read E*TRADE's OAuth status for
@@ -533,56 +547,56 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         button; Alpaca gets its sign-in card inline; any
                         other broker names itself with no invented flow. */}
                     {!brokerConnected && brokerId === "etrade" && (
-                      <div className="order-auth-notice">
-                        <span>🔒 Connect your E*TRADE account to fetch authenticated live market quotes.</span>
+                      <Notice tone="info">
+                        <span>🔒 Connect your E*TRADE account to fetch authenticated live market quotes.</span>{" "}
                         <Button type="button" variant="ghost" size="sm" onClick={onConnectBroker}>
                           Connect E*TRADE →
                         </Button>
-                      </div>
+                      </Notice>
                     )}
                     {!brokerConnected && brokerId === "alpaca" && (
                       <>
-                        <div className="order-auth-notice">
+                        <Notice tone="info">
                           <span>🔒 Connect your Alpaca account to fetch authenticated live market quotes.</span>
-                        </div>
+                        </Notice>
                         <AlpacaSignInCard activeEnv={activeEnv} collapsedWhenConfigured={false} />
                       </>
                     )}
                     {!brokerConnected && brokerId !== "etrade" && brokerId !== "alpaca" && (
-                      <div className="order-auth-notice">
+                      <Notice tone="info">
                         <span>🔒 Connect your {brokerLabel} account to fetch authenticated live market quotes.</span>
-                      </div>
+                      </Notice>
                     )}
                     {orderQuote && (
-                      <div className="order-quote-peek">
-                        <Flex justify="between" align="center">
-                          <span className="quote-company">{orderQuote.companyName}</span>
+                      <Card padding="sm">
+                        <Flex gap="2" align="center" wrap>
+                          <strong>{orderQuote.companyName}</strong>
                           {orderQuote.quoteStatus && (
-                            <span className={`pill-badge ${orderQuote.quoteStatus === "REALTIME" ? "positive" : "neutral"}`}>
+                            <Badge tone={orderQuote.quoteStatus === "REALTIME" ? "success" : "neutral"} size="sm" dot>
                               ● {orderQuote.quoteStatus}
-                            </span>
+                            </Badge>
+                          )}
+                          <strong>{safePriceFormat(orderQuote.lastPrice)}</strong>
+                          {orderQuote.change !== undefined && orderQuote.change !== null ? (
+                            <Badge tone={Number(orderQuote.change) >= 0 ? "success" : "danger"} size="sm">
+                              {Number(orderQuote.change) >= 0 ? "+" : ""}{safeNumberFormat(orderQuote.change)} ({safeNumberFormat(orderQuote.changePercent)}%)
+                            </Badge>
+                          ) : (
+                            <span className="ui-meta">—</span>
+                          )}
+                          <span className="ui-meta">Bid: {safePriceFormat(orderQuote.bid)} / Ask: {safePriceFormat(orderQuote.ask)}</span>
+                          {orderQuote.source && (
+                            <Badge tone="accent">✓ {orderQuote.source}</Badge>
                           )}
                         </Flex>
-                        <span className="quote-price">{safePriceFormat(orderQuote.lastPrice)}</span>
-                        {orderQuote.change !== undefined && orderQuote.change !== null ? (
-                          <span className={`quote-change ${Number(orderQuote.change) >= 0 ? "positive" : "negative"}`}>
-                            {Number(orderQuote.change) >= 0 ? "+" : ""}{safeNumberFormat(orderQuote.change)} ({safeNumberFormat(orderQuote.changePercent)}%)
-                          </span>
-                        ) : (
-                          <span className="quote-change neutral">—</span>
-                        )}
-                        <span className="quote-bidask">Bid: {safePriceFormat(orderQuote.bid)} / Ask: {safePriceFormat(orderQuote.ask)}</span>
-                        {orderQuote.source && (
-                          <Badge tone="accent">✓ {orderQuote.source}</Badge>
-                        )}
-                      </div>
+                      </Card>
                     )}
-                  </div>
+                  </Stack>
 
                   {/* Action Toggle (BUY / SELL) */}
-                  {!orderContext?.optionLegs?.length && <div className="form-group">
+                  {!orderContext?.optionLegs?.length && <Stack gap="2">
                     <FieldShell id="etrade-order-action" label="Order Action">
-                      <div className="action-toggle-grid">
+                      <Grid columns={4} gap="1">
                         <Button
                           type="button"
                           variant={orderAction === "BUY" ? "primary" : "secondary"} tone={orderAction === "BUY" ? "solid" : "subtle"}
@@ -643,20 +657,20 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         >
                           COVER
                         </Button>
-                      </div>
+                      </Grid>
                     </FieldShell>
-                  </div>}
+                  </Stack>}
 
                   {/* Order Type and Pricing */}
                   {orderAssetClass === "options" && (orderContext?.optionLegs?.filter((leg) => leg.securityType === "OPTN").length ?? 0) > 1 && (
-                    <div className="options-net-order-control" role="group" aria-label="Net order direction">
+                    <Flex gap="2" align="center" role="group" aria-label="Net order direction">
                       <span>Net order</span>
                       <Button type="button" variant={(orderContext?.strategyNetDebit ?? 0) >= 0 ? "primary" : "secondary"} tone={(orderContext?.strategyNetDebit ?? 0) >= 0 ? "solid" : "subtle"} onClick={() => setOptionNetOrderDirection(false)}>Debit</Button>
                       <Button type="button" variant={(orderContext?.strategyNetDebit ?? 0) < 0 ? "primary" : "secondary"} tone={(orderContext?.strategyNetDebit ?? 0) < 0 ? "solid" : "subtle"} onClick={() => setOptionNetOrderDirection(true)}>Credit</Button>
-                    </div>
+                    </Flex>
                   )}
-                  <div className="form-row-2">
-                    <div className="form-group">
+                  <Grid columns={2} gap="2">
+                    <Stack gap="1">
                       <Select label="Order Type"
                         value={orderType}
                         disabled={Boolean(orderContext?.optionLegs?.length)}
@@ -671,9 +685,9 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         <option value="STOP">Stop</option>
                         <option value="STOP_LIMIT">Stop Limit</option>
                       </Select>
-                    </div>
+                    </Stack>
 
-                    <div className="form-group">
+                    <Stack gap="1">
                       <TextInput label={orderContext?.optionLegs?.length ? "Net Limit Price per Strategy Unit ($)" : orderType === "LIMIT" ? "Limit Price ($)" : "Stop Price ($)"}
                         type="number"
                         step="0.01"
@@ -687,8 +701,8 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                           setOrderError("");
                         }}
                       />
-                    </div>
-                  </div>
+                    </Stack>
+                  </Grid>
 
                   {/* Limit Price Sanity / Market Divergence Notice */}
                   {(() => {
@@ -720,11 +734,10 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                   })()}
 
                   {/* Quantity and Quick Stepper */}
-                  <div className="form-group">
+                  <Stack gap="2">
                     <FieldShell id="etrade-order-quantity" label={orderContext?.optionLegs?.length ? "Strategy Units" : "Quantity (Shares)"}>
-                      <div className="quantity-stepper-row">
+                      <Flex gap="1" align="center">
                         <Button
-                          className="qty-btn"
                           variant="secondary"
                           size="sm"
                           onClick={() => {
@@ -738,7 +751,6 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         <TextInput
                           type="number"
                           min="1"
-                          className="qty-input"
                           value={orderQuantity}
                           onChange={(e) => {
                             setOrderQuantity(Math.max(1, parseInt(e.target.value) || 1));
@@ -747,7 +759,6 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                           }}
                         />
                         <Button
-                          className="qty-btn"
                           variant="secondary"
                           size="sm"
                           onClick={() => {
@@ -758,9 +769,9 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         >
                           {orderContext?.optionLegs?.some((leg) => leg.securityType === "OPTN") ? "+1" : "+5"}
                         </Button>
-                      </div>
+                      </Flex>
                     </FieldShell>
-                    <div className="qty-preset-chips">
+                    <Flex gap="1" wrap>
                       {(orderAssetClass === "options" ? [1, 2, 5, 10, 25] : [5, 10, 25, 50, 100]).map((q) => (
                         <Button
                           key={q}
@@ -776,38 +787,37 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                           {q} {orderContext?.optionLegs?.length ? "units" : "shs"}
                         </Button>
                       ))}
-                    </div>
-                  </div>
+                    </Flex>
+                  </Stack>
 
                   {/* Pricing Summary */}
-                  <div className="order-calc-card">
-                    <div className="calc-row">
-                      <span>{orderContext?.optionLegs?.length ? `Net ${orderContext.strategyNetDebit !== undefined && orderContext.strategyNetDebit < 0 ? "Credit" : "Debit"} per strategy unit` : "Estimated Price per Share:"}</span>
-                      <span>{orderType === "LIMIT" ? safePriceFormat(orderLimitPrice, 2, "$0.00") : safePriceFormat(orderQuote?.lastPrice, 2, "$0.00")}</span>
-                    </div>
-                    <div className="calc-row">
-                      <span>Online Commission:</span>
-                      <span className="zero-comm">{orderContext?.optionLegs?.length ? (activeDraft ? `${safePriceFormat(activeDraft.estimatedCommission, 2, "$0.00")} broker estimate` : "Broker estimate in preview") : "$0.00 USD"}</span>
-                    </div>
-                    <div className="calc-row total">
-                      <span>Estimated {orderContext?.optionLegs?.length && (orderContext.strategyNetDebit ?? 0) < 0 ? "Credit" : "Total Order Value"}:</span>
-                      <span className="calc-total-val">
-                        ${(
-                          orderQuantity *
-                          (orderType === "LIMIT" ? parseFloat(orderLimitPrice || "0") : orderQuote?.lastPrice || 0) *
-                          (orderAssetClass === "options"
-                            ? 100
-                            : orderContext?.optionLegs?.reduce((total, leg) => total + leg.quantity, 0) || 1)
-                        ).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                  </div>
+                  <SummaryCard
+                    rows={[
+                      {
+                        label: orderContext?.optionLegs?.length ? `Net ${orderContext.strategyNetDebit !== undefined && orderContext.strategyNetDebit < 0 ? "Credit" : "Debit"} per strategy unit` : "Estimated Price per Share:",
+                        value: orderType === "LIMIT" ? safePriceFormat(orderLimitPrice, 2, "$0.00") : safePriceFormat(orderQuote?.lastPrice, 2, "$0.00"),
+                      },
+                      {
+                        label: "Online Commission:",
+                        value: orderContext?.optionLegs?.length ? (activeDraft ? `${safePriceFormat(activeDraft.estimatedCommission, 2, "$0.00")} broker estimate` : "Broker estimate in preview") : "$0.00 USD",
+                      },
+                    ]}
+                    total={{
+                      label: `Estimated ${orderContext?.optionLegs?.length && (orderContext.strategyNetDebit ?? 0) < 0 ? "Credit" : "Total Order Value"}:`,
+                      value: `$${(
+                        orderQuantity *
+                        (orderType === "LIMIT" ? parseFloat(orderLimitPrice || "0") : orderQuote?.lastPrice || 0) *
+                        (orderAssetClass === "options"
+                          ? 100
+                          : orderContext?.optionLegs?.reduce((total, leg) => total + leg.quantity, 0) || 1)
+                      ).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                    }}
+                  />
 
                   {/* Submit Preview and Pre-Trade Risk Analysis Buttons */}
                   <Flex gap="2">
                     <Button
                       type="submit"
-                      className="btn-submit-preview"
                       variant="primary"
                       disabled={previewLoading || !orderSymbol.trim()}
                       title="Generate cryptographic order preview with Trading Agent DID"
@@ -856,50 +866,53 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                       title="Risk Analysis — Run pre-trade institutional risk analysis"
                       aria-label="Risk Analysis"
                     >
-                      <span className="risk-shield-icon" aria-hidden="true">🛡️</span>
+                      <span aria-hidden="true">🛡️</span>
                       <span>Risk Analysis</span>
                     </Button>
                   </Flex>
+                  </Stack>
                 </form>
-              </div>
+              </Stack></Card>
 
               {/* Right: Security & Architecture Specs */}
-              <div className="order-side-info">
-                <div className="info-card">
+              <Stack gap="2">
+                <Card padding="md">
+                  <Stack gap="2">
                   <h5>🛡️ Agentic HITL Safety Guarantee</h5>
                   <p>
                     Every trade initiated by the Multi-Agent System is saved to the institutional ledger in <code>previewed</code> status.
                     No funds are moved, and no order is routed to {brokerLabel} until you review the order details and click <strong>Approve &amp; Submit</strong>.
                   </p>
-                  <div className="safety-bullets">
-                    <div className="bullet-item">
-                      <span className="bullet-icon">🔒</span>
+                  <Stack gap="2">
+                    <Flex gap="2" align="start">
+                      <span>🔒</span>
                       <div>
                         <strong>Cryptographic DID Attestation:</strong> All orders are stamped with Trading Agent DID (<code>did:agent:openaimp:trading</code>) and reviewer user DID.
                       </div>
-                    </div>
-                    <div className="bullet-item">
-                      <span className="bullet-icon">⚖️</span>
+                    </Flex>
+                    <Flex gap="2" align="start">
+                      <span>⚖️</span>
                       <div>
                         <strong>GoF &amp; SOLID Enforcement:</strong> Executes via the Command &amp; Strategy pattern with protected variations over live OAuth and simulated endpoints.
                       </div>
-                    </div>
-                    <div className="bullet-item">
-                      <span className="bullet-icon">⚡</span>
+                    </Flex>
+                    <Flex gap="2" align="start">
+                      <span>⚡</span>
                       <div>
                         <strong>Instant Broker Cancellation:</strong> You can reject or cancel draft orders with one click at any time before execution.
                       </div>
-                    </div>
-                  </div>
-                </div>
+                    </Flex>
+                  </Stack>
+                  </Stack>
+                </Card>
 
                 {/* Sample Quick Action Box */}
-                <div className="info-card">
+                <Card padding="md">
+                  <Stack gap="2">
                   <h5>💬 NLQ Voice &amp; Text Prompts</h5>
                   <p>You can also place trades effortlessly through conversational natural language:</p>
-                  <div className="nlq-example-links">
+                  <Stack gap="1">
                     <Button
-                      className="example-link"
                       variant="ghost"
                       size="sm"
                       onClick={() => sendNlqToChat("Preview buy 10 shares of NVDA limit 125.50")}
@@ -907,7 +920,6 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                       👉 "Preview buy 10 shares of NVDA limit 125.50"
                     </Button>
                     <Button
-                      className="example-link"
                       variant="ghost"
                       size="sm"
                       onClick={() => sendNlqToChat("Screen oversold tech stocks")}
@@ -915,18 +927,18 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                       👉 "Screen oversold tech stocks"
                     </Button>
                     <Button
-                      className="example-link"
                       variant="ghost"
                       size="sm"
                       onClick={() => sendNlqToChat("Show my portfolio positions")}
                     >
                       👉 "Show my portfolio positions"
                     </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+                  </Stack>
+                  </Stack>
+                </Card>
+              </Stack>
+            </Grid>
+          </PageSection>
         </TabPanel>
         <TabPanel
           idBase="order-ticket"

@@ -1,4 +1,4 @@
-import { Button, Notice, PageSection, PageShell, TextInput } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Flex, Notice, PageSection, PageShell, Stack, TextInput } from "./components/ui";
 import { TradeExecutionPreview } from "./TradeExecutionPreview";
 import { safePriceFormat } from "./formatters";
 import type { BrokerPresentation } from "../trading/brokerPresentation";
@@ -69,7 +69,7 @@ export function VoicePanel({
       scopeNote="Real-time conversational voice trading with speech synthesis and recognition — verbal quotes, screening, and strict two-stage verbal Human-in-the-Loop order drafting."
     >
       <PageSection title="Voice trading desk">
-        <div className="tab-pane active voice-pane">
+        <Stack gap="2">
           {/* Issue #3429: the voice desk is E*TRADE\x27s service; say so for another broker. */}
           {selectedBroker !== "etrade" && (
             <Notice tone="warning" title={`${presentation.label} does not run the voice desk`}>
@@ -77,32 +77,38 @@ export function VoicePanel({
             </Notice>
           )}
           {/* Header Card */}
-          <div className="voice-header-card">
-            <div className="voice-header-top">
-              <div>
-                <span className="voice-header-badge">
+          <Card padding="md">
+            <CardHeader
+              title={<><span>🎙️</span> {presentation.deskName}</>}
+              subtitle="Real-time conversational voice trading with speech synthesis and recognition. Verbal quote inquiries, technical screening, and strict two-stage verbal Human-in-the-Loop order drafting."
+              belowSubtitle={
+                <Badge tone="success" size="xs" uppercase>
                   Real-Time Voice Architecture
-                </span>
-                <h3 className="voice-header-title">
-                  <span>🎙️</span> {presentation.deskName}
-                </h3>
-                <p className="voice-header-desc">
-                  Real-time conversational voice trading with speech synthesis and recognition. Verbal quote inquiries, technical screening, and strict two-stage verbal Human-in-the-Loop order drafting.
-                </p>
-              </div>
-              <div className="voice-header-status">
-                <span className={`voice-status-pill ${voiceStatus}`}>
-                  <span className={`voice-status-dot ${voiceStatus}`} />
+                </Badge>
+              }
+              meta={
+                <Badge
+                  tone={
+                    voiceStatus === "speaking"
+                      ? "accent"
+                      : voiceStatus === "listening"
+                        ? "success"
+                        : voiceStatus === "thinking"
+                          ? "warning"
+                          : "neutral"
+                  }
+                  dot
+                >
                   {voiceStatus.toUpperCase()}
-                </span>
-              </div>
-            </div>
-          </div>
+                </Badge>
+              }
+            />
+          </Card>
 
-          <div className="voice-main-grid">
+          <Stack gap="2">
             {/* Visualizer & Mic Control Bar */}
-            <div className="voice-control-card">
-              <div className="voice-control-actions">
+            <Card padding="md">
+              <Flex gap="2" align="center" justify="center" wrap>
                 <Button
                   type="button"
                   onClick={handleToggleVoiceRecording}
@@ -118,20 +124,27 @@ export function VoicePanel({
                 >
                   {voiceIsMuted ? "🔇 Voice Muted" : "🔊 Audio On"}
                 </Button>
-              </div>
+              </Flex>
 
               {/* Animated Audio Visualizer Bars */}
-              <div className="voice-visualizer-bars">
+              <Flex gap="0-5" align="center" justify="center">
                 {[12, 24, 38, 20, 32, 16, 28, 36, 18, 26, 34, 14].map((h, i) => (
                   <div
                     key={i}
-                    className={`voice-vbar ${voiceStatus}`}
                     style={{
                       height: voiceStatus === "speaking" || voiceStatus === "listening" ? `${Math.max(8, (h * (voiceStatus === "listening" ? 1.2 : 0.9)))}px` : "6px",
+                      width: 6,
+                      borderRadius: 3,
+                      background:
+                        voiceStatus === "speaking"
+                          ? "var(--color-accent)"
+                          : voiceStatus === "listening"
+                            ? "var(--color-success)"
+                            : "var(--color-border-medium)",
                     }}
                   />
                 ))}
-              </div>
+              </Flex>
 
               {/* Issue #3796: a named voice failure (the endpoint's
                   code) is a visible state, like the composer's —
@@ -145,13 +158,13 @@ export function VoicePanel({
 
               {/* Interim Real-Time Transcript Display */}
               {voiceInterim && (
-                <div className="voice-interim-box">
+                <Notice tone="accent">
                   🎙️ <em>{voiceInterim}…</em>
-                </div>
+                </Notice>
               )}
 
               {/* Quick Spoken Chips */}
-              <div className="voice-chips-row">
+              <Flex gap="1" justify="center" wrap>
                 <Button
                   onClick={() => handleVoiceTurn("What is Nvidia trading at?")}
                   variant="secondary"
@@ -204,98 +217,94 @@ export function VoicePanel({
                     </Button>
                   </>
                 )}
-              </div>
+              </Flex>
 
               {/* Text Fallback Input Box */}
               <form
                 onSubmit={(e) => { e.preventDefault(); handleVoiceTurn(); }}
-                className="voice-input-form"
               >
+                <Flex gap="1" align="center">
                 <TextInput
                   type="text"
                   placeholder="Or type a spoken command: e.g. 'What is Apple trading at?' or 'Buy 10 NVDA at market'"
                   value={voiceInputText}
                   onChange={(e) => setVoiceInputText(e.target.value)}
-                  className="voice-text-input"
                 />
                 <Button
                   type="submit"
                   disabled={voiceLoading || !voiceInputText.trim()}
-                  className="btn-voice-send"
                   variant="primary"
                  loading={voiceLoading}>
                   {"Send Voice Turn"}
                 </Button>
+                </Flex>
               </form>
-            </div>
+            </Card>
 
             {/* Conversation Feed */}
-            <div className="voice-feed-card">
-              <h5 className="voice-feed-title">
-                <span>💬</span> Live Voice Conversation History
-              </h5>
+            <Card padding="md">
+              <CardHeader title={<><span>💬</span> Live Voice Conversation History</>} />
 
-              <div className="voice-feed-scroll">
+              <Stack gap="2">
                 {voiceTranscript.map((msg, idx) => (
-                  <div
+                  <Stack
                     key={idx}
-                    className={`voice-turn ${msg.role === "user" ? "user-turn" : "bot-turn"}`}
+                    gap="0-5"
+                    align={msg.role === "user" ? "end" : "start"}
                   >
-                    <div className="voice-turn-meta">
-                      <span>{msg.role === "user" ? "👤 Trader (Voice)" : `🤖 ${presentation.deskAgentName}`}</span>
-                      <span>• {msg.timestamp}</span>
-                    </div>
+                    <span className="ui-meta">
+                      {msg.role === "user" ? "👤 Trader (Voice)" : `🤖 ${presentation.deskAgentName}`} • {msg.timestamp}
+                    </span>
 
-                    <div className={`voice-bubble ${msg.role === "user" ? "user-bubble" : "bot-bubble"}`}>
+                    <Card padding="sm" highlight={msg.role === "user"}>
                       <div>{msg.text}</div>
 
                       {/* Embedded HITL Order Preview Card in Voice Feed */}
                       {msg.actionType === "preview" && msg.orderDraft && (
-                        <div className="voice-order-preview-box">
-                          <div className="voice-order-preview-title">
-                            🛡️ Order Preview Staged (HITL Required)
-                          </div>
-                          <div className="voice-order-preview-details">
-                            <div><strong>Order ID:</strong> <code>{msg.orderDraft.orderId}</code></div>
-                            <div><strong>Action:</strong> {msg.orderDraft.action} {msg.orderDraft.quantity} {msg.orderDraft.quantity === 1 ? "share" : "shares"} of {msg.orderDraft.symbol} {msg.orderDraft.orderType === "LIMIT" ? `(LIMIT @ ${safePriceFormat(msg.orderDraft.limitPrice || msg.orderDraft.estimatedPrice)})` : "(MARKET)"}</div>
-                            <div><strong>Estimated Total:</strong> {safePriceFormat(msg.orderDraft.estimatedTotal)} USD</div>
-                          </div>
-                          {/* Issue #1773 (OWASP ASI-02): the voice
-                              approve path shows the same exact
-                              payload, fees, and slippage limits. */}
-                          <TradeExecutionPreview draft={msg.orderDraft} />
-                          <div className="voice-order-preview-actions">
-                            <Button
-                              onClick={() => handleVoiceOrderAction("approve", msg.orderDraft.orderId)}
-                              variant="primary"
-                              tone="subtle"
-                            >
-                              ✓ Voice Approve &amp; Execute
-                            </Button>
-                            <Button
-                              onClick={() => handleVoiceOrderAction("cancel", msg.orderDraft.orderId)}
-                              variant="danger"
-                              tone="subtle"
-                            >
-                              ✕ Cancel Draft
-                            </Button>
-                          </div>
-                        </div>
+                        <Notice tone="warning" title="🛡️ Order Preview Staged (HITL Required)">
+                          <Stack gap="2">
+                            <Stack gap="0-5">
+                              <div><strong>Order ID:</strong> <code>{msg.orderDraft.orderId}</code></div>
+                              <div><strong>Action:</strong> {msg.orderDraft.action} {msg.orderDraft.quantity} {msg.orderDraft.quantity === 1 ? "share" : "shares"} of {msg.orderDraft.symbol} {msg.orderDraft.orderType === "LIMIT" ? `(LIMIT @ ${safePriceFormat(msg.orderDraft.limitPrice || msg.orderDraft.estimatedPrice)})` : "(MARKET)"}</div>
+                              <div><strong>Estimated Total:</strong> {safePriceFormat(msg.orderDraft.estimatedTotal)} USD</div>
+                            </Stack>
+                            {/* Issue #1773 (OWASP ASI-02): the voice
+                                approve path shows the same exact
+                                payload, fees, and slippage limits. */}
+                            <TradeExecutionPreview draft={msg.orderDraft} />
+                            <Flex gap="1" wrap>
+                              <Button
+                                onClick={() => handleVoiceOrderAction("approve", msg.orderDraft.orderId)}
+                                variant="primary"
+                                tone="subtle"
+                              >
+                                ✓ Voice Approve &amp; Execute
+                              </Button>
+                              <Button
+                                onClick={() => handleVoiceOrderAction("cancel", msg.orderDraft.orderId)}
+                                variant="danger"
+                                tone="subtle"
+                              >
+                                ✕ Cancel Draft
+                              </Button>
+                            </Flex>
+                          </Stack>
+                        </Notice>
                       )}
 
                       {/* Embedded Execution Receipt */}
                       {msg.actionType === "approval" && msg.brokerOrderRef && (
-                        <div className="voice-receipt-box">
+                        <Notice tone="success">
                           ✓ Broker Ref: <code>{msg.brokerOrderRef}</code> • Status: <strong>EXECUTED</strong>
-                        </div>
+                        </Notice>
                       )}
-                    </div>
-                  </div>
+                    </Card>
+                  </Stack>
                 ))}
-              </div>
-            </div>
-          </div>
-        </div>
+              </Stack>
+            </Card>
+          </Stack>
+        </Stack>
       </PageSection>
     </PageShell>
   );

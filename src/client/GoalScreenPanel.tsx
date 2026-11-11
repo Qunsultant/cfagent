@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { apiFetch as fetch } from "./apiFetch";
-import { Button, Checkbox, PageSection, PageShell, Select, Table, TextInput } from "./components/ui";
+import { Button, Checkbox, Notice, PageSection, PageShell, Select, Table, TextInput } from "./components/ui";
 import { getPollingConfig } from "./pollingConfig";
 import { startPolling } from "./polling";
 import { usePolling } from "./usePolling";
@@ -568,10 +568,10 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
         </p>
       )}
       {flagState === "off" && (
-        <div className="options-error" role="alert">
+        <Notice tone="danger">
           Saga start is disabled — the monetization flag is OFF. An
           owner enables it in the Flagship dashboard.
-        </div>
+        </Notice>
       )}
       {flagState === "unknown" && userLogin && (
         <p style={sagaMutedPlainStyle}>
@@ -634,9 +634,9 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
         </fieldset>
       </form>
       {formError && (
-        <div className="options-error" role="alert">
+        <Notice tone="danger">
           {formError}
-        </div>
+        </Notice>
       )}
       {started && (
         <div style={sagaReceiptStyle} role="status">
@@ -706,9 +706,9 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
             </p>
           )}
           {phase === "error" && progressError && (
-            <div className="options-error" role="alert">
+            <Notice tone="danger">
               {progressError}
-            </div>
+            </Notice>
           )}
         </div>
       )}
@@ -1052,7 +1052,6 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
     } else {
       void loadLatestGoalResult();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const runScreen = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1200,7 +1199,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
           {"Run goal screen"}
         </Button>
       </form>
-      {error && <div className="options-error" role="alert">{error}</div>}
+      {error && <Notice tone="danger">{error}</Notice>}
       </PageSection>
 
       <PageSection title="Start a paid saga journey">
@@ -1305,34 +1304,40 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
                 }}
               >
                 {pdfUrl && (
-                  <a
-                    className="ui-btn variant-secondary tone-subtle size-sm"
+                  <Button
                     href={pdfUrl}
                     download
+                    variant="secondary"
+                    tone="subtle"
+                    size="sm"
                     style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}
                   >
                     📄 Download PDF
-                  </a>
+                  </Button>
                 )}
                 {xlsxUrl && (
-                  <a
-                    className="ui-btn variant-secondary tone-subtle size-sm"
+                  <Button
                     href={xlsxUrl}
                     download
+                    variant="secondary"
+                    tone="subtle"
+                    size="sm"
                     style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}
                   >
                     📊 Download XLSX
-                  </a>
+                  </Button>
                 )}
                 {csvUrl && (
-                  <a
-                    className="ui-btn variant-secondary tone-subtle size-sm"
+                  <Button
                     href={csvUrl}
                     download
+                    variant="secondary"
+                    tone="subtle"
+                    size="sm"
                     style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "var(--space-1)" }}
                   >
                     📋 Download CSV
-                  </a>
+                  </Button>
                 )}
               </div>
             );
@@ -1368,7 +1373,7 @@ export function GoalScreenPanel({ activeEnv, userLogin }: GoalScreenPanelProps) 
               <Button type="button" onClick={runBacktest} disabled={backtestLoading} loading={backtestLoading}>
                 {`Backtest the ${stockHits.length} stock hit(s)`}
               </Button>
-              {backtestError && <div className="options-error" role="alert">{backtestError}</div>}
+              {backtestError && <Notice tone="danger">{backtestError}</Notice>}
               {backtest && (
                 <div style={{ marginTop: "0.75rem", fontSize: "var(--font-size-body)" }}>
                   <p style={{ margin: "0 0 0.5rem" }}>

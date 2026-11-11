@@ -19,7 +19,7 @@
 
 import { useMemo, useState, type ReactElement } from "react";
 import { downloadScreenExport } from "./runExport";
-import { Button, Table, type TableColumn } from "./components/ui";
+import { Button, PageSection, Table, type TableColumn } from "./components/ui";
 import { RegeneratePdfButton } from "./RegeneratePdfButton";
 
 export interface StockTechnicalsData {
@@ -424,6 +424,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
   // qualification carried into the file (see runExport.ts).
 
   return (
+    <PageSection>
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--space-2)", flexWrap: "wrap", marginBottom: "0.5rem" }}>
         {result.success && (
@@ -432,7 +433,6 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
             variant="accent"
             tone="subtle"
             size="sm"
-              className="screener-export-csv"
               onClick={() => downloadScreenExport(result, "standouts")}
               title="Download this run's standout opportunities as CSV"
             >
@@ -443,7 +443,6 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
               variant="accent"
               tone="subtle"
               size="sm"
-                className="screener-export-csv-all"
                 onClick={() => downloadScreenExport(result, "all-stocks")}
                 title="Download every symbol this run scanned as CSV"
               >
@@ -454,7 +453,6 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
             variant="accent"
             tone="subtle"
             size="sm"
-              className="screener-export-json"
               onClick={() => downloadScreenExport(result, "run-json")}
               title="Download this run's full result as JSON"
             >
@@ -482,7 +480,6 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
           <a
             href={xlsxUrl}
             download
-            className="screener-download-xlsx"
             style={{
               fontSize: "var(--font-size-body-sm)",
               padding: "var(--space-1-5) var(--space-3)",
@@ -665,7 +662,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
               >
                 All {result.allStocks!.length} screened symbols (click column headers to sort)
               </summary>
-              <div className="options-table-scroll" style={{ marginTop: "0.5rem" }}>
+              <div style={{ marginTop: "0.5rem", overflowX: "auto", maxHeight: 480, overflowY: "auto", border: "1px solid var(--color-border-subtle)", borderRadius: 6, background: "var(--color-surface-raised)" }}>
                 <Table
                   columns={withSortAria<AllStockRow>([
                     { key: "symbol", header: <SortLabel label="Symbol" k="symbol" {...all} />, render: (s) => (<><strong>{s.symbol}</strong>{s.indicators?.directional && (<span title="Strong directional move" style={{ marginLeft: "0.3rem" }}>⚡</span>)}</>) },
@@ -696,5 +693,6 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
         </>
       )}
     </div>
+    </PageSection>
   );
 }

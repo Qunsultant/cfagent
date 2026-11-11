@@ -15,7 +15,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch as fetch } from "./apiFetch";
-import { Button, Checkbox, Notice, PageSection, PageShell, SegmentedControl, TextInput } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Checkbox, EmptyState, Flex, Notice, PageSection, PageShell, PillGroup, SegmentedControl, Spinner, Stack, TextInput } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { PendingReviewQueue } from "./PendingReviewQueue";
 import { RegeneratePdfButton } from "./RegeneratePdfButton";
@@ -250,16 +250,16 @@ export function ReportsPanel() {
       <>
       {!selectedReportId && <PendingReviewQueue />}
       <PageSection title="Search and filter">
-      <div className="reports-toolbar">
-        <form onSubmit={handleSearch} className="reports-search">
+      <Stack gap="2">
+        <form onSubmit={handleSearch}>
+          <Flex gap="2" align="center" wrap>
           <TextInput
             type="text"
             placeholder="Search reports… (e.g. NASDAQ100, bullish, NVDA)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="search-input"
           />
-          <Button type="submit" className="search-btn">🔍 Search</Button>
+          <Button type="submit">🔍 Search</Button>
           <span title="Use AI semantic search instead of keyword matching">
             <Checkbox
               label="🧠 Semantic"
@@ -267,37 +267,34 @@ export function ReportsPanel() {
               onChange={(e) => setSemanticMode(e.target.checked)}
             />
           </span>
+          </Flex>
         </form>
-        <div className="source-filters">
-          {filteredSources.map((s) => (
-            <Button
-              key={s}
-              className={`filter-chip ${sourceFilter === s ? "active" : ""}`}
-              onClick={() => setSourceFilter(s)}
-            >
-              {s === "all" ? "All" : SOURCE_LABELS[s] || s}
-            </Button>
-          ))}
-        </div>
-      </div>
+        <PillGroup
+          ariaLabel="Filter by source"
+          size="sm"
+          options={filteredSources.map((s) => ({
+            id: s,
+            label: s === "all" ? "All" : SOURCE_LABELS[s] || s,
+          }))}
+          value={sourceFilter}
+          onChange={setSourceFilter}
+        />
+      </Stack>
       </PageSection>
 
       <PageSection title="Reports">
-      {!selectedReportId && loading && <div className="loading">Loading reports…</div>}
+      {!selectedReportId && loading && <Spinner label="Loading reports…" />}
       {!selectedReportId && error && (
-        <div className="error">
+        <Notice tone="danger">
           Error: {error} <Button onClick={() => fetchReports()}>Retry</Button>
-        </div>
+        </Notice>
       )}
 
       {!selectedReportId && !loading && !error && reports.length === 0 && (
-        <div className="empty">
-          <p>No reports found.</p>
-          <p className="hint">
-            Reports appear here after scheduled runs complete.
-            The first reports will land after the next hourly screener run.
-          </p>
-        </div>
+        <EmptyState
+          title="No reports found."
+          description="Reports appear here after scheduled runs complete. The first reports will land after the next hourly screener run."
+        />
       )}
 
       {selectedReportId ? (
@@ -306,24 +303,23 @@ export function ReportsPanel() {
           onBack={() => setSelectedReportId(null)}
         />
       ) : (
-      <div className="reports-list">
+      <Stack gap="2">
         {reports.map((r) => (
-          <div key={r.id} className="report-card">
-            <div className="report-header">
-              <span
-                className="source-badge"
+          <Card key={r.id} padding="md">
+            <Flex gap="2" align="center" justify="between" wrap>
+              <Badge
                 style={SOURCE_BADGE_STYLES[r.source] || FALLBACK_BADGE_STYLE}
               >
                 {SOURCE_LABELS[r.source] || r.source}
-              </span>
-              <span className="report-time">
+              </Badge>
+              <span className="ui-meta">
                 {new Date(r.createdAt).toLocaleString()}
                 {r.status ? ` · ${r.status}` : ""}
               </span>
-            </div>
-            <h3 className="report-title">{r.title}</h3>
-            <p className="report-summary">{r.summary}</p>
-            <div className="report-actions">
+            </Flex>
+            <CardHeader title={r.title} />
+            <p>{r.summary}</p>
+            <Flex gap="2" align="center" wrap>
               {r.source === "research_report" && r.reportId && (
                 <Button variant="secondary" size="sm" onClick={() => setSelectedReportId(r.reportId as string)}>
                   View run
@@ -339,43 +335,43 @@ export function ReportsPanel() {
                   Replay
                 </Button>
               )}
-              <span className="run-id" title={r.runId}>
+              <span className="ui-meta" title={r.runId}>
                 Run: {r.runId.slice(0, 12)}…
               </span>
               {r.reportUrl && (
-                <a className="report-pdf-link" href={r.reportUrl} download>
+                <Button href={r.reportUrl} download variant="secondary" tone="subtle" size="sm">
                   📄 Download PDF
-                </a>
+                </Button>
               )}
               {r.xlsxUrl && (
-                <a className="report-pdf-link" href={r.xlsxUrl} download>
+                <Button href={r.xlsxUrl} download variant="secondary" tone="subtle" size="sm">
                   📊 Download XLSX
-                </a>
+                </Button>
               )}
               {r.csvUrl && (
-                <a className="report-pdf-link" href={r.csvUrl} download>
+                <Button href={r.csvUrl} download variant="secondary" tone="subtle" size="sm">
                   📋 Download CSV
-                </a>
+                </Button>
               )}
               {!r.reportUrl && (r.pdfStatus || r.pdfError) && (
-                <Notice tone="danger" density="compact" className="report-pdf-unavailable">
+                <Notice tone="danger" density="compact">
                   📄 PDF unavailable{r.pdfError ? ` — ${r.pdfError}` : ""}
                 </Notice>
               )}
               {!r.xlsxUrl && (r.xlsxStatus === "failed" || r.xlsxError) && (
-                <Notice tone="danger" density="compact" className="report-pdf-unavailable">
+                <Notice tone="danger" density="compact">
                   📊 XLSX unavailable{r.xlsxError ? ` — ${r.xlsxError}` : ""}
                 </Notice>
               )}
               {!r.csvUrl && (r.csvStatus === "failed" || r.csvError) && (
-                <Notice tone="danger" density="compact" className="report-pdf-unavailable">
+                <Notice tone="danger" density="compact">
                   📋 CSV unavailable{r.csvError ? ` — ${r.csvError}` : ""}
                 </Notice>
               )}
               {!r.reportUrl && r.pdfStatus === "failed" && (
                 <RegeneratePdfButton onRegenerated={() => fetchReports()} />
               )}
-            </div>
+            </Flex>
             {replayState[r.id]?.result && !replayState[r.id]!.result!.ok && (
               <Notice tone="danger" density="compact">
                 Replay failed — {replayState[r.id]!.result!.error}
@@ -391,9 +387,9 @@ export function ReportsPanel() {
                   )}
               </Notice>
             )}
-          </div>
+          </Card>
         ))}
-      </div>
+      </Stack>
       )}
       </PageSection>
       </>

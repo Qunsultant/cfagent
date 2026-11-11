@@ -16,7 +16,7 @@ import {
   CopilotTriggerButton,
   type CapabilityTabItem,
 } from "./components/CapabilityNavBar";
-import { TabPanel } from "./components/ui";
+import { PageSection, TabPanel } from "./components/ui";
 import { ScannerPanel } from "./ScannerPanel";
 import { IvHistoryPanel } from "./IvHistoryPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -275,7 +275,7 @@ export function OptionsHub({
   ];
 
   return (
-    <section className="trading-section screeners-hub">
+    <PageSection>
       <CapabilityNavBar
         ariaLabel="Options capabilities"
         tabs={optionsTabs}
@@ -383,6 +383,6 @@ export function OptionsHub({
           />
         </TabPanel>
       )}
-    </section>
+    </PageSection>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Select, Table, TextInput, type TableColumn } from "../components/ui";
+import { Button, Flex, Grid, Notice, PageSection, Select, Table, TextInput, type TableColumn } from "../components/ui";
 import { apiFetch as fetch } from "../apiFetch";
 import type { ScreenedOptionContractItem } from "../../types";
 import { buildPaymentSignature, describeChallenge, sendUsdcPayment, type PaidTransfer, type X402Challenge } from "../x402Pay";
@@ -345,7 +345,6 @@ export function RawContractsScreener({
         <div style={{ display: "flex", gap: "var(--space-1)" }}>
           {onSelectContract && (
             <Button
-              className="subnav-btn"
               style={{ padding: "var(--space-1) var(--space-1-5)", fontSize: "var(--font-size-caption)" }}
               title="Inspect in options tools"
               onClick={() => onSelectContract(row)}
@@ -354,7 +353,6 @@ export function RawContractsScreener({
             </Button>
           )}
           <Button
-            className="subnav-btn"
             style={{ padding: "var(--space-1) var(--space-1-5)", fontSize: "var(--font-size-caption)", borderColor: "var(--color-warning)", color: "var(--color-warning)" }}
             title="Analyze risk profile and mitigation playbook"
             onClick={() =>
@@ -406,7 +404,6 @@ export function RawContractsScreener({
           </Button>
           {onPreviewTrade && (
             <Button
-              className="subnav-btn"
               style={{ padding: "var(--space-1) var(--space-1-5)", fontSize: "var(--font-size-caption)", borderColor: "var(--color-accent)", color: "var(--color-accent)" }}
               title="Preview buy trade order"
               onClick={() =>
@@ -439,7 +436,8 @@ export function RawContractsScreener({
   ];
 
   return (
-    <div className="raw-contracts-screener-view" style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+    <PageSection>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
       {/* Top Banner & Quick Underlying Chips */}
       <div
         style={{
@@ -472,7 +470,6 @@ export function RawContractsScreener({
           {POPULAR_SYMBOLS.map((s) => (
             <Button
               key={s}
-              className="subnav-btn"
               style={{
                 padding: "var(--space-1) var(--space-2-5)",
                 fontSize: "var(--font-size-caption)",
@@ -490,10 +487,10 @@ export function RawContractsScreener({
 
       {/* Screener Parameter Form */}
       <form
-        className="options-request-form screeners-filter-form"
         onSubmit={(e) => void handleScreenSubmit(e)}
         style={{ margin: 0 }}
       >
+        <Grid autoFit minColumnWidth="md" gap="2">
         <TextInput label="Underlying Symbol"
           value={symbol}
           onChange={(e) => setSymbol(e.target.value.toUpperCase())}
@@ -518,7 +515,8 @@ export function RawContractsScreener({
           placeholder="5000"
         />
 
-        <div className="screener-criteria-presets-deck">
+        </Grid>
+        <Grid autoFit minColumnWidth="lg" gap="2">
           <ScreenerPresetManager
             assetClass="options"
             userLogin={userLogin}
@@ -531,17 +529,17 @@ export function RawContractsScreener({
             onChange={setOptionsCriteria}
             lastSentFilters={lastSentOptionsFilters}
           />
-        </div>
-        <div className="options-form-footer" style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: "var(--space-2)" }}>
+        </Grid>
+        <Flex justify="end" gap="2">
           <Button type="submit" disabled={loading} style={{ minWidth: "180px", fontWeight: 600 }} loading={loading}>
             {`⚡ Screen ${symbol || "Options"} Contracts`}
           </Button>
-        </div>
+        </Flex>
       </form>
 
       {/* Optional Payment Challenge */}
       {pending && (
-        <div className="options-error" role="status" style={{ borderColor: "var(--color-accent)" }}>
+        <Notice tone="info">
           <p>
             <strong>Payment Optional (x402 Protocol).</strong> Pay ${pending.challenge.amount.toFixed(2)} {describeChallenge(pending.challenge).label} ({describeChallenge(pending.challenge).paymentPath.shortLabel}) or run for free.
           </p>
@@ -555,10 +553,10 @@ export function RawContractsScreener({
               </Button>
             )}
           </div>
-        </div>
+        </Notice>
       )}
 
-      {error && <div className="options-error" role="alert">{error}</div>}
+      {error && <Notice tone="danger">{error}</Notice>}
 
       {/* Results Header with In-Memory Filter and Exporter */}
       {(contracts.length > 0 || summary) && (
@@ -639,12 +637,11 @@ export function RawContractsScreener({
 
       {/* Contracts Table */}
       {contracts.length > 0 && (
-        <div className="options-table-scroll" style={{ maxHeight: "650px", overflowY: "auto", fontSize: "var(--font-size-body-sm)" }}>
+        <div style={{ maxHeight: "650px", overflowY: "auto", overflowX: "auto", fontSize: "var(--font-size-body-sm)", border: "1px solid var(--color-border-subtle)", borderRadius: 6, background: "var(--color-surface-raised)" }}>
           <Table
             columns={contractColumns}
             rows={contractRows}
             rowKey={(row) => `${row.symbol || row.displaySymbol || row.osiKey || row._idx}:${row._idx}`}
-            className="options-comparison-table"
           />
         </div>
       )}
@@ -677,5 +674,6 @@ export function RawContractsScreener({
         onSendPrompt={onSendPrompt}
       />
     </div>
+    </PageSection>
   );
 }

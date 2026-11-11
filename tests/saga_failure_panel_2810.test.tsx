@@ -148,7 +148,10 @@ describe("SagaStartSection errored terminal state (#2810)", () => {
     expect(statusCalls).toBe(1);
     // Terminal failure state: the reason is visible, the run
     // is no longer "following", and the instance reads errored.
-    const alert = container.querySelector(".options-error");
+    // Batch A renders the failure as <Notice tone="danger"> (S-U2
+    // #3051) — danger renders role="alert", so the alert semantics
+    // are preserved; no .options-error div remains.
+    const alert = container.querySelector(".ui-notice.tone-danger");
     expect(alert).not.toBeNull();
     expect(alert!.textContent).toContain("not approved");
     expect(alert!.textContent).toContain("fail-closed");
@@ -180,7 +183,10 @@ describe("SagaStartSection errored terminal state (#2810)", () => {
     ];
     await startSaga();
     expect(statusCalls).toBe(1);
-    const alert = container.querySelector(".options-error");
+    // The failure renders as <Notice tone="danger"> (S-U2 #3051) —
+    // danger renders role="alert", so the alert semantics are
+    // preserved; no .options-error div remains.
+    const alert = container.querySelector(".ui-notice.tone-danger");
     expect(alert).not.toBeNull();
     expect(alert!.textContent).toContain("instance errored");
     expect(container.textContent).not.toMatch(/Following this run/);

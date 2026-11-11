@@ -21,7 +21,7 @@
  */
 
 import { useState } from "react";
-import { Badge, Button, Card, EmptyState, Notice, Spinner } from "./components/ui";
+import { Badge, Button, Card, EmptyState, Notice, PageSection, Spinner } from "./components/ui";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import {
   resolveStockReportFormatStatus,
@@ -420,6 +420,10 @@ export function RunDetailView({
     </>
   );
 
-  if (chrome === "bare") return body;
-  return <Card padding="md">{body}</Card>;
+  if (chrome === "bare") return <PageSection>{body}</PageSection>;
+  return (
+    <Card padding="md">
+      <PageSection>{body}</PageSection>
+    </Card>
+  );
 }

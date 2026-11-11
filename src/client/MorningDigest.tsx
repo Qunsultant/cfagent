@@ -31,7 +31,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch as fetch } from "./apiFetch";
-import { Badge, Button, Card, EmptyState, Notice, Spinner } from "./components/ui";
+import { Badge, Button, Card, EmptyState, Notice, PageSection, Spinner } from "./components/ui";
 import { formatCountdown } from "./PendingReviewQueue";
 
 /** Overnight window: 18:00 previous day → 09:00 today, viewer-local. */
@@ -155,8 +155,8 @@ export function MorningDigest({
   const failedCount = overnight.filter((r) => digestRunStatus(r) === "failed").length;
 
   return (
+    <PageSection title="Morning digest">
     <Card padding="md">
-      <h3 style={{ margin: "0 0 0.25rem" }}>Morning digest</h3>
       <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 1rem" }}>
         Overnight: {formatTime(window.startMs)} – {formatTime(window.endMs)}
         {window.inProgress ? " (in progress)" : ""} · {overnight.length} ran · {partialCount} partial ·{" "}
@@ -273,5 +273,6 @@ export function MorningDigest({
         </div>
       )}
     </Card>
+    </PageSection>
   );
 }

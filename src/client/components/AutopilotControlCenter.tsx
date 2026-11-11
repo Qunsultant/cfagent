@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { AGENT_DIDS } from "../../agents/did";
-import { EmptyState, Table, Badge, Button, Card, PillGroup, TextInput, Select, Notice, PageSection, PageShell, Stack, type BadgeTone, Modal, useToast } from "./ui";
+import { EmptyState, Table, Badge, Button, Card, Flex, Grid, PillGroup, TextInput, Select, Notice, PageSection, PageShell, Stack, type BadgeTone, Modal, useToast } from "./ui";
 import { BRAND } from "../branding";
 import { normalizeAutopilotLimits, type AutopilotPolicyLimits } from "../../services/riskPolicyEngine";
 import type { TradeRecord } from "../../types";
@@ -772,7 +772,7 @@ export function AutopilotControlCenter({
     <PageShell title="Autopilot control center" scopeNote={`Autonomous execution within your written policy, on the account selected at the top: ${accountLabel}.`}>
       {/* Executive Performance Ribbon */}
       <PageSection title="Executive performance">
-      <div className="autopilot-executive-ribbon">
+      <Grid columns={4} gap="4">
         <Card>
           <Stack gap="1">
             <span className="ui-meta-sm">Portfolio NAV</span>
@@ -810,25 +810,23 @@ export function AutopilotControlCenter({
             </span>
           </Stack>
         </Card>
-      </div>
+      </Grid>
       </PageSection>
 
       {/* Interactive Strategy Performance Curve */}
       <PageSection title="Strategy Equity vs S&P 500 Benchmark" description="Real-time mark-to-market performance with automated risk policy bounds">
-      <div className="autopilot-card autopilot-chart-card">
-        <div className="chart-card-header">
-          <div className="chart-tf-selector ui-push">
-                        <PillGroup
-              ariaLabel="Performance timeframe"
+      <Card>
+        <Flex justify="end">
+          <PillGroup
+            ariaLabel="Performance timeframe"
               options={(["1d", "1w", "1m", "3m", "6m", "ytd"] as const).map((tf) => ({ id: tf, label: tf.toUpperCase() }))}
               value={chartTimeframe}
               onChange={setChartTimeframe}
             />
-          </div>
-        </div>
+        </Flex>
 
-        <div className="autopilot-svg-chart-container">
-          <svg viewBox="0 0 1000 220" preserveAspectRatio="none" className="autopilot-svg-canvas">
+        <div>
+          <svg viewBox="0 0 1000 220" preserveAspectRatio="none" width="100%" height="220">
             <defs>
               <linearGradient id="autopilotCurveGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--color-gain)" stopOpacity="0.28" />
@@ -876,60 +874,56 @@ export function AutopilotControlCenter({
           </svg>
         </div>
 
-        <div className="chart-legend-row">
-          <div className="chart-legend-item">
-            <span className="legend-indicator alpha" />
+        <Flex gap="2" align="center" wrap>
+          <Flex gap="1" align="center">
+            <span className="ui-success">●</span>
             <span>Autopilot Strategy (+20.39% Alpha)</span>
-          </div>
-          <div className="chart-legend-item">
-            <span className="legend-indicator benchmark" />
+          </Flex>
+          <Flex gap="1" align="center">
+            <span className="ui-meta">●</span>
             <span>S&amp;P 500 Benchmark (+8.40%)</span>
-          </div>
-          <div className="chart-legend-item">
-            <span className="legend-indicator gate" />
+          </Flex>
+          <Flex gap="1" align="center">
+            <span className="ui-warning">●</span>
             <span>Runtime Pre-Trade Risk Gate Active</span>
-          </div>
-        </div>
-      </div>
+          </Flex>
+        </Flex>
+      </Card>
       </PageSection>
 
       {/* Top 2-Card Institutional Grid */}
-      <div className="autopilot-top-grid">
+      <Grid columns={2} gap="5">
         <PageSection>
         {/* Card 1: Autopilot Status Card */}
-        <div className="autopilot-card autopilot-status-card">
-          <div className="status-card-header">
-            <span className="card-micro-label">Status</span>
-            {isKillSwitched && <span className="kill-switch-pill">KILL SWITCH TRIPPED</span>}
+        <Card>
+          <Flex gap="1" align="center">
+            <span className="ui-meta-sm">Status</span>
+            {isKillSwitched && <Badge tone="danger">KILL SWITCH TRIPPED</Badge>}
             {!isServerBacked && (
-              <span
-                className="kill-switch-pill"
+              <Badge
+                tone="danger"
                 title="The central orchestration service did not answer; the state shown here is this tab only."
               >
                 LOCAL ONLY
-              </span>
+              </Badge>
             )}
-          </div>
+          </Flex>
 
-          <div className="status-main-display">
-            <div className="status-state-row">
-              <span
-                className={`status-indicator-dot ${
-                  isKillSwitched ? "blocked" : isRunning ? "running" : "paused"
-                }`}
-              />
-              <span className="status-state-text">
+          <Stack gap="1">
+            <Flex gap="1" align="center">
+              <span className={isKillSwitched ? "ui-danger" : isRunning ? "ui-success" : "ui-warning"}>●</span>
+              <span>
                 {isKillSwitched ? "Locked Out" : isRunning ? "Running" : "Paused"}
               </span>
-            </div>
-            <span className="status-agent-mode">
+            </Flex>
+            <span className="ui-meta-sm">
               {isRunning && !isKillSwitched
                 ? "Autonomous agent actively scanning and executing trades"
                 : "New ideas route to human approval queue"}
             </span>
-          </div>
+          </Stack>
 
-          <div className="status-actions-row">
+          <Flex gap="2" align="center" wrap>
             <Button
             variant={isRunning && !isKillSwitched ? "secondary" : "primary"}
               onClick={handleToggleAutopilot}
@@ -940,7 +934,6 @@ export function AutopilotControlCenter({
 
             <Button
             variant="danger"
-              className="btn-kill-switch-trigger"
               onClick={() => {
                 setKillSwitchError(null);
                 setKillSwitchModalOpen(true);
@@ -949,27 +942,26 @@ export function AutopilotControlCenter({
             >
               🛡️ Emergency Kill Switch
             </Button>
-          </div>
+          </Flex>
 
           {actionError && (
             <Notice tone="danger" density="compact" onDismiss={() => setActionError(null)}>
               {actionError}
             </Notice>
           )}
-          <p className="autopilot-guardrail-note">
+          <p className="ui-meta">
             Pausing sends new ideas to approval instead. The platform kill switch, if triggered by our
             risk team, blocks all new orders.
           </p>
-        </div>
+        </Card>
         </PageSection>
 
         <PageSection title="Live policy limits">
         {/* Card 2: Live Policy Limits Card */}
-        <div className="autopilot-card autopilot-limits-card">
-          <div className="limits-card-header">
+        <Card>
+          <Flex justify="end">
             <Button
             variant="secondary"
-              className="btn-edit-limits ui-push"
               onClick={() => {
                 setEditLimitsDraft(policyLimits);
                 setLimitsError(null);
@@ -978,9 +970,9 @@ export function AutopilotControlCenter({
             >
               ⚙️ Edit limits
             </Button>
-          </div>
+          </Flex>
 
-          <div className="autopilot-limits-grid">
+          <Grid columns={3} gap="2">
             <Stack gap="1">
               <span className="ui-meta-sm">Max position</span>
               <span><strong>{policyLimits.maxPositionPct.toFixed(2)}%</strong></span>
@@ -1010,33 +1002,30 @@ export function AutopilotControlCenter({
               <span className="ui-meta-sm">Risk</span>
               <span className={RISK_PROFILE_TONE_CLASS[policyLimits.riskProfile] ?? "ui-warning"}><strong>{policyLimits.riskProfile.charAt(0).toUpperCase() + policyLimits.riskProfile.slice(1)}</strong></span>
             </Stack>
-          </div>
+          </Grid>
 
           <div className="ui-footer-bar">
-            <span className="limits-sync-badge">
+            <span className="ui-meta-sm">
               ✓ Enforced at runtime by <strong>RiskPolicyEngine</strong> &amp; <strong>W3C Agent DID</strong>
             </span>
           </div>
-        </div>
+        </Card>
         </PageSection>
-      </div>
+      </Grid>
 
       {/* Job Outcomes (issue #1333): every job's success/failure from
           the one outcome sink, labeled by origin — not the trading
           actions feed above, but the job-truth feed. */}
       <PageSection title="Job outcomes">
-      <div className="autopilot-card autopilot-actions-card">
-        <div className="actions-card-header">
-          <div className="actions-header-left">
-            <span className="actions-count-badge">{jobOutcomes.length}</span>
-            <span
-              className="live-feed-badge cached"
-              title="One outcome sink (mas_job_outcomes): stock, options, goal-screen, discovery, corpus-sync, reports-index, and feed runs, manual and scheduled"
-            >
+      <Card>
+        <Flex gap="2" align="center" justify="between" wrap>
+          <Flex gap="1" align="center">
+            <Badge tone="neutral">{jobOutcomes.length}</Badge>
+            <Badge tone="neutral" title="One outcome sink (mas_job_outcomes): stock, options, goal-screen, discovery, corpus-sync, reports-index, and feed runs, manual and scheduled">
               {isLoadingJobs ? "🔄 Syncing…" : "Job-truth feed"}
-            </span>
-          </div>
-          <div className="actions-header-right">
+            </Badge>
+          </Flex>
+          <Flex gap="1" align="center">
             <Button variant="secondary" size="sm"
               type="button"
               onClick={() => void fetchJobOutcomes()}
@@ -1045,8 +1034,8 @@ export function AutopilotControlCenter({
              loading={isLoadingJobs}>
               {"↻ Refresh Jobs"}
             </Button>
-          </div>
-        </div>
+          </Flex>
+        </Flex>
 
         <Table
           columns={[
@@ -1072,7 +1061,7 @@ export function AutopilotControlCenter({
                   <Badge size="xs" uppercase tone="info">
                     {JOB_OUTCOME_KIND_LABELS[job.kind] ?? job.kind}
                   </Badge>
-                  <span className="action-summary-text">{job.trigger === "scheduled" ? "Scheduled" : "Manual"}</span>
+                  <span className="ui-meta-sm">{job.trigger === "scheduled" ? "Scheduled" : "Manual"}</span>
                 </>
               ),
             },
@@ -1085,7 +1074,7 @@ export function AutopilotControlCenter({
                   <Badge size="xs" tone={JOB_OUTCOME_STATUS_TONES[job.status] ?? "neutral"}>
                     {job.status.toUpperCase()}
                   </Badge>
-                  <span className="action-summary-text">
+                  <span className="ui-meta-sm">
                     {job.scanned !== null && job.scanned !== undefined ? `${job.scanned} scanned` : ""}
                     {job.matched !== null && job.matched !== undefined ? ` · ${job.matched} matched` : ""}
                   </span>
@@ -1099,11 +1088,11 @@ export function AutopilotControlCenter({
               render: (job) => (
                 <>
                   {job.codedError ? (
-                    <span className="action-summary-text">{job.codedError}</span>
+                    <span className="ui-meta-sm">{job.codedError}</span>
                   ) : job.reportUrl ? (
                     <a href={job.reportUrl} target="_blank" rel="noreferrer">Report</a>
                   ) : (
-                    <span className="action-summary-text">—</span>
+                    <span className="ui-meta-sm">—</span>
                   )}
                   <Badge size="xs" tone="neutral" title={`Outcome origin: ${job.origin}`}>
                     {job.origin}
@@ -1115,7 +1104,6 @@ export function AutopilotControlCenter({
           rows={jobOutcomes}
           rowKey={(job) => job.id}
           rowClassName="action-table-row"
-          className="autopilot-actions-table"
           containerClassName="autopilot-table-container"
           empty={(
             <EmptyState
@@ -1126,17 +1114,17 @@ export function AutopilotControlCenter({
             />
           )}
         />
-      </div>
+      </Card>
       </PageSection>
 
       {/* Bottom Card: Recent Autonomous Actions */}
       <PageSection title="Recent autonomous actions">
-      <div className="autopilot-card autopilot-actions-card">
-        <div className="actions-card-header">
-          <div className="actions-header-left">
-            <span className="actions-count-badge">{filteredActions.length}</span>
-            <span
-              className={`live-feed-badge ${isLiveFeed ? "live" : "cached"}`}
+      <Card>
+        <Flex gap="2" align="center" justify="between" wrap>
+          <Flex gap="1" align="center">
+            <Badge tone="neutral">{filteredActions.length}</Badge>
+            <Badge
+              tone={isLiveFeed ? "success" : "neutral"}
               title={
                 isLiveFeed
                   ? "Connected to live SQLite audit ledger (mas_events & mas_trades)"
@@ -1144,12 +1132,11 @@ export function AutopilotControlCenter({
               }
             >
               {isLoadingLive ? "🔄 Syncing…" : isLiveFeed ? "● Live Audit Ledger" : "Offline / Cache"}
-            </span>
-          </div>
+            </Badge>
+          </Flex>
 
-          <div className="actions-header-right">
+          <Flex gap="1" align="center">
             {/* Filter Pills */}
-            <div className="actions-filter-pills">
               <PillGroup
                 options={[
                   { id: "all", label: "All" },
@@ -1160,7 +1147,6 @@ export function AutopilotControlCenter({
                 value={actionsFilter}
                 onChange={setActionsFilter}
               />
-            </div>
 
             {/* Refresh Live Data Button */}
             <Button variant="secondary" size="sm"
@@ -1176,15 +1162,14 @@ export function AutopilotControlCenter({
             <Button
             variant="secondary"
             size="sm"
-              className="btn-simulate-action"
               onClick={handleSimulateAutonomousAction}
               disabled={isSimulating}
               title="Run a real policy evaluation server-side and record the signed verdict"
              loading={isSimulating}>
               {"⚡ Run Policy Check"}
             </Button>
-          </div>
-        </div>
+          </Flex>
+        </Flex>
 
         {/* Actions Table / Empty State */}
         <Table
@@ -1205,7 +1190,7 @@ export function AutopilotControlCenter({
               <><Badge size="xs" uppercase tone={ACTION_TYPE_TONES[action.actionType] ?? "neutral"}>
                           {action.actionType.replace("_", " ").toUpperCase()}
                         </Badge>
-                        <span className="action-summary-text">{action.summary}</span>
+                        <span className="ui-meta-sm">{action.summary}</span>
                         {action.source && (
                           <Badge size="xs" tone={action.source === "live" ? "success" : "purple"} title={`Action origin: ${
                               action.source === "live"
@@ -1223,7 +1208,7 @@ export function AutopilotControlCenter({
               header: "ASSET",
               cellClassName: "symbol-cell",
               render: (action) => (
-              <><Badge size="md" tone="neutral" className="symbol-pill">{action.symbol}</Badge></>
+              <><Badge size="md" tone="neutral">{action.symbol}</Badge></>
             ),
             },
             {
@@ -1254,7 +1239,6 @@ export function AutopilotControlCenter({
               <><Button
               variant="ghost"
               size="sm"
-                          className="did-signature-badge"
                           onClick={() =>
                             handleCopyDid(
                               action.id,
@@ -1275,7 +1259,6 @@ export function AutopilotControlCenter({
           rows={filteredActions}
           rowKey={(action) => action.id}
           rowClassName="action-table-row"
-          className="autopilot-actions-table"
           containerClassName="autopilot-table-container"
           empty={(
             <EmptyState
@@ -1287,7 +1270,6 @@ export function AutopilotControlCenter({
             <Button
             variant="secondary"
             size="sm"
-            className="btn-simulate-action"
             onClick={handleSimulateAutonomousAction}
             >
             Trigger Policy Evaluation
@@ -1296,23 +1278,20 @@ export function AutopilotControlCenter({
             />
           )}
         />
-      </div>
+      </Card>
       </PageSection>
 
       {/* Policy Decisions Audit (issue #651): recorded verdicts from mas_policy_verdicts */}
       <PageSection title="Policy decisions">
-      <div className="autopilot-card autopilot-actions-card">
-        <div className="actions-card-header">
-          <div className="actions-header-left">
-            <span className="actions-count-badge">{verdictRows.length}</span>
-            <span
-              className="live-feed-badge cached"
-              title="Signed policy verdicts recorded by the RiskPolicyEngine (mas_policy_verdicts)"
-            >
+      <Card>
+        <Flex gap="2" align="center" justify="between" wrap>
+          <Flex gap="1" align="center">
+            <Badge tone="neutral">{verdictRows.length}</Badge>
+            <Badge tone="neutral" title="Signed policy verdicts recorded by the RiskPolicyEngine (mas_policy_verdicts)">
               Verdict Audit Trail
-            </span>
-          </div>
-        </div>
+            </Badge>
+          </Flex>
+        </Flex>
 
         <Table
           columns={[
@@ -1329,7 +1308,7 @@ export function AutopilotControlCenter({
               header: "INTENT",
               cellClassName: "summary-cell",
               render: (row) => (
-              <><span className="action-summary-text">{row.intentLabel}</span>
+              <><span className="ui-meta-sm">{row.intentLabel}</span>
                         {row.modeLabel && (
                           <Badge size="xs" tone="neutral">{row.modeLabel}</Badge>
                         )}</>
@@ -1363,7 +1342,7 @@ export function AutopilotControlCenter({
               header: "DETAIL",
               cellClassName: "summary-cell",
               render: (row) => (
-              <><span className="action-summary-text">{row.detail || "—"}</span>
+              <><span className="ui-meta-sm">{row.detail || "—"}</span>
                         {row.signed && (
                           <Badge size="xs" tone="purple" title="Verdict carries a cryptographic attestation signature">
                             Signed
@@ -1375,7 +1354,6 @@ export function AutopilotControlCenter({
           rows={verdictRows}
           rowKey={(row) => row.id}
           rowClassName="action-table-row"
-          className="autopilot-actions-table"
           containerClassName="autopilot-table-container"
           empty={(
             <EmptyState
@@ -1386,30 +1364,19 @@ export function AutopilotControlCenter({
             />
           )}
         />
-      </div>
+      </Card>
       </PageSection>
 
       {/* Edit Policy Limits Modal */}
       {isEditModalOpen && (
-                <Modal open={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} size="none" panelClassName="autopilot-edit-limits-modal" ariaLabel="Edit Live Policy Limits">
-            <div className="modal-header">
-              <h3>Edit Autopilot Policy Limits</h3>
-              <Button
-              variant="ghost"
-                className="btn-close-modal"
-                onClick={() => setIsEditModalOpen(false)}
-              >
-                ✕
-              </Button>
-            </div>
-
-            <form onSubmit={handleSaveLimits} className="edit-limits-form">
+                <Modal open={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} size="none" panelClassName="autopilot-edit-limits-modal" title="Edit Autopilot Policy Limits" ariaLabel="Edit Live Policy Limits">
+            <form onSubmit={handleSaveLimits}>
               {limitsError && (
                 <Notice tone="danger" density="compact" onDismiss={() => setLimitsError(null)}>
                   {limitsError}
                 </Notice>
               )}
-              <div className="form-group-grid">
+              <Grid columns={2} gap="2">
                 <div>
                   <TextInput label="Max position size (% of equity)"
                     hint="Maximum capital committed to any single name"
@@ -1521,71 +1488,49 @@ export function AutopilotControlCenter({
                     <option value="aggressive">Aggressive</option>
                   </Select>
                 </div>
-              </div>
+              </Grid>
 
-              <div className="modal-actions-row">
+              <Flex gap="2" align="center" justify="between">
                 <Button variant="secondary" type="button" onClick={handleResetLimits}>
                   Reset to Defaults
                 </Button>
-                <div className="modal-right-actions">
+                <Flex gap="2" align="center">
                   <Button
                   variant="secondary"
-                    className="btn-cancel"
                     onClick={() => setIsEditModalOpen(false)}
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" className="btn-save-limits" variant="primary">
+                  <Button type="submit" variant="primary">
                     Save Policy Limits
                   </Button>
-                </div>
-              </div>
+                </Flex>
+              </Flex>
             </form>
                   </Modal>
       )}
 
       {/* Emergency Platform Kill Switch Modal */}
       {killSwitchModalOpen && (
-                <Modal open={killSwitchModalOpen} onClose={() => setKillSwitchModalOpen(false)} size="none" panelClassName="autopilot-killswitch-modal" ariaLabel="Emergency Platform Kill Switch">
-            <div className="modal-header">
-              <h3 style={{ color: "var(--color-danger)" }}>🚨 Emergency Platform Kill Switch</h3>
-              <Button
-              variant="ghost"
-                className="btn-close-modal"
-                onClick={() => setKillSwitchModalOpen(false)}
-              >
-                ✕
-              </Button>
-            </div>
-            <div className="modal-body">
-              <p style={{ color: "var(--color-text-secondary)", lineHeight: 1.5, fontSize: "var(--font-size-body)" }}>
+                <Modal open={killSwitchModalOpen} onClose={() => setKillSwitchModalOpen(false)} size="none" panelClassName="autopilot-killswitch-modal" title={<span className="ui-danger">🚨 Emergency Platform Kill Switch</span>} ariaLabel="Emergency Platform Kill Switch">
+            <div>
+              <p className="ui-meta">
                 Activating the Emergency Kill Switch terminates all active autonomous order pipelines,
                 blocks any new trade submission, and cancels pending unexecuted orders across the
                 brokerage.
               </p>
-              <div
-                style={{
-                  background: "var(--color-danger-subtle)",
-                  border: "1px solid var(--color-danger)",
-                  padding: "var(--space-3)",
-                  borderRadius: "var(--radius-sm, 6px)",
-                  margin: "1rem 0",
-                  fontSize: "var(--font-size-body-sm)",
-                  color: "var(--color-danger)",
-                }}
-              >
+              <Notice tone="danger">
                 ⚠️ <strong>Kill switch status:</strong> {isKillSwitched ? "ACTIVATED (SYSTEM LOCKED)" : "DISARMED (NORMAL OPERATIONS)"}
-              </div>
+              </Notice>
               {killSwitchError && (
                 <Notice tone="danger" density="compact" onDismiss={() => setKillSwitchError(null)}>
                   {killSwitchError}
                 </Notice>
               )}
             </div>
-            <div className="modal-actions-row">
+            <Flex gap="2" align="center" justify="between">
               <Button
               variant="secondary"
-                className="btn-cancel"
                 onClick={() => setKillSwitchModalOpen(false)}
               >
                 Dismiss
@@ -1629,7 +1574,7 @@ export function AutopilotControlCenter({
               >
                 {isKillSwitched ? "Disarm Kill Switch & Restore Access" : "ACTIVATE KILL SWITCH NOW"}
               </Button>
-            </div>
+            </Flex>
                   </Modal>
       )}
     </PageShell>

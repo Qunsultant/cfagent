@@ -194,7 +194,12 @@ describe("Broker connect stranded-tab + banner-link trap (#3197)", () => {
     const modalLink = document.querySelector('a[href="https://api.etrade.com/oauth/authorize?token=rt"]');
     expect(modalLink).not.toBeNull();
     // Submit the banner-link PIN against the original token.
-    const input = document.querySelector(".pin-input") as HTMLInputElement;
+    // The PIN input lost its .pin-input class in the S-U2 (#3051)
+    // migration (steps now use Flex + Badge numbers); query the
+    // TextInput by its placeholder instead.
+    const input = document.querySelector(
+      'input[placeholder*="Verification Code"]',
+    ) as HTMLInputElement;
     expect(input).not.toBeNull();
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
     await act(async () => {

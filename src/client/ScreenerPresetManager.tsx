@@ -30,6 +30,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import type { OptionScreenerFilter, StockScreenerFilter } from "../types";
 import { apiFetch as fetch } from "./apiFetch";
 import { Card } from "./components/ui/Card";
+import { Flex } from "./components/ui/Flex";
+import { Stack } from "./components/ui/Stack";
+import { PageSection } from "./components/ui/PageShell";
 import { FieldShell } from "./components/ui/Field";
 import { TextInput } from "./components/ui/TextInput";
 import { Button } from "./components/ui/Button";
@@ -233,15 +236,15 @@ export function ScreenerPresetManager<C>({
   };
 
   return (
+    <PageSection title="Saved presets">
     <Card>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-        <h3 style={{ margin: 0 }}>Saved presets</h3>
-        {visible.length > 0 && (
+      {visible.length > 0 && (
+        <Flex justify="between" align="center">
           <Badge tone="accent" size="sm">
             {visible.length} preset{visible.length === 1 ? "" : "s"}
           </Badge>
-        )}
-      </div>
+        </Flex>
+      )}
       <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", marginBottom: "0.75rem" }}>
         Save the current criteria to reuse them later. Loading a preset puts
         its criteria into the panel; the form&apos;s Run button then sends
@@ -260,11 +263,11 @@ export function ScreenerPresetManager<C>({
           description="Save the current criteria to reuse them later."
         />
       ) : (
-        <ul className="preset-list-container">
+        <Stack gap="2">
           {visible.map((preset) => (
-            <li key={preset.id} className="preset-list-item">
-              <div className="preset-item-meta">
-                <span className="preset-item-name">{preset.name}</span>{" "}
+            <Card key={preset.id} padding="sm">
+              <Flex gap="2" align="center" wrap>
+                <strong>{preset.name}</strong>{" "}
                 <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
                   ({Object.keys(preset.criteria).length} criteria)
                 </span>
@@ -278,20 +281,20 @@ export function ScreenerPresetManager<C>({
                     +{Object.keys(preset.criteria).length - 3} more
                   </Badge>
                 )}
-              </div>
-              <div className="preset-item-actions">
+              </Flex>
+              <Flex gap="2">
                 <Button type="button" variant="primary" size="sm" onClick={() => void handleLoad(preset)}>
                   Load
                 </Button>{" "}
                 <Button type="button" variant="secondary" size="sm" onClick={() => setConfirmDelete(preset)}>
                   Delete
                 </Button>
-              </div>
-            </li>
+              </Flex>
+            </Card>
           ))}
-        </ul>
+        </Stack>
       )}
-      <div className="preset-save-bar">
+      <Flex gap="2" align="end">
         <FieldShell id="preset-manager-name" label="Preset name">
           <TextInput
             id="preset-manager-name"
@@ -308,7 +311,7 @@ export function ScreenerPresetManager<C>({
         >
           Save preset
         </Button>
-      </div>
+      </Flex>
       <Modal
         open={confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
@@ -329,5 +332,6 @@ export function ScreenerPresetManager<C>({
         </p>
       </Modal>
     </Card>
+    </PageSection>
   );
 }

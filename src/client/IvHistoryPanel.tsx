@@ -5,7 +5,7 @@
  * scheduled job: per-symbol coverage, IV rank over time, latest readings.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Select, Table } from "./components/ui";
+import { Button, PageSection, Select, Table } from "./components/ui";
 import { brokerSupports, isBrokerId } from "../trading/brokerCatalog";
 import { readTenantProvidersState } from "./tenantProviders";
 
@@ -122,8 +122,7 @@ export function IvHistoryPanel() {
   const totalObs = names.reduce((n, e) => n + e.observations, 0);
 
   return (
-    <div>
-      <h2 style={{ fontSize: "var(--font-size-title-sm)", marginBottom: "0.25rem" }}>📈 IV History</h2>
+    <PageSection title="IV History">
       <div style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", marginBottom: "1rem" }}>
         Daily {seriesBroker ? `${seriesBroker} ` : ""}option-chain snapshots · {names.length} symbols · {totalObs} observations ·{" "}
         <Button onClick={loadCoverage} style={{ fontSize: "var(--font-size-body-sm)" }}>↻ Refresh</Button>
@@ -203,6 +202,6 @@ export function IvHistoryPanel() {
           )}
         </div>
       )}
-    </div>
+    </PageSection>
   );
 }

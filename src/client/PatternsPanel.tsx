@@ -10,7 +10,7 @@
  */
 
 import { useState } from "react";
-import { Badge, Button, Card, Notice } from "./components/ui";
+import { Badge, Button, Card, Notice, PageSection } from "./components/ui";
 import {
   listStockPatterns,
   type StockPattern,
@@ -40,7 +40,7 @@ export function PatternsPanel({ onApplyPattern }: PatternsPanelProps) {
   };
 
   return (
-    <div>
+    <PageSection title="Stock patterns">
       <Notice tone="info" density="compact">
         Stock patterns from the setup catalog, read-only in this version — adding or updating patterns comes later.
         Patterns are market setup signatures, not presets: applying one fills the New Screen criteria, it never
@@ -98,6 +98,6 @@ export function PatternsPanel({ onApplyPattern }: PatternsPanelProps) {
           </Notice>
         )}
       </div>
-    </div>
+    </PageSection>
   );
 }

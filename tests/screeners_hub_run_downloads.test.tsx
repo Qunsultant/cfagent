@@ -171,7 +171,12 @@ async function renderHub() {
 }
 
 async function selectRun(index: number) {
-  const items = Array.from(container.querySelectorAll<HTMLElement>(".screener-run-item"));
+  // Runs are now primitive Buttons (S-U2 #3051) in the
+  // aria-labelled run-history list — no .screener-run-item class
+  // remains.
+  const items = Array.from(
+    container.querySelectorAll<HTMLElement>('[aria-label="Screener run history"] button'),
+  );
   await act(async () => {
     items[index].click();
   });
@@ -179,10 +184,17 @@ async function selectRun(index: number) {
 }
 
 function exportButtons() {
+  // Result-set downloads are now classless primitive Buttons (S-U2
+  // #3051) — no .screener-export-* classes remain — so find them by
+  // their visible label.
+  const byText = (text: string) =>
+    Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      (b.textContent || "").includes(text),
+    ) ?? null;
   return {
-    csv: container.querySelector<HTMLButtonElement>(".screener-export-csv"),
-    csvAll: container.querySelector<HTMLButtonElement>(".screener-export-csv-all"),
-    json: container.querySelector<HTMLButtonElement>(".screener-export-json"),
+    csv: byText("CSV standouts"),
+    csvAll: byText("CSV all screened"),
+    json: byText("JSON run"),
   };
 }
 

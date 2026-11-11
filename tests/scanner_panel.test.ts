@@ -404,6 +404,31 @@ async function submitForm(form: HTMLFormElement) {
   await flush(60);
 }
 
+/** The scan form: the bare <form> in the scanner PageSection (the
+ *  bespoke `form.scp-form` class is gone after the #3051 shell
+ *  migration); the profile form carries #scp-profile-form instead. */
+function scanForm(): HTMLFormElement {
+  const form = container.querySelector<HTMLFormElement>("#section-opportunity-scanner form");
+  if (!form) throw new Error("scan form not rendered");
+  return form;
+}
+
+/** The ScanDiffView root: it renders a bare Stack now (no .scp-diff
+ *  wrapper), so locate it from its "Scan diff" heading. */
+function diffRoot(): HTMLElement {
+  const heading = [...container.querySelectorAll("strong")].find((el) => el.textContent === "Scan diff");
+  const rootEl = heading?.parentElement?.parentElement;
+  if (!rootEl) throw new Error("diff view not rendered");
+  return rootEl as HTMLElement;
+}
+
+/** A Badge carrying exactly `label` inside `scope` (Badge renders
+ *  `<span class="ui-badge tone-…">label</span>` — the old
+ *  `.scp-chip-target` / `.scp-badge-*` classes are gone). */
+function badgeWithText(scope: ParentNode, label: string): Element | undefined {
+  return [...scope.querySelectorAll(".ui-badge")].find((b) => b.textContent === label);
+}
+
 beforeEach(() => {
   document.body.innerHTML = "";
 });
@@ -573,7 +598,7 @@ describe("ScannerPanel — mode switch + scan run", () => {
     await renderPanel();
     await waitForText("Income (v2)"); // profile picker populated from listProfiles
 
-    await submitForm(container.querySelector("form.scp-form")!);
+    await submitForm(scanForm());
     await waitForText("Bull Call Spread");
 
     const post = calls.filter((c) => c.url.endsWith("/api/trading/options/unified")).at(-1);
@@ -595,7 +620,7 @@ describe("ScannerPanel — mode switch + scan run", () => {
     await waitForText("Income (v2)");
 
     await click(buttonByText(container, "Names that fit my strategy"));
-    await submitForm(container.querySelector("form.scp-form")!);
+    await submitForm(scanForm());
     await waitForText("Iron Condor");
 
     const post = calls.filter((c) => c.url.endsWith("/api/trading/options/unified")).at(-1);
@@ -617,7 +642,7 @@ describe("ScannerPanel — mode switch + scan run", () => {
     await act(async () => {
       setValue(picker, "prof-1");
     });
-    await submitForm(container.querySelector("form.scp-form")!);
+    await submitForm(scanForm());
     await waitForText("Bull Call Spread");
 
     const post = calls.filter((c) => c.url.endsWith("/api/trading/options/unified")).at(-1);
@@ -630,21 +655,23 @@ describe("ScannerPanel — mode switch + scan run", () => {
     await renderPanel();
 
     await click(buttonByText(container, "Names that fit my strategy"));
-    await submitForm(container.querySelector("form.scp-form")!);
+    await submitForm(scanForm());
     await waitForText("No names fit under the current gate");
 
     expect(container.textContent).toContain("No names fit under the current gate — 3 evaluated, 2 borderline, 1 skipped.");
-    const results = container.querySelector(".scp-results");
-    expect(results?.querySelector("table")).toBeNull();
+    // No results table renders for the zero-fit state (the results
+    // view is a bare Stack now — no .scp-results wrapper — and this
+    // payload carries no matrix, so the panel renders no table at all).
+    expect(container.querySelector("table")).toBeNull();
   });
 
   it("a malformed scan payload (all arrays missing) renders without throwing", async () => {
     installFetch(freshState({ unifiedEnvelope: { action: "opportunities", success: true } }));
     await renderPanel();
-    await submitForm(container.querySelector("form.scp-form")!);
+    await submitForm(scanForm());
     await waitForText("No qualifying trades were returned for this scan.");
     expect(container.textContent).toContain(`Mode: ${MODE_LABELS.per_name_best}`);
-    expect(container.querySelector(".scp-error")).toBeNull();
+    expect(container.querySelector(".ui-notice.tone-danger")).toBeNull();
   });
 
   it("a server error message from the scan renders in the error box", async () => {
@@ -652,9 +679,9 @@ describe("ScannerPanel — mode switch + scan run", () => {
       unifiedEnvelope: { action: "opportunities", success: false, error: 'No saved profile named "Ghost".' },
     }));
     await renderPanel();
-    await submitForm(container.querySelector("form.scp-form")!);
+    await submitForm(scanForm());
     await waitForText('No saved profile named "Ghost".');
-    expect(container.querySelector(".scp-error")?.textContent).toContain('No saved profile named "Ghost".');
+    expect(container.querySelector(".ui-notice.tone-danger")?.textContent).toContain('No saved profile named "Ghost".');
   });
 });
 
@@ -744,7 +771,7 @@ describe("ScannerPanel — strategy profiles manager (surface 4)", () => {
     });
     await submitForm(form);
     await waitForText('A profile named "Income" already exists');
-    expect(form.querySelector(".scp-error")?.textContent).toBe('A profile named "Income" already exists');
+    expect(form.querySelector(".ui-notice.tone-danger")?.textContent).toBe('A profile named "Income" already exists');
     // The form stays open so the user can fix the name.
     expect(container.querySelector("#scp-profile-form")).not.toBeNull();
   });
@@ -1009,7 +1036,7 @@ describe("slice 2 — fit matrix board (issue #22 surface)", () => {
     expect(board).not.toBeNull();
     expect(board!.textContent).toContain("Fit matrix");
     expect(board!.textContent).toContain("Pass = screen pass only");
-    expect(board!.textContent).toContain("Qualification is the fit gate's job");
+    expect(board!.textContent).toContain("The fit gate decides qualification");
 
     const headers = [...board!.querySelectorAll("thead th")].map((th) => th.textContent);
     expect(headers).toEqual(["Symbol", "iron_condor", "call_debit_spread", "put_credit_spread"]);
@@ -1040,7 +1067,7 @@ describe("slice 2 — fit matrix board (issue #22 surface)", () => {
     expect(aaplCells[1].textContent).toContain("Iron Condor");
     expect(aaplCells[2].textContent).toContain("0/6 passed · 6 rejected");
     expect(aaplCells[2].textContent).toContain("max loss exceeds limit");
-    expect(aaplCells[2].querySelector(".scp-cell-reason")?.getAttribute("title")).toBe("max loss exceeds limit");
+    expect(aaplCells[2].querySelector(".ui-meta-sm[title]")?.getAttribute("title")).toBe("max loss exceeds limit");
     expect(aaplCells[3].textContent?.trim()).toBe("—"); // AAPL has no put_credit_spread cell
 
     const msftCells = [...rows[1].querySelectorAll("td")];
@@ -1063,7 +1090,7 @@ describe("slice 2 — strategy-type roll-up cards (issue #26 surface)", () => {
     expect(text).toContain("Risk-screen roll-up");
     expect(text).toContain("not a fit-gate qualification");
 
-    const cards = [...container.querySelectorAll(".scp-rollup-card")];
+    const cards = [...container.querySelectorAll(".ui-card")];
     expect(cards).toHaveLength(3);
     const condor = cards.find((c) => c.textContent?.includes("iron_condor"))!;
     expect(condor.textContent).toContain("1 of 2 symbols passed the screen");
@@ -1086,7 +1113,7 @@ describe("slice 2 — strategy-type roll-up cards (issue #26 surface)", () => {
 
   it("renders nothing when the roll-up is empty", async () => {
     await renderResults(perNameEnvelope as OpportunityScanResponse, { mode: "per_name_best", profileLabel: null });
-    expect(container.querySelector(".scp-rollup")).toBeNull();
+    expect(container.querySelector(".ui-card")).toBeNull();
     expect(container.textContent).not.toContain("By strategy type");
   });
 });
@@ -1133,7 +1160,7 @@ describe("slice 2 — board appears in a full panel run", () => {
   it("a scan whose payload carries matrix + rollup renders the roll-up cards and the board", async () => {
     installFetch(freshState({ unifiedEnvelope: boardEnvelope }));
     await renderPanel();
-    await submitForm(container.querySelector("form.scp-form")!);
+    await submitForm(scanForm());
     await waitForText("Fit matrix");
     expect(container.textContent).toContain("By strategy type");
     expect(container.textContent).toContain("1 of 2 symbols passed the screen");
@@ -1169,7 +1196,7 @@ describe("slice 3 — TargetSourceChip (target provenance, issues #19/#23/#25)",
     expect(render("percent")).toContain("stated % target");
     expect(render("thesis")).toContain("thesis-derived target");
     expect(render("em")).toContain("expected-move target");
-    expect(render("stated")).toContain("scp-chip-target"); // a chip, not bare text
+    expect(render("stated")).toContain("ui-badge"); // a chip, not bare text
     expect(TARGET_SOURCE_LABELS).toEqual({
       stated: "stated target",
       percent: "stated % target",
@@ -1189,24 +1216,27 @@ describe("slice 3 — TargetSourceChip (target provenance, issues #19/#23/#25)",
     const board = container.querySelector("#scanner-matrix-board")!;
     const rows = [...board.querySelectorAll("tbody tr")];
     const bySymbol = new Map(rows.map((tr) => [tr.querySelector("strong")?.textContent, tr]));
-    expect(bySymbol.get("STATEDCO")!.querySelector(".scp-chip-target")?.textContent).toBe("stated target");
-    expect(bySymbol.get("PCTCO")!.querySelector(".scp-chip-target")?.textContent).toBe("stated % target");
-    expect(bySymbol.get("THESISCO")!.querySelector(".scp-chip-target")?.textContent).toBe("thesis-derived target");
-    expect(bySymbol.get("EMCO")!.querySelector(".scp-chip-target")?.textContent).toBe("expected-move target");
+    expect(badgeWithText(bySymbol.get("STATEDCO")!, "stated target")?.textContent).toBe("stated target");
+    expect(badgeWithText(bySymbol.get("PCTCO")!, "stated % target")?.textContent).toBe("stated % target");
+    expect(badgeWithText(bySymbol.get("THESISCO")!, "thesis-derived target")?.textContent).toBe("thesis-derived target");
+    expect(badgeWithText(bySymbol.get("EMCO")!, "expected-move target")?.textContent).toBe("expected-move target");
     const skipped = bySymbol.get("ZZZ")!;
-    expect(skipped.querySelector(".scp-chip-target")).toBeNull();
+    expect(badgeWithText(skipped, "stated target")).toBeUndefined();
+    expect(badgeWithText(skipped, "thesis-derived target")).toBeUndefined();
     expect(skipped.textContent).not.toContain("Target");
   });
 
   it("the per-name results table renders the chip next to the target price", async () => {
     await renderResults(perNameEnvelope as OpportunityScanResponse, { mode: "per_name_best", profileLabel: null });
-    const chip = container.querySelector(".scp-results .scp-chip-target");
+    const targetCell = [...container.querySelectorAll("table td")].find((td) => td.textContent?.includes("$262.50"));
+    const chip = targetCell?.querySelector(".ui-badge");
     expect(chip?.textContent).toBe("thesis-derived target");
   });
 
   it("the fits table renders the chip next to the target price", async () => {
     await renderResults(fitEnvelope as OpportunityScanResponse, { mode: "strategy_fit", profileLabel: null });
-    const chip = container.querySelector(".scp-results .scp-chip-target");
+    const targetCell = [...container.querySelectorAll("table td")].find((td) => td.textContent?.includes("$420.00"));
+    const chip = targetCell?.querySelector(".ui-badge");
     expect(chip?.textContent).toBe("thesis-derived target");
   });
 });
@@ -1214,26 +1244,26 @@ describe("slice 3 — TargetSourceChip (target provenance, issues #19/#23/#25)",
 describe("slice 3 — data as-of + scan model version (issue #27 provenance)", () => {
   it("labels the header timestamp 'Data as of' and shows the scan model version the result carries", async () => {
     await renderResults(perNameEnvelope as OpportunityScanResponse, { mode: "per_name_best", profileLabel: null });
-    const head = container.querySelector(".scp-results-head")!;
+    const head = container.textContent ?? "";
     const expectedTime = new Date(perNameEnvelope.generatedAt).toLocaleString();
-    expect(head.textContent).toContain(`Data as of ${expectedTime}`);
-    expect(head.textContent).toContain("scan model v1.1.2");
-    expect(head.textContent).not.toContain("generated"); // the bare pre-slice-3 phrasing is gone
+    expect(head).toContain(`Data as of ${expectedTime}`);
+    expect(head).toContain("scan model v1.1.2");
+    expect(head).not.toContain("generated"); // the bare pre-slice-3 phrasing is gone
   });
 
   it("omits the model-version element when the payload carries none, keeping the as-of label", async () => {
     const noVersion = { ...perNameEnvelope, modelVersion: undefined } as any;
     await renderResults(noVersion as OpportunityScanResponse, { mode: "per_name_best", profileLabel: null });
-    const head = container.querySelector(".scp-results-head")!;
-    expect(head.textContent).not.toContain("scan model v");
-    expect(head.textContent).toContain("Data as of");
+    const head = container.textContent ?? "";
+    expect(head).not.toContain("scan model v");
+    expect(head).toContain("Data as of");
   });
 });
 
 describe("slice 3 — normalized-score labelling (issue #25)", () => {
   it("the per-name table heads the column 'Composite score' and the legend states cross-name comparability", async () => {
     await renderResults(perNameEnvelope as OpportunityScanResponse, { mode: "per_name_best", profileLabel: null });
-    const headers = [...container.querySelectorAll(".scp-results table th")].map((th) => th.textContent);
+    const headers = [...container.querySelectorAll("table th")].map((th) => th.textContent);
     expect(headers).toContain("Composite score");
     expect(headers).not.toContain("Score");
     expect(container.textContent).toContain("Composite scores are normalized 0–100 and comparable across names");
@@ -1242,17 +1272,19 @@ describe("slice 3 — normalized-score labelling (issue #25)", () => {
 
   it("the fits table uses the same 'Composite score' header", async () => {
     await renderResults(fitEnvelope as OpportunityScanResponse, { mode: "strategy_fit", profileLabel: null });
-    const headers = [...container.querySelectorAll(".scp-results table th")].map((th) => th.textContent);
+    const headers = [...container.querySelectorAll("table th")].map((th) => th.textContent);
     expect(headers).toContain("Composite score");
     expect(headers).not.toContain("Score");
   });
 
   it("roll-up cards label the best pick 'composite' and matrix cells carry a composite caption", async () => {
     await renderResults(boardEnvelope as OpportunityScanResponse, { mode: "per_name_best", profileLabel: null });
-    const condor = [...container.querySelectorAll(".scp-rollup-card")].find((c) => c.textContent?.includes("iron_condor"))!;
+    const condor = [...container.querySelectorAll(".ui-card")].find((c) => c.textContent?.includes("iron_condor"))!;
     expect(condor.textContent).toContain("composite 66.4");
     expect(condor.textContent).not.toContain("· score");
-    const caption = container.querySelector("#scanner-matrix-board .scp-cell-caption");
+    const caption = [...container.querySelectorAll("#scanner-matrix-board .ui-meta-sm")].find(
+      (el) => el.textContent === "composite",
+    );
     expect(caption?.textContent).toBe("composite");
   });
 });
@@ -1260,10 +1292,10 @@ describe("slice 3 — normalized-score labelling (issue #25)", () => {
 describe("slice 3 — borderline bucket chips", () => {
   it("fit mode renders each borderline symbol as a borderline-bucket chip under the same prefix", async () => {
     await renderResults(fitEnvelope as OpportunityScanResponse, { mode: "strategy_fit", profileLabel: null });
-    const notes = [...container.querySelectorAll(".scp-borderline")];
+    const notes = [...container.querySelectorAll(".ui-notice.tone-warning")];
     expect(notes).toHaveLength(1);
     expect(notes[0].textContent).toContain("Borderline (evaluated, below the gate): NVDA");
-    const chips = [...notes[0].querySelectorAll(".scp-badge-borderline")].map((c) => c.textContent);
+    const chips = [...notes[0].querySelectorAll(".ui-badge.tone-warning")].map((c) => c.textContent);
     expect(chips).toEqual(["NVDA"]);
   });
 });
@@ -1466,9 +1498,11 @@ function historyState(overrides: Partial<StubState> = {}): StubState {
 }
 
 function historyRows(): HTMLElement[] {
-  const section = container.querySelector(".scp-history");
+  const section = [...container.querySelectorAll(".ui-page-section")].find(
+    (s) => s.querySelector("h2")?.textContent === "Scan history",
+  );
   if (!section) throw new Error("history section not rendered");
-  return [...section.querySelectorAll<HTMLElement>(".scp-row")];
+  return [...section.querySelectorAll<HTMLElement>(".ui-card")];
 }
 
 // Slice 5 client ----------------------------------------------------------------
@@ -1585,8 +1619,8 @@ describe("slice 5 — ScanDiffView (server diff, rendered verbatim)", () => {
     expect(html).toContain("OLDCO");
     expect(html).toContain("AAPL");
     expect(html).toContain("Removed symbols:");
-    expect(html).toContain("scp-badge-borderline"); // the from-bucket badge
-    expect(html).toContain("scp-badge-fit"); // fit chips + the to-bucket badge
+    expect(html).toContain("ui-badge tone-warning"); // the from-bucket borderline badge
+    expect(html).toContain("ui-badge tone-success"); // fit chips + the to-bucket badge
     expect(html).not.toContain("No changes between these runs.");
   });
 
@@ -1629,7 +1663,7 @@ describe("slice 5 — scan history (surface 5)", () => {
     expect(older.textContent).toContain("3 scanned · 3 evaluated");
     expect(older.textContent).toContain("gate: 2 fit / 1 borderline / 0 no fit");
     // The full id stays on the row (title attribute); display is shortened.
-    const meta = older.querySelector(".scp-row-meta");
+    const meta = older.querySelector(".ui-meta-sm[title]");
     expect(meta?.getAttribute("title")).toBe(olderRun.id);
     expect(meta?.textContent).toContain("3f9c1e2a…");
     // Only the newer row can diff against a previous run.
@@ -1661,7 +1695,7 @@ describe("slice 5 — scan history (surface 5)", () => {
     expect(calls.some((c) => c.url.endsWith("/api/trading/options/unified"))).toBe(false);
 
     // A fresh run replaces the view — the banner must not linger.
-    await submitForm(container.querySelector("form.scp-form")!);
+    await submitForm(scanForm());
     await waitForText("Bull Call Spread");
     expect(container.textContent).not.toContain("viewing the stored result");
   });
@@ -1698,14 +1732,13 @@ describe("slice 5 — scan history (surface 5)", () => {
 
     await click(buttonByText(historyRows()[0], "Diff vs previous"));
     await waitForText("Scan diff");
-    const diff = container.querySelector(".scp-diff");
-    expect(diff).not.toBeNull();
-    expect(diff!.textContent).toContain("New fits:");
-    expect(diff!.textContent).toContain("MSFT");
-    expect(diff!.textContent).toContain("Dropped fits:");
-    expect(diff!.textContent).toContain("OLDCO");
-    expect(diff!.textContent).toContain("Still fitting (1):");
-    expect(diff!.textContent).toContain("Bucket changes:");
+    const diff = diffRoot();
+    expect(diff.textContent).toContain("New fits:");
+    expect(diff.textContent).toContain("MSFT");
+    expect(diff.textContent).toContain("Dropped fits:");
+    expect(diff.textContent).toContain("OLDCO");
+    expect(diff.textContent).toContain("Still fitting (1):");
+    expect(diff.textContent).toContain("Bucket changes:");
     const call = calls.find((c) => c.url.includes("/api/etrade/options/scans/diff"));
     expect(call?.url).toContain(`from=${olderRun.id}`);
     expect(call?.url).toContain(`to=${newerRun.id}`);
@@ -1734,7 +1767,7 @@ describe("slice 5 — scan history (surface 5)", () => {
     await waitForText("Comparing 2 of 2 runs picked.");
     await click(buttonByText(container, "Show diff"));
     await waitForText("Scan diff");
-    expect(container.querySelector(".scp-diff")!.textContent).toContain("New fits:");
+    expect(diffRoot().textContent).toContain("New fits:");
     const call = calls.find((c) => c.url.includes("/api/etrade/options/scans/diff"));
     expect(call?.url).toContain(`from=${olderRun.id}`);
     expect(call?.url).toContain(`to=${newerRun.id}`);
@@ -1749,7 +1782,7 @@ describe("slice 5 — scan history (surface 5)", () => {
     state.scanRuns = [newerRun]; // the older run is pruned server-side
     await click(buttonByText(historyRows()[0], "Diff vs previous"));
     await waitForText("scan run not found");
-    expect(container.querySelector(".scp-error")?.textContent).toContain("scan run not found");
+    expect(container.querySelector(".ui-notice.tone-danger")?.textContent).toContain("scan run not found");
   });
 });
 
@@ -1765,7 +1798,7 @@ describe("issue #103 — history rows label the profile; recorded runs replay ve
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row.textContent).toContain("Profile: Income v2");
-      expect(row.querySelector(".scp-badge-profile")?.textContent).toBe("Profile: Income v2");
+      expect(badgeWithText(row, "Profile: Income v2")?.textContent).toBe("Profile: Income v2");
     }
   });
 

@@ -4,7 +4,7 @@ import { apiFetch as fetch } from "./apiFetch";
 import { mapScreenError } from "./paidScreenSubmit";
 import { getDisplayUserDid } from "../agents/did";
 import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
-import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, FieldShell, useToast } from "./components/ui";
+import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, PageSection, FieldShell, Flex, Grid, Stack, useToast } from "./components/ui";
 import { getRoute } from "./routes";
 import { parseTabFromSearch, subscribeToRouteChanges } from "./router";
 import { readTenantProvidersState, useTenantProviders, labelForBroker, currentBrokerLabel } from "./tenantProviders";
@@ -1870,7 +1870,7 @@ export function ETradeTradingHub({
   const orderLegs = orderContext?.optionLegs ?? [];
 
   return (
-    <div className="etrade-trading-hub">
+    <PageSection>
       {/* #1159: OAuth feedback used to live only inside the PIN modal,
           which opens only on success — a failed start showed nothing on
           the hub. This persistent banner surfaces it here (hidden while
@@ -1952,54 +1952,52 @@ export function ETradeTradingHub({
       {/* OAuth PIN Verification Modal */}
       {showPinModal && (
         <Modal open size="none" panelClassName="etrade-pin-modal" title="Authorize E*TRADE Application" onClose={() => setShowPinModal(false)}>
-              <p style={{ margin: "0 0 1rem 0", color: "var(--color-text-secondary)", fontSize: "var(--font-size-body)", lineHeight: "1.4" }}>
+              <p className="ui-meta">
                 An E*TRADE authorization window has opened in a new tab. Log in, authorize application access, and enter the verification PIN provided by E*TRADE.
               </p>
-              <div className="step-instruction">
-                <span className="step-number">1</span>
+              <Flex gap="2" align="center">
+                <Badge tone="neutral">1</Badge>
                 <span>If the tab did not open, click the button below:</span>
-              </div>
+              </Flex>
               {requestTokenInfo?.authorizeUrl && (
-                <a
+                <Button
                   href={requestTokenInfo.authorizeUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="btn-open-etrade"
+                  variant="secondary"
                 >
                   ↗ Open E*TRADE Login &amp; Authorization
-                </a>
+                </Button>
               )}
-              <div className="step-instruction">
-                <span className="step-number">2</span>
+              <Flex gap="2" align="center">
+                <Badge tone="neutral">2</Badge>
                 <span>Copy the verification code (PIN) displayed by E*TRADE and paste it here:</span>
-              </div>
-              <form onSubmit={handleSubmitPin} className="pin-form">
+              </Flex>
+              <form onSubmit={handleSubmitPin}>
                 <TextInput
                   type="text"
-                  className="pin-input"
                   placeholder="Enter E*TRADE Verification Code (e.g. ABC1234)"
                   value={oauthPin}
                   onChange={(e) => setOauthPin(e.target.value)}
                   autoFocus
                 />
-                {oauthMsg && <div style={{ color: "var(--color-danger)", fontSize: "var(--font-size-body-sm)", marginBottom: "0.75rem" }}>⚠️ {oauthMsg}</div>}
-                <div className="modal-btn-row">
+                {oauthMsg && <Notice tone="danger">⚠️ {oauthMsg}</Notice>}
+                <Flex gap="2" align="center">
                   <Button
                     type="submit"
-                    className="btn-submit-pin"
                     variant="primary"
                     disabled={oauthSubmitting || !oauthPin.trim()}
                    loading={oauthSubmitting}>
                     {"✓ Complete Authorization & Store Token"}
                   </Button>
                   <Button
-                    className="btn-cancel-modal"
+                   
                     variant="secondary"
                     onClick={() => setShowPinModal(false)}
                   >
                     Cancel
                   </Button>
-                </div>
+                </Flex>
               </form>
       </Modal>
       )}
@@ -2007,96 +2005,94 @@ export function ETradeTradingHub({
 
       {/* Active HITL Safety Preview Banner (Always visible when a draft is active) */}
       {activeDraft && (
-        <div className="hitl-floating-preview-card">
-          <div className="hitl-card-header">
-            <div className="hitl-badge-group">
-              <span className="hitl-shield-icon">🛡️</span>
+        <Card padding="md">
+          <Flex gap="2" align="center" justify="between">
+            <Flex gap="2" align="center">
+              <span aria-hidden="true">🛡️</span>
               <h4>HUMAN-IN-THE-LOOP ORDER PREVIEW AWAITING APPROVAL</h4>
-            </div>
-            <span className="order-id-tag">ID: <code>{activeDraft.orderId}</code></span>
-          </div>
+            </Flex>
+            <span className="ui-meta-sm">ID: <code className="ui-warning">{activeDraft.orderId}</code></span>
+          </Flex>
 
-          <div className="hitl-card-body">
-            <div className="hitl-order-details-grid">
-              <div className="hitl-stat">
-                <span className="stat-label">Action</span>
-                <span className={`stat-value action-pill ${activeDraft.optionLegs?.length ? "strategy" : activeDraft.action.toLowerCase()}`}>
+          <Stack gap="2">
+            <Grid autoFit minColumnWidth="xs" gap="2">
+              <Stack gap="1">
+                <span className="ui-meta-sm">Action</span>
+                <Badge tone={activeDraft.optionLegs?.length ? "accent" : activeDraft.action.toLowerCase() === "buy" ? "success" : activeDraft.action.toLowerCase() === "sell" ? "danger" : "neutral"}>
                   {activeDraft.optionLegs?.length ? "STRATEGY" : activeDraft.action}
-                </span>
-              </div>
-              <div className="hitl-stat">
-                <span className="stat-label">Symbol</span>
-                <span className="stat-value ticker-val">{activeDraft.symbol}</span>
-              </div>
-              <div className="hitl-stat">
-                <span className="stat-label">Quantity</span>
-                <span className="stat-value">{activeDraft.quantity} {activeDraft.optionLegs?.length ? "strategy units" : "shares"}</span>
-              </div>
-              <div className="hitl-stat">
-                <span className="stat-label">Order Type</span>
-                <span className="stat-value">{activeDraft.brokerOrderType && activeDraft.brokerOrderType !== "EQ" ? `${activeDraft.brokerOrderType} · ${activeDraft.orderType}` : activeDraft.orderType}</span>
-              </div>
-              <div className="hitl-stat">
-                <span className="stat-label">{activeDraft.optionLegs?.length ? "Net limit / unit" : "Limit / Est Price"}</span>
-                <span className="stat-value">{safePriceFormat(activeDraft.limitPrice || activeDraft.estimatedPrice, 2, "Market price")}</span>
-              </div>
-              <div className="hitl-stat">
-                <span className="stat-label">{activeDraft.strategyNetDebit !== undefined && activeDraft.strategyNetDebit < 0 ? "Estimated Credit" : "Estimated Total"}</span>
-                <span className="stat-value total-val">{activeDraft.estimatedTotal != null && Number.isFinite(Number(activeDraft.estimatedTotal)) ? `$${Number(activeDraft.estimatedTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</span>
-              </div>
-            </div>
+                </Badge>
+              </Stack>
+              <Stack gap="1">
+                <span className="ui-meta-sm">Symbol</span>
+                <strong>{activeDraft.symbol}</strong>
+              </Stack>
+              <Stack gap="1">
+                <span className="ui-meta-sm">Quantity</span>
+                <strong>{activeDraft.quantity} {activeDraft.optionLegs?.length ? "strategy units" : "shares"}</strong>
+              </Stack>
+              <Stack gap="1">
+                <span className="ui-meta-sm">Order Type</span>
+                <strong>{activeDraft.brokerOrderType && activeDraft.brokerOrderType !== "EQ" ? `${activeDraft.brokerOrderType} · ${activeDraft.orderType}` : activeDraft.orderType}</strong>
+              </Stack>
+              <Stack gap="1">
+                <span className="ui-meta-sm">{activeDraft.optionLegs?.length ? "Net limit / unit" : "Limit / Est Price"}</span>
+                <strong>{safePriceFormat(activeDraft.limitPrice || activeDraft.estimatedPrice, 2, "Market price")}</strong>
+              </Stack>
+              <Stack gap="1">
+                <span className="ui-meta-sm">{activeDraft.strategyNetDebit !== undefined && activeDraft.strategyNetDebit < 0 ? "Estimated Credit" : "Estimated Total"}</span>
+                <strong className="ui-success">{activeDraft.estimatedTotal != null && Number.isFinite(Number(activeDraft.estimatedTotal)) ? `$${Number(activeDraft.estimatedTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</strong>
+              </Stack>
+            </Grid>
 
             {activeDraft.optionLegs?.length ? (
-              <div className="options-order-context" aria-label="Exact broker order legs">
+              <Stack gap="1" aria-label="Exact broker order legs">
                 <strong>Legs sent to {presentation.label}</strong>
                 <ul>{activeDraft.optionLegs.map((leg, index) => (
                   <li key={`${leg.securityType}-${leg.optionType || "stock"}-${leg.strike || 0}-${leg.expirationDate || "equity"}-${index}`}>
                     {leg.side} {leg.quantity} {leg.securityType === "EQ" ? `${leg.underlyingSymbol} shares` : `${leg.underlyingSymbol} ${leg.optionType} $${leg.strike} ${leg.expirationDate}`}
                   </li>
                 ))}</ul>
-              </div>
+              </Stack>
             ) : null}
 
-            <div className="hitl-attestation-box">
+            <Flex gap="4" align="center" wrap>
               {activeDraft.previewId && (
-                <div className="attest-item">
-                  <span className="attest-label">{presentation.label} Upstream Session:</span>
-                  <code style={{ color: "var(--color-success)", fontWeight: "bold" }}>Preview #{activeDraft.previewId} (Verified)</code>
-                </div>
+                <Flex gap="1" align="center" wrap>
+                  <span className="ui-meta-sm">{presentation.label} Upstream Session:</span>
+                  <strong className="ui-success">Preview #{activeDraft.previewId} (Verified)</strong>
+                </Flex>
               )}
               {activeDraft.previewNotes && (
-                <div className="attest-item" style={{ gridColumn: "1 / -1", background: "var(--color-warning-subtle)", padding: "var(--space-1-5) var(--space-2-5)", borderRadius: "6px", border: "1px solid var(--color-warning)" }}>
-                  <span className="attest-label" style={{ color: "var(--color-warning)" }}>⚠️ Broker Notice:</span>
-                  <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-secondary)" }}>{activeDraft.previewNotes}</span>
-                </div>
+                <Notice tone="warning">
+                  <strong>⚠️ Broker Notice:</strong> {activeDraft.previewNotes}
+                </Notice>
               )}
-              <div className="attest-item">
-                <span className="attest-label">Proposer DID:</span>
+              <Flex gap="1" align="center" wrap>
+                <span className="ui-meta-sm">Proposer DID:</span>
                 <code>{activeDraft.proposerDid}</code>
-              </div>
-              <div className="attest-item">
-                <span className="attest-label">Cryptographic Stamp:</span>
-                <code className="sig-snippet">{activeDraft.proofSignature.slice(0, 32)}…</code>
-              </div>
-              <div className="attest-item">
-                <span className="attest-label">Commission:</span>
-                <span className="zero-comm">{activeDraft.estimatedCommission != null && Number(activeDraft.estimatedCommission) > 0 ? `${safePriceFormat(activeDraft.estimatedCommission)} broker estimate` : activeDraft.optionLegs?.length ? `See ${presentation.label} account disclosure` : `$0.00 (${presentation.label} online)`}</span>
-              </div>
-            </div>
+              </Flex>
+              <Flex gap="1" align="center" wrap>
+                <span className="ui-meta-sm">Cryptographic Stamp:</span>
+                <code>{activeDraft.proofSignature.slice(0, 32)}…</code>
+              </Flex>
+              <Flex gap="1" align="center" wrap>
+                <span className="ui-meta-sm">Commission:</span>
+                <span>{activeDraft.estimatedCommission != null && Number(activeDraft.estimatedCommission) > 0 ? `${safePriceFormat(activeDraft.estimatedCommission)} broker estimate` : activeDraft.optionLegs?.length ? `See ${presentation.label} account disclosure` : `$0.00 (${presentation.label} online)`}</span>
+              </Flex>
+            </Flex>
 
-            <div className="hitl-safety-notice">
+            <Notice tone="warning">
               🛡️ <strong>Safety Guarantee:</strong> No trade will be executed without your explicit authorization. Funds remain untouched until you approve.
-            </div>
+            </Notice>
 
             {/* Issue #1773 (OWASP ASI-02): the exact execution
                 payload, fees, and slippage limits, shown BEFORE the
                 approve button — approval is over this preview. */}
             <TradeExecutionPreview draft={activeDraft} />
 
-            <div className="hitl-action-buttons">
+            <Flex gap="2" align="center" wrap>
               {(orderError.includes("timed out") || orderError.includes("resubmit") || lastExecutionResult?.message?.includes("timed out") || lastExecutionResult?.message?.includes("resubmit")) ? (
                 <Button
-                  className="btn-approve-order"
                   variant="primary"
                   style={{ background: "var(--color-accent)", borderColor: "var(--color-border-focus)" }}
                   disabled={executingDraft}
@@ -2106,7 +2102,6 @@ export function ETradeTradingHub({
                 </Button>
               ) : (
                 <Button
-                  className="btn-approve-order"
                   variant="primary"
                   disabled={executingDraft}
                   onClick={() => handleExecuteDraft(activeDraft.orderId, "approved")}
@@ -2134,11 +2129,10 @@ export function ETradeTradingHub({
                 title="Risk Analysis — Analyze pre-trade risk profile and defense playbook"
                 aria-label="Risk Analysis"
               >
-                <span className="risk-shield-icon" aria-hidden="true">🛡️</span>
+                <span aria-hidden="true">🛡️</span>
                 <span>Risk Analysis</span>
               </Button>
               <Button
-                className="btn-reject-order"
                 variant="danger"
                 tone="subtle"
                 disabled={executingDraft}
@@ -2146,24 +2140,29 @@ export function ETradeTradingHub({
               >
                 ❌ Cancel Draft
               </Button>
-            </div>
-          </div>
-        </div>
+            </Flex>
+          </Stack>
+        </Card>
       )}
 
       {/* Execution Confirmation Alert */}
       {lastExecutionResult && (
-        <div className={`execution-result-banner ${lastExecutionResult.success ? "success" : "rejected"}`}>
-          <div className="exec-icon">{lastExecutionResult.success ? "🎉" : "🚫"}</div>
-          <div className="exec-text">
-            <strong>{lastExecutionResult.message}</strong>
-            <div className="exec-sub">
+        <Notice
+          tone={lastExecutionResult.success ? "success" : "danger"}
+          onDismiss={() => setLastExecutionResult(null)}
+        >
+          <Stack gap="1">
+            <div>
+              {lastExecutionResult.success ? "🎉 " : "🚫 "}
+              <strong>{lastExecutionResult.message}</strong>
+            </div>
+            <div className="ui-meta-sm">
               Ref: <code>{lastExecutionResult.brokerOrderRef}</code> •
               Status: <strong>{lastExecutionResult.status.toUpperCase()}</strong> •
               Authorizer: <code>{lastExecutionResult.authorizerDid || userDid}</code>
             </div>
             {(!lastExecutionResult.success && (lastExecutionResult.message?.includes("timed out") || lastExecutionResult.message?.includes("resubmit"))) && activeDraft && (
-              <div style={{ marginTop: "8px" }}>
+              <div>
                 <Button variant="trade"
                   type="button"
                   disabled={executingDraft}
@@ -2173,16 +2172,8 @@ export function ETradeTradingHub({
                 </Button>
               </div>
             )}
-          </div>
-          <Button
-            className="btn-dismiss-exec"
-            variant="ghost"
-            size="sm"
-            onClick={() => setLastExecutionResult(null)}
-          >
-            ✕
-          </Button>
-        </div>
+          </Stack>
+        </Notice>
       )}
 
       {/* SUBTAB 0: AUTOPILOT CONTROL CENTER */}
@@ -2364,84 +2355,83 @@ export function ETradeTradingHub({
       {/* Quote Inspection Modal */}
       {inspectSymbol && (
         <Modal open size="none" panelClassName="quote-modal-content" onClose={() => setInspectSymbol(null)}
-          title={<div className="ticker-group">
-            <span className="modal-ticker">{inspectSymbol}</span>
-            <span className="modal-company">{inspectQuote?.companyName || "Loading…"}</span>
-          </div>}>
+          title={<Flex gap="2" align="center">
+            <strong>{inspectSymbol}</strong>
+            <span className="ui-meta-sm">{inspectQuote?.companyName || "Loading…"}</span>
+          </Flex>}>
 
             {inspectLoading ? (
-              <div className="modal-loading">Fetching real-time Level 1 Quote…</div>
+              <Flex gap="2" align="center"><Spinner />Fetching real-time Level 1 Quote…</Flex>
             ) : inspectQuote ? (<>
 
-                <div className="price-big-row">
-                  <span className="big-price">{safePriceFormat(inspectQuote.lastPrice)}</span>
+                <Flex gap="2" align="center">
+                  <strong style={{ fontSize: "var(--font-size-display)", fontWeight: 800 }}>{safePriceFormat(inspectQuote.lastPrice)}</strong>
                   {inspectQuote.change !== undefined && inspectQuote.change !== null ? (
-                    <span className={`big-change ${Number(inspectQuote.change) >= 0 ? "positive" : "negative"}`}>
+                    <strong className={Number(inspectQuote.change) >= 0 ? "ui-success" : "ui-danger"}>
                       {Number(inspectQuote.change) >= 0 ? "+" : ""}{safeNumberFormat(inspectQuote.change)} ({safeNumberFormat(inspectQuote.changePercent)}%)
-                    </span>
+                    </strong>
                   ) : (
-                    <span className="big-change neutral">—</span>
+                    <span className="ui-meta-sm">—</span>
                   )}
-                </div>
+                </Flex>
 
-                <div className="quote-grid-3">
-                  <div className="grid-item">
-                    <span className="label">Bid</span>
-                    <span className="val">{safePriceFormat(inspectQuote.bid)}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">Ask</span>
-                    <span className="val">{safePriceFormat(inspectQuote.ask)}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">Spread</span>
-                    <span className="val">{inspectQuote.ask != null && inspectQuote.bid != null ? safePriceFormat(Number(inspectQuote.ask) - Number(inspectQuote.bid)) : "—"}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">Open</span>
-                    <span className="val">{safePriceFormat(inspectQuote.open)}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">Day High</span>
-                    <span className="val">{safePriceFormat(inspectQuote.high)}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">Day Low</span>
-                    <span className="val">{safePriceFormat(inspectQuote.low)}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">52-Week High</span>
-                    <span className="val">{inspectQuote.week52High !== undefined ? safePriceFormat(inspectQuote.week52High) : "—"}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">52-Week Low</span>
-                    <span className="val">{inspectQuote.week52Low !== undefined ? safePriceFormat(inspectQuote.week52Low) : "—"}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">Volume</span>
-                    <span className="val">{inspectQuote.volume != null ? `${safeNumberFormat(Number(inspectQuote.volume) / 1e6)}M` : "—"}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">P/E Ratio</span>
-                    <span className="val">{inspectQuote.peRatio || "N/A"}</span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">Market Cap</span>
-                    <span className="val">
+                <Grid columns={3} gap="2">
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">Bid</span>
+                    <strong>{safePriceFormat(inspectQuote.bid)}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">Ask</span>
+                    <strong>{safePriceFormat(inspectQuote.ask)}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">Spread</span>
+                    <strong>{inspectQuote.ask != null && inspectQuote.bid != null ? safePriceFormat(Number(inspectQuote.ask) - Number(inspectQuote.bid)) : "—"}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">Open</span>
+                    <strong>{safePriceFormat(inspectQuote.open)}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">Day High</span>
+                    <strong>{safePriceFormat(inspectQuote.high)}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">Day Low</span>
+                    <strong>{safePriceFormat(inspectQuote.low)}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">52-Week High</span>
+                    <strong>{inspectQuote.week52High !== undefined ? safePriceFormat(inspectQuote.week52High) : "—"}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">52-Week Low</span>
+                    <strong>{inspectQuote.week52Low !== undefined ? safePriceFormat(inspectQuote.week52Low) : "—"}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">Volume</span>
+                    <strong>{inspectQuote.volume != null ? `${safeNumberFormat(Number(inspectQuote.volume) / 1e6)}M` : "—"}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">P/E Ratio</span>
+                    <strong>{inspectQuote.peRatio || "N/A"}</strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">Market Cap</span>
+                    <strong>
                       {inspectQuote.marketCap ? `$${safeNumberFormat(Number(inspectQuote.marketCap) / 1e9, 1)}B` : "N/A"}
-                    </span>
-                  </div>
-                  <div className="grid-item">
-                    <span className="label">RSI (14)</span>
-                    <span className={`val ${getRsiBadgeClass(inspectQuote.rsi)}`}>
+                    </strong>
+                  </Stack>
+                  <Stack gap="1">
+                    <span className="ui-meta-sm">RSI (14)</span>
+                    <Badge tone={inspectQuote.rsi === undefined ? "neutral" : inspectQuote.rsi <= 35 ? "success" : inspectQuote.rsi >= 70 ? "danger" : "neutral"}>
                       {safeNumberFormat(inspectQuote.rsi, 1, "N/A")}
-                    </span>
-                  </div>
-                </div>
+                    </Badge>
+                  </Stack>
+                </Grid>
 
-                <div className="modal-actions-bar">
+                <Flex gap="2" align="center">
                   <Button
-                    className="btn-modal-buy"
                     variant="trade"
                     onClick={() => {
                       handleQuickTrade(inspectQuote, "BUY");
@@ -2451,16 +2441,15 @@ export function ETradeTradingHub({
                     ⚡ Trade {inspectQuote.symbol}
                   </Button>
                   <Button
-                    className="btn-modal-dismiss"
                     variant="secondary"
                     onClick={() => setInspectSymbol(null)}
                   >
                     Close
                   </Button>
-                </div>
+                </Flex>
               </>
             ) : (
-              <div className="modal-error">Could not retrieve quote details.</div>
+              <Notice tone="danger">Could not retrieve quote details.</Notice>
             )}
       </Modal>
       )}
@@ -2469,24 +2458,24 @@ export function ETradeTradingHub({
         <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={(diagnostics?.broker || selectedBroker) === "alpaca" ? `🦙 Alpaca Diagnostics [${diagnostics?.environment || activeEnv}]` : `⚡ E*TRADE Live REST Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
               {diagnostics ? (
                 <>
-                  <div className="diag-header-row">
-                    <span className={`status-pill status-${diagnostics.status || "unknown"}`}>
+                  <Flex gap="2" align="center" justify="between" wrap>
+                    <Badge tone={diagnostics.status === "healthy" ? "success" : diagnostics.status === "auth_required" || diagnostics.status === "not_configured" ? "warning" : "danger"}>
                       {diagnostics.status === "healthy" ? "🟢 Live REST Upstream Connected & Verified" : (diagnostics.status === "auth_required" ? "🟡 Authentication / Session Required" : (diagnostics.status === "not_configured" ? "🟡 Unconfigured / Sign-in Required" : "🔴 Upstream Gateway Error"))}
-                    </span>
-                    <span className="diag-gateway-text">
+                    </Badge>
+                    <span className="ui-meta-sm">
                       Gateway: <code>{diagnostics.apiUrl || (diagnostics.broker === "alpaca" ? (diagnostics.environment === "PROD" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets") : "Unknown")}</code>
                     </span>
-                  </div>
+                  </Flex>
 
                   {diagnostics.lastError && (
-                    <div className="diag-error-box">
-                      <strong className="diag-error-title">Upstream Message / Error:</strong>
-                      <div className="diag-error-msg">
+                    <Notice tone="danger">
+                      <strong>Upstream Message / Error:</strong>
+                      <div>
                         {diagnostics.lastError}
                       </div>
                       {diagnostics.lastError.includes("only in SANDBOX environment") && (
-                        <div className="diag-sandbox-switch">
-                          <span className="diag-sandbox-hint">
+                        <Flex gap="2" align="center" wrap>
+                          <span className="ui-meta-sm">
                             💡 This Consumer Key belongs to E*TRADE Sandbox (apisb.etrade.com). Switch to TEST to test with this key!
                           </span>
                           <Button
@@ -2500,83 +2489,82 @@ export function ETradeTradingHub({
                           >
                             🧪 Switch to TEST &amp; Re-run
                           </Button>
-                        </div>
+                        </Flex>
                       )}
-                    </div>
+                    </Notice>
                   )}
 
-                  <div className="diag-grid">
-                    <div className="diag-card">
-                      <div className="diag-label">{diagnostics.broker === "alpaca" ? "API Key ID" : "Consumer Key"}</div>
-                      <div className="diag-val">
+                  <Grid autoFit minColumnWidth="xs" gap="2">
+                    <Card padding="sm">
+                      <div className="ui-meta-sm">{diagnostics.broker === "alpaca" ? "API Key ID" : "Consumer Key"}</div>
+                      <div>
                         {diagnostics.credentials?.apiKeyMasked || (diagnostics.credentials?.apiKeyConfigured ? "✓ Configured" : "MISSING")}
                       </div>
-                    </div>
-                    <div className="diag-card">
-                      <div className="diag-label">{diagnostics.broker === "alpaca" ? "API Secret Key" : "Consumer Secret"}</div>
-                      <div className="diag-val">
+                    </Card>
+                    <Card padding="sm">
+                      <div className="ui-meta-sm">{diagnostics.broker === "alpaca" ? "API Secret Key" : "Consumer Secret"}</div>
+                      <div>
                         {diagnostics.credentials?.apiSecretConfigured ? "✓ Securely Configured" : "MISSING"}
                       </div>
-                    </div>
-                    <div className="diag-card">
-                      <div className="diag-label">{diagnostics.broker === "alpaca" ? "Key Source / Session" : "Session Token Vault"}</div>
-                      <div className={`diag-val ${diagnostics.oauthToken?.present ? "token-active" : "token-inactive"}`}>
+                    </Card>
+                    <Card padding="sm">
+                      <div className="ui-meta-sm">{diagnostics.broker === "alpaca" ? "Key Source / Session" : "Session Token Vault"}</div>
+                      <div className={diagnostics.oauthToken?.present ? "ui-success" : "ui-danger"}>
                         {diagnostics.broker === "alpaca"
                           ? (diagnostics.oauthToken?.present ? "✓ Configured & Active" : "No Active Key")
                           : (diagnostics.oauthToken?.present ? "✓ Present & Active" : "No Active Token")}
                       </div>
-                    </div>
-                    <div className="diag-card">
-                      <div className="diag-label">Upstream Accounts</div>
-                      <div className="diag-val">
+                    </Card>
+                    <Card padding="sm">
+                      <div className="ui-meta-sm">Upstream Accounts</div>
+                      <div>
                         {diagnostics.upstreamAccounts?.count ?? 0} account(s) detected
                       </div>
-                    </div>
-                  </div>
+                    </Card>
+                  </Grid>
 
                   {diagnostics.upstreamAccounts?.accounts && diagnostics.upstreamAccounts.accounts.length > 0 && (
-                    <div className="diag-account-details">
-                      <strong className="diag-account-title">
+                    <Stack gap="1">
+                      <strong>
                         Live Account Details:
                       </strong>
                       {diagnostics.upstreamAccounts.accounts.map((acct: any, idx: number) => (
-                        <div key={idx} className="diag-account-row">
+                        <div key={idx}>
                           • ID: <code>{acct.accountId}</code> | Key: <code>{acct.accountKey}</code> | Type: <strong>{acct.accountType || acct.accountDesc}</strong>
                         </div>
                       ))}
                       {diagnostics.upstreamBalance && (
-                        <div className="diag-balance-row">
+                        <div>
                           • Live Balance Fetched: Net Value: <strong>{safePriceFormat(diagnostics.upstreamBalance.netAccountValue || diagnostics.upstreamBalance.computed?.realTimeValues?.totalAccountValue, 2, "$0.00")}</strong> | Cash: <strong>{safePriceFormat(diagnostics.upstreamBalance.cashAvailableForInvestment || diagnostics.upstreamBalance.computed?.cashAvailableForInvestment, 2, "$0.00")}</strong>
                         </div>
                       )}
-                    </div>
+                    </Stack>
                   )}
 
-                  <details className="diag-raw-box">
-                    <summary className="diag-raw-summary">
+                  <details>
+                    <summary>
                       🔍 View Raw Upstream Diagnostic Payload (JSON)
                     </summary>
-                    <pre className="diag-raw-pre">
+                    <pre>
                       {JSON.stringify(diagnostics, null, 2)}
                     </pre>
                   </details>
 
-                  <details className="diagnostics-drawer">
-                    <summary className="diagnostics-summary">
+                  <details>
+                    <summary>
                       ⚙️ Technical Diagnostics &amp; Audit Metadata (Agent DID &amp; Microservice Provenance)
                     </summary>
-                    <div className="diagnostics-content">
+                    <Stack gap="1">
                       <div><strong>Trading Agent DID:</strong> <code>{tradingAgentDid}</code></div>
                       <div><strong>Microservice Architecture:</strong> Model Context Protocol (MCP) &amp; OAuth 1.0a REST Client</div>
                       <div><strong>Attestation Mechanism:</strong> Internal W3C DID cryptographic stamping for microservice audit logs (not a third-party brokerage guarantee)</div>
                       <div><strong>Transactional Ledger:</strong> Institutional Execution Ledger (Audited Trades &amp; System Events)</div>
-                    </div>
+                    </Stack>
                   </details>
 
-                  <div className="diag-modal-actions">
+                  <Flex gap="2" align="center">
                     {(!diagnostics.oauthToken?.present || diagnostics.status === "auth_required" || diagnostics.status === "not_configured") && (
                       <Button
-                        className="btn-oauth-connect"
                         variant="primary"
                         onClick={() => {
                           setShowDiagnosticsModal(false);
@@ -2591,7 +2579,6 @@ export function ETradeTradingHub({
                       </Button>
                     )}
                     <Button
-                      className="btn-sync-diagnostics"
                       variant="secondary"
                       disabled={diagnosticsLoading}
                       onClick={() => runDiagnostics(diagnostics?.broker, diagnostics?.environment || activeEnv)}
@@ -2599,18 +2586,18 @@ export function ETradeTradingHub({
                       {diagnosticsLoading ? "⏳ Testing..." : "🔄 Re-run Diagnostics"}
                     </Button>
                     <Button
-                      className="btn-cancel-modal"
+                     
                       variant="secondary"
                       onClick={() => setShowDiagnosticsModal(false)}
                     >
                       Close
                     </Button>
-                  </div>
+                  </Flex>
                 </>
               ) : (
-                <div style={{ padding: "calc(var(--space-6) + var(--space-2))", textAlign: "center", color: "var(--color-text-muted)" }}>
+                <p className="ui-meta">
                   Running diagnostics against E*TRADE upstream API...
-                </div>
+                </p>
               )}
       </Modal>
       )}
@@ -2641,6 +2628,6 @@ export function ETradeTradingHub({
         subject={riskSubject}
         onSendPrompt={onSendPrompt}
       />
-    </div>
+    </PageSection>
   );
 }
