@@ -42,10 +42,19 @@ import type { FeedJobDefinition } from "./feedJobs";
 
 export interface FeedProviderWiringDeps {
   env: Env;
-  /** The host DO's SQLite (the capture deps' legacy-path handle). */
-  sql: SqlStorage;
-  /** The host's blob storage (the DO storage in agent hosts). */
-  blobStorage: CaptureBlobStorage;
+  /**
+   * The host DO's SQLite (the capture deps' legacy-path handle).
+   * Optional since #3941: the workflow residency has no DO
+   * storage, so it wires through the capture port alone.
+   */
+  sql?: SqlStorage;
+  /**
+   * The residency's blob storage (the DO storage in agent
+   * hosts; the R2-backed store in the workflow residency).
+   * Required in every residency: a capture with nowhere to
+   * record its metadata is a silent provenance gap.
+   */
+  blobStorage?: CaptureBlobStorage;
   /** The capture port (D1 in production); threads through every adapter. */
   capturePort?: ProviderCaptureStore | null;
   /** A real acting login for the per-login providers, when the host has one. */
@@ -60,6 +69,13 @@ export function createCaptureWiredFeedProvider(
   def: FeedJobDefinition,
   deps: FeedProviderWiringDeps,
 ): DataProvider | undefined {
+  // #3941 (feed parity): the workflow residency has no DO sql
+  // handle, so the capture port is its only row path — and the
+  // metadata store is required in every residency. Refuse by
+  // name when neither row path exists or when no metadata store
+  // exists; never build a provider whose first capture write
+  // would drop provenance silently.
+  if ((!deps.capturePort && !deps.sql) || !deps.blobStorage) return undefined;
   const capture = {
     sql: deps.sql,
     blobStorage: deps.blobStorage,

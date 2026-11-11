@@ -175,7 +175,15 @@ export type ETradeDataSurface = Pick<
  * plain P1 parity wrapper and captures nothing.
  */
 export interface ETradeCaptureDeps {
-  sql: SqlStorage;
+  /**
+   * #3941 (feed parity): the DO sql handle is optional now — the
+   * workflow residency has no DO storage, so the capture port is
+   * its only row path. The factory refuses when NEITHER the port
+   * nor sql is present, so a deps object reaching the legacy
+   * branches without sql is a hand-built error, refused by name
+   * there rather than silently dropping the capture.
+   */
+  sql?: SqlStorage;
   blobStorage: CaptureBlobStorage;
   env: CaptureBlobEnv;
   retentionClass?: DataCaptureRetentionClass;
@@ -202,16 +210,33 @@ async function recordCaptureViaDeps(
   blobDeps: { storage: CaptureBlobStorage; env: CaptureBlobEnv },
   input: RecordCaptureInput
 ): Promise<DataCaptureRecord | null> {
-  return capture.capturePort
-    ? capture.capturePort.recordCapture(blobDeps, input)
-    : recordCapture(capture.sql, blobDeps, input);
+  if (capture.capturePort) {
+    return capture.capturePort.recordCapture(blobDeps, input);
+  }
+  // #3941: the port path is the only one the workflow residency
+  // uses; the legacy path needs the DO sql handle. The factory
+  // guarantees one of the two is present, so reaching here means
+  // a hand-built deps object — refuse by name, never silently
+  // drop the capture.
+  if (!capture.sql) {
+    throw new Error(
+      "FEED_CAPTURE_UNWIRED: capture deps have neither a capture port nor a sql handle",
+    );
+  }
+  return recordCapture(capture.sql, blobDeps, input);
 }
 
 /** #2303: the outcome recorder for the deps — port or legacy, as above. */
 function outcomeRecorderForDeps(capture: ETradeCaptureDeps): FetchOutcomeRecorder {
-  return capture.capturePort
-    ? capture.capturePort.createFetchOutcomeRecorder()
-    : createCaptureFetchOutcomeRecorder(capture.sql);
+  if (capture.capturePort) {
+    return capture.capturePort.createFetchOutcomeRecorder();
+  }
+  if (!capture.sql) {
+    throw new Error(
+      "FEED_CAPTURE_UNWIRED: capture deps have neither a capture port nor a sql handle",
+    );
+  }
+  return createCaptureFetchOutcomeRecorder(capture.sql);
 }
 
 export interface ETradeDataProviderOptions {

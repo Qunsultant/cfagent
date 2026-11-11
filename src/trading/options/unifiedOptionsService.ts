@@ -18,7 +18,7 @@ import type {
   SlackBlockKitPayload,
   ETradeOptionChain,
 } from "../../types";
-import { DatabaseORM } from "../../orm";
+import { DatabaseORM, type SqlStorage } from "../../orm";
 import type { DataProviderPorts } from "../../data/buildDataProviderPorts";
 import { TradingPlatformRegistry } from "../registry";
 import { resolveTenantBroker } from "../../services/tenantProviders";
@@ -749,15 +749,29 @@ export class UnifiedOptionsService {
       // reads/writes run on D1 and captures land through the
       // capture port; the deps' own capturePort, when a host
       // threaded one explicitly, is respected first.
+      const platformDeps = this.platformDeps;
       const ports = await this.dataProviderPorts();
       const configPort = ports.config;
+      // #3941: this service's legacy config path reads provider
+      // config/routes from the DO sql handle; the D1 port path
+      // does not need it. When neither is present the platform
+      // path cannot resolve routes — refuse by name, never
+      // silently fall back to the direct client.
+      const legacySql = (): SqlStorage => {
+        if (!platformDeps.sql) {
+          throw new Error(
+            "FEED_CAPTURE_UNWIRED: options platform config needs the D1 config port or the DO sql handle",
+          );
+        }
+        return platformDeps.sql;
+      };
       if (configPort) await configPort.bootstrapDataProviders();
-      else bootstrapDataProviders(this.platformDeps.sql);
+      else bootstrapDataProviders(legacySql());
       platformRunId = crypto.randomUUID();
       const captureDeps: ETradeCaptureDeps =
-        ports.captures && !this.platformDeps.capturePort
-          ? { ...this.platformDeps, capturePort: ports.captures }
-          : this.platformDeps;
+        ports.captures && !platformDeps.capturePort
+          ? { ...platformDeps, capturePort: ports.captures }
+          : platformDeps;
       const provider = createETradeDataProvider(etrade, {
         capture: captureDeps,
       });
@@ -767,10 +781,10 @@ export class UnifiedOptionsService {
         "optionsChains",
         configPort
           ? await configPort.listProviderConfigs()
-          : listProviderConfigs(this.platformDeps.sql),
+          : listProviderConfigs(legacySql()),
         configPort
           ? await configPort.listCapabilityRoutes()
-          : listCapabilityRoutes(this.platformDeps.sql),
+          : listCapabilityRoutes(legacySql()),
         this.callerTier
       );
       engineClient = createPlatformOptionsClient(etrade.client, assignment.primary, {
