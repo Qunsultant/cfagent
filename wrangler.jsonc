@@ -221,14 +221,20 @@
   // Issue #257 (Assessment P1): explicit Workers Logs pipeline. `enabled` is the
   // shorthand for logs.enabled; `invocation_logs` captures one log per
   // invocation (request/response metadata + console output) visible under
-  // Observability > Logs. head_sampling_rate 1 = 100% sampled. No external
-  // destinations configured (no OpenTelemetry destination exists in the
-  // dashboard) — see docs/OBSERVABILITY.md.
+  // Observability > Logs. No external destinations are configured (no
+  // OpenTelemetry destination exists in the dashboard) — see
+  // docs/OBSERVABILITY.md. The sampling rate is set by #4131 below.
+  // Issue #4131 (owner direction): the LOWEST observability setting that
+  // still records something. 0.01 is Cloudflare's floor (1% of invocations),
+  // and persist: false keeps logs streaming without storing them. To silence
+  // it entirely, set enabled: false - that is the only lower step.
   "observability": {
     "enabled": true,
+    "head_sampling_rate": 0.01,
     "logs": {
       "invocation_logs": true,
-      "head_sampling_rate": 1
+      "head_sampling_rate": 0.01,
+      "persist": false
     }
   },
   // Issue #4112 (owner direction): NO schedules and NO triggers. Every cron
@@ -374,7 +380,7 @@
     // is unsetting the var and redeploying.
     // Issue #4122 — cost: 5s -> 60s cuts ticker DO activity (variants: 92%).
     "TICKER_PUSH_INTERVAL_S": "300",
-    "MAS_MAX_STEPS": "2",
+    "MAS_MAX_STEPS": "5",
     "AI_MODEL": "@cf/zai-org/glm-4.7-flash",
     "CF_WALLET_NETWORK": "base-sepolia",
     "CF_WALLET_FACILITATOR": "https://x402.org/facilitator",
