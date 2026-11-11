@@ -3,10 +3,11 @@
  * feed gate. Pins:
  * - the gate decision is null for chain providers (etrade, public,
  *   alpaca — alpaca joined in #3990 via the repo's own Alpaca options
- *   read path) and the coded FAILURE_DATA_PROVIDER_UNAVAILABLE
- *   response (single resolver, catalog httpStatus) for yahoo /
- *   nasdaq / unknown — never a silent E*TRADE feed under another
- *   provider's name;
+ *   read path) and for non-chain selections, which are served through
+ *   a capable provider with the substitution named in the run record
+ *   (#4014) — never a silent feed under another provider's name;
+ *   the coded FAILURE_DATA_PROVIDER_UNAVAILABLE resolver itself is
+ *   pinned in tests/data_provider_capabilities_3990.test.ts;
  * - the handler returns null without touching the store for non-gated
  *   paths (stored-run reads, catalog, config) and for gated paths under
  *   the fail-open default (unbound store resolves etrade/etrade);
@@ -55,17 +56,13 @@ describe("options feed gate decision", () => {
     }
   });
 
-  it("returns the coded unavailable response for non-chain providers", async () => {
+  it("serves non-chain selections through a capable provider (#4014)", () => {
+    // yahoo/nasdaq declare no optionsChains (alpaca declares it since #3990),
+    // but a chain is still served by the capable provider and the run record
+    // names both (see tests/options_chain_serving_4014.test.ts). Refusing
+    // instead left the options screens with no chain at all.
     for (const dataProviderId of ["yahoo", "nasdaq", "bogus"]) {
-      const res = optionsFeedGateResponse({ dataProviderId, brokerId: "etrade" });
-      expect(res).not.toBeNull();
-      expect(res!.status).toBe(502);
-      const body = (await res!.json()) as Record<string, unknown>;
-      expect(body.code).toBe("FAILURE_DATA_PROVIDER_UNAVAILABLE");
-      expect(body.selectedDataProvider).toBe(dataProviderId);
-      expect(body.capability).toBe("optionsChains");
-      expect(typeof body.message).toBe("string");
-      expect(body.message as string).toContain("[FAILURE_DATA_PROVIDER_UNAVAILABLE]");
+      expect(optionsFeedGateResponse({ dataProviderId, brokerId: "etrade" })).toBeNull();
     }
   });
 });

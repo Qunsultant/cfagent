@@ -95,6 +95,7 @@ import { evaluateStockCopilotStrategy } from "../../services/stockCopilotEvaluat
 import { summarizeLearnings } from "../../services/stockCopilotAgenticLoop";
 import { introspectStockCopilot } from "../../services/stockCopilotIntrospection";
 import { hasCopilotCycleLedgerRows } from "../orchestrator/meshStockCopilotDoor";
+import { readCopilotCycleDispatchProbe } from "../orchestrator/scheduledTasksCopilot";
 import {
   copilotChannelsSettingKey,
   parseStoredCopilotChannelEntries,
@@ -118,6 +119,10 @@ export interface StockCopilotRouteContext {
   env: Env;
   /** The instance's storage handle the ports compose over. */
   sql: StockCopilotStoreSqlExecutor;
+  /** The instance's KV storage handle (the #4001 dispatch-probe
+   *  read). Optional: read-only hosts omit it and the probe reads
+   *  null. */
+  storage?: { get: (key: string) => Promise<unknown> } | null;
   /** The instance's acting identity (the cycle's own login source). */
   getScreenerExecutionContext: () => Promise<ScreenerExecutionContext | undefined>;
   /** The instance's settings reader (#3451: the stored trade
@@ -283,6 +288,13 @@ export async function handleStockCopilotRoutes(
       // copilot has never executed, and the status says so.
       const neverExecuted =
         lastCycle === null && !hasCopilotCycleLedgerRows(ctx.sql);
+      // Issue #4001 (follow-up): the dispatch-boundary probe — the
+      // last firing the handler actually entered, and the last reason
+      // the task was not declared, so a silent firing is diagnosable
+      // from the status read instead of invisible.
+      const dispatchProbe = await readCopilotCycleDispatchProbe(
+        ctx.storage ?? null,
+      );
       const status = !flagEnabled
         ? "off"
         : !selection.resolved
@@ -355,6 +367,10 @@ export async function handleStockCopilotRoutes(
         // cycle actually fires and records.
         lastCycle,
         neverExecuted,
+        // Issue #4001 (follow-up): the dispatch-boundary probe — null
+        // until a firing enters the handler / the task goes undeclared.
+        lastCycleFiringAttempt: dispatchProbe.lastFiringAttempt,
+        lastCycleNotDeclared: dispatchProbe.lastNotDeclared,
       });
     } catch (err) {
       return Response.json(
@@ -379,6 +395,7 @@ export async function handleStockCopilotRoutes(
         // Issue #3899 (RC3): the real commercial store, composed from
         // env by the resolver when absent — never the fake default.
         commercial: ctx.commercial,
+        sql: ctx.sql,
       });
       return Response.json(introspection);
     } catch (err) {

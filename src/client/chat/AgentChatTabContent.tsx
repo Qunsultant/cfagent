@@ -68,6 +68,18 @@ const useComposerStyles = makeStyles({
   },
 });
 
+// Owner surface pass (with #3794): the nav bar's right-side
+// group — Clear chat sits immediately left of the copilot Info
+// badge in one right-aligned flex row, so the chat area keeps
+// the vertical space the old action-bar row consumed.
+const useNavRightStyles = makeStyles({
+  group: {
+    display: "flex",
+    alignItems: "center",
+    gap: "var(--space-2)",
+  },
+});
+
 // #3407 (incident — chat stopped scrolling after #3146): Fluent v9's
 // FluentProvider renders a plain block <div> root (its Griffel styles
 // set only color/background/typography), so it broke the flex height
@@ -206,6 +218,7 @@ export function AgentChatTabContentInner({
   const composerStyles = useComposerStyles();
   const surfaceStyles = useSurfaceStyles();
   const quickChipsStyles = useQuickChipsStyles();
+  const navRightStyles = useNavRightStyles();
   const [isPromptChipsExpanded, setIsPromptChipsExpanded] = useState(true);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const { dispatchToast } = useToastController();
@@ -476,22 +489,6 @@ export function AgentChatTabContentInner({
         </div>
       )}
 
-      {/* Action Bar */}
-      <div className="chat-action-bar">
-        {/* Default quick chips references for #2563: Bull Put Spread, Iron Condor */}
-        {messages.length > 0 && (
-          <Button
-            appearance="subtle"
-            size="small"
-            onClick={handleClearWithConfirm}
-            disabled={isResetting}
-            title="Clear conversation and reset session"
-          >
-{isResetting ? (<><Spinner size="tiny" />{"🗑️ Clear chat"}</>) : ("🗑️ Clear chat")}
-          </Button>
-        )}
-      </div>
-
       {resetNotice && (
         <MessageBar intent="success">
           <MessageBarBody>
@@ -659,7 +656,8 @@ export function AgentChatTabContentInner({
         </MessageBar>
       )}
 
-      {/* Persistent Copilot Quick Prompt Chips Strip during ongoing conversation (#3656) */}
+      {/* Persistent Copilot Quick Prompt Chips Strip during ongoing conversation (#3656).
+          Default quick chips references for #2563: Bull Put Spread, Iron Condor. */}
       {currentCopilot?.quickChips && currentCopilot.quickChips.length > 0 && messages.length > 0 && (
         <div
           className={quickChipsStyles.chipsBar}
@@ -770,9 +768,11 @@ export function AgentChatTabContentInner({
 
       {/* Voice channel feedback (#3773, #3794): the named-failure
           notices and transient status sit beside the chat box;
-          the voice CONTROLS render inside the box (in the form
-          below) — never on a separate bar. Rendered only when the
-          active registration's voice channel resolves effective;
+          the voice CONTROLS render inside the box itself — the
+          Input's contentAfter slot, at the field's trailing edge —
+          never on a separate bar and never as form-level siblings
+          of the field. Rendered only when the active
+          registration's voice channel resolves effective;
           transcripts submit through sendChatText, the same path
           as typed turns. */}
       {voiceOn && <ChatComposerVoiceFeedback voice={composerVoice} />}
@@ -784,6 +784,11 @@ export function AgentChatTabContentInner({
           type="text"
           aria-label="Ask the agent"
           value={input}
+          contentAfter={
+            voiceOn ? (
+              <ChatComposerVoiceButtons voice={composerVoice} />
+            ) : undefined
+          }
           onChange={(_e, data) => setInput(data.value)}
           placeholder={
             isResetting
@@ -799,7 +804,6 @@ export function AgentChatTabContentInner({
           disabled={isBusy || isResetting}
           autoFocus
         />
-        {voiceOn && <ChatComposerVoiceButtons voice={composerVoice} />}
         <Button
           type="submit"
           appearance="primary"
@@ -820,25 +824,55 @@ export function AgentChatTabContentInner({
         onTabChange={handleViewChange}
         className="chat-capability-subnav"
         rightContent={
-          currentCopilot ? (
-            <TabHoverItem
-              align="right"
-              eyebrow={currentCopilot.label}
-              title={currentCopilot.tooltip?.title || currentCopilot.label}
-              description={currentCopilot.banner?.description || currentCopilot.tooltip?.description || ""}
-            >
-              <Badge
-                className="copilot-hover-info-badge"
-                appearance="tint"
-                color="brand"
-                size="small"
-                tabIndex={0}
-                role="note"
-                aria-label={`${currentCopilot.label} details`}
-              >
-                ℹ️ {currentCopilot.label} Info
-              </Badge>
-            </TabHoverItem>
+          messages.length > 0 || currentCopilot ? (
+            <div className={navRightStyles.group}>
+              {/* Clear chat lives here now (owner surface pass
+                  with #3794): immediately left of the Info badge,
+                  so its old dedicated action-bar row no longer
+                  takes vertical space from the chat area. Same
+                  conditional render, handler, and states as
+                  before; the confirm Dialog stays below. When no
+                  copilot is registered the group renders with
+                  just this button. */}
+              {messages.length > 0 && (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  onClick={handleClearWithConfirm}
+                  disabled={isResetting}
+                  title="Clear conversation and reset session"
+                >
+                  {isResetting ? (
+                    <>
+                      <Spinner size="tiny" />
+                      {"🗑️ Clear chat"}
+                    </>
+                  ) : (
+                    "🗑️ Clear chat"
+                  )}
+                </Button>
+              )}
+              {currentCopilot && (
+                <TabHoverItem
+                  align="right"
+                  eyebrow={currentCopilot.label}
+                  title={currentCopilot.tooltip?.title || currentCopilot.label}
+                  description={currentCopilot.banner?.description || currentCopilot.tooltip?.description || ""}
+                >
+                  <Badge
+                    className="copilot-hover-info-badge"
+                    appearance="tint"
+                    color="brand"
+                    size="small"
+                    tabIndex={0}
+                    role="note"
+                    aria-label={`${currentCopilot.label} details`}
+                  >
+                    ℹ️ {currentCopilot.label} Info
+                  </Badge>
+                </TabHoverItem>
+              )}
+            </div>
           ) : undefined
         }
       />

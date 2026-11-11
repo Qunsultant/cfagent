@@ -725,8 +725,8 @@ describe("S3-P06 the goals view reads the one consolidated ledger (#3121)", () =
 
   it("the home no longer notes the goals view as 'until S3'", () => {
     expect(source("src/client/SchedulesHome.tsx")).not.toContain("until S3");
-    expect(source("src/client/schedulesHome.ts")).not.toContain("until S3");
-    expect(source("src/client/schedulesHome.ts")).toContain("S3: on the");
+    expect(source("src/client/schedulesHomeView.ts")).not.toContain("until S3");
+    expect(source("src/client/schedulesHomeView.ts")).toContain("S3: on the");
   });
 });
 

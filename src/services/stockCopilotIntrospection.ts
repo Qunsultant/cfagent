@@ -23,6 +23,7 @@ import {
   resolveCopilotTradingSelection,
 } from "../agents/copilotTradingMode";
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
+import { SqlIndexListStore } from "../data/doSqliteIndexListAdapter";
 import type { CommercialStore } from "../data/commercialPorts";
 import type {
   CopilotExecutionMode,
@@ -37,6 +38,7 @@ import {
 } from "./stockCopilot";
 import {
   resolveCopilotUniverse,
+  resolveCopilotUniverseFull,
   resolveCopilotUniversePreset,
   resolveCopilotStrategies,
 } from "./stockCopilotConfiguration";
@@ -105,6 +107,9 @@ export interface StockCopilotIntrospectionResult {
     enabledSessions: readonly CopilotSessionId[];
     universe: string[];
     universePreset?: string | null;
+    universeSource?: "configured" | "stored-index" | "preset-fallback";
+    universeSnapshotDate?: string | null;
+    universeFallbackReason?: string | null;
     strategies: readonly string[];
     rsiMode: StockCopilotRsiMode;
     paused: boolean;
@@ -135,6 +140,8 @@ export interface StockCopilotIntrospectionDeps {
   activityPort: StockCopilotActivityPort;
   controlPort: StockCopilotControlPort;
   commercial?: CommercialStore | null;
+  /** #4027: when supplied, the reported universe is the resolution the cycle runs. */
+  sql?: { exec?: (query: string, ...args: any[]) => any };
 }
 
 /**
@@ -410,8 +417,18 @@ export async function introspectStockCopilot(
   const activeMode = selection.resolved ? selection.selection.mode : null;
   const cadence = resolveCopilotCadence({ env, readSettingRaw });
   const enabledSessions = resolveCopilotSessions({ readSettingRaw, env });
-  const universe = resolveCopilotUniverse({ readSettingRaw, env });
-  const universePreset = resolveCopilotUniversePreset(universe);
+  // #4027: report the resolution the cycle runs — stored index membership or its
+  // labelled fallback — instead of the sync preset, which named an index while
+  // showing a hand-written subset. A context without SQL keeps today's read.
+  const universeResolution = deps.sql
+    ? await resolveCopilotUniverseFull({
+        readSettingRaw,
+        env,
+        indexListStore: new SqlIndexListStore(deps.sql as never),
+      })
+    : null;
+  const universe = universeResolution?.symbols ?? resolveCopilotUniverse({ readSettingRaw, env });
+  const universePreset = universeResolution?.preset ?? resolveCopilotUniversePreset(universe);
   const strategies = resolveCopilotStrategies({ readSettingRaw, env });
   const rsiMode = resolveStockCopilotRsiMode({ readSettingRaw, env });
 
@@ -555,6 +572,13 @@ export async function introspectStockCopilot(
       enabledSessions,
       universe,
       universePreset,
+      ...(universeResolution
+        ? {
+            universeSource: universeResolution.source,
+            universeSnapshotDate: universeResolution.snapshotDate,
+            universeFallbackReason: universeResolution.reason,
+          }
+        : {}),
       strategies,
       rsiMode,
       paused,

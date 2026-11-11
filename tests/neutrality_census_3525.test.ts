@@ -817,7 +817,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/tenantProviders.ts", "public.com", 1],
   ["src/client/tenantProviders.ts", "yahoo", 1],
   ["src/client/tokens.css", "etrade", 5],
-  ["src/client/tradeExecutionPreview.ts", "etrade", 5],
+  ["src/client/tradeExecutionPreviewModel.ts", "etrade", 5],
   ["src/config/agenticPaymentsModes.ts", "etrade", 1],
   ["src/config/asyncJobModes.ts", "etrade", 5],
   ["src/config/cloudflareBrowserMiscModes.ts", "etrade", 15],
@@ -1052,7 +1052,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/optionsAuthFreshness.ts", "etrade", 21],
   ["src/services/optionsAuthFreshness.ts", "yahoo", 1],
   ["src/services/optionsProviderContext.ts", "alpaca", 7],
-  ["src/services/optionsProviderContext.ts", "etrade", 14],
+  // #4014 INTEGRATION growth: optionsChainsServingProvider names the capable
+  // provider that actually serves a chain when the tenant's selection cannot.
+  // Merged #3990 + #4014 baselines (max of both sides; measured 7/13/4 on the
+  // merged file, all under these ceilings).
+  ["src/services/optionsProviderContext.ts", "etrade", 16],
   ["src/services/optionsProviderContext.ts", "yahoo", 4],
   ["src/services/optionsServeRecord.ts", "etrade", 5],
   ["src/services/patternSignals.ts", "etrade", 1],

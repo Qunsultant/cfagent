@@ -63,7 +63,7 @@ import {
   normalizeSchedulesHomeView,
   parseSchedulesDeepLink,
   legacySchedulesRedirect,
-} from "../src/client/schedulesHome";
+} from "../src/client/schedulesHomeView";
 import {
   mergeLedgerRuns,
   filterLedgerRuns,
@@ -681,7 +681,7 @@ describe("S2-P13 one of everything — one UX, one ledger read path, pure core (
   });
 
   it("the home's pure module uses no Cloudflare, no fetch, no window", () => {
-    const home = read("src/client/schedulesHome.ts");
+    const home = read("src/client/schedulesHomeView.ts");
     // The header comment names the absence; assert on usage, not the word.
     expect(home).not.toContain("window.");
     expect(home).not.toContain("typeof window");

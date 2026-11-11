@@ -21,15 +21,21 @@
  * Notice and submits nothing — never a silent fallback to the
  * other backend.
  *
- * Issue #3794 — placement: the CONTROLS (mic + mute) sit INLINE
- * inside the chat box row, alongside the text input and the Send
- * control, like a standard chat interface — never on a separate
- * bar. The state therefore lives in useChatComposerVoice, owned
+ * Issue #3794 — placement: the CONTROLS (mic + audio toggle)
+ * sit INSIDE the chat box itself: the tab renders
+ * ChatComposerVoiceButtons through the composer Input's
+ * contentAfter slot, so the icon buttons sit within the bordered
+ * input field at its trailing edge, like a standard chat
+ * interface — never on a bar and never as form-level siblings of
+ * the field. (The first #3794 landing placed them inside the
+ * composer form but beside the field; the owner reopened the
+ * issue from the production surface, and this placement is the
+ * fix.) The state therefore lives in useChatComposerVoice, owned
  * by the tab: the tab renders ChatComposerVoiceFeedback (the
  * named-failure Notices and transient status — feedback, not
- * controls) beside the box, and ChatComposerVoiceButtons inside
- * the composer form. ChatComposerVoiceControl remains as the
- * composed form (feedback over a buttons row) for standalone use.
+ * controls) beside the box, and the buttons inside it.
+ * ChatComposerVoiceControl remains as the composed form
+ * (feedback over a buttons row) for standalone use.
  *
  * Styling follows the host surface: the chat tab is the Fluent v9
  * surface (#3146), so the controls are the same Fluent primitives
@@ -312,10 +318,14 @@ export function ChatComposerVoiceFeedback(props: { voice: ChatComposerVoice }) {
 }
 
 /**
- * The voice channel's CONTROLS (#3794): the mic and the mute
- * toggle. These render INLINE inside the chat box row (the
- * composer form), alongside the text input and the Send control —
- * the only place voice controls appear.
+ * The voice channel's CONTROLS (#3794): the mic and the audio
+ * toggle, as compact ICON buttons. They render inside the input
+ * box — the chat tab passes them to the composer Input's
+ * contentAfter slot, so they sit within the bordered field at
+ * its trailing edge. That in-box placement is the only place
+ * voice controls appear in the tab. Icon-only: the accessible
+ * names ride on title/aria-label; the listening state stays
+ * unmistakable via the primary appearance and the stop glyph.
  */
 export function ChatComposerVoiceButtons(props: { voice: ChatComposerVoice }) {
   const styles = useStyles();
@@ -329,8 +339,9 @@ export function ChatComposerVoiceButtons(props: { voice: ChatComposerVoice }) {
         disabled={voice.micDisabled}
         onClick={voice.toggleRecording}
         title="Start or stop voice input"
+        aria-label="Start or stop voice input"
       >
-        {voice.status === "listening" ? "⏹ Stop listening" : "🎙 Speak"}
+        {voice.status === "listening" ? "⏹" : "🎙"}
       </Button>
       <Button
         type="button"
@@ -338,8 +349,9 @@ export function ChatComposerVoiceButtons(props: { voice: ChatComposerVoice }) {
         size="small"
         onClick={voice.toggleMuted}
         title="Toggle spoken replies"
+        aria-label="Toggle spoken replies"
       >
-        {voice.muted ? "🔇 Audio muted" : "🔊 Audio on"}
+        {voice.muted ? "🔇" : "🔊"}
       </Button>
     </div>
   );
@@ -349,7 +361,8 @@ export function ChatComposerVoiceButtons(props: { voice: ChatComposerVoice }) {
  * The composed control (#3773): feedback over a buttons row, for
  * standalone use. The chat tab does NOT use this form — since
  * #3794 it owns the hook and places the pieces itself (feedback
- * beside the box, buttons inside it).
+ * beside the box, the icon buttons inside the box via the
+ * Input's contentAfter slot).
  */
 export function ChatComposerVoiceControl(props: ChatComposerVoiceControlProps) {
   const styles = useStyles();

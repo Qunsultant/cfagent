@@ -28,7 +28,7 @@ import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStor
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
 import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
 import { navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
-import { legacySchedulesRedirect } from "./schedulesHome";
+import { legacySchedulesRedirect } from "./schedulesHomeView";
 import { SchedulesHome } from "./SchedulesHome";
 import { getCrumb } from "./routes";
 import { StockSearchBar } from "./components/StockSearchBar";

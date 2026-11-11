@@ -424,6 +424,20 @@ function clickButton(container: HTMLElement, label: string) {
   });
 }
 
+/** Icon-only controls (#3794 in-box mic) are found by their title. */
+function clickButtonByTitle(container: HTMLElement, title: string) {
+  const button = Array.from(container.querySelectorAll("button")).find(
+    (b) => b.getAttribute("title") === title,
+  );
+  if (!button) throw new Error(`button not found by title: ${title}`);
+  act(() => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+const MIC_BUTTON_TITLE = "Start or stop voice input";
+const AUDIO_BUTTON_TITLE = "Toggle spoken replies";
+
 const userMsg = (id: string, text: string) => ({
   id,
   role: "user",
@@ -464,7 +478,7 @@ describe("issue #3773 — ChatComposerVoiceControl", () => {
         onSubmitTranscript={onSubmitTranscript}
       />,
     );
-    clickButton(container, "Speak");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     expect(voiceState.handlers).not.toBeNull();
     act(() => voiceState.handlers?.onInterim?.("show my pos"));
     expect(container.textContent).toContain("show my pos");
@@ -485,7 +499,7 @@ describe("issue #3773 — ChatComposerVoiceControl", () => {
         onSubmitTranscript={vi.fn()}
       />,
     );
-    clickButton(container, "Speak");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     expect(container.textContent).toContain(
       "Speech recognition is not supported in this browser",
     );
@@ -503,7 +517,7 @@ describe("issue #3773 — ChatComposerVoiceControl", () => {
         onSubmitTranscript={vi.fn()}
       />,
     );
-    clickButton(container, "Speak");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     expect(container.textContent).toContain(
       "Speech recognition is not supported in this browser",
     );
@@ -523,7 +537,7 @@ describe("issue #3773 — ChatComposerVoiceControl", () => {
         />,
       );
     await render([], false);
-    clickButton(container, "Speak");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     act(() => voiceState.handlers?.onFinal?.("what is the loop doing"));
     expect(onSubmitTranscript).toHaveBeenCalledWith("what is the loop doing");
     // The user turn lands and the agent is busy: nothing spoken yet.
@@ -567,9 +581,9 @@ describe("issue #3773 — ChatComposerVoiceControl", () => {
         />,
       );
     await render([], false);
-    clickButton(container, "Speak");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     act(() => voiceState.handlers?.onFinal?.("status please"));
-    clickButton(container, "Audio on");
+    clickButtonByTitle(container, AUDIO_BUTTON_TITLE);
     await render(
       [userMsg("u1", "status please"), assistantMsg("a1", "All quiet.")],
       false,
@@ -624,27 +638,105 @@ describe("issue #3773 — the chat tab renders the mic from the projection (data
     await act(async () => root.unmount());
   });
 
-  it("the mic + mute controls sit INLINE inside the chat box (.chat-input-bar), not on a bar above it (#3794)", async () => {
+  it("the mic + audio controls render INSIDE the input box (contentAfter), icon-only — never as buttons in the form bar (#3794)", async () => {
     channelsState.byRegistration = { stock: projectionFor("stock", true) };
     const { container, root } = await renderTab("stock");
     const bar = container.querySelector(".chat-input-bar");
     expect(bar).not.toBeNull();
     const voice = container.querySelector("[data-testid='chat-composer-voice']");
     expect(voice).not.toBeNull();
-    // The voice controls live inside the composer form itself,
-    // alongside the text input — no separate voice bar anywhere.
-    expect(bar!.contains(voice)).toBe(true);
-    const barButtons = [...bar!.querySelectorAll("button")].map(
-      (b) => b.textContent ?? "",
+    // The regression pin for the reopened #3794 defect: the first
+    // landing placed the buttons inside the composer FORM but
+    // beside the text field — outside its visible box. The
+    // controls must live inside the Fluent Input's own root (the
+    // bordered box around the <input>), via its contentAfter slot.
+    const input = bar!.querySelector("input");
+    expect(input).not.toBeNull();
+    const inputRoot = input!.parentElement;
+    expect(inputRoot).not.toBeNull();
+    expect(inputRoot!.contains(voice)).toBe(true);
+    // Not a form-level sibling: neither a direct child of the bar
+    // nor reachable in the bar outside the input root.
+    expect(voice!.parentElement).not.toBe(bar);
+    const barButtonsOutsideInput = [...bar!.querySelectorAll("button")].filter(
+      (b) => !inputRoot!.contains(b),
     );
-    expect(barButtons.join(" ")).toContain("Speak");
-    expect(barButtons.join(" ")).toContain("Audio on");
-    expect(bar!.querySelector("input")).not.toBeNull();
-    // And no voice control exists outside the box.
+    expect(
+      barButtonsOutsideInput.filter((b) =>
+        [MIC_BUTTON_TITLE, AUDIO_BUTTON_TITLE].includes(
+          b.getAttribute("title") ?? "",
+        ),
+      ),
+    ).toEqual([]);
+    // Icon-only: no text labels on the in-box controls.
+    expect(voice!.textContent).toContain("🎙");
+    expect(voice!.textContent).toContain("🔊");
+    expect(voice!.textContent).not.toContain("Speak");
+    expect(voice!.textContent).not.toContain("Audio on");
+    // And no voice control exists anywhere outside the input box.
     const outside = [...container.querySelectorAll("button")].filter(
-      (b) => !bar!.contains(b) && (b.textContent ?? "").includes("Speak"),
+      (b) =>
+        !inputRoot!.contains(b) &&
+        [MIC_BUTTON_TITLE, AUDIO_BUTTON_TITLE].includes(
+          b.getAttribute("title") ?? "",
+        ),
     );
     expect(outside).toEqual([]);
+    await act(async () => root.unmount());
+  });
+
+  it("Clear chat sits in the nav bar beside the Info badge — no chat-action-bar row (owner surface pass)", async () => {
+    channelsState.byRegistration = { stock: projectionFor("stock", true) };
+    chatState.messages = [userMsg("u1", "hello"), assistantMsg("a1", "hi there")];
+    const { container, root } = await renderTab("stock");
+    // The dedicated action-bar row is gone — that vertical space
+    // returns to the chat area.
+    expect(container.querySelector(".chat-action-bar")).toBeNull();
+    const right = container.querySelector(".capability-nav-right");
+    expect(right).not.toBeNull();
+    const clearBtn = [...right!.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes("Clear chat"),
+    );
+    expect(clearBtn).toBeDefined();
+    const info = right!.querySelector(".copilot-hover-info-badge");
+    expect(info).not.toBeNull();
+    // Immediately adjacent, Clear chat on the left: it precedes
+    // the Info badge in document order within the same group.
+    expect(
+      clearBtn!.compareDocumentPosition(info!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Same right-side group: the button's parent row also holds
+    // the badge (inside its hover-item wrapper).
+    expect(clearBtn!.parentElement!.contains(info)).toBe(true);
+    await act(async () => root.unmount());
+  });
+
+  it("no messages ⇒ no Clear chat anywhere; the Info badge still renders", async () => {
+    channelsState.byRegistration = { stock: projectionFor("stock", true) };
+    chatState.messages = [];
+    const { container, root } = await renderTab("stock");
+    const clearBtn = [...container.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes("Clear chat"),
+    );
+    expect(clearBtn).toBeUndefined();
+    expect(container.querySelector(".chat-action-bar")).toBeNull();
+    expect(container.querySelector(".copilot-hover-info-badge")).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("clicking the relocated Clear chat still opens the confirm dialog", async () => {
+    channelsState.byRegistration = { stock: projectionFor("stock", true) };
+    chatState.messages = [userMsg("u1", "hello")];
+    const { container, root } = await renderTab("stock");
+    const clearBtn = [...container.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes("Clear chat"),
+    );
+    expect(clearBtn).toBeDefined();
+    act(() => {
+      clearBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(document.body.textContent).toContain("Clear conversation history?");
     await act(async () => root.unmount());
   });
 
@@ -670,7 +762,7 @@ describe("issue #3773 — the chat tab renders the mic from the projection (data
   it("a voice transcript in the stock view lands as a normal chat turn (same sendMessage, stock sourceTab)", async () => {
     channelsState.byRegistration = { stock: projectionFor("stock", true) };
     const { container, root } = await renderTab("stock");
-    clickButton(container, "Speak");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     act(() => voiceState.handlers?.onFinal?.("What is the loop doing?"));
     expect(chatState.sendMessage).toHaveBeenCalledTimes(1);
     expect(chatState.sendMessage).toHaveBeenCalledWith(
@@ -1062,9 +1154,9 @@ describe("issue #3773 — the client voice seam (one seam, two adapters)", () =>
         onSubmitTranscript={onSubmitTranscript}
       />,
     );
-    clickButton(container, "Speak");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     await flush();
-    clickButton(container, "Stop listening");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     await flush();
     await flush();
     expect(onSubmitTranscript).toHaveBeenCalledWith("show my positions");
@@ -1086,9 +1178,9 @@ describe("issue #3773 — the client voice seam (one seam, two adapters)", () =>
         onSubmitTranscript={onSubmitTranscript}
       />,
     );
-    clickButton(container, "Speak");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     await flush();
-    clickButton(container, "Stop listening");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     await flush();
     await flush();
     expect(container.textContent).toContain("voice_stt_model_failed");
@@ -1113,9 +1205,9 @@ describe("issue #3773 — the client voice seam (one seam, two adapters)", () =>
         />,
       );
     await render([], false);
-    clickButton(container, "Speak");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     await flush();
-    clickButton(container, "Stop listening");
+    clickButtonByTitle(container, MIC_BUTTON_TITLE);
     await flush();
     await flush();
     expect(onSubmitTranscript).toHaveBeenCalledWith("status please");

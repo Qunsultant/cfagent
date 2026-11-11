@@ -909,6 +909,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   const stockCopilotResponse = await handleStockCopilotRoutes(request, url, path, sessionId, {
     env: deps.env,
     sql: deps.ctx.storage.sql,
+    // Issue #4001 (follow-up): the dispatch-probe read needs the
+    // instance's KV storage handle alongside the sql handle.
+    storage: deps.ctx.storage,
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
     readSettingRaw: (key) => deps.readSettingRaw(key),
     // #3398: the session-choice write lands in the same settings

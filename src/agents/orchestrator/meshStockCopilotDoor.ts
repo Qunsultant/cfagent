@@ -845,6 +845,7 @@ export async function introspectStockCopilotViaDoor(
     activityPort: activity,
     controlPort: control,
     commercial: ctx.commercial,
+    sql: ctx.sql,
   });
 
   ctx.audit?.("stock_copilot.introspect_via_door", "orchestrator", {

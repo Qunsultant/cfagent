@@ -629,7 +629,11 @@ describe("U-P04 URL inventory (§8 U-01): Chat.tsx renders schedules from the sh
     expect(types).not.toContain('case "schedules":\n      return "schedules";');
     const chat = read("src/client/Chat.tsx");
     expect(chat).toContain("the URL is the source of truth for navigation");
-    expect(chat).toContain("schedules: (\n      <SchedulesHome");
+    // A CRLF checkout (Windows, or a blob that lost normalization) must not fail a
+    // source-shape pin; the shape is what matters, not the line ending.
+    expect(chat.replace(/\r\n/g, "\n")).toContain(
+      "schedules: (\n      <SchedulesHome",
+    );
     expect(chat).toContain('import { SchedulesHome } from "./SchedulesHome";');
     const hub = read("src/client/ETradeTradingHub.tsx");
     expect(hub).not.toContain('{effectiveSubTab === "schedules" && (');
@@ -642,7 +646,7 @@ describe("U-P05 URL inventory (§8 U-06): the IAAA admin Queue sub-tab is retire
     const panel = read("src/client/IaaaAdminPanel.tsx");
     expect(panel).not.toContain('{ id: "queue", label: "Queue" }');
     expect(panel).not.toContain("<AdminQueueWipePanel />");
-    const home = read("src/client/schedulesHome.ts");
+    const home = read("src/client/schedulesHomeView.ts");
     expect(home).toContain('params.get("iaaaTab") === "queue"');
     expect(home).toContain('return { tab: SCHEDULES_HOME_TAB, view: "queue" };');
     const queueView = read("src/client/ScheduleQueueView.tsx");

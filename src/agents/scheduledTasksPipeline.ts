@@ -86,7 +86,11 @@ import {
   ANALYZE_PIPELINE_CATALOG,
   type AnalyzeStepDeps,
 } from "../services/analyzePipelineJobs";
-import { buildGenerateJobRegistry } from "../services/generateJobs";
+import {
+  buildGenerateJobRegistry,
+  createTenantAwareCanonicalReportStore,
+  type PipelineGenerateReportDoor,
+} from "../services/generateJobs";
 import {
   ensureGeneratePipelineJobs,
   GENERATE_PIPELINE_CATALOG,
@@ -275,25 +279,27 @@ export function analyzeStepDepsForScheduledAgent(
 }
 
 /**
- * The generate-step wiring for this host residency (#3538):
- * both of the generate step's dataset stores are D1-resident
- * (the analyze stage's persisted copies and this stage's
- * generated copies — the deliver stage's readers run in other
- * instances), so the wiring needs no DO-storage seam and the
- * step executes fully in every residency, like analyze.apply.
+ * The generate-step wiring for this host residency (#3538,
+ * #3940): both of the generate step's dataset stores are
+ * D1-resident (the analyze stage's persisted copies and this
+ * stage's generated copies — the deliver stage's readers run
+ * in other instances), so the wiring needs no DO-storage seam
+ * and the step executes fully in every residency, like
+ * analyze.apply.
  *
- * The canonical report-store seam (mas_reports) is NOT wired
- * in this residency — deliberately, on evidence: the canonical
- * seam writes into a report-owning tenant's Orchestrator DO
- * (its reads all resolve there, per-login), while this host's
- * DO is the pipeline host's own storage and pipeline runs
- * carry no report-owning tenant (scheduled/chained runs act
- * under the service identity; a copilot dispatch's login owns
- * the dispatch, not a report in this DO). Writing canonical
- * rows here would strand them where no Reports view reads.
- * Each report's canonical leg is therefore recorded not_wired
- * with its coded reason on the generated artifact — named,
- * never silent (generateJobs.ts carries the full rule).
+ * The canonical report-store seam (mas_reports) IS wired in
+ * this residency — through the tenant-aware leg (#3940,
+ * #3550 option (a)): the seam writes through the
+ * orchestrator door (recordPipelineGenerateReport on the
+ * shared Orchestrator instance), never into this host's own
+ * DO storage — writing canonical rows here would strand
+ * them where no Reports view reads. The leg resolves the
+ * report-owning tenant per job (the job's configured
+ * reportOwnerLogin, else this seam's bound owner — the
+ * configured service identity); a job with no resolvable
+ * tenant records not_wired with its coded reason on the
+ * generated artifact — named, never silent
+ * (generateJobs.ts carries the full rule).
  */
 export function generateStepDepsForScheduledAgent(
   ctx: ScheduledTasksPipelineContext,
@@ -303,7 +309,16 @@ export function generateStepDepsForScheduledAgent(
     registry: buildGenerateJobRegistry(envStrings(ctx.env)),
     analyzedStore: createAnalyzedDatasetPorts(ctx.env),
     generatedStore: createGeneratedDatasetPorts(ctx.env),
-    canonicalReportStore: null,
+    canonicalReportStore: createTenantAwareCanonicalReportStore({
+      ownerLogin: getServiceUserLogin(ctx.env) ?? undefined,
+      record: (input) => {
+        const door = actorGateway.stub<PipelineGenerateReportDoor>(
+          ctx.env.ORCHESTRATOR_AGENT,
+          SHARED_ORCHESTRATOR_INSTANCE,
+        );
+        return door.recordPipelineGenerateReport(input);
+      },
+    }),
     shardsFor: async (jobId) => {
       const stores = createJobPipelineStoresFromSql(sql);
       return (

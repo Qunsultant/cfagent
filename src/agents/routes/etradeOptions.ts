@@ -29,6 +29,7 @@
  * (no new globals; requestedEnv passes through the context).
  */
 
+import { optionsFeedProviderStamp } from "../../services/optionsProviderContext";
 import { unauthenticatedResponse } from "./routeIdentity";
 import { executeOptionsRegenerate } from "./optionsRegenerate";
 import type { AgentContext } from "agents";
@@ -753,7 +754,7 @@ export async function handleEtradeOptionsRoutes(
         // Slice 1: stamp tenant provider/broker into provenance (fail-open etrade/etrade).
         recordStrategyScreenRun(ctx.getOrm(), {
           ...strategyArtifacts,
-          ...(await resolveTenantProviders(ctx.env)),
+          ...optionsFeedProviderStamp(await resolveTenantProviders(ctx.env)),
           userLogin,
           symbol: parsedDiscovery.value.request.symbol,
           trigger: "manual",

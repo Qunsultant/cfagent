@@ -37,7 +37,10 @@
 
 import type { Env } from "../../types";
 import { resolveTenantProviders } from "../../services/tenantProviders";
-import { dataCapabilityUnavailable } from "../../services/optionsProviderContext";
+import {
+  dataCapabilityUnavailable,
+  optionsChainsServingProvider,
+} from "../../services/optionsProviderContext";
 import { codedMessage, getOutcome } from "../../outcomes/outcomeAspects";
 
 /**
@@ -51,7 +54,12 @@ export function optionsFeedGateResponse(providers: {
   dataProviderId: string;
   brokerId: string;
 }): Response | null {
-  const unavailable = dataCapabilityUnavailable(providers.dataProviderId, "optionsChains");
+  // #4014: a tenant whose selected provider cannot serve chains still gets a
+  // chain from a capable provider; the run record names the server and keeps
+  // the requested provider visible. Refusal is reserved for the case where
+  // even the serving provider lacks the capability.
+  const serving = optionsChainsServingProvider(providers.dataProviderId);
+  const unavailable = dataCapabilityUnavailable(serving.servingProviderId, "optionsChains");
   if (!unavailable) return null;
   const entry = getOutcome(unavailable.code);
   return Response.json(
