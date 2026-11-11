@@ -50,6 +50,10 @@ import {
 import type { GenerateStepDeps } from "../services/generatePipelineJobs";
 import { buildDeliverJobRegistry, createDeliverChannelSenders } from "../services/deliverJobs";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+import { createProviderCaptureAdapter } from "../data/createProviderCapturePorts";
+import { createR2CaptureBlobStorage } from "../data/r2CaptureBlobAdapter";
+import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
+import type { FeedStepDeps } from "../services/feedPipelineJobs";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
@@ -116,6 +120,64 @@ export function generateStepDepsForWorkflow(
   };
 }
 
+/**
+ * The feed-step wiring for this workflow residency (#3941,
+ * sub of #3550) — the mirror of the host's
+ * feedStepDepsForScheduledAgent, so both residencies wire the
+ * SAME capture construction: the provider is built by the
+ * capture factory with the D1 capture port and the R2-backed
+ * metadata store (the workflow residency has no DO storage,
+ * so the R2 seam stands in for the host's DO-shaped store).
+ * The provider refuses by name where wiring genuinely cannot
+ * be built (R2 unbound, AGENT_DB unbound, no service login
+ * for the per-login providers) — "workflow residency" alone
+ * is no longer such a case. The Worker env rides through so
+ * the sentiment job can classify in workflow residency
+ * exactly as on the host.
+ */
+export function feedStepDepsForWorkflow(
+  env: Env,
+  stores: JobPipelineStores,
+): FeedStepDeps {
+  const db = env.AGENT_DB;
+  const universeStore = new D1IndexListStore(
+    db as ConstructorParameters<typeof D1IndexListStore>[0],
+  );
+  const fetchHtml = fetchWikipediaIndexHtml;
+  const capturePort = createProviderCaptureAdapter(env) ?? undefined;
+  const blobStorage = createR2CaptureBlobStorage(env) ?? undefined;
+  return {
+    registry: buildFeedJobRegistry(workflowEnvStrings(env)),
+    providerFor: (def) =>
+      createCaptureWiredFeedProvider(def, {
+        env,
+        blobStorage,
+        capturePort,
+        userLogin: getServiceUserLogin(env) ?? undefined,
+      }),
+    universeStore,
+    datasetStore: createFeedDatasetAdapter(env),
+    indexRefresh: {
+      store: universeStore,
+      service: createIndexMembershipService({
+        wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
+        holdings: {
+          getMembers: async () => {
+            throw new Error(
+              "holdings fetcher not bound — the Wikipedia refresh path never calls it",
+            );
+          },
+        },
+      }),
+    },
+    shardsFor: async (jobId) =>
+      (await stores.definitions.getDefinition(jobId))?.config.processing
+        .shards ?? [],
+    userLogin: getServiceUserLogin(env) ?? undefined,
+    env,
+  };
+}
+
 /** Build the flow deps from the worker environment (adapter-side only). */
 export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   if (!env.AGENT_DB) {
@@ -129,10 +191,6 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   const runRecords = new D1JobRunRecordStore(createD1JobRunRecordDb(db));
   const messaging = createJobPipelineMessaging(env);
   const envStrings = workflowEnvStrings(env);
-  const universeStore = new D1IndexListStore(
-    db as ConstructorParameters<typeof D1IndexListStore>[0],
-  );
-  const fetchHtml = fetchWikipediaIndexHtml;
   return {
     stores,
     runRecorder: {
@@ -147,13 +205,17 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // built-ins, the feed steps, enrich.apply, analyze.apply,
     // generate.apply, and deliver.apply). Residency
     // rule: the dataset and index-list stores are D1 here, and
-    // the universe step runs (its service is a network fetch),
-    // but capture-wired PROVIDERS need a DO host's storage (the
-    // capture deps' blob + SQL handles), so providerFor is
-    // unwired in this residency and a feed pull dispatched here
-    // refuses FEED_JOB_NOT_CONFIGURED by name rather than
-    // fetching uncaptured. Feed pulls execute on the
-    // ScheduledAgent host residency, which owns that wiring.
+    // the universe step runs (its service is a network fetch).
+    // The feed step is wired in this residency too (#3941): its
+    // provider is built by the capture factory with the D1
+    // capture port and the R2-backed metadata store — the same
+    // capture construction the host uses, minus the DO sql
+    // handle this residency does not have — so a feed pull
+    // dispatched here executes exactly as on the host. Where
+    // wiring genuinely cannot be built (R2 unbound, AGENT_DB
+    // unbound, no service login for the per-login providers)
+    // the step still refuses FEED_JOB_NOT_CONFIGURED by name
+    // rather than fetching uncaptured.
     // The enrich step's stores are both D1, so an enrich run
     // dispatched here executes fully in this residency. The
     // analyze step's stores are both D1 too (#3537), so an
@@ -176,28 +238,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // configure records its channel not_configured per report
     // (deliverJobs.ts carries the rule).
     steps: createPipelineStepRegistry(
-      {
-        registry: buildFeedJobRegistry(envStrings),
-        providerFor: () => undefined,
-        universeStore,
-        datasetStore: createFeedDatasetAdapter(env),
-        indexRefresh: {
-          store: universeStore,
-          service: createIndexMembershipService({
-            wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
-            holdings: {
-              getMembers: async () => {
-                throw new Error(
-                  "holdings fetcher not bound — the Wikipedia refresh path never calls it",
-                );
-              },
-            },
-          }),
-        },
-        shardsFor: async (jobId) =>
-          (await stores.definitions.getDefinition(jobId))?.config.processing
-            .shards ?? [],
-      },
+      feedStepDepsForWorkflow(env, stores),
       {
         registry: buildEnrichJobRegistry(envStrings),
         datasetStore: createFeedDatasetAdapter(env),
