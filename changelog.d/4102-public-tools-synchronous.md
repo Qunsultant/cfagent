@@ -1,0 +1,3 @@
+### Fixed
+
+- **Public.com copilot tools no longer answer with a job receipt (#4102).** `public_get_quote`, `public_preview_order`, `public_place_order`, `public_orders` and `public_cancel_order` were declared in the broker catalog and registered in the tool factory, but missing from `SYNCHRONOUS_MCP_TOOLS`, so the MCP dispatcher wrapped each call as an async job: asking for a quote returned eight `{jobId, status: "queued"}` receipts and nothing reached the broker. All five now execute inline, like the other brokers' equivalents, with the approval binding unchanged. New pin `tests/synchronous_broker_tools_4102.test.ts` derives its expectation from `BROKER_CATALOG`, so a broker that declares a tool without registering it fails by name.

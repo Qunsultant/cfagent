@@ -364,6 +364,18 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   // Issue #4048: the Public account read answers a balance question in the
   // turn it is asked; a queued job receipt would be no answer at all.
   "public_account",
+  // Issue #4102: #3990 declared those five tools in the catalog and the
+  // factory but never here, so a quote answered with a job receipt and the
+  // money paths became polled jobs. Reads answer in the turn; preview/place/
+  // cancel execute inline like every other broker's money path (#3839), with
+  // the approval binding unchanged. Pinned against BROKER_CATALOG by
+  // tests/synchronous_broker_tools_4102.test.ts - a broker that declares a
+  // tool without registering it fails there by name.
+  "public_get_quote",
+  "public_preview_order",
+  "public_place_order",
+  "public_orders",
+  "public_cancel_order",
   // Issue #3839: the E*TRADE and mesh-door trade tools are money paths
   // too. Queuing them turns a one-turn draft into a polled job (the #3812
   // RCA); they execute inline like their Alpaca counterparts.
