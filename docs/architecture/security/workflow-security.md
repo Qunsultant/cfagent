@@ -64,7 +64,7 @@ serviceDispatch rule — with no configuration, nothing is a service
 dispatch), and a `background` header on any other login resolves
 to "user" with an anomaly flag, so a client-spoofed header cannot
 claim background work. The service identity itself is a real login
-authorized through the normal flow (see [service-identity.md](service-identity.md));
+authorized through the normal flow (see [service-identity.md](../../operations/runbook/service-identity.md));
 the header only names the actor kind for audit and logs.
 
 Queue handling, pinned by #1764 (F-32 closed for the screener
