@@ -57,6 +57,13 @@ import {
   type FetchOutcomeRecorder,
 } from "../trading";
 import { createBlobStore } from "../services/blobStoreR2Adapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Module logger on the S2 structured-logging seam (#3515 S3 ratchet). */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "data/providerCapturePorts",
+});
 
 export const DATA_CAPTURE_TABLE = "mas_data_captures";
 
@@ -305,7 +312,27 @@ export async function getCaptureBlob(
   key: string
 ): Promise<Uint8Array | null> {
   const meta = await storage.get<CaptureBlobMeta>(key).catch(() => undefined);
-  if (!meta) return null;
+  if (!meta) {
+    // #3941 (feed parity): the raw bytes live in R2 under the bare
+    // blob ref in BOTH residencies, while the metadata lives in the
+    // residency's own store — so a reader whose metadata store
+    // never saw this key (the other residency's write) still finds
+    // the bytes through the R2 object itself. Only on a metadata
+    // miss; a hit reads exactly as before.
+    const store = createBlobStore(env);
+    if (!store) return null;
+    try {
+      const obj = await store.get(key);
+      return obj ? obj.bytes : null;
+    } catch (err) {
+      structuredLog.warn("providerCapturePorts.capture_blob_r2_fallback_read_failed", {
+        message: "[dataProviders] capture blob R2 fallback read failed",
+        error: err instanceof Error ? err.message : String(err),
+        key,
+      });
+      return null;
+    }
+  }
   const store = createBlobStore(env);
   if (store && meta.r2Key) {
     try {
