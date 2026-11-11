@@ -1619,6 +1619,23 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/adr/README.md", "public.com", 1],
   ["src/agents/registry.ts", "alpaca", 1],
   ["src/services/oasfRecords.ts", "public.com", 1],
+  // #4178 INTEGRATION: the capability registry gains per-provider
+  // entries and the unit-driver table binds them — the registry
+  // and the driver table name the providers they integrate, which
+  // is their job (the provider-id registries' seed precedent).
+  // The ids, capability strings, and adapter factory names are
+  // data-bearing identifiers; neutralizing them would falsify the
+  // inventory. 9 new rows, +21 lines (measured 1166/9151 ->
+  // 1175/9172).
+  ["src/agentic/capabilityRegistry.ts", "etrade", 5],
+  ["src/agentic/capabilityRegistry.ts", "public.com", 1],
+  ["src/agentic/capabilityRegistry.ts", "alpaca", 3],
+  ["src/agentic/capabilityRegistry.ts", "yahoo", 3],
+  ["src/agentic/capabilityRegistry.ts", "nasdaq", 3],
+  ["src/agentic/unitDrivers.ts", "etrade", 3],
+  ["src/agentic/unitDrivers.ts", "alpaca", 1],
+  ["src/agentic/unitDrivers.ts", "yahoo", 1],
+  ["src/agentic/unitDrivers.ts", "nasdaq", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
