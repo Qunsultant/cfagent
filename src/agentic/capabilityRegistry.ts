@@ -29,8 +29,19 @@
  * #1362) — see the COMPOSITION_MEMORY entry below.
  */
 
+/**
+ * The registry's stage vocabulary. #4178 (step 1 of programme
+ * #4177) adds "enrich" and "analyze": the pipeline chain's two
+ * middle stages had job registries but no registry home. The
+ * compiler's CHAIN_STAGE_ORDER (src/orchestrate.ts) is NOT
+ * extended in this slice — chains still validate against the
+ * five-stage order; enrich/analyze steps become compilable when
+ * the spec-based workflows land (later programme steps).
+ */
 export type RegistryStage =
   | "feed"
+  | "enrich"
+  | "analyze"
   | "generate"
   | "store"
   | "serve"
@@ -104,6 +115,131 @@ export const CAPABILITY_REGISTRY: CapabilityEntry[] = [
     owner: "#259 / #959",
     status: "shipped",
     verification: "tests/screener_pipeline.test.ts",
+  },
+  // ---- Feed: provider adapters (#4178) ----
+  // One entry per declared adapter in the DataProvider registry.
+  // Per-run provider/broker selection as a stage input rides on
+  // #3960 — these rows bind the adapters as they are today
+  // (registry-fixed sourceId); the selection mechanism is not
+  // re-implemented here.
+  {
+    id: "feed-provider-yahoo",
+    stage: "feed",
+    capability:
+      "Yahoo quotes, bars, fundamentals, technicals, and sentiment via the DataProvider contract",
+    source: "src/trading/dataProviders/adapters.ts#createYahooDataProvider (#1118)",
+    inputs: ["symbols", "universe definition"],
+    outputs: ["quotes", "bars", "fundamentals", "technicals", "sentiment"],
+    provenance: "provider id + symbol",
+    owner: "#1118 / #1116",
+    status: "shipped",
+    verification: "tests/data_provider_yahoo_p1317.test.ts",
+  },
+  {
+    id: "feed-provider-etrade",
+    stage: "feed",
+    capability:
+      "E*TRADE quotes, options chains, bars, and fundamentals via the DataProvider contract",
+    source: "src/trading/dataProviders/adapters.ts#createETradeDataProvider (#1118)",
+    inputs: ["symbols", "universe definition", "provider credentials"],
+    outputs: ["quotes", "options chains", "bars", "fundamentals"],
+    provenance: "provider id + symbol",
+    owner: "#1118 / #1116",
+    status: "shipped",
+    verification: "tests/etrade_adapter_reads_3937.test.ts",
+  },
+  {
+    id: "feed-provider-alpaca",
+    stage: "feed",
+    capability: "Alpaca market-data quotes via the DataProvider contract",
+    source: "src/trading/dataProviders/adapters.ts#createAlpacaDataProvider (#1118)",
+    inputs: ["symbols", "universe definition"],
+    outputs: ["quotes"],
+    provenance: "provider id + symbol",
+    owner: "#1118 / #1116",
+    status: "shipped",
+    verification: "tests/data_provider_alpaca_p1385.test.ts",
+  },
+  {
+    id: "feed-provider-nasdaq",
+    stage: "feed",
+    capability: "Nasdaq symbols and delayed quotes via the DataProvider contract",
+    source: "src/trading/dataProviders/adapters.ts#createNasdaqDataProvider (#1118)",
+    inputs: ["symbols"],
+    outputs: ["symbols", "delayed quotes"],
+    provenance: "provider id + symbol",
+    owner: "#1118 / #1116",
+    status: "shipped",
+    verification: "tests/data_provider_nasdaq_p1368.test.ts",
+  },
+  {
+    id: "feed-provider-public",
+    stage: "feed",
+    capability: "Public.com quotes via the DataProvider contract",
+    source: "src/trading/dataProviders/adapters.ts#createPublicDataProvider (#1118)",
+    inputs: ["symbols"],
+    outputs: ["quotes"],
+    provenance: "provider id + symbol",
+    owner: "#1118 / #1116",
+    status: "planned",
+    // Contract-only, mirroring feed-dataprovider-news: the
+    // factory exists but no adapter is registered in the live
+    // DataProviderRegistry (routes/dataProviders.ts registers
+    // etrade/yahoo/alpaca/nasdaq only). Must NOT seed as shipped.
+    verification: null,
+  },
+  // ---- Feed: ScheduledAgent feed executors (#4178) ----
+  {
+    id: "feed-index-refresh",
+    stage: "feed",
+    capability: "Index-list refresh: Wikipedia tables and ETF holdings files into the stored index lists",
+    source: "src/services/indexListJob.ts#executeIndexListRefreshJob (#1980)",
+    inputs: ["index list store", "index list fetch service", "index ids"],
+    outputs: ["index list descriptors", "per-index failures"],
+    provenance: "index id + snapshot date",
+    owner: "#1980",
+    status: "shipped",
+    verification: "tests/index_list_goals_scheduled_1980.test.ts",
+  },
+  {
+    id: "feed-refresh-all",
+    stage: "feed",
+    capability: "Hourly dispatch of every J2 feed job through the pipeline control plane's scheduled-firing seam",
+    source: "src/agents/scheduledTasksPipeline.ts#dispatchScheduledPipelineJob (#3787)",
+    inputs: ["feed job catalog"],
+    outputs: ["per-job dispatch outcomes"],
+    provenance: "goal id + dispatch time",
+    owner: "#3787",
+    status: "shipped",
+    verification: "tests/pipeline_scheduled_goals.test.ts",
+  },
+
+  // ---- Enrich (#4178) ----
+  {
+    id: "enrich-dataset",
+    stage: "enrich",
+    capability: "Enrich a quotes copy with fundamentals, technicals, and sentiment joins into the enriched dataset",
+    source: "src/services/enrichJobs.ts#runEnrichJob (#3536)",
+    inputs: ["persisted quotes artifact", "fundamentals/technicals/sentiment copies"],
+    outputs: ["enriched dataset artifact"],
+    provenance: "feed job id + enrich job id",
+    owner: "#3536",
+    status: "shipped",
+    verification: "tests/enrich_jobs_3536.test.ts",
+  },
+
+  // ---- Analyze (#4178) ----
+  {
+    id: "analyze-dataset",
+    stage: "analyze",
+    capability: "Apply rule sets to the enriched artifact into the analyzed dataset",
+    source: "src/services/analyzeJobs.ts#runAnalyzeJob (#3537)",
+    inputs: ["persisted enriched artifact", "rule sets", "thresholds"],
+    outputs: ["analyzed dataset artifact", "rule gaps", "rule coverage"],
+    provenance: "enrich job id + analyze job id",
+    owner: "#3537",
+    status: "shipped",
+    verification: "tests/analyze_jobs_3537.test.ts",
   },
 
   // ---- Generate ----
@@ -205,6 +341,97 @@ export const CAPABILITY_REGISTRY: CapabilityEntry[] = [
     status: "shipped",
     verification: "tests/report_body_r2_s2.test.ts",
   },
+  // ---- Store: per-family dataset stores (#4178) ----
+  // One persisted copy per pipeline stage: the store step of the
+  // canonical flow. These rows bind the persistence ports, which
+  // execute. They do NOT decide #3642 — the store stage's
+  // async-job executor disposition (build it or remove "store"
+  // from the PipelineStage vocabulary) belongs to #3642.
+  {
+    id: "store-feed-dataset",
+    stage: "store",
+    capability: "Persisted feed copy: one artifact per (source, dataset) with its run record; reads never fetch",
+    source: "src/data/createFeedDatasetPorts.ts#createFeedDatasetAdapter (#3530)",
+    inputs: ["fetched dataset rows"],
+    outputs: ["stored feed artifact + run record"],
+    provenance: "source id + dataset + run id",
+    owner: "#3530",
+    status: "shipped",
+    verification: "tests/feed_jobs_s1_3530.test.ts",
+  },
+  {
+    id: "store-enriched-dataset",
+    stage: "store",
+    capability: "Persisted enriched copy: one artifact per enrich job with its run record",
+    source: "src/data/createEnrichedDatasetPorts.ts#createEnrichedDatasetAdapter (#3536)",
+    inputs: ["enriched dataset rows"],
+    outputs: ["stored enriched artifact + run record"],
+    provenance: "enrich job id + run id",
+    owner: "#3536",
+    status: "shipped",
+    verification: "tests/enriched_dataset_store_3536.test.ts",
+  },
+  {
+    id: "store-analyzed-dataset",
+    stage: "store",
+    capability: "Persisted analyzed copy: one artifact per analyze job with its run record",
+    source: "src/data/createAnalyzedDatasetPorts.ts#createAnalyzedDatasetPorts (#3537)",
+    inputs: ["analyzed dataset rows"],
+    outputs: ["stored analyzed artifact + run record"],
+    provenance: "analyze job id + run id",
+    owner: "#3537",
+    status: "shipped",
+    verification: "tests/analyzed_dataset_store_3537.test.ts",
+  },
+  {
+    id: "store-generated-dataset",
+    stage: "store",
+    capability: "Persisted generated copy: one artifact per generate job with its run record",
+    source: "src/data/createGeneratedDatasetPorts.ts#createGeneratedDatasetPorts (#3538)",
+    inputs: ["generated report documents"],
+    outputs: ["stored generated artifact + run record"],
+    provenance: "generate job id + run id",
+    owner: "#3538",
+    status: "shipped",
+    verification: "tests/generated_dataset_store_3538.test.ts",
+  },
+  {
+    id: "store-delivery-dataset",
+    stage: "store",
+    capability: "Persisted delivery copy: one artifact per deliver job with its run record",
+    source: "src/data/createDeliveryDatasetPorts.ts#createDeliveryDatasetPorts (#3539)",
+    inputs: ["delivery outcomes per channel"],
+    outputs: ["stored delivery artifact + run record"],
+    provenance: "deliver job id + run id",
+    owner: "#3539",
+    status: "shipped",
+    verification: "tests/delivery_dataset_store_3539.test.ts",
+  },
+  // ---- Store: ScheduledAgent resource executors (#4178) ----
+  {
+    id: "store-resource-rollup",
+    stage: "store",
+    capability: "Roll the previous UTC day's resource projection totals into daily rollup rows",
+    source: "src/agents/resourceGoals.ts#runResourceRollup (#1819)",
+    inputs: ["D1 resource projection"],
+    outputs: ["daily rollup rows"],
+    provenance: "day",
+    owner: "#1819",
+    status: "shipped",
+    verification: "tests/resource_rollup_alert_1819.test.ts",
+  },
+  {
+    id: "store-resource-comparison",
+    stage: "store",
+    capability: "Build the comparison report for the latest completed rollup day and store it",
+    source: "src/agents/resourceGoals.ts#runResourceComparison (#1819)",
+    inputs: ["daily rollup rows"],
+    outputs: ["comparison report"],
+    provenance: "day",
+    owner: "#1819",
+    status: "shipped",
+    verification: "tests/resource_rollup_alert_1819.test.ts",
+  },
 
   // ---- Serve ----
   {
@@ -230,6 +457,18 @@ export const CAPABILITY_REGISTRY: CapabilityEntry[] = [
     owner: "screener program",
     status: "shipped",
     verification: "tests/scheduled_report_pdf_url.test.ts",
+  },
+  {
+    id: "serve-feed-dataset",
+    stage: "serve",
+    capability: "Serve reads from the persisted feed copy (latest / latestUsable); a missing copy is a typed missing, never a fetch",
+    source: "src/data/feedDatasetPorts.ts#resolveFeedQuotesFromArtifact (#3530)",
+    inputs: ["stored feed artifact"],
+    outputs: ["quotes resolution"],
+    provenance: "source id + dataset",
+    owner: "#3530",
+    status: "shipped",
+    verification: "tests/feed_jobs_s1_3530.test.ts",
   },
 
   // ---- Deliver ----
@@ -270,6 +509,31 @@ export const CAPABILITY_REGISTRY: CapabilityEntry[] = [
     owner: "#1262",
     status: "shipped",
     verification: "tests/channel_consolidation.test.ts",
+  },
+  // ---- Deliver: ScheduledAgent executors (#4178) ----
+  {
+    id: "deliver-social",
+    stage: "deliver",
+    capability: "Social publish: build daily drafts then publish due drafts under the approval gating",
+    source: "src/agents/social/goalExecutor.ts#executeSocialGoal (#1077)",
+    inputs: ["brief", "social ledger", "approvals"],
+    outputs: ["drafts + publish results + catch-up"],
+    provenance: "date + channel",
+    owner: "#1077",
+    status: "shipped",
+    verification: "tests/social_goal_executor.test.ts",
+  },
+  {
+    id: "deliver-resource-cap-alert",
+    stage: "deliver",
+    capability: "Resource cap alert: evaluate the UTC day-to-date against the 70%/90%/100% tiers and post breaches to Slack, deduped per budget-day",
+    source: "src/agents/resourceGoals.ts#runResourceCapAlert (#1819)",
+    inputs: ["D1 resource projection", "Slack destination"],
+    outputs: ["alerted / undelivered / noDestination per budget"],
+    provenance: "budget + day",
+    owner: "#1819",
+    status: "shipped",
+    verification: "tests/resource_rollup_alert_1819.test.ts",
   },
 ];
 

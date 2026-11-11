@@ -36,6 +36,8 @@ import {
 
 const STAGES: RegistryStage[] = [
   "feed",
+  "enrich",
+  "analyze",
   "generate",
   "store",
   "serve",
