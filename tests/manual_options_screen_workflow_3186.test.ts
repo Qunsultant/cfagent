@@ -147,5 +147,87 @@ describe("manual options screen through the one pipeline (#3186 step 3d)", () =>
       `options:${runId}:screen`,
     );
     expect(screenArtifact?.result["matchedCount"]).toBe(2);
+
+    // Issue #4067: the failed PDF format is partial + marked - the
+    // shapeReport stage records "partial" (PDF fails in the test env
+    // exactly as on the registry path), the failed format's status +
+    // error ride the canonical row, and the formats that generated
+    // are never stranded.
+    const shapeArtifact = await storage.get<{
+      terminal: string;
+      report: Record<string, unknown>;
+    }>(`options:${runId}:shapeReport`);
+    expect(shapeArtifact?.terminal).toBe("partial");
+    expect(shapeArtifact?.report["pdfStatus"]).toBe("failed");
+    expect(typeof shapeArtifact?.report["pdfError"]).toBe("string");
+    expect(shapeArtifact?.report["xlsxStatus"]).toBe("generated");
+    expect(shapeArtifact?.report["csvStatus"]).toBe("generated");
+    expect(rowBody.pdfStatus).toBe("failed");
+    expect(typeof rowBody.pdfError).toBe("string");
+  });
+
+  it("a failed XLSX leg is partial + marked and never strands the CSV leg (#4067)", async () => {
+    DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
+    const screener = new DynamicOptionsScreener();
+    const sql = new MockSqlStorage();
+    const orm = new DatabaseORM(sql as never);
+    const storage = memoryStorage();
+    const fakeAgent = {
+      generateAndStoreOptionsXlsx: async () => {
+        throw new Error("xlsx generation failed in test");
+      },
+      generateAndStoreOptionsCsv: async () => ({ key: "csv-key-1", fileName: "options.csv" }),
+      getPdfByKey: async () => null,
+      getOptionsXlsxByKey: async () => ({ bytes: new Uint8Array([1]), fileName: "options.xlsx" }),
+      getOptionsCsvByKey: async () => ({ bytes: new Uint8Array([1]), fileName: "options.csv" }),
+    };
+    const ctx = {
+      env: {},
+      getOrm: () => orm,
+      agentCtx: { storage: { ...storage, sql } },
+      ensureTables: () => sql,
+      getScreenerAgent: () => fakeAgent,
+      requestedEnv: undefined,
+    } as never;
+
+    const res = await executeOptionsScreen({
+      ctx,
+      userLogin: "owner@example.com",
+      screener,
+      screenFilter: { underlyingSymbols: ["AAPL"] },
+      screenPushToSlack: false,
+      screenSlackChannel: undefined,
+      screenUniverseLabel: undefined,
+      screenEmailTo: undefined,
+      deferDelivery: false,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body["xlsxKey"]).toBeUndefined();
+    expect(body["csvKey"]).toBe("csv-key-1");
+
+    const rows = Array.from(sql.exec("SELECT * FROM mas_reports")) as any[];
+    expect(rows).toHaveLength(1);
+    const runId = String(rows[0].run_id);
+    const rowBody = JSON.parse(String(rows[0].body));
+    expect(rowBody.xlsxStatus).toBe("failed");
+    expect(typeof rowBody.xlsxError).toBe("string");
+    expect(rowBody.csvKey).toBe("csv-key-1");
+
+    // The CSV leg ran after the XLSX leg failed; the stage is partial.
+    const shapeArtifact = await storage.get<{
+      terminal: string;
+      report: Record<string, unknown>;
+    }>(`options:${runId}:shapeReport`);
+    expect(shapeArtifact?.terminal).toBe("partial");
+    expect(shapeArtifact?.report["xlsxStatus"]).toBe("failed");
+    expect(shapeArtifact?.report["csvStatus"]).toBe("generated");
+    expect(shapeArtifact?.report["csvKey"]).toBe("csv-key-1");
+
+    // All eight stages ran; the run outcome is completed, not failed.
+    expect(storage.keys()).toHaveLength(8);
+    const outcomes = listJobOutcomes(sql as never);
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].status).toBe("completed");
   });
 });
