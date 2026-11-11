@@ -17,9 +17,10 @@ Workflow files can ONLY arrive via the web UI (the API refuses them).
 The gate enforces both; this note exists so you meet them before
 tripping the gate. -->
 ## Agent
-#<your-agent-hashtag>
+#<agent-hashtag>
 
 ## Summary
+What changed and why?
 
 ## Type
 - [ ] Bug fix (`bug`)

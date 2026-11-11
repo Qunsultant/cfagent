@@ -156,6 +156,27 @@ The issue templates live in `.github/ISSUE_TEMPLATE/` on the default branch — 
 ## Agent
 #<agent-hashtag>
 
+## Type
+Title convention + label (check one; title prefix and label must match):
+- [ ] `[Enterprise Architecture] - <title>` + `ent-arch` (+ `architecture`): cross-cutting architecture decision, standard, pattern, or governance item (usually epic or ADR-linked)
+- [ ] `[Bug] - <title>` + `bug`: defect in shipped behavior
+- [ ] `[Enhancement] - <title>` + `enhancement`: new or improved capability
+- [ ] `[Fix] - <title>` + `fix`: planned correction (non-urgent)
+- [ ] `[Hotfix] - <title>` + `hotfix`: urgent production fix (emergency rules, gitops §18.2, still apply)
+- [ ] Task (no type prefix; `lane:<lane>` label still required)
+
+## Size
+Estimate the work, not the importance. Pick one.
+- [ ] Small — one focused change, one PR, no migration, no cross-surface coordination
+- [ ] Medium — several files or one migration, one PR, coordination with one other surface or lane
+- [ ] Large — multi-slice work, migrations, or cross-lane coordination; split into smaller issues (each one-PR-sized) — a sub-issue's work never spans multiple PRs (gitops §5, issue #4072)
+
+## Priority
+How urgent this is, not how big it is. Pick one.
+- [ ] Low — nice to have; no deadline, deferrable without user impact
+- [ ] Medium — needed for a planned milestone; short deferral acceptable
+- [ ] High — blocks users, a release, or another lane's work; needs prompt attention
+
 ## Problem
 What is wrong or missing?
 
@@ -172,9 +193,24 @@ Journey impact — REQUIRED before/after statement (an issue without it is incom
 - Journey after this change (how it works once this lands):
 - What the user sees/does differently (be specific; where the change touches navigation, name the nav/preset states — which items appear/disappear, which preset is active, what an empty selection shows):
 
+## Existing / similar issues (required — search BEFORE creating)
+- [ ] I searched existing issues (open and closed) for the same or similar work before creating this issue.
+- Same or similar issues found (reference each by number; state whether it already covers this work, only overlaps it, or is distinct):
+  - #NNNN — <title> — <covers / overlaps / distinct because …>
+  - (If none found, write "None found" and give the search terms used below.)
+- Search terms used:
+- If an existing issue already covers this work, do NOT create a duplicate — comment on that issue instead. A new issue is justified only when no existing issue covers it, or when the difference is stated above. (Record confirmed relationships under Related issues below.)
+
+## Related issues
+Parent epic:
+Blocks / Blocked by:
+Related:
+Supersedes:
+
 ## Scope
 Included:
 Excluded:
+Scope discipline: every item excluded from this issue gets its own sub-issue under this issue, created at the time it is identified and linked under Related issues — never left as a follow-up note, TODO, or 'future work' line. An excluded item with no sub-issue is a review finding.
 
 ## Acceptance criteria
 - [ ] Observable, testable criterion
@@ -184,6 +220,7 @@ Excluded:
 ## Test plan
 
 ## Dependencies
+Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
 
 ## Parallelism (issue #4070)
 Parallel or Serial:
@@ -255,6 +292,7 @@ All development on this issue must follow:
 - Workflows operationalized:
 - How to harness this value from UX:
 - Process docs updated (file + commit, or none with reason):
+- Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
 - Remaining work (issue #4071 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):
 ```
@@ -506,6 +544,10 @@ Parallel lanes work this repository concurrently. Before starting an issue:
 
 Two lanes working the same issue silently produce duplicate PRs (the #672 fix was built twice in parallel; one PR landed and the other closed as superseded). A claim does not reserve the issue forever — it makes the collision visible before the work is duplicated.
 
+Live work ledger (issue #4075): a single live index of active work — a docs page or a pinned issue — listing, per active claim: issue, branch, PR, lane, status. It is generated from GitHub (open branches, open PRs, claim comments), not hand-maintained, and refreshed when a claim is made or a PR merges. Check the ledger before claiming, alongside the branch/PR check above.
+
+Push transport (issue #4085): a real git push stalls on the VM egress proxy, so branches are published with push-files (whole-file snapshot) — that snapshot push is what overwrote #3650's guard in #3655. Until the proxy is fixed, the snapshot path is the transport; the rebase rule (§11) still applies to it. Fixing the proxy is infra work, tracked by #4085.
+
 ### Updating an issue branch
 
 Fetch first:
@@ -602,6 +644,8 @@ Verify in tiers (issue #4052):
 - **Tier 1 — fast gate, before publishing (minutes):** strict typecheck, affected suites, pin suites, migration-pin lint, and the policy-gate check on the PR body.
 - **Tier 2 — full suite, in CI:** the full test suite runs in CI on the PR head and on the merge-group commit. A merge requires the queue + required checks green; the local full run does not gate the push.
 - **Tier 2 locally** only when the change touches shared or censused surfaces (for example a doc under the neutrality census, shared routers/ports, workflow files) or when CI cannot run.
+
+One shared Tier 1 script (issue #4082): `scripts/verify-tier1.sh` implements the Tier 1 gate once, identical for every lane. Per-slice verify scripts are retired in place (deprecated, pointing at the shared script) — a lane does not re-implement the gate.
 
 The merge gate is unchanged: the full suite still runs before any merge, in CI, on the exact merge-group commit.
 
@@ -793,20 +837,51 @@ Every pull request carries its creating agent's name as a hashtag in the `## Age
 ## Summary
 What changed and why?
 
+## Type
+- [ ] Bug fix (`bug`)
+- [ ] Enhancement (`enhancement`)
+- [ ] Fix (`fix`)
+- [ ] Hotfix (`hotfix`)
+- [ ] Enterprise Architecture (`ent-arch`, `architecture`)
+- [ ] Docs / Chore (no type label required)
+
 ## Linked issue
-Closes #123
+OpenAIMP/cfagent#<number> (add a closing keyword only when this PR fully resolves the issue)
+
+## Related issues
+Parent epic:
+Blocks / Blocked by:
+Related:
+Supersedes:
 
 ## Full report
-The full report for this PR lives in the linked issue's completion report (gitops §15). This PR body is a pointer, not a second record.
+The full report for this PR — implementation, test evidence, change management, value and impact, risk, delivery, and release — lives in the linked issue's completion report (gitops §15). This PR body is a pointer, not a second record.
 
 This PR completes its linked issue in full (issue #4072: one sub-issue = one PR). If the issue's work does not fit this PR, split the issue first — do not split the work across PRs.
 
 ## Checklist
 - [ ] Required checks green on the current merge with `main`
 - [ ] Pins my change alters are updated in this PR (gitops §7)
+- [ ] UX changes use ui/ primitives and tokens only (docs/agents/ux-architecture.md §20)
 - [ ] CHANGELOG fragment added (changelog.d/, preferred) or entry added (additive, under Unreleased)
-- [ ] Process documentation impact: none / updated <file> (<commit>)
+- [ ] No file deleted in this PR (pure renames only; deprecate in place instead — gitops §22, gate check (i))
+- [ ] Any new deprecation names what superseded it (gitops §22, gate check (j))
 - [ ] Linked issue's completion report updated with this PR's full report
+- [ ] This PR completes its linked issue in full — no follow-up PR carries the rest of this issue's work (gitops §5, issue #4072)
+- [ ] Related issues recorded above (parent epic, blocks/blocked-by, related, supersedes — or none)
+- [ ] Surfaces touched named (UX / CLI / API / MCP — or none)
+
+## Pre-merge checklist — first-attempt merge
+- [ ] Linked issue uses the full reference OpenAIMP/cfagent#<number> (a bare #N fails gate check (a); add a closing keyword only when this PR fully resolves the issue)
+- [ ] Every pin file this change affects is updated in this PR, including counts in files the slice did not otherwise touch (nav counts, panel/page pins, route inventory, orchestrator budgets — gitops §7)
+- [ ] PR CI green on its head, with the full check set present — a head showing only the label check after ~15 min is a dropped trigger: re-trigger (no-op push) and re-judge; never mark ready on a partial tab
+- [ ] Mark ready with auto-merge on as soon as PR CI is green, and let the merge queue validate (merge_group) against current main and merge — do NOT hold the PR as a draft while main moves. Manual base-update-judge cycles are the failure mode, not the fix: the queue absorbs main movement, and gate check (f) is bypassed in merge_group mode, so a stale-but-non-conflicting branch merges via the queue
+- [ ] Intervene only if the queue kicks the PR out: conflict → rebuild once (keep both blocks, fix pins, verify the stacked tree); merge_group CI failure → fix the real failure once, then re-ready
+- [ ] Multiple ready + auto-merge PRs are fine — the queue serializes them. A 405 means the queue owns the merge; never force-push; rebase merges only
+- [ ] Latest run per check name governs — a Cancelled run with a later Success is not a failure
+
+## Process documentation impact
+Process documentation impact: <none, or what process docs this PR changes>
 ```
 
 Use automatic closing keywords only when the PR fully resolves the issue.
@@ -872,6 +947,10 @@ Configure checks appropriate to the repository:
 | Delivery | Preview/staging smoke tests and migration validation |
 
 Required check names and triggering conditions must be stable and intentional.
+
+### Stuck-run detection (issue #4087)
+
+A run that hangs past its deadline is flagged, not left silent: queue entries, workflow runs, and browser tasks hanging past their deadline get flagged visibly (see #3954 for the detection mechanism). The ruleset browser task that died unnoticed after two hours waiting for a sign-in (2026-11-11) is the shape this catches. Flagging only — the retry decision stays with the lane.
 
 GitHub can consider `skipped` or `neutral` statuses acceptable for required checks. Therefore, configure explicit gating so required tests cannot silently disappear behind conditions. [docs.github](https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/about-protected-branches)
 
@@ -940,6 +1019,8 @@ Do not change merge strategy unilaterally.
 If a merge queue is required, enqueue the PR. Ensure GitHub Actions workflows handle `merge_group` events so queue-created integration commits receive their required checks. [docs.github](https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
 
 **Merge-queue auto-merge enrollment (moved from repo AGENTS.md, #3816).** When a merge queue is configured, never pass strategy flags (`--rebase`, `--squash`, or `--merge`) to `gh pr merge --auto`. Use `gh pr merge --auto` directly — the merge-queue ruleset manages the merge method (REBASE). Passing strategy flags causes the CLI to exit without enqueuing.
+
+Queue grouping (issue #4088): the queue groups at most 5 entries per group with ALLGREEN. The grouping value is an owner setting, recorded here when changed; a larger group size is tried and observed on a busy window, and reverted if a red entry blocks groups more than it helps. ALLGREEN and the required checks are unchanged by grouping.
 
 **Linear history on the PR branch (moved from repo AGENTS.md, #3816).** Maintain linear history by rebasing (`git rebase origin/main`) rather than creating merge commits on the PR branch. While the Policy Gate dynamically resolves PR branch parents on merge commits (#2546), clean rebased commits prevent accidental history distortion and speed up merge-queue evaluation.
 
@@ -1016,6 +1097,8 @@ Every release MUST have:
 - Release notes.
 
 A merged PR is not automatically a released feature.
+
+Deploy gated on CI (issue #4086): deploy starts only for a commit whose CI has passed — the gate is on the CI run for the exact deployed revision, and the deployed commit's CI run is named in the deploy record. A merged commit whose CI has not passed is not deployable.
 
 ### Versioning
 
@@ -1200,6 +1283,7 @@ Agents cannot approve their own exceptions.
 - Workflows operationalized:
 - How to harness this value from UX:
 - Process docs updated (file + commit, or none with reason):
+- Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
 - Remaining work (issue #4071 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):
 ```
@@ -1214,6 +1298,8 @@ Do not report `PASS` when:
 - A known test-coverage gap for the changed behavior is undisclosed.
 
 The Risks and limitations section MUST state known test-coverage gaps for the changed behavior explicitly — behavior that shipped without dedicated tests, paths exercised only in production, suites known to be load-flaky. A gap disclosed in the report is a tracked limitation; a gap discovered later is a misreport. (Standing example: #218's digest behavior shipped without dedicated tests; the gap belonged in its completion report, not in a verification pass weeks later. See also §18.4 on stub honesty.)
+
+Unposted-§15 ledger (issue #4077): a single ledger (a docs file) lists every unposted §15 with its draft location and the approval still needed, updated when a §15 is posted. An unposted §15 is a visible open item, not a forgotten draft. Posting still needs separate user approval — the ledger tracks, it does not post.
 
 ***
 
@@ -1249,6 +1335,8 @@ The Risks and limitations section MUST state known test-coverage gaps for the ch
 ## 17. Post-merge verification discipline
 
 Merging is not completion. A PR merged without verifying the feature works in production is an unverified change. Every merged PR MUST pass the verification steps below before its issue is marked Done; unrelated work may continue in parallel.
+
+Auto-close reconciliation (issue #4076): a scheduled check reconciles merged-but-open issues — for each open issue whose PR merged, it comments the merge commit and closes the issue, with the merge commit as the evidence. An open issue may already be on main (#3655, #3868, #3872 stayed open after merging); the reconciliation keeps the board truthful. No bare force-close: a close without its merge evidence is not a reconciliation.
 
 ### 17.1. Integration over unit tests
 
@@ -1594,11 +1682,11 @@ implement.
   `non_fast_forward`, `pull_request`, `required_linear_history`,
   `required_status_checks` and **`merge_queue`**. The queue merges by
   `REBASE` with `ALLGREEN` grouping and up to 5 entries;
-  `strict_required_status_checks_policy` is **false**, so a branch is
-  NOT required to be up to date before merging — the queue builds each
-  entry on the latest base. Earlier text in this bullet claimed no
-  merge-queue rule existed and that branches had to be up to date;
-  both are superseded. Re-verify with
+  `strict_required_status_checks_policy` is **true** (owner decision
+  2026-11-11, issue #4053; verified live 2026-11-11), so a branch must
+  be up to date with `main` before merging — the queue rebuilds the
+  merge group when `main` moves. Earlier text in this bullet claimed
+  strict was false; that is superseded. Re-verify with
   `gh api repos/<owner>/<repo>/rulesets` before relying on this. The bypass list must be empty, except for
   a documented owner emergency path: an owner bypass is permitted
   only when it files a restore issue in the same action (§18.1
@@ -1613,6 +1701,7 @@ implement.
   ruleset's required checks. Treat the gate as active only after
   verifying the live ruleset includes it; if it is missing, report the
   enforcement gap.
+- **Gate checks the new rules (issue #4079).** The gate also checks the rules landed in PR #4074: a sub-issue under an epic declares Parallelism (Parallel/Serial, Depends on, Conflicts with); a PR completes its linked issue in full (one sub-issue = one PR); a completed issue's §15 carries a Remaining work line. A PR violating them fails the gate with a named check.
 - **No-deletion and deprecation rule (owner direction 2026-10-27, #1894; rename form owner direction 2026-10-29, #2299).**
   No PR may delete a file — the gate fails any deletion with no label
   bypass (the `allow-test-deletion` label no longer permits deletions).
@@ -1667,12 +1756,15 @@ implement.
   each code standard operationally and points to its canonical source;
   it does not copy rule text wholesale, and delivery and process rules
   remain here.
+- **Template and workflow sync (issue #4081).** Three sources state the same rules — this document's embedded templates (§5, §9, §15), the GitHub template files (`.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE/`), and the workflow files (`.github/workflows/`) — and they drift. They are one rule: a change to any one updates the other two in the same PR. A doc-freshness test (`tests/gitops_doc_freshness_*.test.ts`) asserts the embedded templates match the GitHub files section for section, and that this document's description of the auto-merge workflow matches the workflow file's own header comment. Deliberate supersets — gate comments, the pre-merge checklist, the Type/Size/Priority sections — are documented in the test, not treated as drift.
+- **Skill files do not restate delivery rules (issue #4083).** Lane skill files point at this document instead of duplicating delivery rules. A rule that lives only in one lane's skill file is drift, not a rule — the #4044 no-stale-branch rule bound nobody until it was amended into this document (PR #4059).
 - **Where agents meet these rules.** These rules are also stated in
   the PR template checklist (seen at PR creation), so an agent meets
   them before tripping the gate — not only in a gate failure message.
   Repo AGENTS.md points here without restating the rules (#3816: this
   document is their single home). The gate remains the enforcement
   for agents that read neither (including external agents).
+- **CODEOWNERS for shared surfaces (issue #4078).** `.github/CODEOWNERS` covers the shared surfaces (routers, ports, the recorder, the canonical report store) with the owning lane for each, and a change to a shared surface requires its owner's review. #2556 found CODEOWNERS did not cover control files; the same gap applied to shared surfaces. The owner mapping for each surface is a decision for the #4078 slice, not assumed here.
 - **Zero-touch documentation merges (#2555; moved from repo
   AGENTS.md, #3816).** A PR whose touched files are strictly confined
   to `docs/` or markdown files — and which touches nothing under

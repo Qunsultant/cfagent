@@ -7,7 +7,7 @@ assignees: []
 ---
 
 ## Agent
-#<your-agent-hashtag>
+#<agent-hashtag>
 
 ## Type
 - [x] `[Enterprise Architecture] - <title>` + `ent-arch` (+ `architecture`)
@@ -81,6 +81,11 @@ How the decision will be validated (review, prototype, metrics — or review-onl
 ## Dependencies
 Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
 
+## Parallelism (gitops §5, issue #4070)
+Parallel or Serial:
+Depends on (issue numbers, or none):
+Conflicts with (shared files/surfaces, or none):
+
 ## Change management (expected)
 Expected impact:
 Migration and data impact:
@@ -107,5 +112,7 @@ For each doc, write `applies (evidence: …)` or `N/A (reason: …)`:
 Allocation (or none — architecture decisions are human judgment; agents draft, owners decide):
 
 ## Completion report (gitops §15 — fill on close)
-Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
+- Process docs updated (file + commit, or none with reason):
+- Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
+- Remaining work (gitops §15 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):
