@@ -1,0 +1,3 @@
+### Fixed
+
+- **Public.com's option chain follows the same rules as Alpaca and E*TRADE (#4036):** the mapper had never been compared to the brokers it claims parity with, and it shipped a contract on a last trade alone. A contract now needs a **two-sided quote** (bid *and* ask) to enter the chain — a last print cannot be priced or traded — and `lastPrice` is the printed trade when there is one, otherwise the bid/ask midpoint, which is the same documented derivation Alpaca uses. Greeks and IV appear only where Public sends them: absent stays absent, never zero. Pinned by `tests/public_option_chain_parity_4036.test.ts` (7 tests: shape, two-sided rule, midpoint derivation, absent greeks, pairing/order, unparseable expiry, and refusing to invent an underlying price).
