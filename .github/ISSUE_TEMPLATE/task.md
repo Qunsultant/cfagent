@@ -22,7 +22,7 @@ Title convention + label (check one; title prefix and label must match):
 <!-- Estimate the work, not the importance. Pick one. -->
 - [ ] Small — one focused change, one PR, no migration, no cross-surface coordination
 - [ ] Medium — several files or one migration, one PR, coordination with one other surface or lane
-- [ ] Large — multi-PR or multi-slice work, migrations, or cross-lane coordination; split into smaller issues when possible
+- [ ] Large — multi-slice work, migrations, or cross-lane coordination; split into smaller issues (each one-PR-sized) — a sub-issue's work never spans multiple PRs (gitops §5, issue #4072)
 
 ## Priority
 <!-- How urgent this is, not how big it is. Pick one. -->
@@ -70,6 +70,11 @@ Scope discipline: every item excluded from this issue gets its own sub-issue und
 
 ## Dependencies
 Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
+
+## Parallelism (gitops §5, issue #4070)
+Parallel or Serial:
+Depends on (issue numbers, or none):
+Conflicts with (shared files/surfaces, or none):
 
 ## Change management (expected)
 Expected impact:
@@ -136,4 +141,5 @@ All development on this issue must follow:
 - Workflows operationalized:
 - How to harness this value from UX:
 - Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
+- Remaining work (gitops §15 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):
