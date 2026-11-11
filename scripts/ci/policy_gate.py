@@ -35,6 +35,10 @@ messages are not fallback context.
 (h) Process documentation line (gitops §23: PR body must carry the §9
     "Process documentation impact:" checklist line — presence only,
     never a judgment of the decision's quality)
+(k) Out-of-scope line (gitops §5/§9, issue #4099): PR body must carry
+    the §9 "Out of scope:" line — presence only, never a judgment of
+    whether the [Out-of-Scope] sub-issues it names are the right ones.
+    "None" is a valid value.
 """
 
 import argparse
@@ -220,6 +224,18 @@ def evaluate_policy(
                 "(h) process documentation: PR body has no "
                 "'Process documentation impact:' checklist line "
                 "(see gitops §9/§23)"
+            )
+
+        # (k) Out-of-scope line (gitops §5/§9, issue #4099). Presence only:
+        # the gate checks that the §9 "Out of scope:" line exists in the PR
+        # body, never whether the [Out-of-Scope] sub-issues it names are the
+        # right ones. "None" is a valid value. Checked against the PR body
+        # alone (not commit messages), like (h).
+        if not re.search(r"(?i)out of scope\s*:", body):
+            failures.append(
+                "(k) out of scope: PR body has no "
+                "'Out of scope:' line "
+                "(see gitops §9, issue #4099)"
             )
 
     # (d) CHANGELOG entry under ## [Unreleased], or a changelog.d fragment.
