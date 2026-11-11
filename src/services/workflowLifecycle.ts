@@ -50,6 +50,7 @@ export function lifecycleStateForRunStatus(status: string): WorkflowLifecycleSta
   switch ((status ?? "").trim()) {
     case "cancelled":
     case "terminated":
+    case "retired":
       return "cancelled";
     case "completed":
     case "partial":
@@ -72,7 +73,8 @@ export function lifecycleStateForRunStatus(status: string): WorkflowLifecycleSta
 }
 
 /**
- * A run's lifecycle state. A run whose stages are all cancelled is
+ * A run's lifecycle state. A run whose stages are all cancelled
+ * (or retired — a retired stage settles its run cancelled) is
  * cancelled even when its status verb is unknown — the recorded
  * cancellation wins over the verb. Otherwise the status mapping
  * decides.
@@ -84,7 +86,7 @@ export function lifecycleStateForRun(run: {
   if (run.status === "cancelled" || run.status === "terminated") return "cancelled";
   if (
     run.stages.length > 0 &&
-    run.stages.every((s) => s.status === "cancelled" || s.status === "terminated")
+    run.stages.every((s) => s.status === "cancelled" || s.status === "terminated" || s.status === "retired")
   ) {
     return "cancelled";
   }
