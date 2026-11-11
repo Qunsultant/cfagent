@@ -1,4 +1,4 @@
-# #4065: options feed — chains as a registered feed job with a persisted dataset
+### Options feed (#4065)
 
 ## Decision (a): register options-chains as a feed job
 
