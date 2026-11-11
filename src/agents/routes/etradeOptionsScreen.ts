@@ -49,6 +49,10 @@ import {
   createManualOptionsScreenDelivery,
 } from "../../workflows/manualOptionsScreen";
 import { createSqlStageClaimStore } from "../../data/stageClaimsStore";
+import { createSqlDeliverySuppressionStore } from "../../data/deliveryClaimsStore";
+import {
+  createDeliverySuppressor,
+} from "../../workflows/screenDeliverySuppression";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -103,6 +107,15 @@ export async function executeOptionsScreen(args: {
       screenEmailTo,
       deferDelivery,
       canonicalLeg,
+      // Issue #4064: the durable duplicate-delivery suppressor
+      // for this entry — the ONE module, backed by
+      // mas_delivery_claims in this DO's SQLite (the same table
+      // and key space the followup.deliver executor claims into,
+      // so a re-run/replay of the same run never re-sends).
+      // Same store handle shape as the stage claims above.
+      suppressor: createDeliverySuppressor(
+        createSqlDeliverySuppressionStore(() => ctx.agentCtx.storage.sql),
+      ),
     }),
     record: createManualOptionsRecordBuilder(ctx as never),
     demoFallback: isDemoCalibratedChainsEnabled(),
