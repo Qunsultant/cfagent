@@ -45,6 +45,7 @@ How the change was checked (read-through, render check — no code or tests ride
 
 ## Checklist
 - [ ] No code or tests ride in this PR (docs / chore only — a `docs(...)` title marks this PR docs-only for the gate; never use one when a code or test file rides along)
+- [ ] This PR completes its linked issue in full (or none, for a zero-touch docs change — gitops §5, issue #4072)
 - [ ] No file deleted in this PR (pure renames only; deprecate in place instead — gitops §22, gate check (i))
 - [ ] Linked issue's completion report updated with this PR's full report (or none, for a zero-touch docs change)
 

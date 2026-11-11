@@ -41,6 +41,8 @@ Supersedes:
 ## Full report
 The full report for this PR — implementation, test evidence, change management, value and impact, risk, delivery, and release — lives in the linked issue's completion report (gitops §15). This PR body is a pointer, not a second record.
 
+This PR completes its linked issue in full (gitops §5, issue #4072: one sub-issue = one PR). If the issue's work does not fit this PR, split the issue first — do not split the work across PRs.
+
 ## Checklist
 - [ ] Required checks green on the current merge with `main`
 - [ ] Pins my change alters are updated in this PR (gitops §7)
@@ -49,6 +51,7 @@ The full report for this PR — implementation, test evidence, change management
 - [ ] No file deleted in this PR (pure renames only; deprecate in place instead — gitops §22, gate check (i))
 - [ ] Any new deprecation names what superseded it (gitops §22, gate check (j))
 - [ ] Linked issue's completion report updated with this PR's full report
+- [ ] This PR completes its linked issue in full — no follow-up PR carries the rest of this issue's work (gitops §5, issue #4072)
 - [ ] Related issues recorded above (parent epic, blocks/blocked-by, related, supersedes — or none)
 - [ ] Surfaces touched named (UX / CLI / API / MCP — or none)
 
