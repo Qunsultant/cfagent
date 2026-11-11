@@ -163,6 +163,10 @@ import {
   planRun,
   planStageFanout,
 } from "../workflows/stageRunnerPlan";
+import {
+  OPTIONS_ADDRESSABLE_STAGES,
+  type OptionsPipelineStage,
+} from "../workflows/stageRuntimeIds";
 import type { PipelineStage } from "../types";
 
 /**
@@ -466,22 +470,62 @@ export function vocabularyStageForNodeKind(kind: string): StageName | null {
 }
 
 /**
+ * Issue #4061 (#3551 prep slice) — the options vocabulary in the
+ * engine: the family's 8 execution stages (OPTIONS_ADDRESSABLE_STAGES,
+ * pinned by #4067) name themselves — an options job node's kind IS
+ * its vocabulary stage, so the kind names the stage by identity.
+ * No second list: membership in the #4067 pin IS the vocabulary,
+ * so the pin stays the single source of truth. The display stages
+ * (feed/store/serve) are presentation only and name no control
+ * address: they have no entry here, so a request for one refuses
+ * stage_vocabulary_unknown. "deliver" is the one id shared with
+ * the catalog vocabulary (execution stage 8); it resolves through
+ * both tables to the same node.
+ */
+export function optionsVocabularyStageForNodeKind(kind: string): OptionsPipelineStage | null {
+  return (OPTIONS_ADDRESSABLE_STAGES as readonly string[]).includes(kind)
+    ? (kind as OptionsPipelineStage)
+    : null;
+}
+
+/**
+ * A stage addressable by (runId, stageId): a catalog stage or an
+ * options execution stage. The seven *ByVocabulary operations take
+ * this union; the (jobId, nodePath) twins they delegate to still
+ * take node paths, so their meanings are unchanged.
+ */
+export type VocabularyStage = StageName | OptionsPipelineStage;
+
+/**
  * Resolve a vocabulary stage of a job definition to its node
- * path — the (runId, stageId) address's node half. Exactly one
- * node may claim the stage: none refuses
- * `stage_vocabulary_unknown`, two or more refuse
- * `stage_vocabulary_ambiguous` (a stage split across nodes is
- * not one addressable stage). The walk is pre-order, root first
+ * path — the (runId, stageId) address's node half. A node claims
+ * a stage under either naming rule: its kind maps to the catalog
+ * stage (#3945), or its kind IS the options stage (#4061). One
+ * node matching both rules is one match, not two — the shared
+ * "deliver" id resolves once. Exactly one node may claim the
+ * stage: none refuses `stage_vocabulary_unknown`, two or more
+ * refuse `stage_vocabulary_ambiguous` (a stage split across nodes
+ * is not one addressable stage). The walk is pre-order, root first
  * — a root whose kind is a vocabulary stage (the chain's feed
  * root) resolves to "".
+ *
+ * Shared kind name, documented: the J-pipeline kind "enrich" IS
+ * the gather stage, and the options enrich stage carries that
+ * same kind — so "gather" and "enrich" address one node on an
+ * options-shaped definition, and the twin behaves identically
+ * under either name.
  */
 export function vocabularyStageNodePath(
   definition: JobDefinition,
-  stage: StageName,
+  stage: VocabularyStage,
 ): string {
   const matches: string[] = [];
   const walk = (node: JobNodeConfig, path: string): void => {
-    if (vocabularyStageForNodeKind(node.kind) === stage) matches.push(path);
+    if (
+      vocabularyStageForNodeKind(node.kind) === stage ||
+      optionsVocabularyStageForNodeKind(node.kind) === stage
+    )
+      matches.push(path);
     const children = node.children ?? [];
     for (let i = 0; i < children.length; i++) {
       walk(children[i], childPath(path, i));
@@ -1479,11 +1523,12 @@ export class JobPipelineControl {
     return { registrationId, schedule };
   }
 
-  // ---- uniform stage control addressed by vocabulary stage (#3945) ----
+  // ---- uniform stage control addressed by vocabulary stage (#3945, #4061) ----
   //
   // The same seven operations, addressed by (runId, stageId) with
-  // the stage half a vocabulary (catalog) stage name instead of a
-  // node path. Each resolves the stage to its node path through
+  // the stage half a vocabulary stage name instead of a node path:
+  // a catalog stage (#3945) or an options execution stage (#4061).
+  // Each resolves the stage to its node path through
   // vocabularyStageNodePath and delegates to its (jobId, nodePath)
   // twin — the twins' meanings, claims, and refusals ARE the
   // operation, so a vocabulary address can never behave
@@ -1493,7 +1538,7 @@ export class JobPipelineControl {
   // need no run and address the definition's node directly.
 
   /** Resolve one vocabulary stage of one job to its node path. */
-  private async vocabularyNodePath(jobId: string, stage: StageName): Promise<string> {
+  private async vocabularyNodePath(jobId: string, stage: VocabularyStage): Promise<string> {
     const definition = await this.requireDefinition(jobId);
     return vocabularyStageNodePath(definition, stage);
   }
@@ -1501,7 +1546,7 @@ export class JobPipelineControl {
   /** Run a vocabulary stage that has not run in the current run. */
   async runStageByVocabulary(
     jobId: string,
-    stage: StageName,
+    stage: VocabularyStage,
     opts?: { runId?: string },
   ): Promise<JobDispatchResult> {
     return this.runStage(jobId, await this.vocabularyNodePath(jobId, stage), opts);
@@ -1510,24 +1555,24 @@ export class JobPipelineControl {
   /** Re-run a completed or failed vocabulary stage from its persisted input. */
   async rerunStageByVocabulary(
     jobId: string,
-    stage: StageName,
+    stage: VocabularyStage,
     opts?: { runId?: string },
   ): Promise<JobDispatchResult> {
     return this.rerunStage(jobId, await this.vocabularyNodePath(jobId, stage), opts);
   }
 
   /** Stop a running vocabulary stage — non-terminal, resumable. */
-  async stopStageByVocabulary(jobId: string, stage: StageName): Promise<JobInstanceRecord> {
+  async stopStageByVocabulary(jobId: string, stage: VocabularyStage): Promise<JobInstanceRecord> {
     return this.stopStage(jobId, await this.vocabularyNodePath(jobId, stage));
   }
 
   /** Resume a stopped vocabulary stage from its persisted checkpoint. */
-  async resumeStageByVocabulary(jobId: string, stage: StageName): Promise<JobDispatchResult> {
+  async resumeStageByVocabulary(jobId: string, stage: VocabularyStage): Promise<JobDispatchResult> {
     return this.resumeStage(jobId, await this.vocabularyNodePath(jobId, stage));
   }
 
   /** Cancel a vocabulary stage — terminal, surfaced as cancelled. */
-  async cancelStageByVocabulary(jobId: string, stage: StageName): Promise<JobInstanceRecord> {
+  async cancelStageByVocabulary(jobId: string, stage: VocabularyStage): Promise<JobInstanceRecord> {
     return this.cancelStage(jobId, await this.vocabularyNodePath(jobId, stage));
   }
 
@@ -1544,7 +1589,7 @@ export class JobPipelineControl {
   /** Schedule a vocabulary stage: attach it to the schedule mechanism. */
   async scheduleStageByVocabulary(
     jobId: string,
-    stage: StageName,
+    stage: VocabularyStage,
     spec: { cron?: string; interval?: string },
     reason: string,
     host?: JobScheduleHost,
@@ -1561,7 +1606,7 @@ export class JobPipelineControl {
   /** Re-schedule a vocabulary stage: one atomic action. */
   async rescheduleStageByVocabulary(
     jobId: string,
-    stage: StageName,
+    stage: VocabularyStage,
     spec: { cron?: string; interval?: string },
     reason: string,
     host?: JobScheduleHost,
