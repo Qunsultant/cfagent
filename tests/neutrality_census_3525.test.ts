@@ -381,6 +381,13 @@ const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
   ["README.md", "etrade", 3],
   ["README.md", "yahoo", 1],
+  // #4038/#4039 INTEGRATION: the broker parity matrix names the brokers it
+  // compares by definition; the table is the artefact, not platform framing.
+  ["docs/architecture/broker-parity-matrix.md", "etrade", 2],
+  ["docs/architecture/broker-parity-matrix.md", "public.com", 1],
+  ["docs/architecture/broker-parity-matrix.md", "alpaca", 2],
+  ["docs/architecture/broker-parity-matrix.md", "yahoo", 1],
+  ["docs/architecture/broker-parity-matrix.md", "nasdaq", 1],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "alpaca", 8],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "etrade", 19],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "yahoo", 5],
