@@ -583,7 +583,13 @@ Refactor production code and tests where useful. Keep tests independent and unde
 
 ### Step 5: Verify
 
-Run affected tests and required repository checks.
+Verify in tiers (issue #4052):
+
+- **Tier 1 — fast gate, before publishing (minutes):** strict typecheck, affected suites, pin suites, migration-pin lint, and the policy-gate check on the PR body.
+- **Tier 2 — full suite, in CI:** the full test suite runs in CI on the PR head and on the merge-group commit. A merge requires the queue + required checks green; the local full run does not gate the push.
+- **Tier 2 locally** only when the change touches shared or censused surfaces (for example a doc under the neutrality census, shared routers/ports, workflow files) or when CI cannot run.
+
+The merge gate is unchanged: the full suite still runs before any merge, in CI, on the exact merge-group commit.
 
 ### Additional rules
 
@@ -725,6 +731,8 @@ Do not fabricate authorship, reviewer approval, or signatures.
 
 ### Before pushing
 
+Publish early (issue #4051): when code is complete locally, publish it immediately — create the branch on GitHub from current `main`, push the changed files, and open a DRAFT pull request. The draft PR is the collaboration surface: collaborators can pull the branch, review the diff, and build on it. Verification runs on the branch (locally and in CI); fixes land as new commits on the same branch. The merge stays gated by the Merge Queue + required checks, so nothing unproven reaches `main`.
+
 Inspect:
 
 ```bash
@@ -733,16 +741,16 @@ git diff --check
 git diff
 ```
 
-Run the repository’s applicable validation commands.
-
-For this repository the applicable battery is:
+Run the Tier 1 fast gate before publishing (see §7 Step 5):
 
 - `npx tsc --noEmit -p tsconfig.json` — typecheck clean.
-- `npm run test:ci` — the full test suite, not only the touched files.
+- Affected suites, not only the touched files.
+- Pin suites (`npm run test:pins`) and the migration-pin lint.
+- The policy-gate check on the PR body.
 - The production build.
 - The repository gates the change touches (see §7, the pin rule): `node scripts/token-coverage.mjs` reports TOTAL raw = 0 for client changes, the dangling-var() ratchet suite passes, `npm run tokens:gen -- --check` reports the token mirror in sync, and every pin the change alters is updated in the same change.
 
-A battery failure is classified under §10 before pushing. Never push a red battery "to let CI sort it out" — CI is the confirmation of a green local run, not a substitute for one.
+The full test suite (`npm run test:ci`) is Tier 2: it runs in CI on the PR head and the merge-group commit, not as a pre-push gate. A Tier 1 failure is classified under §10 before pushing. Never push a red Tier 1 battery "to let CI sort it out" — CI is the confirmation of a green Tier 1 run, not a substitute for one.
 
 Check for:
 
@@ -938,6 +946,8 @@ that genuinely removes a file `main` holds.
 
 Rebase when the branch is **conflicted** (`mergeable: CONFLICTING`), or
 when a failing check names a conflict — not to chase `main`.
+
+The no-stale rule (issue #4044, amended by #4051) governs the **merge**, not branch publication: a branch published from a base that later moves is normal — pushing to a feature branch cannot revert anything on `main`. Staleness is resolved at merge time, by the queue rebuilding the merge group on current `main` and by strict required status checks (see §19.5). The live-main re-check (issue #4044) therefore applies before opening the PR and before pushing further commits onto a PR branch — not before first publication, where the branch is created from live `main` by construction.
 
 ### After merge
 
@@ -1338,6 +1348,7 @@ Manual rebasing does not scale to concurrent lanes: two PRs can each be green on
   Note: GitHub App / API tokens without the `workflow` scope cannot edit files under `.github/workflows/` (403 "Resource not accessible by integration") — this one-line change must be applied by the owner in the GitHub web UI or pushed from a checkout whose credentials carry workflow scope. Until it lands, the queue gates nothing and the AGENTS.md checklist remains the control. `deploy.yml` stays push-only: a queued merge that lands on `main` triggers deploy via the push event, so deploy does not need a `merge_group` trigger and MUST NOT be a required PR check (it never runs on PRs).
 - **Required-check names are fragile by construction:** the CI test job's name embeds the active environment (`Test & Build (Node 22) [PROD]`), which is read from `environment.config.json`. If that config flips environment, the job name changes and the protection rule's required checks silently stop matching. Whenever `environment.config.json` changes, the owner MUST re-check the required-check list against the actual job names on the next CI run.
 - **Until the queue is enabled**, the AGENTS.md pre-merge checklist is the manual substitute: rebase, re-test on the rebased head, verify post-merge CI — and treat any merge that skipped those steps as a §19.4 deviation, recorded on the PR.
+- **Strict required status checks (issue #4053, owner decision 2026-11-11):** `strict_required_status_checks_policy` is ON in the `protectmain` ruleset, so a stale branch head cannot merge — GitHub requires the branch to be up to date with `main` before merging, and the queue rebuilds the merge group when `main` moves. This is the structural backstop that makes publish-early safe: a branch may be published from any recent base, but only a branch current with `main` can land.
 
 ***
 
@@ -1448,20 +1459,15 @@ current base before merging.
 ### Default auto-merge automation (issue #1509)
 
 The `auto-merge-trusted` workflow (`.github/workflows/auto-merge-trusted.yml`)
-is the default for every PR targeting `main`, including drafts, but NOT PRs
-that change workflow files (see the withholding exception below). It applies
+is the default for every PR targeting `main`, including drafts and PRs that
+change workflow files (the #1894 withholding exception was removed by owner
+decision 2026-11-01, issue #2670 — see the hold-removed note below). It applies
 the `auto-merge` label to drafts and enables rebase auto-merge when they are
 marked ready for review; GitHub cannot merge a draft while it remains a
 draft. There is no author allowlist. The PR template remains focused on
 description and checklist content; the workflow applies the default label.
 
-- Withholding exception (owner direction 2026-10-27, issue #1894; live since
-  PR #1900): the labeler WITHHOLDS auto-merge for PRs touching workflow
-  files, PRs by bot authors, PRs deleting files, and PRs marked as created
-  automatically by Jules. Those PRs need a human merge click once green (see
-  §22 Policy-file handling). No other file path is excluded from automatic
-  labeling or merging; non-withheld PRs follow the same required checks,
-  conversation resolution, and merge-queue validation as other PRs.
+- Hold removed (owner decision 2026-11-01, issue #2670, superseding #1894): the #1894 hold logic — withholding auto-merge for PRs touching workflow files, PRs by bot authors, PRs deleting files, and PRs marked as created automatically by Jules — is removed entirely. The workflow applies the `auto-merge` label and enables rebase auto-merge for every PR targeting `main`, including workflow-touching PRs; drafts are labeled automatically and merge only after they are marked ready. No file path is excluded from automatic labeling or merging. The safety net is the required checks (Policy Gate including its no-deletion rule, Gitleaks, Test & Build, Load Active Environment) plus merge-queue validation on the merge-group commit.
 - Enabling auto-merge does not bypass branch rules. GitHub merges only
   after all required checks pass, conversations are resolved, and queue
   validation passes when the merge queue is enabled. Removing the label
@@ -1662,12 +1668,12 @@ implement.
   second parent) and reads attribution — linked issue, lane, hashtag —
   from the PR body and labels only; commit messages are not fallback
   context.
-- **Policy-file handling.** Workflow changes do not get automatic
-  auto-merge: the labeler withholds it for PRs touching workflow files
-  (issue #1894), so those PRs need a human merge click once green. The
-  live `protectmain` ruleset requires zero approving reviews and does
-  not require Code Owner review. Required status checks and
-  review-thread resolution still apply uniformly.
+- **Policy-file handling.** Workflow changes follow the same automatic
+  auto-merge path as any other PR (hold removed, owner decision
+  2026-11-01, issue #2670, superseding #1894). The live `protectmain`
+  ruleset requires zero approving reviews and does not require Code
+  Owner review. Required status checks and review-thread resolution
+  still apply uniformly.
   **Required-check pre-flight (moved from repo AGENTS.md, #3816):**
   before waiting for queue admission, confirm that the checks required
   by ruleset 25543527 (`protectmain`) — Load Active Environment,
