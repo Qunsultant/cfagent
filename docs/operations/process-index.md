@@ -60,6 +60,7 @@ guide.
 | --- | --- | --- | --- | --- | --- |
 | Coordinator dispatch + boundary reporting | Agentic | COO-spr9 | Not yet documented — #3466 | Not yet documented | — |
 | Proactivity handling (select / skip / send rules) | Agentic | COO-spr9 | Not yet documented — #3466 | Not yet documented | — |
+| Handover between agents (lanes) | Agentic | COO-spr9 | [handover-playbook.md](handover-playbook.md) | Current | 2026-11-11 |
 
 ## Non-deterministic — copilot
 
