@@ -588,7 +588,6 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userLogin]);
 
   const approve = async (family: StorePriceFamily) => {
