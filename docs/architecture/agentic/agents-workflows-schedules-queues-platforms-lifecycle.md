@@ -1576,13 +1576,45 @@ not adopted, no issue filed, no build
 exercises it when the grant UI is Platform Admin only is the open question the
 draft addresses.
 
+Organization & strategy (CEO):
+
+The Organization & strategy platform is the CEO platform —
+platforms.md §2: Balanced Scorecard and strategy maps; OKRs
+for bounded objectives; enterprise operating-model design;
+COSO ERM for risk-informed strategy; COBIT for governance of
+information and technology. It synthesizes organizational
+state, compares strategic scenarios, coordinates executive
+objectives, identifies dependencies, proposes portfolio
+allocation, routes reserved decisions, and monitors outcomes.
+The CEO platform is the coordinator in the federated model
+(platforms.md §1): one shared architecture, control plane,
+and evidence plane, with each executive owning domain
+outcomes. Its rows below are coordination programmes owned
+in the CEO lane; the platform products those programmes
+produce live in the owning platforms' tables — the generic
+scheduling capability (#3709), filed in the CEO lane, is a
+Technology Platform product and its row sits in the
+Technology Platform table above, not duplicated here. The
+alignment requirements that govern the CEO lane's programmes
+— one-of-everything, REUSE over REINVENT — live in #1069
+(no lane label; system-wide, not a CEO product).
+
+The CEO rows below were added 2026-11-11; their statuses are as of that date.
+
+| Product | Purpose | Status | Tracking |
+| --- | --- | --- | --- |
+| Scheduling consolidation programme | One scheduling engine, agent, workflow, and UX across the four implementation types and four UI surfaces | Partial — S0–S5 merged (6 of 10 core slices, 60%); S6 + Phase 2 (#3124, #3123) + Phase 3 (#3122) remain; live proofs owed S1–S5 + U-03 | #3121 |
+| Copilot Evolution programme | Decoupled architecture, multi-agent mesh, and autonomous omnichannel collaboration across copilots | Filed — prioritized review done (dedup-first); no build | #3752 (#3753–#3757) |
+| Agentic collaboration via AGENTS.md | Lane backlog review + prioritized plan at report-for-work time; cross-lane work filed in its lane; dedup before any build; lifecycle labels | Filed — amendment PR not opened, awaits owner go-ahead | #3503 |
+| Back to Basics programme | A lean agentic (RSI/ASI) platform: fewer tests, components, services, interfaces, endpoints, implementations | Partial — P0 inventory/baseline done; deprecation rule canonical (gitops §22); P1–P5 not started | #2299 |
+| AOP-by-default mandate | AOP by default for all work; migrate existing hardcoding to aspects | Partial — approved/mandated; enforcement drafts only, no repo files changed; four ambiguities need owner rulings | #2363 |
+
 All other platforms — products not yet defined (**TBD**
 placeholder rows; no filed product issues were found for these
 platforms in the 2026-11-09 survey):
 
 | Platform | Product status |
 | --- | --- |
-| Organization & strategy (CEO) | TBD — products to be defined by the owning platform |
 | Operations & service delivery (COO) | TBD — products to be defined by the owning platform |
 | Investment & portfolio (CIO function) | TBD — products to be defined |
 | Research (Chief Research Officer / Chief Scientist function) | TBD — products to be defined |
@@ -1875,8 +1907,8 @@ owner's word, not on this document.
 - **Current:** §12.2's inventory — the Technology, Agentic,
   Security & trust, Product & experience (CPO), Finance &
   capital (CFO), Data & knowledge (CDO), Legal &
-  obligation (CLO), and Business architecture & commercial
-  (CBO) platform products
+  obligation (CLO), Business architecture & commercial
+  (CBO), and Organization & strategy (CEO) platform products
   filed or partial; all other
   platforms' products undefined.
 - **Future:** every platform productized under the platform
@@ -1897,6 +1929,8 @@ owner's word, not on this document.
   §12.2 (this issue, #3867);
   the Business architecture & commercial (CBO) platform's
   products defined in §12.2 (this issue, #4062);
+  the Organization & strategy (CEO) platform's products
+  defined in §12.2 (this issue, #4094);
   product definition for the
   remaining platforms is **TBD**, owned by each platform.
 
