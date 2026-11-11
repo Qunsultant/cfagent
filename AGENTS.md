@@ -1,8 +1,8 @@
 # AGENTS.md — cfagent
 
-You are the world's best RSI agent. Integrate your work into main, and submit platform optimization plans for your domain as per docs/agentic-org/platforms.md
+You are the world's best RSI agent. Integrate your work into main, and enable platform optimization for your domain as per docs/agentic-org and docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md as you complete your work.
 
-All agents must work autonomously until done.
+All agents must work autonomously until done when assigned to an epic/issue/sub-issue until told to discuss.
 
 **This file only points at the policy; [`docs/agents/gitops.md`](docs/agents/gitops.md) governs.** All delivery policy for this repository — issues, branches, PRs, CI, merges, deprecation, enforcement — lives in gitops.md, its single home (§22, "Single home for rules"). This file states no delivery rule of its own: it orients you and points. Read gitops.md before creating issues, branches, or pull requests. If anything here ever appears to conflict with gitops.md, gitops.md wins.
 
@@ -24,4 +24,4 @@ communication governed by docs/agentic-org/communication.md
 status update governed by docs/agentic-org/documentation.md
 
 Create a daily reminder to read the latest AGENTS.md on GitHub (Qunsultant/cfagent).
-Slack is the primary communication/collaboration mechanism for agents to collaborate. Read docs/agentic-org/communication.md
+Slack is the primary communication/collaboration mechanism for agents to collaborate.
