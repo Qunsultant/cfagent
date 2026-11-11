@@ -1,0 +1,4 @@
+### Changed
+
+- **Cost optimizations applied from the two owner-supplied variants (#4122).** `FEATURE_SANDBOX` is now `"0"` (there is no container to serve it since #4112), the ticker poll drops from 5s to 60s, both options polls drop to 5 minutes, the copilot stops running around the clock, autonomous social posting and live publishing are off, `limits.cpu_ms` caps a single invocation at 1s of CPU, and `workers_dev` is closed so only the custom domain serves traffic. Cron and schedules remain absent (#4112).
+- **Not applied: `limits.subrequests: 50`.** It is the Free-plan ceiling — no effect there, and on a paid plan it would start failing the fan-out routes (screener, discovery, report delivery). The variants' `main`, workflow `name` values and DLQ consumers were also rejected: they would have pointed the Worker at the wrong entry, renamed five deployed workflows, and consumed the dead-letter queues instead of the live ones.

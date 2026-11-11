@@ -4,6 +4,16 @@
   "main": "src/server.ts",
   "compatibility_date": "2026-10-31",
   "compatibility_flags": ["nodejs_compat"],
+  // Issue #4122 — cost guards taken from the two owner-supplied variants
+  // (nextgentp-cost-optimized-wrangler{,-v2}). cpu_ms caps a runaway
+  // invocation at 1s of CPU. The variants also proposed subrequests: 50,
+  // deliberately NOT applied: 50 is the Free-plan ceiling, it changes nothing
+  // there, and on a paid plan it would start failing the fan-out routes
+  // (screener, discovery, report delivery).
+  "limits": { "cpu_ms": 1000 },
+  // The custom domain is the only intended front door; workers.dev stays
+  // closed so stray subdomain traffic cannot bill.
+  "workers_dev": false,
   "routes": [{ "pattern": "agent.openaimp.com", "custom_domain": true }],
   // Issue #329: only `/` and `/index.html` need the Worker (they inject the
   // session and render the landing page). Everything else that matches a file
@@ -293,7 +303,8 @@
     // set. Rollback is unsetting this var and redeploying.
     "STOCK_COPILOT_PAPER_ENABLED": "1",
     // Issue #3728: Unconstrained continuous Stock Copilot trading around the clock (24/7).
-    "STOCK_COPILOT_AROUND_THE_CLOCK": "true",
+    // Issue #4122 — cost: idle outside market hours instead of polling all day.
+    "STOCK_COPILOT_AROUND_THE_CLOCK": "false",
     // Issue #3727 — copilot capability enablement (owner direction
     // 2026-11-07): every capability-gating switch is externalized
     // here and set so the copilots are fully functional/enabled —
@@ -351,15 +362,18 @@
     "QUOTES_REST_FALLBACK_MS": "60000",
     "QUOTES_WS_RECONNECT_BASE_MS": "1000",
     "QUOTES_WS_RECONNECT_CAP_MS": "30000",
-    "OPTIONS_FLOWS_POLL_MS": "30000",
-    "OPTIONS_LATEST_POLL_MS": "60000",
+    // Issue #4122 — cost: 30s -> 300s between options-flow polls.
+    "OPTIONS_FLOWS_POLL_MS": "300000",
+    // Issue #4122 — cost: 60s -> 300s between latest-options polls.
+    "OPTIONS_LATEST_POLL_MS": "300000",
     "CHAT_AUTO_REFRESH_FLOOR_S": "5",
     "GOAL_TRACK_POLL_MS": "2000",
     "GOAL_TRACK_DEADLINE_MS": "600000",
     // Issue #2443 — TickerAgent push cadence, seconds. Default 5s;
     // changing it changes live tick cadence (product call). Rollback
     // is unsetting the var and redeploying.
-    "TICKER_PUSH_INTERVAL_S": "5",
+    // Issue #4122 — cost: 5s -> 60s cuts ticker DO activity (variants: 92%).
+    "TICKER_PUSH_INTERVAL_S": "60",
     "MAS_MAX_STEPS": "4",
     "AI_MODEL": "@cf/zai-org/glm-4.7-flash",
     "CF_WALLET_NETWORK": "base-sepolia",
@@ -418,8 +432,10 @@
     // trigger. No token → live publish errors honestly, never a
     // silent dry-run. Rollback is removing these two vars (or setting
     // them to "0") and redeploying — no code change.
-    "SOCIAL_POSTING_ENABLED": "1",
-    "SOCIAL_LIVE_PUBLISHING": "1",
+    // Issue #4122 — cost: no autonomous social posting.
+    "SOCIAL_POSTING_ENABLED": "0",
+    // Issue #4122 — cost: no live social publishing.
+    "SOCIAL_LIVE_PUBLISHING": "0",
     // Issue #1489: scope autonomous publishing to Threads only during
     // Threads-first rollout. Without this, config defaults to "threads,x",
     // attempting to publish to X where X_ACCESS_TOKEN is not configured.
@@ -458,7 +474,9 @@
     // Rollback is setting this var to "0" (or toggling off in Flagship dashboard).
     "FEATURE_MONETIZATION": "1",
     // Issue #3491 / #3492 / #3779 — Sandbox & Workspace enablement
-    "FEATURE_SANDBOX": "1",
+    // Issue #4122 (owner direction): the sandbox has no container (#4112),
+    // so the flag is off — the variants put it at "0" for the same reason.
+    "FEATURE_SANDBOX": "0",
     "FEATURE_WORKSPACE": "1",
     "WORKSPACE_ROOT": "/workspace"
   }
