@@ -7,7 +7,7 @@ assignees: []
 ---
 
 ## Agent
-#<your-agent-hashtag>
+#<agent-hashtag>
 
 ## Type
 Title convention + label (check one; title prefix and label must match):
@@ -31,8 +31,10 @@ Title convention + label (check one; title prefix and label must match):
 - [ ] High — blocks users, a release, or another lane's work; needs prompt attention
 
 ## Problem
+What is wrong or missing?
 
 ## Outcome
+What observable result is required?
 
 ## User journey
 Journey (which user journey this change serves):
@@ -64,7 +66,9 @@ Excluded:
 Scope discipline: every item excluded from this issue gets its own sub-issue under this issue, created at the time it is identified and linked under Related issues — never left as a follow-up note, TODO, or 'future work' line. An excluded item with no sub-issue is a review finding.
 
 ## Acceptance criteria
-- [ ]
+- [ ] Observable, testable criterion
+- [ ] Failure/recovery criterion
+- [ ] Relevant regression criterion
 
 ## Test plan
 
@@ -135,11 +139,12 @@ All development on this issue must follow:
 - Change management (actual: change type, impacted surfaces, migration and data impact, rollout plan, rollback plan, communication, changelog entry):
 - Conformance (actual: UX primitives/tokens used, architecture boundaries followed, reused surfaces, rework justification, regression pins):
 - Agentic design (actual: allocation as built, delegation path, evaluator, task records, policies/budgets, never-list compliance):
-- Value and impact (value created, capabilities enabled, competencies improved, value proposition, delivery channels, user journey):
+- Value and impact (value created, capabilities enhanced, competencies improved, value proposition, delivery channels, user journey):
 - Risk and limitations (security, tenant isolation, compatibility, performance/cost; known test-coverage gaps stated explicitly):
 - Delivery and release (migration, feature flag, deployment impact, rollback; release state, version, environment):
 - Workflows operationalized:
 - How to harness this value from UX:
+- Process docs updated (file + commit, or none with reason):
 - Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
 - Remaining work (gitops §15 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):

@@ -20,7 +20,7 @@ Emergency rules (gitops §18.2) still apply — urgency does not bypass
 the gate. A merge over red needs the owner-authorized §18.1 emergency
 exception, with a restore-green issue created in the same action. -->
 ## Agent
-#<your-agent-hashtag>
+#<agent-hashtag>
 
 ## Summary
 Urgent production fix — what is broken, and what this PR does about it:
@@ -56,6 +56,7 @@ How to undo this PR if the fix makes things worse:
 - [ ] No file deleted in this PR (pure renames only; deprecate in place instead — gitops §22, gate check (i))
 - [ ] Any new deprecation names what superseded it (gitops §22, gate check (j))
 - [ ] Linked issue's completion report updated with this PR's full report
+- [ ] This PR completes its linked issue in full — no follow-up PR carries the rest of this issue's work (gitops §5, issue #4072)
 
 ## Process documentation impact
 Process documentation impact: <none, or what process docs this PR changes>
