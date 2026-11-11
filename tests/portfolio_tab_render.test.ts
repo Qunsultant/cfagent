@@ -44,14 +44,20 @@ describe("Portfolio Tab Click & Render Inspection", () => {
         })
       )
     );
-    expect(html).toContain("portfolio-section");
+    // The portfolio section is a PageSection after the #3051 primitives
+    // migration (the bespoke `portfolio-section` wrapper div is gone);
+    // the hero header and actions render inside it.
+    expect(html).toContain('<section class="ui-page-section">');
+    expect(html).toContain("Portfolio &amp; holdings");
     expect(html).toContain("PORTFOLIO &amp; HOLDINGS");
     expect(html).toContain("Portfolio Holdings &amp; Open Positions");
     expect(html).toContain("Portfolio Equity");
     expect(html).toContain("Available Cash");
     // Renamed from "Total Active Positions" in 868e754 (option position close
     // workflow), which also added the options/equities breakdown below it.
-    expect(html).toContain('<span class="summary-title">Active Positions</span>');
+    // The stat labels render as ui-meta-sm after #3051 (KpiRibbon), not
+    // the bespoke `summary-title` spans.
+    expect(html).toContain('<span class="ui-meta-sm">Active Positions</span>');
     expect(html).toContain("Refresh Positions");
     expect(html).toContain("Fast Order Ticket");
     // #913/#921: the default render is the PROD (live) environment, where

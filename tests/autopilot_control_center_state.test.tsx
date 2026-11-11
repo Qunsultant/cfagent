@@ -115,7 +115,19 @@ function buttonContainingText(text: string): HTMLButtonElement | null {
 }
 
 function statusText(): string {
-  const el = container.querySelector(".status-state-text");
+  // The status is now a bare <span> in the Status Card (S-U2 #3051)
+  // — no .status-state-text class remains. Scope to the Card headed
+  // by the "Status" label, then read the span carrying exactly one
+  // of the three states.
+  const label = Array.from(container.querySelectorAll("span.ui-meta-sm")).find(
+    (s) => s.textContent?.trim() === "Status",
+  );
+  const card = label?.closest(".ui-card");
+  const el = card
+    ? Array.from(card.querySelectorAll("span")).find((s) =>
+        ["Paused", "Running", "Locked Out"].includes(s.textContent?.trim() ?? ""),
+      )
+    : undefined;
   return el?.textContent?.trim() || "";
 }
 

@@ -140,8 +140,8 @@ describe("ScanResultsView PDF link (#126 PR-D)", () => {
     expect(anchors[0].getAttribute("href")).toBe(reportUrl);
     expect(anchors[0].textContent).toContain("Download PDF report");
     // PR-C exports unaffected.
-    expect(container.querySelector(".scanner-export-csv")).not.toBeNull();
-    expect(container.querySelector(".scanner-export-json")).not.toBeNull();
+    expect(container.querySelector('button[title="Download result rows for this run as CSV"]')).not.toBeNull();
+    expect(container.querySelector('button[title="Download the full stored result for this run as JSON"]')).not.toBeNull();
   });
 
   it("a run WITHOUT a reportUrl shows NO PDF link and no keyless-endpoint anchor; exports still present", async () => {
@@ -158,8 +158,8 @@ describe("ScanResultsView PDF link (#126 PR-D)", () => {
     expect(allHrefs).not.toContain("/api/options/report.pdf");
     expect(container.textContent).not.toContain("Download PDF report");
     // PR-C exports unaffected.
-    expect(container.querySelector(".scanner-export-csv")).not.toBeNull();
-    expect(container.querySelector(".scanner-export-json")).not.toBeNull();
+    expect(container.querySelector('button[title="Download result rows for this run as CSV"]')).not.toBeNull();
+    expect(container.querySelector('button[title="Download the full stored result for this run as JSON"]')).not.toBeNull();
   });
 });
 
@@ -174,8 +174,8 @@ describe("ScreenerResultsView PDF link (#126 PR-D)", () => {
     expect(anchors[0].getAttribute("href")).toBe(
       `/api/screener/report.pdf?key=${encodeURIComponent(pdfKey)}`,
     );
-    expect(container.querySelector(".screener-export-csv")).not.toBeNull();
-    expect(container.querySelector(".screener-export-json")).not.toBeNull();
+    expect(container.querySelector("button[title=\"Download this run's standout opportunities as CSV\"]")).not.toBeNull();
+    expect(container.querySelector("button[title=\"Download this run's full result as JSON\"]")).not.toBeNull();
   });
 
   it("a run's own reportUrl wins over its pdfKey (precedence unchanged)", async () => {
@@ -197,8 +197,8 @@ describe("ScreenerResultsView PDF link (#126 PR-D)", () => {
     expect(allHrefs).not.toContain("/api/screener/report.pdf");
     expect(container.textContent).not.toContain("Download PDF report");
     // The result set itself is still downloadable (PR-B exports).
-    expect(container.querySelector(".screener-export-csv")).not.toBeNull();
-    expect(container.querySelector(".screener-export-json")).not.toBeNull();
+    expect(container.querySelector("button[title=\"Download this run's standout opportunities as CSV\"]")).not.toBeNull();
+    expect(container.querySelector("button[title=\"Download this run's full result as JSON\"]")).not.toBeNull();
   });
 
   it("a FAILED run shows NO PDF link (previously the keyless latest-PDF)", async () => {

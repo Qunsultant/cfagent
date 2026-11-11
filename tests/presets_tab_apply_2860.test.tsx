@@ -37,11 +37,18 @@ describe("presets tab Apply (#2860 F3)", () => {
     const src = readFileSync("src/client/StockHub.tsx", "utf8");
     const start = src.indexOf("screener-tabpanel-presets");
     expect(start).toBeGreaterThan(-1);
-    const end = src.indexOf("options-assumptions", start);
-    expect(end).toBeGreaterThan(start);
-    const region = src.slice(start, end);
-    expect(region).toContain("PresetsPanel");
-    expect(region).toContain("handleCriteriaChange");
-    expect(region).toContain('handleTabChange("new-screen")');
+    // The presets tabpanel is the last tabpanel after the #3051
+    // migration (the `options-assumptions` section that used to follow
+    // it is gone), so the region runs to the end of the file. Anchor
+    // on the onApplyPreset handler body: apply through
+    // handleCriteriaChange, then navigate to new-screen.
+    const region = src.slice(start);
+    expect(region).toContain("<PresetsPanel");
+    const handlerStart = region.indexOf("onApplyPreset={(criteria) => {");
+    expect(handlerStart).toBeGreaterThan(-1);
+    const applyIndex = region.indexOf("handleCriteriaChange(criteria);", handlerStart);
+    const navigateIndex = region.indexOf('handleTabChange("new-screen");', applyIndex);
+    expect(applyIndex).toBeGreaterThan(handlerStart);
+    expect(navigateIndex).toBeGreaterThan(applyIndex);
   });
 });

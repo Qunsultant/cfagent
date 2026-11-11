@@ -357,7 +357,12 @@ async function renderPanel() {
 }
 
 function runItems(): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>(".discovery-run-item"));
+  // Runs are now primitive Buttons (S-U2 #3051): each carries an
+  // aria-label "Review discovery run from <locale date>" — no
+  // bespoke .discovery-run-item class remains.
+  return Array.from(
+    container.querySelectorAll<HTMLElement>('button[aria-label^="Review discovery run from"]'),
+  );
 }
 
 function buttonByText(text: string): HTMLButtonElement | undefined {
@@ -531,9 +536,14 @@ describe("DiscoveryRunsPanel — profile-derived runs (#533)", () => {
   });
 
   function outcomeBlock(symbol: string): HTMLElement {
-    const block = Array.from(container.querySelectorAll<HTMLElement>(".discovery-outcome")).find(
-      (el) => el.querySelector("strong")?.textContent === symbol,
+    // Outcomes are now primitive Cards (S-U2 #3051): the outcome's
+    // symbol is the header <strong> (exact text — ranked rows carry
+    // "SYMBOL <label>", never the bare symbol), so the Card around
+    // it is the outcome block. No .discovery-outcome class remains.
+    const strong = Array.from(container.querySelectorAll("strong")).find(
+      (el) => el.textContent === symbol,
     );
+    const block = strong?.closest(".ui-card") as HTMLElement | null;
     if (!block) throw new Error(`outcome block for ${symbol} not found`);
     return block;
   }
@@ -583,8 +593,8 @@ describe("DiscoveryRunsPanel — profile-derived runs (#533)", () => {
     );
     // The abstention uses its own alert box, not the failure box, and
     // the outcome carries no failure badge and no view line.
-    expect(msft.querySelector(".discovery-outcome-abstained")).not.toBeNull();
-    expect(msft.querySelector(".discovery-outcome-error")).toBeNull();
+    expect(msft.querySelector(".ui-notice.tone-warning")).not.toBeNull();
+    expect(msft.querySelector(".ui-notice.tone-danger")).toBeNull();
     expect(msft.textContent).not.toContain("Failed");
     expect(msft.textContent).not.toContain("Derived view");
     // The detail head names the abstention alongside the failure.
@@ -805,9 +815,14 @@ describe("DiscoveryRunsPanel — no-view runs (#534)", () => {
   });
 
   function outcomeBlock(symbol: string): HTMLElement {
-    const block = Array.from(container.querySelectorAll<HTMLElement>(".discovery-outcome")).find(
-      (el) => el.querySelector("strong")?.textContent === symbol,
+    // Outcomes are now primitive Cards (S-U2 #3051): the outcome's
+    // symbol is the header <strong> (exact text — ranked rows carry
+    // "SYMBOL <label>", never the bare symbol), so the Card around
+    // it is the outcome block. No .discovery-outcome class remains.
+    const strong = Array.from(container.querySelectorAll("strong")).find(
+      (el) => el.textContent === symbol,
     );
+    const block = strong?.closest(".ui-card") as HTMLElement | null;
     if (!block) throw new Error(`outcome block for ${symbol} not found`);
     return block;
   }
@@ -879,21 +894,21 @@ describe("DiscoveryRunsPanel — no-view runs (#534)", () => {
     expect(text).toContain("Completed");
     expect(text).toContain("Abstained");
     // The abstention box (not the failure box) names the gate reasons.
-    expect(msft.querySelector(".discovery-outcome-abstained")).not.toBeNull();
-    expect(msft.querySelector(".discovery-outcome-error")).toBeNull();
+    expect(msft.querySelector(".ui-notice.tone-warning")).not.toBeNull();
+    expect(msft.querySelector(".ui-notice.tone-danger")).toBeNull();
     expect(text).toContain("Abstained — the chain loaded, but no structure qualified under the stated constraints");
     expect(text).toContain("insufficient liquidity ×3");
     expect(text).toContain("probability of profit below the floor ×2");
     expect(text).toContain("No pick was manufactured.");
     // No best-pick box and no ranked rows for an abstention.
     expect(text).not.toContain("Best-supported");
-    expect(msft.querySelector(".discovery-ranked-row")).toBeNull();
+    expect(msft.querySelector('[aria-label*="ranked structures"]')).toBeNull();
   });
 
   it("renders the failed symbol with its reason and the constraints it ran under", async () => {
     await renderPanel();
     const aapl = outcomeBlock("AAPL");
-    expect(aapl.querySelector(".discovery-outcome-error")).not.toBeNull();
+    expect(aapl.querySelector(".ui-notice.tone-danger")).not.toBeNull();
     expect(aapl.textContent).toContain("E*TRADE chain unavailable: session expired");
     expect(aapl.textContent).toContain("Constraints (no-view");
   });

@@ -32,7 +32,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Badge, Button, EmptyState, Spinner, type BadgeTone } from "../components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, Flex, Notice, PageSection, Spinner, Stack, type BadgeTone } from "../components/ui";
 import {
   getDiscoveryRun,
   listDiscoveryRuns,
@@ -209,87 +209,93 @@ function NoViewOutcomeBody({ outcome }: { outcome: DiscoverySymbolOutcome }) {
   const excludedCount = excluded.reduce((sum, e) => sum + e.count, 0);
 
   return (
-    <>
+    <Stack gap="2">
       {outcome.snapshot?.screen && (
-        <p className="discovery-screen-line">
+        <p className="ui-footnote">
           Chain screen: {outcome.snapshot.screen.contractsEvaluated.toLocaleString()} contracts
           evaluated · {outcome.snapshot.screen.contractsMatched.toLocaleString()} matched
         </p>
       )}
 
       {outcome.abstained === true ? (
-        <div className="discovery-outcome-abstained" role="alert">
+        <Notice tone="warning">
           Abstained — the chain loaded, but no structure qualified under the stated constraints
           {excluded.length > 0
             ? ` (${excluded.map((e) => `${e.reason} ×${e.count}`).join(", ")})`
             : ""}
           . No pick was manufactured.
-        </div>
+        </Notice>
       ) : (
         <>
           {best && (
-            <div className="discovery-best">
-              <span className="discovery-best-label">★ Best-supported structure (no-view)</span>
-              {best.status === "no_trade" || !best.best ? (
-                <span>
-                  No qualifying structure —{" "}
-                  {best.rationale[0] ?? "no structure cleared the stated constraints."}
-                </span>
-              ) : (
-                <span>
-                  {best.best.candidate.label} ·{" "}
-                  {BEST_TRADE_STATUS_LABELS[best.status] ?? best.status} · confidence{" "}
-                  {best.confidence}
-                  {best.rationale[0] ? ` — ${best.rationale[0]}` : ""}
-                </span>
-              )}
-              {best.blockers.length > 0 && (
-                <span className="discovery-best-blockers">
-                  Blockers: {best.blockers.join("; ")}
-                </span>
-              )}
-              {/* Issue #1773 (HAX #9): no-view ratings cap at MEDIUM
-                  by construction — the breakdown says so explicitly. */}
-              <ConfidenceMethodBreakdown pick={{ ...best, capHigh: true }} />
-            </div>
+            <Card padding="sm">
+              <Stack gap="1">
+                <span className="ui-meta-sm"><strong>★ Best-supported structure (no-view)</strong></span>
+                {best.status === "no_trade" || !best.best ? (
+                  <span>
+                    No qualifying structure —{" "}
+                    {best.rationale[0] ?? "no structure cleared the stated constraints."}
+                  </span>
+                ) : (
+                  <span>
+                    {best.best.candidate.label} ·{" "}
+                    {BEST_TRADE_STATUS_LABELS[best.status] ?? best.status} · confidence{" "}
+                    {best.confidence}
+                    {best.rationale[0] ? ` — ${best.rationale[0]}` : ""}
+                  </span>
+                )}
+                {best.blockers.length > 0 && (
+                  <span className="ui-meta">
+                    Blockers: {best.blockers.join("; ")}
+                  </span>
+                )}
+                {/* Issue #1773 (HAX #9): no-view ratings cap at MEDIUM
+                    by construction — the breakdown says so explicitly. */}
+                <ConfidenceMethodBreakdown pick={{ ...best, capHigh: true }} />
+              </Stack>
+            </Card>
           )}
 
           {ranked.length > 0 ? (
-            <div
-              className="discovery-ranked-list"
+            <Stack
+              gap="1"
               aria-label={`${ranked.length} ranked structures for ${outcome.symbol}`}
             >
               {ranked.map((entry) => {
                 const c = entry.candidate;
                 const isBest = bestCandidateId !== undefined && c.id === bestCandidateId;
                 return (
-                  <div key={c.id} className={`discovery-ranked-row${isBest ? " best" : ""}`}>
-                    <span className="discovery-ranked-rank">#{entry.rank}</span>
-                    <span className="discovery-ranked-name">
-                      {c.label}
-                      {isBest ? " ★" : ""}
-                    </span>
-                    <span className="discovery-ranked-meta">
-                      Composite {entry.compositeScore.toFixed(1)} · score model {c.scoreModel} ·
-                      POP {Math.round(c.modelImpliedProbabilityOfProfit * 100)}%
-                    </span>
-                    <span className="discovery-ranked-meta">
-                      {c.netDebit >= 0 ? "Net debit" : "Net credit"} {fmtUsd(Math.abs(c.netDebit))}{" "}
-                      · Max profit {c.maxProfit === null ? "Unbounded" : fmtUsd(c.maxProfit)} ·
-                      Max loss {fmtUsd(c.maxLoss)} · Structure R/R{" "}
-                      {c.structureRewardRisk === null
-                        ? "—"
-                        : `${c.structureRewardRisk.toFixed(2)}×`}
-                    </span>
-                  </div>
+                  <Card key={c.id} padding="sm" highlight={isBest}>
+                    <Stack gap="0-5">
+                      <Flex gap="1" align="center" wrap>
+                        <Badge tone={isBest ? "accent" : "neutral"} size="xs">#{entry.rank}</Badge>
+                        <strong>
+                          {c.label}
+                          {isBest ? " ★" : ""}
+                        </strong>
+                      </Flex>
+                      <span className="ui-meta">
+                        Composite {entry.compositeScore.toFixed(1)} · score model {c.scoreModel} ·
+                        POP {Math.round(c.modelImpliedProbabilityOfProfit * 100)}%
+                      </span>
+                      <span className="ui-meta">
+                        {c.netDebit >= 0 ? "Net debit" : "Net credit"} {fmtUsd(Math.abs(c.netDebit))}{" "}
+                        · Max profit {c.maxProfit === null ? "Unbounded" : fmtUsd(c.maxProfit)} ·
+                        Max loss {fmtUsd(c.maxLoss)} · Structure R/R{" "}
+                        {c.structureRewardRisk === null
+                          ? "—"
+                          : `${c.structureRewardRisk.toFixed(2)}×`}
+                      </span>
+                    </Stack>
+                  </Card>
                 );
               })}
-            </div>
+            </Stack>
           ) : (
             <EmptyState title="No structures ranked for this symbol under the stated constraints." />
           )}
 
-          <p className="discovery-counts-line">
+          <p className="ui-footnote">
             Excluded: {excludedCount}
             {excluded.length > 0
               ? ` (${excluded.map((e) => `${e.reason} ×${e.count}`).join(", ")})`
@@ -297,7 +303,7 @@ function NoViewOutcomeBody({ outcome }: { outcome: DiscoverySymbolOutcome }) {
           </p>
         </>
       )}
-    </>
+    </Stack>
   );
 }
 
@@ -311,8 +317,9 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
   const excludedCount = excluded.reduce((sum, e) => sum + e.count, 0);
 
   return (
-    <div className="discovery-outcome">
-      <div className="discovery-outcome-head">
+    <Card padding="md">
+      <Stack gap="2">
+      <Flex gap="2" align="center" wrap>
         <strong>{outcome.symbol}</strong>
         <Badge tone={OUTCOME_BADGES[outcome.status].tone} size="sm" dot>
           {OUTCOME_BADGES[outcome.status].label}
@@ -327,11 +334,11 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
           </Badge>
         )}
         {outcome.snapshot && (
-          <span className="discovery-outcome-source">
+          <span className="ui-meta-sm">
             {outcome.snapshot.dataSource === "live" ? "Live broker chain" : "Calibrated demo data"}
           </span>
         )}
-      </div>
+      </Flex>
 
       {/* Issue #533 (PR-533A): outcome.request is optional in the
           store's shape — an abstained outcome carries none. Saved-
@@ -339,7 +346,7 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
           rendering for existing runs; the derived/abstained outcome
           presentation itself is PR-533B's surface work. */}
       {request && (
-        <p className="discovery-view-line">
+        <p className="ui-footnote">
           {outcome.derivation ? "Derived view" : "Saved view"}: {humanizeThesis(request.thesis)} ·
           target {fmtUsd(request.targetPrice)} by{" "}
           {request.targetDate} · IV expected {request.expectedIvDirection} · max planned loss{" "}
@@ -351,7 +358,7 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
       {/* Issue #533: the derivation, in full, beside the view line —
           a derived target always travels with how it was derived. */}
       {outcome.derivation && (
-        <p className="discovery-derived-line">{formatDerivationLine(outcome.derivation)}</p>
+        <Notice tone="accent">{formatDerivationLine(outcome.derivation)}</Notice>
       )}
 
       {/* Issue #534: the stored constraint set, in place of a view
@@ -359,94 +366,101 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
           on every no-view outcome (completed, abstained, failed):
           the mode's input record. */}
       {outcome.constraintSet && (
-        <p className="discovery-constraint-line">
+        <Notice tone="neutral">
           {formatConstraintSetLine(outcome.constraintSet)}
-        </p>
+        </Notice>
       )}
 
       {outcome.status === "failed" ? (
-        <div className="discovery-outcome-error" role="alert">
+        <Notice tone="danger">
           ⚠️ {outcome.error ?? "Discovery failed for this symbol; no reason was recorded."}
-        </div>
+        </Notice>
       ) : outcome.status === "abstained" ? (
-        <div className="discovery-outcome-abstained" role="alert">
+        <Notice tone="warning">
           Abstained — {outcome.error ?? "no reason was recorded."}
-        </div>
+        </Notice>
       ) : outcome.constraintSet ? (
         <NoViewOutcomeBody outcome={outcome} />
       ) : (
-        <>
+        <Stack gap="2">
           {outcome.snapshot?.screen && (
-            <p className="discovery-screen-line">
+            <p className="ui-footnote">
               Chain screen: {outcome.snapshot.screen.contractsEvaluated.toLocaleString()} contracts
               evaluated · {outcome.snapshot.screen.contractsMatched.toLocaleString()} matched
             </p>
           )}
 
           {best && (
-            <div className="discovery-best">
-              <span className="discovery-best-label">★ Best trade</span>
-              {best.status === "no_trade" || !best.best ? (
-                <span>
-                  No trade — {best.rationale[0] ?? "no candidate qualified under this view."}
-                </span>
-              ) : (
-                <span>
-                  {best.best.candidate.label} ·{" "}
-                  {BEST_TRADE_STATUS_LABELS[best.status] ?? best.status} · confidence{" "}
-                  {best.confidence}
-                  {best.rationale[0] ? ` — ${best.rationale[0]}` : ""}
-                </span>
-              )}
-              {best.blockers.length > 0 && (
-                <span className="discovery-best-blockers">
-                  Blockers: {best.blockers.join("; ")}
-                </span>
-              )}
-              {/* Issue #1773 (HAX #9): the confidence rating travels
-                  with its method breakdown. */}
-              <ConfidenceMethodBreakdown pick={best} />
-            </div>
+            <Card padding="sm">
+              <Stack gap="1">
+                <span className="ui-meta-sm"><strong>★ Best trade</strong></span>
+                {best.status === "no_trade" || !best.best ? (
+                  <span>
+                    No trade — {best.rationale[0] ?? "no candidate qualified under this view."}
+                  </span>
+                ) : (
+                  <span>
+                    {best.best.candidate.label} ·{" "}
+                    {BEST_TRADE_STATUS_LABELS[best.status] ?? best.status} · confidence{" "}
+                    {best.confidence}
+                    {best.rationale[0] ? ` — ${best.rationale[0]}` : ""}
+                  </span>
+                )}
+                {best.blockers.length > 0 && (
+                  <span className="ui-meta">
+                    Blockers: {best.blockers.join("; ")}
+                  </span>
+                )}
+                {/* Issue #1773 (HAX #9): the confidence rating travels
+                    with its method breakdown. */}
+                <ConfidenceMethodBreakdown pick={best} />
+              </Stack>
+            </Card>
           )}
 
           {ranked.length > 0 ? (
-            <div className="discovery-ranked-list" aria-label={`${ranked.length} ranked candidates for ${outcome.symbol}`}>
+            <Stack gap="1" aria-label={`${ranked.length} ranked candidates for ${outcome.symbol}`}>
               {ranked.map((entry) => {
                 const c = entry.candidate;
                 const isBest = bestCandidateId !== undefined && c.id === bestCandidateId;
                 return (
-                  <div key={c.id} className={`discovery-ranked-row${isBest ? " best" : ""}`}>
-                    <span className="discovery-ranked-rank">#{entry.rank}</span>
-                    <span className="discovery-ranked-name">
-                      {c.label}
-                      {isBest ? " ★" : ""}
-                    </span>
-                    <span className="discovery-ranked-meta">
-                      Composite {entry.compositeScore.toFixed(1)} · POP{" "}
-                      {Math.round(c.modelImpliedProbabilityOfProfit * 100)}%
-                    </span>
-                    <span className="discovery-ranked-meta">
-                      {c.netDebit >= 0 ? "Net debit" : "Net credit"} {fmtUsd(Math.abs(c.netDebit))} ·
-                      Max profit {c.maxProfit === null ? "Unbounded" : fmtUsd(c.maxProfit)} · Max
-                      loss {fmtUsd(c.maxLoss)} · Target R/R {c.targetRewardRisk.toFixed(2)}×
-                    </span>
-                  </div>
+                  <Card key={c.id} padding="sm" highlight={isBest}>
+                    <Stack gap="0-5">
+                      <Flex gap="1" align="center" wrap>
+                        <Badge tone={isBest ? "accent" : "neutral"} size="xs">#{entry.rank}</Badge>
+                        <strong>
+                          {c.label}
+                          {isBest ? " ★" : ""}
+                        </strong>
+                      </Flex>
+                      <span className="ui-meta">
+                        Composite {entry.compositeScore.toFixed(1)} · POP{" "}
+                        {Math.round(c.modelImpliedProbabilityOfProfit * 100)}%
+                      </span>
+                      <span className="ui-meta">
+                        {c.netDebit >= 0 ? "Net debit" : "Net credit"} {fmtUsd(Math.abs(c.netDebit))} ·
+                        Max profit {c.maxProfit === null ? "Unbounded" : fmtUsd(c.maxProfit)} · Max
+                        loss {fmtUsd(c.maxLoss)} · Target R/R {c.targetRewardRisk.toFixed(2)}×
+                      </span>
+                    </Stack>
+                  </Card>
                 );
               })}
-            </div>
+            </Stack>
           ) : (
             <EmptyState title="No candidates ranked for this view — the pipeline found nothing that satisfied it." />
           )}
 
-          <p className="discovery-counts-line">
+          <p className="ui-footnote">
             Screened out: {screenedOutCount} · Excluded: {excludedCount}
             {excluded.length > 0
               ? ` (${excluded.map((e) => `${e.reason} ×${e.count}`).join(", ")})`
               : ""}
           </p>
-        </>
+        </Stack>
       )}
-    </div>
+      </Stack>
+    </Card>
   );
 }
 
@@ -524,21 +538,16 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
   const csvOffered = detail !== null && detail.status !== "failed";
 
   return (
-    <section className="discovery-runs" aria-label="Discovery runs">
-      <div className="discovery-runs-header">
-        <div>
-          <h3>Discovery runs</h3>
-          <p>
-            Persisted runs from scheduled and manually triggered discovery — saved views re-run
-            verbatim, profile-derived runs derive each symbol&apos;s target at run time, and
-            no-view runs rank structures under stored constraints only (no thesis, no target).
-            Separate from the interactive discovery above, whose results are not stored.
-          </p>
-        </div>
+    <PageSection
+      title="Discovery runs"
+      description="Persisted runs from scheduled and manually triggered discovery — saved views re-run verbatim, profile-derived runs derive each symbol's target at run time, and no-view runs rank structures under stored constraints only (no thesis, no target). Separate from the interactive discovery above, whose results are not stored."
+    >
+      <Stack gap="2">
+      <Flex justify="end">
         <Button variant="secondary" size="sm" onClick={() => void loadRuns()}>
           ↻ Refresh
         </Button>
-      </div>
+      </Flex>
 
       {refusal && (
         <EmptyState
@@ -550,15 +559,15 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
       )}
 
       {!refusal && listError && (
-        <div className="discovery-runs-error" role="alert">
+        <Notice tone="danger">
           {listError}
-        </div>
+        </Notice>
       )}
 
       {!refusal && runs === null && !listError && (
-        <div className="discovery-runs-loading" role="status">
-          <Spinner size="sm" label="Loading discovery runs" /> Loading discovery runs…
-        </div>
+        <Flex gap="2" align="center">
+          <Spinner size="sm" label="Loading discovery runs" /> <span className="ui-meta">Loading discovery runs…</span>
+        </Flex>
       )}
 
       {!refusal && runs !== null && runs.length === 0 && !listError && (
@@ -571,27 +580,28 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
       )}
 
       {!refusal && runs !== null && runs.length > 0 && (
-        <div className="discovery-run-list" aria-label="Persisted discovery runs">
+        <Stack gap="1" aria-label="Persisted discovery runs">
           {runs.map((run) => {
             const selected = run.id === selectedId;
             return (
               <Button
                 key={run.id}
                 type="button"
-                className="discovery-run-item"
+                variant={selected ? "accent" : "secondary"}
+                tone="subtle"
                 aria-pressed={selected}
                 aria-label={`Review discovery run from ${new Date(run.createdAt).toLocaleString()}`}
                 onClick={() => setSelectedId(run.id)}
               >
                 <strong>{new Date(run.createdAt).toLocaleString()}</strong>
-                <span className="discovery-run-meta">{discoveryTriggerLabel(run)}</span>
-                <span className="discovery-run-meta">
+                <span className="ui-meta">{discoveryTriggerLabel(run)}</span>
+                <span className="ui-meta">
                   {DISCOVERY_INPUT_MODEL_LABELS[run.inputModel]}
                 </span>
                 <Badge tone={RUN_STATUS_TONES[run.status]} size="sm" dot>
                   {DISCOVERY_RUN_STATUS_LABELS[run.status]}
                 </Badge>
-                <span className="discovery-run-meta">{run.symbols.join(", ")}</span>
+                <span className="ui-meta">{run.symbols.join(", ")}</span>
                 {run.inputModel === "profile-derived" || run.inputModel === "no-view" ? (
                   <span>
                     {run.completedCount} of {run.symbols.length} symbols completed
@@ -604,104 +614,115 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
                     {run.failedCount > 0 ? ` · ${run.failedCount} failed` : ""}
                   </span>
                 )}
-                {selected && <span className="discovery-run-viewing">● Viewing</span>}
+                {selected && <Badge tone="accent" size="xs">● Viewing</Badge>}
               </Button>
             );
           })}
-        </div>
+        </Stack>
       )}
 
       {selectedId && (
-        <div className="discovery-run-detail">
+        <Stack gap="2">
           {detailLoading && (
-            <div className="discovery-runs-loading" role="status">
-              <Spinner size="sm" label="Loading discovery run" /> Loading run…
-            </div>
+            <Flex gap="2" align="center">
+              <Spinner size="sm" label="Loading discovery run" /> <span className="ui-meta">Loading run…</span>
+            </Flex>
           )}
           {detailError && (
-            <div className="discovery-runs-error" role="alert">
+            <Notice tone="danger">
               {detailError}
-            </div>
+            </Notice>
           )}
           {detail && !detailLoading && (
             <>
-              <div className="discovery-run-detail-head">
-                <div>
-                  <h4>
-                    {new Date(detail.createdAt).toLocaleString()} · {discoveryTriggerLabel(detail)}
-                  </h4>
-                  <p>
-                    {countRankedCandidates(detail)} ranked candidates across{" "}
-                    {detail.completedCount} completed{" "}
-                    {detail.inputModel === "saved-request" ? "request" : "symbol"}
-                    {detail.completedCount === 1 ? "" : "s"}
-                    {failed.length > 0
-                      ? ` · Failed: ${failed.map((o) => o.symbol).join(", ")}`
-                      : ""}
-                    {abstained.length > 0
-                      ? ` · Abstained: ${abstained.map((o) => o.symbol).join(", ")}`
-                      : ""}
-                  </p>
-                  {detail.profileRef && (
-                    <p className="discovery-run-profile">
-                      Profile-derived · profile {detail.profileRef.name} v{detail.profileRef.version}{" "}
-                      — targets derived at run time from each symbol&apos;s live chain, never
-                      configured views.
-                    </p>
-                  )}
-                  {detail.inputModel === "no-view" && (
-                    <p className="discovery-run-noview">
-                      No-view · constraints only — no thesis or target was supplied, derived, or
-                      assumed for this run. Structures were ranked under the stored constraint
-                      sets by the no-view-v1 score model (not comparable to viewed scores), and
-                      the best-supported structure is research only, never a recommendation.
-                    </p>
-                  )}
-                </div>
-                <Badge tone={RUN_STATUS_TONES[detail.status]} size="sm" dot>
-                  {DISCOVERY_RUN_STATUS_LABELS[detail.status]}
-                </Badge>
-                <div className="discovery-downloads">
-                  {csvOffered && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => downloadDiscoveryExport(detail, "candidates-csv")}
-                      title="Download this run's ranked candidates as CSV"
-                    >
-                      ⬇ Candidates CSV
-                    </Button>
-                  )}
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => downloadDiscoveryExport(detail, "run-json")}
-                    title={
-                      detail.status === "failed"
-                        ? "Download this failed run's full record as JSON (the diagnostic record)"
-                        : "Download this run's full stored record as JSON"
-                    }
-                  >
-                    ⬇ Run JSON
-                  </Button>
-                </div>
-              </div>
+              <Card padding="md">
+                <CardHeader
+                  title={`${new Date(detail.createdAt).toLocaleString()} · ${discoveryTriggerLabel(detail)}`}
+                  subtitle={
+                    <>
+                      {countRankedCandidates(detail)} ranked candidates across{" "}
+                      {detail.completedCount} completed{" "}
+                      {detail.inputModel === "saved-request" ? "request" : "symbol"}
+                      {detail.completedCount === 1 ? "" : "s"}
+                      {failed.length > 0
+                        ? ` · Failed: ${failed.map((o) => o.symbol).join(", ")}`
+                        : ""}
+                      {abstained.length > 0
+                        ? ` · Abstained: ${abstained.map((o) => o.symbol).join(", ")}`
+                        : ""}
+                    </>
+                  }
+                  belowSubtitle={
+                    <>
+                      {detail.profileRef && (
+                        <p className="ui-footnote">
+                          Profile-derived · profile {detail.profileRef.name} v{detail.profileRef.version}{" "}
+                          — targets derived at run time from each symbol&apos;s live chain, never
+                          configured views.
+                        </p>
+                      )}
+                      {detail.inputModel === "no-view" && (
+                        <p className="ui-footnote">
+                          No-view · constraints only — no thesis or target was supplied, derived, or
+                          assumed for this run. Structures were ranked under the stored constraint
+                          sets by the no-view-v1 score model (not comparable to viewed scores), and
+                          the best-supported structure is research only, never a recommendation.
+                        </p>
+                      )}
+                    </>
+                  }
+                  meta={
+                    <Stack gap="1" align="end">
+                      <Badge tone={RUN_STATUS_TONES[detail.status]} size="sm" dot>
+                        {DISCOVERY_RUN_STATUS_LABELS[detail.status]}
+                      </Badge>
+                      <Flex gap="1" wrap>
+                        {csvOffered && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => downloadDiscoveryExport(detail, "candidates-csv")}
+                            title="Download this run's ranked candidates as CSV"
+                          >
+                            ⬇ Candidates CSV
+                          </Button>
+                        )}
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => downloadDiscoveryExport(detail, "run-json")}
+                          title={
+                            detail.status === "failed"
+                              ? "Download this failed run's full record as JSON (the diagnostic record)"
+                              : "Download this run's full stored record as JSON"
+                          }
+                        >
+                          ⬇ Run JSON
+                        </Button>
+                      </Flex>
+                    </Stack>
+                  }
+                />
+              </Card>
 
               {detail.status === "failed" && (
-                <div className="discovery-runs-error" role="alert">
+                <Notice tone="danger">
                   {detail.inputModel === "saved-request"
                     ? "This run failed — every saved request failed. The reasons are recorded per symbol below; the run is kept as a diagnostic record, never as a result."
                     : "This run failed — no symbol produced a result. Abstentions and failures are recorded per symbol below; the run is kept as a diagnostic record, never as a result."}
-                </div>
+                </Notice>
               )}
 
-              {detail.outcomes.map((outcome) => (
-                <OutcomeView key={outcome.symbol} outcome={outcome} />
-              ))}
+              <Stack gap="2">
+                {detail.outcomes.map((outcome) => (
+                  <OutcomeView key={outcome.symbol} outcome={outcome} />
+                ))}
+              </Stack>
             </>
           )}
-        </div>
+        </Stack>
       )}
-    </section>
+      </Stack>
+    </PageSection>
   );
 }

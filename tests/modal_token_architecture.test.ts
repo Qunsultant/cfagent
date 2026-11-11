@@ -83,12 +83,33 @@ describe("Universal Modal System & Diagnostics Token Architecture", () => {
 
   describe("ETradeTradingHub.tsx JSX Token Architecture", () => {
     it("uses semantic diagnostic classes rather than ad-hoc inline styles", () => {
-      expect(tradingHub).toContain('className="diag-card"');
-      expect(tradingHub).toContain('className="diag-label"');
-      expect(tradingHub).toContain('className="diag-val');
-      expect(tradingHub).toContain('className="diag-error-box"');
-      expect(tradingHub).toContain('className="diag-raw-box"');
-      expect(tradingHub).toContain('className="diag-modal-actions"');
+      // S-U2 (#3051): the diagnostics modal no longer renders bespoke
+      // diag-* source classes — it renders via the token-styled
+      // primitives (Flex/Grid/Card/Badge/Notice). The intent is
+      // unchanged: diagnostics use semantic tokens/classes, not
+      // ad-hoc inline styles — so assert that against the new
+      // primitives rendering, scoped to the modal's source section.
+      const diagStart = tradingHub.indexOf("Live REST Diagnostics Modal");
+      expect(diagStart).toBeGreaterThan(-1);
+      const diagEnd = tradingHub.indexOf("Alpaca Broker Connection", diagStart);
+      expect(diagEnd).toBeGreaterThan(diagStart);
+      const diagModal = tradingHub.slice(diagStart, diagEnd);
+      // Status pill is a semantic Badge whose tone derives from the
+      // diagnostic status (success / warning / danger).
+      expect(diagModal).toContain("<Badge tone={diagnostics.status");
+      // Credential fields render as token-styled Cards in a Grid.
+      expect(diagModal).toContain("<Grid autoFit");
+      expect(diagModal).toContain('<Card padding="sm">');
+      // The upstream-error banner is a semantic danger Notice.
+      expect(diagModal).toContain('<Notice tone="danger">');
+      // The raw-payload and technical drawers are native <details>.
+      expect(diagModal.match(/<details>/g)?.length).toBe(2);
+      // The modal's actions lay out via Flex.
+      expect(diagModal).toContain('<Flex gap="2" align="center">');
+      // And no ad-hoc styling survives in the modal: no inline
+      // style props and no bespoke diag-* classes.
+      expect(diagModal).not.toContain("style={{");
+      expect(diagModal).not.toContain('className="diag-');
     });
   });
 

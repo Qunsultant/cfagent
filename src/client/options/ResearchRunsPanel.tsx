@@ -14,7 +14,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Button, Checkbox, Table, TextInput, type TableColumn } from "../components/ui";
+import { Button, Checkbox, PageSection, Table, TextInput, type TableColumn } from "../components/ui";
 import { csrfHeaders } from "../apiFetch";
 import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
 import { AutonomousOptionsRuns } from "./AutonomousOptionsRuns";
@@ -353,12 +353,11 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
   };
 
   return (
-    <div style={{ padding: "var(--space-3)" }}>
-      <h3>
-        Autonomous Options Research{" "}
-        <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>(read-only — no order entry from this panel)</span>
-      </h3>
-
+    <>
+      <PageSection
+        title="Autonomous Options Research"
+        description="Read-only — no order entry from this panel"
+      >
       <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: 12, flexWrap: "wrap" }}>
         <Button onClick={() => void runNow()} disabled={running} loading={running}>
           {"Run research now"}
@@ -463,16 +462,20 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
         </div>
       )}
 
+      </PageSection>
+
       {/* Issue #3121 U-03 (lossless + additive): the retired OptionsHub
           schedules mode's options-research content lives here now —
           the one-shot run form (#2545), the autonomous runs record
           (#223), and the screening activity log (#1162). The
           schedules themselves live only in the consolidated home
           (?tab=schedules). */}
+      <PageSection title="Run scheduling & activity">
       <ScheduledOptionsRunForm activeEnv={activeEnv} userLogin={userLogin} />
       <AutonomousOptionsRuns />
       <ScreeningActivityPanel userLogin={userLogin} />
-    </div>
+      </PageSection>
+    </>
   );
 }
 

@@ -67,6 +67,43 @@
  * comments stripped (line comments guarded so https:// survives),
  * string-literal contents dropped, template ${...} interpolation code
  * kept (it is code, not prose).
+ *
+ * S-U2 (#3051, merged 2026-11-10): all 26 slice-3051 entries burned —
+ * register 64 -> 38, zero slice-3051 entries remain; 34 surfaces now
+ * conforming (8 pre-S-U2 + 26 migrated). Dead `scanner-export-csv`
+ * (ScannerPanel.tsx:615) removed with the ScannerPanel migration.
+ * ScreenersHub inner-panel audit (2026-11-10): ScreenersHub mounts
+ * NO panel components — post-#2896 its four asset tabs (forex /
+ * futures / commodities / bonds) render only the Planned Notice, so
+ * there is nothing further to audit; the hub itself conforms. The
+ * panels formerly associated with it now live under StockHub
+ * (ScreenerResultsView, StockCriteriaPanel, ScreenerPresetManager —
+ * all conforming) and OptionsHub (ScannerPanel, IvHistoryPanel,
+ * ResearchRunsPanel, OptionsResearchPanel — all conforming — plus
+ * OptionsFlowsHub, still registered slice 3695, 35 bespoke, burns in
+ * S-U3+). OptionsResearchPanel itself mounts RawContractsScreener
+ * (conforming).
+ * optionsResearch.css disposition (2026-11-10): NOT consolidated in
+ * S-U2, NOT deleted. Both copies (src/client/optionsResearch.css,
+ * 1,217 lines; src/client/options/optionsResearch.css, 1,197 lines)
+ * stay, already registered as one-offs in
+ * one_off_stylesheets_1337.json. They still style live classes in
+ * files outside S-U2 scope — MarketDataResearchHub `options-error`
+ * (slice 3695), OptionsCriteriaPanel `options-criteria-row` (nested
+ * component, out of scope by design), AutonomousOptionsRuns
+ * `autonomous-runs*` family, LlmStrategyEvalModal `options-error`,
+ * ScheduledOptionsRunForm `options-comparison-note` /
+ * `options-request-form`, ThreeWayComparison
+ * `options-comparison-note` / `options-error` — plus
+ * ScreenerResultsView's Table containerClassName
+ * `options-table-scroll` (gate-invisible: the scanner counts
+ * className attributes only, not containerClassName, but the class
+ * still applies). None of those six files imports the stylesheet
+ * itself: they depend on the side-effect imports in ScreenersHub,
+ * StockHub, LlmOptionsIdeasPanel and OptionsResearchPanel, so those
+ * imports MUST stay until the users migrate. Full removal /
+ * consolidation is deferred to S-U7 (CSS consolidation) after
+ * S-U3–S-U6 burn the remaining users.
  */
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
@@ -366,7 +403,33 @@ const CONFORMING_INTERIORS: string[] = [
   "src/client/TrackRecordPanel.tsx",
   "src/client/ScreeningReviewPanel.tsx",
   "src/client/FirstRunScreen.tsx",
-];
+  "src/client/PatternsPanel.tsx",
+  "src/client/PresetsPanel.tsx",
+  "src/client/IvHistoryPanel.tsx",
+  "src/client/MorningDigest.tsx",
+  "src/client/options/ResearchRunsPanel.tsx",
+  "src/client/RunDetailView.tsx",
+  "src/client/StockCriteriaPanel.tsx",
+  "src/client/OptionsHub.tsx",
+  "src/client/ScreenersHub.tsx",
+  "src/client/ScreenerResultsView.tsx",
+  "src/client/ScreenerPresetManager.tsx",
+  "src/client/LedgerPanel.tsx",
+  "src/client/options/RawContractsScreener.tsx",
+  "src/client/GoalScreenPanel.tsx",
+  "src/client/ReportsPanel.tsx",
+  "src/client/StockHub.tsx",
+  "src/client/options/LlmOptionsIdeasPanel.tsx",
+  "src/client/VoicePanel.tsx",
+  "src/client/PortfolioPanel.tsx",
+  "src/client/options/DiscoveryRunsPanel.tsx",
+  "src/client/OmnichannelPanel.tsx",
+  "src/client/OrderTicketPanel.tsx",
+  "src/client/components/AutopilotControlCenter.tsx",
+  "src/client/options/OptionsResearchPanel.tsx",
+  "src/client/ScannerPanel.tsx",
+  "src/client/ETradeTradingHub.tsx",
+]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):
  *  route files, sub-tab files, hub files, hub-view files, admin
