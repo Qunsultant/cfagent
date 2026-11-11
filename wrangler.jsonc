@@ -418,7 +418,7 @@
     // attempting to publish to X where X_ACCESS_TOKEN is not configured.
     "SOCIAL_AUTONOMOUS_CHANNELS": "threads",
     // Issue #1475 (sub-issue of #1344), service identity for unattended
-    // work (runbook docs/architecture/security/service-identity.md):
+    // work (runbook docs/operations/runbook/service-identity.md):
     // the login scheduled goals and ledger forwards run under. Plain
     // identifier, not a credential — never routed through secrets sync.
     // Value follows the repo's own convention for the generic service
