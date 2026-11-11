@@ -280,9 +280,27 @@ async function usableAccessToken(
 }
 
 /**
+ * Issue #4048: the deployment credential, when the operator configured
+ * one (PUBLIC_API_KEY, synced by deploy.yml like ALPACA_*). It is a
+ * FALLBACK, never an override: a user's own stored token always wins,
+ * and the status surface names which source is in use so nobody
+ * mistakes a shared deployment key for their personal account. Reads
+ * only — the Public trade commands refuse a deployment-sourced credential.
+ */
+export function publicDeploymentToken(env: Env): string | null {
+  const raw = (env as unknown as Record<string, unknown>).PUBLIC_API_KEY;
+  if (typeof raw !== "string") return null;
+  const token = raw.trim();
+  return token.length > 10 ? token : null;
+}
+
+/**
  * THE adapter's token source: the signed-in user's usable Public
  * access token, or null. Reads exactly the record the connect paths
- * write; one login's token is never served to another login.
+ * write. One login's stored token is never served to another login;
+ * the deployment key (#4048) is the one documented exception — it is
+ * shared by every login on the deployment, which is why the status
+ * surface and every read name the source it served from.
  */
 export async function getPublicAccessToken(
   env: Env,
@@ -291,8 +309,27 @@ export async function getPublicAccessToken(
 ): Promise<string | null> {
   if (!userLogin) return null;
   const set = await getStoredPublicTokens(env, userLogin);
-  if (!set) return null;
+  if (!set) return publicDeploymentToken(env);
   return usableAccessToken(env, set, fetchImpl);
+}
+
+/** #4048: whose credential would serve this login's Public reads. */
+export type PublicCredentialSource = "user" | "deployment" | null;
+
+/**
+ * Issue #4048: NAMES the credential that would serve this login — the
+ * login's own stored token ("user"), else the deployment key
+ * ("deployment"), else null. Never returns the token itself, so the
+ * source can travel in a status body, a tool result or an audit row.
+ */
+export async function getPublicCredentialSource(
+  env: Env,
+  userLogin: string
+): Promise<PublicCredentialSource> {
+  if (!userLogin) return null;
+  const set = await getStoredPublicTokens(env, userLogin);
+  if (set) return "user";
+  return publicDeploymentToken(env) ? "deployment" : null;
 }
 
 /* --------------------- credential-reference seam --------------------- */
@@ -597,7 +634,11 @@ export async function getPublicConnectionStatus(
   userLogin: string
 ): Promise<{
   connected: boolean;
-  method: "oauth" | "personal" | null;
+  /** #4048: true only when a check actually observed this credential work. */
+  verified: boolean;
+  method: "oauth" | "personal" | "deployment" | null;
+  /** #4048: whose credential served the read. */
+  source: PublicCredentialSource;
   tokenHint: string | null;
   mcpUrl: string;
   verifiedAt: string | null;
@@ -605,8 +646,27 @@ export async function getPublicConnectionStatus(
   tools: string[];
 }> {
   const set = await getStoredPublicTokens(env, userLogin);
+  const deployment = set ? null : publicDeploymentToken(env);
+  if (!set && deployment) {
+    return {
+      // #4048: configured, not verified — nothing has checked this key yet,
+      // and the deployment key is shared by every tenant, so it never gets
+      // a token hint (the deployment-pair precedent exposes none either).
+      connected: true,
+      verified: false,
+      method: "deployment" as const,
+      source: "deployment" as const,
+      tokenHint: null,
+      mcpUrl: PUBLIC_MCP_URL,
+      verifiedAt: null,
+      toolCount: 0,
+      tools: [],
+    };
+  }
   return {
     connected: Boolean(set),
+    verified: Boolean(set?.verifiedAt),
+    source: set ? ("user" as const) : null,
     method: set ? (set.kind === "oauth" ? "oauth" : "personal") : null,
     tokenHint: set ? `${set.accessToken.slice(0, 4)}...${set.accessToken.slice(-4)}` : null,
     mcpUrl: PUBLIC_MCP_URL,

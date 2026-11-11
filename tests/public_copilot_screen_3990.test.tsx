@@ -51,6 +51,7 @@ import {
 import { DataProviderRegistry } from "../src/trading/dataProviders/registry";
 import { createPublicDataProviderFromEnv } from "../src/trading/dataProviders/adapters";
 import { AlpacaBrokerPanel } from "../src/client/AlpacaBrokerPanel";
+import { PublicTokenCard } from "../src/client/PublicTokenCard";
 import type { Env } from "../src/types";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -423,5 +424,51 @@ describe("broker panel is broker-neutral for public (#3990 Slice D)", () => {
     });
     expect(container.textContent).not.toContain("Alpaca");
     expect(container.textContent).not.toContain("Cancel all open orders");
+  });
+});
+
+describe("PublicTokenCard — the deployment credential (#4048)", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("says configured-not-verified, offers no Disconnect, and raises no verification warning", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          broker: "public",
+          configured: true,
+          signedIn: false,
+          source: "deployment",
+          method: "deployment",
+          tokenHint: null,
+          verified: false,
+          verifiedAt: null,
+          toolCount: 0,
+          tools: [],
+        }),
+      ),
+    );
+    await act(async () => {
+      root.render(<PublicTokenCard />);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(container.textContent).toContain("configured, not verified");
+    // a verification failure message for a credential nothing verified
+    expect(container.textContent).not.toContain("observed no tools");
+    // nothing the button could disconnect: the key lives in the deployment
+    expect(container.textContent).not.toContain("Disconnect");
+    expect(container.textContent).toContain("Use my token");
   });
 });

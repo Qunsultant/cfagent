@@ -807,6 +807,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     status: "live",
     commands: [
       "public_get_quote",
+      "public_account",
       "public_preview_order",
       "public_place_order",
       "public_orders",

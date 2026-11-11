@@ -30,6 +30,7 @@ import { z } from "zod";
 import { recordTradingRunOutcome } from "../../services/tradingRunOutcome";
 import { notifyOrderExecution } from "../../services/orderExecutionNotifier";
 import { getUserDid } from "../../agents/did";
+import { getPublicCredentialSource } from "../../security/publicOAuth";
 import { marketDataQuoteAuditEvent } from "../../config/marketDataModes";
 import { resolveTradeEnvironmentFromSettings } from "../../agents/routes/brokerEnvironment";
 import type { BrokerEnvironment } from "../../agents/routes/brokerEnvironment";
@@ -111,6 +112,77 @@ export class PublicGetQuoteCommand implements IMcpToolCommand {
     const event = marketDataQuoteAuditEvent("mcp");
     if (event) context.audit?.(event, "research", { symbol, provider: "public", price: quote.price, provenance: "live" });
     return { ...quote, provider: "public", provenance: "live" as const };
+  }
+}
+
+/**
+ * Issue #4048 — the Public account read.
+ *
+ * The platform exposes accounts and positions; without a tool the copilot
+ * could only answer a balance question with "I have no tool for that" and
+ * point the user at the Public app. This is a READ: it never places,
+ * previews or cancels anything.
+ *
+ * The credential may be the tenant's own stored token or, on a deployment
+ * configured with PUBLIC_API_KEY, ONE account shared by every tenant. The
+ * result names the source so the answer can say whose account it read, and
+ * every mutating platform call refuses a deployment-sourced credential
+ * (`refuseDeploymentCredential` in src/trading/public/platform.ts).
+ */
+export class PublicAccountCommand implements IMcpToolCommand {
+  readonly name = "public_account";
+  readonly description =
+    "Read the connected Public account: account id(s), cash available / buying power, and every open position with quantity, average cost and unrealized P&L when Public sends them. Read-only — it never places, previews or cancels an order. Live-only, as Public has no paper mode. credentialSource names whose credential served the read: 'user' is your own stored token, 'deployment' is the operator's PUBLIC_API_KEY — one account shared by every tenant on this deployment, so say so rather than presenting its balance as the user's own.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {},
+  };
+
+  readonly zodSchema = z.object({});
+
+  async execute(_input: Record<string, never>, context: McpToolContext) {
+    const { platform } = await publicPlatform(context);
+    const source = await getPublicCredentialSource(context.env, context.sessionId);
+    // #4048: one broker round trip — getPositions already reads the account,
+    // so the answer cannot mix two snapshots.
+    const snapshot = await platform.getPositions();
+    const accounts = [snapshot.account];
+    // #4048: when Public omits average cost the parser marks the basis
+    // unknown; drop the fields derived from it instead of reporting a
+    // marketValue − 0 "gain" the broker never sent.
+    const positions = snapshot.positions.map((position) =>
+      position.costBasisKnown === false
+        ? {
+            ...position,
+            pricePaid: null,
+            costBasis: null,
+            totalGain: null,
+            unrealizedGainLoss: null,
+            totalGainPercent: null,
+            unrealizedGainLossPercent: null,
+          }
+        : position
+    );
+    context.audit?.("public.account_read", "trading", {
+      accounts: accounts.length,
+      positions: positions.length,
+      accountId: snapshot.account.accountId,
+      // #4048: whose credential served the read — a tenant's own balance
+      // and the shared deployment account's must be distinguishable.
+      source,
+      login: context.sessionId,
+    });
+    return {
+      provider: "public",
+      provenance: "live" as const,
+      timestamp: new Date().toISOString(),
+      credentialSource: source,
+      accounts,
+      account: snapshot.account,
+      positions,
+      buyingPower: snapshot.account.cashAvailableForInvestment,
+    };
   }
 }
 

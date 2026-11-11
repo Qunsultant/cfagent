@@ -11,7 +11,7 @@ and `tests/a2a_entrypoint_auth_1763.test.ts`).
 ## Method and scope
 
 - Inventory source: `src/mcps/openaimp/mcpPermissionPorts.ts`
-  `MCP_TOOL_SCOPES` (133 tools: 124 canonical + 9 deprecated #1906
+  `MCP_TOOL_SCOPES` (134 tools: 125 canonical + 9 deprecated #1906
   aliases, completeness-pinned against the live
   factory registry in both directions by #1843's tests) plus the
   scanner surface (`src/services/cloudflareWalletsScanner.ts`) and
@@ -100,6 +100,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `public_orders` | mcp:read | L (I / R on other doors) — reads the caller's Public orders via the trading allow-list (`get_orders`); attributed to the caller's session/token (#3990) |
 | `foss_alpaca_orders` (deprecated #1906 alias of `alpaca_orders`, same scope) | mcp:read | L (I / R on other doors) |
 | `alpaca_get_quote` | mcp:read | L (I / R on other doors) — live quote with provenance (#3782); the copilot's quote tool for its broker (#3451) |
+| `public_account` | mcp:read | L (I / R on other doors) — the connected Public account read (#4048): accounts, buying power and open positions, with the credential source (the caller's own token vs the deployment key shared by every tenant) in both the result and the `public.account_read` audit row; read-only, live-only, and the answer to "what is my balance" without sending the user to another app |
 | `alpaca_get_option_chain` | mcp:read | L (I / R on other doors) — the broker's own live option chain (#4014): expiry dates + contracts with bid/ask, greeks and IV when sent; refuses with an explicit unavailable error instead of inventing prices, and is the chain source for multi-leg strategies (PMCC) when the tenant's data provider has no optionsChains |
 | `public_get_quote` | mcp:read | L (I / R on other doors) — live quote with provenance from the Public MCP data allow-list (#3990); the copilot's quote tool for its broker |
 | `browser_inspect_page` | mcp:read | L (I / R on other doors) |

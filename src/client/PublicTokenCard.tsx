@@ -25,8 +25,11 @@ interface TokenStatus {
   broker: string;
   configured: boolean;
   signedIn: boolean;
-  method: "oauth" | "personal" | null;
+  method: "oauth" | "personal" | "deployment" | null;
+  source?: "user" | "deployment" | null;
   tokenHint: string | null;
+  /** #4048: whether a check actually observed the credential work. */
+  verified?: boolean;
   /** #4035: when the credential was verified, and what it saw. */
   verifiedAt?: string | null;
   toolCount?: number;
@@ -134,17 +137,20 @@ export function PublicTokenCard() {
         {load.state === "error" && <Notice tone="danger">{load.message}</Notice>}
         {load.state === "ready" && (
           <p>
-            {load.status.configured
-              ? `Connected (${load.status.method ?? "personal"}${load.status.tokenHint ? `, ${load.status.tokenHint}` : ""})${
-                  load.status.verifiedAt
-                    ? ` \u00b7 verified ${new Date(load.status.verifiedAt).toLocaleString()} \u00b7 ${load.status.toolCount ?? 0} tools`
-                    : ""
-                }.`
-              : "Not connected."}
+            {load.status.source === "deployment"
+              ? "Connected with the deployment key (PUBLIC_API_KEY) — configured, not verified. Paste a personal token below to act as your own Public account instead."
+              : load.status.configured
+                ? `Connected (${load.status.method ?? "personal"}${load.status.tokenHint ? `, ${load.status.tokenHint}` : ""})${
+                    load.status.verifiedAt
+                      ? ` \u00b7 verified ${new Date(load.status.verifiedAt).toLocaleString()} \u00b7 ${load.status.toolCount ?? 0} tools`
+                      : ""
+                  }.`
+                : "Not connected."}
           </p>
         )}
         {load.state === "ready" &&
           load.status.configured &&
+          load.status.source !== "deployment" &&
           (load.status.toolCount ?? 0) === 0 && (
             <Notice tone="warning">
               Connected, but the last verification observed no tools. Reconnect, and if it persists the
@@ -162,9 +168,13 @@ export function PublicTokenCard() {
         />
         <Flex align="center" gap="2">
           <Button type="button" size="sm" onClick={handleConnect} disabled={submitting} loading={submitting}>
-            {load.state === "ready" && load.status.configured ? "Replace token" : "Connect Public.com"}
+            {load.state === "ready" && load.status.source === "deployment"
+              ? "Use my token"
+              : load.state === "ready" && load.status.configured
+                ? "Replace token"
+                : "Connect Public.com"}
           </Button>
-          {load.state === "ready" && load.status.configured && (
+          {load.state === "ready" && load.status.configured && load.status.source !== "deployment" && (
             <Button type="button" size="sm" variant="secondary" onClick={handleDisconnect} disabled={submitting}>
               Disconnect
             </Button>
