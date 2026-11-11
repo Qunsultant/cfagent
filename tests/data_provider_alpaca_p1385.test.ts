@@ -48,6 +48,13 @@
  * No secret-shaped literals: key/secret fixture values below are
  * assembled from string fragments at runtime, so no secret-shaped
  * literal ever enters the file.
+ *
+ * Issue #3990 adaptation: the adapter declares quotes/bars/
+ * optionsChains (the options source is injected; tests stub it) and
+ * NO fundamentals (the wrapped provider's getFundamentals throws —
+ * ADR 0019: Yahoo-covered). The capture and verifier pins below
+ * follow the new capability set; the fundamentals pins moved to
+ * tests/data_provider_capabilities_3990.test.ts (opt-in seam).
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -154,6 +161,40 @@ function throwingMarketData(): FixtureMarketData {
   };
 }
 
+// Issue #3990: the stub options source — a conformant chain (symbol
+// echo + pairs array) and one expiry date. The default (real) source
+// would call Alpaca's live API, so every test that runs the kit or
+// calls the chain methods injects this instead.
+const stubOptionsChain = {
+  getChain: async () => ({
+    symbol: "AAPL",
+    underlyingPrice: 100,
+    pairs: [
+      {
+        call: {
+          optionType: "CALL",
+          strikePrice: 100,
+          symbol: "AAPL260320C00100000",
+          bid: 1,
+          ask: 1.2,
+          lastPrice: 1.1,
+        },
+      },
+    ],
+  }),
+  getExpiryDates: async () => [{ year: 2026, month: 3, day: 20 }],
+};
+
+function throwingOptionsChain() {
+  const boom = () => {
+    throw new Error("alpaca options down");
+  };
+  return {
+    getChain: async () => boom(),
+    getExpiryDates: async () => boom(),
+  };
+}
+
 function fakeBlobStorage() {
   const map = new Map<string, unknown>();
   return {
@@ -209,12 +250,12 @@ function callRoute(
   return handleDataProviderRoutes(request, url, path, "session-1", ctx) as Promise<Response>;
 }
 
-describe("adapter: alpaca declares quotes/bars/fundamentals; batch rides the wrapped provider's getQuotes", () => {
+describe("adapter: alpaca declares quotes/bars/optionsChains; batch rides the wrapped provider's getQuotes", () => {
   it("id/name/capabilities match the seed; getQuote returns the tagged envelope field-for-field", async () => {
     const adapter = createAlpacaDataProvider(fixtureMarketData());
     expect(adapter.id).toBe("alpaca");
     expect(adapter.name).toBe("Alpaca Markets");
-    expect([...adapter.capabilities]).toEqual(["quotes", "historicalBars", "fundamentals"]);
+    expect([...adapter.capabilities]).toEqual(["quotes", "historicalBars", "optionsChains"]);
     const out = await adapter.getQuote!("AAPL", RUN);
     expect(out.providerId).toBe("alpaca");
     expect(out.capability).toBe("quotes");
@@ -263,15 +304,16 @@ describe("capture: capture-wired alpaca constructions write rows per capability"
     const sql = new MockSqlStorage();
     const adapter = createAlpacaDataProvider(fixtureMarketData(), undefined, {
       capture: captureDeps(sql),
+      optionsChain: stubOptionsChain as never,
     });
     await adapter.getQuote!("AAPL", RUN);
     await adapter.getHistoricalBars!("AAPL", undefined, undefined, RUN);
-    await adapter.getFundamentals!("AAPL", RUN);
+    await adapter.getOptionsChain!({ symbol: "AAPL", chainType: "CALLPUT" }, RUN);
     const byRun = listCapturesByRun(sql as never, "test-tenant", "run-alpaca-1385");
     expect(byRun.length).toBe(3);
     expect(byRun.map((r) => r.capability).sort()).toEqual([
-      "fundamentals",
       "historicalBars",
+      "optionsChains",
       "quotes",
     ]);
     expect(byRun.every((r) => r.providerId === "alpaca" && r.rawKind === "provider-result")).toBe(true);
@@ -351,29 +393,30 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
   });
 
   it("configured + conformant provider → ok:true naming all three capabilities", async () => {
-    const result = await verifyAlpacaDataProvider(undefined, { provider: fixtureMarketData() });
+    const result = await verifyAlpacaDataProvider(undefined, {
+      provider: fixtureMarketData(),
+      optionsChain: stubOptionsChain as never,
+    });
     expect(result.ok).toBe(true);
-    expect(result.summary).toMatch(/conformance passed for quotes, historicalBars, fundamentals/);
+    expect(result.summary).toMatch(/conformance passed for quotes, historicalBars, optionsChains/);
   });
 
   it("kit failure → ok:false with the failure list, never a silent pass", async () => {
-    const bad = fixtureMarketData({
-      getFundamentals: async (s: string) => ({
-        provenance: "live",
+    const badChain = {
+      getChain: async () => ({
         symbol: "WRONG",
-        companyName: `${s} Inc.`,
-        sector: "Technology",
-        industry: "Software",
-        description: "fixture",
-        marketCap: 1_000_000,
-        fiftyTwoWeekHigh: 300,
-        fiftyTwoWeekLow: 200,
+        underlyingPrice: 100,
+        pairs: [],
       }),
+      getExpiryDates: async () => [{ year: 2026, month: 3, day: 20 }],
+    };
+    const result = await verifyAlpacaDataProvider(undefined, {
+      provider: fixtureMarketData(),
+      optionsChain: badChain as never,
     });
-    const result = await verifyAlpacaDataProvider(undefined, { provider: bad });
     expect(result.ok).toBe(false);
     expect(result.summary).toMatch(/conformance failed/);
-    expect(result.summary).toMatch(/fundamentals/);
+    expect(result.summary).toMatch(/optionsChains/);
   });
 
   it("throwing provider + sql-derived recorder → ok:false and one fetch_failed row per capability", async () => {
@@ -385,6 +428,7 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
     const result = await verifyAlpacaDataProvider(undefined, {
       provider: throwingMarketData(),
       outcomeRecorder: createCaptureFetchOutcomeRecorder(sql as never),
+      optionsChain: throwingOptionsChain() as never,
     });
     expect(result.ok).toBe(false);
     expect(result.summary).toMatch(/conformance failed/);
@@ -393,8 +437,8 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
     const failed = listFetchFailures(sql as never, "default");
     expect(failed.length).toBe(3);
     expect(failed.map((r) => r.capability).sort()).toEqual([
-      "fundamentals",
       "historicalBars",
+      "optionsChains",
       "quotes",
     ]);
     expect(failed.every((r) => r.providerId === "alpaca")).toBe(true);
@@ -407,13 +451,15 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
   });
 
   it("conformance parity field-for-field over the injected provider", async () => {
-    const adapter = createAlpacaDataProvider(fixtureMarketData());
+    const adapter = createAlpacaDataProvider(fixtureMarketData(), undefined, {
+      optionsChain: stubOptionsChain as never,
+    });
     const report = await runDataProviderConformance(adapter);
     expect(report.ok).toBe(true);
     expect(report.checks.map((c) => c.capability)).toEqual([
       "quotes",
       "historicalBars",
-      "fundamentals",
+      "optionsChains",
     ]);
   });
 });
@@ -471,7 +517,11 @@ describe("lifecycle + routes: alpaca verifies, enables, and serves with health; 
     const sql = new MockSqlStorage();
     seedProviderConfigs(sql as never);
     expect(getProviderConfig(sql as never, "alpaca")?.lifecycleState).toBe("configured");
-    const verifier = () => verifyAlpacaDataProvider(undefined, { provider: fixtureMarketData() });
+    const verifier = () =>
+      verifyAlpacaDataProvider(undefined, {
+        provider: fixtureMarketData(),
+        optionsChain: stubOptionsChain as never,
+      });
     const verified = await transitionProvider(sql as never, "alpaca", "verify", "tester", {
       verifier: verifier as never,
     });

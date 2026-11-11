@@ -1,10 +1,13 @@
 /**
  * Options Screener product programme slice 2 (issue #2598) — the options
  * feed gate. Pins:
- * - the gate decision is null for chain providers (etrade, public) and
- *   the coded FAILURE_DATA_PROVIDER_UNAVAILABLE response (single
- *   resolver, catalog httpStatus) for yahoo / alpaca / nasdaq / unknown
- *   — never a silent E*TRADE feed under another provider's name;
+ * - the gate decision is null for chain providers (etrade, public,
+ *   alpaca — alpaca joined in #3990 via the repo's own Alpaca options
+ *   read path) and for non-chain selections, which are served through
+ *   a capable provider with the substitution named in the run record
+ *   (#4014) — never a silent feed under another provider's name;
+ *   the coded FAILURE_DATA_PROVIDER_UNAVAILABLE resolver itself is
+ *   pinned in tests/data_provider_capabilities_3990.test.ts;
  * - the handler returns null without touching the store for non-gated
  *   paths (stored-run reads, catalog, config) and for gated paths under
  *   the fail-open default (unbound store resolves etrade/etrade);
@@ -48,16 +51,16 @@ const notGated: Array<[string, string]> = [
 
 describe("options feed gate decision", () => {
   it("passes chain providers through untouched", () => {
-    for (const dataProviderId of ["etrade", "public"]) {
+    for (const dataProviderId of ["etrade", "public", "alpaca"]) {
       expect(optionsFeedGateResponse({ dataProviderId, brokerId: "etrade" })).toBeNull();
     }
   });
 
   it("serves non-chain selections through a capable provider (#4014)", () => {
-    // yahoo/nasdaq/alpaca declare no optionsChains, but a chain is still served
-    // by the capable provider and the run record names both (see
-    // tests/options_chain_serving_4014.test.ts). Refusing instead left the
-    // options screens with no chain at all.
+    // yahoo/nasdaq declare no optionsChains (alpaca declares it since #3990),
+    // but a chain is still served by the capable provider and the run record
+    // names both (see tests/options_chain_serving_4014.test.ts). Refusing
+    // instead left the options screens with no chain at all.
     for (const dataProviderId of ["yahoo", "alpaca", "nasdaq", "bogus"]) {
       expect(optionsFeedGateResponse({ dataProviderId, brokerId: "etrade" })).toBeNull();
     }

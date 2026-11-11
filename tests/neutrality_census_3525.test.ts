@@ -335,8 +335,49 @@ function measure(): Map<string, number> {
  * precedent: the rule's prose comment was neutralized instead (it names
  * the sentiment job without the provider brand), so the row is the rule
  * line alone. One raise (stockCopilotPrompt.ts/yahoo 1->2).
+ * Baseline update (#3990, 2026-11-10): Public.com joins as a live broker
+ * and the data-provider/broker taxonomy splits (defaults alpaca/alpaca,
+ * Alpaca optionsChains in the data adapter, Public trading platform +
+ * five copilot tools, public-mode screening). 17 new rows, all
+ * dispositioned INTEGRATION — the provider's own adapters, command
+ * modules, registry entries, trading client, platform, outcome code
+ * and token card name the provider they serve, which is their job
+ * (the copilot commands name their Alpaca/E*TRADE mirrors in their
+ * header, the #3782 precedent): BrokerDynamicMenu nasdaq 1,
+ * PublicTokenCard public.com 15 / alpaca 1, commercialPorts yahoo 2,
+ * commands.ts public.com 2, publicCommands.ts etrade 3 / public.com 12
+ * / alpaca 4, publicTradingMcp.ts public.com 1, outcomeCatalog.json
+ * public.com 1, publicTrading.ts public.com 4, brokerCatalog.ts
+ * public.com 4, brokerPresentation.ts public.com 4, public/platform.ts
+ * public.com 11 / alpaca 2, screenerPipeline.ts public.com 3. 21 raises
+ * in the same modules (capability-matrix comments, the taxonomy kind
+ * map, the Alpaca options extraction, the Public catalog entry):
+ * copilotTradingMode alpaca 8->9, brokerConnect alpaca 21->22,
+ * screener-agent etrade 69->71 / alpaca 15->18, BrokerDynamicMenu
+ * etrade 24->25 / yahoo 6->7, client tenantProviders alpaca 9->10,
+ * commercialPorts alpaca 3->8, optionsProviderContext alpaca 5->7 /
+ * yahoo 3->4, services tenantProviders public.com 1->2 / alpaca 10->11,
+ * optionsData etrade 2->5 / alpaca 14->23, brokerCatalog alpaca 18->19,
+ * adapters alpaca 10->20 / yahoo 28->32, contract etrade 19->22 /
+ * alpaca 5->9 / yahoo 12->14 / nasdaq 3->5. The MCP inventory doc
+ * gains its first public.com row (2 lines: the Public.com tool row
+ * and the read-scope mention) and the scope table's Alpaca comments
+ * grow it 3->6 — same INTEGRATION disposition (the inventory names
+ * the providers its servers integrate; the scope table is the
+ * registry). The PLATFORM slice is
+ * untouched (still 189 rows / 1050 lines). Totals move 1135/8912 ->
+ * 1152/9045.
+ * Follow-up in the same PR (mesh family + OASF map + audit doc):
+ * registry.ts public.com 1->5 / alpaca new (1), oasfRecords.ts
+ * public.com new (1), ADR 0028 new (etrade 10 / public.com 7 /
+ * alpaca 24 / yahoo 11 / nasdaq 4), adr README public.com new (1) /
+ * alpaca 1->2, data-provider-platform.md etrade 1->8 / public.com
+ * 1->3 / alpaca 1->13 / yahoo 1->8 / nasdaq 1->5 (the #3990 section
+ * written after the first baseline update). Totals move 1152/9045 ->
+ * 1160/9141.
  */
 const BASELINE: Array<[string, string, number]> = [
+  // ---- PLATFORM (189 rows / 1050 lines) ----
   // ---- PLATFORM (189 rows / 1050 lines) ----
   ["README.md", "etrade", 3],
   ["README.md", "yahoo", 1],
@@ -527,7 +568,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-
   // ---- INTEGRATION (678 rows / 6515 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
@@ -552,11 +592,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/security/vendor-risk-1774.md", "alpaca", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "etrade", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "public.com", 1],
-  ["docs/operations/data/data-provider-platform.md", "alpaca", 1],
-  ["docs/operations/data/data-provider-platform.md", "etrade", 1],
-  ["docs/operations/data/data-provider-platform.md", "nasdaq", 1],
-  ["docs/operations/data/data-provider-platform.md", "public.com", 1],
-  ["docs/operations/data/data-provider-platform.md", "yahoo", 1],
+  ["docs/operations/data/data-provider-platform.md", "alpaca", 13],
+  ["docs/operations/data/data-provider-platform.md", "etrade", 8],
+  ["docs/operations/data/data-provider-platform.md", "nasdaq", 5],
+  ["docs/operations/data/data-provider-platform.md", "public.com", 3],
+  ["docs/operations/data/data-provider-platform.md", "yahoo", 8],
   ["docs/operations/data/feed-jobs.md", "alpaca", 2],
   ["docs/operations/data/feed-jobs.md", "etrade", 2],
   ["docs/operations/data/feed-jobs.md", "nasdaq", 2],
@@ -568,7 +608,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/browserAgent.ts", "etrade", 4],
   ["src/agents/chatPrompt.ts", "alpaca", 2],
   ["src/agents/chatPrompt.ts", "etrade", 7],
-  ["src/agents/copilotTradingMode.ts", "alpaca", 8],
+  ["src/agents/copilotTradingMode.ts", "alpaca", 9],
   ["src/agents/copilotTradingMode.ts", "etrade", 5],
   ["src/agents/judge.ts", "alpaca", 1],
   ["src/agents/judge.ts", "etrade", 1],
@@ -622,13 +662,13 @@ const BASELINE: Array<[string, string, number]> = [
   // neutralized instead, so the row is the rule line alone.
   ["src/agents/prompts/stockCopilotPrompt.ts", "yahoo", 2],
   ["src/agents/registry.ts", "etrade", 27],
-  ["src/agents/registry.ts", "public.com", 1],
+  ["src/agents/registry.ts", "public.com", 5],
   ["src/agents/research-agent.ts", "etrade", 6],
   ["src/agents/routes/agenticPayments.ts", "etrade", 4],
   ["src/agents/routes/alpaca.ts", "alpaca", 41],
   ["src/agents/routes/autopilot.ts", "etrade", 1],
   ["src/agents/routes/brokerCodedError.ts", "etrade", 20],
-  ["src/agents/routes/brokerConnect.ts", "alpaca", 21],
+  ["src/agents/routes/brokerConnect.ts", "alpaca", 22],
   ["src/agents/routes/brokerConnect.ts", "etrade", 4],
   ["src/agents/routes/brokerEnvironment.ts", "etrade", 9],
   ["src/agents/routes/brokerGate.ts", "etrade", 11],
@@ -698,8 +738,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/scheduledTasksPipeline.ts", "alpaca", 1],
   ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "yahoo", 1],
-  ["src/agents/screener-agent.ts", "alpaca", 15],
-  ["src/agents/screener-agent.ts", "etrade", 69],
+  ["src/agents/screener-agent.ts", "alpaca", 18],
+  ["src/agents/screener-agent.ts", "etrade", 71],
   ["src/agents/screener-agent.ts", "yahoo", 58],
   ["src/agents/screenerA2aDispatch.ts", "etrade", 2],
   ["src/agents/screenerA2aDispatch.ts", "yahoo", 5],
@@ -771,7 +811,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/styles.css", "alpaca", 8],
   ["src/client/styles.css", "etrade", 79],
   ["src/client/styles.css", "yahoo", 4],
-  ["src/client/tenantProviders.ts", "alpaca", 9],
+  ["src/client/tenantProviders.ts", "alpaca", 10],
   ["src/client/tenantProviders.ts", "etrade", 4],
   ["src/client/tenantProviders.ts", "nasdaq", 1],
   ["src/client/tenantProviders.ts", "public.com", 1],
@@ -802,7 +842,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/config/tradingAgentConfig.ts", "alpaca", 5],
   ["src/config/tradingAgentConfig.ts", "etrade", 4],
   ["src/data/bucketPorts.ts", "etrade", 4],
-  ["src/data/commercialPorts.ts", "alpaca", 3],
+  ["src/data/commercialPorts.ts", "alpaca", 8],
   ["src/data/commercialPorts.ts", "etrade", 7],
   ["src/data/createBucketPorts.ts", "etrade", 1],
   ["src/data/createTokenPorts.ts", "etrade", 6],
@@ -890,7 +930,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/marketDataCommands.ts", "alpaca", 75],
   ["src/mcps/openaimp/marketDataCommands.ts", "etrade", 5],
   ["src/mcps/openaimp/marketDataCommands.ts", "yahoo", 4],
-  ["src/mcps/openaimp/mcpPermissionPorts.ts", "alpaca", 3],
+  ["src/mcps/openaimp/mcpPermissionPorts.ts", "alpaca", 6],
   ["src/mcps/openaimp/mcpPermissionPorts.ts", "etrade", 9],
   ["src/mcps/openaimp/meshDoorCommands.ts", "alpaca", 6],
   ["src/mcps/openaimp/meshDoorCommands.ts", "etrade", 15],
@@ -1011,11 +1051,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/oasfRecords.ts", "etrade", 2],
   ["src/services/optionsAuthFreshness.ts", "etrade", 21],
   ["src/services/optionsAuthFreshness.ts", "yahoo", 1],
-  ["src/services/optionsProviderContext.ts", "alpaca", 5],
+  ["src/services/optionsProviderContext.ts", "alpaca", 7],
   // #4014 INTEGRATION growth: optionsChainsServingProvider names the capable
   // provider that actually serves a chain when the tenant's selection cannot.
+  // Merged #3990 + #4014 baselines (max of both sides; measured 7/13/4 on the
+  // merged file, all under these ceilings).
   ["src/services/optionsProviderContext.ts", "etrade", 16],
-  ["src/services/optionsProviderContext.ts", "yahoo", 3],
+  ["src/services/optionsProviderContext.ts", "yahoo", 4],
   ["src/services/optionsServeRecord.ts", "etrade", 5],
   ["src/services/patternSignals.ts", "etrade", 1],
   ["src/services/pipelineChains.ts", "yahoo", 3],
@@ -1058,10 +1100,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/stockCopilotIntrospection.ts", "nasdaq", 1],
   ["src/services/stockCopilotIntrospection.ts", "yahoo", 1],
   ["src/services/stockCopilotSessions.ts", "alpaca", 1],
-  ["src/services/tenantProviders.ts", "alpaca", 10],
+  ["src/services/tenantProviders.ts", "alpaca", 11],
   ["src/services/tenantProviders.ts", "etrade", 12],
   ["src/services/tenantProviders.ts", "nasdaq", 2],
-  ["src/services/tenantProviders.ts", "public.com", 1],
+  ["src/services/tenantProviders.ts", "public.com", 2],
   ["src/services/tenantProviders.ts", "yahoo", 2],
   ["src/services/thinkHarness.ts", "etrade", 12],
   ["src/services/tradingWebhooks.ts", "etrade", 24],
@@ -1080,28 +1122,28 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/alpaca/credentials.ts", "alpaca", 6],
   ["src/trading/alpaca/fillLots.ts", "alpaca", 4],
   ["src/trading/alpaca/occSymbol.ts", "alpaca", 8],
-  ["src/trading/alpaca/optionsData.ts", "alpaca", 14],
-  ["src/trading/alpaca/optionsData.ts", "etrade", 2],
+  ["src/trading/alpaca/optionsData.ts", "alpaca", 23],
+  ["src/trading/alpaca/optionsData.ts", "etrade", 5],
   ["src/trading/alpaca/platform.ts", "alpaca", 113],
   ["src/trading/alpaca/platform.ts", "etrade", 8],
   ["src/trading/alpaca/signIn.ts", "alpaca", 6],
-  ["src/trading/brokerCatalog.ts", "alpaca", 18],
+  ["src/trading/brokerCatalog.ts", "alpaca", 19],
   ["src/trading/brokerCatalog.ts", "etrade", 26],
   ["src/trading/brokerPanels.ts", "alpaca", 1],
   ["src/trading/brokerPanels.ts", "etrade", 1],
   ["src/trading/brokerPresentation.ts", "alpaca", 12],
   ["src/trading/brokerPresentation.ts", "etrade", 14],
   ["src/trading/channels/approval.ts", "etrade", 3],
-  ["src/trading/dataProviders/adapters.ts", "alpaca", 10],
+  ["src/trading/dataProviders/adapters.ts", "alpaca", 20],
   ["src/trading/dataProviders/adapters.ts", "etrade", 103],
   ["src/trading/dataProviders/adapters.ts", "nasdaq", 17],
   ["src/trading/dataProviders/adapters.ts", "public.com", 4],
-  ["src/trading/dataProviders/adapters.ts", "yahoo", 28],
+  ["src/trading/dataProviders/adapters.ts", "yahoo", 32],
   ["src/trading/dataProviders/conformance.ts", "etrade", 1],
-  ["src/trading/dataProviders/contract.ts", "alpaca", 5],
-  ["src/trading/dataProviders/contract.ts", "etrade", 19],
-  ["src/trading/dataProviders/contract.ts", "nasdaq", 3],
-  ["src/trading/dataProviders/contract.ts", "yahoo", 12],
+  ["src/trading/dataProviders/contract.ts", "alpaca", 9],
+  ["src/trading/dataProviders/contract.ts", "etrade", 22],
+  ["src/trading/dataProviders/contract.ts", "nasdaq", 5],
+  ["src/trading/dataProviders/contract.ts", "yahoo", 14],
   ["src/trading/dataProviders/fetchOutcome.ts", "etrade", 12],
   ["src/trading/dataProviders/lifecycle.ts", "etrade", 3],
   ["src/trading/dataProviders/providerHealth.ts", "etrade", 1],
@@ -1209,8 +1251,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["wrangler.jsonc", "alpaca", 1],
   ["wrangler.jsonc", "etrade", 5],
   ["src/client/BrokerDynamicMenu.tsx", "alpaca", 24],
-  ["src/client/BrokerDynamicMenu.tsx", "etrade", 24],
-  ["src/client/BrokerDynamicMenu.tsx", "yahoo", 6],
+  ["src/client/BrokerDynamicMenu.tsx", "etrade", 25],
+  ["src/client/BrokerDynamicMenu.tsx", "yahoo", 7],
   ["src/trading/voice/stockCopilotVoiceActivation.ts", "etrade", 2],
   ["docs/architecture/client-assets.md", "etrade", 1],
   ["src/agents/orchestrator/asyncJobs.ts", "alpaca", 1],
@@ -1231,12 +1273,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/shardExecutors.ts", "alpaca", 3],
   ["src/trading/screenerPipeline.ts", "alpaca", 26],
   ["src/trading/screeningSchemas.ts", "alpaca", 4],
-
   ["docs/agents/rca-aapl-bracket-order-3812.md", "alpaca", 20],
   ["docs/agents/rca-aapl-bracket-order-3812.md", "etrade", 11],
   ["src/services/providerUxLinks.ts", "alpaca", 11],
   ["src/services/tradingRunOutcome.ts", "alpaca", 2],
-
   // Issue #3839: the copilot capability contract and its two wiring
   // files name the providers they integrate; dispositioned INTEGRATION.
   ["docs/agents/copilot-broker-capability.md", "alpaca", 10],
@@ -1244,7 +1284,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/agents/copilot-broker-capability.md", "yahoo", 1],
   ["src/agents/orchestrator.ts", "alpaca", 1],
   ["src/config/asyncJobModes.ts", "alpaca", 1],
-
   // ---- HISTORICAL (145 rows / 732 lines) ----
   ["docs/Assessment.md", "etrade", 6],
   ["docs/Assessment.md", "yahoo", 2],
@@ -1256,7 +1295,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/adr/0008-market-data-circuit-breakers.md", "alpaca", 4],
   ["docs/architecture/adr/0008-market-data-circuit-breakers.md", "etrade", 5],
   ["docs/architecture/adr/0008-market-data-circuit-breakers.md", "yahoo", 7],
-  ["docs/architecture/adr/README.md", "alpaca", 1],
+  ["docs/architecture/adr/README.md", "alpaca", 2],
   ["docs/architecture/adr/README.md", "yahoo", 1],
   ["docs/architecture/agentic/stockcopilot-evoluation.md", "alpaca", 20],
   ["docs/architecture/agentic/stockcopilot-evoluation.md", "etrade", 3],
@@ -1391,7 +1430,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/plans/rsi-tech-plan-2026-10-20.md", "yahoo", 1],
   ["docs/plans/pr_3719_body.md", "alpaca", 3],
   ["docs/plans/pr_3719_body.md", "etrade", 6],
-
   // ---- NOT-PROVIDER (74 rows / 290 lines) ----
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "nasdaq", 4],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "nasdaq", 1],
@@ -1467,7 +1505,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/screeningSchemas.ts", "nasdaq", 2],
   ["src/trading/universes.ts", "nasdaq", 3],
   ["src/types.ts", "nasdaq", 1],
-
   // ---- FALSE-POSITIVE (28 rows / 32 lines) ----
   ["docs/architecture/adr/0002-data-foundation-layer.md", "fidelity", 1],
   ["docs/architecture/adr/0005-actor-port.md", "fidelity", 1],
@@ -1524,6 +1561,45 @@ const BASELINE: Array<[string, string, number]> = [
   // #3892 INTEGRATION: the introspection payload names the provider it
   // enumerates, alongside the other broker's.
   ["src/mcps/openaimp/tradingLimitCommands.ts", "etrade", 1],
+  // #3990 INTEGRATION: Public.com joins as a live broker and the
+  // data-provider/broker taxonomy splits — the provider's own
+  // adapters, command modules, registry entries, trading client,
+  // platform, outcome code and token card name the provider they
+  // serve, which is their job; the copilot commands name their
+  // Alpaca/E*TRADE mirrors in their header (the #3782 precedent).
+  ["src/client/BrokerDynamicMenu.tsx", "nasdaq", 1],
+  ["src/client/PublicTokenCard.tsx", "public.com", 15],
+  ["src/client/PublicTokenCard.tsx", "alpaca", 1],
+  ["src/data/commercialPorts.ts", "yahoo", 2],
+  ["src/mcps/openaimp/commands.ts", "public.com", 2],
+  ["src/mcps/openaimp/publicCommands.ts", "etrade", 3],
+  ["src/mcps/openaimp/publicCommands.ts", "public.com", 12],
+  ["src/mcps/openaimp/publicCommands.ts", "alpaca", 4],
+  ["src/mcps/public/publicTradingMcp.ts", "public.com", 1],
+  ["src/outcomes/outcomeCatalog.json", "public.com", 1],
+  ["src/services/publicTrading.ts", "public.com", 4],
+  ["src/trading/brokerCatalog.ts", "public.com", 4],
+  ["src/trading/brokerPresentation.ts", "public.com", 4],
+  ["src/trading/public/platform.ts", "public.com", 11],
+  ["src/trading/public/platform.ts", "alpaca", 2],
+  ["src/trading/screenerPipeline.ts", "public.com", 3],
+  ["docs/architecture/agentic/mcp-server-inventory.md", "public.com", 2],
+  // #3990 follow-up in the same PR (mesh family + OASF map + audit
+  // doc): the new public-mcp-commands registry family names its
+  // Alpaca mirror and the Public tools it accounts for (INTEGRATION —
+  // the registry names the providers its families cover; the OASF map
+  // names the family it maps), and ADR 0028 + its index row name the
+  // providers the decision is about (HISTORICAL — dated decision
+  // records, 0028 etrade 10 / public.com 7 / alpaca 24 / yahoo 11 /
+  // nasdaq 4, index public.com 1 / alpaca 1->2).
+  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "etrade", 10],
+  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "public.com", 7],
+  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "alpaca", 24],
+  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "yahoo", 11],
+  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "nasdaq", 4],
+  ["docs/architecture/adr/README.md", "public.com", 1],
+  ["src/agents/registry.ts", "alpaca", 1],
+  ["src/services/oasfRecords.ts", "public.com", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));

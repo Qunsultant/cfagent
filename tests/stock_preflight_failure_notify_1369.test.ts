@@ -65,7 +65,10 @@ describe("autonomousMarketScreen preflight-blocked failure path (#1369)", () => 
 
   it("a blocked run fails loud with the guard error and publishes screener.failed instead of returning silently", async () => {
     const { service, publish, runScreen } = blockedService();
-    const result = await service.autonomousMarketScreen({});
+    // Issue #3990: the guard runs only for etrade-provider runs and
+    // the platform default is alpaca now — the E*TRADE provider is
+    // named explicitly (same as the #1527 guard tests).
+    const result = await service.autonomousMarketScreen({ provider: "etrade" });
     expect(result.success).toBe(false);
     expect(String((result as any).error)).toContain("FAILURE_AUTH_NO_SESSION");
     expect(runScreen).not.toHaveBeenCalled();
@@ -79,8 +82,8 @@ describe("autonomousMarketScreen preflight-blocked failure path (#1369)", () => 
 
   it("a second blocked run in the same episode notifies again (no dedup on the per-run notice)", async () => {
     const { service, publish } = blockedService();
-    await service.autonomousMarketScreen({});
-    await service.autonomousMarketScreen({});
+    await service.autonomousMarketScreen({ provider: "etrade" });
+    await service.autonomousMarketScreen({ provider: "etrade" });
     const failed = publish.mock.calls.map((c) => c[0]).filter((e: any) => e.type === "screener.failed");
     expect(failed).toHaveLength(2);
   });
@@ -89,7 +92,7 @@ describe("autonomousMarketScreen preflight-blocked failure path (#1369)", () => 
     const { service, publish, runScreen } = blockedService();
     const shardSubmit = vi.fn(async () => ({ jobId: "never" }));
     (service as any).shardSubmit = shardSubmit;
-    const result = await service.autonomousMarketScreen({ sharded: true });
+    const result = await service.autonomousMarketScreen({ sharded: true, provider: "etrade" });
     expect(result.success).toBe(false);
     expect(String((result as any).error)).toContain("FAILURE_AUTH_NO_SESSION");
     expect(runScreen).not.toHaveBeenCalled();

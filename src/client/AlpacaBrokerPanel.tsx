@@ -429,15 +429,21 @@ export function AlpacaBrokerPanel({ activeEnv, broker = "alpaca" }: AlpacaBroker
         <Flex align="center" gap="2">
           <h4>Order history</h4>
           {/* Issue #3885: cancel every open order — preview first, then the
-              token, then the table refreshes only on a confirmed cancel. */}
-          <AlpacaCancelAllControl
-            openOrders={
-              orderHistory.state === "ready"
-                ? (orderHistory.data.orders ?? []).filter((row) => row.status === "OPEN").length
-                : 0
-            }
-            onCancelled={() => setOrderHistoryNonce((n) => n + 1)}
-          />
+              token, then the table refreshes only on a confirmed cancel.
+              Issue #3990: Alpaca-only — the cancel-all control calls the
+              Alpaca cancel-all endpoint, and Public has no cancel-all on
+              its MCP surface (one cancel_order call per order). A Public
+              panel renders no Alpaca control. */}
+          {brokerId === "alpaca" && (
+            <AlpacaCancelAllControl
+              openOrders={
+                orderHistory.state === "ready"
+                  ? (orderHistory.data.orders ?? []).filter((row) => row.status === "OPEN").length
+                  : 0
+              }
+              onCancelled={() => setOrderHistoryNonce((n) => n + 1)}
+            />
+          )}
         </Flex>
         <BrokerSurfaceGate broker={brokerId} surface="orderHistory">
           {orderHistory.state === "loading" && <Spinner size="sm" label={`Loading ${label} order history`} />}

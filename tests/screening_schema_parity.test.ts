@@ -663,10 +663,12 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
       { symbols: ["NVDA"], thesis: "bullish" },
       // Issue #3655: the REST route stamps brokerId/dataProviderId/
       // mode server-side from the tenant selection (fixture's
-      // unbound store falls back to etrade; TEST → paper), so the
-      // builder's identity must carry the same resolved values for
-      // parity — the builder stamps identity values, never a default.
-      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "etrade", mode: "paper" }
+      // unbound store falls back to the platform default — alpaca
+      // data since #3990, etrade broker for this fixture's etrade
+      // session; TEST → paper), so the builder's identity must carry
+      // the same resolved values for parity — the builder stamps
+      // identity values, never a default.
+      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "alpaca", mode: "paper" }
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;
@@ -700,8 +702,9 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
       "autonomousStrategyDiscovery",
       { requests: [VALID_STRATEGY_REQUEST] },
       // Issue #3655: same resolved-identity stamping as the options
-      // parity test above (etrade/etrade/paper for this fixture).
-      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "etrade", mode: "paper" }
+      // parity test above (etrade broker / alpaca data / paper for
+      // this fixture, #3990).
+      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "alpaca", mode: "paper" }
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;

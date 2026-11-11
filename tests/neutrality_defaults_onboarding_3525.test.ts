@@ -76,11 +76,13 @@ describe("neutrality S3 — StockHub default follows the tenant's configured pro
 });
 
 describe("neutrality S3 — deferred defaults pinned", () => {
-  it("tenant-providers default broker is Alpaca in paper mode (#3812); the data provider stays etrade", () => {
+  it("tenant-providers default broker is Alpaca in paper mode (#3812); the data provider is Alpaca too (#3990)", () => {
     // Issue #3812 (owner rule on #3451): the platform default broker is
     // Alpaca; paper is the mode default (TEST), so no stored selection
     // means Alpaca in paper mode on every surface, including this mirror.
-    expect(DEFAULT_TENANT_PROVIDERS_STATE).toEqual({ dataProviderId: "etrade", brokerId: "alpaca" });
+    // Issue #3990: the data default is Alpaca as well (one provider on
+    // both axes; the reason is on the server default).
+    expect(DEFAULT_TENANT_PROVIDERS_STATE).toEqual({ dataProviderId: "alpaca", brokerId: "alpaca" });
   });
   it("order ticket copy names the selected broker (provenance, #3669)", () => {
     const src = read("src/client/OrderTicketPanel.tsx");

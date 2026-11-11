@@ -15,6 +15,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { AlpacaTradingPlatform } from "../src/trading/alpaca/platform";
 import { ETradeTradingPlatform } from "../src/trading/etrade/platform";
+import { PublicTradingPlatform } from "../src/trading/public/platform";
 import { BROKER_CATALOG, brokerSupports, type BrokerId, type BrokerOperation } from "../src/trading/brokerCatalog";
 
 const CREDS = { ALPACA_API_KEY: "key", ALPACA_SECRET_KEY: "secret" } as any;
@@ -59,6 +60,9 @@ describe("declared capabilities match the implementation (#3233)", () => {
     const prototypes: Record<BrokerId, any> = {
       etrade: ETradeTradingPlatform.prototype,
       alpaca: AlpacaTradingPlatform.prototype,
+      // Issue #3990: Public joins the parity total — every capability
+      // the catalog declares for public must have a platform method.
+      public: PublicTradingPlatform.prototype,
     };
     for (const broker of Object.keys(BROKER_CATALOG) as BrokerId[]) {
       for (const [operation, method] of Object.entries(OPERATION_METHOD) as [BrokerOperation, string][]) {
@@ -78,6 +82,11 @@ describe("declared capabilities match the implementation (#3233)", () => {
     const platform = new AlpacaTradingPlatform(CREDS, undefined, "user@example.com") as any;
     expect(typeof platform.getPositionLots).toBe("function");
     expect(typeof platform.screenMarkets).toBe("function");
+    // Issue #3990: Public declares the same screening capability, and
+    // its platform implements it over its own quotes.
+    expect(brokerSupports("public", "marketScreening")).toBe(true);
+    const publicPlatform = new PublicTradingPlatform({} as any, undefined, "user@example.com") as any;
+    expect(typeof publicPlatform.screenMarkets).toBe("function");
     // Option ORDER placement is still equity-only in the adapter; #3329 closes
     // that, and until then the declaration must keep saying what is true.
     expect(brokerSupports("alpaca", "orderPlace")).toBe(true);

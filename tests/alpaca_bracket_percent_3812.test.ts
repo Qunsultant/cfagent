@@ -231,13 +231,13 @@ describe("Alpaca order tools accept percent exits (#3812)", () => {
   });
 });
 
-describe("default broker is Alpaca in paper mode (#3812)", () => {
-  it("the server default broker is alpaca; the data provider default is unchanged", () => {
-    expect(DEFAULT_TENANT_PROVIDERS).toEqual({ dataProviderId: "etrade", brokerId: "alpaca" });
+describe("default broker is Alpaca in paper mode (#3812); default data provider is Alpaca too (#3990)", () => {
+  it("the server default pair is alpaca data + alpaca broker", () => {
+    expect(DEFAULT_TENANT_PROVIDERS).toEqual({ dataProviderId: "alpaca", brokerId: "alpaca" });
   });
 
   it("the client mirror agrees, so the settings menu opens on Alpaca before the server row loads", () => {
-    expect(DEFAULT_TENANT_PROVIDERS_STATE).toEqual({ dataProviderId: "etrade", brokerId: "alpaca" });
+    expect(DEFAULT_TENANT_PROVIDERS_STATE).toEqual({ dataProviderId: "alpaca", brokerId: "alpaca" });
   });
 });
 

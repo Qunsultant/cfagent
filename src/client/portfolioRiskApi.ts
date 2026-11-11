@@ -36,7 +36,7 @@ async function postJson<T>(path: string, env: string, body?: unknown): Promise<T
  * they are the surface its pins describe, and moving E*TRADE onto the neutral
  * route needs an equivalence proof of its own, not a side effect of this slice.
  */
-export type RiskBroker = "etrade" | "alpaca";
+export type RiskBroker = "etrade" | "alpaca" | "public"; // Issue #3990: Public risk reads name their own broker.
 
 export function riskApiPath(broker: RiskBroker, suffix: string): string {
   return broker === "etrade" ? `/api/etrade${suffix}` : `/api/broker${suffix}`;

@@ -90,14 +90,25 @@ export function parsePublicRpcBody(text: string): unknown {
 export class PublicMcpClient {
   private readonly accessTokenProvider: PublicAccessTokenProvider;
   private readonly fetchImpl: typeof fetch;
+  private readonly toolAllowlist: readonly string[];
   private sessionId: string | undefined;
 
   constructor(options: {
     accessTokenProvider: PublicAccessTokenProvider;
     fetchImpl?: typeof fetch;
+    /**
+     * Issue #3990: the tools this instance may call. Defaults to the
+     * data allow-list, so a data client stays read-only by
+     * construction. The trading client (publicTradingMcp.ts) passes
+     * its own list over the same transport — one transport, two
+     * allow-lists, never a shared list that could grow a write tool
+     * into the data path.
+     */
+    toolAllowlist?: readonly string[];
   }) {
     this.accessTokenProvider = options.accessTokenProvider;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.toolAllowlist = options.toolAllowlist ?? PUBLIC_DATA_TOOL_ALLOWLIST;
   }
 
   /** One JSON-RPC call. Throws PublicMcpError on any failure. */
@@ -163,14 +174,16 @@ export class PublicMcpClient {
 
   /**
    * Invoke one allow-listed tool and return its text result (the
-   * content parts of type "text", joined). A tool outside the
-   * allow-list is refused before any network call — read-only by
-   * construction, not by convention.
+   * content parts of type "text", joined). A tool outside THIS
+   * instance's allow-list is refused before any network call — the
+   * data instance's read-only guarantee and the trading instance's
+   * write boundary are the same check over different lists.
    */
   async callToolText(name: string, args: Record<string, unknown>): Promise<string> {
-    if (!(PUBLIC_DATA_TOOL_ALLOWLIST as readonly string[]).includes(name)) {
+    if (!this.toolAllowlist.includes(name)) {
+      const kind = this.toolAllowlist === PUBLIC_DATA_TOOL_ALLOWLIST ? "data" : "trading";
       throw new PublicMcpError(
-        `tool "${name}" is not on the Public data allow-list; the data provider is read-only by construction and never calls it.`
+        `tool "${name}" is not on the Public ${kind} allow-list; the ${kind === "data" ? "data provider is read-only by construction and never calls it" : "trading client never calls it"}.`
       );
     }
     const result = (await this.callRpc("tools/call", {

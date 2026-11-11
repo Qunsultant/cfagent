@@ -8,9 +8,9 @@
  * resolveIaaaTenant, never from a client value:
  *   dataProviderId: one of DATA_PROVIDER_IDS (etrade, public,
  *     yahoo, nasdaq, alpaca)
- *   brokerId: "etrade" | "alpaca" — the only brokers with a
- *     route implementation in this build.
- * Defaults are etrade (data provider) / the platform default
+ *   brokerId: "etrade" | "alpaca" | "public" — the brokers with a
+ *     route implementation in this build (public since #3990).
+ * Defaults are alpaca (data provider, #3990) / the platform default
  * broker (DEFAULT_TENANT_PROVIDERS.brokerId, commercialPorts.ts)
  * — issue #3812, owner rule on #3451; issue #3937 (user decision
  * 2026-11-10) makes that ONE default global: every surface resolves
@@ -28,7 +28,7 @@ import type { TenantProviders } from "../data/commercialPorts";
 import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 import { codedMessage } from "../outcomes/outcomeAspects";
 
-export const BROKER_IDS = ["etrade", "alpaca"] as const;
+export const BROKER_IDS = ["etrade", "alpaca", "public"] as const;
 export type BrokerId = (typeof BROKER_IDS)[number];
 
 /**
@@ -60,6 +60,7 @@ export const DATA_PROVIDER_IDENTITIES: Readonly<Record<string, ProviderIdentity>
 export const BROKER_IDENTITIES: Readonly<Record<string, ProviderIdentity>> = {
   etrade: { id: "etrade", displayName: "E*TRADE" },
   alpaca: { id: "alpaca", displayName: "Alpaca" },
+  public: { id: "public", displayName: "Public.com" },
 };
 
 /** Identity for a data-provider id; undefined for an unknown id (never a guessed brand). */
