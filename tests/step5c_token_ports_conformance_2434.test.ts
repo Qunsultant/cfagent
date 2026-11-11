@@ -53,6 +53,7 @@ import {
 } from "../src/security/etradeOAuth";
 import {
   connectPublicPersonalToken,
+  getPublicConnectionStatus,
   getPublicOAuthPending,
   getStoredPublicTokens,
   publicTokenKey,
@@ -724,6 +725,14 @@ describe("5c façade characterization dual-run (§9)", () => {
       expect(connected.toolCount).toBe(1);
       const stored = await getStoredPublicTokens(env, LOGIN);
       expect(stored?.kind).toBe("personal");
+      // #4035: verification is evidence, not a boolean.
+      expect(stored?.verifiedTools).toEqual(["get_quote"]);
+      expect(typeof stored?.verifiedAt).toBe("string");
+      const status = await getPublicConnectionStatus(env, LOGIN);
+      expect(status.connected).toBe(true);
+      expect(status.verifiedAt).toBe(stored?.verifiedAt);
+      expect(status.toolCount).toBe(1);
+      expect(status.tools).toEqual(["get_quote"]);
     },
   );
 

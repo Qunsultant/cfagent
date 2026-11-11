@@ -105,6 +105,10 @@ export interface PublicTokenSet {
   revocationEndpoint?: string;
   storedAt: string;
   userLogin: string;
+  /** #4035: when the credential was verified against the MCP server. */
+  verifiedAt?: string;
+  /** #4035: the tool names the verification observed (tools/list). */
+  verifiedTools?: string[];
 }
 
 export interface PublicOAuthPending {
@@ -191,13 +195,17 @@ export async function revokeStoredPublicTokens(env: Env, userLogin: string): Pro
 export async function storePublicPersonalToken(
   env: Env,
   userLogin: string,
-  token: string
+  token: string,
+  verification?: { verifiedAt: string; tools: string[] },
 ): Promise<void> {
   await storePublicTokens(env, {
     kind: "personal",
     accessToken: token,
     storedAt: new Date().toISOString(),
     userLogin,
+    ...(verification
+      ? { verifiedAt: verification.verifiedAt, verifiedTools: [...verification.tools] }
+      : {}),
   });
 }
 
@@ -592,6 +600,9 @@ export async function getPublicConnectionStatus(
   method: "oauth" | "personal" | null;
   tokenHint: string | null;
   mcpUrl: string;
+  verifiedAt: string | null;
+  toolCount: number;
+  tools: string[];
 }> {
   const set = await getStoredPublicTokens(env, userLogin);
   return {
@@ -599,6 +610,10 @@ export async function getPublicConnectionStatus(
     method: set ? (set.kind === "oauth" ? "oauth" : "personal") : null,
     tokenHint: set ? `${set.accessToken.slice(0, 4)}...${set.accessToken.slice(-4)}` : null,
     mcpUrl: PUBLIC_MCP_URL,
+    // #4035: proof the connection was verified, and what it observed.
+    verifiedAt: set?.verifiedAt ?? null,
+    toolCount: set?.verifiedTools?.length ?? 0,
+    tools: set?.verifiedTools ?? [],
   };
 }
 
@@ -619,8 +634,14 @@ export async function connectPublicPersonalToken(
     fetchImpl,
   });
   const tools = await client.listTools();
-  await storePublicPersonalToken(env, userLogin, token);
-  return { toolCount: tools.length, tools: tools.map((t) => t.name) };
+  const toolNames = tools.map((t) => t.name);
+  // #4035: the verification is evidence, not a boolean — the status
+  // surface can say when the credential was checked and what it saw.
+  await storePublicPersonalToken(env, userLogin, token, {
+    verifiedAt: new Date().toISOString(),
+    tools: toolNames,
+  });
+  return { toolCount: toolNames.length, tools: toolNames };
 }
 
 /** Disconnect: best-effort upstream revocation, then drop the record. */

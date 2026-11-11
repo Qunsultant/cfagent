@@ -172,6 +172,10 @@ export async function handleBrokerConnectRoutes(
       method: status.method,
       tokenHint: status.tokenHint,
       mcpUrl: status.mcpUrl,
+      // #4035: the verification evidence the Settings card renders.
+      verifiedAt: status.verifiedAt,
+      toolCount: status.toolCount,
+      tools: status.tools,
     });
   }
 

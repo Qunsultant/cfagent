@@ -523,6 +523,10 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     const card = readFileSync("src/client/PublicTokenCard.tsx", "utf8");
     expect(card).toContain("/api/public/connect");
     const routes = readFileSync("src/agents/routes/brokerConnect.ts", "utf8");
+    // #4035: the status the card reads carries the verification evidence.
+    expect(routes).toContain("verifiedAt: status.verifiedAt");
+    expect(routes).toContain("toolCount: status.toolCount");
+    expect(card).toContain("verifiedAt");
     expect(routes).toContain("/broker/connect/public");
   });
 });
