@@ -375,6 +375,15 @@ function measure(): Map<string, number> {
  * 1->3 / alpaca 1->13 / yahoo 1->8 / nasdaq 1->5 (the #3990 section
  * written after the first baseline update). Totals move 1152/9045 ->
  * 1160/9141.
+ *
+ * Baseline update (#3992 PR-5, 2026-11-11): the feed-run residency
+ * decision doc names the #3976 incident job by its exact id
+ * (`yahoo-nasdaq100-quotes`) — a data-bearing identifier, the job's
+ * registered name, not platform framing; the #3911/#4002 precedent
+ * (a job id named verbatim is baselined, its prose neutralized, never
+ * the id rewritten). One new row, dispositioned INTEGRATION:
+ * feed-run-residency-and-scheduled-silence-3992.md yahoo 1. The rest
+ * of the doc and its companion fragment name no provider brand.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -388,6 +397,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/broker-parity-matrix.md", "alpaca", 2],
   ["docs/architecture/broker-parity-matrix.md", "yahoo", 1],
   ["docs/architecture/broker-parity-matrix.md", "nasdaq", 1],
+  // #3992 PR-5 INTEGRATION: the residency decision doc names the incident
+  // job by its registered id (a data-bearing identifier), per the note above.
+  ["docs/architecture/feed-run-residency-and-scheduled-silence-3992.md", "yahoo", 1],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "alpaca", 8],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "etrade", 19],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "yahoo", 5],
