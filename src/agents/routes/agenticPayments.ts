@@ -1761,9 +1761,11 @@ export async function handleAgenticPaymentsRoutes(
               versionId: credit.versionId,
             }));
           } else {
-            console.error(
-              `[payments] redemption journal entry skipped for run=${runRequestId} (claim ${credit.creditRunId} has no product/version — pre-0058 claim); credit already redeemed.`,
-            );
+            structuredLog.error("agenticPayments.redemptionJournalSkipped", {
+              message: `[payments] redemption journal entry skipped for run=${runRequestId} (claim ${credit.creditRunId} has no product/version — pre-0058 claim); credit already redeemed.`,
+              runRequestId,
+              creditRunId: credit.creditRunId,
+            });
           }
           return Response.json({ runRequestId, status: "redeemed_started", creditRunId: credit.creditRunId, workflowId: handle.workflowId });
         }
@@ -2173,9 +2175,11 @@ export async function handleAgenticPaymentsRoutes(
         // The plan is created; a product-row failure must not
         // fail the create — it is a loud log, and the next plan
         // create (or the slice-2 backfill) repairs it.
-        console.error(
-          `[payments] product row ensure failed for plan ${plan.id}: ${err?.message || "unknown error"}`,
-        );
+        structuredLog.error("agenticPayments.productRowEnsureFailed", {
+          message: `[payments] product row ensure failed for plan ${plan.id}: ${err?.message || "unknown error"}`,
+          planId: plan.id,
+          error: err?.message || "unknown error",
+        });
       }
       // Audit (#1969 acceptance): the record alone answers which code, what
       // happened, for which login — code + message + login + structured fields.
