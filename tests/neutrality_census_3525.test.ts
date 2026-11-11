@@ -375,6 +375,36 @@ function measure(): Map<string, number> {
  * 1->3 / alpaca 1->13 / yahoo 1->8 / nasdaq 1->5 (the #3990 section
  * written after the first baseline update). Totals move 1152/9045 ->
  * 1160/9141.
+ *
+ * Baseline update (#3992 PR-5, 2026-11-11): the feed-run residency
+ * decision doc names the #3976 incident job by its exact id
+ * (`yahoo-nasdaq100-quotes`) — a data-bearing identifier, the job's
+ * registered name, not platform framing; the #3911/#4002 precedent
+ * (a job id named verbatim is baselined, its prose neutralized, never
+ * the id rewritten). One new row, dispositioned INTEGRATION:
+ * feed-run-residency-and-scheduled-silence-3992.md yahoo 1. The rest
+ * of the doc and its companion fragment name no provider brand.
+ * Baseline update (#4065, 2026-11-11): the options-chains feed
+ * jobs land — one options-chains job per optionsChains-serving
+ * source (etrade, alpaca, public), each a parameterized
+ * definition on the #3930 idiom, with a persisted
+ * options-chains dataset. 0 new rows, 7 raises, all
+ * dispositioned INTEGRATION — the pipeline/job-system
+ * provider-id registries and provider wiring name the provider
+ * they serve, which is their job (the seed-time disposition):
+ * the growth is the new jobs' own id/label/sourceId/alias
+ * lines only (feedJobs.ts alpaca 5->7 / etrade 5->7 / nasdaq
+ * 10->11; feedPipelineJobs.ts alpaca 5->9 / etrade 4->8 /
+ * nasdaq 20->23 / public.com 2->3). The prose brand mentions
+ * were neutralized instead: the registry comment names the
+ * three serving sources without brands, the runner's evidence
+ * note drops its brand parenthetical, and the dataset
+ * definition uses the neutral BrokerOptionChain /
+ * BrokerOptionExpireDate aliases (the non-deprecated names) —
+ * so no feedDatasetPorts.ts etrade row is created and the
+ * feedJobs.ts yahoo row does not move. The PLATFORM slice is
+ * untouched (still 189 rows / 1050 lines). Totals move
+ * 1161/9142 -> 1161/9159.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -388,6 +418,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/broker-parity-matrix.md", "alpaca", 2],
   ["docs/architecture/broker-parity-matrix.md", "yahoo", 1],
   ["docs/architecture/broker-parity-matrix.md", "nasdaq", 1],
+  // #3992 PR-5 INTEGRATION: the residency decision doc names the incident
+  // job by its registered id (a data-bearing identifier), per the note above.
+  ["docs/architecture/feed-run-residency-and-scheduled-silence-3992.md", "yahoo", 1],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "alpaca", 8],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "etrade", 19],
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "yahoo", 5],
@@ -1017,14 +1050,14 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/etradeOAuth.ts", "etrade", 3],
   ["src/services/eventCalendar.ts", "etrade", 1],
   ["src/services/eventCalendar.ts", "yahoo", 5],
-  ["src/services/feedJobs.ts", "alpaca", 5],
-  ["src/services/feedJobs.ts", "etrade", 5],
-  ["src/services/feedJobs.ts", "nasdaq", 10],
+  ["src/services/feedJobs.ts", "alpaca", 7],
+  ["src/services/feedJobs.ts", "etrade", 7],
+  ["src/services/feedJobs.ts", "nasdaq", 11],
   ["src/services/feedJobs.ts", "yahoo", 26],
-  ["src/services/feedPipelineJobs.ts", "alpaca", 5],
-  ["src/services/feedPipelineJobs.ts", "etrade", 4],
-  ["src/services/feedPipelineJobs.ts", "nasdaq", 20],
-  ["src/services/feedPipelineJobs.ts", "public.com", 2],
+  ["src/services/feedPipelineJobs.ts", "alpaca", 9],
+  ["src/services/feedPipelineJobs.ts", "etrade", 8],
+  ["src/services/feedPipelineJobs.ts", "nasdaq", 23],
+  ["src/services/feedPipelineJobs.ts", "public.com", 3],
   ["src/services/feedPipelineJobs.ts", "yahoo", 31],
   ["src/services/feedProviderWiring.ts", "alpaca", 2],
   ["src/services/feedProviderWiring.ts", "etrade", 4],

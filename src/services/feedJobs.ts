@@ -55,7 +55,9 @@ import {
   type FeedDatasetArtifact,
   type FeedDatasetRunRecord,
   type FeedDatasetStore,
+  type FeedDatasetStoreInput,
   type FeedFundamentalsRow,
+  type FeedOptionsChainRow,
   type FeedQuotesResolution,
   type FeedSentimentRow,
   type PersistedSentiment,
@@ -68,7 +70,7 @@ import {
   withFeedDeadline,
 } from "./feedJobTimeouts";
 import type { IndexListFetchService } from "./indexListProducer";
-import type { Env } from "../types";
+import type { BrokerOptionChain, Env } from "../types";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -93,6 +95,8 @@ export const FEED_JOB_CODES = {
   noBarsReturned: "FEED_NO_BARS_RETURNED",
   newsUnsupported: "FEED_PROVIDER_NEWS_UNSUPPORTED",
   noNewsReturned: "FEED_NO_NEWS_RETURNED",
+  optionsChainsUnsupported: "FEED_PROVIDER_OPTIONS_CHAINS_UNSUPPORTED",
+  noChainsReturned: "FEED_NO_CHAINS_RETURNED",
   refreshTimeout: "FEED_REFRESH_TIMEOUT",
   fetchTimeout: "FEED_FETCH_TIMEOUT",
   captureTimeout: "FEED_CAPTURE_TIMEOUT",
@@ -286,6 +290,9 @@ export const YAHOO_DOW_QUOTES_JOB_ID = "yahoo-dow-quotes";
 export const ALPACA_NASDAQ100_QUOTES_JOB_ID = "alpaca-nasdaq100-quotes";
 export const ETRADE_NASDAQ100_QUOTES_JOB_ID = "etrade-nasdaq100-quotes";
 export const PUBLIC_NASDAQ100_QUOTES_JOB_ID = "public-nasdaq100-quotes";
+export const ETRADE_OPTIONS_CHAINS_JOB_ID = "etrade-options-chains";
+export const ALPACA_OPTIONS_CHAINS_JOB_ID = "alpaca-options-chains";
+export const PUBLIC_OPTIONS_CHAINS_JOB_ID = "public-options-chains";
 export const FEED_JOB_DEFAULTS = {
   cadenceMinutes: 60,
   staleAfterMinutes: 180,
@@ -496,6 +503,42 @@ export function buildFeedJobRegistry(
   registry.register(
     nasdaq100QuotesJob(env, PUBLIC_NASDAQ100_QUOTES_JOB_ID, "public"),
   );
+  // #4065 — ONE options-chains job per source that serves the
+  // optionsChains capability (the three optionsChains-serving
+  // sources — the #3990 taxonomy; the pure data providers
+  // declare no optionsChains and get no chains job). Each is
+  // parameterized on the #3930 idiom: the id names the DEFAULT universe (nasdaq100,
+  // kept for lineage), and a run's `universe` input names the
+  // stored index list it actually pulls — or a run's `symbols`
+  // input names explicit underlyings (an options screen's
+  // underlyings, which need not belong to any stored list;
+  // the artifact then carries a symbols-kind universe). There
+  // is no per-universe chains job: the same job serves any
+  // stored list and any explicit-symbol run.
+  for (const [jobId, sourceId] of [
+    [ETRADE_OPTIONS_CHAINS_JOB_ID, "etrade"],
+    [ALPACA_OPTIONS_CHAINS_JOB_ID, "alpaca"],
+    [PUBLIC_OPTIONS_CHAINS_JOB_ID, "public"],
+  ] as const) {
+    registry.register({
+      id: jobId,
+      sourceId,
+      dataset: "options-chains",
+      elements: ["optionsChains"],
+      universe: { kind: "index", index: "nasdaq100", label: "Nasdaq-100" },
+      parameterizedUniverse: true,
+      cadenceMinutes: resolveFeedJobCadenceMinutes(
+        env,
+        jobId,
+        FEED_JOB_DEFAULTS.cadenceMinutes,
+      ),
+      staleAfterMinutes: resolveFeedJobStaleMinutes(
+        env,
+        jobId,
+        FEED_JOB_DEFAULTS.staleAfterMinutes,
+      ),
+    });
+  }
   return registry;
 }
 
@@ -557,6 +600,19 @@ export interface RunFeedJobOptions {
    * index list; the artifact's universe size is the subset's.
    */
   symbols?: string[];
+  /**
+   * #4065 — the chains run's fetch window: the DTE band whose
+   * expirations the job persists, and the cap on expirations
+   * fetched per symbol. Defaults mirror the screener's own
+   * fetch (minDte 0, maxDte 365, maxExpirationsPerSymbol 100
+   * — the screener config default). A screen whose DTE window
+   * lies outside the persisted window cannot be served from
+   * the dataset; the composition (#4068) passes the screen's
+   * window into the run. Absent ⇒ the defaults.
+   */
+  minDte?: number;
+  maxDte?: number;
+  maxExpirationsPerSymbol?: number;
   /** Injectable clock (tests). */
   now?: () => Date;
 }
@@ -662,6 +718,52 @@ function quoteSymbol(quote: QuoteResult): string {
     : "";
 }
 
+/**
+ * #3992 PR-3 — the capture-leg bound: one store attempt for a
+ * run artifact, raced against FEED_JOB_TIMEOUTS.captureMs via
+ * the PR-1 substrate. The outcome is a VALUE, never a rejection,
+ * so the caller decides the failure semantics: a timeout is a
+ * named outcome the record() closures answer with one degraded
+ * fallback write; a store error keeps carrying the original
+ * error object so the closures can rethrow it byte-identically
+ * to the pre-PR-3 propagation. The race abandons a hung store
+ * (its late write may still land in the background) but the
+ * helper has settled, so exactly one outcome is ever observed.
+ */
+type StoreRunArtifactOutcome =
+  | { ok: true; artifact: FeedDatasetArtifact }
+  | { ok: false; reason: "timeout" }
+  | { ok: false; reason: "error"; error: unknown };
+
+async function storeRunArtifact(
+  store: FeedDatasetStore,
+  input: FeedDatasetStoreInput,
+): Promise<StoreRunArtifactOutcome> {
+  try {
+    const artifact = await withFeedDeadline(
+      store.store(input),
+      FEED_JOB_TIMEOUTS.captureMs,
+      FEED_JOB_CODES.captureTimeout,
+    );
+    return { ok: true, artifact };
+  } catch (err) {
+    if (err instanceof FeedJobTimeoutError) {
+      return { ok: false, reason: "timeout" };
+    }
+    return { ok: false, reason: "error", error: err };
+  }
+}
+
+/**
+ * #3992 PR-3 — the message a per-symbol fetch timeout leaves
+ * in the loop's firstError: it names the stable code and the
+ * whole-loop budget, so a run that fetched nothing fails with
+ * its no*Returned code AND an errorMessage that says why.
+ */
+function fetchTimeoutMessage(): string {
+  return `Provider fetch leg did not settle within ${FEED_JOB_TIMEOUTS.fetchMs}ms (${FEED_JOB_CODES.fetchTimeout}).`;
+}
+
 export async function runFeedJob(
   registry: FeedJobRegistry,
   deps: FeedJobDeps,
@@ -706,7 +808,7 @@ export async function runFeedJob(
       codedError: args.codedError,
       errorMessage: args.errorMessage,
     };
-    const artifact = await deps.datasetStore.store({
+    const storeInput: FeedDatasetStoreInput = {
       jobId: def.id,
       sourceId: def.sourceId,
       dataset: def.dataset,
@@ -717,28 +819,61 @@ export async function runFeedJob(
       quotes: args.quotes,
       run,
       nowIso: finishedAt.toISOString(),
-    });
-    if (args.status === "failed") {
+    };
+    // #3992 PR-3: the store write is bound by the capture leg.
+    // A store error rethrows exactly as before; a capture
+    // timeout degrades honestly (degradedRun below).
+    const outcome = await storeRunArtifact(deps.datasetStore, storeInput);
+    if (!outcome.ok && outcome.reason === "error") throw outcome.error;
+    let artifactId: string;
+    let settledRun = run;
+    if (outcome.ok) {
+      artifactId = outcome.artifact.id;
+    } else {
+      // The primary write did not settle within the capture
+      // bound: attempt ONE degraded fallback — same runId, a
+      // failed empty record coded FEED_CAPTURE_TIMEOUT — and
+      // land the run on it. If the fallback also fails, the
+      // run still settles: captureTimeout with artifactId ""
+      // (no artifact exists; an id is never fabricated).
+      const degradedRun: FeedDatasetRunRecord = {
+        ...run,
+        status: "failed",
+        received: 0,
+        failed: args.requested,
+        missingSymbols: symbols,
+        codedError: FEED_JOB_CODES.captureTimeout,
+        errorMessage: `Run-record store write did not settle within ${FEED_JOB_TIMEOUTS.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
+      };
+      const fallback = await storeRunArtifact(deps.datasetStore, {
+        ...storeInput,
+        quotes: [],
+        run: degradedRun,
+      });
+      settledRun = degradedRun;
+      artifactId = fallback.ok ? fallback.artifact.id : "";
+    }
+    if (settledRun.status === "failed") {
       structuredLog.warn("feedJobs.run_failed", {
         message: `[feedJobs] ${FEED_JOB_RUN_FAILED}`,
         jobId: def.id,
         runId,
-        code: args.codedError,
+        code: settledRun.codedError,
         requested: args.requested,
       });
     }
     return {
       jobId: def.id,
       runId,
-      status: args.status,
-      artifactId: artifact.id,
-      requested: run.requested,
-      received: run.received,
-      failed: run.failed,
-      missingSymbols: run.missingSymbols,
-      codedError: run.codedError,
-      startedAt: run.startedAt,
-      finishedAt: run.finishedAt,
+      status: settledRun.status,
+      artifactId,
+      requested: settledRun.requested,
+      received: settledRun.received,
+      failed: settledRun.failed,
+      missingSymbols: settledRun.missingSymbols,
+      codedError: settledRun.codedError,
+      startedAt: settledRun.startedAt,
+      finishedAt: settledRun.finishedAt,
     };
   };
 
@@ -819,14 +954,32 @@ export async function runFeedJob(
 
   // 3. Fetch through the port. Captures fire inside the
   //    capture-wired adapter under this run's id.
+  // #3992 PR-3: the batch await is raced against the fetch
+  // bound; a timeout is discriminated in the catch and records
+  // FEED_FETCH_TIMEOUT, distinctly from FEED_FETCH_FAILED.
   let envelope;
   try {
-    envelope = await deps.provider.getQuotesBatch(symbols, {
-      runId,
-      tenantId: opts.tenantId ?? "default",
-      ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
-    });
+    envelope = await withFeedDeadline(
+      deps.provider.getQuotesBatch(symbols, {
+        runId,
+        tenantId: opts.tenantId ?? "default",
+        ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+      }),
+      FEED_JOB_TIMEOUTS.fetchMs,
+      FEED_JOB_CODES.fetchTimeout,
+    );
   } catch (err) {
+    if (err instanceof FeedJobTimeoutError) {
+      return record({
+        status: "failed",
+        quotes: [],
+        requested: symbols.length,
+        missingSymbols: symbols,
+        codedError: FEED_JOB_CODES.fetchTimeout,
+        errorMessage: `Provider batch quote fetch for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.fetchMs}ms (${FEED_JOB_CODES.fetchTimeout}).`,
+        universe,
+      });
+    }
     return record({
       status: "failed",
       quotes: [],
@@ -925,6 +1078,9 @@ export async function runFeedFundamentalsJob(
     rows: FeedFundamentalsRow[];
     requested: number;
     missingSymbols: string[];
+    /** #3992 PR-3: every requested symbol — the degraded
+     *  capture-fallback record names them all as missing. */
+    allSymbols: string[];
     codedError: string | null;
     errorMessage: string | null;
     universe: FeedDatasetArtifact["universe"];
@@ -943,7 +1099,7 @@ export async function runFeedFundamentalsJob(
       codedError: args.codedError,
       errorMessage: args.errorMessage,
     };
-    const artifact = await deps.datasetStore.store({
+    const storeInput: FeedDatasetStoreInput = {
       jobId: def.id,
       sourceId: def.sourceId,
       dataset: def.dataset,
@@ -955,28 +1111,61 @@ export async function runFeedFundamentalsJob(
       fundamentals: args.rows,
       run,
       nowIso: finishedAt.toISOString(),
-    });
-    if (args.status === "failed") {
+    };
+    // #3992 PR-3: the store write is bound by the capture leg.
+    // A store error rethrows exactly as before; a capture
+    // timeout degrades honestly (degradedRun below).
+    const outcome = await storeRunArtifact(deps.datasetStore, storeInput);
+    if (!outcome.ok && outcome.reason === "error") throw outcome.error;
+    let artifactId: string;
+    let settledRun = run;
+    if (outcome.ok) {
+      artifactId = outcome.artifact.id;
+    } else {
+      // The primary write did not settle within the capture
+      // bound: attempt ONE degraded fallback — same runId, a
+      // failed empty record coded FEED_CAPTURE_TIMEOUT — and
+      // land the run on it. If the fallback also fails, the
+      // run still settles: captureTimeout with artifactId ""
+      // (no artifact exists; an id is never fabricated).
+      const degradedRun: FeedDatasetRunRecord = {
+        ...run,
+        status: "failed",
+        received: 0,
+        failed: args.requested,
+        missingSymbols: args.allSymbols,
+        codedError: FEED_JOB_CODES.captureTimeout,
+        errorMessage: `Run-record store write did not settle within ${FEED_JOB_TIMEOUTS.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
+      };
+      const fallback = await storeRunArtifact(deps.datasetStore, {
+        ...storeInput,
+        fundamentals: [],
+        run: degradedRun,
+      });
+      settledRun = degradedRun;
+      artifactId = fallback.ok ? fallback.artifact.id : "";
+    }
+    if (settledRun.status === "failed") {
       structuredLog.warn(FEED_JOB_RUN_FAILED, {
         message: `[feedJobs] ${FEED_JOB_RUN_FAILED}`,
         jobId: def.id,
         runId,
-        code: args.codedError,
+        code: settledRun.codedError,
         requested: args.requested,
       });
     }
     return {
       jobId: def.id,
       runId,
-      status: args.status,
-      artifactId: artifact.id,
-      requested: run.requested,
-      received: run.received,
-      failed: run.failed,
-      missingSymbols: run.missingSymbols,
-      codedError: run.codedError,
-      startedAt: run.startedAt,
-      finishedAt: run.finishedAt,
+      status: settledRun.status,
+      artifactId,
+      requested: settledRun.requested,
+      received: settledRun.received,
+      failed: settledRun.failed,
+      missingSymbols: settledRun.missingSymbols,
+      codedError: settledRun.codedError,
+      startedAt: settledRun.startedAt,
+      finishedAt: settledRun.finishedAt,
     };
   };
 
@@ -1011,6 +1200,7 @@ export async function runFeedFundamentalsJob(
         rows: [],
         requested: 0,
         missingSymbols: [],
+        allSymbols: symbols,
         codedError: FEED_JOB_CODES.refreshTimeout,
         errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
         universe,
@@ -1022,6 +1212,7 @@ export async function runFeedFundamentalsJob(
         rows: [],
         requested: 0,
         missingSymbols: [],
+        allSymbols: symbols,
         codedError: FEED_JOB_CODES.universeRefreshFailed,
         errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
         universe,
@@ -1032,6 +1223,7 @@ export async function runFeedFundamentalsJob(
       rows: [],
       requested: 0,
       missingSymbols: [],
+      allSymbols: symbols,
       codedError: FEED_JOB_CODES.universeMissing,
       errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
       universe,
@@ -1046,6 +1238,7 @@ export async function runFeedFundamentalsJob(
       rows: [],
       requested: symbols.length,
       missingSymbols: symbols,
+      allSymbols: symbols,
       codedError: FEED_JOB_CODES.fundamentalsUnsupported,
       errorMessage: `Provider "${def.sourceId}" does not implement fundamentals; the feed job cannot pull its dataset.`,
       universe,
@@ -1056,16 +1249,39 @@ export async function runFeedFundamentalsJob(
   //    throws or whose envelope names another provider is a
   //    missing symbol with the failure counted — one bad symbol
   //    never poisons the rows already pulled.
+  // #3992 PR-3: the WHOLE loop is bound by the fetch leg — one
+  //    deadline for the loop, captured before it starts on the
+  //    same clock the race's default timers read (Date.now —
+  //    vitest fake timers drive both). Each symbol's await is
+  //    raced with the REMAINING budget, never a fresh bound per
+  //    symbol; a symbol that times out is missing with the
+  //    timeout named in firstError, and once the budget is gone
+  //    no further fetch starts — the remaining symbols are
+  //    marked missing in one pass.
   const rows: FeedFundamentalsRow[] = [];
   const missingSymbols: string[] = [];
   let firstError: string | null = null;
-  for (const symbol of symbols) {
+  const fetchDeadlineMs = Date.now() + FEED_JOB_TIMEOUTS.fetchMs;
+  for (let i = 0; i < symbols.length; i++) {
+    const symbol = symbols[i];
+    const remainingMs = fetchDeadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      for (let j = i; j < symbols.length; j++) {
+        missingSymbols.push(symbols[j]);
+      }
+      firstError ??= fetchTimeoutMessage();
+      break;
+    }
     try {
-      const envelope = await deps.provider.getFundamentals(symbol, {
-        runId,
-        tenantId: opts.tenantId ?? "default",
-        ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
-      });
+      const envelope = await withFeedDeadline(
+        deps.provider.getFundamentals(symbol, {
+          runId,
+          tenantId: opts.tenantId ?? "default",
+          ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+        }),
+        remainingMs,
+        FEED_JOB_CODES.fetchTimeout,
+      );
       if (envelope.providerId !== def.sourceId) {
         missingSymbols.push(symbol);
         firstError ??= `Provider envelope named "${envelope.providerId}" for a "${def.sourceId}" feed job; the result was refused, not relabelled.`;
@@ -1078,9 +1294,12 @@ export async function runFeedFundamentalsJob(
       rows.push({ symbol, fundamentals: envelope.result });
     } catch (err) {
       missingSymbols.push(symbol);
-      firstError ??= scrubFailureMessage(
-        err instanceof Error ? err.message : String(err),
-      );
+      firstError ??=
+        err instanceof FeedJobTimeoutError
+          ? fetchTimeoutMessage()
+          : scrubFailureMessage(
+              err instanceof Error ? err.message : String(err),
+            );
     }
   }
   if (rows.length === 0) {
@@ -1089,6 +1308,7 @@ export async function runFeedFundamentalsJob(
       rows: [],
       requested: symbols.length,
       missingSymbols,
+      allSymbols: symbols,
       codedError: FEED_JOB_CODES.noFundamentalsReturned,
       errorMessage:
         firstError ??
@@ -1101,6 +1321,7 @@ export async function runFeedFundamentalsJob(
     rows,
     requested: symbols.length,
     missingSymbols,
+    allSymbols: symbols,
     codedError: null,
     errorMessage: null,
     universe,
@@ -1145,6 +1366,9 @@ export async function runFeedTechnicalsJob(
     rows: FeedDailyBarRow[];
     requested: number;
     missingSymbols: string[];
+    /** #3992 PR-3: every requested symbol — the degraded
+     *  capture-fallback record names them all as missing. */
+    allSymbols: string[];
     codedError: string | null;
     errorMessage: string | null;
     universe: FeedDatasetArtifact["universe"];
@@ -1163,7 +1387,7 @@ export async function runFeedTechnicalsJob(
       codedError: args.codedError,
       errorMessage: args.errorMessage,
     };
-    const artifact = await deps.datasetStore.store({
+    const storeInput: FeedDatasetStoreInput = {
       jobId: def.id,
       sourceId: def.sourceId,
       dataset: def.dataset,
@@ -1175,28 +1399,61 @@ export async function runFeedTechnicalsJob(
       bars: args.rows,
       run,
       nowIso: finishedAt.toISOString(),
-    });
-    if (args.status === "failed") {
+    };
+    // #3992 PR-3: the store write is bound by the capture leg.
+    // A store error rethrows exactly as before; a capture
+    // timeout degrades honestly (degradedRun below).
+    const outcome = await storeRunArtifact(deps.datasetStore, storeInput);
+    if (!outcome.ok && outcome.reason === "error") throw outcome.error;
+    let artifactId: string;
+    let settledRun = run;
+    if (outcome.ok) {
+      artifactId = outcome.artifact.id;
+    } else {
+      // The primary write did not settle within the capture
+      // bound: attempt ONE degraded fallback — same runId, a
+      // failed empty record coded FEED_CAPTURE_TIMEOUT — and
+      // land the run on it. If the fallback also fails, the
+      // run still settles: captureTimeout with artifactId ""
+      // (no artifact exists; an id is never fabricated).
+      const degradedRun: FeedDatasetRunRecord = {
+        ...run,
+        status: "failed",
+        received: 0,
+        failed: args.requested,
+        missingSymbols: args.allSymbols,
+        codedError: FEED_JOB_CODES.captureTimeout,
+        errorMessage: `Run-record store write did not settle within ${FEED_JOB_TIMEOUTS.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
+      };
+      const fallback = await storeRunArtifact(deps.datasetStore, {
+        ...storeInput,
+        bars: [],
+        run: degradedRun,
+      });
+      settledRun = degradedRun;
+      artifactId = fallback.ok ? fallback.artifact.id : "";
+    }
+    if (settledRun.status === "failed") {
       structuredLog.warn(FEED_JOB_RUN_FAILED, {
         message: `[feedJobs] ${FEED_JOB_RUN_FAILED}`,
         jobId: def.id,
         runId,
-        code: args.codedError,
+        code: settledRun.codedError,
         requested: args.requested,
       });
     }
     return {
       jobId: def.id,
       runId,
-      status: args.status,
-      artifactId: artifact.id,
-      requested: run.requested,
-      received: run.received,
-      failed: run.failed,
-      missingSymbols: run.missingSymbols,
-      codedError: run.codedError,
-      startedAt: run.startedAt,
-      finishedAt: run.finishedAt,
+      status: settledRun.status,
+      artifactId,
+      requested: settledRun.requested,
+      received: settledRun.received,
+      failed: settledRun.failed,
+      missingSymbols: settledRun.missingSymbols,
+      codedError: settledRun.codedError,
+      startedAt: settledRun.startedAt,
+      finishedAt: settledRun.finishedAt,
     };
   };
 
@@ -1233,6 +1490,7 @@ export async function runFeedTechnicalsJob(
         rows: [],
         requested: 0,
         missingSymbols: [],
+        allSymbols: symbols,
         codedError: FEED_JOB_CODES.refreshTimeout,
         errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
         universe,
@@ -1244,6 +1502,7 @@ export async function runFeedTechnicalsJob(
         rows: [],
         requested: 0,
         missingSymbols: [],
+        allSymbols: symbols,
         codedError: FEED_JOB_CODES.universeRefreshFailed,
         errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
         universe,
@@ -1254,6 +1513,7 @@ export async function runFeedTechnicalsJob(
       rows: [],
       requested: 0,
       missingSymbols: [],
+      allSymbols: symbols,
       codedError: FEED_JOB_CODES.universeMissing,
       errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
       universe,
@@ -1268,6 +1528,7 @@ export async function runFeedTechnicalsJob(
       rows: [],
       requested: symbols.length,
       missingSymbols: symbols,
+      allSymbols: symbols,
       codedError: FEED_JOB_CODES.historicalBarsUnsupported,
       errorMessage: `Provider "${def.sourceId}" does not implement historicalBars; the feed job cannot pull its dataset.`,
       universe,
@@ -1281,20 +1542,34 @@ export async function runFeedTechnicalsJob(
   //    symbol with the failure counted — one bad symbol never
   //    poisons the rows already pulled, and generated bars are
   //    never persisted as data.
+  // #3992 PR-3: the WHOLE loop is bound by the fetch leg, as in
+  //    the fundamentals run — one deadline captured before the
+  //    loop on the race's clock (Date.now); each symbol races
+  //    with the remaining budget; a timeout is missing with the
+  //    timeout named; an exhausted budget starts no new fetch.
   const rows: FeedDailyBarRow[] = [];
   const missingSymbols: string[] = [];
   let firstError: string | null = null;
-  for (const symbol of symbols) {
+  const fetchDeadlineMs = Date.now() + FEED_JOB_TIMEOUTS.fetchMs;
+  for (let i = 0; i < symbols.length; i++) {
+    const symbol = symbols[i];
+    const remainingMs = fetchDeadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      for (let j = i; j < symbols.length; j++) {
+        missingSymbols.push(symbols[j]);
+      }
+      firstError ??= fetchTimeoutMessage();
+      break;
+    }
     try {
-      const envelope = await deps.provider.getHistoricalBars(
-        symbol,
-        "1D",
-        HISTORY_BAR_LIMIT,
-        {
+      const envelope = await withFeedDeadline(
+        deps.provider.getHistoricalBars(symbol, "1D", HISTORY_BAR_LIMIT, {
           runId,
           tenantId: opts.tenantId ?? "default",
           ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
-        },
+        }),
+        remainingMs,
+        FEED_JOB_CODES.fetchTimeout,
       );
       if (envelope.providerId !== def.sourceId) {
         missingSymbols.push(symbol);
@@ -1313,9 +1588,12 @@ export async function runFeedTechnicalsJob(
       rows.push({ symbol, bars: envelope.result });
     } catch (err) {
       missingSymbols.push(symbol);
-      firstError ??= scrubFailureMessage(
-        err instanceof Error ? err.message : String(err),
-      );
+      firstError ??=
+        err instanceof FeedJobTimeoutError
+          ? fetchTimeoutMessage()
+          : scrubFailureMessage(
+              err instanceof Error ? err.message : String(err),
+            );
     }
   }
   if (rows.length === 0) {
@@ -1324,6 +1602,7 @@ export async function runFeedTechnicalsJob(
       rows: [],
       requested: symbols.length,
       missingSymbols,
+      allSymbols: symbols,
       codedError: FEED_JOB_CODES.noBarsReturned,
       errorMessage:
         firstError ??
@@ -1336,6 +1615,7 @@ export async function runFeedTechnicalsJob(
     rows,
     requested: symbols.length,
     missingSymbols,
+    allSymbols: symbols,
     codedError: null,
     errorMessage: null,
     universe,
@@ -1424,6 +1704,9 @@ export async function runFeedSentimentJob(
     rows: FeedSentimentRow[];
     requested: number;
     missingSymbols: string[];
+    /** #3992 PR-3: every requested symbol — the degraded
+     *  capture-fallback record names them all as missing. */
+    allSymbols: string[];
     codedError: string | null;
     errorMessage: string | null;
     universe: FeedDatasetArtifact["universe"];
@@ -1442,7 +1725,7 @@ export async function runFeedSentimentJob(
       codedError: args.codedError,
       errorMessage: args.errorMessage,
     };
-    const artifact = await deps.datasetStore.store({
+    const storeInput: FeedDatasetStoreInput = {
       jobId: def.id,
       sourceId: def.sourceId,
       dataset: def.dataset,
@@ -1454,28 +1737,61 @@ export async function runFeedSentimentJob(
       sentiment: args.rows,
       run,
       nowIso: finishedAt.toISOString(),
-    });
-    if (args.status === "failed") {
+    };
+    // #3992 PR-3: the store write is bound by the capture leg.
+    // A store error rethrows exactly as before; a capture
+    // timeout degrades honestly (degradedRun below).
+    const outcome = await storeRunArtifact(deps.datasetStore, storeInput);
+    if (!outcome.ok && outcome.reason === "error") throw outcome.error;
+    let artifactId: string;
+    let settledRun = run;
+    if (outcome.ok) {
+      artifactId = outcome.artifact.id;
+    } else {
+      // The primary write did not settle within the capture
+      // bound: attempt ONE degraded fallback — same runId, a
+      // failed empty record coded FEED_CAPTURE_TIMEOUT — and
+      // land the run on it. If the fallback also fails, the
+      // run still settles: captureTimeout with artifactId ""
+      // (no artifact exists; an id is never fabricated).
+      const degradedRun: FeedDatasetRunRecord = {
+        ...run,
+        status: "failed",
+        received: 0,
+        failed: args.requested,
+        missingSymbols: args.allSymbols,
+        codedError: FEED_JOB_CODES.captureTimeout,
+        errorMessage: `Run-record store write did not settle within ${FEED_JOB_TIMEOUTS.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
+      };
+      const fallback = await storeRunArtifact(deps.datasetStore, {
+        ...storeInput,
+        sentiment: [],
+        run: degradedRun,
+      });
+      settledRun = degradedRun;
+      artifactId = fallback.ok ? fallback.artifact.id : "";
+    }
+    if (settledRun.status === "failed") {
       structuredLog.warn(FEED_JOB_RUN_FAILED, {
         message: `[feedJobs] ${FEED_JOB_RUN_FAILED}`,
         jobId: def.id,
         runId,
-        code: args.codedError,
+        code: settledRun.codedError,
         requested: args.requested,
       });
     }
     return {
       jobId: def.id,
       runId,
-      status: args.status,
-      artifactId: artifact.id,
-      requested: run.requested,
-      received: run.received,
-      failed: run.failed,
-      missingSymbols: run.missingSymbols,
-      codedError: run.codedError,
-      startedAt: run.startedAt,
-      finishedAt: run.finishedAt,
+      status: settledRun.status,
+      artifactId,
+      requested: settledRun.requested,
+      received: settledRun.received,
+      failed: settledRun.failed,
+      missingSymbols: settledRun.missingSymbols,
+      codedError: settledRun.codedError,
+      startedAt: settledRun.startedAt,
+      finishedAt: settledRun.finishedAt,
     };
   };
 
@@ -1513,6 +1829,7 @@ export async function runFeedSentimentJob(
         rows: [],
         requested: 0,
         missingSymbols: [],
+        allSymbols: symbols,
         codedError: FEED_JOB_CODES.refreshTimeout,
         errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
         universe,
@@ -1524,6 +1841,7 @@ export async function runFeedSentimentJob(
         rows: [],
         requested: 0,
         missingSymbols: [],
+        allSymbols: symbols,
         codedError: FEED_JOB_CODES.universeRefreshFailed,
         errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
         universe,
@@ -1534,6 +1852,7 @@ export async function runFeedSentimentJob(
       rows: [],
       requested: 0,
       missingSymbols: [],
+      allSymbols: symbols,
       codedError: FEED_JOB_CODES.universeMissing,
       errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
       universe,
@@ -1548,6 +1867,7 @@ export async function runFeedSentimentJob(
       rows: [],
       requested: symbols.length,
       missingSymbols: symbols,
+      allSymbols: symbols,
       codedError: FEED_JOB_CODES.newsUnsupported,
       errorMessage: `Provider "${def.sourceId}" does not implement news; the feed job cannot pull its dataset.`,
       universe,
@@ -1559,19 +1879,41 @@ export async function runFeedSentimentJob(
   //    provider, or whose feed is empty is a missing symbol
   //    with the failure counted — one bad symbol never poisons
   //    the rows already pulled.
+  // #3992 PR-3: the WHOLE loop is bound by the fetch leg, as in
+  //    the fundamentals and technicals runs — one deadline
+  //    captured before the loop on the race's clock (Date.now);
+  //    each symbol races with the remaining budget; a timeout
+  //    is missing with the timeout named; an exhausted budget
+  //    starts no new fetch. Only the news FETCH is raced here:
+  //    the classification batches below are NOT bounded in
+  //    this PR — the PR-4 execution deadline covers them.
   const articlesBySymbol = new Map<
     string,
     Array<{ headline: string; source: string; publishedAt: string; url?: string }>
   >();
   const missingSymbols: string[] = [];
   let firstError: string | null = null;
-  for (const symbol of symbols) {
+  const fetchDeadlineMs = Date.now() + FEED_JOB_TIMEOUTS.fetchMs;
+  for (let i = 0; i < symbols.length; i++) {
+    const symbol = symbols[i];
+    const remainingMs = fetchDeadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      for (let j = i; j < symbols.length; j++) {
+        missingSymbols.push(symbols[j]);
+      }
+      firstError ??= fetchTimeoutMessage();
+      break;
+    }
     try {
-      const envelope = await deps.provider.getNews(symbol, {
-        runId,
-        tenantId: opts.tenantId ?? "default",
-        ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
-      });
+      const envelope = await withFeedDeadline(
+        deps.provider.getNews(symbol, {
+          runId,
+          tenantId: opts.tenantId ?? "default",
+          ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+        }),
+        remainingMs,
+        FEED_JOB_CODES.fetchTimeout,
+      );
       if (envelope.providerId !== def.sourceId) {
         missingSymbols.push(symbol);
         firstError ??= `Provider envelope named "${envelope.providerId}" for a "${def.sourceId}" feed job; the result was refused, not relabelled.`;
@@ -1593,9 +1935,12 @@ export async function runFeedSentimentJob(
       );
     } catch (err) {
       missingSymbols.push(symbol);
-      firstError ??= scrubFailureMessage(
-        err instanceof Error ? err.message : String(err),
-      );
+      firstError ??=
+        err instanceof FeedJobTimeoutError
+          ? fetchTimeoutMessage()
+          : scrubFailureMessage(
+              err instanceof Error ? err.message : String(err),
+            );
     }
   }
   if (articlesBySymbol.size === 0) {
@@ -1604,6 +1949,7 @@ export async function runFeedSentimentJob(
       rows: [],
       requested: symbols.length,
       missingSymbols,
+      allSymbols: symbols,
       codedError: FEED_JOB_CODES.noNewsReturned,
       errorMessage:
         firstError ??
@@ -1697,6 +2043,445 @@ export async function runFeedSentimentJob(
     rows,
     requested: symbols.length,
     missingSymbols,
+    allSymbols: symbols,
+    codedError: null,
+    errorMessage: null,
+    universe,
+  });
+}
+
+/**
+ * #4065 — the options-chains feed run: the same contract as
+ * runFeedFundamentalsJob, over the provider's optionsChains
+ * capability (getOptionExpiryDates + getOptionsChain). The job
+ * persists the chains the live chainFetch already retrieves —
+ * one row per symbol (the eligible expirations, one chain per
+ * eligible expiry, verbatim as the provider returned them) —
+ * so chainFetch can consume a persisted dataset exactly the
+ * way the stock feed's quotes are consumed, instead of calling
+ * a live client object at the entry.
+ *
+ * Decision (a) of #4065, on evidence: the chain source CAN
+ * execute in workflow residency — the #3941 proof (PR #4056)
+ * constructs the same broker clients inside the residency from
+ * env through createCaptureWiredFeedProvider, and this runner
+ * builds its provider the same way, through the same
+ * providerFor seam. The live client object itself never
+ * crosses a residency boundary (step inputs must be
+ * serializable) — the J-engine constructs deps inside the
+ * residency from env, exactly like the feed provider.
+ *
+ * Universe — two honest provenances, never a silent drop:
+ * - a run input naming symbols: when every named symbol is a
+ *   member of the stored list the run resolves (the default
+ *   nasdaq100, or the run's `universe` input), the run is a
+ *   subset of that list — index-kind universe, size the
+ *   subset's (the #3535 pin: a sharded run's partition is a
+ *   subset of the stored list, and its artifact still names
+ *   the list). When ANY named symbol is not a member, the run
+ *   is an explicit-symbol run — symbols-kind universe, the
+ *   symbols used as-is (an options screen's underlyings need
+ *   not belong to any stored list; filtering them against the
+ *   list would silently drop the screen's symbols). The
+ *   membership check is a plain store read — a run that names
+ *   its symbols never triggers an index refresh for a list it
+ *   may not need.
+ * - no symbols input: the stored index list, with the
+ *   fundamentals run's hydration + failure codes
+ *   (FEED_REFRESH_TIMEOUT / FEED_UNIVERSE_REFRESH_FAILED /
+ *   FEED_UNIVERSE_MISSING).
+ *
+ * Fetch window — the run's DTE band (minDte/maxDte) and the
+ * per-symbol expiration cap (maxExpirationsPerSymbol); the
+ * defaults mirror the screener's own fetch (0–365 days, 100
+ * expirations — the screener config default). A misconfigured
+ * window (minDte > maxDte) fails the run by name, never
+ * persists an empty dataset.
+ *
+ * Honesty rules are the fundamentals run's, unchanged:
+ * provenance is verified per envelope; a run that fetched
+ * nothing is a FAILED run; per-symbol failures are named in
+ * missingSymbols, never silently dropped. Two chains-specific
+ * rules, mirroring the screener's fetchChainsForSymbol:
+ * - expirations exist but none fall inside the window ⇒ a
+ *   legitimate empty row (empty chains, no errors) — the
+ *   symbol IS covered by the dataset, with nothing in-window.
+ * - the provider returns NO expirations for a symbol ⇒ no
+ *   row, the symbol is missing. The screener falls back to an
+ *   unscoped chain request there; the feed job does NOT — an
+ *   unscoped chain would land in the dataset without its
+ *   expiry in the row's expiries, unmatchable provenance.
+ * A row whose chain fetch failed for one expiry keeps its
+ * fetched chains and names the failure in fetchErrors; the
+ * run is partial. No behaviour change to any other stage.
+ */
+export async function runFeedOptionsChainsJob(
+  registry: FeedJobRegistry,
+  deps: FeedJobDeps,
+  jobId: string,
+  opts: RunFeedJobOptions = {},
+): Promise<FeedRunResult> {
+  const def = registry.get(jobId);
+  if (!def) {
+    throw new FeedJobError(
+      FEED_JOB_CODES.jobNotFound,
+      `No feed job is registered with id "${jobId}".`,
+    );
+  }
+  const now = opts.now ?? (() => new Date());
+  const startedAt = now();
+  const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
+  const trigger = opts.trigger ?? "manual";
+
+  const record = async (args: {
+    status: FeedDatasetRunRecord["status"];
+    rows: FeedOptionsChainRow[];
+    requested: number;
+    missingSymbols: string[];
+    codedError: string | null;
+    errorMessage: string | null;
+    universe: FeedDatasetArtifact["universe"];
+  }): Promise<FeedRunResult> => {
+    const finishedAt = now();
+    const run: FeedDatasetRunRecord = {
+      runId,
+      trigger,
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      status: args.status,
+      requested: args.requested,
+      received: args.rows.length,
+      failed: args.requested - args.rows.length,
+      missingSymbols: args.missingSymbols,
+      codedError: args.codedError,
+      errorMessage: args.errorMessage,
+    };
+    const artifact = await deps.datasetStore.store({
+      jobId: def.id,
+      sourceId: def.sourceId,
+      dataset: def.dataset,
+      elements: [...def.elements],
+      universe: args.universe,
+      providerId: def.sourceId,
+      asOf: finishedAt.toISOString(),
+      quotes: [],
+      chains: args.rows,
+      run,
+      nowIso: finishedAt.toISOString(),
+    });
+    if (args.status === "failed") {
+      structuredLog.warn(FEED_JOB_RUN_FAILED, {
+        message: `[feedJobs] ${FEED_JOB_RUN_FAILED}`,
+        jobId: def.id,
+        runId,
+        code: args.codedError,
+        requested: args.requested,
+      });
+    }
+    return {
+      jobId: def.id,
+      runId,
+      status: args.status,
+      artifactId: artifact.id,
+      requested: run.requested,
+      received: run.received,
+      failed: run.failed,
+      missingSymbols: run.missingSymbols,
+      codedError: run.codedError,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+    };
+  };
+
+  // 0. Fetch window — a misconfigured window fails the run by
+  //    name, never persists an empty dataset. Validated after
+  //    the universe input resolves (an unknown universe refuses
+  //    by name first) and before any store read or fetch.
+  const minDte = opts.minDte ?? 0;
+  const maxDte = opts.maxDte ?? 365;
+  const maxExpirationsPerSymbol = opts.maxExpirationsPerSymbol ?? 100;
+  const universeIndex = resolveRunUniverse(def, opts.universe);
+  const universeLabel = labelForRunUniverse(registry, universeIndex);
+  if (minDte > maxDte) {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: 0,
+      missingSymbols: [],
+      codedError: FEED_JOB_CODES.fetchFailed,
+      errorMessage: `Invalid DTE window for the options-chains run: minDte (${minDte}) exceeds maxDte (${maxDte}).`,
+      universe: {
+        kind: "index",
+        index: universeIndex,
+        label: universeLabel,
+        snapshotDate: null,
+        sourceLabel: null,
+        size: 0,
+      },
+    });
+  }
+
+  // 1. Universe — explicit symbols (membership rule) or the
+  //    stored index list (with hydration, like the
+  //    fundamentals run).
+  const explicitSymbols = Array.from(
+    new Set(
+      (opts.symbols ?? [])
+        .map((s) => s.toUpperCase().trim())
+        .filter((s) => s.length > 0),
+    ),
+  );
+  let symbols: string[];
+  let universe: FeedDatasetArtifact["universe"];
+  if (explicitSymbols.length > 0) {
+    const list = await deps.universeStore.latest(universeIndex);
+    const listed = new Set(symbolsOfList(list));
+    if (list && explicitSymbols.every((s) => listed.has(s))) {
+      symbols = explicitSymbols;
+      universe = {
+        kind: "index",
+        index: universeIndex,
+        label: universeLabel,
+        snapshotDate: list.snapshotDate ?? null,
+        sourceLabel: list.sourceLabel ?? null,
+        size: symbols.length,
+      };
+    } else {
+      symbols = explicitSymbols;
+      universe = {
+        kind: "symbols",
+        symbols: [...explicitSymbols],
+        label: `Run symbols (${explicitSymbols.length})`,
+        snapshotDate: null,
+        sourceLabel: null,
+        size: symbols.length,
+      };
+    }
+  } else {
+    // #3976: same cold-store hydration as the fundamentals run.
+    const { list, refreshError, refreshTimedOut } =
+      await resolveUniverseListWithHydration(deps, universeIndex);
+    symbols = symbolsOfList(list);
+    universe = {
+      kind: "index",
+      index: universeIndex,
+      label: universeLabel,
+      snapshotDate: list?.snapshotDate ?? null,
+      sourceLabel: list?.sourceLabel ?? null,
+      size: symbols.length,
+    };
+    if (!list || symbols.length === 0) {
+      if (refreshTimedOut) {
+        return record({
+          status: "failed",
+          rows: [],
+          requested: 0,
+          missingSymbols: [],
+          codedError: FEED_JOB_CODES.refreshTimeout,
+          errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+          universe,
+        });
+      }
+      if (refreshError !== undefined) {
+        return record({
+          status: "failed",
+          rows: [],
+          requested: 0,
+          missingSymbols: [],
+          codedError: FEED_JOB_CODES.universeRefreshFailed,
+          errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
+          universe,
+        });
+      }
+      return record({
+        status: "failed",
+        rows: [],
+        requested: 0,
+        missingSymbols: [],
+        codedError: FEED_JOB_CODES.universeMissing,
+        errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
+        universe,
+      });
+    }
+  }
+
+  // 2. The capability contract: no chain methods ⇒ a named
+  //    refusal recorded as the run, never a fabricated dataset.
+  if (
+    typeof deps.provider.getOptionExpiryDates !== "function" ||
+    typeof deps.provider.getOptionsChain !== "function"
+  ) {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: symbols.length,
+      missingSymbols: symbols,
+      codedError: FEED_JOB_CODES.optionsChainsUnsupported,
+      errorMessage: `Provider "${def.sourceId}" does not implement optionsChains; the feed job cannot pull its dataset.`,
+      universe,
+    });
+  }
+
+  // 3. Fetch per symbol through the port. The DTE window and
+  //    the per-symbol expiration cap mirror the screener's
+  //    fetchChainsForSymbol (dedupe + sort + cap); the budget
+  //    and the retry pass do not apply — the dataset is the
+  //    fetch, and a dataset-backed read is deterministic by
+  //    construction. A symbol whose expiration fetch throws,
+  //    whose envelope names another provider, or whose provider
+  //    returns no expirations gets no row and is named missing;
+  //    a chain fetch that fails for one expiry is named in the
+  //    row's fetchErrors and the run goes partial.
+  const todayUtc = Date.UTC(
+    now().getUTCFullYear(),
+    now().getUTCMonth(),
+    now().getUTCDate(),
+  );
+  const rows: FeedOptionsChainRow[] = [];
+  const missingSymbols: string[] = [];
+  let firstError: string | null = null;
+  for (const symbol of symbols) {
+    try {
+      const expirationsEnvelope = await deps.provider.getOptionExpiryDates(
+        symbol,
+        {
+          runId,
+          tenantId: opts.tenantId ?? "default",
+          ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+        },
+      );
+      if (expirationsEnvelope.providerId !== def.sourceId) {
+        missingSymbols.push(symbol);
+        firstError ??= `Provider envelope named "${expirationsEnvelope.providerId}" for a "${def.sourceId}" feed job; the result was refused, not relabelled.`;
+        continue;
+      }
+      const expirations = expirationsEnvelope.result ?? [];
+      if (expirations.length === 0) {
+        missingSymbols.push(symbol);
+        firstError ??= `Provider "${def.sourceId}" returned no expirations for ${symbol}; no chain row was persisted for it.`;
+        continue;
+      }
+      const eligible = Array.from(
+        new Map(
+          expirations
+            .filter((expiry) => {
+              const dte = Math.ceil(
+                (Date.UTC(expiry.year, expiry.month - 1, expiry.day) -
+                  todayUtc) /
+                  (24 * 60 * 60 * 1000),
+              );
+              return dte >= minDte && dte <= maxDte;
+            })
+            .map((expiry) => [
+              `${expiry.year}-${expiry.month}-${expiry.day}`,
+              expiry,
+            ]),
+        ).values(),
+      )
+        .sort(
+          (a, b) =>
+            Date.UTC(a.year, a.month - 1, a.day) -
+            Date.UTC(b.year, b.month - 1, b.day),
+        )
+        .slice(0, maxExpirationsPerSymbol);
+      const chains: BrokerOptionChain[] = [];
+      const fetchErrors: string[] = [];
+      for (const expiry of eligible) {
+        try {
+          const chainEnvelope = await deps.provider.getOptionsChain(
+            {
+              symbol,
+              expiryYear: expiry.year,
+              expiryMonth: expiry.month,
+              expiryDay: expiry.day,
+              includeWeekly: true,
+            },
+            {
+              runId,
+              tenantId: opts.tenantId ?? "default",
+              ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
+            },
+          );
+          if (chainEnvelope.providerId !== def.sourceId) {
+            fetchErrors.push(
+              `Chain for ${expiry.year}-${expiry.month}-${expiry.day} named provider "${chainEnvelope.providerId}"; refused, not relabelled.`,
+            );
+            continue;
+          }
+          if (chainEnvelope.result) {
+            const returned = chainEnvelope.result;
+            // The dataset's chain→expiry association is the
+            // chain's selectedExpiry (all three chains-serving
+            // adapters stamp it). A chain that names a different
+            // expiry than the one requested is a provider
+            // contract violation — refused, never stored under
+            // the wrong expiry. A chain with no stamp gets the
+            // request's expiry on a copy (the request IS the
+            // provenance: this chain was fetched for exactly
+            // this expiry); the provider's object is never
+            // mutated.
+            if (returned.selectedExpiry) {
+              const stamped = returned.selectedExpiry;
+              if (
+                stamped.year !== expiry.year ||
+                stamped.month !== expiry.month ||
+                stamped.day !== expiry.day
+              ) {
+                fetchErrors.push(
+                  `Chain for ${expiry.year}-${expiry.month}-${expiry.day} named a different expiry (${stamped.year}-${stamped.month}-${stamped.day}); refused, not relabelled.`,
+                );
+                continue;
+              }
+              chains.push(returned);
+            } else {
+              chains.push({
+                ...returned,
+                selectedExpiry: {
+                  year: expiry.year,
+                  month: expiry.month,
+                  day: expiry.day,
+                },
+              });
+            }
+          }
+        } catch (err) {
+          fetchErrors.push(
+            scrubFailureMessage(
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
+        }
+      }
+      rows.push({ symbol, expiries: eligible, chains, fetchErrors });
+    } catch (err) {
+      missingSymbols.push(symbol);
+      firstError ??= scrubFailureMessage(
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  if (rows.length === 0) {
+    return record({
+      status: "failed",
+      rows: [],
+      requested: symbols.length,
+      missingSymbols,
+      codedError: FEED_JOB_CODES.noChainsReturned,
+      errorMessage:
+        firstError ??
+        `Provider "${def.sourceId}" returned no chains for the ${universeLabel} universe; nothing was persisted as data.`,
+      universe,
+    });
+  }
+  return record({
+    status:
+      missingSymbols.length > 0 ||
+      rows.some((row) => row.fetchErrors.length > 0)
+        ? "partial"
+        : "completed",
+    rows,
+    requested: symbols.length,
+    missingSymbols,
     codedError: null,
     errorMessage: null,
     universe,
@@ -1745,6 +2530,11 @@ export async function readPersistedTechnicalsBars(
 ): Promise<PersistedTechnicalsRead | undefined> {
   const artifact = await store.latestUsable("yahoo", "technicals");
   if (!artifact || !artifact.bars || artifact.bars.length === 0) return undefined;
+  // #4065: a technicals read needs a stored-list universe — an
+  // explicit-symbol artifact names no list, so it is unusable
+  // here (undefined, per this reader's contract — the caller
+  // falls back to the live fetch, never a fabricated index).
+  if (artifact.universe.kind !== "index") return undefined;
   const barsBySymbol = new Map<string, YahooDailyBar[]>();
   for (const row of artifact.bars) {
     const daily = marketDataResearchBarsToDailyBars(row.bars);
@@ -1810,6 +2600,11 @@ export async function readPersistedSentiment(
   if (!artifact || !artifact.sentiment || artifact.sentiment.length === 0) {
     return undefined;
   }
+  // #4065: a sentiment read needs a stored-list universe — an
+  // explicit-symbol artifact names no list, so it is unusable
+  // here (undefined, per this reader's contract — the caller
+  // shows the gap, never a fabricated index).
+  if (artifact.universe.kind !== "index") return undefined;
   const sentimentBySymbol = new Map<string, FeedSentimentRow>();
   for (const row of artifact.sentiment) {
     sentimentBySymbol.set(row.symbol.toUpperCase(), row);

@@ -149,7 +149,9 @@ describe("pipeline host wiring (#3543)", () => {
     // #3931 pin update (§7): the parameterized Yahoo technicals
     // job joins the plane — one job per data type, parameterized
     // by universe, never per-universe copies.
-    expect(pipelineJobIds()).toHaveLength(11);
+    // #4065 pin update (§7): the three options-chains jobs join
+    // the plane — one per optionsChains-serving source.
+    expect(pipelineJobIds()).toHaveLength(14);
     expect(pipelineEnrichJobIds()).toHaveLength(7);
     expect(pipelineAnalyzeJobIds()).toHaveLength(7);
     expect(pipelineGenerateJobIds()).toHaveLength(7);
