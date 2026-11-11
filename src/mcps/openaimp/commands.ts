@@ -70,6 +70,7 @@ import {
 import { TradingLimitsCommand } from "./tradingLimitCommands";
 import {
   PublicCancelOrderCommand,
+  PublicAccountCommand,
   PublicGetQuoteCommand,
   PublicOrdersCommand,
   PublicPlaceOrderCommand,
@@ -1798,6 +1799,7 @@ export class McpToolFactory {
     // neutral public platform (preview-first placement; TEST refuses
     // with FAILURE_PUBLIC_NO_PAPER_MODE).
     this.registerTool(new PublicGetQuoteCommand());
+    this.registerTool(new PublicAccountCommand());
     this.registerTool(new PublicPreviewOrderCommand());
     this.registerTool(new PublicPlaceOrderCommand());
     this.registerTool(new PublicOrdersCommand());

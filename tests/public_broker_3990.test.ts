@@ -610,4 +610,32 @@ describe("Slice C — the neutral Public connect read", () => {
     expect(body.configured).toBe(false);
     expect(body.signedIn).toBe(false);
   });
+
+  it("separates configured from signedIn for a deployment credential (#4048)", async () => {
+    const { namespace } = fakeSessionStore();
+    const env = {
+      SESSION_STORE: namespace,
+      PUBLIC_API_KEY: "public-deployment-token-123456",
+    } as unknown as Env;
+    const request = new Request("https://app.test/api/broker/connect/public", {
+      method: "GET",
+      headers: { "x-user-login": "test-login" },
+    });
+    const res = await handleConnectRoute(
+      request,
+      new URL("https://app.test/api/broker/connect/public"),
+      "/broker/connect/public",
+      "session-test",
+      ctx(env),
+    );
+    const body = (await res!.json()) as Record<string, unknown>;
+    // configured by the deployment key, but THIS login never signed in
+    expect(body.configured).toBe(true);
+    expect(body.signedIn).toBe(false);
+    expect(body.source).toBe("deployment");
+    expect(body.verified).toBe(false);
+    // a shared key is never hinted back
+    expect(body.tokenHint).toBeNull();
+    expect(JSON.stringify(body)).not.toContain("public-deployment-token-123456");
+  });
 });

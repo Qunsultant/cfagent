@@ -32,13 +32,13 @@
 | Execution context | Tools run in the caller's own OrchestratorAgent Durable Object instance |
 | SDK | `@modelcontextprotocol/sdk` 1.32.2, `@modelcontextprotocol/server` 2.4.0 (`package.json:31-32`) |
 
-## 2. Tools — 133 in `tools/list`
+## 2. Tools — 134 in `tools/list`
 
 One factory, `McpToolFactory` (`src/mcps/openaimp/commands.ts`, static
-registration block): **133 `this.registerTool(...)` calls**, reconciled
-against **133 entries** in the scope table `MCP_TOOL_SCOPES`
+registration block): **134 `this.registerTool(...)` calls**, reconciled
+against **134 entries** in the scope table `MCP_TOOL_SCOPES`
 (`src/mcps/openaimp/mcpPermissionPorts.ts:155`, completeness-pinned by test
-against the live factory registry). Of the 133, **124 are canonical** and
+against the live factory registry). Of the 134, **125 are canonical** and
 **9 are deprecated `foss_*` aliases** (#1906; removal is a follow-up, not
 part of this inventory).
 
@@ -50,7 +50,7 @@ part of this inventory).
 | Payments | 7 | `draft_payment`, `confirm_payment_draft`, `get_payment_gateways`, `get_transactions`, `check_payment_budget`, `get_payments_overview`, `get_payment_budget` |
 | E\*TRADE | 7 | `etrade_market_scan`, `etrade_get_quote`, `etrade_preview_order`, `etrade_execute_order`, `etrade_get_positions`, `etrade_auth_status`, `etrade_account_discovery` |
 | Market data & Alpaca | 18 | `market_data_get_quote`, `market_data_company_fundamentals`, `market_data_historical_bars`, `market_data_research`, `alpaca_snapshot`, `alpaca_account`, `alpaca_positions`, `alpaca_orders`, `alpaca_place_order`, `alpaca_place_bracket_ladder`, `alpaca_cancel_bracket_ladder`, `alpaca_get_quote`, `alpaca_get_option_chain`, `alpaca_preview_order`, `alpaca_execute_order`, `alpaca_cancel_order`, `alpaca_cancel_ticker`, `alpaca_cancel_all` |
-| Public.com (#3990) | 5 | `public_get_quote`, `public_preview_order`, `public_place_order`, `public_orders`, `public_cancel_order` |
+| Public.com (#3990, #4048) | 6 | `public_get_quote`, `public_account`, `public_preview_order`, `public_place_order`, `public_orders`, `public_cancel_order` |
 | Deprecated `foss_*` aliases (#1906) | 9 | `foss_get_quote`, `foss_company_fundamentals`, `foss_historical_bars`, `foss_market_research`, `foss_alpaca_snapshot`, `foss_alpaca_account`, `foss_alpaca_positions`, `foss_alpaca_orders`, `foss_alpaca_place_order` |
 | Agentic payments (x402 / MPP) | 3 | `paid_options_screener`, `paid_market_research`, `agentic_wallet_status` |
 | Cloudflare Agents advanced | 9 | `browser_inspect_page`, `browser_screenshot`, `dispatch_trading_webhook`, `run_sandbox_command`, `run_quant_backtest`, `think_trade_validation`, `ai_search_financial_docs`, `ai_search_agent_search`, `execute_durable_twap` |
@@ -65,36 +65,37 @@ part of this inventory).
 | Screens | 2 | `run_stock_screen`, `run_options_strategy_screen` |
 | Trading limits (#3888) | 1 | `trading_limits` |
 | Stock Copilot | 6 | `stock_copilot_status`, `stock_copilot_control`, `stock_copilot_introspect`, `stock_copilot_learnings`, `stock_copilot_evaluate`, `stock_copilot_remediate_gaps` |
-| **Total** | **133** | |
+| **Total** | **134** | |
 
 Note: `execute_nlq` is grouped above by domain (platform/knowledge) but
 carries the `mcp:execute` scope (§2.2), not `mcp:read`.
 
-### 2.2 Scopes — 6 scopes, 133 tools
+### 2.2 Scopes — 6 scopes, 134 tools
 
 Every tool declares exactly one scope in `MCP_TOOL_SCOPES`; execution
 passes through the permission gate (`executeWithPermissionGate`) before
-execution. Scope totals: 64 `mcp:read`, 27 `mcp:write`, 7 `mcp:execute`,
-21 `mcp:trade`, 10 `mcp:payments`, 4 `mcp:admin` (133 total).
+execution. Scope totals: 65 `mcp:read`, 27 `mcp:write`, 7 `mcp:execute`,
+21 `mcp:trade`, 10 `mcp:payments`, 4 `mcp:admin` (134 total).
 
 | Scope | Count | Tools |
 | --- | --- | --- |
-| `mcp:read` | 63 | All read tools, including `knowledge_search`, `web_search`, `web_fetch`, `get_async_job`, `list_async_jobs`, the E\*TRADE/market-data/Alpaca reads, the Public.com reads (`public_get_quote`, `public_orders`), the `foss_*` read aliases, the AgentDB reads, the job-pipeline `get_*`/`list_*` status tools, `get_trading_accounts`, `get_trading_positions`, `get_trading_quote`, `list_report_assets`, `get_report_asset`, `get_trade_approval_status`, `browser_scrape_tables`, `stock_copilot_status`, `stock_copilot_introspect`, `stock_copilot_learnings`, `stock_copilot_evaluate` |
+| `mcp:read` | 65 | All read tools, including `knowledge_search`, `web_search`, `web_fetch`, `get_async_job`, `list_async_jobs`, the E\*TRADE/market-data/Alpaca reads, the Public.com reads (`public_get_quote`, `public_account`, `public_orders`), the `foss_*` read aliases, the AgentDB reads, the job-pipeline `get_*`/`list_*` status tools, `get_trading_accounts`, `get_trading_positions`, `get_trading_quote`, `list_report_assets`, `get_report_asset`, `get_trade_approval_status`, `browser_scrape_tables`, `stock_copilot_status`, `stock_copilot_introspect`, `stock_copilot_learnings`, `stock_copilot_evaluate` |
 | `mcp:write` | 27 | `manage_categories`, `manage_referrals`, `manage_external_ads`, `manage_session_memory`, `goal.compile`, `goal.schedule`, `trigger_scheduled_goal`, the job-pipeline `run_*`/`manage_*` tools and `set_feed_job_schedule`, `browser_snap_transaction`, `browser_capture_page`, `slack_dispatch_transaction_snap`, `run_stock_screen`, `run_options_strategy_screen`, `stock_copilot_control`, `stock_copilot_remediate_gaps` |
 | `mcp:execute` | 7 | `execute_nlq`, `chain.run`, `run_sandbox_command`, `run_quant_backtest`, `dispatch_trading_webhook`, `think_trade_validation`, `browser_screenshot` |
 | `mcp:trade` | 21 | `alpaca_cancel_all`, `alpaca_cancel_bracket_ladder`, `alpaca_cancel_order`, `alpaca_cancel_ticker`, `alpaca_execute_order`, `alpaca_place_bracket_ladder`, `alpaca_place_order`, `alpaca_preview_order`, `decide_trade_approval`, `etrade_execute_order`, `etrade_preview_order`, `execute_durable_twap`, `foss_alpaca_place_order` (deprecated #1906 alias), `propose_options_trade`, `propose_stock_trade`, `public_cancel_order`, `public_place_order`, `public_preview_order`, `slack_send_pre_trade_approval`, `start_trade_approval`, `trading_limits` |
 | `mcp:payments` | 10 | `agentic_wallet_status`, `check_payment_budget`, `confirm_payment_draft`, `draft_payment`, `get_payment_budget`, `get_payment_gateways`, `get_payments_overview`, `get_transactions`, `paid_market_research`, `paid_options_screener` |
 | `mcp:admin` | 4 | `get_audit_events`, `get_revenue_summary`, `list_database_tables`, `query_table_data` |
 
-### 2.3 Synchronous vs queued — 7 synchronous, 126 queued
+### 2.3 Synchronous vs queued — 82 synchronous, 52 queued
 
-Only **7 tools are synchronous** (`SYNCHRONOUS_MCP_TOOLS`,
-`src/config/asyncJobModes.ts:301-313`):
+**82 tools are synchronous** (`SYNCHRONOUS_MCP_TOOLS`, plus the
+`LEGACY_BROKER_TOOL_PREFIX` arm of `isSynchronousMcpTool`,
+`src/config/asyncJobModes.ts`): the status reads, job retrieval, the broker
+read and trade paths, browser and web tools, and (from #4048) the Public
+account read, so a balance question is answered in the turn it is asked
+instead of returning a queue receipt.
 
-- `get_async_job`, `list_async_jobs`
-- `stock_copilot_status`, `stock_copilot_control`, `stock_copilot_introspect`, `stock_copilot_learnings`, `stock_copilot_evaluate`
-
-The other **126 tools are queued** and return
+The other **52 tools are queued** and return
 `{ jobId, status: "queued" }` — a queue receipt, not a result. Results are
 retrieved via `get_async_job` / `list_async_jobs`.
 

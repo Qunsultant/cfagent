@@ -167,12 +167,16 @@ export async function handleBrokerConnectRoutes(
     return Response.json({
       broker: "public",
       configured: status.connected,
-      signedIn: status.connected,
-      source: status.connected ? "user" : "none",
+      // #4048: signedIn means THIS login used its own token. A deployment
+      // credential is configured, not signed in — same contract as the
+      // branch above.
+      signedIn: status.source === "user",
+      source: status.source ?? "none",
       method: status.method,
       tokenHint: status.tokenHint,
       mcpUrl: status.mcpUrl,
       // #4035: the verification evidence the Settings card renders.
+      verified: status.verified,
       verifiedAt: status.verifiedAt,
       toolCount: status.toolCount,
       tools: status.tools,

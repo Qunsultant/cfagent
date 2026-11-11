@@ -242,21 +242,29 @@ export function parsePublicPositions(payload: unknown): {
     if (!symbol || quantity === undefined) continue;
     const marketValue = num(pickField(row, ["market_value", "marketValue"])) ?? 0;
     const currentPrice = num(pickField(row, ["current_price", "currentPrice", "last_price", "lastPrice"])) ?? 0;
-    const pricePaid = num(pickField(row, ["average_cost", "averageCost", "cost_basis", "costBasis"])) ?? 0;
-    const costBasis = pricePaid * quantity;
+    const pricePaid = num(pickField(row, ["average_cost", "averageCost", "cost_basis", "costBasis"]));
+    // Issue #4048: an absent average cost is UNKNOWN, not zero. Computing
+    // marketValue − 0 reports the whole market value as a gain the broker
+    // never sent, and the copilot would repeat it as the user's P&L.
+    const costBasisKnown = pricePaid !== undefined;
+    const paidPerShare = pricePaid ?? 0;
+    const costBasis = paidPerShare * quantity;
+    const gain = costBasisKnown ? marketValue - costBasis : 0;
+    const gainPercent = costBasisKnown && costBasis > 0 ? (gain / costBasis) * 100 : 0;
     positions.push({
       symbol,
       description: symbol,
       quantity,
-      pricePaid,
+      costBasisKnown,
+      pricePaid: paidPerShare,
       costBasis,
       currentPrice,
       marketPrice: currentPrice,
       marketValue,
-      totalGain: marketValue - costBasis,
-      unrealizedGainLoss: marketValue - costBasis,
-      totalGainPercent: costBasis > 0 ? ((marketValue - costBasis) / costBasis) * 100 : 0,
-      unrealizedGainLossPercent: costBasis > 0 ? ((marketValue - costBasis) / costBasis) * 100 : 0,
+      totalGain: gain,
+      unrealizedGainLoss: gain,
+      totalGainPercent: gainPercent,
+      unrealizedGainLossPercent: gainPercent,
       daysGain: 0,
       daysGainPercent: 0,
     });
