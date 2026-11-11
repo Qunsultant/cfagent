@@ -185,7 +185,10 @@ describe("activateSubscription", () => {
     const subs = new InMemorySubscriptionAdapter();
     const store = new InMemoryCommercialAdapter();
     await store.upsertAccount({ userId: "u1", tenantId: "t1", tier: "PayPerUse", creditsUSD: 3, includedRuns: 2 });
-    const plan = await subs.createPlan({ id: "pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10 });
+    const created = await subs.createPlan({ id: "pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10 });
+    // Issue #3289: activation is fail-closed on approval — the
+    // fixture plan must be approved, as the operator path would.
+    const plan = await subs.approvePlan(created.id, "op");
     const first = await activateSubscription({
       subs, store, userId: "u1", tenantId: "t1", plan, providerPaymentRef: "sub-a", nowMs: NOW,
     });
@@ -214,7 +217,10 @@ describe("activateSubscription", () => {
     await expect(
       activateSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: { ...plan, active: false }, providerPaymentRef: "sub-x", nowMs: NOW }),
     ).rejects.toThrow(/not active/);
-    const live = await subs.createPlan({ id: "live", name: "Live", priceUSD: 5, periodDays: 7, includedRuns: 0 });
+    const createdLive = await subs.createPlan({ id: "live", name: "Live", priceUSD: 5, periodDays: 7, includedRuns: 0 });
+    // Issue #3289: approve the fixture plan so the tenant-mismatch
+    // check below is reached (approval runs first, fail-closed).
+    const live = await subs.approvePlan(createdLive.id, "op");
     await store.upsertAccount({ userId: "u1", tenantId: "t1", tier: "Free" });
     await expect(
       activateSubscription({ subs, store, userId: "u1", tenantId: "t2", plan: live, providerPaymentRef: "sub-y", nowMs: NOW }),

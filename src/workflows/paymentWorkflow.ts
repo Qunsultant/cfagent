@@ -117,6 +117,8 @@ import {
   type PaymentWorkflowStep,
 } from "./paymentWorkflowFlow";
 import { recordWorkflowTraceHop } from "../observability/meshTrace";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { logAspectEvent } from "../aspects/loggingAspect";
 import { meshTraceStoreForEnv } from "../data/createMeshTracePorts";
 import {
@@ -160,6 +162,11 @@ import { createFeatureFlagPort } from "../features/createFeatureFlagPort";
 import { createWorkflowPorts, type WorkflowEnv } from "./createWorkflowPorts";
 import type { WorkflowJobCommand } from "./workflowPorts";
 import { createStageBoundaryEmitter } from "./stageBoundaryEmitter";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/paymentWorkflow",
+});
 
 export type { PaymentWorkflowParams, PaymentWorkflowOutcome };
 
@@ -484,9 +491,10 @@ export class PaymentWorkflow extends ThinkWorkflow<
               versionId: e.versionId,
             }));
           } else {
-            console.error(
-              `[payment-workflow] charge journal entry skipped for run=${e.runRequestId} (no product/version resolved — cfpay-era confirmation); DO row is authoritative.`,
-            );
+            structuredLog.error("paymentWorkflow.chargeJournalSkipped", {
+              message: `[payment-workflow] charge journal entry skipped for run=${e.runRequestId} (no product/version resolved — cfpay-era confirmation); DO row is authoritative.`,
+              runRequestId: e.runRequestId,
+            });
           }
           try {
             const rows = await listCfpayLedgerRows(this.env, e.runRequestId);
@@ -587,9 +595,10 @@ export class PaymentWorkflow extends ThinkWorkflow<
             versionId: product.versionId,
           }));
         } else {
-          console.error(
-            `[payment-workflow] failure-credit journal entry skipped for run=${runRequestId} (no product/version resolved); DO credit row is authoritative.`,
-          );
+          structuredLog.error("paymentWorkflow.failureCreditJournalSkipped", {
+            message: `[payment-workflow] failure-credit journal entry skipped for run=${runRequestId} (no product/version resolved); DO credit row is authoritative.`,
+            runRequestId,
+          });
         }
       },
       consumeCoverage: async (use: { userId: string; paidVia: string; priceUSD: number }) => {

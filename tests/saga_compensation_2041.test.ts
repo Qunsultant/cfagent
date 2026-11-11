@@ -381,20 +381,31 @@ describe("saga credit redemption (G-REDEEM, S3)", () => {
     // The saga's issueCredit dep records exactly this claim shape.
     await store.recordCreditClaim({ creditRunId: "run-9", userId: "u1", family: "goal", amountUSD: 0.1 });
     await store.recordCreditClaim({ creditRunId: "run-10", userId: "u1", family: "goal", amountUSD: 0.1 });
+    // Issue #3289: per-charge recording columns ride on the claim
+    // (null on legacy claims recorded before migration 0058).
     expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({
       creditRunId: "run-9",
       amountUSD: 0.1,
+      productId: null,
+      versionId: null,
+      priceUSD: null,
     });
     await store.redeemCredit("run-9", "run-new");
     expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({
       creditRunId: "run-10",
       amountUSD: 0.1,
+      productId: null,
+      versionId: null,
+      priceUSD: null,
     });
     await expect(store.redeemCredit("run-9", "run-other")).rejects.toThrow(/already redeemed/i);
     await store.recordCreditClaim({ creditRunId: "run-10", userId: "u1", family: "goal", amountUSD: 0.1 });
     expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({
       creditRunId: "run-10",
       amountUSD: 0.1,
+      productId: null,
+      versionId: null,
+      priceUSD: null,
     });
     expect(await store.findUnredeemedCredit("u1", "stock")).toBeNull();
   });

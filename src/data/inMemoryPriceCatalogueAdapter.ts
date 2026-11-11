@@ -201,7 +201,7 @@ export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
     const existing = await this.getEffectiveEntry(family, segment);
     if (!existing) {
       throw new Error(
-        `No effective price for family ${family} in segment ${segment}: cannot approve a price that does not exist.`,
+        `No stored price for family ${family}: cannot approve a price that does not exist.`,
       );
     }
     const now = Date.now();
