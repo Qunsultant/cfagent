@@ -43,7 +43,8 @@ export function parseTabFromSearch(search: string): RouteId {
  * (verified against Chat.tsx / ETradeTradingHub / nav-config deep links):
  * `orderTab`/`assetClass` live on the order page; `riskTab` on the Risk
  * Analysis page and inside the order page's risk tab; `reportsTab` on
- * the hub's reports sub-tab; `iaaaTab` on platform-admin; `run`/`q`
+ * the hub's reports sub-tab; `iaaaTab` and `providerTab` on
+ * platform-admin; `run`/`q`
  * (legacy alias) on workflow-runs, and `run` also on the schedules
  * home (#3121 S2, where it deep-links one job's run history);
  * `schedule` on the schedules home (#3121 S2, one schedule);
@@ -57,6 +58,10 @@ export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   riskTab: ["risk-analysis", "order"],
   reportsTab: ["reports"],
   iaaaTab: ["platform-admin"],
+  // Issue #3978: the data-providers inner tabs (`providerTab`) live on
+  // platform-admin, so the param survives navigation to it and drops
+  // on the way out, like every other page-owned param (#3238).
+  providerTab: ["platform-admin"],
   run: ["workflow-runs", "schedules"],
   q: ["workflow-runs"],
   screenerTab: ["screeners", "options", "stock-hub"],

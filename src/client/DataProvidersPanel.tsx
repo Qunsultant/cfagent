@@ -15,7 +15,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, EmptyState, Notice, Spinner, Table, type TableColumn, TextInput, useToast } from "./components/ui";
+import { Button, EmptyState, Notice, Spinner, Table, type TableColumn, Tabs, TabPanel, TextInput, useToast, type TabOption } from "./components/ui";
+import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import {
   fetchDataProviders,
   fmtCaptureBytes,
@@ -292,6 +293,35 @@ function FeedNoJobBlock({ providerId }: { providerId: string }) {
   );
 }
 
+/**
+ * The provider table, shared by the overview tab (all providers) and
+ * each provider tab (one row). One component, one `dpp-table` className
+ * occurrence: the two tables are the same table with different columns
+ * and rows, not two bespoke tables. Keeps the DataProvidersPanel
+ * bespoke-class count at its registered snapshot (ux gate #3991, S-U1).
+ */
+function ProviderTable({
+  columns,
+  rows,
+}: {
+  columns: TableColumn<DataProviderView>[];
+  rows: DataProviderView[];
+}) {
+  return (
+    <Table<DataProviderView>
+      columns={columns}
+      rows={rows}
+      rowKey={(view) => view.id}
+      rowProps={(view) => ({
+        "data-provider-id": view.id,
+      } as React.HTMLAttributes<HTMLTableRowElement>)}
+      rowClassName="dpp-item"
+      className="dpp-table"
+      containerClassName="dpp-table-container"
+    />
+  );
+}
+
 export function DataProvidersPanel() {
   const toast = useToast();
   const [providers, setProviders] = useState<DataProviderView[]>([]);
@@ -309,6 +339,20 @@ export function DataProvidersPanel() {
   const [registerId, setRegisterId] = useState("");
   const [registerPrecedence, setRegisterPrecedence] = useState("");
   const [registering, setRegistering] = useState(false);
+
+  // #3978: the inner tabs live in `?providerTab=` via the shared hook
+  // (the IAAA pattern, one level down — `view` is taken by the admin
+  // section). The valid set is data-driven (provider ids arrive with
+  // the list), so any non-empty value is accepted here; the render
+  // falls back to overview for an id with no provider yet (unknown,
+  // or still loading) — a deep link opened before the list loads still
+  // lands on its tab once the list arrives.
+  const { activeTab, handleTabChange } = useUrlSyncedTabs<string>({
+    param: "providerTab",
+    isValid: (value): value is string =>
+      typeof value === "string" && value.length > 0,
+    defaultTab: "overview",
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -592,6 +636,1121 @@ export function DataProvidersPanel() {
     setConfirmingDeprovisionId(null);
   };
 
+  // #3978: the full detail columns, built once per render. The overview
+  // reuses the same definitions filtered to its summary columns; the
+  // provider-name cell is a deep link to that provider's tab only on
+  // the overview (on its own tab the name is plain text — a link to
+  // the current tab would go nowhere).
+  const buildColumns = (linkProviderName: boolean): TableColumn<DataProviderView>[] => [
+    {
+      key: "provider",
+      header: "Provider",
+      cellClassName: "dpp-col-provider-cell",
+      render: (view) => (
+        <div className="dpp-col-provider">
+          {linkProviderName ? (
+            <a
+              className="ui-link"
+              href={`/?tab=platform-admin&view=data-providers&providerTab=${encodeURIComponent(view.id)}`}
+              onClick={(event) => {
+                event.preventDefault();
+                handleTabChange(view.id);
+              }}
+            >
+              {providerDisplayName(view)}
+            </a>
+          ) : (
+            <span className="dpp-item-name">{providerDisplayName(view)}</span>
+          )}
+          <code className="dpp-item-id">{view.id}</code>
+          <div className="dpp-item-meta">
+            <span>{`Adapter: ${view.adapterKind}`}</span>
+            <span>{`Precedence: ${view.precedence}`}</span>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "state",
+      header: "Lifecycle & State",
+      cellClassName: "dpp-col-state-cell",
+      render: (view) => (
+        <div className="dpp-col-state">
+          <span className="dpp-item-state">{view.lifecycleState}</span>
+          <span className="dpp-item-enabled">{view.enabled ? "Enabled" : "Disabled"}</span>
+          <div className="dpp-item-meta">
+            <span>{`Serving: ${view.serving ? "Yes" : "No"}`}</span>
+            <span>
+              {"Credential reference: "}
+              {view.credentialRef ? <code>{view.credentialRef}</code> : "None"}
+            </span>
+            {view.verification ? (
+              <span>
+                {`Verified ${fmtDataProviderTime(view.verification.verifiedAt)} by ${view.verification.verifiedBy} — ${view.verification.summary}`}
+              </span>
+            ) : (
+              <span>Not verified</span>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "health",
+      header: "Health & Telemetry",
+      cellClassName: "dpp-col-health-cell",
+      render: (view) => (
+        <div className="dpp-col-health">
+          {view.health ? (
+            <div className="dpp-health">
+              <div className="dpp-health-head">
+                <span className={`dpp-health-status dpp-health-status-${view.health.status}`}>
+                  {HEALTH_STATUS_LABELS[view.health.status] ?? view.health.status}
+                </span>
+                <span>{`Captures: ${view.health.totalCaptures}`}</span>
+                <span>{`Failure rate: ${Math.round(view.health.failureRate * 100)}%`}</span>
+                <span>{`Last 24h: ${view.health.capturesLast24h} captures, ${view.health.failuresLast24h} failed`}</span>
+              </div>
+              <div className="dpp-health-meta">
+                <span>{`Last success: ${fmtDataProviderTime(view.health.lastSuccessAt)}`}</span>
+                <span>{`Last failure: ${fmtDataProviderTime(view.health.lastFailureAt)}`}</span>
+                <span>{`Captured data: ${fmtCaptureBytes(view.health.totalRawBytes)}`}</span>
+              </div>
+              {typeof view.health.fetchFailureRate === "number" &&
+                typeof view.health.fetchAttempts === "number" && (
+                  <div className="dpp-health-meta">
+                    <span>{`Fetch failure rate: ${Math.round(view.health.fetchFailureRate * 100)}%`}</span>
+                    <span>{`${view.health.fetchFailures ?? 0} of ${view.health.fetchAttempts} attempts failed`}</span>
+                    {view.health.lastFetchFailureAt && (
+                      <span>{`Latest fetch failure: ${fmtDataProviderTime(view.health.lastFetchFailureAt)}${
+                        view.health.latestFetchFailureKind
+                          ? ` (${view.health.latestFetchFailureKind})`
+                          : ""
+                      }`}</span>
+                    )}
+                  </div>
+                )}
+              {Object.keys(view.health.byCapability ?? {}).length > 0 && (
+                <ul className="dpp-health-caps">
+                  {Object.entries(view.health.byCapability).map(([capability, agg]) => (
+                    <li key={capability} className="dpp-health-cap">
+                      {`${capability}: ${agg.totalCaptures} captures (${agg.failedCount} failed)`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <span className="dpp-health-nodata">Health unavailable</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "feedJobs",
+      header: "Feed Jobs",
+      cellClassName: "dpp-col-feed-cell",
+      render: (view) => {
+        const feed = view.feed ?? null;
+        const jobs = view.feedJobs ?? [];
+        if (!feed && jobs.length === 0) {
+          return <FeedNoJobBlock providerId={view.id} />;
+        }
+        const busy = actingId === view.id;
+        return (
+          <div className="dpp-feed-jobs">
+            {feed && (
+              <FeedStatusBlock
+                feed={feed}
+                busy={busy}
+                onRunNow={() => void runFeedNow(view)}
+              />
+            )}
+            {jobs.map((job) => {
+              const state = job.pipeline?.state ?? "unknown";
+              const lastRun = job.feed?.lastRun ?? null;
+              const snapshot = job.feed?.snapshot ?? null;
+              const ageLabel = snapshot
+                ? snapshot.ageSeconds < 90
+                  ? `${snapshot.ageSeconds}s old`
+                  : snapshot.ageSeconds < 5400
+                    ? `${Math.round(snapshot.ageSeconds / 60)}m old`
+                    : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
+                : null;
+              return (
+                <div key={job.jobId} className="dpp-feed-job">
+                  <div className="dpp-feed-head">
+                    <span className="dpp-feed-label">{job.label}</span>
+                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                      {state}
+                    </span>
+                  </div>
+                  <div className="dpp-feed-meta">
+                    {job.feed?.state === "never-run" || !lastRun ? (
+                      <span>Never run</span>
+                    ) : (
+                      <span>
+                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
+                      </span>
+                    )}
+                    {snapshot && (
+                      <span>
+                        {`Persisted: ${snapshot.rowsPersisted} rows · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
+                      </span>
+                    )}
+                    {job.nextScheduledRun && (
+                      <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
+                    )}
+                    {lastRun?.codedError && (
+                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                    )}
+                  </div>
+                  {(job.feed?.history?.length ?? 0) > 1 && (
+                    <ul className="dpp-feed-history">
+                      {job.feed!.history.slice(1, 4).map((run) => (
+                        <li key={run.runId}>
+                          {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="dpp-feed-actions">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void runFeedAction(view, job, "run")}
+                    >
+                      Run
+                    </Button>
+                    {(state === "running" || state === "queued") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runFeedAction(view, job, "pause")}
+                      >
+                        Pause
+                      </Button>
+                    )}
+                    {state === "paused" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runFeedAction(view, job, "resume")}
+                      >
+                        Resume
+                      </Button>
+                    )}
+                    {(state === "running" || state === "queued" || state === "paused") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runFeedAction(view, job, "cancel")}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    {(state === "completed" || state === "failed" || state === "cancelled") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runFeedAction(view, job, "retry")}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </div>
+                  <FeedJobScheduleEditor view={view} job={job} busy={busy} onSave={saveFeedSchedule} />
+                </div>
+              );
+            })}
+          </div>
+        );
+      },
+    },
+    {
+      // #3536: the enrich jobs column — the feed-jobs
+      // column's shape transposed (same dpp-feed-*
+      // classes; no new stylesheet), plus the lineage
+      // line naming the feed run each copy derives from.
+      key: "enrichJobs",
+      header: "Enrich Jobs",
+      cellClassName: "dpp-col-feed-cell",
+      render: (view) => {
+        const jobs = view.enrichJobs ?? [];
+        if (jobs.length === 0) {
+          return <span className="dpp-feed-none">No enrich jobs</span>;
+        }
+        const busy = actingId === view.id;
+        return (
+          <div className="dpp-feed-jobs">
+            {jobs.map((job) => {
+              const state = job.pipeline?.state ?? "unknown";
+              const lastRun = job.enrich?.lastRun ?? null;
+              const snapshot = job.enrich?.snapshot ?? null;
+              const ageLabel = snapshot
+                ? snapshot.ageSeconds < 90
+                  ? `${snapshot.ageSeconds}s old`
+                  : snapshot.ageSeconds < 5400
+                    ? `${Math.round(snapshot.ageSeconds / 60)}m old`
+                    : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
+                : null;
+              return (
+                <div key={job.jobId} className="dpp-feed-job">
+                  <div className="dpp-feed-head">
+                    <span className="dpp-feed-label">{job.label}</span>
+                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                      {state}
+                    </span>
+                  </div>
+                  <div className="dpp-feed-meta">
+                    {job.enrich?.state === "never-run" || !lastRun ? (
+                      <span>Never run</span>
+                    ) : (
+                      <span>
+                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
+                      </span>
+                    )}
+                    {snapshot && (
+                      <span>
+                        {`Enriched: ${snapshot.rowsPersisted} rows · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
+                      </span>
+                    )}
+                    {snapshot?.inputRunId && (
+                      <span>{`Derived from feed run: ${snapshot.inputRunId}`}</span>
+                    )}
+                    {job.nextScheduledRun && (
+                      <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
+                    )}
+                    {lastRun?.codedError && (
+                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                    )}
+                  </div>
+                  {(job.enrich?.history?.length ?? 0) > 1 && (
+                    <ul className="dpp-feed-history">
+                      {job.enrich!.history.slice(1, 4).map((run) => (
+                        <li key={run.runId}>
+                          {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="dpp-feed-actions">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void runEnrichAction(view, job, "run")}
+                    >
+                      Run
+                    </Button>
+                    {(state === "running" || state === "queued") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runEnrichAction(view, job, "pause")}
+                      >
+                        Pause
+                      </Button>
+                    )}
+                    {state === "paused" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runEnrichAction(view, job, "resume")}
+                      >
+                        Resume
+                      </Button>
+                    )}
+                    {(state === "running" || state === "queued" || state === "paused") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runEnrichAction(view, job, "cancel")}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    {(state === "completed" || state === "failed" || state === "cancelled") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runEnrichAction(view, job, "retry")}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      },
+    },
+    {
+      // #3537: the analyze jobs column — the enrich-jobs
+      // column's shape transposed (same dpp-feed-*
+      // classes; no new stylesheet), plus the lineage
+      // line naming the enrich run each copy derives from
+      // and the breadth line from the analyzed summary.
+      key: "analyzeJobs",
+      header: "Analyze Jobs",
+      cellClassName: "dpp-col-feed-cell",
+      render: (view) => {
+        const jobs = view.analyzeJobs ?? [];
+        if (jobs.length === 0) {
+          return <span className="dpp-feed-none">No analyze jobs</span>;
+        }
+        const busy = actingId === view.id;
+        return (
+          <div className="dpp-feed-jobs">
+            {jobs.map((job) => {
+              const state = job.pipeline?.state ?? "unknown";
+              const lastRun = job.analyze?.lastRun ?? null;
+              const snapshot = job.analyze?.snapshot ?? null;
+              const ageLabel = snapshot
+                ? snapshot.ageSeconds < 90
+                  ? `${snapshot.ageSeconds}s old`
+                  : snapshot.ageSeconds < 5400
+                    ? `${Math.round(snapshot.ageSeconds / 60)}m old`
+                    : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
+                : null;
+              return (
+                <div key={job.jobId} className="dpp-feed-job">
+                  <div className="dpp-feed-head">
+                    <span className="dpp-feed-label">{job.label}</span>
+                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                      {state}
+                    </span>
+                  </div>
+                  <div className="dpp-feed-meta">
+                    {job.analyze?.state === "never-run" || !lastRun ? (
+                      <span>Never run</span>
+                    ) : (
+                      <span>
+                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
+                      </span>
+                    )}
+                    {snapshot && (
+                      <span>
+                        {`Analyzed: ${snapshot.rowsPersisted} rows · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
+                      </span>
+                    )}
+                    {snapshot && (
+                      <span>
+                        {`Breadth: ${snapshot.summary.advancers} up / ${snapshot.summary.decliners} down${snapshot.summary.meanCompositeScore !== null ? ` · mean composite ${snapshot.summary.meanCompositeScore}` : ""}`}
+                      </span>
+                    )}
+                    {snapshot?.inputRunId && (
+                      <span>{`Derived from enrich run: ${snapshot.inputRunId}`}</span>
+                    )}
+                    {job.nextScheduledRun && (
+                      <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
+                    )}
+                    {lastRun?.codedError && (
+                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                    )}
+                  </div>
+                  {(job.analyze?.history?.length ?? 0) > 1 && (
+                    <ul className="dpp-feed-history">
+                      {job.analyze!.history.slice(1, 4).map((run) => (
+                        <li key={run.runId}>
+                          {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="dpp-feed-actions">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void runAnalyzeAction(view, job, "run")}
+                    >
+                      Run
+                    </Button>
+                    {(state === "running" || state === "queued") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runAnalyzeAction(view, job, "pause")}
+                      >
+                        Pause
+                      </Button>
+                    )}
+                    {state === "paused" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runAnalyzeAction(view, job, "resume")}
+                      >
+                        Resume
+                      </Button>
+                    )}
+                    {(state === "running" || state === "queued" || state === "paused") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runAnalyzeAction(view, job, "cancel")}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    {(state === "completed" || state === "failed" || state === "cancelled") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runAnalyzeAction(view, job, "retry")}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      },
+    },
+    {
+      // #3538: the generate jobs column — the analyze-jobs
+      // column's shape transposed (same dpp-feed-*
+      // classes; no new stylesheet), plus the per-report
+      // formats line and the canonical leg's outcome from
+      // the generated copy.
+      key: "generateJobs",
+      header: "Generate Jobs",
+      cellClassName: "dpp-col-feed-cell",
+      render: (view) => {
+        const jobs = view.generateJobs ?? [];
+        if (jobs.length === 0) {
+          return <span className="dpp-feed-none">No generate jobs</span>;
+        }
+        const busy = actingId === view.id;
+        return (
+          <div className="dpp-feed-jobs">
+            {jobs.map((job) => {
+              const state = job.pipeline?.state ?? "unknown";
+              const lastRun = job.generate?.lastRun ?? null;
+              const snapshot = job.generate?.snapshot ?? null;
+              const ageLabel = snapshot
+                ? snapshot.ageSeconds < 90
+                  ? `${snapshot.ageSeconds}s old`
+                  : snapshot.ageSeconds < 5400
+                    ? `${Math.round(snapshot.ageSeconds / 60)}m old`
+                    : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
+                : null;
+              return (
+                <div key={job.jobId} className="dpp-feed-job">
+                  <div className="dpp-feed-head">
+                    <span className="dpp-feed-label">{job.label}</span>
+                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                      {state}
+                    </span>
+                  </div>
+                  <div className="dpp-feed-meta">
+                    {job.generate?.state === "never-run" || !lastRun ? (
+                      <span>Never run</span>
+                    ) : (
+                      <span>
+                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} formats)`}
+                      </span>
+                    )}
+                    {snapshot && (
+                      <span>
+                        {`Generated: ${snapshot.reportsPersisted} reports · ${snapshot.formatsPersisted} formats · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
+                      </span>
+                    )}
+                    {snapshot?.reports.map((report) => (
+                      <span key={report.kind}>
+                        {`${report.kind}: ${report.formatsGenerated.join(", ") || "none"}${report.formatsFailed.length > 0 ? ` · failed: ${report.formatsFailed.join(", ")}` : ""} · canonical: ${report.canonicalStatus}`}
+                      </span>
+                    ))}
+                    {snapshot?.inputRunId && (
+                      <span>{`Derived from analyze run: ${snapshot.inputRunId}`}</span>
+                    )}
+                    {job.nextScheduledRun && (
+                      <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
+                    )}
+                    {lastRun?.codedError && (
+                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                    )}
+                  </div>
+                  {(job.generate?.history?.length ?? 0) > 1 && (
+                    <ul className="dpp-feed-history">
+                      {job.generate!.history.slice(1, 4).map((run) => (
+                        <li key={run.runId}>
+                          {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} formats`}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="dpp-feed-actions">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void runGenerateAction(view, job, "run")}
+                    >
+                      Run
+                    </Button>
+                    {(state === "running" || state === "queued") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runGenerateAction(view, job, "pause")}
+                      >
+                        Pause
+                      </Button>
+                    )}
+                    {state === "paused" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runGenerateAction(view, job, "resume")}
+                      >
+                        Resume
+                      </Button>
+                    )}
+                    {(state === "running" || state === "queued" || state === "paused") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runGenerateAction(view, job, "cancel")}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    {(state === "completed" || state === "failed" || state === "cancelled") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runGenerateAction(view, job, "retry")}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      },
+    },
+    {
+      // #3539: the provider's deliver jobs as pipeline jobs —
+      // the generate column's shape, one stage later (the
+      // delivery copy + per-channel outcomes).
+      key: "deliverJobs",
+      header: "Deliver Jobs",
+      cellClassName: "dpp-col-feed-cell",
+      render: (view) => {
+        const jobs = view.deliverJobs ?? [];
+        if (jobs.length === 0) {
+          return <span className="dpp-feed-none">No deliver jobs</span>;
+        }
+        const busy = actingId === view.id;
+        return (
+          <div className="dpp-feed-jobs">
+            {jobs.map((job) => {
+              const state = job.pipeline?.state ?? "unknown";
+              const lastRun = job.deliver?.lastRun ?? null;
+              const snapshot = job.deliver?.snapshot ?? null;
+              const ageLabel = snapshot
+                ? snapshot.ageSeconds < 90
+                  ? `${snapshot.ageSeconds}s old`
+                  : snapshot.ageSeconds < 5400
+                    ? `${Math.round(snapshot.ageSeconds / 60)}m old`
+                    : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
+                : null;
+              return (
+                <div key={job.jobId} className="dpp-feed-job">
+                  <div className="dpp-feed-head">
+                    <span className="dpp-feed-label">{job.label}</span>
+                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                      {state}
+                    </span>
+                  </div>
+                  <div className="dpp-feed-meta">
+                    {job.deliver?.state === "never-run" || !lastRun ? (
+                      <span>Never run</span>
+                    ) : (
+                      <span>
+                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} channels)`}
+                      </span>
+                    )}
+                    {snapshot && (
+                      <span>
+                        {`Delivered: ${snapshot.pairsDelivered} pairs · channels: ${snapshot.channelsDelivered.join(", ") || "none"} · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
+                      </span>
+                    )}
+                    {snapshot?.reports.map((report) => (
+                      <span key={report.kind}>
+                        {`${report.kind}: ${report.channels.map((c) => `${c.channel}=${c.status}`).join(", ") || "none"}`}
+                      </span>
+                    ))}
+                    {snapshot?.inputRunId && (
+                      <span>{`Derived from generate run: ${snapshot.inputRunId}`}</span>
+                    )}
+                    {job.nextScheduledRun && (
+                      <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
+                    )}
+                    {lastRun?.codedError && (
+                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                    )}
+                  </div>
+                  {(job.deliver?.history?.length ?? 0) > 1 && (
+                    <ul className="dpp-feed-history">
+                      {job.deliver!.history.slice(1, 4).map((run) => (
+                        <li key={run.runId}>
+                          {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} channels`}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="dpp-feed-actions">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void runDeliverAction(view, job, "run")}
+                    >
+                      Run
+                    </Button>
+                    {(state === "running" || state === "queued") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runDeliverAction(view, job, "pause")}
+                      >
+                        Pause
+                      </Button>
+                    )}
+                    {state === "paused" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runDeliverAction(view, job, "resume")}
+                      >
+                        Resume
+                      </Button>
+                    )}
+                    {(state === "running" || state === "queued" || state === "paused") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runDeliverAction(view, job, "cancel")}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    {(state === "completed" || state === "failed" || state === "cancelled") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runDeliverAction(view, job, "retry")}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      },
+    },
+    {
+      // #3540: the provider's composed pipeline chains —
+      // the end-to-end roll-up (per-stage states + the
+      // current frontier) with chain-level and
+      // frontier-stage management, reusing the feed-job
+      // cell classes (no new stylesheet).
+      key: "pipelineChains",
+      header: "Pipeline",
+      cellClassName: "dpp-col-feed-cell",
+      render: (view) => {
+        const chains = view.pipelineChains ?? [];
+        if (chains.length === 0) {
+          return <span className="dpp-feed-none">No pipeline</span>;
+        }
+        const busy = actingId === view.id;
+        return (
+          <div className="dpp-feed-jobs">
+            {chains.map((chain) => {
+              const state = chain.pipeline?.state ?? "unknown";
+              const frontierStage = chain.frontier
+                ? chain.stages.find((s) => s.stage === chain.frontier)
+                : undefined;
+              return (
+                <div key={chain.jobId} className="dpp-feed-job">
+                  <div className="dpp-feed-head">
+                    <span className="dpp-feed-label">{chain.label}</span>
+                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                      {state}
+                    </span>
+                  </div>
+                  <div className="dpp-feed-meta">
+                    {chain.pipeline?.lastRunStatus ? (
+                      <span>
+                        {`Last run: ${chain.pipeline.lastRunStatus} ${fmtDataProviderTime(chain.pipeline.lastRunAt)}`}
+                      </span>
+                    ) : (
+                      <span>Never run</span>
+                    )}
+                    <span>
+                      {chain.stages
+                        .map((s) => `${s.stage}: ${s.status}`)
+                        .join(" · ")}
+                    </span>
+                    {chain.frontier && (
+                      <span>{`Frontier: ${chain.frontier}`}</span>
+                    )}
+                    {frontierStage?.error && (
+                      <span className="dpp-feed-error">{frontierStage.error}</span>
+                    )}
+                    {chain.pipeline?.lastError && (
+                      <span className="dpp-feed-error">{chain.pipeline.lastError}</span>
+                    )}
+                    {chain.nextScheduledRun && (
+                      <span>{`Next run: ${fmtDataProviderTime(chain.nextScheduledRun)}`}</span>
+                    )}
+                  </div>
+                  <div className="dpp-feed-actions">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void runChainAction(view, chain, "run")}
+                    >
+                      Run
+                    </Button>
+                    {(state === "running" || state === "queued") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runChainAction(view, chain, "pause")}
+                      >
+                        Pause
+                      </Button>
+                    )}
+                    {state === "paused" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runChainAction(view, chain, "resume")}
+                      >
+                        Resume
+                      </Button>
+                    )}
+                    {(state === "running" || state === "queued" || state === "paused") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runChainAction(view, chain, "cancel")}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    {(state === "completed" || state === "failed" || state === "cancelled") && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => void runChainAction(view, chain, "retry")}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                    {frontierStage && frontierStage.status === "running" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() =>
+                          void runChainAction(view, chain, "stage_pause", frontierStage.stage)
+                        }
+                      >
+                        {`Pause ${frontierStage.stage}`}
+                      </Button>
+                    )}
+                    {frontierStage && frontierStage.status === "stopped" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() =>
+                          void runChainAction(view, chain, "stage_resume", frontierStage.stage)
+                        }
+                      >
+                        {`Resume ${frontierStage.stage}`}
+                      </Button>
+                    )}
+                    {frontierStage &&
+                      frontierStage.status !== "completed" &&
+                      frontierStage.status !== "cancelled" &&
+                      frontierStage.status !== "not-run" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() =>
+                            void runChainAction(view, chain, "stage_cancel", frontierStage.stage)
+                          }
+                        >
+                          {`Cancel ${frontierStage.stage}`}
+                        </Button>
+                      )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      },
+    },
+    {
+      key: "capabilities",
+      header: "Capabilities & Routes",
+      cellClassName: "dpp-col-capabilities-cell",
+      render: (view) => {
+        const myRoutes = routes.filter(
+          (r) => r.primaryProviderId === view.id || r.gapFillProviderId === view.id
+        );
+        return (
+          <div className="dpp-col-capabilities">
+            <div className="dpp-item-meta">
+              <span>
+                {`Capabilities: ${
+                  view.declaredCapabilities.length > 0
+                    ? view.declaredCapabilities.join(", ")
+                    : "None declared"
+                }`}
+              </span>
+            </div>
+            {myRoutes.length > 0 && (
+              <ul className="dpp-routes">
+                {myRoutes.map((route) => (
+                  <li key={route.capability} className="dpp-route">
+                    <span className="dpp-route-capability">{route.capability}</span>
+                    <span className="dpp-route-tier">{`Tier: ${route.minTier === "premium" ? "Premium" : "Freemium"}`}</span>
+                    <span>{`Primary: ${route.primaryProviderId}`}</span>
+                    <span>{`Gap-fill: ${route.gapFillProviderId ?? "—"}`}</span>
+                    <span>{`Resolves: ${route.resolves ? "Yes" : "No"}`}</span>
+                    {route.error && <span className="dpp-route-error">{route.error}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: "connectivity",
+      header: "Connectivity & Session",
+      cellClassName: "dpp-col-session-cell",
+      render: (view) => (
+        <div className="dpp-col-session">
+          {isETradeProvider(view) ? (
+            <div className="dpp-session-info">
+              {etradeStatus === null ? (
+                <span>E*TRADE session presence unavailable for this session.</span>
+              ) : (
+                <>
+                  <span>
+                    <strong>Panel (signed-in session):</strong>{" "}
+                    {etradeStatus.authenticated ? "connected" : "not connected"}
+                  </span>
+                  <span>
+                    <strong>Token presence by scope:</strong>{" "}
+                    {etradeStatus.tokenScopes
+                      ? scopeLines(etradeStatus.tokenScopes)
+                          .map((line) => `${line.scope}: ${line.present ? "present" : "absent"}`)
+                          .join(" · ")
+                      : "scope presence unavailable"}
+                  </span>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="dpp-session-info">
+              <span>
+                {view.verification ? "Connectivity verified" : "Awaiting verification"}
+              </span>
+              <span>
+                {view.credentialRef ? "Credential reference set" : "No credential configured"}
+              </span>
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      cellClassName: "dpp-col-actions-cell",
+      render: (view) => {
+        const busy = actingId === view.id;
+        return (
+          <div className="dpp-col-actions">
+            {confirmingDeprovisionId === view.id ? (
+              <div className="dpp-item-actions">
+                <span className="dpp-confirm-text">
+                  Deprovision this provider? Its capability routes are withdrawn and its
+                  credential reference is cleared.
+                </span>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => void runAction(view, "deprovision")}
+                  loading={busy}
+                  disabled={busy}
+                >
+                  Confirm deprovision
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmingDeprovisionId(null)}
+                  disabled={busy}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <div className="dpp-item-actions">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => openConfigure(view)}
+                >
+                  Configure
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void runAction(view, "verify")}
+                >
+                  Verify
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void runAction(view, view.enabled ? "disable" : "enable")}
+                >
+                  {view.enabled ? "Disable" : "Enable"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  tone="subtle"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmingDeprovisionId(view.id);
+                    setConfiguringId(null);
+                  }}
+                >
+                  Deprovision
+                </Button>
+              </div>
+            )}
+
+            {configuringId === view.id && (
+              <div className="dpp-configure-form">
+                <TextInput
+                  id="dpp-configure-credential-ref"
+                  label="Credential reference"
+                  placeholder="env:PROVIDER_API_KEY"
+                  value={configureRef}
+                  onChange={(event) => setConfigureRef(event.target.value)}
+                  wrapperClassName="dpp-configure-field"
+                />
+                <TextInput
+                  id="dpp-configure-display-name"
+                  label="Display name (optional)"
+                  placeholder="e.g. Yahoo Finance"
+                  value={configureName}
+                  onChange={(event) => setConfigureName(event.target.value)}
+                  wrapperClassName="dpp-configure-field"
+                />
+                <div className="dpp-configure-actions">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => void handleConfigureSave(view)}
+                    loading={busy}
+                    disabled={busy}
+                  >
+                    Save configuration
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfiguringId(null)}
+                    disabled={busy}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+
+  // #3978: the inner tab strip. The valid set is data-driven (provider
+  // ids arrive with the list), so the hook accepts any non-empty value
+  // and the render falls back to overview for an id with no provider
+  // yet (unknown, or still loading) — a deep link opened before the
+  // list loads still lands on its tab once the list arrives.
+  const activeProvider = providers.find((p) => p.id === activeTab) ?? null;
+  const effectiveTab =
+    activeTab === "add" ? "add" : activeProvider ? activeTab : "overview";
+  const providerTabs: TabOption<string>[] = [
+    { id: "overview", label: "Overview" },
+    ...providers.map((p) => ({ id: p.id, label: providerDisplayName(p) })),
+    { id: "add", label: "Add provider" },
+  ];
+  const columns = buildColumns(false);
+  // Overview: the summary columns only — provider, lifecycle/state,
+  // health. Every detail column lives on its provider tab.
+  const overviewColumns = buildColumns(true).filter((column) =>
+    ["provider", "state", "health"].includes(column.key),
+  );
+
   return (
     <div className="dpp-panel">
       <p className="dpp-desc">
@@ -611,1137 +1770,72 @@ export function DataProvidersPanel() {
         </Button>
       </div>
 
-      {loading ? (
-        <div className="dpp-loading">
-          <Spinner size="sm" /> Loading data providers…
-        </div>
-      ) : needsAuth ? (
-        <EmptyState
-          title="Sign-in required"
-          description="Please log in to view and manage data providers."
-        />
-      ) : providers.length === 0 ? (
-        <EmptyState
-          title="No data providers configured"
-          description="Register a provider below to start its provisioning lifecycle. Providers appear here with their lifecycle state, verification evidence, and capability routes."
-        />
-      ) : (
-        <Table<DataProviderView>
-          columns={[
-            {
-              key: "provider",
-              header: "Provider",
-              cellClassName: "dpp-col-provider-cell",
-              render: (view) => (
-                <div className="dpp-col-provider">
-                  <span className="dpp-item-name">{providerDisplayName(view)}</span>
-                  <code className="dpp-item-id">{view.id}</code>
-                  <div className="dpp-item-meta">
-                    <span>{`Adapter: ${view.adapterKind}`}</span>
-                    <span>{`Precedence: ${view.precedence}`}</span>
-                  </div>
-                </div>
-              ),
-            },
-            {
-              key: "state",
-              header: "Lifecycle & State",
-              cellClassName: "dpp-col-state-cell",
-              render: (view) => (
-                <div className="dpp-col-state">
-                  <span className="dpp-item-state">{view.lifecycleState}</span>
-                  <span className="dpp-item-enabled">{view.enabled ? "Enabled" : "Disabled"}</span>
-                  <div className="dpp-item-meta">
-                    <span>{`Serving: ${view.serving ? "Yes" : "No"}`}</span>
-                    <span>
-                      {"Credential reference: "}
-                      {view.credentialRef ? <code>{view.credentialRef}</code> : "None"}
-                    </span>
-                    {view.verification ? (
-                      <span>
-                        {`Verified ${fmtDataProviderTime(view.verification.verifiedAt)} by ${view.verification.verifiedBy} — ${view.verification.summary}`}
-                      </span>
-                    ) : (
-                      <span>Not verified</span>
-                    )}
-                  </div>
-                </div>
-              ),
-            },
-            {
-              key: "health",
-              header: "Health & Telemetry",
-              cellClassName: "dpp-col-health-cell",
-              render: (view) => (
-                <div className="dpp-col-health">
-                  {view.health ? (
-                    <div className="dpp-health">
-                      <div className="dpp-health-head">
-                        <span className={`dpp-health-status dpp-health-status-${view.health.status}`}>
-                          {HEALTH_STATUS_LABELS[view.health.status] ?? view.health.status}
-                        </span>
-                        <span>{`Captures: ${view.health.totalCaptures}`}</span>
-                        <span>{`Failure rate: ${Math.round(view.health.failureRate * 100)}%`}</span>
-                        <span>{`Last 24h: ${view.health.capturesLast24h} captures, ${view.health.failuresLast24h} failed`}</span>
-                      </div>
-                      <div className="dpp-health-meta">
-                        <span>{`Last success: ${fmtDataProviderTime(view.health.lastSuccessAt)}`}</span>
-                        <span>{`Last failure: ${fmtDataProviderTime(view.health.lastFailureAt)}`}</span>
-                        <span>{`Captured data: ${fmtCaptureBytes(view.health.totalRawBytes)}`}</span>
-                      </div>
-                      {typeof view.health.fetchFailureRate === "number" &&
-                        typeof view.health.fetchAttempts === "number" && (
-                          <div className="dpp-health-meta">
-                            <span>{`Fetch failure rate: ${Math.round(view.health.fetchFailureRate * 100)}%`}</span>
-                            <span>{`${view.health.fetchFailures ?? 0} of ${view.health.fetchAttempts} attempts failed`}</span>
-                            {view.health.lastFetchFailureAt && (
-                              <span>{`Latest fetch failure: ${fmtDataProviderTime(view.health.lastFetchFailureAt)}${
-                                view.health.latestFetchFailureKind
-                                  ? ` (${view.health.latestFetchFailureKind})`
-                                  : ""
-                              }`}</span>
-                            )}
-                          </div>
-                        )}
-                      {Object.keys(view.health.byCapability ?? {}).length > 0 && (
-                        <ul className="dpp-health-caps">
-                          {Object.entries(view.health.byCapability).map(([capability, agg]) => (
-                            <li key={capability} className="dpp-health-cap">
-                              {`${capability}: ${agg.totalCaptures} captures (${agg.failedCount} failed)`}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="dpp-health-nodata">Health unavailable</span>
-                  )}
-                </div>
-              ),
-            },
-            {
-              key: "feedJobs",
-              header: "Feed Jobs",
-              cellClassName: "dpp-col-feed-cell",
-              render: (view) => {
-                const feed = view.feed ?? null;
-                const jobs = view.feedJobs ?? [];
-                if (!feed && jobs.length === 0) {
-                  return <FeedNoJobBlock providerId={view.id} />;
-                }
-                const busy = actingId === view.id;
-                return (
-                  <div className="dpp-feed-jobs">
-                    {feed && (
-                      <FeedStatusBlock
-                        feed={feed}
-                        busy={busy}
-                        onRunNow={() => void runFeedNow(view)}
-                      />
-                    )}
-                    {jobs.map((job) => {
-                      const state = job.pipeline?.state ?? "unknown";
-                      const lastRun = job.feed?.lastRun ?? null;
-                      const snapshot = job.feed?.snapshot ?? null;
-                      const ageLabel = snapshot
-                        ? snapshot.ageSeconds < 90
-                          ? `${snapshot.ageSeconds}s old`
-                          : snapshot.ageSeconds < 5400
-                            ? `${Math.round(snapshot.ageSeconds / 60)}m old`
-                            : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
-                        : null;
-                      return (
-                        <div key={job.jobId} className="dpp-feed-job">
-                          <div className="dpp-feed-head">
-                            <span className="dpp-feed-label">{job.label}</span>
-                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
-                              {state}
-                            </span>
-                          </div>
-                          <div className="dpp-feed-meta">
-                            {job.feed?.state === "never-run" || !lastRun ? (
-                              <span>Never run</span>
-                            ) : (
-                              <span>
-                                {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
-                              </span>
-                            )}
-                            {snapshot && (
-                              <span>
-                                {`Persisted: ${snapshot.rowsPersisted} rows · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
-                              </span>
-                            )}
-                            {job.nextScheduledRun && (
-                              <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
-                            )}
-                            {lastRun?.codedError && (
-                              <span className="dpp-feed-error">{lastRun.codedError}</span>
-                            )}
-                          </div>
-                          {(job.feed?.history?.length ?? 0) > 1 && (
-                            <ul className="dpp-feed-history">
-                              {job.feed!.history.slice(1, 4).map((run) => (
-                                <li key={run.runId}>
-                                  {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          <div className="dpp-feed-actions">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => void runFeedAction(view, job, "run")}
-                            >
-                              Run
-                            </Button>
-                            {(state === "running" || state === "queued") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runFeedAction(view, job, "pause")}
-                              >
-                                Pause
-                              </Button>
-                            )}
-                            {state === "paused" && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runFeedAction(view, job, "resume")}
-                              >
-                                Resume
-                              </Button>
-                            )}
-                            {(state === "running" || state === "queued" || state === "paused") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runFeedAction(view, job, "cancel")}
-                              >
-                                Cancel
-                              </Button>
-                            )}
-                            {(state === "completed" || state === "failed" || state === "cancelled") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runFeedAction(view, job, "retry")}
-                              >
-                                Retry
-                              </Button>
-                            )}
-                          </div>
-                          <FeedJobScheduleEditor view={view} job={job} busy={busy} onSave={saveFeedSchedule} />
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              },
-            },
-            {
-              // #3536: the enrich jobs column — the feed-jobs
-              // column's shape transposed (same dpp-feed-*
-              // classes; no new stylesheet), plus the lineage
-              // line naming the feed run each copy derives from.
-              key: "enrichJobs",
-              header: "Enrich Jobs",
-              cellClassName: "dpp-col-feed-cell",
-              render: (view) => {
-                const jobs = view.enrichJobs ?? [];
-                if (jobs.length === 0) {
-                  return <span className="dpp-feed-none">No enrich jobs</span>;
-                }
-                const busy = actingId === view.id;
-                return (
-                  <div className="dpp-feed-jobs">
-                    {jobs.map((job) => {
-                      const state = job.pipeline?.state ?? "unknown";
-                      const lastRun = job.enrich?.lastRun ?? null;
-                      const snapshot = job.enrich?.snapshot ?? null;
-                      const ageLabel = snapshot
-                        ? snapshot.ageSeconds < 90
-                          ? `${snapshot.ageSeconds}s old`
-                          : snapshot.ageSeconds < 5400
-                            ? `${Math.round(snapshot.ageSeconds / 60)}m old`
-                            : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
-                        : null;
-                      return (
-                        <div key={job.jobId} className="dpp-feed-job">
-                          <div className="dpp-feed-head">
-                            <span className="dpp-feed-label">{job.label}</span>
-                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
-                              {state}
-                            </span>
-                          </div>
-                          <div className="dpp-feed-meta">
-                            {job.enrich?.state === "never-run" || !lastRun ? (
-                              <span>Never run</span>
-                            ) : (
-                              <span>
-                                {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
-                              </span>
-                            )}
-                            {snapshot && (
-                              <span>
-                                {`Enriched: ${snapshot.rowsPersisted} rows · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
-                              </span>
-                            )}
-                            {snapshot?.inputRunId && (
-                              <span>{`Derived from feed run: ${snapshot.inputRunId}`}</span>
-                            )}
-                            {job.nextScheduledRun && (
-                              <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
-                            )}
-                            {lastRun?.codedError && (
-                              <span className="dpp-feed-error">{lastRun.codedError}</span>
-                            )}
-                          </div>
-                          {(job.enrich?.history?.length ?? 0) > 1 && (
-                            <ul className="dpp-feed-history">
-                              {job.enrich!.history.slice(1, 4).map((run) => (
-                                <li key={run.runId}>
-                                  {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          <div className="dpp-feed-actions">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => void runEnrichAction(view, job, "run")}
-                            >
-                              Run
-                            </Button>
-                            {(state === "running" || state === "queued") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runEnrichAction(view, job, "pause")}
-                              >
-                                Pause
-                              </Button>
-                            )}
-                            {state === "paused" && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runEnrichAction(view, job, "resume")}
-                              >
-                                Resume
-                              </Button>
-                            )}
-                            {(state === "running" || state === "queued" || state === "paused") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runEnrichAction(view, job, "cancel")}
-                              >
-                                Cancel
-                              </Button>
-                            )}
-                            {(state === "completed" || state === "failed" || state === "cancelled") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runEnrichAction(view, job, "retry")}
-                              >
-                                Retry
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              },
-            },
-            {
-              // #3537: the analyze jobs column — the enrich-jobs
-              // column's shape transposed (same dpp-feed-*
-              // classes; no new stylesheet), plus the lineage
-              // line naming the enrich run each copy derives from
-              // and the breadth line from the analyzed summary.
-              key: "analyzeJobs",
-              header: "Analyze Jobs",
-              cellClassName: "dpp-col-feed-cell",
-              render: (view) => {
-                const jobs = view.analyzeJobs ?? [];
-                if (jobs.length === 0) {
-                  return <span className="dpp-feed-none">No analyze jobs</span>;
-                }
-                const busy = actingId === view.id;
-                return (
-                  <div className="dpp-feed-jobs">
-                    {jobs.map((job) => {
-                      const state = job.pipeline?.state ?? "unknown";
-                      const lastRun = job.analyze?.lastRun ?? null;
-                      const snapshot = job.analyze?.snapshot ?? null;
-                      const ageLabel = snapshot
-                        ? snapshot.ageSeconds < 90
-                          ? `${snapshot.ageSeconds}s old`
-                          : snapshot.ageSeconds < 5400
-                            ? `${Math.round(snapshot.ageSeconds / 60)}m old`
-                            : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
-                        : null;
-                      return (
-                        <div key={job.jobId} className="dpp-feed-job">
-                          <div className="dpp-feed-head">
-                            <span className="dpp-feed-label">{job.label}</span>
-                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
-                              {state}
-                            </span>
-                          </div>
-                          <div className="dpp-feed-meta">
-                            {job.analyze?.state === "never-run" || !lastRun ? (
-                              <span>Never run</span>
-                            ) : (
-                              <span>
-                                {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
-                              </span>
-                            )}
-                            {snapshot && (
-                              <span>
-                                {`Analyzed: ${snapshot.rowsPersisted} rows · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
-                              </span>
-                            )}
-                            {snapshot && (
-                              <span>
-                                {`Breadth: ${snapshot.summary.advancers} up / ${snapshot.summary.decliners} down${snapshot.summary.meanCompositeScore !== null ? ` · mean composite ${snapshot.summary.meanCompositeScore}` : ""}`}
-                              </span>
-                            )}
-                            {snapshot?.inputRunId && (
-                              <span>{`Derived from enrich run: ${snapshot.inputRunId}`}</span>
-                            )}
-                            {job.nextScheduledRun && (
-                              <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
-                            )}
-                            {lastRun?.codedError && (
-                              <span className="dpp-feed-error">{lastRun.codedError}</span>
-                            )}
-                          </div>
-                          {(job.analyze?.history?.length ?? 0) > 1 && (
-                            <ul className="dpp-feed-history">
-                              {job.analyze!.history.slice(1, 4).map((run) => (
-                                <li key={run.runId}>
-                                  {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          <div className="dpp-feed-actions">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => void runAnalyzeAction(view, job, "run")}
-                            >
-                              Run
-                            </Button>
-                            {(state === "running" || state === "queued") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runAnalyzeAction(view, job, "pause")}
-                              >
-                                Pause
-                              </Button>
-                            )}
-                            {state === "paused" && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runAnalyzeAction(view, job, "resume")}
-                              >
-                                Resume
-                              </Button>
-                            )}
-                            {(state === "running" || state === "queued" || state === "paused") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runAnalyzeAction(view, job, "cancel")}
-                              >
-                                Cancel
-                              </Button>
-                            )}
-                            {(state === "completed" || state === "failed" || state === "cancelled") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runAnalyzeAction(view, job, "retry")}
-                              >
-                                Retry
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              },
-            },
-            {
-              // #3538: the generate jobs column — the analyze-jobs
-              // column's shape transposed (same dpp-feed-*
-              // classes; no new stylesheet), plus the per-report
-              // formats line and the canonical leg's outcome from
-              // the generated copy.
-              key: "generateJobs",
-              header: "Generate Jobs",
-              cellClassName: "dpp-col-feed-cell",
-              render: (view) => {
-                const jobs = view.generateJobs ?? [];
-                if (jobs.length === 0) {
-                  return <span className="dpp-feed-none">No generate jobs</span>;
-                }
-                const busy = actingId === view.id;
-                return (
-                  <div className="dpp-feed-jobs">
-                    {jobs.map((job) => {
-                      const state = job.pipeline?.state ?? "unknown";
-                      const lastRun = job.generate?.lastRun ?? null;
-                      const snapshot = job.generate?.snapshot ?? null;
-                      const ageLabel = snapshot
-                        ? snapshot.ageSeconds < 90
-                          ? `${snapshot.ageSeconds}s old`
-                          : snapshot.ageSeconds < 5400
-                            ? `${Math.round(snapshot.ageSeconds / 60)}m old`
-                            : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
-                        : null;
-                      return (
-                        <div key={job.jobId} className="dpp-feed-job">
-                          <div className="dpp-feed-head">
-                            <span className="dpp-feed-label">{job.label}</span>
-                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
-                              {state}
-                            </span>
-                          </div>
-                          <div className="dpp-feed-meta">
-                            {job.generate?.state === "never-run" || !lastRun ? (
-                              <span>Never run</span>
-                            ) : (
-                              <span>
-                                {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} formats)`}
-                              </span>
-                            )}
-                            {snapshot && (
-                              <span>
-                                {`Generated: ${snapshot.reportsPersisted} reports · ${snapshot.formatsPersisted} formats · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
-                              </span>
-                            )}
-                            {snapshot?.reports.map((report) => (
-                              <span key={report.kind}>
-                                {`${report.kind}: ${report.formatsGenerated.join(", ") || "none"}${report.formatsFailed.length > 0 ? ` · failed: ${report.formatsFailed.join(", ")}` : ""} · canonical: ${report.canonicalStatus}`}
-                              </span>
-                            ))}
-                            {snapshot?.inputRunId && (
-                              <span>{`Derived from analyze run: ${snapshot.inputRunId}`}</span>
-                            )}
-                            {job.nextScheduledRun && (
-                              <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
-                            )}
-                            {lastRun?.codedError && (
-                              <span className="dpp-feed-error">{lastRun.codedError}</span>
-                            )}
-                          </div>
-                          {(job.generate?.history?.length ?? 0) > 1 && (
-                            <ul className="dpp-feed-history">
-                              {job.generate!.history.slice(1, 4).map((run) => (
-                                <li key={run.runId}>
-                                  {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} formats`}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          <div className="dpp-feed-actions">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => void runGenerateAction(view, job, "run")}
-                            >
-                              Run
-                            </Button>
-                            {(state === "running" || state === "queued") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runGenerateAction(view, job, "pause")}
-                              >
-                                Pause
-                              </Button>
-                            )}
-                            {state === "paused" && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runGenerateAction(view, job, "resume")}
-                              >
-                                Resume
-                              </Button>
-                            )}
-                            {(state === "running" || state === "queued" || state === "paused") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runGenerateAction(view, job, "cancel")}
-                              >
-                                Cancel
-                              </Button>
-                            )}
-                            {(state === "completed" || state === "failed" || state === "cancelled") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runGenerateAction(view, job, "retry")}
-                              >
-                                Retry
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              },
-            },
-            {
-              // #3539: the provider's deliver jobs as pipeline jobs —
-              // the generate column's shape, one stage later (the
-              // delivery copy + per-channel outcomes).
-              key: "deliverJobs",
-              header: "Deliver Jobs",
-              cellClassName: "dpp-col-feed-cell",
-              render: (view) => {
-                const jobs = view.deliverJobs ?? [];
-                if (jobs.length === 0) {
-                  return <span className="dpp-feed-none">No deliver jobs</span>;
-                }
-                const busy = actingId === view.id;
-                return (
-                  <div className="dpp-feed-jobs">
-                    {jobs.map((job) => {
-                      const state = job.pipeline?.state ?? "unknown";
-                      const lastRun = job.deliver?.lastRun ?? null;
-                      const snapshot = job.deliver?.snapshot ?? null;
-                      const ageLabel = snapshot
-                        ? snapshot.ageSeconds < 90
-                          ? `${snapshot.ageSeconds}s old`
-                          : snapshot.ageSeconds < 5400
-                            ? `${Math.round(snapshot.ageSeconds / 60)}m old`
-                            : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
-                        : null;
-                      return (
-                        <div key={job.jobId} className="dpp-feed-job">
-                          <div className="dpp-feed-head">
-                            <span className="dpp-feed-label">{job.label}</span>
-                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
-                              {state}
-                            </span>
-                          </div>
-                          <div className="dpp-feed-meta">
-                            {job.deliver?.state === "never-run" || !lastRun ? (
-                              <span>Never run</span>
-                            ) : (
-                              <span>
-                                {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} channels)`}
-                              </span>
-                            )}
-                            {snapshot && (
-                              <span>
-                                {`Delivered: ${snapshot.pairsDelivered} pairs · channels: ${snapshot.channelsDelivered.join(", ") || "none"} · ${ageLabel}${snapshot.stale ? " · STALE" : ""}`}
-                              </span>
-                            )}
-                            {snapshot?.reports.map((report) => (
-                              <span key={report.kind}>
-                                {`${report.kind}: ${report.channels.map((c) => `${c.channel}=${c.status}`).join(", ") || "none"}`}
-                              </span>
-                            ))}
-                            {snapshot?.inputRunId && (
-                              <span>{`Derived from generate run: ${snapshot.inputRunId}`}</span>
-                            )}
-                            {job.nextScheduledRun && (
-                              <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
-                            )}
-                            {lastRun?.codedError && (
-                              <span className="dpp-feed-error">{lastRun.codedError}</span>
-                            )}
-                          </div>
-                          {(job.deliver?.history?.length ?? 0) > 1 && (
-                            <ul className="dpp-feed-history">
-                              {job.deliver!.history.slice(1, 4).map((run) => (
-                                <li key={run.runId}>
-                                  {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} channels`}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          <div className="dpp-feed-actions">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => void runDeliverAction(view, job, "run")}
-                            >
-                              Run
-                            </Button>
-                            {(state === "running" || state === "queued") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runDeliverAction(view, job, "pause")}
-                              >
-                                Pause
-                              </Button>
-                            )}
-                            {state === "paused" && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runDeliverAction(view, job, "resume")}
-                              >
-                                Resume
-                              </Button>
-                            )}
-                            {(state === "running" || state === "queued" || state === "paused") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runDeliverAction(view, job, "cancel")}
-                              >
-                                Cancel
-                              </Button>
-                            )}
-                            {(state === "completed" || state === "failed" || state === "cancelled") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runDeliverAction(view, job, "retry")}
-                              >
-                                Retry
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              },
-            },
-            {
-              // #3540: the provider's composed pipeline chains —
-              // the end-to-end roll-up (per-stage states + the
-              // current frontier) with chain-level and
-              // frontier-stage management, reusing the feed-job
-              // cell classes (no new stylesheet).
-              key: "pipelineChains",
-              header: "Pipeline",
-              cellClassName: "dpp-col-feed-cell",
-              render: (view) => {
-                const chains = view.pipelineChains ?? [];
-                if (chains.length === 0) {
-                  return <span className="dpp-feed-none">No pipeline</span>;
-                }
-                const busy = actingId === view.id;
-                return (
-                  <div className="dpp-feed-jobs">
-                    {chains.map((chain) => {
-                      const state = chain.pipeline?.state ?? "unknown";
-                      const frontierStage = chain.frontier
-                        ? chain.stages.find((s) => s.stage === chain.frontier)
-                        : undefined;
-                      return (
-                        <div key={chain.jobId} className="dpp-feed-job">
-                          <div className="dpp-feed-head">
-                            <span className="dpp-feed-label">{chain.label}</span>
-                            <span className={`dpp-feed-state dpp-feed-state-${state}`}>
-                              {state}
-                            </span>
-                          </div>
-                          <div className="dpp-feed-meta">
-                            {chain.pipeline?.lastRunStatus ? (
-                              <span>
-                                {`Last run: ${chain.pipeline.lastRunStatus} ${fmtDataProviderTime(chain.pipeline.lastRunAt)}`}
-                              </span>
-                            ) : (
-                              <span>Never run</span>
-                            )}
-                            <span>
-                              {chain.stages
-                                .map((s) => `${s.stage}: ${s.status}`)
-                                .join(" · ")}
-                            </span>
-                            {chain.frontier && (
-                              <span>{`Frontier: ${chain.frontier}`}</span>
-                            )}
-                            {frontierStage?.error && (
-                              <span className="dpp-feed-error">{frontierStage.error}</span>
-                            )}
-                            {chain.pipeline?.lastError && (
-                              <span className="dpp-feed-error">{chain.pipeline.lastError}</span>
-                            )}
-                            {chain.nextScheduledRun && (
-                              <span>{`Next run: ${fmtDataProviderTime(chain.nextScheduledRun)}`}</span>
-                            )}
-                          </div>
-                          <div className="dpp-feed-actions">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={busy}
-                              onClick={() => void runChainAction(view, chain, "run")}
-                            >
-                              Run
-                            </Button>
-                            {(state === "running" || state === "queued") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runChainAction(view, chain, "pause")}
-                              >
-                                Pause
-                              </Button>
-                            )}
-                            {state === "paused" && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runChainAction(view, chain, "resume")}
-                              >
-                                Resume
-                              </Button>
-                            )}
-                            {(state === "running" || state === "queued" || state === "paused") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runChainAction(view, chain, "cancel")}
-                              >
-                                Cancel
-                              </Button>
-                            )}
-                            {(state === "completed" || state === "failed" || state === "cancelled") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void runChainAction(view, chain, "retry")}
-                              >
-                                Retry
-                              </Button>
-                            )}
-                            {frontierStage && frontierStage.status === "running" && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() =>
-                                  void runChainAction(view, chain, "stage_pause", frontierStage.stage)
-                                }
-                              >
-                                {`Pause ${frontierStage.stage}`}
-                              </Button>
-                            )}
-                            {frontierStage && frontierStage.status === "stopped" && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() =>
-                                  void runChainAction(view, chain, "stage_resume", frontierStage.stage)
-                                }
-                              >
-                                {`Resume ${frontierStage.stage}`}
-                              </Button>
-                            )}
-                            {frontierStage &&
-                              frontierStage.status !== "completed" &&
-                              frontierStage.status !== "cancelled" &&
-                              frontierStage.status !== "not-run" && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  disabled={busy}
-                                  onClick={() =>
-                                    void runChainAction(view, chain, "stage_cancel", frontierStage.stage)
-                                  }
-                                >
-                                  {`Cancel ${frontierStage.stage}`}
-                                </Button>
-                              )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              },
-            },
-            {
-              key: "capabilities",
-              header: "Capabilities & Routes",
-              cellClassName: "dpp-col-capabilities-cell",
-              render: (view) => {
-                const myRoutes = routes.filter(
-                  (r) => r.primaryProviderId === view.id || r.gapFillProviderId === view.id
-                );
-                return (
-                  <div className="dpp-col-capabilities">
-                    <div className="dpp-item-meta">
-                      <span>
-                        {`Capabilities: ${
-                          view.declaredCapabilities.length > 0
-                            ? view.declaredCapabilities.join(", ")
-                            : "None declared"
-                        }`}
-                      </span>
-                    </div>
-                    {myRoutes.length > 0 && (
-                      <ul className="dpp-routes">
-                        {myRoutes.map((route) => (
-                          <li key={route.capability} className="dpp-route">
-                            <span className="dpp-route-capability">{route.capability}</span>
-                            <span className="dpp-route-tier">{`Tier: ${route.minTier === "premium" ? "Premium" : "Freemium"}`}</span>
-                            <span>{`Primary: ${route.primaryProviderId}`}</span>
-                            <span>{`Gap-fill: ${route.gapFillProviderId ?? "—"}`}</span>
-                            <span>{`Resolves: ${route.resolves ? "Yes" : "No"}`}</span>
-                            {route.error && <span className="dpp-route-error">{route.error}</span>}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                );
-              },
-            },
-            {
-              key: "connectivity",
-              header: "Connectivity & Session",
-              cellClassName: "dpp-col-session-cell",
-              render: (view) => (
-                <div className="dpp-col-session">
-                  {isETradeProvider(view) ? (
-                    <div className="dpp-session-info">
-                      {etradeStatus === null ? (
-                        <span>E*TRADE session presence unavailable for this session.</span>
-                      ) : (
-                        <>
-                          <span>
-                            <strong>Panel (signed-in session):</strong>{" "}
-                            {etradeStatus.authenticated ? "connected" : "not connected"}
-                          </span>
-                          <span>
-                            <strong>Token presence by scope:</strong>{" "}
-                            {etradeStatus.tokenScopes
-                              ? scopeLines(etradeStatus.tokenScopes)
-                                  .map((line) => `${line.scope}: ${line.present ? "present" : "absent"}`)
-                                  .join(" · ")
-                              : "scope presence unavailable"}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="dpp-session-info">
-                      <span>
-                        {view.verification ? "Connectivity verified" : "Awaiting verification"}
-                      </span>
-                      <span>
-                        {view.credentialRef ? "Credential reference set" : "No credential configured"}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ),
-            },
-            {
-              key: "actions",
-              header: "Actions",
-              cellClassName: "dpp-col-actions-cell",
-              render: (view) => {
-                const busy = actingId === view.id;
-                return (
-                  <div className="dpp-col-actions">
-                    {confirmingDeprovisionId === view.id ? (
-                      <div className="dpp-item-actions">
-                        <span className="dpp-confirm-text">
-                          Deprovision this provider? Its capability routes are withdrawn and its
-                          credential reference is cleared.
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => void runAction(view, "deprovision")}
-                          loading={busy}
-                          disabled={busy}
-                        >
-                          Confirm deprovision
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setConfirmingDeprovisionId(null)}
-                          disabled={busy}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="dpp-item-actions">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => openConfigure(view)}
-                        >
-                          Configure
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => void runAction(view, "verify")}
-                        >
-                          Verify
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => void runAction(view, view.enabled ? "disable" : "enable")}
-                        >
-                          {view.enabled ? "Disable" : "Enable"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          tone="subtle"
-                          disabled={busy}
-                          onClick={() => {
-                            setConfirmingDeprovisionId(view.id);
-                            setConfiguringId(null);
-                          }}
-                        >
-                          Deprovision
-                        </Button>
-                      </div>
-                    )}
-
-                    {configuringId === view.id && (
-                      <div className="dpp-configure-form">
-                        <TextInput
-                          id="dpp-configure-credential-ref"
-                          label="Credential reference"
-                          placeholder="env:PROVIDER_API_KEY"
-                          value={configureRef}
-                          onChange={(event) => setConfigureRef(event.target.value)}
-                          wrapperClassName="dpp-configure-field"
-                        />
-                        <TextInput
-                          id="dpp-configure-display-name"
-                          label="Display name (optional)"
-                          placeholder="e.g. Yahoo Finance"
-                          value={configureName}
-                          onChange={(event) => setConfigureName(event.target.value)}
-                          wrapperClassName="dpp-configure-field"
-                        />
-                        <div className="dpp-configure-actions">
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            onClick={() => void handleConfigureSave(view)}
-                            loading={busy}
-                            disabled={busy}
-                          >
-                            Save configuration
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setConfiguringId(null)}
-                            disabled={busy}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              },
-            },
-          ]}
-          rows={providers}
-          rowKey={(view) => view.id}
-          rowProps={(view) => ({
-            "data-provider-id": view.id,
-          } as React.HTMLAttributes<HTMLTableRowElement>)}
-          rowClassName="dpp-item"
-          className="dpp-table"
-          containerClassName="dpp-table-container"
-        />
-      )}
-
-      {!needsAuth && (
-        <div className="dpp-register-row">
-          <TextInput
-            id="dpp-register-id"
-            label="New provider ID"
-            placeholder="e.g. alpaca"
-            value={registerId}
-            onChange={(event) => setRegisterId(event.target.value)}
-            wrapperClassName="dpp-register-field"
+      <Tabs
+        tabs={providerTabs}
+        value={effectiveTab}
+        onChange={handleTabChange}
+        ariaLabel="Data providers"
+        idBase="data-providers"
+      />
+      <TabPanel idBase="data-providers" tabId="overview" active={effectiveTab === "overview"}>
+        {loading ? (
+          <div className="dpp-loading">
+            <Spinner size="sm" /> Loading data providers…
+          </div>
+        ) : needsAuth ? (
+          <EmptyState
+            title="Sign-in required"
+            description="Please log in to view and manage data providers."
           />
-          <TextInput
-            id="dpp-register-precedence"
-            label="Precedence (optional)"
-            placeholder="e.g. 3"
-            value={registerPrecedence}
-            onChange={(event) => setRegisterPrecedence(event.target.value)}
-            wrapperClassName="dpp-register-field"
+        ) : providers.length === 0 ? (
+          <EmptyState
+            title="No data providers configured"
+            description="Register a provider below to start its provisioning lifecycle. Providers appear here with their lifecycle state, verification evidence, and capability routes."
           />
-          <Button
-            variant="primary"
-            onClick={() => void handleRegister()}
-            loading={registering}
-            disabled={registering || registerId.trim() === ""}
-          >
-            Register provider
-          </Button>
-        </div>
-      )}
+        ) : (
+          <ProviderTable columns={overviewColumns} rows={providers} />
+        )}
+      </TabPanel>
+      {providers.map((view) => (
+        <TabPanel key={view.id} idBase="data-providers" tabId={view.id} active={effectiveTab === view.id}>
+          <ProviderTable columns={columns} rows={[view]} />
+        </TabPanel>
+      ))}
+      <TabPanel idBase="data-providers" tabId="add" active={effectiveTab === "add"}>
+        {needsAuth ? (
+          <EmptyState
+            title="Sign-in required"
+            description="Please log in to view and manage data providers."
+          />
+        ) : (
+          <div className="dpp-register-row">
+            <TextInput
+              id="dpp-register-id"
+              label="New provider ID"
+              placeholder="e.g. alpaca"
+              value={registerId}
+              onChange={(event) => setRegisterId(event.target.value)}
+              wrapperClassName="dpp-register-field"
+            />
+            <TextInput
+              id="dpp-register-precedence"
+              label="Precedence (optional)"
+              placeholder="e.g. 3"
+              value={registerPrecedence}
+              onChange={(event) => setRegisterPrecedence(event.target.value)}
+              wrapperClassName="dpp-register-field"
+            />
+            <Button
+              variant="primary"
+              onClick={() => void handleRegister()}
+              loading={registering}
+              disabled={registering || registerId.trim() === ""}
+            >
+              Register provider
+            </Button>
+          </div>
+        )}
+      </TabPanel>
     </div>
   );
 }

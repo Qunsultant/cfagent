@@ -63,6 +63,15 @@ describe("router param scoping (#3238)", () => {
     expect(buildSearchWithTab("?tab=platform-admin&iaaaTab=members", "platform-admin")).toBe(
       "?tab=platform-admin&iaaaTab=members",
     );
+    // Issue #3978: the data-providers inner tab param is owned by
+    // platform-admin — it survives navigation to the page and drops
+    // on the way out, like iaaaTab.
+    expect(buildSearchWithTab("?tab=platform-admin&providerTab=yahoo", "platform-admin")).toBe(
+      "?tab=platform-admin&providerTab=yahoo",
+    );
+    expect(buildSearchWithTab("?tab=platform-admin&providerTab=yahoo", "portfolio")).toBe(
+      "?tab=portfolio",
+    );
     expect(buildSearchWithTab("?tab=checkout&checkoutTab=pay", "checkout")).toBe(
       "?tab=checkout&checkoutTab=pay",
     );
@@ -84,6 +93,7 @@ describe("router param scoping (#3238)", () => {
       "riskTab",
       "reportsTab",
       "iaaaTab",
+      "providerTab",
       "run",
       "q",
       "schedule",

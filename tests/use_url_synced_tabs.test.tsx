@@ -139,4 +139,18 @@ describe("useUrlSyncedTabs", () => {
     expect(seen?.active).toBe("options");
     expect(seen?.visited).toEqual(["stocks", "options"]);
   });
+
+  it("back/forward to a URL with no tab param adopts the default (#3978)", () => {
+    render({});
+    act(() => {
+      seen?.change("options");
+    });
+    expect(seen?.active).toBe("options");
+    window.history.replaceState(null, "", "/screeners");
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(seen?.active).toBe("stocks");
+    expect(seen?.visited).toEqual(["stocks", "options"]);
+  });
 });

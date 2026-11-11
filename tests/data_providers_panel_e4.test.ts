@@ -229,6 +229,10 @@ async function setInputValue(id: string, value: string) {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  // #3978: panel tabs are URL-synced, so a tab click in one test writes
+  // ?providerTab= into the shared jsdom URL and would leak into the
+  // next test's initial tab. Every test starts from a clean URL.
+  window.history.replaceState(null, "", "/");
 });
 
 afterEach(async () => {
@@ -271,6 +275,10 @@ describe("DataProvidersPanel rendering (issue #1180)", () => {
     await renderPanel();
     await waitForText("E*TRADE");
 
+    // #3978: the detail columns live on the provider tab now; the
+    // overview shows the summary columns only.
+    await click(container, "E*TRADE");
+
     const etrade = providerItem("etrade");
     const etext = etrade.textContent || "";
     expect(etext).toContain("E*TRADE");
@@ -292,6 +300,9 @@ describe("DataProvidersPanel rendering (issue #1180)", () => {
     expect(etext).toContain("Resolves: Yes");
     expect(etext).toContain("Resolves: No");
     expect(etext).toContain("provider etrade is not enabled for optionsChains");
+
+    // #3978: the yahoo row lives on its own tab.
+    await click(container, "yahoo");
 
     const yahoo = providerItem("yahoo");
     const ytext = yahoo.textContent || "";
@@ -354,16 +365,25 @@ describe("DataProvidersPanel affordances (issue #1180)", () => {
     await renderPanel();
     await waitForText("nasdaq");
 
+    // #3978: each provider's action buttons live on its own tab (the
+    // tab label is the display name, which is the id for these
+    // fixtures); open each tab in turn and read its row's buttons.
     const labels = (id: string) =>
       [...providerItem(id).querySelectorAll("button")].map((b) => b.textContent?.trim());
     // Issue #2723: standard consistent action buttons across all providers
-    expect(labels("nasdaq")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
-    expect(labels("cfgd")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
-    expect(labels("verf")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
-    expect(labels("enbd")).toEqual(["Configure", "Verify", "Disable", "Deprovision"]);
-    expect(labels("dsbv")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
-    expect(labels("dsbn")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
-    expect(labels("depr")).toEqual(["Configure", "Verify", "Enable", "Deprovision"]);
+    const expected: Array<[string, string[]]> = [
+      ["nasdaq", ["Configure", "Verify", "Enable", "Deprovision"]],
+      ["cfgd", ["Configure", "Verify", "Enable", "Deprovision"]],
+      ["verf", ["Configure", "Verify", "Enable", "Deprovision"]],
+      ["enbd", ["Configure", "Verify", "Disable", "Deprovision"]],
+      ["dsbv", ["Configure", "Verify", "Enable", "Deprovision"]],
+      ["dsbn", ["Configure", "Verify", "Enable", "Deprovision"]],
+      ["depr", ["Configure", "Verify", "Enable", "Deprovision"]],
+    ];
+    for (const [id, buttons] of expected) {
+      await click(container, id);
+      expect(labels(id)).toEqual(buttons);
+    }
   });
 });
 
@@ -374,6 +394,9 @@ describe("DataProvidersPanel action wiring (issue #1180)", () => {
     const calls = installFetch({ list: { providers: [YAHOO], routes: [] } });
     await renderPanel();
     await waitForText("yahoo");
+
+    // #3978: actions live on the provider tab.
+    await click(container, "yahoo");
 
     await click(providerItem("yahoo"), "Verify");
 
@@ -390,7 +413,10 @@ describe("DataProvidersPanel action wiring (issue #1180)", () => {
     await renderPanel();
     await waitForText("E*TRADE");
 
+    // #3978: actions live on the provider tab.
+    await click(container, "nasdaq");
     await click(providerItem("nasdaq"), "Enable");
+    await click(container, "E*TRADE");
     await click(providerItem("etrade"), "Disable");
 
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
@@ -406,6 +432,9 @@ describe("DataProvidersPanel action wiring (issue #1180)", () => {
     const calls = installFetch({ list: { providers: [ETRADE], routes: [] } });
     await renderPanel();
     await waitForText("E*TRADE");
+
+    // #3978: actions live on the provider tab.
+    await click(container, "E*TRADE");
 
     await click(providerItem("etrade"), "Deprovision");
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
@@ -423,6 +452,9 @@ describe("DataProvidersPanel action wiring (issue #1180)", () => {
     const calls = installFetch({ list: { providers: [YAHOO], routes: [] } });
     await renderPanel();
     await waitForText("yahoo");
+
+    // #3978: actions live on the provider tab.
+    await click(container, "yahoo");
 
     await click(providerItem("yahoo"), "Configure");
     await setInputValue("dpp-configure-credential-ref", "env:YAHOO_API_KEY");
@@ -442,6 +474,9 @@ describe("DataProvidersPanel action wiring (issue #1180)", () => {
     const calls = installFetch({ list: { providers: [], routes: [] } });
     await renderPanel();
     await waitForText("No data providers configured");
+
+    // #3978: the register form lives on the Add tab now.
+    await click(container, "Add provider");
 
     await setInputValue("dpp-register-id", "alpaca");
     await setInputValue("dpp-register-precedence", "3");
@@ -464,6 +499,9 @@ describe("DataProvidersPanel action wiring (issue #1180)", () => {
     });
     await renderPanel();
     await waitForText("yahoo");
+
+    // #3978: actions live on the provider tab.
+    await click(container, "yahoo");
 
     await click(providerItem("yahoo"), "Verify");
     await waitForText('Verification failed for provider "yahoo"');
