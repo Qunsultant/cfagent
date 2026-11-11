@@ -7,7 +7,7 @@ assignees: []
 ---
 
 ## Agent
-#<your-agent-hashtag>
+#<agent-hashtag>
 
 ## Type
 - [x] `[Bug] - <title>` + `bug`
@@ -96,6 +96,11 @@ Levels/types (ISTQB, per G5): unit / integration / system / acceptance; function
 ## Dependencies
 Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
 
+## Parallelism (gitops §5, issue #4070)
+Parallel or Serial:
+Depends on (issue numbers, or none):
+Conflicts with (shared files/surfaces, or none):
+
 ## Root cause analysis (ITIL problem management — REQUIRED when Classification is Problem; required before close for all classifications)
 Timeline (facts only, with times: what happened, when, when detected, when workaround/fix landed):
 Root cause (evidenced — link the code/log/record that proves it, not just an assertion):
@@ -140,5 +145,7 @@ RCA closing gate (all must hold, or the issue stays open):
 - [ ] Structural fix merged + verified in production (or known-error recorded with workaround + fix issue linked)
 - [ ] Problem linked, or explicit one-off decision recorded in the RCA section
 - [ ] §15 report filed below
-Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
+- Process docs updated (file + commit, or none with reason):
+- Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
+- Remaining work (gitops §15 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):

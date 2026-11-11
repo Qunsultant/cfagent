@@ -20,7 +20,7 @@ The gate checks the body, not just the file.
   superseded it. Pure renames pass; deletions fail with no bypass.
 - Any new deprecation in code files must name what superseded it. -->
 ## Agent
-#<your-agent-hashtag>
+#<agent-hashtag>
 
 ## Summary
 What docs / chore change this PR makes:
