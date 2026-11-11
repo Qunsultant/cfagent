@@ -691,7 +691,7 @@ export const GENERIC_WORKFLOW_CAPABILITY: PlatformCapability = {
   surfaces: [
     {
       id: "stage-ops",
-      door: "run / re-run / stop / resume / cancel / schedule / re-schedule at (runId, stageId)",
+      door: "run / re-run / stop / resume / cancel / retire / schedule / re-schedule at (runId, stageId)",
       module: "src/services/jobPipelineEngine.ts",
       exportName: "JobPipelineControl",
     },

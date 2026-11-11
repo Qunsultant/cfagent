@@ -154,6 +154,7 @@ import {
   type StageRunnerInvocation,
   type StageRunnerPlan,
   type StageRunnerStage,
+  type StageRunnerStageId,
   type StageUnitCheckpoint,
 } from "../workflows/stageRunnerPorts";
 import {
@@ -374,6 +375,22 @@ class StageCancelled extends RunStopped {
   }
 }
 
+/**
+ * A stage-scoped retirement (#3944): the run settles as
+ * cancelled, with the retired stage named. Unlike a cancel,
+ * the stage itself is retired on the job's definition — it
+ * never re-runs in any run — so the run's outstanding units
+ * are recorded cancelled while the retired stage's own units
+ * stay "retired" (see the executeRun catch: the sweep never
+ * overwrites a retired entry).
+ */
+class StageRetired extends RunStopped {
+  constructor(readonly stageId: string) {
+    super("cancelled");
+    this.name = "StageRetired";
+  }
+}
+
 const TERMINAL: readonly JobRunState[] = ["completed", "failed", "cancelled"];
 
 function pathSegments(path: string): number[] {
@@ -583,6 +600,7 @@ export class JobPipelineControl {
       );
     }
     assertExecutionModeSupported(definition.config.executionMode);
+    this.assertScopeNotRetired(definition, opts?.scopePath ?? "");
     const runId = this.newRunId();
     const completion = this.executeRun(definition, {
       runId,
@@ -861,6 +879,45 @@ export class JobPipelineControl {
     }
   }
 
+  /**
+   * Retire refusal at dispatch (#3944): a job carrying a
+   * retired stage in the dispatched scope never starts — the
+   * run refuses by name before any step executes, naming the
+   * retired stage(s). Retiring is an operator act on the
+   * definition; a run that would include the stage cannot
+   * silently skip it, and cannot run it either.
+   */
+  private assertScopeNotRetired(definition: JobDefinition, scopePath: string): void {
+    const scopeNode = this.nodeAtPath(definition.root, scopePath);
+    const retired: string[] = [];
+    const walk = (node: JobNodeConfig, path: string): void => {
+      if (node.retired === true) retired.push(jobStageId(path));
+      (node.children ?? []).forEach((child, i) => walk(child, childPath(path, i)));
+    };
+    walk(scopeNode, scopePath);
+    if (retired.length > 0) {
+      throw new JobPipelineError(
+        "stage_not_retirable",
+        `Job "${definition.jobId}" has retired stage(s) ${retired.join(", ")} in scope "${scopePath || "root"}"; a retired stage never re-runs — redefine the job to remove or replace them.`,
+      );
+    }
+  }
+
+  /**
+   * Refuse a stage action on a retired stage (#3944): the
+   * stage's definition carries the retirement, so the refusal
+   * is by name at the operation, never a silent no-op.
+   */
+  private assertStageNotRetired(definition: JobDefinition, nodePath: string): void {
+    const node = this.nodeAtPath(definition.root, nodePath);
+    if (node.retired === true) {
+      throw new JobPipelineError(
+        "stage_not_retirable",
+        `Stage "${jobStageId(nodePath)}" of job "${definition.jobId}" is retired; a retired stage never re-runs.`,
+      );
+    }
+  }
+
   private assertStageNotLive(instance: JobInstanceRecord, action: string): void {
     if (instance.state === "running" || instance.state === "queued" || instance.state === "paused") {
       throw new JobPipelineError(
@@ -917,7 +974,7 @@ export class JobPipelineControl {
     const instance = await this.requireInstance(jobId);
     this.assertRunAddressed(instance, opts?.runId);
     this.assertStageNotLive(instance, "run");
-    this.nodeAtPath(definition.root, nodePath);
+    this.assertStageNotRetired(definition, nodePath);
     const stageId = jobStageId(nodePath);
     const entries = this.stageEntries(instance, stageId);
     if (entries.some((e) => e.status === "completed")) {
@@ -965,7 +1022,7 @@ export class JobPipelineControl {
     const instance = await this.requireInstance(jobId);
     this.assertRunAddressed(instance, opts?.runId);
     this.assertStageNotLive(instance, "re-run");
-    this.nodeAtPath(definition.root, nodePath);
+    this.assertStageNotRetired(definition, nodePath);
     const stageId = jobStageId(nodePath);
     const entries = this.stageEntries(instance, stageId);
     if (entries.some((e) => e.status === "running")) {
@@ -1087,7 +1144,7 @@ export class JobPipelineControl {
     const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
     this.assertRunAddressed(instance);
-    this.nodeAtPath(definition.root, nodePath);
+    this.assertStageNotRetired(definition, nodePath);
     const stageId = jobStageId(nodePath);
     if (instance.state !== "paused") {
       throw new JobPipelineError(
@@ -1183,6 +1240,97 @@ export class JobPipelineControl {
     const fresh = await this.requireInstance(jobId);
     // Cancelling the stage a stopped run is stopped at settles
     // the run: it can never resume past a cancelled stage.
+    if (
+      fresh.state === "paused" &&
+      entries.some((e) => e.status === "stopped")
+    ) {
+      const settled: JobInstanceRecord = {
+        ...fresh,
+        state: "cancelled",
+        desiredState: "none",
+        stageDesired: null,
+        updatedAt: this.iso(),
+      };
+      await this.deps.stores.instances.saveInstance(settled);
+      await publishJobStatus(this.deps.publisher, {
+        jobId,
+        runId: fresh.currentRunId ?? "unknown",
+        state: "cancelled",
+        at: this.iso(),
+      });
+      await this.recordTerminal(settled, "cancelled", undefined);
+      return settled;
+    }
+    return fresh;
+  }
+
+  /**
+   * Retire a stage (#3944): the eighth uniform operation.
+   * Definition-level and permanent — the stage is stamped
+   * retired on the job's stored definition (versioned, like a
+   * schedule change), so it never re-runs in any run. On a
+   * live run the request is recorded per stage and honored at
+   * that stage's next boundary (or when the stage is reached);
+   * on a stopped run, retiring the stopped stage settles the
+   * run as cancelled. A retired stage's units are recorded
+   * "retired", never failed and never silently skipped — and
+   * its downstream never proceeds. Retiring an already-retired
+   * stage refuses by name; retiring needs no run (a stage can
+   * be retired before it ever runs).
+   */
+  async retireStage(jobId: string, nodePath: string): Promise<JobInstanceRecord> {
+    const definition = await this.requireDefinition(jobId);
+    const instance = await this.requireInstance(jobId);
+    const node = this.nodeAtPath(definition.root, nodePath);
+    const stageId = jobStageId(nodePath);
+    if (node.retired === true) {
+      throw new JobPipelineError(
+        "stage_not_retirable",
+        `Stage "${stageId}" of job "${jobId}" is already retired; a retired stage never re-runs and cannot be retired again.`,
+      );
+    }
+    await this.applyNodeRetired(jobId, nodePath);
+    const entries = this.stageEntries(instance, stageId);
+    if (instance.state === "running" || instance.state === "queued") {
+      const stageDesired = { ...(instance.stageDesired ?? {}), [stageId]: "retire" as const };
+      const updated: JobInstanceRecord = { ...instance, stageDesired, updatedAt: this.iso() };
+      await this.deps.stores.instances.saveInstance(updated);
+      await publishStageAction(this.deps.publisher, {
+        jobId,
+        runId: instance.currentRunId!,
+        stageId,
+        action: "retire",
+        at: this.iso(),
+      });
+      return updated;
+    }
+    if (entries.length > 0) {
+      const checkpoints = createJobPipelineStageCheckpointStore(
+        this.deps.stores.instances,
+        jobId,
+      );
+      const ledger = await checkpoints.read(instance.currentRunId!);
+      if (ledger) {
+        await checkpoints.write({
+          ...ledger,
+          units: ledger.units.map((u) =>
+            u.stage === stageId && u.status !== "completed"
+              ? { ...u, status: "retired" as const, updatedAt: this.iso() }
+              : u,
+          ),
+        });
+      }
+    }
+    await publishStageAction(this.deps.publisher, {
+      jobId,
+      runId: instance.currentRunId ?? "none",
+      stageId,
+      action: "retire",
+      at: this.iso(),
+    });
+    const fresh = await this.requireInstance(jobId);
+    // Retiring the stage a stopped run is stopped at settles
+    // the run: it can never resume past a retired stage.
     if (
       fresh.state === "paused" &&
       entries.some((e) => e.status === "stopped")
@@ -1383,6 +1531,16 @@ export class JobPipelineControl {
     return this.cancelStage(jobId, await this.vocabularyNodePath(jobId, stage));
   }
 
+  /**
+   * Retire a vocabulary stage — permanent, the stage never
+   * re-runs in any run. Delegates to the (jobId, nodePath)
+   * twin, so the twin's meanings, claims, and refusals ARE
+   * the operation.
+   */
+  async retireStageByVocabulary(jobId: string, stage: StageName): Promise<JobInstanceRecord> {
+    return this.retireStage(jobId, await this.vocabularyNodePath(jobId, stage));
+  }
+
   /** Schedule a vocabulary stage: attach it to the schedule mechanism. */
   async scheduleStageByVocabulary(
     jobId: string,
@@ -1415,6 +1573,37 @@ export class JobPipelineControl {
       reason,
       host,
     );
+  }
+
+  /**
+   * Persist one node's retirement into the job's stored raw
+   * definition (re-resolved + versioned, like a schedule
+   * change). The flag survives re-resolution because
+   * resolveNode parses it; a definition that never carried it
+   * resolves it absent.
+   */
+  private async applyNodeRetired(jobId: string, nodePath: string): Promise<JobDefinition> {
+    const existing = await this.requireDefinition(jobId);
+    const raw = JSON.parse(JSON.stringify(existing.rawConfig ?? {})) as Record<string, unknown>;
+    if (!isRecord(raw.root)) {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Job "${jobId}" has no stored root node to retire a stage on.`,
+      );
+    }
+    let node: Record<string, unknown> = raw.root;
+    for (const segment of pathSegments(nodePath)) {
+      const children = node.children;
+      if (!Array.isArray(children) || !isRecord(children[segment])) {
+        throw new JobPipelineError(
+          "job_config_invalid",
+          `Scope path "${nodePath}" does not resolve in job "${jobId}"'s stored configuration.`,
+        );
+      }
+      node = children[segment] as Record<string, unknown>;
+    }
+    node.retired = true;
+    return this.saveResolved(jobId, raw);
   }
 
   /** Persist one node's schedule configuration into the job's stored raw definition (re-resolved + versioned). */
@@ -1760,11 +1949,18 @@ export class JobPipelineControl {
       if (error instanceof RunStopped && error.reason === "cancelled") {
         // Surface the cancellation per stage: every outstanding
         // unit of the run is recorded cancelled, never vanished.
+        // A retired stage names itself instead, and its own
+        // units stay "retired" — the sweep below never
+        // overwrites them; only the run's other outstanding
+        // units are recorded cancelled.
+        if (error instanceof StageRetired && !ctx.notes.includes(`stage retired: ${error.stageId}`)) {
+          ctx.notes.push(`stage retired: ${error.stageId}`);
+        }
         if (error instanceof StageCancelled && !ctx.notes.includes(`stage cancelled: ${error.stageId}`)) {
           ctx.notes.push(`stage cancelled: ${error.stageId}`);
         }
         for (const unit of ctx.ledger.units) {
-          if (unit.status !== "completed" && unit.status !== "cancelled" && unit.status !== "skipped") {
+          if (unit.status !== "completed" && unit.status !== "cancelled" && unit.status !== "skipped" && unit.status !== "retired") {
             this.setEntry(ctx, { ...unit, status: "cancelled", updatedAt: this.iso() });
           }
         }
@@ -1927,6 +2123,42 @@ export class JobPipelineControl {
   }
 
   /**
+   * Record a retired stage's units before it runs (#3944):
+   * every planned unit is "retired" (never executed), the
+   * ledger persists, the transition publishes — then the run
+   * settles cancelled with the stage named. Shared by the
+   * live-request path (honorStageControl) and the
+   * definition-level backstop (execNode).
+   */
+  private async retireUnitsBeforeRun(
+    ctx: RunContext,
+    plan: StageRunnerPlan,
+    stageId: StageRunnerStageId,
+  ): Promise<never> {
+    const units = plan.units.length > 0 ? plan.units : [{ unitId: ctx.runId }];
+    for (const unit of units) {
+      const prior = this.entryFor(ctx.ledger, stageId, unit.unitId);
+      this.setEntry(ctx, {
+        stage: stageId,
+        unitId: unit.unitId,
+        status: "retired",
+        attempt: prior?.attempt ?? 0,
+        updatedAt: this.iso(),
+      });
+    }
+    await this.persistLedger(ctx);
+    await publishStageAction(this.deps.publisher, {
+      jobId: ctx.jobId,
+      runId: ctx.runId,
+      stageId,
+      action: "retired",
+      at: this.iso(),
+      detail: "stage retired before it ran",
+    });
+    throw new StageRetired(stageId);
+  }
+
+  /**
    * Honor a stage control request recorded for a stage that has
    * not started yet (the driver reaching it IS the boundary):
    * stop marks its units stopped and stops the run there;
@@ -1965,6 +2197,9 @@ export class JobPipelineControl {
         detail: "stage cancelled before it ran",
       });
       throw new StageCancelled(stageId);
+    }
+    if (action === "retire") {
+      await this.retireUnitsBeforeRun(ctx, plan, stageId);
     }
     for (const unit of units) {
       const prior = this.entryFor(ctx.ledger, stageId, unit.unitId);
@@ -2059,6 +2294,33 @@ export class JobPipelineControl {
         at: this.iso(),
       });
       throw new StageCancelled(cancelStageId);
+    }
+
+    // Retirement next: a stage-level retire for the cursor's
+    // stage or any in-flight stage settles the run the same
+    // way a cancel does — the stage's units are "retired",
+    // never executed, and downstream never proceeds.
+    const retireStageId = [cursorStageId, ...activeStageIds].find(
+      (s) => instance.stageDesired?.[s] === "retire",
+    );
+    if (retireStageId) {
+      for (const active of ctx.activeUnits.values()) {
+        if (active.stageId !== retireStageId) continue;
+        const prior = this.entryFor(ctx.ledger, active.stageId, active.unitId);
+        if (prior) {
+          this.setEntry(ctx, { ...prior, status: "retired", updatedAt: this.iso() });
+        }
+      }
+      await this.persistLedger(ctx);
+      await this.clearStageDesired(ctx.jobId, retireStageId);
+      await publishStageAction(this.deps.publisher, {
+        jobId: ctx.jobId,
+        runId: ctx.runId,
+        stageId: retireStageId,
+        action: "retired",
+        at: this.iso(),
+      });
+      throw new StageRetired(retireStageId);
     }
 
     if (countAsStep) ctx.stepsSinceCheckpoint += 1;
@@ -2205,6 +2467,15 @@ export class JobPipelineControl {
 
       await this.honorStageControl(ctx, plan, path);
 
+      // Definition-level retirement (#3944): a node stamped
+      // retired never executes in any run — the backstop for
+      // resumes and races, where no stageDesired entry exists
+      // to honor. The stage's units are recorded "retired"
+      // and the run settles cancelled with the stage named.
+      if (node.retired === true) {
+        await this.retireUnitsBeforeRun(ctx, plan, stageId);
+      }
+
       const entries = ctx.ledger.units.filter((u) => u.stage === stageId);
       if (
         ctx.resuming &&
@@ -2222,6 +2493,9 @@ export class JobPipelineControl {
       if (!next) {
         if (entries.some((e) => e.status === "cancelled")) {
           throw new StageCancelled(stageId);
+        }
+        if (entries.some((e) => e.status === "retired")) {
+          throw new StageRetired(stageId);
         }
         if (await this.artifactExists(ctx, outputKey, inMemory)) {
           return this.readArtifact(ctx, outputKey, inMemory);
