@@ -1,0 +1,3 @@
+### Added
+
+- **CEO Organization & strategy platform products defined in the lifecycle doc (#4094, sub-issue of #3844):** §12.2's CEO TBD row is replaced with the platform's programme table — scheduling consolidation programme, Copilot Evolution programme, agentic collaboration via AGENTS.md, Back to Basics programme, AOP-by-default mandate — each with purpose, status as of 2026-11-11, and tracking issue; §14.8 records the platform as defined. Every status was verified from its tracking issue's live state on current main before writing; the generic scheduling capability (#3709) is recorded as a Technology Platform product, not duplicated here. #ceo-aimp
