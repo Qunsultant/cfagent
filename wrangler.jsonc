@@ -202,9 +202,12 @@
     // instances and their stored state are untouched by it.
     { "tag": "v15", "renamed_classes": [{ "from": "SearchAgent", "to": "OrchestratorAgent" }] }
   ],
-  // Issue #606 (phase 4 of #415): no KV namespaces remain — sessions and
+  // Issue #606 (phase 4 of #415): no KV binding is declared — sessions and
   // E*TRADE credentials live in the SessionStore DO (#329), report PDFs
-  // in R2 (#605). The dashboard namespaces are deleted owner-side.
+  // in R2 (#605). Correction (#4120, audit 2026-11-11): two namespaces DO
+  // still exist in the account — AGENT_SESSIONS and SESSIONS — unbound and
+  // unused by this Worker. Deleting them is an owner action on Cloudflare,
+  // not a manifest change; the earlier "deleted owner-side" note was wrong.
   // Issue #257 (Assessment P1): explicit Workers Logs pipeline. `enabled` is the
   // shorthand for logs.enabled; `invocation_logs` captures one log per
   // invocation (request/response metadata + console output) visible under
