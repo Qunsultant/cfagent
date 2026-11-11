@@ -23,6 +23,15 @@
  * outcome with no job twin is its own run (a discovery run, a
  * synchronous screen) rather than being dropped.
  *
+ * Issue #3946 (Option B): the engine's D1 job run records
+ * (src/data/d1JobRunRecordAdapter, migration 0047) feed it as a
+ * third ledger. A D1 record is its own run — family "other",
+ * source "job-outcome" — with an honest empty stage list: the
+ * record carries no per-stage rows, so no stages are invented for
+ * it. It carries no broker provenance and no login, so those fields
+ * stay absent and the row is a deployment-level engine run, never
+ * attributed to the signed-in user.
+ *
  * Honesty rules:
  *  - a field the store does not record is null, never invented;
  *  - inputs and outputs are normalized summaries, never raw payloads:
@@ -51,6 +60,11 @@ import { codedMessage } from "../outcomes/outcomeAspects";
 import { buildFeedJobRegistry } from "./feedJobs";
 import { FEED_PIPELINE_CATALOG } from "./feedPipelineJobs";
 import type { DataProviderId } from "../trading";
+// Issue #3946 (Option B): the engine's D1 run records merge onto the
+// Workflow Runs page through runFromJobRunRecord, beside the DO
+// ledgers — never re-homed, never projected here (that is #4116).
+import { d1JobRunRecordId } from "./jobRunRecordReads";
+import type { JobRunRecord } from "./jobRunRecords";
 
 export type WorkflowRunTrigger = "manual" | "scheduled" | "autonomous" | "webhook" | "agent" | "unknown";
 
@@ -1445,7 +1459,9 @@ export function hasReportDocuments(run: WorkflowRun): boolean {
 function reportTrigger(trigger: string | null): WorkflowRunTrigger {
   const t = (trigger ?? "").trim().toLowerCase();
   if (t.startsWith("manual")) return "manual";
-  if (t.startsWith("schedul") || t === "cron") return "scheduled";
+  // Issue #3946: the engine's own scheduled vocabulary — a job run
+  // record stamps "worker-cron" for its cron-scheduled runs.
+  if (t.startsWith("schedul") || t === "cron" || t === "worker-cron") return "scheduled";
   return "unknown";
 }
 
@@ -1512,6 +1528,70 @@ export function runFromReportDocument(input: {
     deliveryStates: {},
     error: null,
     documents: input.documents,
+    fanoutCapReason: null,
+    resumedSkippedUnits: [],
+  };
+}
+
+/**
+ * Issue #3946 (Option B): an engine D1 job run record → a WorkflowRun.
+ * The record is its own run (family "other", source "job-outcome")
+ * with an honest empty stage list — the D1 row carries no per-stage
+ * rows, so no stages are invented for it. Duration is recorded
+ * (finished − started); the trigger is normalized through the same
+ * reportTrigger as canonical rows, with the engine's "worker-cron"
+ * vocabulary named in triggerDetail. Broker provenance is absent on
+ * D1 rows (#3655), so brokerId stays undefined; the row is a
+ * deployment-level engine run, never attributed to the signed-in
+ * user. Lifecycle comes from the recorded outcome verb — a terminal
+ * outcome is done.
+ */
+export function runFromJobRunRecord(record: JobRunRecord): WorkflowRun {
+  const status: WorkflowRunStatus =
+    record.outcome === "success"
+      ? "completed"
+      : record.outcome === "failure"
+        ? "failed"
+        : "skipped";
+  const trigger = reportTrigger(record.trigger ?? null);
+  const startedMs = Date.parse(record.started);
+  const finishedMs = Date.parse(record.finished);
+  return {
+    id: d1JobRunRecordId(record),
+    runId: d1JobRunRecordId(record),
+    workflow: FAMILY_WORKFLOW["other"],
+    family: "other",
+    title: `Job ${record.jobId}`,
+    source: "job-outcome",
+    trigger,
+    triggerDetail:
+      record.trigger === "worker-cron"
+        ? "Worker cron — the engine's scheduled trigger"
+        : trigger === "manual"
+          ? "Manual — recorded on the D1 run record"
+          : trigger === "scheduled"
+            ? "Scheduled — recorded on the D1 run record"
+            : "Not recorded by the source",
+    triggeredBy: record.triggeredBy ?? null,
+    status,
+    lifecycle: lifecycleStateForRun({ status, stages: [] }),
+    schedule: scheduleProvenanceForTrigger(trigger),
+    startedAt: record.started,
+    finishedAt: record.finished,
+    durationMs:
+      Number.isFinite(startedMs) && Number.isFinite(finishedMs)
+        ? Math.max(0, finishedMs - startedMs)
+        : null,
+    stageCount: 0,
+    completedStages: 0,
+    failedStages: 0,
+    stages: [],
+    inputs: {},
+    outputs: { status },
+    artifacts: [],
+    deliveryStates: {},
+    error: record.outcome === "failure" ? record.error ?? null : null,
+    documents: null,
     fanoutCapReason: null,
     resumedSkippedUnits: [],
   };

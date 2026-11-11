@@ -1,11 +1,11 @@
 /**
  * Issue #1057 (consolidation S5): the ONE run-summary shape for the
  * Runs read surface (GET /api/runs), and the normalizers that map each
- * of the four run stores into it. This module is the single definition
+ * of the five run stores into it. This module is the single definition
  * site for the shape — the route merges, the client renders, neither
  * redefines it.
  *
- * The four stores (survey D9):
+ * The five stores (survey D9 + #3946):
  *  - mas_reports — the canonical store (scheduledReports hits). Rows
  *    whose source is a screening kind map to that kind; the remaining
  *    canonical sources (research_report, iv_collection, …) map to
@@ -14,6 +14,12 @@
  *  - mas_discovery_runs (DiscoveryRunSummary) — scheduled discovery.
  *  - the ScreenerAgent latest/history feed (ScreenerRunResult) —
  *    stock screens as the agent itself recorded them.
+ *  - the engine's D1 job run records (JobRunRecord, #3946 Option B)
+ *    — deployment-level engine runs. They map to kind "report" with
+ *    source "job-pipeline"; they carry no pdf/xlsx/csv, no reportId,
+ *    and no resultCount, so those fields stay null (honest absence).
+ *    They are deployment-level runs, never attributed to the
+ *    signed-in user — the D1 table carries no login column.
  *
  * Honesty rule: a field a store does not record is null, never
  * invented (scan runs have no status; canonical rows have no status
@@ -41,6 +47,10 @@ import { scheduledReportPdfUrl } from "./scheduledReports";
 // Via the src/trading barrel — the #290 boundary's sole public surface.
 import type { ScanRunSummary, DiscoveryRunSummary, OptionsPartialQualification } from "../trading";
 import type { ScreenerRunResult } from "../agents/screener-agent";
+// Issue #3946 (Option B): the engine's D1 run records merge onto the
+// Runs surface through this module's mapper, beside the DO stores.
+import { d1JobRunRecordId, listD1JobRunRecords } from "./jobRunRecordReads";
+import type { JobRunRecord } from "./jobRunRecords";
 
 export type RunKind = "screener" | "options_scanner" | "discovery" | "goal" | "report";
 
@@ -447,6 +457,73 @@ export function runSummaryFromScreenerRun(run: ScreenerRunResult): RunSummary {
     source: "screener",
     runSource: "stock",
   };
+}
+
+/**
+ * Issue #3946 (Option B): a D1 job run record → the one Runs shape.
+ * The record carries no pdf/xlsx/csv, no reportId, and no
+ * resultCount — those stay null, never invented. The summary is the
+ * engine's recorded descriptor when present; otherwise the outcome
+ * in words (failure carries the recorded error, skipped carries the
+ * recorded reason). Kind "report": D1 rows surface under kind=all
+ * only — "report" is not a valid kind filter value, so no other kind
+ * ever claims them. The row is a deployment-level engine run, never
+ * attributed to the signed-in user.
+ */
+export function runSummaryFromJobRunRecord(record: JobRunRecord): RunSummary {
+  const id = d1JobRunRecordId(record);
+  const status =
+    record.outcome === "success"
+      ? "completed"
+      : record.outcome === "failure"
+        ? "failed"
+        : "skipped";
+  const summary =
+    record.descriptor ??
+    (record.outcome === "failure"
+      ? `Failed: ${record.error ?? "unknown error"}`
+      : record.outcome === "skipped"
+        ? `Skipped: ${record.detail ?? "no reason recorded"}`
+        : `Completed ${record.operation} for ${record.jobId}`);
+  return {
+    kind: "report",
+    id,
+    runId: id,
+    title: `Job ${record.jobId}`,
+    summary,
+    trigger: record.trigger ?? null,
+    createdAt: record.started,
+    status,
+    resultCount: null,
+    pdfKey: null,
+    reportUrl: null,
+    xlsxKey: null,
+    xlsxUrl: null,
+    csvKey: null,
+    csvUrl: null,
+    pdfStatus: null,
+    pdfError: null,
+    xlsxStatus: null,
+    xlsxError: null,
+    csvStatus: null,
+    csvError: null,
+    reportId: null,
+    scanRunId: null,
+    source: "job-pipeline",
+  };
+}
+
+/**
+ * Issue #3946 (Option B): the engine's D1 run records as Runs
+ * summaries. Throws the reader's named error when AGENT_DB is
+ * unbound — the route names it in storeErrors.
+ */
+export async function listD1JobRunRecordSummaries(
+  env: unknown,
+  limit: number,
+): Promise<RunSummary[]> {
+  const records = await listD1JobRunRecords(env, limit);
+  return records.map(runSummaryFromJobRunRecord);
 }
 
 /**

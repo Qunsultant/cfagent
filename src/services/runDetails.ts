@@ -278,7 +278,7 @@ export function buildRunDetail(
   options: BuildRunDetailOptions = {},
 ): RunDetail {
   const catalog = options.catalog ?? RUN_DETAIL_MESSAGE_CATALOG;
-  const store = options.store ?? (summary.reportId ? "mas_reports" : summary.kind === "options_scanner" ? "mas_opportunity_scans" : summary.kind === "discovery" ? "mas_discovery_runs" : "screener-feed");
+  const store = options.store ?? (summary.reportId ? "mas_reports" : summary.source === "job-pipeline" ? "job-pipeline" : summary.kind === "options_scanner" ? "mas_opportunity_scans" : summary.kind === "discovery" ? "mas_discovery_runs" : "screener-feed");
   const body = parseBody((summary as { body?: unknown }).body);
   const nested = (parseBody(body?.report?.result) as Record<string, any>) ?? {};
   const mergedBody = { ...body, ...nested };
