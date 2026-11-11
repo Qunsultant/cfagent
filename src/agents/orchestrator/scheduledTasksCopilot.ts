@@ -406,6 +406,25 @@ export async function runStockCopilotCycleForInstance(
       });
       return copilotCycleLedgerOutcome(result.status, result.refusal);
     },
+    {
+      // Issue #4001 (follow-up): the 13:05/14:05 firings ran cleanly
+      // and left no ledger row, and the ledger store swallows its own
+      // failures — so a production-only write failure is named here as
+      // an audit event instead of vanishing. The next firing either
+      // leaves the row or names the error.
+      onRecordFailure: (failure) => {
+        try {
+          ctx.audit("stock_copilot.ledger_write_failed", "orchestrator", {
+            code: "ledger_write_failed",
+            taskId: taskCtx.taskId,
+            jobId: failure.jobId,
+            error: failure.error,
+          });
+        } catch {
+          // Reporting a failed record must never break the firing.
+        }
+      },
+    },
   );
 }
 

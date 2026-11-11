@@ -51,12 +51,50 @@ function normalize(outcome: OutcomeInput): ScheduledCallbackOutcome {
   return outcome;
 }
 
-function storeRecord(sql: SqlStorage, record: Omit<JobRunRecord, "system">): void {
+/**
+ * Issue #4001 (follow-up): what a failed ledger write reports. The hook
+ * runs only when the store throws; recording still never breaks the
+ * callback, and a throwing hook is swallowed the same way.
+ */
+export interface ScheduleCallbackRecordFailure {
+  jobId: string;
+  operation: string;
+  outcome: JobRunRecord["outcome"];
+  error: string;
+}
+
+export interface RecordScheduleCallbackRunOptions {
+  /**
+   * Called (best-effort) when the ledger store throws, so a silent
+   * production-only write failure is named instead of vanishing.
+   */
+  onRecordFailure?: (failure: ScheduleCallbackRecordFailure) => void;
+}
+
+function storeRecord(
+  sql: SqlStorage,
+  record: Omit<JobRunRecord, "system">,
+  onRecordFailure?: RecordScheduleCallbackRunOptions["onRecordFailure"],
+): void {
   try {
     const store = new SqlJobRunRecordStore(sql);
     store.record(buildJobRunRecord({ system: "orchestrator-schedule", ...record }));
-  } catch {
-    // Recording never breaks the callback.
+  } catch (err) {
+    // Recording never breaks the callback — but a swallowed store
+    // failure is unobservable, so a caller that supplied a hook hears
+    // about it (best-effort; a throwing hook is swallowed too).
+    if (onRecordFailure) {
+      try {
+        onRecordFailure({
+          jobId: record.jobId,
+          operation: record.operation,
+          outcome: record.outcome,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } catch {
+        // Reporting a failed record must never break the callback either.
+      }
+    }
   }
 }
 
@@ -112,6 +150,7 @@ export async function recordScheduleCallbackRun(
   payload: unknown,
   schedule: { id?: unknown } | undefined,
   run: () => Promise<OutcomeInput>,
+  options?: RecordScheduleCallbackRunOptions,
 ): Promise<void> {
   const started = new Date().toISOString();
   // Issue #3121 S1 — the §4 consolidated-ledger linkage, stamped at
@@ -143,7 +182,7 @@ export async function recordScheduleCallbackRun(
       ...(outcome.detail ? { detail: outcome.detail } : {}),
       ...(outcome.descriptor ? { descriptor: outcome.descriptor } : {}),
       ...(outcome.artifactRefs ? { artifactRefs: outcome.artifactRefs } : {}),
-    });
+    }, options?.onRecordFailure);
   } catch (err) {
     storeRecord(sql, {
       jobId,
@@ -155,7 +194,7 @@ export async function recordScheduleCallbackRun(
       ...payloadProvenance(payload),
       ...linkage,
       error: err instanceof Error ? err.message : String(err),
-    });
+    }, options?.onRecordFailure);
     throw err;
   }
 }
