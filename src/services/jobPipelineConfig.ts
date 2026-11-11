@@ -56,6 +56,8 @@ export type JobPipelineErrorCode =
   | "stage_not_scheduled"
   | "stage_schedule_host_unconfigured"
   | "stage_reschedule_unsupported"
+  | "stage_vocabulary_unknown"
+  | "stage_vocabulary_ambiguous"
   | "stage_reschedule_failed";
 
 export class JobPipelineError extends Error {
