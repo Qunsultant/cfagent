@@ -31,17 +31,19 @@ These rules are what the code on main does today. The definition states them; it
 
 Every paid-screen run goes through one gate, the native monetization gate (`src/services/nativeMonetization.ts`, `NativeMonetizationGate.check()`), reached through the paid-screen submission seam (`src/services/paidScreenSubmission.ts`). The gate consumes coverage only through `check()` / `confirmPaid()` and the existing tier/coverage model. There is no second entitlement path. (The conformance exception to this rule is stated in §8 — the chat/NLQ paid path currently uses a second price source and bypasses the approval check. That is an open conformance point, not a second approved path.)
 
-Gate order, verified (`nativeMonetization.ts`, main `9e6ef41`):
+Gate order, verified (`nativeMonetization.ts`, `check()`, main `cd276b81`):
 
 1. **Verified identity required; tenant mismatch throws.** An existing paid row for the run returns `already_paid`.
 2. **Flag OFF → free, price 0, no price resolution.** A free run never depends on catalogue approval state.
-3. **Unlimited-free grant FIRST, before price resolution and before the scheduled coverage-only rule.** An active grant returns `allowed: true, status: "paid", priceUSD: 0, paidVia: "unlimited_free_grant"` (`nativeMonetization.ts:247–252`) and records a paid row, so a later `confirmPaid` returns `already_paid`. A grant-covered run therefore **never fails on a missing/unapproved family price** and **covers recurring runs** — a deliberate change to the recurring rule. Audit: the payment workflow records `payment.covered` with `paidVia: "unlimited_free_grant"`; `consumeCoverage` no-ops for it (no included run consumed, no credits deducted).
-4. **Price resolution** via `priceFor()`: only an APPROVED catalogue price charges; missing / unapproved / invalid throws fail-closed — never a guessed price.
-5. **Coverage, in order:** `Subscribed` + `includedRunsRemaining > 0` → `subscription_included` (one included run decremented); else `creditsUSD >= price` → `credits` (price deducted, cent-rounded); else no coverage.
-6. **Scheduled, not one-off-authorized → `coverage_required`, HTTP 402**, reason: "Scheduled runs need subscription included usage or prepaid credits. No unattended card charge is taken." One-off scheduled means `trigger === "scheduled" && scheduleKind === "one_off" && authorizedAtSubmission === true`; anything else scheduled (recurring, or no schedule kind stated) is coverage-only.
-7. **Manual / one-off-authorized, uncovered → checkout minted** (Stripe card or x402; no checkout ports → throw fail-closed), returned as 402 `payment_required` with the checkout attached.
+3. **Unlimited-free grant, bounded by the approved-free quota (#3263).** An active grant covers the run within its per-service quota for the family in the current period (default 10 runs per service per month, operator-managed data). A quota-covered run returns `allowed: true, status: "paid", priceUSD: 0, paidVia: "approved_free_quota"`. At the cap the run is refused with the outcome-coded at-limit decision and no checkout is minted. No quota port, no settings row, or no resolvable tenant falls through to the normal gate.
+4. **Free allowance (#3305).** A Free account runs up to the allowance — 10 runs per product per UTC calendar month, operator-managed and changeable — returning `paidVia: "free_run_allowance"` at price 0. Grant-covered runs never touch the free-run counter.
+5. **Unlimited-free grant as the last free fall-through.** Only when neither the quota nor the Free allowance can cover the run does the grant itself cover it at price 0, `paidVia: "unlimited_free_grant"`, consuming nothing. This ordering SUPERSEDES the #3245 grant-first order (in-code note, #3263 CI fix): the grant no longer precedes the Free allowance. A grant-covered run records a paid row, so a later `confirmPaid` returns `already_paid`, and therefore **never fails on a missing/unapproved family price** and **covers recurring runs**. Audit: the payment workflow records `payment.covered` with `paidVia: "unlimited_free_grant"`; `consumeCoverage` no-ops for it (no included run consumed, no credits deducted).
+6. **Price resolution** via `priceFor()`: only an APPROVED catalogue price charges; missing / unapproved / invalid throws fail-closed — never a guessed price.
+7. **Coverage, in order:** `Subscribed` + `includedRunsRemaining > 0` → `subscription_included` (one included run decremented); else `creditsUSD >= price` → `credits` (price deducted, cent-rounded); else no coverage.
+8. **Scheduled, not one-off-authorized → `coverage_required`, HTTP 402**, reason: "Scheduled runs need subscription included usage or prepaid credits. No unattended card charge is taken." One-off scheduled means `trigger === "scheduled" && scheduleKind === "one_off" && authorizedAtSubmission === true`; anything else scheduled (recurring, or no schedule kind stated) is coverage-only.
+9. **Manual / one-off-authorized, uncovered → checkout minted** (Stripe card or x402; no checkout ports → throw fail-closed), returned as 402 `payment_required` with the checkout attached.
 
-The caller side (`paidScreenSubmission.ts`, `resolvePaidScreenCoverage()` / `resolvePaidScreenAction()`) mirrors this order exactly: grant first, then Subscribed included runs, then credits; flag-OFF → free; covered scheduled / one-off-authorized → start the payment workflow; uncovered recurring / unstated → skip with the coverage-required reason. Identity is resolved from the verified session only; a client-supplied tenantId is never read.
+The caller side (`paidScreenSubmission.ts`, `coverageForAccount()` / `resolvePaidScreenAction()`) resolves coverage grant first, then Subscribed included runs, then credits; flag-OFF → free; covered scheduled / one-off-authorized → start the payment workflow; uncovered recurring / unstated → skip with the coverage-required reason. The gate re-checks inside the payment workflow and applies the quota/allowance ordering of steps 3–5 to a grant-covered run. Identity is resolved from the verified session only; a client-supplied tenantId is never read.
 
 ### 2.2 Tiers and effective tier
 
@@ -79,11 +81,10 @@ The caller side (`paidScreenSubmission.ts`, `resolvePaidScreenCoverage()` / `res
 
 ### 3.1 Decided vs shipped — the gaps this definition does not hide
 
-The matrix above is the **decided** model. Three parts of it are **not yet shipped**; they are implementation work in separate slices, not silent re-decisions:
+The matrix above is the **decided** model. Two parts of it are **not yet shipped**; they are implementation work in separate slices, not silent re-decisions. (A third, the free-run counter, shipped as #3305 — migration 0043 — and is wired in the gate, §2.1 step 4.)
 
-1. **The free-run counter (10 per product, §4.1).** No free-run counter exists in the gate today: a Free account without a grant currently meets 402 + checkout on manual runs and a skip on recurring scheduled runs. The 10-run allowance is decided; counting it needs a gate slice.
-2. **The at-limit upgrade-or-buy-credits offer (§7).** The client today maps any 402 to one fixed checkout message with no upgrade offer and no plan choice (#3246, unbuilt). The decided offer needs the upgrade surface plus the credits purchase path.
-3. **Triggered as a distinct tracked trigger (§9).** The money path today knows only `manual | scheduled` (`NativeRunTrigger`). Tracking a triggered run as user-invoked needs the trigger carried through the seam and audited with the invoking login.
+1. **The at-limit upgrade-or-buy-credits offer (§7).** The client today maps any 402 to one fixed checkout message with no upgrade offer and no plan choice (#3246, unbuilt). The decided offer needs the upgrade surface plus the credits purchase path.
+2. **Triggered as a distinct tracked trigger (§9).** The money path today knows only `manual | scheduled` (`NativeRunTrigger`). Tracking a triggered run as user-invoked needs the trigger carried through the seam and audited with the invoking login.
 
 ## 4. Allowances per plan
 
