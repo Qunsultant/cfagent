@@ -145,6 +145,15 @@ export interface JobNodeConfig {
   /** Per-node execution-mode overrides, merged over the job's resolved mode. */
   executionMode?: Partial<JobExecutionMode>;
   schedule?: JobScheduleConfig;
+  /**
+   * Retired (#3944): the stage never executes again in any run
+   * of this job. Set only by the retire operation (persisted on
+   * the definition, versioned like a schedule change); a new
+   * dispatch of a job carrying a retired stage refuses by name,
+   * and a live run reaching the stage settles cancelled with the
+   * stage named — downstream never proceeds.
+   */
+  retired?: boolean;
 }
 
 /** The fully-defaulted configuration a run executes under (resolved at define/configure time, re-read at run start). */
@@ -225,11 +234,11 @@ export interface JobInstanceRecord {
   stageCheckpoint: StageRunnerCheckpoint | null;
   /**
    * Per-stage control requests the engine honors at that stage's
-   * next boundary (#3069 stop/cancel, addressed by stage id):
-   * stage id → requested action. Cleared when honored or when a
-   * new run dispatches.
+   * next boundary (#3069 stop/cancel, #3944 retire, addressed by
+   * stage id): stage id → requested action. Cleared when honored
+   * or when a new run dispatches.
    */
-  stageDesired: Record<string, "pause" | "cancel"> | null;
+  stageDesired: Record<string, "pause" | "cancel" | "retire"> | null;
   lastError: string | null;
   updatedAt: string;
 }
