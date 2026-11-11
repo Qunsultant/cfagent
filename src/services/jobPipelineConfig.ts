@@ -51,6 +51,7 @@ export type JobPipelineErrorCode =
   | "stage_not_stoppable"
   | "stage_not_resumable"
   | "stage_not_cancellable"
+  | "stage_not_retirable"
   | "stage_input_missing"
   | "stage_already_scheduled"
   | "stage_not_scheduled"
@@ -243,6 +244,12 @@ function resolveNode(raw: unknown, path: string): JobNodeConfig {
   }
   if (raw.schedule !== undefined) {
     node.schedule = resolveSchedule(raw.schedule);
+  }
+  if (raw.retired !== undefined) {
+    if (typeof raw.retired !== "boolean") {
+      throw invalid(`Node ${path} "retired" must be a boolean.`);
+    }
+    node.retired = raw.retired;
   }
   return node;
 }

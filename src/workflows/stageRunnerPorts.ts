@@ -218,12 +218,17 @@ export interface StageRunnerPlan {
  * A stage's unit state: the stage-chain vocabulary, plus "timed_out" (a unit
  * past its deadline — the shard-deadline outcome the workflow flow already
  * records) and "never-attempted" for a planned pair with no row at all.
- * Plus the uniform stage-control states (#3069, folded into #3549):
+ * Plus the uniform stage-control states (#3069, folded into #3549;
+ * #3944 adds retire as the eighth uniform operation):
  * "stopped" — halted by a stop action, non-terminal and resumable,
  * never recorded as failed; "cancelled" — terminal by a cancel
- * action, surfaced as cancelled, never silently resumed past.
+ * action, surfaced as cancelled, never silently resumed past;
+ * "retired" — terminal by a retire action on the stage's
+ * definition: the stage never re-runs in any run, and a run
+ * reaching it settles cancelled with the stage named, its
+ * downstream never proceeding past it.
  */
-export type StageUnitStatus = StageStatus | "timed_out" | "never-attempted" | "stopped" | "cancelled";
+export type StageUnitStatus = StageStatus | "timed_out" | "never-attempted" | "stopped" | "cancelled" | "retired";
 
 /** One (stage, unit) checkpoint entry. */
 export interface StageUnitCheckpoint {

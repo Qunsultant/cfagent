@@ -100,10 +100,11 @@ export async function publishJobStatus(
 
 /**
  * A stage action or stage transition, published on the same
- * envelope (#3549, absorbing #3069): the seven control
- * operations (run / rerun / stop / resume / cancel / schedule /
- * reschedule) and the unit transitions the driver records
- * (completed / failed / timed_out / stopped / cancelled). The
+ * envelope (#3549, absorbing #3069): the eight control
+ * operations (run / rerun / stop / resume / cancel / retire /
+ * schedule / reschedule) and the unit transitions the driver
+ * records (completed / failed / timed_out / stopped / cancelled /
+ * retired). The
  * event is ADDRESSED by (runId, stageId) and carries the #2869
  * claim key for the stage (stageIdempotencyKey under the "jobs"
  * namespace), so a downstream consumer claims on exactly the
@@ -117,13 +118,15 @@ export type JobStageAction =
   | "stop"
   | "resume"
   | "cancel"
+  | "retire"
   | "schedule"
   | "reschedule"
   | "completed"
   | "failed"
   | "timed_out"
   | "stopped"
-  | "cancelled";
+  | "cancelled"
+  | "retired";
 
 export interface JobStageActionInput {
   jobId: string;
