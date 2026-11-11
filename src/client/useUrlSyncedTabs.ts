@@ -81,7 +81,6 @@ export function useUrlSyncedTabs<T extends string>(
   const readFromLocation = useCallback((): T | null => {
     if (typeof window === "undefined") return null;
     return readTabFromHref(window.location.href, param, aliases, isValid);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [param, aliasKey]);
 
   const initialResolvedTab = useMemo<T>(() => {
@@ -89,7 +88,6 @@ export function useUrlSyncedTabs<T extends string>(
     const fromUrl = readFromLocation();
     if (fromUrl) return fromUrl;
     return defaultTab;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readFromLocation]);
 
   const [activeTab, setActiveTab] = useState<T>(initialResolvedTab);
