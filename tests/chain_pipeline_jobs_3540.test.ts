@@ -420,7 +420,7 @@ describe("pipeline chain definitions (#3540)", () => {
     expect(params[7]).toMatchObject({ deliverJobId: DELIVER_ID });
   });
 
-  it("ensure is idempotent and registerSchedules declares the whole plane (46)", async () => {
+  it("ensure is idempotent and registerSchedules declares the whole plane (49)", async () => {
     const h = await makeHarness();
     const first = await h.stores.definitions.getDefinition(CHAIN_ID);
     await ensureChainPipelineJobs(h.control, h.stores, {});
@@ -431,7 +431,8 @@ describe("pipeline chain definitions (#3540)", () => {
     });
     // #3932: one more job on the plane — the parameterized
     // sentiment job (one definition, folded into every chain).
-    expect(registrations).toHaveLength(46);
+    // #4065 pin update: three options-chains jobs join the plane.
+    expect(registrations).toHaveLength(49);
     const chainRegs = registrations.filter((r) => r.jobId.endsWith("-pipeline"));
     expect(chainRegs).toHaveLength(7);
     expect(chainRegs.every((r) => r.nodePath === "")).toBe(true);
