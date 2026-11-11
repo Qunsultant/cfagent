@@ -26,6 +26,8 @@ import {
   recordUnifiedOptionsRun,
   type UnifiedOptionsRunRecord,
 } from "../services/optionsServeRecord";
+import type { CanonicalReportStoreSeam } from "../services/generateJobs";
+import { recordUnifiedOptionsRunThroughLeg } from "./optionsCanonicalLeg";
 import { resolveTenantProviders } from "../services/tenantProviders";
 import {
   resolveTenantProviderContext,
@@ -77,6 +79,14 @@ export interface ManualOptionsScreenInput {
   screenUniverseLabel?: string;
   screenEmailTo?: string;
   deferDelivery?: boolean;
+  /**
+   * The engine's tenant-aware canonical leg (#4060): when bound,
+   * the shapeReport re-record rides the same leg the persist stage
+   * used (one transport for the row); otherwise the legacy direct
+   * ORM write. The manual entry binds the same seam instance it
+   * passes to the persist stage.
+   */
+  canonicalLeg?: CanonicalReportStoreSeam;
 }
 
 function symbolsLabel(filter: OptionScreenerFilter, universeLabel?: string): string {
@@ -202,19 +212,39 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
     // fields onto the persist row - no second row. The filter +
     // result + provenance already ride the persist row (they are not
     // backfillable, so they were written by the record builder).
-    recordUnifiedOptionsRun(ctx.getOrm() as never, {
-      ...canonical.record,
-      pdfKey,
-      pdfStatus,
-      pdfError,
-      xlsxKey,
-      xlsxStatus,
-      xlsxError,
-      csvKey,
-      csvStatus,
-      csvError,
-      reportUrl,
-    }, ctx.env as never);
+    // #4060: when the entry bound the engine leg, the re-record
+    // rides the same leg (one transport for the row); otherwise the
+    // legacy direct ORM write. Either way the re-record never fails
+    // the run.
+    if (input.canonicalLeg) {
+      await recordUnifiedOptionsRunThroughLeg(input.canonicalLeg, {
+        ...canonical.record,
+        pdfKey,
+        pdfStatus,
+        pdfError,
+        xlsxKey,
+        xlsxStatus,
+        xlsxError,
+        csvKey,
+        csvStatus,
+        csvError,
+        reportUrl,
+      });
+    } else {
+      recordUnifiedOptionsRun(ctx.getOrm() as never, {
+        ...canonical.record,
+        pdfKey,
+        pdfStatus,
+        pdfError,
+        xlsxKey,
+        xlsxStatus,
+        xlsxError,
+        csvKey,
+        csvStatus,
+        csvError,
+        reportUrl,
+      }, ctx.env as never);
+    }
 
     // A failed format is partial + marked (issue #4067, #3072's
     // per-format rule): the stage records "partial" when any format

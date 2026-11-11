@@ -42,6 +42,7 @@ import { resolveTenantProviderContext, withProviderProvenance } from "../../serv
 import { getEventCalendarCoverage, toEventCalendarInfo } from "../../services/eventCalendar";
 import type { EtradeOptionsRouteContext } from "./etradeOptions";
 import { createOptionsScreenPorts, optionsArtifactKey } from "../../workflows/optionsScreenPorts";
+import { createManualOptionsCanonicalLeg } from "../../workflows/optionsCanonicalLeg";
 import { runOptionsScreenWorkflow } from "../../workflows/optionsScreenWorkflow";
 import {
   createManualOptionsRecordBuilder,
@@ -83,12 +84,16 @@ export async function executeOptionsScreen(args: {
   // this was its only caller, so the legacy phases retire with it).
   const generationId = `options_scanner:manual:${new Date().toISOString()}`;
   const claims = createSqlStageClaimStore(() => ctx.agentCtx.storage.sql);
+  // Issue #4060: the manual entry's canonical write rides the
+  // engine's tenant-aware leg (the orchestrator door) — the route no
+  // longer writes mas_reports directly. One seam instance serves
+  // the persist stage and the shapeReport re-record, so the row has
+  // one transport.
+  const canonicalLeg = createManualOptionsCanonicalLeg(ctx.env);
   const ports = createOptionsScreenPorts({
     screener,
     storage: ctx.agentCtx.storage,
-    canonical: {
-      storeCanonicalReport: (input, env) => ctx.getOrm().storeCanonicalReport(input, env),
-    },
+    canonicalLeg,
     ...createManualOptionsScreenDelivery({
       ctx: ctx as never,
       screenFilter,
@@ -97,6 +102,7 @@ export async function executeOptionsScreen(args: {
       screenUniverseLabel,
       screenEmailTo,
       deferDelivery,
+      canonicalLeg,
     }),
     record: createManualOptionsRecordBuilder(ctx as never),
     demoFallback: isDemoCalibratedChainsEnabled(),

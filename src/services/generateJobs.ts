@@ -73,10 +73,6 @@ import {
   type GeneratedFormatRecord,
   type GeneratedReportRecord,
 } from "../data/generatedDatasetPorts";
-import type {
-  CanonicalStoreResult,
-  ScheduledReportInput,
-} from "./scheduledReports";
 import { buildAnalyzeJobRegistry } from "./analyzeJobs";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -216,70 +212,17 @@ export function validateGenerateFormats(formats: readonly string[]): string[] {
 /* The canonical report-store seam (mas_reports, where it fits)        */
 /* ------------------------------------------------------------------ */
 
-/**
- * The canonical report-store seam, host-bound where it fits:
- * a host whose residency owns reports (a tenant's Orchestrator
- * DO) binds storeReportAtGeneration over its sql + index env
- * and names the owning tenant login here. The generate service
- * calls it once per report with the seam's own input shape —
- * the write side of the canonical machinery does not move
- * (one writer, generation-id idempotency, #2345/#2359).
- *
- * Issue #3940 (#3550 option (a)): the tenant-aware leg binds
- * the seam over the ORCHESTRATOR DOOR instead of a sql
- * handle (createTenantAwareCanonicalReportStore, below), so
- * the canonical copy lands in the report-owning tenant's
- * Orchestrator DO in both pipeline residencies — never in
- * the pipeline host's own store, where no Reports view reads.
- */
-export interface CanonicalReportStoreSeam {
-  /** The report-owning tenant login this seam writes for —
-   *  the seam's bound owner: the fallback when a job names
-   *  no owner of its own (the leg resolves per job first).
-   *  Absent ⇒ the seam names no tenant; the leg resolves
-   *  the owner from the job's configured reportOwnerLogin,
-   *  else records not_wired with its coded reason. */
-  ownerLogin?: string;
-  /** storeReportAtGeneration, host-bound. Never throws by contract. */
-  store(input: ScheduledReportInput): Promise<CanonicalStoreResult | null>;
-}
+// Issue #4060: the seam lives in ./canonicalReportLeg.ts (a leaf —
+// importing the leg must not drag in this module's job graph).
+// Re-exported here so every existing importer keeps its path.
+import {
+  createTenantAwareCanonicalReportStore,
+  type CanonicalReportStoreSeam,
+  type PipelineGenerateReportDoor,
+} from "./canonicalReportLeg";
 
-/**
- * The orchestrator door the tenant-aware leg writes through
- * (#3940): the generate stage never writes mas_reports
- * directly — it calls the report-owning tenant's
- * Orchestrator DO door, which stores through the one seam
- * (storeReportAtGeneration) inside that DO. One method, the
- * same shape as the screener's recordWorkflowScreenReport
- * door (OrchestratorAgent.recordPipelineGenerateReport).
- */
-export interface PipelineGenerateReportDoor {
-  recordPipelineGenerateReport(
-    input: ScheduledReportInput,
-  ): Promise<CanonicalStoreResult | null>;
-}
-
-/**
- * The tenant-aware canonical leg (#3940, #3550 option (a)):
- * build a seam whose store call writes through the
- * orchestrator door (record) instead of a host-bound sql
- * handle. The owner rides on the store input (the leg
- * resolves it per job — the job's configured
- * reportOwnerLogin first, this seam's bound owner second);
- * ownerLogin here is that bound owner — the residency's
- * fallback for jobs that name no owner of their own
- * (the configured service identity where one exists),
- * absent when the residency configures none.
- */
-export function createTenantAwareCanonicalReportStore(args: {
-  ownerLogin?: string;
-  record: PipelineGenerateReportDoor["recordPipelineGenerateReport"];
-}): CanonicalReportStoreSeam {
-  return {
-    ...(args.ownerLogin !== undefined ? { ownerLogin: args.ownerLogin } : {}),
-    store: (input) => args.record(input),
-  };
-}
+export { createTenantAwareCanonicalReportStore };
+export type { CanonicalReportStoreSeam, PipelineGenerateReportDoor };
 
 /* ------------------------------------------------------------------ */
 /* The contract + registry                                             */

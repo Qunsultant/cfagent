@@ -244,14 +244,31 @@ function optionsCtx() {
   // tests/manual_options_screen_workflow_3186.test.ts pattern);
   // sql-only storage dies at plan.persist.
   const store = new Map<string, unknown>();
+  // Issue #4060: the manual entry writes its canonical row through
+  // the engine's leg (the orchestrator door), so the fake ctx
+  // supplies the door — a namespace whose record writes through the
+  // same fake store the direct ORM used, so the pin keeps capturing
+  // both writes (persist + shapeReport re-record, one generationId).
+  // The fake dedupes by generationId like the real seam (first
+  // write created:true, re-record created:false, one reportId).
+  const seenGenerations = new Set<string>();
+  const storeCanonicalReport = (report: any) => {
+    hoisted.canonicalReports.push(report);
+    const generationId = String(report?.generationId ?? "");
+    const created = !seenGenerations.has(generationId);
+    seenGenerations.add(generationId);
+    return { reportId: "report-1", created };
+  };
   return {
-    env: {} as any,
-    getOrm: () =>
-      ({
-        storeCanonicalReport: (report: any) => {
-          hoisted.canonicalReports.push(report);
-        },
-      }) as any,
+    env: {
+      ORCHESTRATOR_AGENT: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          recordPipelineGenerateReport: async (input: any) => storeCanonicalReport(input),
+        }),
+      },
+    } as any,
+    getOrm: () => ({ storeCanonicalReport }) as any,
     agentCtx: {
       storage: {
         sql,
