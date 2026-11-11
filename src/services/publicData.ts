@@ -523,9 +523,9 @@ function mapChainContract(
   const ask = numValue(row.ask);
   const lastPrice = numValue(row.last) ?? numValue(row.lastPrice);
   // #4036 parity rule: a contract needs a TWO-SIDED quote to enter the
-  // chain. Alpaca omits anything without bid AND ask (its adapter says so
-  // in optionsData.ts); a last trade alone cannot be priced or traded, so
-  // Public keeps the same rule instead of shipping a one-sided row.
+  // chain. The other brokers' adapters omit anything without bid AND ask
+  // (see optionsData.ts); a last trade alone cannot be priced or traded,
+  // so this provider keeps the same rule instead of a one-sided row.
   if (bid === undefined || ask === undefined) return null;
 
   const out: Partial<ETradeOptionChainContract> & {
