@@ -134,10 +134,14 @@ export interface CronDispatchRecordInput {
  *
  * The `system` is restamped after validation: the S1 builder's
  * runtime allowlist (`SYSTEMS` in `src/services/jobRunRecords.ts`)
- * does not yet admit `"worker-cron"`, and that file is concurrently
- * edited by the parallel #3650 fix — admitting the new system there
- * waits until #3650 lands, rather than colliding with it. The
- * vocabulary itself is widened in `src/data/jobRunRecordPorts.ts`
+ * did not admit `"worker-cron"` when S5 landed, and that file was
+ * concurrently edited by the parallel #3650 fix — admitting the new
+ * system there waited until #3650 landed, rather than colliding
+ * with it. S6 admits it now that #3650 has landed
+ * (Qunsultant/cfagent#3723); the restamp below is RETAINED as-is
+ * (the record's system is explicit, not derived — zero behavior
+ * change, and the S5-P06 shape pin still holds). The vocabulary
+ * itself was widened in S5 in `src/data/jobRunRecordPorts.ts`
  * (`JobRunSystem` gains `"worker-cron"`), so the restamped record
  * is a well-typed `JobRunRecord` and the DO-SQLite store (which
  * inserts the system string verbatim, with no allowlist) round-trips
