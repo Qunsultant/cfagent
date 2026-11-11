@@ -37,6 +37,8 @@ import { FieldShell } from "./components/ui/Field";
 import { TextInput } from "./components/ui/TextInput";
 import { Select } from "./components/ui/Select";
 import { Button } from "./components/ui/Button";
+import { Flex } from "./components/ui/Flex";
+import { PageSection } from "./components/ui/PageShell";
 import { EmptyState } from "./components/ui/EmptyState";
 
 export type RsiBand = "any" | "oversold" | "overbought" | "neutral";
@@ -186,7 +188,7 @@ export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: Stoc
     const field = criteria[key];
     const id = `stock-criteria-${key}`;
     return (
-      <div className={`stock-criteria-row${field.enabled ? " is-enabled" : ""}`} key={key}>
+      <Flex gap="2" align="center" key={key}>
         <Button
           type="button"
           variant={field.enabled ? "primary" : "secondary"}
@@ -206,7 +208,7 @@ export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: Stoc
             {...inputProps}
           />
         </FieldShell>
-      </div>
+      </Flex>
     );
   };
 
@@ -219,7 +221,7 @@ export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: Stoc
     const field = criteria[key];
     const id = `stock-criteria-${key}`;
     return (
-      <div className={`stock-criteria-row${field.enabled ? " is-enabled" : ""}`} key={key}>
+      <Flex gap="2" align="center" key={key}>
         <Button
           type="button"
           variant={field.enabled ? "primary" : "secondary"}
@@ -251,7 +253,7 @@ export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: Stoc
             ))}
           </Select>
         </FieldShell>
-      </div>
+      </Flex>
     );
   };
 
@@ -266,13 +268,11 @@ export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: Stoc
   ];
 
   return (
+    <PageSection
+      title="Stock criteria"
+      description="Thresholds the next run filters on. A criterion left Off is omitted from the run request without clearing its value. All seven fields are applied by the screen's filter stage on both providers."
+    >
     <Card>
-      <h3>Stock criteria</h3>
-      <p>
-        Thresholds the next run filters on. A criterion left Off is omitted
-        from the run request without clearing its value. All seven fields
-        are applied by the screen&apos;s filter stage on both providers.
-      </p>
       {numericRow("minRsi", "Min RSI", "0–100; stocks below this RSI-14 are rejected.", { min: "0", max: "100" })}
       {numericRow("maxRsi", "Max RSI", "0–100; stocks above this RSI-14 are rejected.", { min: "0", max: "100" })}
       {numericRow("minVolume", "Min daily volume", "Shares; stocks below this volume are rejected.", { min: "0" })}
@@ -303,5 +303,6 @@ export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: Stoc
         </ul>
       )}
     </Card>
+    </PageSection>
   );
 }

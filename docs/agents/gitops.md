@@ -210,7 +210,7 @@ Supersedes:
 ## Scope
 Included:
 Excluded:
-Scope discipline: every item excluded from this issue gets its own sub-issue under this issue, created at the time it is identified and linked under Related issues — never left as a follow-up note, TODO, or 'future work' line. An excluded item with no sub-issue is a review finding.
+Scope discipline: every item excluded from this issue gets its own sub-issue under this issue, created at the time it is identified and linked under Related issues — never left as a follow-up note, TODO, or 'future work' line. An excluded item with no sub-issue is a review finding. Title it `[Out-of-Scope] <thing>` (issue #4099): anything this work identifies as out of scope, or as not considered, gets its own sub-issue under the relevant parent with that title, a one-line reason it is out of scope, and a link to the work that surfaced it.
 
 ## Acceptance criteria
 - [ ] Observable, testable criterion
@@ -293,6 +293,7 @@ All development on this issue must follow:
 - How to harness this value from UX:
 - Process docs updated (file + commit, or none with reason):
 - Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
+- Out-of-scope items filed (issue #4099): `[Out-of-Scope]` sub-issue numbers for anything this issue surfaced as out of scope or not considered, or none.
 - Remaining work (issue #4071 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):
 ```
@@ -884,6 +885,9 @@ This PR completes its linked issue in full (issue #4072: one sub-issue = one PR)
 
 ## Process documentation impact
 Process documentation impact: <none, or what process docs this PR changes>
+
+## Out of scope
+Out of scope: <none, or [Out-of-Scope] sub-issue links — every item this PR leaves out of scope gets its own sub-issue titled `[Out-of-Scope] <thing>` (issue #4099)>
 ```
 
 Use automatic closing keywords only when the PR fully resolves the issue.
@@ -896,7 +900,7 @@ A submit from the GitHub web UI creates a patch branch (e.g. `OpenAIMP-patch-15`
 2. **Linked issue, full reference.** Write the linked issue as `Qunsultant/cfagent#<number>` (or `OpenAIMP/cfagent#<number>`, which redirects to the same issue) in `## Linked issue`. Either form satisfies the gate without auto-closing the issue. Use a closing keyword (`Closes #<number>`) only when the PR fully resolves the issue.
 3. **Changelog fragment as a second file.** Before the PR merges, add a second file on the same patch branch via the web UI (branch view → Add file → Create new file) at `changelog.d/<issue>-<slug>.md` with a `### ` section header and at least one entry line. Do not edit CHANGELOG.md — that reintroduces the prepend race the fragments exist to end.
 
-If the gate still fails after fixing the body: body edits re-trigger Policy Gate (the workflow triggers on `edited`), so a re-run reflects the new body; a stale-base failure means the branch predates files added to main — update the branch to current main and let checks re-run. No exemption class exists for web submits, and none is proposed: workflow files are the highest-privilege files in the repo and deserve the gate most. If the gate shows a failure you believe is wrong, read the failing check's name — (a) linked issue, (b) lane, (c) hashtag, (d) changelog, (e) docs scope, (f) stale base, (i) no deletion, (j) deprecation — and fix that item, not the gate.
+If the gate still fails after fixing the body: body edits re-trigger Policy Gate (the workflow triggers on `edited`), so a re-run reflects the new body; a stale-base failure means the branch predates files added to main — update the branch to current main and let checks re-run. No exemption class exists for web submits, and none is proposed: workflow files are the highest-privilege files in the repo and deserve the gate most. If the gate shows a failure you believe is wrong, read the failing check's name — (a) linked issue, (b) lane, (c) hashtag, (d) changelog, (e) docs scope, (f) stale base, (i) no deletion, (j) deprecation, (k) out of scope — and fix that item, not the gate.
 
 ### Review rules
 
@@ -1286,6 +1290,7 @@ Agents cannot approve their own exceptions.
 - How to harness this value from UX:
 - Process docs updated (file + commit, or none with reason):
 - Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
+- Out-of-scope items filed (issue #4099): `[Out-of-Scope]` sub-issue numbers for anything this issue surfaced as out of scope or not considered, or none.
 - Remaining work (issue #4071 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):
 ```

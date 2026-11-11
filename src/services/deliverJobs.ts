@@ -75,7 +75,15 @@
  *   the SAME generated artifact already delivered; those are
  *   recorded already_delivered (the sender is not called) and
  *   only the rest are attempted — so the engine's retry /
- *   resume re-runs the step safely.
+ *   resume re-runs the step safely. Every send ALSO claims
+ *   its (runId, destination) pair through the ONE suppressor
+ *   module (src/workflows/screenDeliverySuppression.ts,
+ *   #3943) with an injected store — the screener's key
+ *   space — so a re-run/replay with the same run id never
+ *   re-sends even when the delivery dataset store cannot
+ *   see the first run. A failed send releases its claim; a
+ *   not-configured pair never claims; the ux channel is a
+ *   read-back and never claims.
  *
  * Run outcomes are RETURNED, not thrown — the run record is
  * the job's state (the #3530 idiom). Only contract violations
@@ -104,6 +112,12 @@ import { ETradeWebhookService } from "./tradingWebhooks";
 import type { Env } from "../types";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import {
+  createDeliverySuppressor,
+  deliveryDestinationFor,
+  deliverySuppressionKey,
+  type DeliverySuppressor,
+} from "../workflows/screenDeliverySuppression";
 
 /** Module logger on the S2 structured-logging seam (#3515 S3 ratchet). */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -527,6 +541,16 @@ export interface DeliverJobDeps {
   /** Per-channel coded reasons a sender could not be built
    *  (createDeliverChannelSenders' second return). */
   unconfiguredReasons?: Partial<Record<DeliverChannel, string>>;
+  /**
+   * The duplicate-delivery suppressor for this residency
+   * (#3943): the ONE module (screenDeliverySuppression),
+   * injected with the residency's store — the host injects
+   * the durable mas_delivery_claims store, the workflow
+   * residency an in-memory suppressor. Absent ⇒ a fresh
+   * in-memory suppressor (the screener executor's fallback
+   * idiom): claims then hold only for this run.
+   */
+  suppressor?: DeliverySuppressor;
 }
 
 export interface RunDeliverJobOptions {
@@ -630,9 +654,13 @@ const scrubbed = (err: unknown): string =>
  * Run one deliver job: resolve the persisted generated input,
  * deliver each of its reports over the configured channels
  * (skipping pairs an earlier run over the same input already
- * delivered), persist the delivery artifact. Outcomes are
- * RETURNED (the failed-input run is recorded first); only an
- * unknown job id throws (a caller bug, the #3530 idiom).
+ * delivered), persist the delivery artifact. Every send ALSO
+ * claims its (runId, destination) pair through the ONE
+ * suppressor module with the injected store (#3943) — a
+ * re-run/replay with the same run id never re-sends.
+ * Outcomes are RETURNED (the failed-input run is recorded
+ * first); only an unknown job id throws (a caller bug, the
+ * #3530 idiom).
  */
 export async function runDeliverJob(
   registry: DeliverJobRegistry,
@@ -656,6 +684,11 @@ export async function runDeliverJob(
   const emailTo = opts.emailTo !== undefined ? opts.emailTo : def.emailTo;
   const webhookUrl = opts.webhookUrl !== undefined ? opts.webhookUrl : def.webhookUrl;
   const pairFilter = opts.pairKeys ? new Set(opts.pairKeys) : null;
+  // The duplicate-delivery suppressor for this run (#3943):
+  // the one module, injected store. Absent ⇒ a fresh
+  // in-memory suppressor — claims then hold only for this
+  // run (the screener executor's fallback idiom).
+  const suppressor = deps.suppressor ?? createDeliverySuppressor();
 
   const finish = async (
     partial: Omit<
@@ -833,12 +866,20 @@ export async function runDeliverJob(
         content,
         inputArtifact,
         deps,
+        suppressor,
+        runId,
         slackChannel,
         emailTo,
         webhookUrl,
       });
       channelRecords.push(record);
       if (record.status === "delivered") {
+        requested++;
+        received++;
+      } else if (record.status === "already_delivered") {
+        // A suppressor-held pair counts as received, like a
+        // store-held pair above: the recipient already holds
+        // the report.
         requested++;
         received++;
       } else if (record.status === "failed") {
@@ -882,11 +923,15 @@ async function deliverOneChannel(args: {
   content: ReturnType<typeof reportContent>;
   inputArtifact: GeneratedDatasetArtifact;
   deps: DeliverJobDeps;
+  /** The one suppressor module, injected store (#3943). */
+  suppressor: DeliverySuppressor;
+  /** This deliver run's id — the claim's run id. */
+  runId: string;
   slackChannel: string | null;
   emailTo: string | null;
   webhookUrl: string | null;
 }): Promise<DeliveryChannelRecord> {
-  const { channel, def, report, content, inputArtifact, deps } = args;
+  const { channel, def, report, content, inputArtifact, deps, suppressor, runId } = args;
   const base = { channel, formats: content.formats };
   const notConfigured = (codedError: string, errorMessage: string): DeliveryChannelRecord => ({
     ...base,
@@ -904,6 +949,30 @@ async function deliverOneChannel(args: {
     errorMessage: scrubbed(errorMessage),
     detail: null,
   });
+  /**
+   * Claim this pair's (runId, destination) before sending
+   * (#3943): the screener's key space, one module. A held
+   * claim ⇒ already_delivered — the sender is never called.
+   * The claim is taken ONLY here, after every
+   * not-configured early-return, so a pair that cannot be
+   * attempted never claims; a send that does not happen
+   * (failed, or unconfiguredReason) releases it below.
+   */
+  const suppressedRecord = (
+    destination: string,
+    target: string | null,
+  ): DeliveryChannelRecord | null => {
+    if (suppressor.tryClaim(runId, destination)) return null;
+    return {
+      ...base,
+      status: "already_delivered",
+      target,
+      formats: content.formats,
+      codedError: null,
+      errorMessage: null,
+      detail: `Suppressed by delivery claim ${deliverySuppressionKey(runId, destination)} (already claimed by an earlier send); not sent again.`,
+    };
+  };
 
   if (channel === "ux") {
     // Verified read-back through the same store port the
@@ -958,6 +1027,9 @@ async function deliverOneChannel(args: {
         "No Slack transport is configured in this residency (no cfpay A2A, no SLACK_BOT_TOKEN, no SLACK_WEBHOOK_URL); the delivery was not attempted.",
       );
     }
+    const slackDestination = deliveryDestinationFor("slack");
+    const suppressed = suppressedRecord(slackDestination, args.slackChannel ?? null);
+    if (suppressed) return suppressed;
     try {
       const r = await sender({
         text: content.text,
@@ -973,8 +1045,14 @@ async function deliverOneChannel(args: {
             }
           : {}),
       });
-      if (r.unconfiguredReason) return notConfigured(r.unconfiguredReason, r.error ?? r.unconfiguredReason);
-      if (!r.ok) return failedRecord(r.error ?? "Slack delivery failed.");
+      if (r.unconfiguredReason) {
+        suppressor.release(runId, slackDestination);
+        return notConfigured(r.unconfiguredReason, r.error ?? r.unconfiguredReason);
+      }
+      if (!r.ok) {
+        suppressor.release(runId, slackDestination);
+        return failedRecord(r.error ?? "Slack delivery failed.");
+      }
       return {
         ...base,
         status: "delivered",
@@ -989,6 +1067,7 @@ async function deliverOneChannel(args: {
         detail: null,
       };
     } catch (err) {
+      suppressor.release(runId, slackDestination);
       return failedRecord(scrubbed(err));
     }
   }
@@ -1007,6 +1086,9 @@ async function deliverOneChannel(args: {
         "No email transport is configured in this residency (no cfpay A2A, no EMAIL binding); the delivery was not attempted.",
       );
     }
+    const emailDestination = deliveryDestinationFor("email", args.emailTo);
+    const suppressed = suppressedRecord(emailDestination, args.emailTo);
+    if (suppressed) return suppressed;
     try {
       const html = `<p>${content.text
         .replace(/&/g, "&amp;")
@@ -1027,8 +1109,14 @@ async function deliverOneChannel(args: {
             }
           : {}),
       });
-      if (r.unconfiguredReason) return notConfigured(r.unconfiguredReason, r.error ?? r.unconfiguredReason);
-      if (!r.ok) return failedRecord(r.error ?? "Email delivery failed.");
+      if (r.unconfiguredReason) {
+        suppressor.release(runId, emailDestination);
+        return notConfigured(r.unconfiguredReason, r.error ?? r.unconfiguredReason);
+      }
+      if (!r.ok) {
+        suppressor.release(runId, emailDestination);
+        return failedRecord(r.error ?? "Email delivery failed.");
+      }
       return {
         ...base,
         status: "delivered",
@@ -1043,6 +1131,7 @@ async function deliverOneChannel(args: {
         detail: null,
       };
     } catch (err) {
+      suppressor.release(runId, emailDestination);
       return failedRecord(scrubbed(err));
     }
   }
@@ -1055,6 +1144,9 @@ async function deliverOneChannel(args: {
       "No webhook sender is configured in this residency; the delivery was not attempted.",
     );
   }
+  const webhookDestination = deliveryDestinationFor("webhook");
+  const suppressed = suppressedRecord(webhookDestination, null);
+  if (suppressed) return suppressed;
   try {
     const r = await sender({
       event: "pipeline.report",
@@ -1070,8 +1162,14 @@ async function deliverOneChannel(args: {
       },
       ...(args.webhookUrl ? { url: args.webhookUrl } : {}),
     });
-    if (r.unconfiguredReason) return notConfigured(r.unconfiguredReason, r.error ?? r.unconfiguredReason);
-    if (!r.ok) return failedRecord(r.error ?? "Webhook dispatch failed.");
+    if (r.unconfiguredReason) {
+      suppressor.release(runId, webhookDestination);
+      return notConfigured(r.unconfiguredReason, r.error ?? r.unconfiguredReason);
+    }
+    if (!r.ok) {
+      suppressor.release(runId, webhookDestination);
+      return failedRecord(r.error ?? "Webhook dispatch failed.");
+    }
     return {
       ...base,
       status: "delivered",
@@ -1082,6 +1180,7 @@ async function deliverOneChannel(args: {
       detail: null,
     };
   } catch (err) {
+    suppressor.release(runId, webhookDestination);
     return failedRecord(scrubbed(err));
   }
 }

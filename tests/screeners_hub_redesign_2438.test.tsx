@@ -199,7 +199,12 @@ describe("StockHub redesign (#2438, moved by #2896)", () => {
   it("drops the grouped universe cards and keeps the compact run list", async () => {
     await renderHub();
     expect(container.querySelector('[aria-label="Scheduled jobs by universe"]')).toBeNull();
-    const items = Array.from(container.querySelectorAll<HTMLElement>(".screener-run-item"));
+    // The compact run list is now primitive Buttons (S-U2 #3051) in
+    // the aria-labelled run-history list — no .screener-run-item
+    // class remains.
+    const items = Array.from(
+      container.querySelectorAll<HTMLElement>('[aria-label="Screener run history"] button'),
+    );
     expect(items).toHaveLength(2);
   });
 

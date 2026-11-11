@@ -73,3 +73,6 @@ This PR completes its linked issue in full (gitops §5, issue #4072: one sub-iss
 
 ## Process documentation impact
 Process documentation impact: <none, or what process docs this PR changes>
+
+## Out of scope
+Out of scope: <none, or [Out-of-Scope] sub-issue links — every item this PR leaves out of scope gets its own sub-issue titled `[Out-of-Scope] <thing>` (issue #4099)>

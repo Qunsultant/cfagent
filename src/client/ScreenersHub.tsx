@@ -7,6 +7,7 @@ import {
 import type { ScreenedStockItem } from "../types";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "./components/CapabilityNavBar";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { Notice, PageSection } from "./components/ui";
 import "./optionsResearch.css";
 
 /** S8 (consolidation, umbrella #958): the hub's tabs — the four
@@ -249,7 +250,7 @@ export function ScreenersHub({
   }, []);
 
   return (
-    <section className="trading-section screeners-hub">
+    <PageSection>
       <CapabilityNavBar
         ariaLabel="Instrument class capabilities"
         tabs={screenerTabs}
@@ -281,21 +282,16 @@ export function ScreenersHub({
             hidden={hubTab !== asset}
             style={hubTab !== asset ? { display: "none" } : undefined}
           >
-            <div className="options-comparison-note" style={{ margin: "1.5rem 0", padding: "var(--space-6)", background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "8px" }}>
-              <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-text-muted)", fontSize: "var(--font-size-title-sm)" }}>
-                🚧 {SCREENING_ASSET_CLASSES.find((a) => a.id === asset)?.label || "Asset"} Screener · Planned
-              </h4>
-              <p style={{ margin: 0, color: "var(--color-text-muted)", fontSize: "var(--font-size-body)" }}>
-                This instrument class is a planned extension point. Multi-asset provider adapters are currently in development.
-              </p>
-            </div>
+            <Notice tone="info" title={`${SCREENING_ASSET_CLASSES.find((a) => a.id === asset)?.label || "Asset"} Screener · Planned`}>
+              This instrument class is a planned extension point. Multi-asset provider adapters are currently in development.
+            </Notice>
           </div>
         ) : null
       )}
 
-      <p className="options-assumptions">
+      <p className="ui-meta">
         Provider adapters declare the instrument classes and screening endpoint they support. Add a broker, market-data API, or MCP connector by registering its capabilities and mapping its response to the common result table; unsupported instrument classes are not silently routed to an unrelated feed.
       </p>
-    </section>
+    </PageSection>
   );
 }

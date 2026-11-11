@@ -58,6 +58,8 @@ import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts";
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
+import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";
+import { createSqlDeliverySuppressionStore } from "../data/deliveryClaimsStore";
 import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
 import {
@@ -361,6 +363,18 @@ export function deliverStepDepsForScheduledAgent(
     deliveryStore: createDeliveryDatasetPorts(ctx.env),
     senders,
     unconfiguredReasons,
+    // Duplicate-delivery suppression, re-homed (#3943): the
+    // ONE module with the host's durable claims store — the
+    // same mas_delivery_claims table name and key space the
+    // screener executor claims into, so a host re-run/replay
+    // with the same run id never re-sends. The table is the
+    // host DO's own SQLite (the orchestrator's claims table
+    // is a different DO's storage); sharing claims ACROSS
+    // those DOs needs a claims door, not a second suppressor
+    // — that door is follow-up work, recorded on #3943's §15.
+    suppressor: createDeliverySuppressor(
+      createSqlDeliverySuppressionStore(() => sql),
+    ),
     shardsFor: async (jobId) => {
       const stores = createJobPipelineStoresFromSql(sql);
       return (

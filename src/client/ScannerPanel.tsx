@@ -61,7 +61,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import "./scannerPanel.css";
-import { Button, Card, Checkbox, FieldShell, PillGroup, Select, Table, TextInput } from "./components/ui";
+import { Badge, Button, Card, Checkbox, FieldShell, Flex, Grid, Notice, PageSection, PillGroup, Select, Stack, Table, TextInput, type BadgeTone } from "./components/ui";
 import { StrategyLibraryModal } from "./options/StrategyLibraryModal";
 import { resolveCatalogStrategyLabels } from "./options/strategyLibrary";
 import { parseSymbolList } from "./accountApi";
@@ -232,7 +232,7 @@ export function TargetSourceChip({ source }: { source: ScanTargetSource | null |
   if (!source) return null;
   const label = TARGET_SOURCE_LABELS[source];
   if (!label) return null;
-  return <span className="scp-badge scp-chip-target">{label}</span>;
+  return <Badge tone="neutral">{label}</Badge>;
 }
 
 // Slice 2 view-model helpers (exported for tests) -------------------------
@@ -416,57 +416,57 @@ export function ScanDiffView({ data }: { data: ScanRunDiffResult }) {
     diff.bucketChanges.length === 0 &&
     diff.addedSymbols.length === 0 &&
     diff.removedSymbols.length === 0;
-  const symbolChips = (symbols: string[], className: string) => (
-    <span className="scp-diff-chips">
+  const symbolChips = (symbols: string[], tone: BadgeTone) => (
+    <Flex gap="1" align="center" wrap>
       {symbols.map((symbol) => (
-        <span key={symbol} className={`scp-badge ${className}`}>{symbol}</span>
+        <Badge key={symbol} tone={tone}>{symbol}</Badge>
       ))}
-    </span>
+    </Flex>
   );
   return (
-    <div className="scp-diff">
-      <div className="scp-results-head">
+    <Stack gap="2">
+      <Flex gap="2" align="center" justify="between" wrap>
         <strong>Scan diff</strong>
-        <span className="scp-asof">
+        <span className="ui-meta-sm">
           {new Date(data.from.generatedAt).toLocaleString()} → {new Date(data.to.generatedAt).toLocaleString()}
         </span>
-      </div>
+      </Flex>
       {nothingChanged && (
-        <div className="scp-nofit" role="note">No changes between these runs.</div>
+        <p className="ui-meta" role="note">No changes between these runs.</p>
       )}
       {diff.newFits.length > 0 && (
-        <div className="scp-diff-line">New fits: {symbolChips(diff.newFits, "scp-badge-fit")}</div>
+        <div>New fits: {symbolChips(diff.newFits, "success")}</div>
       )}
       {diff.droppedFits.length > 0 && (
-        <div className="scp-diff-line">Dropped fits: {symbolChips(diff.droppedFits, "scp-badge-no_fit")}</div>
+        <div>Dropped fits: {symbolChips(diff.droppedFits, "danger")}</div>
       )}
       {diff.stillFitting.length > 0 && (
-        <div className="scp-diff-line">
-          Still fitting ({diff.stillFitting.length}): {symbolChips(diff.stillFitting, "scp-badge-fit")}
+        <div>
+          Still fitting ({diff.stillFitting.length}): {symbolChips(diff.stillFitting, "success")}
         </div>
       )}
       {diff.bucketChanges.length > 0 && (
-        <div className="scp-diff-line">
+        <div>
           Bucket changes:{" "}
-          <span className="scp-diff-chips">
+          <Flex gap="1" align="center" wrap>
             {diff.bucketChanges.map((change) => (
-              <span key={change.symbol} className="scp-diff-change">
+              <span key={change.symbol}>
                 <strong>{change.symbol}</strong>{" "}
-                <span className={`scp-badge scp-badge-${change.from}`}>{change.from}</span>
+                <Badge tone={gateBucketTone(change.from)}>{change.from}</Badge>
                 {" → "}
-                <span className={`scp-badge scp-badge-${change.to}`}>{change.to}</span>
+                <Badge tone={gateBucketTone(change.to)}>{change.to}</Badge>
               </span>
             ))}
-          </span>
+          </Flex>
         </div>
       )}
       {diff.addedSymbols.length > 0 && (
-        <div className="scp-diff-line">Added symbols: {symbolChips(diff.addedSymbols, "")}</div>
+        <div>Added symbols: {symbolChips(diff.addedSymbols, "neutral")}</div>
       )}
       {diff.removedSymbols.length > 0 && (
-        <div className="scp-diff-line">Removed symbols: {symbolChips(diff.removedSymbols, "")}</div>
+        <div>Removed symbols: {symbolChips(diff.removedSymbols, "neutral")}</div>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -492,34 +492,34 @@ export interface ScanRunContext {
 export function TypeRollupCards({ rollup }: { rollup: ScanTypeRollup[] }) {
   if (!rollup || rollup.length === 0) return null;
   return (
-    <div className="scp-rollup-wrap">
-      <div className="scp-subhead">By strategy type</div>
-      <div className="scp-legend">
-        Risk-screen roll-up: counts are candidates that passed the scanner's risk screen.
+    <Stack gap="2">
+      <h3>By strategy type</h3>
+      <p className="ui-meta">
+        Risk-screen roll-up: counts are candidates that passed the scanner risk screen.
         A screen pass is not an acceptance-rule pass and not a fit-gate qualification.
-      </div>
-      <div className="scp-rollup">
+      </p>
+      <Grid autoFit minColumnWidth="md" gap="2">
         {rollup.map((entry) => (
-          <Card padding="none" className="scp-rollup-card" key={entry.strategyType}>
-            <div className="scp-rollup-type">{entry.strategyType}</div>
-            <div className="scp-rollup-line">
+          <Card padding="sm" key={entry.strategyType}>
+            <strong>{entry.strategyType}</strong>
+            <div>
               {entry.symbolsPassed} of {entry.symbolsEvaluated} symbols passed the screen
             </div>
-            <div className="scp-rollup-meta">
+            <div className="ui-meta-sm">
               {entry.passedCount} passed · {entry.rejectedCount} rejected of {entry.evaluatedCount} candidates
             </div>
             {entry.bestOverall ? (
-              <div className="scp-rollup-best">
+              <div>
                 Best: <strong>{entry.bestOverall.symbol}</strong> — {entry.bestOverall.label} · composite{" "}
                 {entry.bestOverall.compositeScore.toFixed(1)} · POP {fmtPct(entry.bestOverall.probabilityOfProfit)}
               </div>
             ) : (
-              <div className="scp-rollup-best scp-muted">No passing candidate</div>
+              <div className="ui-meta-sm">No passing candidate</div>
             )}
           </Card>
         ))}
-      </div>
-    </div>
+      </Grid>
+    </Stack>
   );
 }
 
@@ -528,6 +528,18 @@ const VERDICT_LABELS: Record<ScanMatrixRow["verdict"], string> = {
   no_pass: "NO PASS",
   skipped: "SKIPPED",
 };
+
+/** Gate-bucket -> Badge tone (fit/borderline/no-fit share one mapping). */
+const GATE_BUCKET_TONES: Record<string, BadgeTone> = {
+  fit: "success",
+  borderline: "warning",
+  no_fit: "danger",
+  none: "neutral",
+};
+
+function gateBucketTone(bucket: string | null | undefined): BadgeTone {
+  return GATE_BUCKET_TONES[bucket ?? "none"] ?? "neutral";
+}
 
 /**
  * The names × strategy-types fit matrix as a board (issue #22
@@ -549,16 +561,16 @@ export function MatrixBoard({
   if (!matrix || matrix.length === 0) return null;
   const types = matrixStrategyTypes(matrix);
   return (
-    <div className="scp-matrix" id="scanner-matrix-board">
-      <div className="scp-subhead">Fit matrix</div>
-      <div className="scp-legend">
-        Pass = screen pass only: at least one candidate passed the scanner's risk screen in that
-        type. Qualification is the fit gate's job — see the fit / borderline / no fit badge on each row.
-      </div>
+    <Stack gap="2" id="scanner-matrix-board">
+      <h3>Fit matrix</h3>
+      <p className="ui-meta">
+        Pass = screen pass only: at least one candidate passed the scanner risk screen in that
+        type. The fit gate decides qualification — see the fit / borderline / no fit badge on each row.
+      </p>
       <Table
         containerClassName="scp-matrix-scroll"
         columns={[
-          { key: "symbol", header: "Symbol", cellClassName: "scp-matrix-symbol", render: (row: ScanMatrixRow & { __rowKey: string }) => (<><strong>{row.symbol}</strong>{" "}<span className={`scp-badge scp-badge-verdict-${row.verdict}`}>{VERDICT_LABELS[row.verdict]}</span>{row.gateBucket && (<> <span className={`scp-badge scp-badge-${row.gateBucket}`}>{row.gateBucket}</span></>)}{row.verdict !== "skipped" && (<div className="scp-row-meta">Target {fmtTarget(row.targetPrice, row.targetEmUnits)}<TargetSourceChip source={row.targetSource} /></div>)}{row.gateReasons && row.gateReasons.length > 0 && (<div className="scp-reasons">{row.gateReasons.join("; ")}</div>)}</>) },
+          { key: "symbol", header: "Symbol", cellClassName: "scp-matrix-symbol", render: (row: ScanMatrixRow & { __rowKey: string }) => (<><strong>{row.symbol}</strong>{" "}<Badge tone={row.verdict === "pass" ? "success" : row.verdict === "no_pass" ? "danger" : "neutral"}>{VERDICT_LABELS[row.verdict]}</Badge>{row.gateBucket && (<> <Badge tone={gateBucketTone(row.gateBucket)}>{row.gateBucket}</Badge></>)}{row.verdict !== "skipped" && (<div className="ui-meta-sm">Target {fmtTarget(row.targetPrice, row.targetEmUnits)}<TargetSourceChip source={row.targetSource} /></div>)}{row.gateReasons && row.gateReasons.length > 0 && (<div className="ui-meta-sm">{row.gateReasons.join("; ")}</div>)}</>) },
           ...types.map((t) => ({
             key: t,
             header: t,
@@ -570,17 +582,17 @@ export function MatrixBoard({
               if (!cell) return "—";
               if (!cell.best) {
                 const top = topRejectionReason(cell.rejectionReasons);
-                return (<><div>{cell.passedCount}/{cell.evaluatedCount} passed · {cell.rejectedCount} rejected</div>{top && (<div className="scp-cell-reason" title={top.reason}>top rejection: {top.reason} ×{top.count}</div>)}</>);
+                return (<><div>{cell.passedCount}/{cell.evaluatedCount} passed · {cell.rejectedCount} rejected</div>{top && (<div className="ui-meta-sm" title={top.reason}>top rejection: {top.reason} ×{top.count}</div>)}</>);
               }
-              const content = (<><div className="scp-cell-score">{cell.best.compositeScore.toFixed(1)}</div><div className="scp-cell-caption">composite</div><div>{cell.passedCount}/{cell.evaluatedCount} passed</div><div className="scp-cell-label">{cell.best.label}</div></>);
-              return onPreviewTrade ? (<Button variant="ghost" className="scp-cell-btn" title={`Preview ${cell.best.label} for ${row.symbol}`} onClick={() => onPreviewTrade(matrixCellTradeContext(row, cell, thesis))}>{content}</Button>) : content;
+              const content = (<><strong>{cell.best.compositeScore.toFixed(1)}</strong><span className="ui-meta-sm">composite</span><div>{cell.passedCount}/{cell.evaluatedCount} passed</div><div>{cell.best.label}</div></>);
+              return onPreviewTrade ? (<Button variant="ghost" title={`Preview ${cell.best.label} for ${row.symbol}`} onClick={() => onPreviewTrade(matrixCellTradeContext(row, cell, thesis))}>{content}</Button>) : content;
             },
           })),
         ]}
         rows={matrix.map((row, idx) => ({ ...row, __rowKey: `${row.symbol}-${idx}` }))}
         rowKey={(row) => row.__rowKey}
       />
-    </div>
+    </Stack>
   );
 }
 
@@ -605,16 +617,15 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
 
 
   return (
-    <div className="scp-results">
-      <div className="scp-results-head">
+    <Stack gap="2">
+      <Flex gap="2" align="center" wrap>
         <strong>Mode: {MODE_LABELS[mode]}</strong>
         <Button
         variant="accent"
         tone="subtle"
         size="sm"
-          className="scanner-export-csv"
           onClick={() => downloadScanExport(exportRun, "results-csv")}
-          title="Download this run's result rows as CSV"
+          title="Download result rows for this run as CSV"
         >
           ⬇ CSV results
         </Button>
@@ -622,9 +633,8 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
         variant="accent"
         tone="subtle"
         size="sm"
-          className="scanner-export-json"
           onClick={() => downloadScanExport(exportRun, "run-json")}
-          title="Download this run's full stored result as JSON"
+          title="Download the full stored result for this run as JSON"
         >
           ⬇ JSON run
         </Button>
@@ -635,32 +645,26 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
             different run's report, the wrong-run class #297 fixed
             for the stock screener. No reportUrl → no PDF link. */}
         {result.reportUrl && (
-          <a
+          <Button
             href={result.reportUrl}
             download
-            style={{
-              fontSize: "var(--font-size-body-sm)",
-              padding: "var(--space-1-5) var(--space-3)",
-              borderRadius: "4px",
-              border: "1px solid var(--color-accent)",
-              color: "var(--color-accent)",
-              textDecoration: "none",
-              marginLeft: "auto",
-            }}
+            variant="accent"
+            tone="subtle"
+            size="sm"
           >
             📄 Download PDF report
-          </a>
+          </Button>
         )}
         {result.profileRef && (
-          <span className="scp-badge scp-badge-profile">Profile: {result.profileRef.name} v{result.profileRef.version}</span>
+          <Badge tone="neutral">Profile: {result.profileRef.name} v{result.profileRef.version}</Badge>
         )}
         {!result.profileRef && runContext.profileLabel && (
-          <span className="scp-badge">Profile: {runContext.profileLabel}</span>
+          <Badge tone="neutral">Profile: {runContext.profileLabel}</Badge>
         )}
-        {generatedAt && <span className="scp-asof">Data as of {new Date(generatedAt).toLocaleString()}</span>}
-        {result.modelVersion && <span className="scp-asof">scan model v{result.modelVersion}</span>}
-      </div>
-      <div className="scp-counts">
+        {generatedAt && <span className="ui-meta-sm">Data as of {new Date(generatedAt).toLocaleString()}</span>}
+        {result.modelVersion && <span className="ui-meta-sm">scan model v{result.modelVersion}</span>}
+      </Flex>
+      <p className="ui-meta">
         {scanned} scanned · {evaluated} evaluated · {skipped} skipped
         {mode === "strategy_fit" && (
           <> · <strong>{result.fitsTotal ?? 0} fits</strong> · gate: {gate.fit} fit / {gate.borderline} borderline / {gate.noFit} no fit</>
@@ -669,11 +673,11 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
           <> · gate: {gate.fit} fit / {gate.borderline} borderline / {gate.noFit} no fit</>
         )}
         {result.persisted && result.scanRunId && <> · saved as scan run {result.scanRunId}</>}
-      </div>
-      <div className="scp-legend">
+      </p>
+      <p className="ui-meta">
         Composite scores are normalized 0–100 and comparable across names; targets are
         volatility-normalized — shown in expected-move (EM) units where the target is EM-based.
-      </div>
+      </p>
 
       <TypeRollupCards rollup={typeRollup} />
 
@@ -688,19 +692,19 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
               { key: "target", header: "Target", render: (row) => (<>{fmtTarget(row.targetPrice, row.targetEmUnits)}<TargetSourceChip source={row.targetSource} /></>) },
               { key: "entry", header: "Entry", render: (row) => fmtEntry(row.pick?.best?.candidate?.netDebit) },
               { key: "maxloss", header: "Max loss", render: (row) => fmtMoney(row.pick?.best?.candidate?.maxLoss) },
-              { key: "gate", header: "Gate", render: (row) => (<><span className={`scp-badge scp-badge-${row.gateBucket ?? "none"}`}>{row.gateBucket ?? "—"}</span>{row.gateReasons && row.gateReasons.length > 0 && (<div className="scp-reasons">{row.gateReasons.join("; ")}</div>)}</>) },
+              { key: "gate", header: "Gate", render: (row) => (<><Badge tone={gateBucketTone(row.gateBucket)}>{row.gateBucket ?? "—"}</Badge>{row.gateReasons && row.gateReasons.length > 0 && (<div className="ui-meta-sm">{row.gateReasons.join("; ")}</div>)}</>) },
             ]}
             rows={opportunities.map((row, idx) => ({ ...row, __rowKey: `${row.symbol}-${idx}` }))}
             rowKey={(row) => row.__rowKey}
           />
         ) : (
-          <div className="scp-nofit" role="note">No qualifying trades were returned for this scan.</div>
+          <p className="ui-meta" role="note">No qualifying trades were returned for this scan.</p>
         )
       )}
 
       {mode === "strategy_fit" && (
         (result.fitsTotal ?? 0) === 0 ? (
-          <div className="scp-nofit" role="note">{noFitMessage(result)}</div>
+          <p className="ui-meta" role="note">{noFitMessage(result)}</p>
         ) : fits.length > 0 ? (
           <Table
             columns={[
@@ -711,36 +715,36 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
               { key: "target", header: "Target", render: (row) => (<>{fmtTarget(row.targetPrice, row.targetEmUnits)}<TargetSourceChip source={row.targetSource} /></>) },
               { key: "entry", header: "Entry", render: (row) => fmtEntry(bestFitCell(row)?.netDebit) },
               { key: "maxloss", header: "Max loss", render: (row) => fmtMoney(bestFitCell(row)?.maxLoss) },
-              { key: "gate", header: "Gate", render: (row) => (<><span className={`scp-badge scp-badge-${row.gateBucket ?? "none"}`}>{row.gateBucket ?? "—"}</span>{row.gateReasons && row.gateReasons.length > 0 && (<div className="scp-reasons">{row.gateReasons.join("; ")}</div>)}</>) },
+              { key: "gate", header: "Gate", render: (row) => (<><Badge tone={gateBucketTone(row.gateBucket)}>{row.gateBucket ?? "—"}</Badge>{row.gateReasons && row.gateReasons.length > 0 && (<div className="ui-meta-sm">{row.gateReasons.join("; ")}</div>)}</>) },
             ]}
             rows={fits.map((row, idx) => ({ ...row, __rowKey: `${row.symbol}-${idx}` }))}
             rowKey={(row) => row.__rowKey}
           />
         ) : (
-          <div className="scp-nofit" role="note">{noFitMessage(result)}</div>
+          <p className="ui-meta" role="note">{noFitMessage(result)}</p>
         )
       )}
 
       {mode === "strategy_fit" && borderline.length > 0 && (
-        <div className="scp-note scp-borderline">
+        <Notice tone="warning">
           Borderline (evaluated, below the gate):{" "}
           {borderline.map((r, idx) => (
-            <span key={`${r.symbol}-${idx}`} className="scp-badge scp-badge-borderline">{r.symbol}</span>
+            <Badge key={`${r.symbol}-${idx}`} tone="warning">{r.symbol}</Badge>
           ))}
-        </div>
+        </Notice>
       )}
 
       <MatrixBoard matrix={matrix} thesis={runContext.thesis} onPreviewTrade={onPreviewTrade} />
 
       {assumptions.length > 0 && (
-        <div className="scp-assumptions">
-          <div className="scp-subhead">Assumptions &amp; disclosures</div>
+        <Stack gap="1">
+          <h3>Assumptions &amp; disclosures</h3>
           <ul>
             {assumptions.map((line, idx) => <li key={idx}>{line}</li>)}
           </ul>
-        </div>
+        </Stack>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -904,11 +908,11 @@ interface CatalogStrategy {
   aliases: string[];
 }
 
-const THESIS_COLORS: Record<string, string> = {
-  bullish: "var(--color-success)",
-  bearish: "var(--color-danger)",
-  range_bound: "var(--color-warning)",
-  large_move: "var(--color-purple)",
+const THESIS_TONES: Record<string, BadgeTone> = {
+  bullish: "success",
+  bearish: "danger",
+  range_bound: "warning",
+  large_move: "purple",
 };
 
 function StrategyCatalogBrowser() {
@@ -940,7 +944,7 @@ function StrategyCatalogBrowser() {
   const theses = ["all", "bullish", "bearish", "range_bound", "large_move"];
 
   return (
-    <div style={{ margin: "1rem 0", border: "1px solid var(--color-border-medium)", borderRadius: 6, padding: "var(--space-3)" }}>
+    <Card padding="sm">
       <Button
       variant="ghost"
         onClick={() => setOpen(!open)}
@@ -948,44 +952,32 @@ function StrategyCatalogBrowser() {
         {open ? "▼" : "▶"} Strategy catalog ({strategies.length || "…" } strategies)
       </Button>
       {open && (
-        <div style={{ marginTop: "0.75rem" }}>
-          <div style={{ marginBottom: "0.5rem" }}>
+        <Stack gap="2">
                         <PillGroup
               options={theses.map((t) => ({ id: t, label: t === "all" ? "All" : t.replace("_", " ") }))}
               value={filter}
               onChange={setFilter}
             />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--space-2)" }}>
+          <Grid autoFit minColumnWidth="md" gap="2">
             {filtered.map((st) => (
               <Card padding="sm" key={st.id}>
-                <div style={{ fontWeight: 700 }}>{st.label}</div>
-                <div style={{ color: "var(--color-text-muted)", margin: "0.25rem 0" }}>{st.description}</div>
-                <div>
-                  {st.theses.map((th) => (
-                    <span
-                      key={th}
-                      style={{
-                        display: "inline-block",
-                        marginRight: "0.3rem",
-                        padding: "var(--space-0-5) var(--space-2)",
-                        borderRadius: 10,
-                        fontSize: "var(--font-size-caption)",
-                        fontWeight: 600,
-                        color: THESIS_COLORS[th] ?? "var(--color-text-muted)",
-                        border: `1px solid ${THESIS_COLORS[th] ?? "var(--color-border-medium)"}`,
-                      }}
-                    >
-                      {th.replace("_", " ")}
-                    </span>
-                  ))}
-                </div>
+                <Stack gap="1">
+                  <strong>{st.label}</strong>
+                  <span className="ui-meta-sm">{st.description}</span>
+                  <Flex gap="1" align="center" wrap>
+                    {st.theses.map((th) => (
+                      <Badge key={th} tone={THESIS_TONES[th] ?? "neutral"} size="xs">
+                        {th.replace("_", " ")}
+                      </Badge>
+                    ))}
+                  </Flex>
+                </Stack>
               </Card>
             ))}
-          </div>
-        </div>
+          </Grid>
+        </Stack>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -1323,11 +1315,10 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
           .join(", ")}${selectedStrategies.length > 3 ? "…" : ""}`;
 
   return (
-    <section className="scp-panel" id="section-opportunity-scanner" style={{ scrollMarginTop: 80 }}>
-      <div className="scp-header">
-        <h3>📈 Strategy/Symbol Scanner</h3>
-        <span className="scp-asof">{activeEnv} environment</span>
-      </div>
+    <section id="section-opportunity-scanner">
+      <Stack gap="2">
+      <PageSection title="📈 Strategy/Symbol Scanner" description={`${activeEnv} environment`}>
+        <Stack gap="2">
       <StrategyCatalogBrowser />
 
       <PillGroup
@@ -1337,8 +1328,9 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
         onChange={setMode}
       />
 
-      <form className="scp-form" onSubmit={runScan}>
-        <div className="scp-field scp-field-wide">
+      <form onSubmit={runScan}>
+        <Grid autoFit minColumnWidth="md" gap="2">
+        <div>
           <TextInput label="Symbols"
             id="scp-symbols"
             type="text"
@@ -1347,18 +1339,17 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
             placeholder="AAPL, MSFT, NVDA"
           />
         </div>
-        <div className="scp-field">
+        <div>
           <Select label="Thesis" id="scp-thesis" value={thesis} onChange={(e) => setThesis(e.target.value as OptionThesis)}>
             {THESIS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </Select>
         </div>
-        <div className="scp-field scp-field-strategies">
+        <div>
           {/* Issue #450: one shared StrategyLibraryModal (multi-select).
               Names, descriptions and thesis tags preserved from the catalog. */}
           <FieldShell id="scp-strategies" label="Strategies" hint="(empty = all)">
             <Button
             variant="secondary"
-              className="scp-strategy-picker-btn"
               onClick={() => setStrategyModalOpen(true)}
               disabled={strategyCatalog.length === 0}
              loading={strategyCatalog.length === 0}>
@@ -1369,7 +1360,6 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
             <Button
             variant="secondary"
             size="sm"
-              className="scp-clear-btn"
               onClick={() => setSelectedStrategies([])}
             >
               Clear ({selectedStrategies.length})
@@ -1384,12 +1374,12 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
             onApply={setSelectedStrategies}
           />
         </div>
-        <div className="scp-field">
+        <div>
           <Select label="Risk profile" id="scp-risk" value={riskProfile} onChange={(e) => setRiskProfile(e.target.value as RiskProfileValue)}>
             {RISK_PROFILE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
           </Select>
         </div>
-        <div className="scp-field">
+        <div>
           <Select label="Strategy profile" id="scp-profile" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
             <option value="">No profile</option>
             {profiles.map((p) => (
@@ -1398,114 +1388,123 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
           </Select>
         </div>
         {mode === "strategy_fit" && (
-          <div className="scp-field">
+          <div>
             <Select label="Show fits up to" id="scp-fit-limit" value={fitLimit} onChange={(e) => setFitLimit(Number(e.target.value))}>
               {[10, 25, 50].map((n) => <option key={n} value={n}>{n}</option>)}
             </Select>
           </div>
         )}
-        <div className="scp-field scp-field-btn">
-          <Button type="submit" className="scp-run" disabled={scanning} loading={scanning} variant="primary">
+        <div>
+          <Button type="submit" disabled={scanning} loading={scanning} variant="primary">
             {"Run scan"}
           </Button>
         </div>
+        </Grid>
       </form>
-      <div className="scp-note">
+      <p className="ui-meta">
         {mode === "per_name_best"
           ? "Per-name best: the strongest trade for each symbol, ranked — the gate still grades every pick."
           : "Strategy fit: only names whose best pick clears the fit gate are listed as fits; borderline and skipped names are accounted, not hidden."}
-      </div>
+      </p>
 
-      {scanError && <div className="scp-error" role="alert">{scanError}</div>}
-      {diffError && <div className="scp-error" role="alert">{diffError}</div>}
+      {scanError && <Notice tone="danger">{scanError}</Notice>}
+      {diffError && <Notice tone="danger">{diffError}</Notice>}
       {diffResult ? (
         <ScanDiffView data={diffResult} />
       ) : (
         <>
           {result && historicalNote && (
-            <div className="scp-note scp-historical" role="note">
+            <p className="ui-meta" role="note">
               Saved scan from {new Date(historicalNote).toLocaleString()} — viewing the stored result, not a new run.
-            </div>
+            </p>
           )}
-          {result && rerunNote && <div className="scp-note" role="note">{rerunNote}</div>}
+          {result && rerunNote && <p className="ui-meta" role="note">{rerunNote}</p>}
           {result && runContext && <ScanResultsView result={result} runContext={runContext} onPreviewTrade={onPreviewTrade} storedRun={viewedRun} />}
         </>
       )}
+        </Stack>
+      </PageSection>
 
       {/* Strategy profiles manager (surface 4) */}
-      <div className="scp-subhead">
-        Strategy Profiles
-        <Button variant="secondary" size="sm" className="scp-mini-btn" onClick={openCreateForm}>+ New profile</Button>
-      </div>
+      <PageSection title="Strategy profiles">
+        <Stack gap="2">
+      <Flex justify="end">
+        <Button variant="secondary" size="sm" onClick={openCreateForm}>+ New profile</Button>
+      </Flex>
       {profilesError && (
-        <div className="scp-error" role="alert">
+        <Notice tone="danger">
           {profilesError}{" "}
           <Button variant="secondary" size="sm" onClick={() => void loadProfiles()}>
             Retry
           </Button>
-        </div>
+        </Notice>
       )}
-      {savedNote && <div className="scp-note">{savedNote}</div>}
-      {!profilesLoaded && <div className="scp-muted">Loading strategy profiles…</div>}
+      {savedNote && <p className="ui-meta">{savedNote}</p>}
+      {!profilesLoaded && <p className="ui-meta">Loading strategy profiles…</p>}
       {profilesLoaded && profiles.length === 0 && !profilesError && (
-        <div className="scp-muted">No saved profiles yet. Create one to scan by “my strategy” instead of re-stating constraints each time.</div>
+        <p className="ui-meta">No saved profiles yet. Create one to scan by “my strategy” instead of re-stating constraints each time.</p>
       )}
       {profiles.map((profile) => (
-        <div className="scp-row" key={profile.id}>
-          <div className="scp-row-main">
-            <strong>{profile.name}</strong> <span className="scp-badge">v{profile.version}</span>
-            <span className="scp-row-summary">{profileSummary(profile)}</span>
-            <span className="scp-row-meta">updated {new Date(profile.updatedAt).toLocaleString()}</span>
-          </div>
-          <Button variant="secondary" size="sm" className="scp-mini-btn" onClick={() => setProfileId(profile.id)}>Use in scan</Button>
-          <Button variant="secondary" size="sm" className="scp-mini-btn" onClick={() => openEditForm(profile)}>Edit</Button>
-          <Button
-          variant="danger"
-          tone={confirmDeleteId === profile.id ? "solid" : "subtle"}
-            onClick={() => void handleDelete(profile)}
-          >
-            {confirmDeleteId === profile.id ? "Confirm delete?" : "Delete"}
-          </Button>
-        </div>
+        <Card padding="sm" key={profile.id}>
+          <Stack gap="1">
+            <Flex gap="1" align="center" wrap>
+              <strong>{profile.name}</strong> <Badge tone="neutral">v{profile.version}</Badge>
+            </Flex>
+            <span className="ui-meta-sm">{profileSummary(profile)}</span>
+            <span className="ui-meta-sm">updated {new Date(profile.updatedAt).toLocaleString()}</span>
+            <Flex gap="1" align="center" wrap>
+              <Button variant="secondary" size="sm" onClick={() => setProfileId(profile.id)}>Use in scan</Button>
+              <Button variant="secondary" size="sm" onClick={() => openEditForm(profile)}>Edit</Button>
+              <Button
+              variant="danger"
+              tone={confirmDeleteId === profile.id ? "solid" : "subtle"}
+                onClick={() => void handleDelete(profile)}
+              >
+                {confirmDeleteId === profile.id ? "Confirm delete?" : "Delete"}
+              </Button>
+            </Flex>
+          </Stack>
+        </Card>
       ))}
 
       {formOpen && (
-        <form className="scp-profile-form" id="scp-profile-form" onSubmit={saveProfile}>
-          <div className="scp-subhead">{editingId ? "Edit profile" : "New profile"}</div>
-          {formError && <div className="scp-error" role="alert">{formError}</div>}
-          <div className="scp-form-grid">
-            <div className="scp-field scp-field-wide">
+        <form id="scp-profile-form" onSubmit={saveProfile}>
+        <Stack gap="2">
+          <h3>{editingId ? "Edit profile" : "New profile"}</h3>
+          {formError && <Notice tone="danger">{formError}</Notice>}
+          <Grid autoFit minColumnWidth="md" gap="2">
+            <div>
               <TextInput label="Name *" id="scp-pf-name" type="text" value={form.name} onChange={setField("name")} placeholder="Income" />
             </div>
-            <div className="scp-field">
+            <div>
               <Select label="Thesis" id="scp-pf-thesis" value={form.thesis} onChange={setField("thesis")}>
                 <option value="">(unset)</option>
                 {THESIS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select>
             </div>
-            <div className="scp-field scp-field-wide">
+            <div>
               <TextInput label="Allowed strategy types (comma-separated ids)" id="scp-pf-types" type="text" value={form.allowedStrategies} onChange={setField("allowedStrategies")} placeholder="put_credit_spread, iron_condor" />
             </div>
-            <div className="scp-field">
+            <div>
               <TextInput label="Max planned loss ($)" id="scp-pf-maxloss" type="number" min="0" step="any" value={form.maxPlannedLoss} onChange={setField("maxPlannedLoss")} />
             </div>
-            <div className="scp-field">
+            <div>
               <TextInput label="Min reward / risk" id="scp-pf-minrr" type="number" min="0" step="any" value={form.minRewardRisk} onChange={setField("minRewardRisk")} />
             </div>
-            <div className="scp-field">
+            <div>
               <TextInput label="Min DTE" id="scp-pf-mindte" type="number" min="0" step="1" value={form.minDte} onChange={setField("minDte")} />
             </div>
-            <div className="scp-field">
+            <div>
               <TextInput label="Max DTE" id="scp-pf-maxdte" type="number" min="0" step="1" value={form.maxDte} onChange={setField("maxDte")} />
             </div>
-            <div className="scp-field">
+            <div>
               <Select label="Event policy" id="scp-pf-events" value={form.eventPolicy} onChange={setField("eventPolicy")}>
                 <option value="">(unset)</option>
                 <option value="warn">warn</option>
                 <option value="exclude">exclude</option>
               </Select>
             </div>
-            <div className="scp-field">
+            <div>
               <Select label="Expected IV direction" id="scp-pf-iv" value={form.expectedIvDirection} onChange={setField("expectedIvDirection")}>
                 <option value="">(unset)</option>
                 <option value="rise">rise</option>
@@ -1513,16 +1512,16 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
                 <option value="fall">fall</option>
               </Select>
             </div>
-            <div className="scp-field">
+            <div>
               <TextInput label="Optimization bias (0–100)" id="scp-pf-bias" type="number" min="0" max="100" step="1" value={form.optimizationBias} onChange={setField("optimizationBias")} />
             </div>
-            <div className="scp-field">
+            <div>
               <Select label="Risk profile posture" id="scp-pf-risk" value={form.riskProfile} onChange={setField("riskProfile")}>
                 <option value="">(unset)</option>
                 {RISK_PROFILE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
               </Select>
             </div>
-            <div className="scp-field">
+            <div>
               <Select label="Default scan mode" id="scp-pf-mode" value={form.mode} onChange={setField("mode")}>
                 <option value="">(unset)</option>
                 {(Object.keys(MODE_LABELS) as ScanMode[]).map((value) => (
@@ -1530,18 +1529,18 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
                 ))}
               </Select>
             </div>
-          </div>
+          </Grid>
 
           <Checkbox label="Set fit-gate thresholds (issue #24)" checked={form.gateEnabled} onChange={setField("gateEnabled")} />
           {form.gateEnabled && (
-            <div className="scp-form-grid">
-              <div className="scp-field">
+            <Grid autoFit minColumnWidth="md" gap="2">
+              <div>
                 <TextInput label="Gate min score (0–100)" id="scp-pf-gate-score" type="number" min="0" max="100" step="any" value={form.gateMinCompositeScore} onChange={setField("gateMinCompositeScore")} />
               </div>
-              <div className="scp-field">
+              <div>
                 <TextInput label="Gate min POP (0–1)" id="scp-pf-gate-pop" type="number" min="0" max="1" step="0.05" value={form.gateMinProbabilityOfProfit} onChange={setField("gateMinProbabilityOfProfit")} />
               </div>
-              <div className="scp-field">
+              <div>
                 <Select label="Gate min confidence" id="scp-pf-gate-conf" value={form.gateMinConfidence} onChange={setField("gateMinConfidence")}>
                   <option value="">(unset)</option>
                   <option value="LOW">LOW</option>
@@ -1549,97 +1548,104 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
                   <option value="HIGH">HIGH</option>
                 </Select>
               </div>
-              <div className="scp-field">
+              <div>
                 <Checkbox label="Require fresh quotes" checked={form.gateRequireFresh} onChange={setField("gateRequireFresh")} />
               </div>
-            </div>
+            </Grid>
           )}
 
-          <div className="scp-form-actions">
-            <Button type="submit" className="scp-run" disabled={saving} loading={saving} variant="primary">
+          <Flex gap="2" align="center">
+            <Button type="submit" disabled={saving} loading={saving} variant="primary">
               {editingId ? "Save changes" : "Create profile"}
             </Button>
-            <Button className="scp-mini-btn" onClick={() => { setFormOpen(false); setEditingId(null); }} variant="secondary" size="sm">
+            <Button onClick={() => { setFormOpen(false); setEditingId(null); }} variant="secondary" size="sm">
               Cancel
             </Button>
-          </div>
-        </form>
+          </Flex>
+        </Stack>
+      </form>
       )}
+        </Stack>
+      </PageSection>
 
       {/* Scan history (surface 5, issue #27) */}
-      <div className="scp-history">
-        <div className="scp-subhead">Scan history</div>
+      <PageSection title="Scan history">
+        <Stack gap="2">
         {historyError && (
-          <div className="scp-error" role="alert">
+          <Notice tone="danger">
             {historyError}{" "}
             <Button variant="secondary" size="sm" onClick={() => void loadHistory()}>
               Retry
             </Button>
-          </div>
+          </Notice>
         )}
-        {!historyLoaded && <div className="scp-muted">Loading scan history…</div>}
+        {!historyLoaded && <p className="ui-meta">Loading scan history…</p>}
         {historyLoaded && history.length === 0 && !historyError && (
-          <div className="scp-muted">
+          <p className="ui-meta">
             No saved scan runs yet. Runs are saved automatically when a scan completes — run a scan and it will appear here.
-          </div>
+          </p>
         )}
         {compareIds.length > 0 && (
-          <div className="scp-note scp-compare-bar">
+          <Flex gap="2" align="center" wrap>
             Comparing {compareIds.length} of 2 runs picked.
-            <Button className="scp-mini-btn" disabled={compareIds.length !== 2} onClick={compareSelected} variant="secondary" size="sm">
+            <Button disabled={compareIds.length !== 2} onClick={compareSelected} variant="secondary" size="sm">
               Show diff
             </Button>
-            <Button className="scp-mini-btn" onClick={() => setCompareIds([])} variant="secondary" size="sm">
+            <Button onClick={() => setCompareIds([])} variant="secondary" size="sm">
               Clear
             </Button>
-          </div>
+          </Flex>
         )}
         {history.map((run, idx) => (
-          <div className="scp-row" key={run.id}>
-            <div className="scp-row-main">
-              <strong>{new Date(run.generatedAt).toLocaleString()}</strong>{" "}
-              <span className="scp-badge">{MODE_LABELS[run.mode] ?? run.mode}</span>
-              {run.profileRef && (
-                <span className="scp-badge scp-badge-profile">Profile: {run.profileRef.name} v{run.profileRef.version}</span>
-              )}
-              <span className="scp-row-summary">
+          <Card padding="sm" key={run.id}>
+            <Stack gap="1">
+              <Flex gap="1" align="center" wrap>
+                <strong>{new Date(run.generatedAt).toLocaleString()}</strong>{" "}
+                <Badge tone="neutral">{MODE_LABELS[run.mode] ?? run.mode}</Badge>
+                {run.profileRef && (
+                  <Badge tone="neutral">Profile: {run.profileRef.name} v{run.profileRef.version}</Badge>
+                )}
+              </Flex>
+              <span className="ui-meta-sm">
                 model v{run.modelVersion} · {run.coverage?.scanned ?? 0} scanned · {run.coverage?.evaluated ?? 0} evaluated
                 {" "}· gate: {run.gate?.fit ?? 0} fit / {run.gate?.borderline ?? 0} borderline / {run.gate?.noFit ?? 0} no fit
               </span>
-              <span className="scp-row-meta" title={run.id}>run {shortenRunId(run.id)}</span>
-            </div>
-            <Button
-            variant="secondary"
-            size="sm"
-              className="scp-mini-btn"
-              disabled={historyBusyId === run.id}
-              onClick={() => void viewRun(run)}
-            >
-              View
-            </Button>
-            <Button
-            variant="secondary"
-            size="sm"
-              className="scp-mini-btn"
-              disabled={historyBusyId === run.id || scanning}
-              onClick={() => void rerunRun(run)}
-            >
-              Re-run
-            </Button>
-            {idx < history.length - 1 && (
-              <Button className="scp-mini-btn" onClick={() => diffVsPrevious(run, idx)} variant="secondary" size="sm">
-                Diff vs previous
-              </Button>
-            )}
-            <Checkbox
-              label="Compare"
-              checked={compareIds.includes(run.id)}
-              onChange={() => toggleCompare(run.id)}
-            />
-          </div>
+              <span className="ui-meta-sm" title={run.id}>run {shortenRunId(run.id)}</span>
+              <Flex gap="1" align="center" wrap>
+                <Button
+                variant="secondary"
+                size="sm"
+                  disabled={historyBusyId === run.id}
+                  onClick={() => void viewRun(run)}
+                >
+                  View
+                </Button>
+                <Button
+                variant="secondary"
+                size="sm"
+                  disabled={historyBusyId === run.id || scanning}
+                  onClick={() => void rerunRun(run)}
+                >
+                  Re-run
+                </Button>
+                {idx < history.length - 1 && (
+                  <Button onClick={() => diffVsPrevious(run, idx)} variant="secondary" size="sm">
+                    Diff vs previous
+                  </Button>
+                )}
+                <Checkbox
+                  label="Compare"
+                  checked={compareIds.includes(run.id)}
+                  onChange={() => toggleCompare(run.id)}
+                />
+              </Flex>
+            </Stack>
+          </Card>
         ))}
-      </div>
-    </section>
+        </Stack>
+      </PageSection>
+    </Stack>
+  </section>
   );
 }
 

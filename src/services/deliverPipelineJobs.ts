@@ -47,6 +47,7 @@ import {
   type DeliverJobRegistry,
   type DeliverStatusView,
 } from "./deliverJobs";
+import type { DeliverySuppressor } from "../workflows/screenDeliverySuppression";
 import {
   feedShardSymbols,
   FEED_PIPELINE_CATALOG,
@@ -258,6 +259,13 @@ export interface DeliverStepDeps {
   /** Per-channel coded reasons a sender could not be built. */
   unconfiguredReasons?: Partial<Record<DeliverChannel, string>>;
   /**
+   * The duplicate-delivery suppressor for this residency
+   * (#3943): the ONE module, injected store. The step
+   * forwards it to the run (registerDeliverStep); absent ⇒
+   * the run builds a fresh in-memory suppressor.
+   */
+  suppressor?: DeliverySuppressor;
+  /**
    * The job's currently configured shard keys (its definition's
    * processing.shards, read at run time — the feed wiring's
    * idiom). Absent ⇒ step params may carry "shards" instead.
@@ -341,6 +349,7 @@ export function registerDeliverStep(
         ...(deps.unconfiguredReasons
           ? { unconfiguredReasons: deps.unconfiguredReasons }
           : {}),
+        ...(deps.suppressor ? { suppressor: deps.suppressor } : {}),
       },
       def.id,
       {

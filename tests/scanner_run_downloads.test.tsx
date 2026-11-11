@@ -218,9 +218,12 @@ async function waitForText(text: string, timeoutMs = 6000) {
 }
 
 function exportButtons() {
+  // The export controls are Buttons now (the dead .scanner-export-*
+  // classes are gone after the #3051 migration); pin them by their
+  // title attributes, which name the run the export targets.
   return {
-    csv: container.querySelector<HTMLButtonElement>(".scanner-export-csv"),
-    json: container.querySelector<HTMLButtonElement>(".scanner-export-json"),
+    csv: container.querySelector<HTMLButtonElement>('button[title="Download result rows for this run as CSV"]'),
+    json: container.querySelector<HTMLButtonElement>('button[title="Download the full stored result for this run as JSON"]'),
   };
 }
 
@@ -353,9 +356,11 @@ describe("ScannerPanel — viewing a saved run points the exports at it (#126 PR
     await flush(60);
     await waitForText("Diff vs previous");
 
-    const section = container.querySelector(".scp-history");
+    const section = [...container.querySelectorAll(".ui-page-section")].find(
+      (el) => el.querySelector("h2")?.textContent === "Scan history",
+    );
     expect(section).not.toBeNull();
-    const rows = [...section!.querySelectorAll<HTMLElement>(".scp-row")];
+    const rows = [...section!.querySelectorAll<HTMLElement>(".ui-card")];
     expect(rows).toHaveLength(2);
     const viewButton = [...rows[1].querySelectorAll("button")].find((b) =>
       b.textContent?.includes("View"),

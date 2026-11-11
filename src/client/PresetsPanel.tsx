@@ -14,7 +14,7 @@
  */
 
 import { useState } from "react";
-import { Badge, Button, Card, Notice } from "./components/ui";
+import { Badge, Button, Card, Notice, PageSection } from "./components/ui";
 import { ScreenerPresetManager, createPreset } from "./ScreenerPresetManager";
 import {
   listStarterPresets,
@@ -83,7 +83,7 @@ export function PresetsPanel({
         patterns by proposal; same names, different surface.
       </Notice>
 
-      <h3>My Presets</h3>
+      <PageSection title="My Presets">
       <ScreenerPresetManager
         key={managerKey}
         assetClass="stocks"
@@ -94,8 +94,9 @@ export function PresetsPanel({
           onNavigateNewScreen();
         }}
       />
+      </PageSection>
 
-      <h3>Starter presets (proposed)</h3>
+      <PageSection title="Starter presets (proposed)">
       {copyNotice && (
         <Notice tone="success" density="compact">{copyNotice}</Notice>
       )}
@@ -136,6 +137,7 @@ export function PresetsPanel({
           </Card>
         ))}
       </div>
+      </PageSection>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePolling } from "./usePolling";
 import { useAutoRefresh } from "./autoRefresh";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
-import { Skeleton, Button, Select, TextInput, Badge, Card, Notice, Checkbox, FieldShell } from "./components/ui";
+import { Skeleton, Button, Select, TextInput, Badge, Card, CardHeader, Notice, Checkbox, FieldShell, Flex, Grid, PageSection, Stack } from "./components/ui";
 import { apiFetch as fetch } from "./apiFetch";
 import {
   getScreeningProviders,
@@ -724,7 +724,7 @@ export function StockHub({
   ];
 
   return (
-    <section className="trading-section screeners-hub">
+    <PageSection>
       <CapabilityNavBar
         ariaLabel="Stock Hub capabilities"
         tabs={screenerTabs}
@@ -768,7 +768,7 @@ export function StockHub({
             />
           </div>
           {/* Issue #212: autonomous screener panel — retained run history. */}
-          <div className="screener-feed-callout" style={{ marginBottom: "1rem" }}>
+          <Card padding="md" style={{ marginBottom: "1rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginBottom: "0.5rem", flexWrap: "wrap" }}>
               <span style={{ color: "var(--color-accent)", fontWeight: 700 }}>🤖 Autonomous Screen</span>
               <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
@@ -815,7 +815,6 @@ export function StockHub({
                       <Button
                         key={run.timestamp}
                         type="button"
-                        className="screener-run-item"
                         aria-pressed={isSelected}
                         onClick={() => setSelectedAutoTs(run.timestamp)}
                         style={{
@@ -829,6 +828,9 @@ export function StockHub({
                           cursor: "pointer",
                           fontSize: "var(--font-size-body-sm)",
                           color: "var(--color-text-primary)",
+                          whiteSpace: "normal",
+                          flexWrap: "wrap",
+                          justifyContent: "flex-start",
                         }}
                       >
                         <span style={{ fontWeight: 600 }}>
@@ -842,7 +844,7 @@ export function StockHub({
                         {" · "}
                         {run.totalScanned ?? 0} scanned · {run.matchedCount ?? 0} matched · {oppCount} standout
                         {" "}
-                        <Badge tone={status === "success" ? "success" : status === "partial" ? "warning" : "danger"} className="screener-run-status">
+                        <Badge tone={status === "success" ? "success" : status === "partial" ? "warning" : "danger"}>
                           {SCREEN_RUN_STATUS_LABELS[status]}
                         </Badge>
                         {" · "}
@@ -920,46 +922,37 @@ export function StockHub({
                 )}
               </>
             )}
-          </div>
+          </Card>
           {/* Issue #2746: One-shot manual screen moved to its own page / view (?tab=screeners&view=new-screen). */}
-          <div className="provider-dashboard-callout">
+          <Stack gap="2">
             <Card padding="md">
-              <div className="provider-callout-inner">
-                <div>
-                  <h3 className="provider-callout-title">Run a new screen</h3>
-                  <p className="provider-callout-desc">
-                    Execute a manual stock screen with custom filters, presets, and delivery targets.
-                  </p>
-                </div>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => handleTabChange("new-screen")}
-                >
-                  Run a new screen &rarr;
-                </Button>
-              </div>
+              <CardHeader
+                title="Run a new screen"
+                subtitle="Execute a manual stock screen with custom filters, presets, and delivery targets."
+                meta={
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => handleTabChange("new-screen")}
+                  >
+                    Run a new screen &rarr;
+                  </Button>
+                }
+              />
             </Card>
-          </div>
-          {/* Issue #2723: Provider connectivity consolidated into Platform Admin -> Data Providers. */}
-          <div id="provider-dashboard" className="provider-dashboard-callout">
-            <Card padding="md">
-              <div className="provider-callout-inner">
-                <div>
-                  <h4 className="provider-callout-title">Provider connectivity &amp; health</h4>
-                  <p className="provider-callout-desc">
-                    Live provisioning lifecycle, capture health, and route metrics are consolidated in Platform Admin.
-                  </p>
-                </div>
-                <a
-                  href="/?tab=platform-admin&view=data-providers"
-                  className="ui-btn ui-btn-secondary ui-btn-sm provider-callout-link"
-                >
-                  View Data Providers &rarr;
-                </a>
-              </div>
+            {/* Issue #2723: Provider connectivity consolidated into Platform Admin -> Data Providers. */}
+            <Card padding="md" id="provider-dashboard">
+              <CardHeader
+                title="Provider connectivity & health"
+                subtitle="Live provisioning lifecycle, capture health, and route metrics are consolidated in Platform Admin."
+                meta={
+                  <Button href="/?tab=platform-admin&view=data-providers" variant="secondary" size="sm">
+                    View Data Providers &rarr;
+                  </Button>
+                }
+              />
             </Card>
-          </div>
+          </Stack>
         </div>
       )}
 
@@ -972,7 +965,7 @@ export function StockHub({
           hidden={hubTab !== "new-screen" && hubTab !== "run-screen"}
           style={hubTab !== "new-screen" && hubTab !== "run-screen" ? { display: "none" } : undefined}
         >
-          <div style={{ padding: "0 var(--space-4)" }}>
+          <Stack gap="2" style={{ padding: "0 var(--space-4)" }}>
             <h2 style={{ fontSize: "1.125rem", margin: "1.5rem 0 0.25rem" }}>Run a new screen</h2>
             <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 0.75rem" }}>
               Provider health: see the <a href="/?tab=platform-admin&view=data-providers">provider dashboard</a> in Platform Admin.
@@ -993,7 +986,9 @@ export function StockHub({
                 )}
               </Notice>
             )}
-            <form className="options-request-form screeners-filter-form" onSubmit={(event) => void runScreen(event)}>
+            <form onSubmit={(event) => void runScreen(event)}>
+              <Stack gap="2">
+              <Grid autoFit minColumnWidth="xs" gap="2">
               <Select label="Data provider / API" value={providerId} onChange={(event) => setProviderId(event.target.value)}>
                 {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
               </Select>
@@ -1058,7 +1053,8 @@ export function StockHub({
               <TextInput label="Max results" type="number" min="1" value={stockLimit} onChange={(event) => setStockLimit(event.target.value)}
                 disabled={!providerSupportsFilter(activeProvider, assetClass, "limit")}
                 hint={providerSupportsFilter(activeProvider, assetClass, "limit") ? undefined : `Not supported by ${activeProvider?.label ?? "this provider"}`} />
-              <div className="screener-criteria-presets-deck">
+              </Grid>
+              <Grid autoFit minColumnWidth="lg" gap="2">
                 <ScreenerPresetManager
                   assetClass="stocks"
                   userLogin={userLogin}
@@ -1070,11 +1066,11 @@ export function StockHub({
                   onChange={handleCriteriaChange}
                   lastSentFilters={lastSentStockFilters}
                 />
-              </div>
-              <div className="screener-criteria-presets-deck">
-                <div>
+              </Grid>
+              <Grid autoFit minColumnWidth="lg" gap="2">
+                <Stack gap="2">
                   <h3>Delivery &amp; report</h3>
-                  <p>Deliver this run like the scheduled Stock Market Screen does.</p>
+                  <p className="ui-footnote">Deliver this run like the scheduled Stock Market Screen does.</p>
                   <FieldShell id="stock-delivery-slack-push" label="Slack push">
                     <Checkbox id="stock-delivery-slack-push" checked={deliveryPushToSlack} onChange={(event) => setDeliveryPushToSlack(event.target.checked)} />
                   </FieldShell>
@@ -1085,8 +1081,8 @@ export function StockHub({
                       placeholder="Optional; e.g. #trading-desk (blank = the configured channel)"
                     />
                   )}
-                </div>
-                <div>
+                </Stack>
+                <Stack gap="2">
                   <TextInput label="Email recipients"
                     type="email"
                     value={deliveryEmailTo}
@@ -1102,8 +1098,8 @@ export function StockHub({
                   <FieldShell id="stock-delivery-pdf" label="PDF report" hint="Attach the run's generated PDF report to deliveries">
                     <Checkbox id="stock-delivery-pdf" checked={deliveryGeneratePdf} onChange={(event) => setDeliveryGeneratePdf(event.target.checked)} />
                   </FieldShell>
-                </div>
-              </div>
+                </Stack>
+              </Grid>
               {(monetization === "on" || retryPaid) && (
                 <TextInput label="Checkout email"
                   type="email"
@@ -1113,9 +1109,10 @@ export function StockHub({
                   hint="Required when monetization is on — the payment contact for this run."
                 />
               )}
-              <div className="options-form-footer">
+              <Flex gap="2">
                 <Button type="submit" variant="primary" disabled={loading || !endpoint} loading={loading}>{"Run stock screen"}</Button>
-              </div>
+              </Flex>
+              </Stack>
             </form>
 
             {paymentStarted && (
@@ -1153,27 +1150,20 @@ export function StockHub({
                 <ScreenerResultsView result={r} />
               </div>
             ))}
-            {!manualResult && summary && <div className="screener-results-header"><span>{summary}</span><span>{activeProvider?.label} · {activeEnv}</span></div>}
+            {!manualResult && summary && <Flex gap="2" justify="between" align="center" wrap><span className="ui-meta">{summary}</span><span className="ui-meta">{activeProvider?.label} · {activeEnv}</span></Flex>}
 
-            <div className="provider-dashboard-callout">
-              <Card padding="md">
-                <div className="provider-callout-inner">
-                  <div>
-                    <h4 className="provider-callout-title">Provider connectivity &amp; health</h4>
-                    <p className="provider-callout-desc">
-                      Live provisioning lifecycle, capture health, and route metrics are consolidated in Platform Admin.
-                    </p>
-                  </div>
-                  <a
-                    href="/?tab=platform-admin&view=data-providers"
-                    className="ui-btn ui-btn-secondary ui-btn-sm provider-callout-link"
-                  >
+            <Card padding="md" id="provider-dashboard">
+              <CardHeader
+                title="Provider connectivity & health"
+                subtitle="Live provisioning lifecycle, capture health, and route metrics are consolidated in Platform Admin."
+                meta={
+                  <Button href="/?tab=platform-admin&view=data-providers" variant="secondary" size="sm">
                     View Data Providers &rarr;
-                  </a>
-                </div>
-              </Card>
-            </div>
-          </div>
+                  </Button>
+                }
+              />
+            </Card>
+          </Stack>
         </div>
       )}
 
@@ -1255,9 +1245,9 @@ export function StockHub({
       )}
 
 
-      <p className="options-assumptions">
+      <p className="ui-footnote">
         Provider adapters declare the instrument classes and screening endpoint they support. Add a broker, market-data API, or MCP connector by registering its capabilities and mapping its response to the common result table; unsupported instrument classes are not silently routed to an unrelated feed.
       </p>
-    </section>
+    </PageSection>
   );
 }

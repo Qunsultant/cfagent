@@ -17,6 +17,13 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
    */
   href?: string;
   target?: React.HTMLAttributeAnchorTarget;
+  /**
+   * Anchor-only: passed through to the rendered <a> when `href` is set
+   * (the anchor branch spreads ...rest onto it). Without `href` it has
+   * no effect — ButtonProps extends button attributes, so this has to
+   * be declared here or `download` fails typecheck at the call site.
+   */
+  download?: string | boolean;
 }
 
 /**

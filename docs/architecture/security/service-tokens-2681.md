@@ -4,7 +4,7 @@ A service token is a credential **for** a provisioned service identity,
 not a replacement for provisioning. It authenticates non-interactive
 callers (automation, other agents) as the service identity
 (`SERVICE_USER_LOGIN`, e.g. `svc-background`) against the platform API.
-Companion to [service-identity.md](service-identity.md) (the identity
+Companion to [service-identity.md](../../operations/runbook/service-identity.md) (the identity
 itself) and [authz.md](authz.md) (the PDP and role model). The
 provisioning surface for #2171 (agent access management) consumes this
 mechanism; #2171's full agent-access model is separate scope.

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Table, TextInput, FieldShell, type TableColumn } from "../components/ui";
+import { Button, Card, CardHeader, Flex, Notice, PageSection, Stack, Table, TextInput, FieldShell, type TableColumn } from "../components/ui";
 import { apiFetch as fetch } from "../apiFetch";
 import {
   downloadRawOptionsIdeasXls,
@@ -157,8 +157,10 @@ export function LlmOptionsIdeasPanel({ activeEnv, userLogin }: LlmOptionsIdeasPa
   ];
 
   return (
-    <section className="trading-section options-research-section llm-options-ideas-panel">
-      <form className="options-request-form llm-options-ideas-form" onSubmit={(event) => void submit(event)}>
+    <PageSection title="LLM options ideas">
+      <Stack gap="2">
+      <form onSubmit={(event) => void submit(event)}>
+        <Stack gap="2">
         <TextInput label="Underlying ticker"
           required
           maxLength={10}
@@ -166,7 +168,7 @@ export function LlmOptionsIdeasPanel({ activeEnv, userLogin }: LlmOptionsIdeasPa
           onChange={(event) => setSymbol(event.target.value)}
           placeholder="e.g. NVDA"
         />
-        <FieldShell id="llm-options-question" className="llm-options-question" label="Your question">
+        <FieldShell id="llm-options-question" label="Your question">
         <TextInput id="llm-options-question"
           multiline
           required
@@ -183,7 +185,6 @@ export function LlmOptionsIdeasPanel({ activeEnv, userLogin }: LlmOptionsIdeasPa
           </Button>
           <Button
             type="button"
-            className="options-eval-llm-btn"
             disabled={loading || !symbol.trim() || !question.trim()}
             onClick={() => void runAnalysis(question, true)}
             title="Force refresh live chains and update market cache"
@@ -192,9 +193,10 @@ export function LlmOptionsIdeasPanel({ activeEnv, userLogin }: LlmOptionsIdeasPa
             🔄 Refresh Chains
           </Button>
         </div>
+        </Stack>
       </form>
 
-      <div className="llm-ideas-samples" aria-label="Sample analysis questions">
+      <Flex gap="1" align="center" wrap aria-label="Sample analysis questions">
         <strong>Try a sample:</strong>
         {sampleQuestions.map((sample) => (
           <Button
@@ -209,25 +211,20 @@ export function LlmOptionsIdeasPanel({ activeEnv, userLogin }: LlmOptionsIdeasPa
             {sample}
           </Button>
         ))}
-      </div>
+      </Flex>
 
-      <p className="options-assumptions">
+      <p className="ui-footnote">
         Sample questions submit immediately using the ticker above. All group requests and the final ranking input are available as an Excel 97–2003 .xls export. The analysis report, exact LLM inputs, and all retrieved raw chains can each be downloaded after retrieval.
       </p>
-      {error && <div className="options-error" role="alert">{error}</div>}
+      {error && <Notice tone="danger">{error}</Notice>}
 
       {result && (
-        <section className="options-comparison" aria-label="Raw-data LLM analysis">
-          <header className="options-results-header">
-            <div>
-              <h3>LLM analysis report</h3>
-              <span>
-                {result.llm.model || "Configured model"} ·{" "}
-                {result.dataCoverage.sentContractCount ?? result.dataCoverage.contractCount} of {result.dataCoverage.contractCount} contracts sent ·{" "}
-                {result.dataCoverage.expirationCount} expirations
-              </span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
+        <PageSection
+          title="LLM analysis report"
+          description={`${result.llm.model || "Configured model"} · ${result.dataCoverage.sentContractCount ?? result.dataCoverage.contractCount} of ${result.dataCoverage.contractCount} contracts sent · ${result.dataCoverage.expirationCount} expirations`}
+        >
+          <Stack gap="2">
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
               {(result.isSynthetic || result.retrievedData?.dataSource?.includes("synthetic")) && (
                 <span
                   style={{
@@ -276,102 +273,94 @@ export function LlmOptionsIdeasPanel({ activeEnv, userLogin }: LlmOptionsIdeasPa
                   ⚡ Stored Market Cache
                 </span>
               )}
-            </div>
-          </header>
+          </div>
           {result.notice && (
-            <div
-              style={{
-                fontSize: "0.75rem",
-                color: "var(--color-text-muted)",
-                background: "var(--color-surface-sunken)",
-                border: "1px solid var(--color-border-subtle)",
-                borderRadius: "var(--radius-sm, 6px)",
-                padding: "var(--space-1-5) var(--space-2-5)",
-                marginBottom: "0.75rem",
-              }}
-            >
+            <Notice tone="info">
               ℹ️ {result.notice}
-            </div>
+            </Notice>
           )}
           {result.finalAnalysis?.status === "complete" ? (
-            <article className="options-llm-answer">
-              <h4>Overall group-winner ranking</h4>
-              <p>{result.finalAnalysis.answer}</p>
-              {(result.finalAnalysis.rankings || []).map((item) => {
-                const group = result.groups?.find((entry) => entry.id === item.groupId);
-                return (
-                  <div className="llm-ideas-ranking" key={item.groupId}>
-                    <strong>#{item.rank} · {group?.label || item.groupId}</strong>
-                    <span>{item.strategy}</span>
-                    <p>{item.rationale}</p>
-                  </div>
-                );
-              })}
-            </article>
+            <Card padding="md">
+              <Stack gap="2">
+                <CardHeader title="Overall group-winner ranking" />
+                <p>{result.finalAnalysis.answer}</p>
+                {(result.finalAnalysis.rankings || []).map((item) => {
+                  const group = result.groups?.find((entry) => entry.id === item.groupId);
+                  return (
+                    <Stack gap="0-5" key={item.groupId}>
+                      <strong>#{item.rank} · {group?.label || item.groupId}</strong>
+                      <span>{item.strategy}</span>
+                      <p className="ui-footnote">{item.rationale}</p>
+                    </Stack>
+                  );
+                })}
+              </Stack>
+            </Card>
           ) : (
-            <div className="options-error" role="alert">
+            <Notice tone="danger">
               Final cross-group ranking is unavailable: {result.finalAnalysis?.error || result.llm.error || "No completed group analyses were available."} Group-level results below are still available; no overall winner is inferred.
-            </div>
+            </Notice>
           )}
           {(result.groups || []).map((group) => (
-            <article className="options-llm-answer llm-ideas-group" key={group.id}>
-              <header>
-                <h4>{group.label}</h4>
-                <span>{group.status === "complete" ? `${group.contractCount} contracts · ${group.expirationCount} expirations` : "Analysis failed"}</span>
-              </header>
-              {group.status === "complete"
-                ? <p>{group.answer}</p>
-                : <div className="options-error" role="alert">{group.error}</div>}
-              {(group.contractSymbols || []).length > 0 && (
-                <p><b>Referenced E*TRADE contracts:</b> {group.contractSymbols?.join(", ")}</p>
-              )}
-              {(group.contractDetails || []).length > 0 && (
-                <div className="options-table-scroll">
+            <Card padding="md" key={group.id}>
+              <Stack gap="2">
+                <CardHeader
+                  title={group.label}
+                  meta={<span className="ui-meta">{group.status === "complete" ? `${group.contractCount} contracts · ${group.expirationCount} expirations` : "Analysis failed"}</span>}
+                />
+                {group.status === "complete"
+                  ? <p>{group.answer}</p>
+                  : <Notice tone="danger">{group.error}</Notice>}
+                {(group.contractSymbols || []).length > 0 && (
+                  <p className="ui-footnote"><b>Referenced E*TRADE contracts:</b> {group.contractSymbols?.join(", ")}</p>
+                )}
+                {(group.contractDetails || []).length > 0 && (
                   <Table
-                    className="options-table"
                     columns={contractColumns}
                     rows={group.contractDetails ?? []}
                     rowKey={(row) => row.symbol}
                   />
-                </div>
-              )}
-              {(group.contractWarnings || []).map((warning) => (
-                <p className="options-comparison-note" role="note" key={warning}>{warning}</p>
-              ))}
-              {group.inputTruncated && (
-                <p className="options-comparison-note">Input was sampled to fit the model context ({group.sentContractCount} of {group.contractCount} group contracts sent).</p>
-              )}
-            </article>
+                )}
+                {(group.contractWarnings || []).map((warning) => (
+                  <p className="ui-footnote" role="note" key={warning}>{warning}</p>
+                ))}
+                {group.inputTruncated && (
+                  <p className="ui-footnote">Input was sampled to fit the model context ({group.sentContractCount} of {group.contractCount} group contracts sent).</p>
+                )}
+              </Stack>
+            </Card>
           ))}
           <div style={{ display: "flex", gap: "var(--space-2-5)", flexWrap: "wrap", marginTop: "0.5rem" }}>
-            <Button type="button" className="options-eval-llm-btn" onClick={() => void downloadReport()}>
+            <Button type="button" onClick={() => void downloadReport()}>
               📥 Download analysis report (.xls)
             </Button>
             {result.llmInput && (
-              <Button type="button" className="options-eval-llm-btn" onClick={() => void downloadInput()}>
+              <Button type="button" onClick={() => void downloadInput()}>
                 📥 Download exact inputs (.xls)
               </Button>
             )}
             {result.retrievedData && (
-              <Button type="button" className="options-eval-llm-btn" onClick={() => void downloadRetrievedData()}>
+              <Button type="button" onClick={() => void downloadRetrievedData()}>
                 📥 Download all retrieved raw data (.xls)
               </Button>
             )}
           </div>
-          {exportError && <div className="options-error" role="alert">Export failed: {exportError}</div>}
+          {exportError && <Notice tone="danger">Export failed: {exportError}</Notice>}
           {result.dataCoverage.inputTruncated && (
-            <p className="options-comparison-note">
+            <p className="ui-footnote">
               One or more group inputs were reduced to fit the context window, prioritizing near-the-money and more liquid strikes across expirations. The raw-data export includes all retrieved chains.
               {result.dataCoverage.estimatedInputTokens
                 ? ` Estimated input: ${result.dataCoverage.estimatedInputTokens.toLocaleString()} tokens.`
                 : ""}
             </p>
           )}
-          <p className="options-comparison-note">
+          <p className="ui-footnote">
             Retrieved {result.dataCoverage.chainCount} option-chain responses. Contract references are checked against the data sent to each LLM request; these recommendations are not independently verified optimality or execution assessments.
           </p>
-        </section>
+          </Stack>
+        </PageSection>
       )}
-    </section>
+      </Stack>
+    </PageSection>
   );
 }

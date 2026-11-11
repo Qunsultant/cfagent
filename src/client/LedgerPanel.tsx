@@ -1,4 +1,4 @@
-import { Button, Card, EmptyState, PageSection, PageShell, Spinner, Table } from "./components/ui";
+import { Badge, Button, Card, EmptyState, Flex, PageSection, PageShell, Spinner, Table } from "./components/ui";
 import { safePriceFormat } from "./formatters";
 import type { TradeRecord } from "../types";
 import type { RiskSubject } from "./options/riskManagementEngine";
@@ -24,8 +24,8 @@ export function LedgerPanel({ orders, ordersLoading, fetchOrders, setRiskSubject
       scopeNote="Audited trade records: every executed order with its broker reference, proposer DID, and date — refresh to re-read the ledger."
     >
       <PageSection title="Order execution ledger">
-        <Card className="trading-section">
-          <div className="ledger-header-row">
+        <Card>
+          <Flex justify="between" align="center">
             <h4>📜 Order Execution Ledger (Audited Trade Records)</h4>
             <Button
               variant="secondary"
@@ -34,21 +34,21 @@ export function LedgerPanel({ orders, ordersLoading, fetchOrders, setRiskSubject
              loading={ordersLoading}>
               {"🔄 Refresh Ledger"}
             </Button>
-          </div>
+          </Flex>
 
-          <div className="ledger-table-wrap">
+          <div>
             <Table
                       columns={[
                         { key: "id", header: "Order ID", render: (ord: any) => <code>{ord.id}</code> },
-                        { key: "symbol", header: "Symbol", render: (ord: any) => <span className="ticker-badge">{ord.symbol}</span> },
-                        { key: "action", header: "Action", render: (ord: any) => <span className={`action-pill ${ord.action.toLowerCase()}`}>{ord.action}</span> },
+                        { key: "symbol", header: "Symbol", render: (ord: any) => <Badge tone="neutral">{ord.symbol}</Badge> },
+                        { key: "action", header: "Action", render: (ord: any) => <Badge tone={ord.action.toLowerCase().includes("buy") ? "success" : "danger"}>{ord.action}</Badge> },
                         { key: "qty", header: "Shares", render: (ord: any) => <>{ord.quantity}</> },
                         { key: "price", header: "Price", render: (ord: any) => <>{safePriceFormat(ord.price)}</> },
                         { key: "total", header: "Total Value", render: (ord: any) => <>{ord.totalValue != null && Number.isFinite(Number(ord.totalValue)) ? `$${Number(ord.totalValue).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</> },
-                        { key: "status", header: "Status", render: (ord: any) => <span className={`tx-status-pill ${ord.status}`}>{ord.status.toUpperCase()}</span> },
-                        { key: "ref", header: "Broker Ref", render: (ord: any) => <code className="broker-ref-snippet">{ord.orderRef || "—"}</code> },
-                        { key: "did", header: "Proposer DID", render: (ord: any) => <code className="did-snippet" title={ord.proposerDid}>{ord.proposerDid.replace("did:agent:openaimp:", "")}</code> },
-                        { key: "date", header: "Date & Time", render: (ord: any) => <span className="time-snippet">{new Date(ord.createdAt).toLocaleString()}</span> },
+                        { key: "status", header: "Status", render: (ord: any) => <Badge tone={ord.status === "completed" ? "success" : ord.status === "authorized" ? "accent" : "neutral"}>{ord.status.toUpperCase()}</Badge> },
+                        { key: "ref", header: "Broker Ref", render: (ord: any) => <code>{ord.orderRef || "—"}</code> },
+                        { key: "did", header: "Proposer DID", render: (ord: any) => <code title={ord.proposerDid}>{ord.proposerDid.replace("did:agent:openaimp:", "")}</code> },
+                        { key: "date", header: "Date & Time", render: (ord: any) => <span>{new Date(ord.createdAt).toLocaleString()}</span> },
                         { key: "actions", header: "Action", render: (ord: any) => <Button variant="warning" tone="subtle" size="sm" type="button" onClick={() => { setRiskSubject({ title: `${ord.action} ${ord.quantity}x ${ord.symbol}`, underlyingSymbol: ord.symbol, underlyingPrice: ord.price, strategyType: `${ord.action} Trade`, sentiment: ord.action.toLowerCase().includes("buy") ? "bullish" : "bearish", quantity: ord.quantity, positionType: "EQUITY", maxLoss: ord.totalValue, breakevens: [ord.price], breakevenText: `Price: ${safePriceFormat(ord.price)}` }); }} title="Analyze risk profile for this ledger trade">🛡️ Risk</Button> },
                       ]}
                       rows={orders}

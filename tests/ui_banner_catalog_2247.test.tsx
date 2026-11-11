@@ -65,7 +65,14 @@ describe("ReportsPanel PDF-unavailable (#2247)", () => {
     await flush();
     const text = container.textContent || "";
     expect(text).toContain("FAILURE_REPORT_PDF_GENERATION");
-    expect(container.querySelector("div.report-pdf-unavailable")).not.toBeNull();
+    // The bespoke `report-pdf-unavailable` class hook is gone after the
+    // #3051 primitives migration (Notice takes no bespoke class); the
+    // error still renders inside the Notice primitive itself.
+    const notices = [...container.querySelectorAll(".ui-notice")];
+    expect(notices.length).toBeGreaterThan(0);
+    expect(
+      notices.some((n) => (n.textContent || "").includes("FAILURE_REPORT_PDF_GENERATION")),
+    ).toBe(true);
     expect(container.querySelector("span.report-pdf-unavailable")).toBeNull();
   });
 });
