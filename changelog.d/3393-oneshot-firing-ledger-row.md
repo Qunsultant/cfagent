@@ -1,0 +1,3 @@
+### Added
+
+- **Scheduling consolidation Slice #3393 — one-shot firing ledger row (#3121):** every direct one-shot synthesized firing (`ScheduledAgent.fireSynthesizedSchedule`) now records a consolidated-ledger run row (`job_run_records`, system `scheduled-agent-goal`) at every terminal point — success, blocked, budget-rejected, and failed-legs — with the §4 linkage resolved through the S1 resolver `buildLedgerLinkage` (trigger manual, scheduleId = record id, asyncJobId = created job, workflowId null). The §9 map row for the B-T3-06 direct one-shot firing now reads landed. No firing-time, cron-expression, governance, budget, or payload changes; the onCron paths are untouched. #3121

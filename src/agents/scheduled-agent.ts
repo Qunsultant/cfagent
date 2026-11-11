@@ -2505,6 +2505,54 @@ export class ScheduledAgent extends PortThink {
       );
     }
     const now = new Date();
+    // Issue #3121 #3393 — every direct one-shot firing records a
+    // consolidated-ledger run row (system `scheduled-agent-goal`),
+    // like the onCron terminal points (`recordGoalRun`): the trigger
+    // is manual — a one-shot record has no cron and is fired directly
+    // by a caller, never by the tick; the schedule id IS the record
+    // id; the async job id rides the success branch that creates an
+    // Orchestrator job (null on every refusal — no job was created);
+    // no one-shot firing runs through a workflow, so workflowId is
+    // null. The linkage resolves through the S1 resolver
+    // (`buildLedgerLinkage`), never hand-built at this write site.
+    // Recording never breaks the firing: `recordJobRun` swallows
+    // storage failures, and a refused firing still records its
+    // reason (a skip without a reason cannot be constructed).
+    const runStarted = now.toISOString();
+    const recordOneShotRun = (
+      outcome: JobRunRecord["outcome"],
+      extra: {
+        error?: string;
+        detail?: string;
+        descriptor?: string;
+        asyncJobId?: string | null;
+      },
+    ): Promise<void> => {
+      const linkage = buildLedgerLinkage({
+        payload: {
+          scheduleId: record.id,
+          ...(extra.asyncJobId ? { asyncJobId: extra.asyncJobId } : {}),
+        },
+        triggeredBy: "manual",
+      });
+      return this.recordJobRun({
+        jobId: record.id,
+        operation: CHAIN_EXECUTE_OPERATION,
+        started: runStarted,
+        finished: new Date().toISOString(),
+        outcome,
+        triggeredBy: "manual",
+        trigger: linkage.trigger,
+        scheduleId: linkage.scheduleId,
+        asyncJobId: linkage.asyncJobId,
+        workflowId: linkage.workflowId,
+        ...(extra.error !== undefined ? { error: extra.error } : {}),
+        ...(extra.detail !== undefined ? { detail: extra.detail } : {}),
+        ...(extra.descriptor !== undefined
+          ? { descriptor: extra.descriptor }
+          : {}),
+      });
+    };
     // #1548 (slice 0): same halt resolution as onCron, so the
     // direct one-shot path sees the mirrored halt too.
     const fireTenantId = opts?.tenantId ?? "primary";
@@ -2526,6 +2574,7 @@ export class ScheduledAgent extends PortThink {
           /* Blocked already; an audit failure must not unblock it. */
         }
       }
+      await recordOneShotRun("skipped", { detail: decision.reason });
       return { fired: false, reason: decision.reason, record };
     }
     // #1779: the shared PaymentsAgentStub (budgetCheck) via the
@@ -2539,9 +2588,14 @@ export class ScheduledAgent extends PortThink {
       agentId: AGENTIC_SPEND_AGENT_ID,
     });
     if (!budgetOk.allowed) {
+      // Issue #3121 #3393 — a budget refusal is a terminal point:
+      // it records a skipped row with the reason, like the onCron
+      // budget terminal point, and consumes nothing.
+      const budgetReason = `budget check rejected: ${budgetOk.reason ?? "disallowed"}`;
+      await recordOneShotRun("skipped", { detail: budgetReason });
       return {
         fired: false,
-        reason: `budget check rejected: ${budgetOk.reason ?? "disallowed"}`,
+        reason: budgetReason,
         record,
       };
     }
@@ -2560,11 +2614,16 @@ export class ScheduledAgent extends PortThink {
         const failed = execution.legs.filter(
           (l) => l.status === "failed" || l.status === "blocked",
         );
+        // Issue #3121 #3393 — a failed-legs firing is a terminal
+        // point: it records a failure row with the error, like the
+        // onCron failure terminal points, and consumes nothing.
+        const failureReason = `chain execution failed: ${failed
+          .map((l) => `${l.capabilityId}: ${l.detail}`)
+          .join("; ")}`;
+        await recordOneShotRun("failure", { error: failureReason });
         return {
           fired: false,
-          reason: `chain execution failed: ${failed
-            .map((l) => `${l.capabilityId}: ${l.detail}`)
-            .join("; ")}`,
+          reason: failureReason,
           record,
           execution,
         };
@@ -2581,6 +2640,14 @@ export class ScheduledAgent extends PortThink {
     await this.saveSynthesized(
       records.map((r) => (r.id === id ? updated : r)),
     );
+    // Issue #3121 #3393 — the firing consumed the record, so the
+    // success row records with the created job's id (the join key
+    // to the job), the same `job:<id>` descriptor the onCron
+    // job-creating branches stamp.
+    await recordOneShotRun("success", {
+      descriptor: `job:${job.jobId}`,
+      asyncJobId: job.jobId,
+    });
     if (
       execution &&
       opts?.sql &&
