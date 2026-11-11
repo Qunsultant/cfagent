@@ -216,9 +216,18 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
       reportUrl,
     }, ctx.env as never);
 
-    // The port wraps this return as {terminal, report}: return the
-    // flat report object (not a {terminal, report} envelope).
+    // A failed format is partial + marked (issue #4067, #3072's
+    // per-format rule): the stage records "partial" when any format
+    // failed, so the failure is visible as the stage outcome instead
+    // of a whole-run failure; the formats that generated are never
+    // stranded (each format above is its own failure domain). The
+    // port reads the terminal off this flat report object and wraps
+    // it as {terminal, report}; the run outcome stays "completed"
+    // (partial is a non-failing terminal).
+    const anyFormatFailed =
+      pdfStatus === "failed" || xlsxStatus === "failed" || csvStatus === "failed";
     return {
+      terminal: anyFormatFailed ? "partial" : "completed",
       pdfKey,
       pdfStatus,
       pdfError,
