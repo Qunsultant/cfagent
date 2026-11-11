@@ -18,7 +18,9 @@ import { subscribeToRouteChanges } from "./router";
  *   the URL and adopts it, covering both popstate and the "routechange"
  *   event navigateToTab dispatches after pushState (issue 2896: a
  *   popstate-only listener missed left-nav view changes entirely, so
- *   the URL moved but the tab stayed).
+ *   the URL moved but the tab stayed). A URL that names no tab adopts
+ *   the default (issue #3978: back to the bare URL returns to the
+ *   default tab instead of keeping the previous URL's tab).
  */
 export interface UseUrlSyncedTabsOptions<T extends string> {
   /** Canonical query param, e.g. "view". */
@@ -141,13 +143,21 @@ export function useUrlSyncedTabs<T extends string>(
         setActiveTab(tabFromUrl);
         setVisitedTabs((prev) => new Set(prev).add(tabFromUrl));
         onTabChange?.(tabFromUrl);
+      } else if (!tabFromUrl && activeTab !== defaultTab) {
+        // #3978: back/forward to a URL that names no tab (the param
+        // was never written, or was dropped by a tab change) adopts
+        // the default — the tab the bare URL addresses — instead of
+        // keeping the tab the previous URL named.
+        setActiveTab(defaultTab);
+        setVisitedTabs((prev) => new Set(prev).add(defaultTab));
+        onTabChange?.(defaultTab);
       }
     };
     // popstate alone misses navigateToTab: it pushStates and dispatches
     // "routechange" instead, so a left-nav view change never reached the
     // hub (URL moved, tab stayed). subscribeToRouteChanges covers both.
     return subscribeToRouteChanges(handleRouteSync);
-  }, [activeTab, onTabChange, readFromLocation]);
+  }, [activeTab, defaultTab, onTabChange, readFromLocation]);
 
   return { activeTab, visitedTabs, handleTabChange };
 }

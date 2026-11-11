@@ -288,6 +288,10 @@ function feedBlock(id: string): Element {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  // #3978: panel tabs are URL-synced, so a tab click in one test writes
+  // ?providerTab= into the shared jsdom URL and would leak into the
+  // next test's initial tab. Every test starts from a clean URL.
+  window.history.replaceState(null, "", "/");
 });
 
 afterEach(async () => {
@@ -306,6 +310,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
   it("never-run: chip + dataset facts + Run now, no last-run or local-copy lines", async () => {
     installFetch({ lists: [{ providers: [provider({ feed: FEED_NEVER_RUN })], routes: [] }] });
     await renderPanel();
+    await click(container, "yahoo");
     const block = feedBlock("yahoo");
     expect(block.querySelector(".dpp-feed-status-chip-never-run")).not.toBeNull();
     expect(block.textContent).toContain("yahoo-nasdaq100-quotes");
@@ -322,6 +327,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
   it("ready + fresh copy: last run with trigger/counts, copy age, no STALE", async () => {
     installFetch({ lists: [{ providers: [provider({ feed: FEED_FRESH })], routes: [] }] });
     await renderPanel();
+    await click(container, "yahoo");
     const block = feedBlock("yahoo");
     expect(block.querySelector(".dpp-feed-status-chip-ready")).not.toBeNull();
     expect(block.textContent).toContain("Last run: completed");
@@ -335,6 +341,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
   it("ready + stale copy: STALE marker + stale chip, visually distinct", async () => {
     installFetch({ lists: [{ providers: [provider({ feed: FEED_STALE })], routes: [] }] });
     await renderPanel();
+    await click(container, "yahoo");
     const block = feedBlock("yahoo");
     expect(block.querySelector(".dpp-feed-status-chip-stale")).not.toBeNull();
     expect(block.querySelector(".dpp-feed-status-chip-ready")).toBeNull();
@@ -345,6 +352,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
   it("ready + failed last run + no usable copy: failure rendered as failure, with its stable code", async () => {
     installFetch({ lists: [{ providers: [provider({ feed: FEED_FAILED })], routes: [] }] });
     await renderPanel();
+    await click(container, "yahoo");
     const block = feedBlock("yahoo");
     expect(block.querySelector(".dpp-feed-status-chip-failed")).not.toBeNull();
     expect(block.textContent).toContain("Last run: failed");
@@ -365,6 +373,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     };
     installFetch({ lists: [{ providers: [provider({ feed })], routes: [] }] });
     await renderPanel();
+    await click(container, "yahoo");
     const block = feedBlock("yahoo");
     expect(block.textContent).toContain("Last run: partial");
     expect(block.textContent).toContain("97/100 rows");
@@ -374,6 +383,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
   it("not-configured: honest state, dataset facts, and NO Run now button", async () => {
     installFetch({ lists: [{ providers: [provider({ feed: FEED_NOT_CONFIGURED })], routes: [] }] });
     await renderPanel();
+    await click(container, "yahoo");
     const block = feedBlock("yahoo");
     expect(block.querySelector(".dpp-feed-status-chip-not-configured")).not.toBeNull();
     expect(block.textContent).toContain("no dataset store is wired on this host");
@@ -386,6 +396,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
       lists: [{ providers: [provider({ id: "nasdaq", adapterKind: "nasdaq", feed: null, feedJobs: [] })], routes: [] }],
     });
     await renderPanel();
+    await click(container, "nasdaq");
     const row = providerItem("nasdaq");
     expect(row.textContent).toContain("No feed job for this source");
     expect(row.textContent).toContain("listed-securities universe");
@@ -399,6 +410,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
       lists: [{ providers: [provider({ id: "public", adapterKind: "public", feed: null, feedJobs: [] })], routes: [] }],
     });
     await renderPanel();
+    await click(container, "public");
     const row = providerItem("public");
     expect(row.textContent).toContain("No feed job for this source");
     expect(row.textContent).not.toContain("listed-securities universe");
@@ -409,6 +421,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
       lists: [{ providers: [provider({ id: "nasdaq", adapterKind: "nasdaq", feed: null, feedJobs: [NASDAQ_UNIVERSE_JOB] })], routes: [] }],
     });
     await renderPanel();
+    await click(container, "nasdaq");
     const row = providerItem("nasdaq");
     expect(row.textContent).toContain("Nasdaq-100 universe (stored index list)");
     expect(row.textContent).not.toContain("No feed job for this source");
@@ -420,6 +433,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
       lists: [{ providers: [provider({ feed: FEED_FRESH, feedJobs: [PIPELINE_JOB] })], routes: [] }],
     });
     await renderPanel();
+    await click(container, "yahoo");
     const row = providerItem("yahoo");
     expect(row.querySelector(".dpp-feed-status")).not.toBeNull();
     expect(row.textContent).toContain("Yahoo quotes — Nasdaq-100");
@@ -431,6 +445,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
   it("feed block renders even when capture health says no-data (the two facts are not conflated)", async () => {
     installFetch({ lists: [{ providers: [provider({ feed: FEED_FRESH, health: HEALTH })], routes: [] }] });
     await renderPanel();
+    await click(container, "yahoo");
     const row = providerItem("yahoo");
     expect(row.textContent).toContain("No data yet");
     expect(row.querySelector(".dpp-feed-status")).not.toBeNull();
@@ -476,6 +491,7 @@ describe("Run now — the S1 feed-run route (issue #3530 status UX)", () => {
       feedRunGate: gate,
     });
     await renderPanel();
+    await click(container, "yahoo");
     const block = feedBlock("yahoo");
     const btn = buttonWithText(block, "Run now");
     await act(async () => {
@@ -519,6 +535,7 @@ describe("Run now — the S1 feed-run route (issue #3530 status UX)", () => {
       },
     });
     await renderPanel();
+    await click(container, "yahoo");
     await click(feedBlock("yahoo"), "Run now");
     await flush(80);
     expect(container.textContent).toContain("run failed");
@@ -539,6 +556,7 @@ describe("Run now — the S1 feed-run route (issue #3530 status UX)", () => {
       },
     });
     await renderPanel();
+    await click(container, "yahoo");
     await click(feedBlock("yahoo"), "Run now");
     await flush(80);
     expect(document.body.textContent).toContain("partially completed (97/100 rows)");
@@ -554,6 +572,7 @@ describe("Run now — the S1 feed-run route (issue #3530 status UX)", () => {
       },
     });
     await renderPanel();
+    await click(container, "yahoo");
     await click(feedBlock("yahoo"), "Run now");
     await flush(80);
     expect(container.textContent).toContain("Feed-job wiring is incomplete on this host");
@@ -567,6 +586,7 @@ describe("Run now — the S1 feed-run route (issue #3530 status UX)", () => {
       feedRunBody: { error: "A verified session is required to run a feed job." },
     });
     await renderPanel();
+    await click(container, "yahoo");
     await click(feedBlock("yahoo"), "Run now");
     await flush(80);
     expect(container.textContent).toContain("A verified session is required to run a feed job.");

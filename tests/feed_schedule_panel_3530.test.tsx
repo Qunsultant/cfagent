@@ -138,6 +138,11 @@ async function renderPanel() {
     root.render(React.createElement(ToastProvider, null, React.createElement(DataProvidersPanel)));
   });
   await flush(60);
+  // #3978: the feed-job schedule editor lives on the provider tab now;
+  // the overview shows the summary columns only. Every test in this
+  // file renders the yahoo provider (config has no display name, so
+  // the tab label is the id).
+  await click(container, "yahoo");
 }
 
 function providerItem(id: string): Element {
@@ -164,6 +169,10 @@ async function click(scope: ParentNode, text: string) {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  // #3978: panel tabs are URL-synced, so a tab click in one test writes
+  // ?providerTab= into the shared jsdom URL and would leak into the
+  // next test's initial tab. Every test starts from a clean URL.
+  window.history.replaceState(null, "", "/");
 });
 
 afterEach(async () => {

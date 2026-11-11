@@ -32,6 +32,10 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
+    // #3978: panel tabs are URL-synced, so a tab click in one test
+    // writes ?providerTab= into the shared jsdom URL and would leak
+    // into the next test's initial tab. Every test starts clean.
+    window.history.replaceState(null, "", "/");
   });
 
   afterEach(async () => {
@@ -132,6 +136,20 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
+    // #3978: the full 12-column table with the connectivity and action
+    // columns lives on the provider tab now; the overview shows the
+    // summary columns only. The fixture has no display name, so the
+    // tab label is the id.
+    const etradeTab = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === "etrade",
+    ) as HTMLButtonElement;
+    await act(async () => {
+      etradeTab.click();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
     // Verifies table element exists
     const table = container.querySelector("table.dpp-table");
     expect(table).not.toBeNull();
@@ -170,6 +188,16 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
     expect(etradeButtons).toEqual(["Configure", "Verify", "Disable", "Deprovision"]);
 
     // Verifies consistent standard buttons on alpaca row
+    // #3978: the alpaca row lives on its own tab.
+    const alpacaTab = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === "alpaca",
+    ) as HTMLButtonElement;
+    await act(async () => {
+      alpacaTab.click();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
     const alpacaRow = container.querySelector('[data-provider-id="alpaca"]');
     expect(alpacaRow).not.toBeNull();
     const alpacaButtons = Array.from(alpacaRow!.querySelectorAll("button")).map((b) => b.textContent?.trim());

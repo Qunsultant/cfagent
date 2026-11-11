@@ -824,6 +824,10 @@ describe("panel route tier badge (issue #1202)", () => {
   let root: Root;
 
   beforeEach(() => {
+    // #3978: panel tabs are URL-synced, so a tab click in one test
+    // writes ?providerTab= into the shared jsdom URL and would leak
+    // into the next test's initial tab. Every test starts clean.
+    window.history.replaceState(null, "", "/");
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: unknown) => {
@@ -873,6 +877,15 @@ describe("panel route tier badge (issue #1202)", () => {
     await act(async () => {
       root.render(React.createElement(ToastProvider, null, React.createElement(DataProvidersPanel)));
     });
+    // #3978: the capability routes live on the provider tab now; the
+    // overview shows the summary columns only.
+    const etradeTab = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === "E*TRADE",
+    ) as HTMLButtonElement;
+    await act(async () => {
+      etradeTab.click();
+    });
+    await flush(60);
     await waitForText("Primary: etrade");
 
     const rows = [...container.querySelectorAll(".dpp-route")];
