@@ -74,7 +74,6 @@ export const PROPOSED_SEED_PRICES: Record<PriceFamily, number> = {
  * approval with no name and no time is not an audit record.
  */
 export type PriceApprovalStatus = "proposed" | "approved";
-
 export function assertPriceApprovalStatus(status: unknown): PriceApprovalStatus {
   if (status !== "proposed" && status !== "approved") {
     throw new Error(`Invalid price approval status: ${String(status)} (must be proposed or approved).`);
@@ -90,42 +89,109 @@ export function assertApproverId(approverId: unknown): string {
   return approverId.trim();
 }
 
+// Issue #3289: a catalogue row IS a version. The resolver and
+// the segment rules are the single definitions in productPorts.
+import {
+  assertSegment,
+  catalogueVersionId,
+  DEFAULT_SEGMENT,
+  perRunProductId,
+  resolveEffectiveVersion,
+} from "./productPorts";
+
 export interface PriceEntry {
+  /** Version id, e.g. `cat-stock-default-v1` (migration 0058). */
+  id: string;
   family: PriceFamily;
   priceUSD: number;
   updatedAtMs: number;
-  /** #2547: proposed until an operator approves the entry. */
+  /**
+   * #2547: proposed until an operator approves the entry. Only
+   * an APPROVED price may be charged: the monetization gates
+   * resolve prices through getApprovedPrice, so a PROPOSED
+   * price fails closed exactly like a missing one. Approval
+   * is per version automatically, since the status lives on
+   * the version row. approvedBy is the approving operator's
+   * login; approvedAtMs the approval instant. Both are null
+   * on a proposed entry. A pre-#2547 row has approvalStatus
+   * "approved" with approvedBy/approvedAtMs null (grandfathered
+   * by the migration, not by an approval record).
+   */
   approvalStatus: PriceApprovalStatus;
-  /** Login of the approving operator; null while proposed. */
   approvedBy: string | null;
-  /** Epoch ms of the approval; null while proposed. */
   approvedAtMs: number | null;
+  /** Issue #3289 — the per-run product this price belongs to. */
+  productId: string;
+  /** Issue #3289 — the segment this price is sellable to. */
+  segment: string;
+  /** Issue #3289 — the per-product per-segment version number, from 1. */
+  version: number;
+  /** Issue #3289 — the instant this version became chargeable (epoch ms). */
+  effectiveFromMs: number;
+  /** Issue #3289 — the instant this version stops being chargeable (epoch ms); null = open-ended. */
+  effectiveToMs: number | null;
 }
 
 /**
- * The price catalogue store surface. `getPrice` returns the raw
- * stored price (null for a family with no stored row) for
- * operator/display reads; it does NOT consider approval state.
- * Charging reads go through `getApprovedPrice`, which returns
- * null unless the entry exists, is valid, and is APPROVED — that
- * null is the gates' fail-closed signal, not an invitation to
- * guess a price (#2547).
+ * The price catalogue store surface. `getPrice`/`getEntry`
+ * return the EFFECTIVE version for the segment (default
+ * "default"), whether or not it is approved — null when no
+ * version is effective. Charging reads go through
+ * `getApprovedPrice`, which returns null unless the effective
+ * entry exists, is valid, and is APPROVED — that null is the
+ * gates' fail-closed signal, not an invitation to guess a
+ * price (#2547). `getAllPrices` returns the effective version
+ * per family for the default segment, one row per family.
  */
 export interface PriceCatalogue {
-  getPrice(family: string): Promise<number | null>;
-  getEntry(family: string): Promise<PriceEntry | null>;
-  getApprovedPrice(family: string): Promise<number | null>;
+  getPrice(family: string, segment?: string): Promise<number | null>;
+  getEntry(family: string, segment?: string): Promise<PriceEntry | null>;
+  getApprovedPrice(family: string, segment?: string): Promise<number | null>;
   getAllPrices(): Promise<PriceEntry[]>;
   /**
-   * Write a price. Writing ALWAYS lands as PROPOSED with the
-   * approval record cleared: a changed price is a new proposal,
-   * never a silently-still-approved one (#2547).
+   * Issue #3289 — the effective entry for a family+segment at
+   * an explicit instant (default now). The resolution
+   * primitive behind getEntry/getPrice/getApprovedPrice.
+   */
+  getEffectiveEntry(family: string, segment: string, nowMs?: number): Promise<PriceEntry | null>;
+  /**
+   * Issue #3289 — all versions of one family's per-run
+   * product (optionally one segment), oldest effective first.
+   * A catalogue row IS a version, so this is the version-chain
+   * read for per-run products.
+   */
+  listVersions(family: string, segment?: string): Promise<PriceEntry[]>;
+  /**
+   * Issue #3289 — create a new version for a family+segment:
+   * the version number is server-assigned (max existing + 1),
+   * the version is PROPOSED (a price change is never approved
+   * by being written), effectiveFromMs defaults to now,
+   * segment to "default". A duplicate effectiveFromMs for the
+   * product+segment throws.
+   */
+  createVersion(input: {
+    family: PriceFamily;
+    priceUSD: number;
+    segment?: string;
+    effectiveFromMs?: number;
+    effectiveToMs?: number | null;
+  }): Promise<PriceEntry>;
+  /**
+   * Issue #3289 — set a price = create a new version (see
+   * createVersion). A price change is always a new version,
+   * never an edit in place: the old version stays on record
+   * (and stays chargeable to grandfathered holders until its
+   * effectiveToMs). The operator price route keeps its shape.
+   * Writing ALWAYS lands as PROPOSED with the approval record
+   * cleared: a changed price is a new proposal, never a
+   * silently-still-approved one (#2547).
    */
   setPrice(input: { family: unknown; priceUSD: unknown }): Promise<PriceEntry>;
   /**
-   * Approve the stored price for a family, recording the
-   * approver and the approval time. Approving a family with no
-   * stored price throws — there is nothing to approve.
+   * Approve the EFFECTIVE version of a family in a segment
+   * (default "default"), recording the approver and the
+   * approval time. Approving a family with no effective version
+   * throws — there is nothing to approve.
    */
-  approvePrice(input: { family: unknown; approverId: unknown }): Promise<PriceEntry>;
+  approvePrice(input: { family: unknown; approverId: unknown; segment?: unknown }): Promise<PriceEntry>;
 }

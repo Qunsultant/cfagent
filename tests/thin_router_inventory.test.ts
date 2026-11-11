@@ -381,6 +381,16 @@
  * channel read) — bringing the pinned inventory to 420 entries;
  * the delegation sequence is unchanged (same handler, same
  * position).
+ *
+ * Issue #3289 (slice 1) added four — POST
+ * /payments/agentic/commercial/subscriptions/:subscriptionId/move
+ * and POST /payments/agentic/commercial/accounts/:userId/segment
+ * (in handleAgenticPaymentsRoutes, after the prices route, before
+ * the operators routes). Each path-param route contributes two
+ * inventory entries (an includes literal for the prefix and an
+ * endsWith literal for the suffix, in source order) — bringing
+ * the pinned inventory to 424 entries; the delegation sequence
+ * is unchanged (same handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -632,6 +642,10 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/pricing\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/prices\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/prices\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/subscriptions/\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/move\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/accounts/\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/segment\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators/add\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators/remove\")",

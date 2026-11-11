@@ -303,7 +303,10 @@ describe("billing service: create, externalized defaults, and grandfather", () =
     // Repurchase activation (the live behaviour) still works with the new record fields present.
     const subs = new InMemorySubscriptionAdapter();
     const store = new InMemoryCommercialAdapter();
-    const plan = await subs.createPlan({ id: "pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10 });
+    const created = await subs.createPlan({ id: "pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10 });
+    // Issue #3289: purchase activation validates approved+active.
+    await subs.approvePlan(created.id, "test-operator");
+    const plan = (await subs.getPlan(created.id))!;
     const { subscription } = await activateSubscription({
       subs, store, userId: "u1", tenantId: "t1", plan, providerPaymentRef: "sub-rep-1", nowMs: NOW,
     });

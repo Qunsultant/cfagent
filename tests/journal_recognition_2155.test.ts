@@ -153,6 +153,9 @@ describe("recognition derivation from journal entries + subscription period", ()
       transactionRef: "sub-checkout-1",
       tenantId: "tenant-a",
       subscriptionId: "sub-1",
+      productId: "prod-sub-basic",
+
+      versionId: "plan-basic-v1",
       amountUSD: 30,
     });
   }
@@ -198,6 +201,8 @@ describe("recognition posting through the journal port (#2155 follow-up)", () =>
         transactionRef: "sub-checkout-1",
         tenantId: "tenant-a",
         subscriptionId: "sub-1",
+        productId: "prod-sub-basic",
+        versionId: "plan-basic-v1",
         amountUSD: 30,
       }),
     );
@@ -251,6 +256,8 @@ describe("recognition posting through the journal port (#2155 follow-up)", () =>
         transactionRef: "sub-checkout-9",
         tenantId: "tenant-b",
         subscriptionId: "sub-1",
+        productId: "prod-sub-basic",
+        versionId: "plan-basic-v1",
         amountUSD: 99,
       }),
     );

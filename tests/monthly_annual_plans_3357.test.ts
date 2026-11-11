@@ -51,11 +51,17 @@ import * as drizzleSchema from "../src/data/drizzleSchema";
 import { InMemoryBillingPolicyAdapter } from "../src/data/inMemoryBillingPolicyAdapter";
 import { InMemorySubscriptionAdapter } from "../src/data/inMemorySubscriptionAdapter";
 import {
+  MIGRATION_0007_COMMERCIAL_STORE,
   MIGRATION_0008_SUBSCRIPTIONS,
+  MIGRATION_0009_JOURNAL,
+  MIGRATION_0011_PRICE_CATALOGUE,
+  MIGRATION_0012_NATIVE_LEDGER,
   MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS,
   MIGRATION_0014_BILLING,
+  MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
   MIGRATION_0041_PLAN_TRIAL_DAYS,
   MIGRATION_0049_PLAN_PRICE_APPROVAL,
+  MIGRATION_0058_PRODUCT_VERSIONS,
   ALL_MIGRATIONS,
   applyMigrations,
   type MigrationDb,
@@ -251,12 +257,30 @@ describe("migration 0049 — plan price approval (#3357)", () => {
       )
       .run(NOW, NOW);
     await applyMigrations(db as unknown as MigrationDb, [MIGRATION_0049_PLAN_PRICE_APPROVAL]);
+    // Issue #3289: the adapter's SELECT now reads the 0058
+    // version columns, so 0058 (+ its prerequisites) must be
+    // applied before the adapter read. The legacy row is
+    // backfilled as v1 of its name-derived product, approval
+    // preserved.
+    await applyMigrations(db as unknown as MigrationDb, [
+      MIGRATION_0007_COMMERCIAL_STORE,
+      MIGRATION_0009_JOURNAL,
+      MIGRATION_0011_PRICE_CATALOGUE,
+      MIGRATION_0012_NATIVE_LEDGER,
+      MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
+      MIGRATION_0058_PRODUCT_VERSIONS,
+    ]);
     const subs = new D1SubscriptionAdapter(db);
     const legacy = await subs.getPlan("legacy-monthly");
     expect(legacy?.approvalStatus).toBe("approved");
     expect(legacy?.approvedBy).toBeNull();
     expect(legacy?.approvedAtMs).toBeNull();
     expect(isPlanPriceApproved(legacy!)).toBe(true);
+    expect(legacy?.productId).toBe("prod-sub-legacy-monthly");
+    expect(legacy?.segment).toBe("default");
+    expect(legacy?.version).toBe(1);
+    expect(legacy?.effectiveFromMs).toBe(NOW);
+    expect(legacy?.billingPeriod).toBe("monthly");
   });
 
   it("drizzle schema maps the approval columns (DDL/schema parity)", () => {

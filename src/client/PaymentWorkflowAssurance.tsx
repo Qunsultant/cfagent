@@ -60,6 +60,7 @@ import {
   PROPOSED_SEED_PRICES,
   type PriceCatalogue,
   type PriceEntry,
+  type PriceFamily,
 } from "../data/priceCataloguePorts";
 import {
   runPaymentWorkflowFlow,
@@ -155,14 +156,42 @@ export async function runAssuranceScenario(cfg: FakeConfig): Promise<ScenarioRes
     async getAllPrices(): Promise<PriceEntry[]> {
       return (Object.entries(PROPOSED_SEED_PRICES) as Array<[ScreenerFamily, number]>).map(
         ([family, priceUSD]) => ({
+          // Issue #3289: the demo entries are v1 rows for the
+          // default segment, effective now — the same shape the
+          // real catalogue seeds.
+          id: `cat-${family}-default-v1`,
           family,
           priceUSD,
           updatedAtMs: Date.now(),
           approvalStatus: "approved" as const,
           approvedBy: "payment-assurance-demo",
           approvedAtMs: Date.now(),
+          productId: `prod-per-run-${family}`,
+          segment: "default",
+          version: 1,
+          effectiveFromMs: Date.now(),
+          effectiveToMs: null,
         }),
       );
+    },
+    async getEffectiveEntry(family: string, segment?: string, nowMs?: number): Promise<PriceEntry | null> {
+      void segment;
+      void nowMs;
+      return this.getEntry(family);
+    },
+    async listVersions(family: string, segment?: string): Promise<PriceEntry[]> {
+      void segment;
+      const entry = await this.getEntry(family);
+      return entry ? [entry] : [];
+    },
+    async createVersion(input: {
+      family: PriceFamily;
+      priceUSD: number;
+      segment?: string;
+      effectiveFromMs?: number;
+      effectiveToMs?: number | null;
+    }): Promise<PriceEntry> {
+      throw new Error(`Demo catalogue is read-only (family ${String(input.family)} not versioned).`);
     },
     async setPrice(input: { family: unknown; priceUSD: unknown }): Promise<PriceEntry> {
       throw new Error(`Demo catalogue is read-only (family ${String(input.family)} not set).`);

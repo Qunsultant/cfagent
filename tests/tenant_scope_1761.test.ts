@@ -132,6 +132,8 @@ describe.each([
         tenantId: "tenant-a",
         runRequestId: "run-1",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -148,6 +150,8 @@ describe.each([
         tenantId: "tenant-a",
         runRequestId: "run-1",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -162,6 +166,8 @@ describe.each([
           tenantId: "tenant-b",
           runRequestId: "run-1",
           family: "goal",
+          productId: "prod-per-run-goal",
+          versionId: "cat-goal-default-v1",
           amountUSD: 0.1,
         }),
       ),

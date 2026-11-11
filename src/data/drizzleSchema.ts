@@ -314,6 +314,8 @@ export const agentCommercialAccounts = sqliteTable("agent_commercial_accounts", 
   unlimitedFreeGrantedBy: text("unlimited_free_granted_by"),
   unlimitedFreeReason: text("unlimited_free_reason"),
   unlimitedFreeExpiresAtMs: integer("unlimited_free_expires_at_ms"),
+  /** Issue #3289: the customer's market/customer segment (migration 0058). Default "default"; a missing/null segment reads as "default". */
+  segment: text("segment").notNull().default("default"),
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
 
@@ -494,6 +496,10 @@ export const agentCreditClaims = sqliteTable("agent_credit_claims", {
   userId: text("user_id").notNull(),
   family: text("family").notNull(),
   amountUSD: real("amount_usd").notNull(),
+  /** Issue #3289: the product/version/price of the charge this claim reverses (migration 0058). NULL on legacy claims. */
+  productId: text("product_id"),
+  versionId: text("version_id"),
+  priceUSD: real("price_usd"),
   createdAtMs: integer("created_at_ms").notNull(),
 });
 
@@ -692,6 +698,10 @@ export const agentJournalEntries = sqliteTable("agent_journal_entries", {
   tenantId: text("tenant_id").notNull(),
   runRequestId: text("run_request_id").notNull(),
   family: text("family").notNull(),
+  /** Issue #3289: per-charge product/version/price recording (migration 0058). NULL on legacy rows; the mapping layer requires them for new per-run events. */
+  productId: text("product_id"),
+  versionId: text("version_id"),
+  priceUSD: real("price_usd"),
   createdAtMs: integer("created_at_ms").notNull(),
 });
 
@@ -740,6 +750,10 @@ export const agentNativeLedgerRows = sqliteTable("agent_native_ledger_rows", {
   tenantId: text("tenant_id").notNull(),
   family: text("family").notNull(),
   runRequestId: text("run_request_id").notNull(),
+  /** Issue #3289: per-charge product/version/price recording (migration 0058). NULL on legacy rows; the price is the charge price. */
+  productId: text("product_id"),
+  versionId: text("version_id"),
+  priceUSD: real("price_usd"),
   createdAtMs: integer("created_at_ms").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
@@ -842,14 +856,35 @@ export const agentDigestPassDays = sqliteTable("agent_digest_pass_days", {
  * that this mapping and that DDL agree on columns.
  */
 export const agentPriceCatalogue = sqliteTable("agent_price_catalogue", {
-  family: text("family").primaryKey(),
+  /**
+   * Issue #3289: the catalogue is versioned (migration 0058
+   * rebuilds the table). The PRIMARY KEY is the version id
+   * (`cat-<family>-<segment>-v<version>`); `family` is no longer
+   * the key — one family has many versions across segments.
+   * This schema MAPS the table; it does not create it — DDL
+   * authority lives in migration 0058
+   * (src/data/migrationRunner.ts), and a test pins that this
+   * mapping and that DDL agree on columns.
+   */
+  id: text("id").primaryKey(),
+  family: text("family").notNull(),
   priceUSD: real("price_usd").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
   // Approval state (#2547): migration 0027 adds these columns to
-  // the 0011 table; existing rows default to 'proposed'.
+  // the 0011 table; existing rows default to 'proposed'. Migration
+  // 0058 rebuilds the table and carries them into the new DDL.
   approvalStatus: text("approval_status").notNull().default("proposed"),
   approvedBy: text("approved_by"),
   approvedAtMs: integer("approved_at_ms"),
+  // Version columns (#3289, migration 0058): the product this
+  // version belongs to, the segment it is sellable to, the
+  // per-product per-segment version number, and the effective
+  // window (effectiveToMs null = open-ended).
+  productId: text("product_id").notNull(),
+  segment: text("segment").notNull().default("default"),
+  version: integer("version").notNull(),
+  effectiveFromMs: integer("effective_from_ms").notNull(),
+  effectiveToMs: integer("effective_to_ms"),
 });
 
 /**
@@ -881,6 +916,80 @@ export const agentSubscriptionPlans = sqliteTable("agent_subscription_plans", {
   active: integer("active").notNull(),
   createdAtMs: integer("created_at_ms").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
+  // Product versions (#3289, migration 0058): the plan row IS
+  // the version. productId is the product it belongs to;
+  // segment is the market it is sellable to (default "default");
+  // version is the per-product per-segment number from 1;
+  // effectiveFromMs/effectiveToMs are the launch window
+  // (effectiveToMs null = open-ended); billingPeriod is
+  // monthly|annual; featuresJson is a display-only JSON array;
+  // stripePriceId is the Stripe Price object for this version.
+  productId: text("product_id").notNull().default(""),
+  segment: text("segment").notNull().default("default"),
+  version: integer("version").notNull().default(1),
+  effectiveFromMs: integer("effective_from_ms").notNull().default(0),
+  effectiveToMs: integer("effective_to_ms"),
+  billingPeriod: text("billing_period").notNull().default("monthly"),
+  featuresJson: text("features_json"),
+  stripePriceId: text("stripe_price_id"),
+});
+
+/**
+ * Products (#3289, migration 0058): product identity. A product
+ * is the thing customers buy; its versions (plan rows for
+ * subscriptions, catalogue rows for per-run) are the immutable
+ * terms snapshots. This schema MAPS the table; DDL authority
+ * lives in migration 0058 (src/data/migrationRunner.ts).
+ */
+export const agentProducts = sqliteTable("agent_products", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull(),
+  description: text("description"),
+  createdAtMs: integer("created_at_ms").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Per-customer version moves (#3289 §3.8, migration 0058): one
+ * row per customer moved — the audit that answers "what
+ * happened to customer X". bulkMoveId is null for a
+ * per-customer move; productId is null for a segment-only move
+ * by a customer holding no version. This schema MAPS the
+ * table; DDL authority lives in migration 0058.
+ */
+export const agentVersionMoves = sqliteTable("agent_version_moves", {
+  id: text("id").primaryKey(),
+  bulkMoveId: text("bulk_move_id"),
+  userId: text("user_id").notNull(),
+  productId: text("product_id"),
+  fromVersionId: text("from_version_id"),
+  toVersionId: text("to_version_id"),
+  segment: text("segment").notNull(),
+  movedBy: text("moved_by").notNull(),
+  reason: text("reason"),
+  movedAtMs: integer("moved_at_ms").notNull(),
+});
+
+/**
+ * Bulk-move summaries (#3289 §3.8, migration 0058): one row per
+ * bulk move (the "move all customers to current pricing"
+ * action, slice 2). This schema MAPS the table; DDL authority
+ * lives in migration 0058.
+ */
+export const agentBulkMoves = sqliteTable("agent_bulk_moves", {
+  id: text("id").primaryKey(),
+  productId: text("product_id").notNull(),
+  segmentScope: text("segment_scope"),
+  targetVersionIdsJson: text("target_version_ids_json").notNull(),
+  movedBy: text("moved_by").notNull(),
+  reason: text("reason"),
+  status: text("status").notNull(),
+  movedCount: integer("moved_count").notNull(),
+  skippedCount: integer("skipped_count").notNull(),
+  failedCount: integer("failed_count").notNull(),
+  startedAtMs: integer("started_at_ms").notNull(),
+  finishedAtMs: integer("finished_at_ms"),
 });
 
 /**
