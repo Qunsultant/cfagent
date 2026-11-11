@@ -104,6 +104,43 @@ import {
 } from "./pipelinePolicy";
 import { computeBackoffDelayMs } from "./resilience";
 import {
+  FEED_JOB_TIMEOUTS,
+  withFeedDeadline,
+} from "./feedJobTimeouts";
+import { FEED_JOB_CODES } from "./feedJobs";
+
+/**
+ * The step name of the feed pull, as registered by
+ * createFeedStepRegistry (FEED_PULL_STEP in feedPipelineJobs.ts).
+ * Declared locally rather than imported: feedPipelineJobs.ts
+ * imports this module, so importing its constant here would
+ * close a module cycle. The two declarations name the same
+ * step; the #3992 PR-4 pin suite exercises the real registry,
+ * so a drift between them fails loudly there.
+ */
+const FEED_PULL_STEP_NAME = "feed.pull";
+
+/** True when any node in the definition tree invokes the named step. */
+function jobTreeInvokesStep(node: JobNodeConfig, stepName: string): boolean {
+  if ((node.steps ?? []).some((step) => step.step === stepName)) return true;
+  return (node.children ?? []).some((child) => jobTreeInvokesStep(child, stepName));
+}
+
+/**
+ * Resolve a feed run's whole-execution bound (#3992 PR-4): a
+ * positive finite injected value wins; absent, non-positive, or
+ * non-finite falls back to the catalogue value
+ * FEED_JOB_TIMEOUTS.executionMs. Configuration-shaped input can
+ * never silently mean "no deadline" — the catalogue is the
+ * floor of meaning, exactly as withFeedDeadline refuses a
+ * non-positive bound by name.
+ */
+export function resolveFeedExecutionDeadlineMs(injected?: number): number {
+  return typeof injected === "number" && Number.isFinite(injected) && injected > 0
+    ? injected
+    : FEED_JOB_TIMEOUTS.executionMs;
+}
+import {
   DEFAULT_STAGE_TIMEOUT_MS,
   isJobStageId,
   jobStageId,
@@ -201,6 +238,18 @@ export interface JobPipelineDeps {
   sleep?: (ms: number) => Promise<void>;
   /** The stage-runner invocation this host drives (the contract's driver kind). Defaults to "sync". */
   invocation?: StageRunnerInvocation;
+  /**
+   * Optional whole-execution bound for FEED jobs only (#3992
+   * PR-4): executeRun races a feed job's execution tree against
+   * this many milliseconds and settles the run failed with
+   * FEED_DEADLINE_EXCEEDED past it. Resolved through
+   * resolveFeedExecutionDeadlineMs — absent / non-positive /
+   * non-finite means the catalogue value
+   * FEED_JOB_TIMEOUTS.executionMs (240s), so hosts that never
+   * set this are bounded by default. Non-feed jobs are never
+   * raced by this bound.
+   */
+  feedExecutionDeadlineMs?: number;
   /** The schedule host stage scheduling registers with. registerSchedules takes its host explicitly; scheduleStage falls back to this. */
   scheduleHost?: JobScheduleHost;
 }
@@ -1658,7 +1707,27 @@ export class JobPipelineControl {
 
     try {
       const scopeNode = this.nodeAtPath(definition.root, opts.scopePath);
-      await this.execNode(ctx, scopeNode, opts.scopePath, null);
+      // #3992 PR-4: a feed job's whole execution tree is bounded
+      // by the resolved feed execution deadline. The race covers
+      // ONLY this await — instance setup above and the terminal
+      // writes below stay outside it. The rejection abandons the
+      // execution (abandon-not-abort, the withFeedDeadline
+      // idiom): the tree may keep running in the host, but the
+      // run is terminally settled by the catch below, and the
+      // zombie's late writes go through the step journal and the
+      // run's own stores — never through this run's terminal
+      // path — so the settled outcome cannot flip. Non-feed jobs
+      // execute exactly as before.
+      const execution = this.execNode(ctx, scopeNode, opts.scopePath, null);
+      if (jobTreeInvokesStep(definition.root, FEED_PULL_STEP_NAME)) {
+        await withFeedDeadline(
+          execution,
+          resolveFeedExecutionDeadlineMs(this.deps.feedExecutionDeadlineMs),
+          FEED_JOB_CODES.deadlineExceeded,
+        );
+      } else {
+        await execution;
+      }
       instance = await this.requireInstance(jobId);
       const descriptor =
         `run ${opts.runId}: ${ctx.stepExecutions} step executions, ${ctx.artifactKeys.length} artifacts` +
@@ -1716,6 +1785,15 @@ export class JobPipelineControl {
           artifactKeys: [...ctx.artifactKeys],
         };
       }
+      // #3992 PR-4: a feed execution that exceeded its whole-run
+      // deadline arrives here as a FeedJobTimeoutError whose
+      // code is FEED_JOB_CODES.deadlineExceeded, and settles
+      // EXACTLY like any other failure — same instance state,
+      // same publication, same terminal record — by design: no
+      // separate settle path exists for it to diverge through.
+      // Its message carries the FEED_DEADLINE_EXCEEDED code, so
+      // the run record, the instance's lastError, and the panel
+      // name the deadline rather than a generic failure.
       const message = error instanceof Error ? error.message : String(error);
       instance = { ...instance, state: "failed", desiredState: "none", lastError: message };
       await this.setInstance(instance);
