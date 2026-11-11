@@ -59,6 +59,54 @@ export interface ActivationResult {
   account: CommercialAccountRecord;
 }
 
+/**
+ * Issue #3289 — validate a plan version is approved and active.
+ * The plan row IS a version, so its approval is per-version: a
+ * PROPOSED version is never chargeable, and a deactivated
+ * version is never buyable. Used by the purchase path
+ * (activateSubscription), which validates approved+active ONLY
+ * — not effective: a checkout minted for plan X must still
+ * activate after an operator launches a new version in between,
+ * or a paid checkout would strand (the mint-time effective
+ * check is the route's job).
+ */
+export function assertPlanApprovedAndActive(plan: SubscriptionPlanRecord): void {
+  if (!plan.active) throw new Error(`Plan ${plan.id} is not active.`);
+  if (plan.approvalStatus !== "approved") {
+    throw new Error(
+      `Plan ${plan.id} is not approved (status: ${plan.approvalStatus}): refusing to activate an unapproved price (fail-closed).`,
+    );
+  }
+}
+
+/**
+ * Issue #3289 — validate a plan version is effective + approved
+ * FOR THE BUYER'S SEGMENT at purchase/trial start. The buyer
+ * buys the effective version for their segment, never a stale,
+ * future, expired, deactivated, or unapproved one, and never a
+ * version effective only for another segment. The effective
+ * lookup uses the store's getEffectiveVersion (the one
+ * resolver), so the check cannot drift from the GET /plans
+ * listing the buyer chose from. Used by the trial path
+ * (activateTrialSubscription), where no payment has been taken
+ * yet and refusing a superseded version costs the buyer
+ * nothing — they re-list and trial the current version.
+ */
+export async function assertPlanEffectiveAndApprovedForSegment(
+  subs: SubscriptionStore,
+  plan: SubscriptionPlanRecord,
+  segment: string,
+  nowMs: number = Date.now(),
+): Promise<void> {
+  assertPlanApprovedAndActive(plan);
+  const effective = await subs.getEffectiveVersion(plan.productId, segment, nowMs);
+  if (!effective || effective.id !== plan.id) {
+    throw new Error(
+      `Plan ${plan.id} is not the effective version for product ${plan.productId} in segment ${segment}: refusing to activate a version the buyer cannot currently buy (fail-closed).`,
+    );
+  }
+}
+
 export interface GrantInput {
   subs: SubscriptionStore;
   store: CommercialStore;
@@ -139,7 +187,10 @@ export async function grantSubscription(input: GrantInput): Promise<ActivationRe
 export async function activateSubscription(input: ActivationInput): Promise<ActivationResult> {
   const { subs, store, userId, tenantId, plan, providerPaymentRef } = input;
   const nowMs = input.nowMs ?? Date.now();
-  if (!plan.active) throw new Error(`Plan ${plan.id} is not active.`);
+  // Issue #3289: approved+active only (NOT effective) — see
+  // assertPlanApprovedAndActive: a paid checkout must not
+  // strand because a new version launched after mint.
+  assertPlanApprovedAndActive(plan);
   if (!providerPaymentRef) throw new Error("providerPaymentRef is required.");
   const replay = await subs.findByPaymentRef(providerPaymentRef);
   if (replay) {

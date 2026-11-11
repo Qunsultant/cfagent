@@ -2038,6 +2038,214 @@ export const MIGRATION_0057_JOB_DELIVERY_DATASETS: DataMigration = {
     CREATE INDEX IF NOT EXISTS idx_job_delivery_datasets_job
       ON job_delivery_datasets (job_id, created_at DESC, id DESC)`,
 };
+/**
+ * Migration 0058 — product versions (#3289 slice 1, sub-issue of
+ * #3241). Products are identity; versions are immutable terms
+ * snapshots; plan rows ARE versions and catalogue rows ARE
+ * versions (design docs/architecture — #3289 §3).
+ *
+ * What it does:
+ * - agent_products: the product identity table, seeded with the
+ *   four per-run products (stock/goal/options/strategy) and the
+ *   read-only Free baseline, plus one product per distinct
+ *   existing plan name (dynamic backfill — the live store's plan
+ *   rows are operator data, never assumed here).
+ * - agent_subscription_plans gains the version columns
+ *   (product_id, segment, version, effective_from_ms,
+ *   effective_to_ms, billing_period, features_json,
+ *   stripe_price_id). Every existing row becomes version 1 of
+ *   its name-derived product in segment "default", keeping its
+ *   approval status; effective_from_ms is the row's own
+ *   created_at_ms (the row is already live, so it must be
+ *   effective — see the date-function note below).
+ * - agent_price_catalogue is REBUILT: its PRIMARY KEY was
+ *   `family` (one row per family), which cannot hold versions.
+ *   The rebuild renames the old table aside, creates the new
+ *   table with a surrogate `id` PK (deterministic
+ *   `cat-<family>-default-v1`), copies every row as v1 of its
+ *   family product in segment "default" (approval status
+ *   preserved), then drops the old table. The (product, segment,
+ *   version) unique index makes the version number unambiguous.
+ *   There is deliberately NO unique index on (product, segment,
+ *   effective_from_ms): two versions may share a start instant
+ *   (same-millisecond creation is a race, not a caller error —
+ *   the design's "duplicate effectiveFromMs rejected" is
+ *   superseded here), and the resolver tiebreaks ties by
+ *   greatest version, so the pick stays total and a version
+ *   created "effective now" is effective now, never 1ms in the
+ *   future (a +1ms bump broke setPrice→approvePrice in the
+ *   same millisecond: the bumped version was not yet effective
+ *   when approvePrice ran, so it approved the old version).
+ * - agent_commercial_accounts gains `segment` (default
+ *   "default"); agent_journal_entries, agent_native_ledger_rows
+ *   and agent_credit_claims gain product_id / version_id /
+ *   price_usd (nullable in DDL — legacy rows predate
+ *   versioning; the mapping layer requires them for new per-run
+ *   events, fail-closed).
+ * - agent_version_moves + agent_bulk_moves: the move audit
+ *   (§3.8). The (bulk_move_id, user_id) unique index is the
+ *   bulk-job idempotency backstop; SQLite treats NULLs as
+ *   distinct, so per-customer moves (bulk_move_id NULL) never
+ *   collide on it. DEVIATION from the design's §3.8 table:
+ *   to_version_id is NULLABLE here (the design shows it NOT
+ *   NULL) — a segment-only move by a customer holding no
+ *   version has no version to record, and the audit row must
+ *   still exist (the segment change is the audited fact).
+ *   product_id was already nullable in the design for the same
+ *   case.
+ *
+ * Deviations from the design, recorded not hidden:
+ * - effective_from_ms is the row's own created_at_ms /
+ *   updated_at_ms, not "migration time": the portable-subset
+ *   rule (no dialect date functions) forbids strftime('now')
+ *   in migration SQL, and the row's recorded instant is the
+ *   more accurate "live since" value anyway.
+ * - The catalogue rebuild is the one statement sequence in
+ *   this repo that is not crash-convergent: a crash between the
+ *   RENAME and the CREATE leaves the old table as
+ *   agent_price_catalogue_legacy and a re-run fails at the
+ *   RENAME. Recovery is one statement —
+ *   `ALTER TABLE agent_price_catalogue_legacy RENAME TO
+ *   agent_price_catalogue` — before re-running the ensure.
+ *   The window is two adjacent statements; every other
+ *   statement here is IF NOT EXISTS / OR IGNORE shaped.
+ * - The product id for a plan is derived from its name
+ *   (`prod-sub-` + lowercase, spaces to hyphens) so the
+ *   backfill is deterministic in pure SQL; the same derivation
+ *   lives in src/data/productPorts.ts
+ *   (subscriptionProductIdForName) and the two must agree.
+ *   Duplicate plan names share one product and are numbered
+ *   by creation order (version = rank, effective_from_ms
+ *   staggered by rank-1 ms so the effective ordering matches
+ *   creation order — the (product, segment, effective_from_ms)
+ *   unique index was dropped; ties are allowed and resolve by
+ *   greatest version, see the rebuild note above).
+ * - The four per-run catalogue prices are NOT seeded here:
+ *   the ensure-time seed (PROPOSED_SEED_PRICES in
+ *   ensurePriceCatalogueSchema) stays the seed, because the
+ *   fail-closed empty-catalogue test needs a seed-free path
+ *   and the #2185 pin is "an operator edit survives re-ensure".
+ *   The products seeded here are identity rows, not prices.
+ *
+ * Prerequisites: any ensure path that applies 0058 must have
+ * applied 0007 (accounts/claims), 0008 (plans), 0009
+ * (journal), 0011 (catalogue), 0012 (native ledger) and 0027
+ * (catalogue approval columns) first — the backfill reads the
+ * plans table, the rebuild copies the approval columns, and
+ * the account/journal/ledger/claim ALTERs need their tables.
+ * The six ensure lists that include 0058 (product,
+ * subscription, catalogue, commercial, journal, native ledger)
+ * carry those prerequisites (applyMigrations sorts by version,
+ * so list order does not matter).
+ */
+export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
+  version: 58,
+  name: "0058_product_versions",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_products (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  description TEXT,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO agent_products (id, name, kind, description, created_at_ms, updated_at_ms)
+  VALUES
+    ('prod-per-run-stock', 'stock', 'per_run', NULL, 0, 0),
+    ('prod-per-run-goal', 'goal', 'per_run', NULL, 0, 0),
+    ('prod-per-run-options', 'options', 'per_run', NULL, 0, 0),
+    ('prod-per-run-strategy', 'strategy', 'per_run', NULL, 0, 0),
+    ('prod-free', 'Free', 'subscription', NULL, 0, 0);
+INSERT OR IGNORE INTO agent_products (id, name, kind, description, created_at_ms, updated_at_ms)
+  SELECT 'prod-sub-' || lower(replace(trim(name), ' ', '-')), MIN(name), 'subscription', NULL, MIN(created_at_ms), MIN(created_at_ms)
+  FROM agent_subscription_plans
+  GROUP BY 'prod-sub-' || lower(replace(trim(name), ' ', '-'));
+ALTER TABLE agent_subscription_plans ADD COLUMN product_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_subscription_plans ADD COLUMN segment TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE agent_subscription_plans ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE agent_subscription_plans ADD COLUMN effective_from_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agent_subscription_plans ADD COLUMN effective_to_ms INTEGER;
+ALTER TABLE agent_subscription_plans ADD COLUMN billing_period TEXT NOT NULL DEFAULT 'monthly';
+ALTER TABLE agent_subscription_plans ADD COLUMN features_json TEXT;
+ALTER TABLE agent_subscription_plans ADD COLUMN stripe_price_id TEXT;
+UPDATE agent_subscription_plans SET
+  product_id = 'prod-sub-' || lower(replace(trim(name), ' ', '-')),
+  segment = 'default',
+  version = (
+    SELECT COUNT(*) FROM agent_subscription_plans AS p2
+    WHERE 'prod-sub-' || lower(replace(trim(p2.name), ' ', '-')) = 'prod-sub-' || lower(replace(trim(agent_subscription_plans.name), ' ', '-'))
+      AND (p2.created_at_ms < agent_subscription_plans.created_at_ms OR (p2.created_at_ms = agent_subscription_plans.created_at_ms AND p2.id <= agent_subscription_plans.id))
+  ),
+  effective_from_ms = created_at_ms + (
+    SELECT COUNT(*) FROM agent_subscription_plans AS p2
+    WHERE 'prod-sub-' || lower(replace(trim(p2.name), ' ', '-')) = 'prod-sub-' || lower(replace(trim(agent_subscription_plans.name), ' ', '-'))
+      AND (p2.created_at_ms < agent_subscription_plans.created_at_ms OR (p2.created_at_ms = agent_subscription_plans.created_at_ms AND p2.id < agent_subscription_plans.id))
+  ),
+  effective_to_ms = NULL,
+  billing_period = CASE WHEN period_days = 365 THEN 'annual' ELSE 'monthly' END,
+  features_json = NULL,
+  stripe_price_id = NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS agent_subscription_plans_product_segment_version_idx ON agent_subscription_plans (product_id, segment, version);
+ALTER TABLE agent_price_catalogue RENAME TO agent_price_catalogue_legacy;
+CREATE TABLE agent_price_catalogue (
+  id TEXT PRIMARY KEY,
+  family TEXT NOT NULL,
+  price_usd REAL NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  approval_status TEXT NOT NULL DEFAULT 'proposed',
+  approved_by TEXT,
+  approved_at_ms INTEGER,
+  product_id TEXT NOT NULL,
+  segment TEXT NOT NULL DEFAULT 'default',
+  version INTEGER NOT NULL,
+  effective_from_ms INTEGER NOT NULL,
+  effective_to_ms INTEGER
+);
+INSERT INTO agent_price_catalogue (id, family, price_usd, updated_at_ms, approval_status, approved_by, approved_at_ms, product_id, segment, version, effective_from_ms, effective_to_ms)
+  SELECT 'cat-' || family || '-default-v1', family, price_usd, updated_at_ms, approval_status, approved_by, approved_at_ms, 'prod-per-run-' || family, 'default', 1, updated_at_ms, NULL
+  FROM agent_price_catalogue_legacy;
+DROP TABLE agent_price_catalogue_legacy;
+CREATE UNIQUE INDEX IF NOT EXISTS agent_price_catalogue_product_segment_version_idx ON agent_price_catalogue (product_id, segment, version);
+ALTER TABLE agent_commercial_accounts ADD COLUMN segment TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE agent_journal_entries ADD COLUMN product_id TEXT;
+ALTER TABLE agent_journal_entries ADD COLUMN version_id TEXT;
+ALTER TABLE agent_journal_entries ADD COLUMN price_usd REAL;
+ALTER TABLE agent_native_ledger_rows ADD COLUMN product_id TEXT;
+ALTER TABLE agent_native_ledger_rows ADD COLUMN version_id TEXT;
+ALTER TABLE agent_native_ledger_rows ADD COLUMN price_usd REAL;
+ALTER TABLE agent_credit_claims ADD COLUMN product_id TEXT;
+ALTER TABLE agent_credit_claims ADD COLUMN version_id TEXT;
+ALTER TABLE agent_credit_claims ADD COLUMN price_usd REAL;
+CREATE TABLE IF NOT EXISTS agent_version_moves (
+  id TEXT PRIMARY KEY,
+  bulk_move_id TEXT,
+  user_id TEXT NOT NULL,
+  product_id TEXT,
+  from_version_id TEXT,
+  to_version_id TEXT,
+  segment TEXT NOT NULL,
+  moved_by TEXT NOT NULL,
+  reason TEXT,
+  moved_at_ms INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_version_moves_bulk_user_idx ON agent_version_moves (bulk_move_id, user_id);
+CREATE TABLE IF NOT EXISTS agent_bulk_moves (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  segment_scope TEXT,
+  target_version_ids_json TEXT NOT NULL,
+  moved_by TEXT NOT NULL,
+  reason TEXT,
+  status TEXT NOT NULL,
+  moved_count INTEGER NOT NULL,
+  skipped_count INTEGER NOT NULL,
+  failed_count INTEGER NOT NULL,
+  started_at_ms INTEGER NOT NULL,
+  finished_at_ms INTEGER
+);
+`,
+};
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -2094,6 +2302,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0055_APPROVED_FREE_QUOTA_SEED,
   MIGRATION_0056_JOB_GENERATED_DATASETS,
   MIGRATION_0057_JOB_DELIVERY_DATASETS,
+  MIGRATION_0058_PRODUCT_VERSIONS,
 ];
 
 function splitStatements(sqlText: string): string[] {

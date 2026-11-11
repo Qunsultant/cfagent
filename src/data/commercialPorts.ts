@@ -23,6 +23,11 @@
  */
 import type { CommercialAccount } from "../services/cfpayMonetization";
 
+// Issue #3289: the segment is an explicit operator assignment
+// on the account row; the single segment rules live in
+// productPorts, never redeclared here.
+import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
+
 export type StoreTier = "Free" | "PayPerUse" | "Subscribed";
 
 export const VALID_TIERS: readonly StoreTier[] = ["Free", "PayPerUse", "Subscribed"];
@@ -118,6 +123,15 @@ export interface CommercialAccountRecord {
   includedRuns: number;
   /** Issue #3245: operator-granted unlimited-free entitlement (null = none). */
   unlimitedFreeGrant?: UnlimitedFreeGrant | null;
+  /**
+   * Issue #3289 — the account's segment (market), an explicit
+   * operator assignment, default "default". The gate resolves
+   * prices for this segment; the segment always derives from
+   * the verified account row, never from a client claim.
+   * Optional on the record so pre-0058 rows (no column) read
+   * as the default; adapters map it to "default" when absent.
+   */
+  segment?: string;
   updatedAtMs: number;
 }
 
@@ -179,6 +193,16 @@ export interface CreditClaimRecord {
   userId: string;
   family: string;
   amountUSD: number;
+  /**
+   * Issue #3289 — per-charge recording (§3.9): the product and
+   * version whose charge this credit replaces, and the price
+   * that was charged. Null on legacy rows (written before
+   * 0058); the redemption journal mapping reads them when
+   * present.
+   */
+  productId?: string | null;
+  versionId?: string | null;
+  priceUSD?: number | null;
   createdAtMs: number;
 }
 
@@ -254,6 +278,8 @@ export function toCommercialAccount(
       tier: "Free",
       creditsUSD: 0,
       includedRunsRemaining: 0,
+      // Issue #3289: no account row = the default segment.
+      segment: DEFAULT_SEGMENT,
     };
   }
   return {
@@ -267,6 +293,10 @@ export function toCommercialAccount(
     // gate sees it without a second store read. The gate, not this
     // mapping, decides whether it is live at run time (expiry).
     unlimitedFreeGrant: record.unlimitedFreeGrant ?? null,
+    // Issue #3289: the segment rides on the resolved account so
+    // the gate prices for the customer's segment without a
+    // second store read. Pre-0058 rows read as the default.
+    segment: record.segment ?? DEFAULT_SEGMENT,
   };
 }
 
@@ -289,6 +319,8 @@ export interface CommercialStore {
   adjustCredits(userId: string, deltaUSD: number): Promise<CommercialAccountRecord>;
   consumeIncludedRun(userId: string): Promise<CommercialAccountRecord>;
   consumeCredits(userId: string, amountUSD: number): Promise<CommercialAccountRecord>;
+  /** Issue #3289 — set an account's segment (operator act, audited by the route). */
+  setAccountSegment(userId: string, segment: string): Promise<CommercialAccountRecord>;
   getTenantAdsEnabled(tenantId: string): Promise<boolean>;
   setTenantAdsEnabled(tenantId: string, adsEnabled: boolean): Promise<TenantSettingsRecord>;
   /** Issue #2481: per-tenant auto-refresh switch (absent row = OFF). */
@@ -313,15 +345,27 @@ export interface CommercialStore {
     tenantId: string,
     providers: TenantProviders,
   ): Promise<TenantSettingsRecord>;
-  /** Idempotent: re-recording the same claim is a no-op (the DO ledger row is the audit). */
+  /** Idempotent: re-recording the same claim is a no-op (the DO ledger row is the audit). Issue #3289: the optional productId/versionId/priceUSD record which charge the credit replaces (§3.9). */
   recordCreditClaim(claim: {
     creditRunId: string;
     userId: string;
     family: string;
     amountUSD: number;
+    productId?: string | null;
+    versionId?: string | null;
+    priceUSD?: number | null;
   }): Promise<CreditClaimRecord>;
-  /** Oldest unredeemed claim for the family, FIFO by creation. */
-  findUnredeemedCredit(userId: string, family: string): Promise<{ creditRunId: string; amountUSD: number } | null>;
+  /** Oldest unredeemed claim for the family, FIFO by creation. Issue #3289: carries the per-charge recording fields when the claim has them. */
+  findUnredeemedCredit(
+    userId: string,
+    family: string,
+  ): Promise<{
+    creditRunId: string;
+    amountUSD: number;
+    productId?: string | null;
+    versionId?: string | null;
+    priceUSD?: number | null;
+  } | null>;
   /** The atomic claim: throws /already redeemed/ on replay. */
   redeemCredit(creditRunId: string, redeemedByRunId: string): Promise<CreditRedemptionRecord>;
   /**

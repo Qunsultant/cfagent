@@ -42,6 +42,11 @@ export class InMemoryJournalAdapter implements JournalPort {
         tenantId: e.tenantId,
         runRequestId: e.runRequestId,
         family: e.family,
+        // Issue #3289: per-charge recording — null when the
+        // mapping carries none (top-up, legacy replays).
+        productId: e.productId ?? null,
+        versionId: e.versionId ?? null,
+        priceUSD: e.priceUSD ?? null,
         createdAtMs: now,
       };
       // #1761: mirror the D1 adapter — the entry id is

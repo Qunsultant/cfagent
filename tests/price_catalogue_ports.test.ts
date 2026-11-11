@@ -42,8 +42,13 @@ import {
 import { InMemoryPriceCatalogueAdapter } from "../src/data/inMemoryPriceCatalogueAdapter";
 import { createPriceCatalogueAdapter } from "../src/data/createPriceCataloguePorts";
 import {
+  MIGRATION_0007_COMMERCIAL_STORE,
+  MIGRATION_0008_SUBSCRIPTIONS,
+  MIGRATION_0009_JOURNAL,
   MIGRATION_0011_PRICE_CATALOGUE,
+  MIGRATION_0012_NATIVE_LEDGER,
   MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
+  MIGRATION_0058_PRODUCT_VERSIONS,
   applyMigrations,
   type MigrationDb,
 } from "../src/data/migrationRunner";
@@ -111,11 +116,17 @@ async function emptyAdapters(): Promise<Array<{ name: string; catalogue: PriceCa
   const mock = new MockD1Database();
   const db = createD1PriceCatalogueDb(mock as unknown as D1Database);
   // Migrations only, no ensure seeding: the table exists (at the
-  // current schema, 0011 + the #2547 approval columns of 0027)
+  // current schema — 0011 + the #2547 approval columns of 0027 +
+  // the #3289 version columns of 0058, with 0058's prerequisites)
   // but holds no rows.
   await applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0007_COMMERCIAL_STORE,
+    MIGRATION_0008_SUBSCRIPTIONS,
+    MIGRATION_0009_JOURNAL,
     MIGRATION_0011_PRICE_CATALOGUE,
+    MIGRATION_0012_NATIVE_LEDGER,
     MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
+    MIGRATION_0058_PRODUCT_VERSIONS,
   ]);
   return [
     { name: "in-memory", catalogue: new InMemoryPriceCatalogueAdapter({}) },
@@ -175,8 +186,24 @@ describe("price catalogue port contract (#2185)", () => {
     const db = createD1PriceCatalogueDb(mock as unknown as D1Database);
     await ensurePriceCatalogueSchema(db);
     // Bypass adapter validation: write a bad row straight through Drizzle.
-    await db.insert(agentPriceCatalogue).values({ family: "goal", priceUSD: -5, updatedAtMs: Date.now() }).onConflictDoUpdate({
-      target: agentPriceCatalogue.family,
+    // Issue #3289: the row is a version — the upsert targets the version
+    // id (the family is no longer unique), and the row carries the full
+    // new shape.
+    await db.insert(agentPriceCatalogue).values({
+      id: "cat-goal-default-v1",
+      family: "goal",
+      priceUSD: -5,
+      updatedAtMs: Date.now(),
+      approvalStatus: "proposed",
+      approvedBy: null,
+      approvedAtMs: null,
+      productId: "prod-per-run-goal",
+      segment: "default",
+      version: 1,
+      effectiveFromMs: Date.now(),
+      effectiveToMs: null,
+    }).onConflictDoUpdate({
+      target: agentPriceCatalogue.id,
       set: { priceUSD: -5, updatedAtMs: Date.now() },
     });
     const catalogue = new D1PriceCatalogueAdapter(db);
@@ -447,14 +474,13 @@ describe("price catalogue structural pins (#2185, ADR 0002 R1)", () => {
     const schemaColumns = Array.isArray(rawColumns)
       ? rawColumns.map((c: any) => c.name as string)
       : Object.keys(rawColumns).map((s) => s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
-    const block = MIGRATION_0011_PRICE_CATALOGUE.sql.split(
-      "CREATE TABLE IF NOT EXISTS agent_price_catalogue (",
+    // Issue #3289: migration 0058 REBUILDS the catalogue (the
+    // family PK cannot hold versions) — the DDL authority is the
+    // 0058 CREATE TABLE block, not the 0011 CREATE + 0027 ALTERs.
+    const block = MIGRATION_0058_PRODUCT_VERSIONS.sql.split(
+      "CREATE TABLE agent_price_catalogue (",
     )[1].split(");")[0];
     const ddlColumns = [...block.matchAll(/^\s{2}(\w+) /gm)].map((m) => m[1]);
-    // #2547: migration 0027 adds the approval columns by ALTER.
-    const alterColumns = [...MIGRATION_0027_PRICE_CATALOGUE_APPROVAL.sql.matchAll(/ADD COLUMN (\w+)/g)].map(
-      (m) => m[1],
-    );
-    expect([...ddlColumns, ...alterColumns].sort()).toEqual(schemaColumns.sort());
+    expect(ddlColumns.sort()).toEqual(schemaColumns.sort());
   });
 });

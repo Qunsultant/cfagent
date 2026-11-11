@@ -11,11 +11,13 @@ import { BusinessError } from "../outcomes/outcomeAspects";
 import {
   assertApproverId,
   assertPlan,
+  assertPlanVersionInput,
   type ProviderBillingPatch,
   type SubscriptionPlanRecord,
   type SubscriptionRecord,
   type SubscriptionStore,
 } from "./subscriptionPorts";
+import { resolveEffectiveVersion } from "./productPorts";
 
 export class InMemorySubscriptionAdapter implements SubscriptionStore {
   private plans = new Map<string, SubscriptionPlanRecord>();
@@ -28,6 +30,13 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
     periodDays?: unknown;
     includedRuns?: unknown;
     trialDays?: unknown;
+    productId?: unknown;
+    segment?: unknown;
+    effectiveFromMs?: unknown;
+    effectiveToMs?: unknown;
+    billingPeriod?: unknown;
+    featuresJson?: unknown;
+    stripePriceId?: unknown;
   }): Promise<SubscriptionPlanRecord> {
     const plan = assertPlan(input);
     const id = plan.id || `plan-${crypto.randomUUID().slice(0, 8)}`;
@@ -35,6 +44,14 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
     const now = Date.now();
     // Issue #3357: a plan is created PROPOSED — only an operator
     // approval through approvePlan makes its price chargeable.
+    // Issue #3289: the version fields default per
+    // assertPlanVersionInput; the version NUMBER is
+    // server-assigned. Two versions may share an effectiveFromMs
+    // (same-ms creation is a race — see the 0058 header note):
+    // the resolver tiebreaks ties by greatest version.
+    const versioned = assertPlanVersionInput(input, plan.name, plan.periodDays, now);
+    const siblings = await this.listVersions(versioned.productId, versioned.segment);
+    const version = siblings.reduce((max, s) => Math.max(max, s.version), 0) + 1;
     const record: SubscriptionPlanRecord = {
       ...plan,
       id,
@@ -44,9 +61,43 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
       active: true,
       createdAtMs: now,
       updatedAtMs: now,
+      ...versioned,
+      version,
     };
     this.plans.set(id, record);
     return record;
+  }
+
+  async listVersions(productId: string, segment?: string): Promise<SubscriptionPlanRecord[]> {
+    return [...this.plans.values()]
+      .filter((p) => p.productId === productId && (segment === undefined || p.segment === segment))
+      .sort(
+        (a, b) =>
+          a.effectiveFromMs - b.effectiveFromMs ||
+          a.version - b.version ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+  }
+
+  async getEffectiveVersion(
+    productId: string,
+    segment: string,
+    nowMs: number,
+  ): Promise<SubscriptionPlanRecord | null> {
+    return resolveEffectiveVersion(await this.listVersions(productId, segment), segment, nowMs);
+  }
+
+  async moveSubscriptionToVersion(
+    subscriptionId: string,
+    versionId: string,
+  ): Promise<SubscriptionRecord> {
+    const existing = this.subscriptions.get(subscriptionId);
+    if (!existing) throw new Error(`No subscription ${subscriptionId}.`);
+    const target = this.plans.get(versionId);
+    if (!target) throw new Error(`No plan version ${versionId}.`);
+    const updated: SubscriptionRecord = { ...existing, planId: versionId, updatedAtMs: Date.now() };
+    this.subscriptions.set(subscriptionId, updated);
+    return updated;
   }
 
   async approvePlan(planId: string, approverId: string): Promise<SubscriptionPlanRecord> {

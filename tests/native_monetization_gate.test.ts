@@ -111,7 +111,7 @@ describe("native gate: card confirm semantics", () => {
     // Per-checkout amount: the goal catalogue price, not a fixed amount.
     expect(creates).toEqual([{ draftId: "run-1", amount: 0.1 }]);
     const confirmed = await gate.confirmPaid({ id: "run-1", userId: "u1", email: "u1@example.com" });
-    expect(confirmed).toEqual({ allowed: true, status: "paid", runRequestId: "run-1", priceUSD: 0.1, paidVia: "stripe_checkout" });
+    expect(confirmed).toEqual({ allowed: true, status: "paid", runRequestId: "run-1", priceUSD: 0.1, paidVia: "stripe_checkout", productId: "prod-per-run-goal", versionId: "cat-goal-default-v1" });
     // Already-paid short-circuit.
     expect((await gate.confirmPaid({ id: "run-1", userId: "u1", email: "u1@example.com" })).status).toBe("already_paid");
   });
@@ -179,7 +179,7 @@ describe("native gate: crypto confirm semantics", () => {
       { id: "run-1", userId: "u1", email: "u1@example.com" },
       { paymentProof: x402Proof({ nonce: challenge.nonce }), payer: PAYER },
     );
-    expect(confirmed).toEqual({ allowed: true, status: "paid", runRequestId: "run-1", priceUSD: 0.1, paidVia: "x402" });
+    expect(confirmed).toEqual({ allowed: true, status: "paid", runRequestId: "run-1", priceUSD: 0.1, paidVia: "x402", productId: "prod-per-run-goal", versionId: "cat-goal-default-v1" });
     // The verify request carried this run's amount + recipient as requirements.
     const req = calls[0].body.paymentRequirements as { amount: string; payTo: string };
     expect(req.amount).toBe("100000");
