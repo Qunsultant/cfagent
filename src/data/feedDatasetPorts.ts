@@ -39,6 +39,10 @@ import type {
   IndexId,
   QuoteResult,
 } from "../trading";
+import type {
+  BrokerOptionChain,
+  BrokerOptionExpireDate,
+} from "../types";
 
 export type FeedDatasetRunStatus = "completed" | "partial" | "failed";
 export type FeedDatasetRunTrigger = "manual" | "scheduled";
@@ -64,7 +68,7 @@ export interface FeedDatasetRunRecord {
 }
 
 /** Where a dataset's universe came from — provenance, never invented. */
-export interface FeedDatasetUniverse {
+export interface FeedDatasetIndexUniverse {
   kind: "index";
   index: IndexId;
   label: string;
@@ -75,6 +79,29 @@ export interface FeedDatasetUniverse {
   /** Symbols in the universe the run used (0 when none existed). */
   size: number;
 }
+
+/**
+ * #4065 — an explicit-symbol run's universe: the run pulled
+ * exactly these symbols (an options screen's underlyings, which
+ * need not belong to any stored index list). There is no stored
+ * list to name, so there is no snapshot date and no source label
+ * — the symbols themselves ARE the provenance. Readers that need
+ * a stored-list index (quotes / technicals / sentiment) treat a
+ * symbols-kind artifact as unusable, never as an index run.
+ */
+export interface FeedDatasetSymbolUniverse {
+  kind: "symbols";
+  symbols: string[];
+  label: string;
+  snapshotDate: null;
+  sourceLabel: null;
+  /** Symbols in the universe the run used. */
+  size: number;
+}
+
+export type FeedDatasetUniverse =
+  | FeedDatasetIndexUniverse
+  | FeedDatasetSymbolUniverse;
 
 export interface FeedDatasetArtifact {
   id: string;
@@ -122,6 +149,19 @@ export interface FeedDatasetArtifact {
    * exactly the way a quotes copy is.
    */
   sentiment?: FeedSentimentRow[];
+  /**
+   * #4065 — the options-chains dataset's rows — one per symbol:
+   * the expirations the provider returned for the symbol (the
+   * eligible DTE window, deduped, sorted), one chain per eligible
+   * expiry fetched, verbatim as the provider returned it, and the
+   * per-symbol fetch failures (empty when the symbol fetched
+   * cleanly — a row with empty chains and no fetchErrors is a
+   * legitimate empty slice, not a missing symbol). Present only
+   * on options-chains-dataset artifacts; every other dataset
+   * omits it. The store's row count counts chain rows too, so a
+   * chains copy is usable exactly the way a quotes copy is.
+   */
+  chains?: FeedOptionsChainRow[];
   run: FeedDatasetRunRecord;
   createdAt: string;
 }
@@ -175,14 +215,37 @@ export interface FeedSentimentRow {
   sentiment: PersistedSentiment;
 }
 
-/** Rows a stored artifact carries (quotes + fundamentals + bars + sentiment) — the
+/**
+ * #4065 — one symbol's option chains in an options-chains
+ * dataset artifact. `expiries` are the eligible expirations the
+ * provider returned for the symbol (the run's DTE window,
+ * deduped, sorted); `chains` holds one chain per eligible expiry
+ * fetched, verbatim as the provider returned it (each chain's
+ * selectedExpiry names its expiry — the dataset-backed source
+ * matches a requested expiry against it); `fetchErrors` names
+ * the per-symbol fetch failures as plain strings (empty when
+ * the symbol fetched cleanly). A row is stored for every symbol
+ * whose expiration fetch succeeded, even when no expiry fell
+ * inside the window (empty chains, no errors — the legitimate
+ * empty slice); a symbol whose expiration fetch failed gets no
+ * row and is named in the run record's missingSymbols instead.
+ */
+export interface FeedOptionsChainRow {
+  symbol: string;
+  expiries: BrokerOptionExpireDate[];
+  chains: BrokerOptionChain[];
+  fetchErrors: string[];
+}
+
+/** Rows a stored artifact carries (quotes + fundamentals + bars + sentiment + chains) — the
  *  count every adapter persists and every status surface shows. */
 export function feedDatasetRowCount(artifact: FeedDatasetArtifact): number {
   return (
     artifact.quotes.length +
     (artifact.fundamentals?.length ?? 0) +
     (artifact.bars?.length ?? 0) +
-    (artifact.sentiment?.length ?? 0)
+    (artifact.sentiment?.length ?? 0) +
+    (artifact.chains?.length ?? 0)
   );
 }
 
@@ -306,6 +369,15 @@ export function resolveFeedQuotesFromArtifact(args: {
     : Math.max(0, Math.floor((args.nowMs - asOfMs) / 1000));
   const stale =
     args.maxAgeSeconds !== undefined && ageSeconds > args.maxAgeSeconds;
+  // #4065: a quotes read needs a stored-list universe — an
+  // explicit-symbol artifact names no list, so it is unusable
+  // here (a labelled miss, never a fabricated index).
+  if (artifact.universe.kind !== "index") {
+    return {
+      status: "missing",
+      reason: `stored feed snapshot for ${args.sourceId}/${args.dataset} carries an explicit-symbol universe, not a stored index list: no quotes provenance to serve`,
+    };
+  }
   return {
     status: "hit",
     quotes,

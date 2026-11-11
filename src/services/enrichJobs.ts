@@ -1061,7 +1061,12 @@ export async function resolveFeedInputArtifact(
       a.jobId === feedJobId &&
       a.run.status !== "failed" &&
       feedDatasetRowCount(a) > 0 &&
-      (universeIndex === undefined || a.universe.index === universeIndex),
+      // #4065: a symbols-kind artifact names no stored list, so
+      // it never matches a universe filter (an undefined filter
+      // still matches it — the caller asked for no universe).
+      (universeIndex === undefined ||
+        (a.universe.kind === "index" &&
+          a.universe.index === universeIndex)),
   );
 }
 
