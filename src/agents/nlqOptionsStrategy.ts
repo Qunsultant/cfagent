@@ -659,7 +659,7 @@ export interface OptionsStrategyDeps {
    * run so history is that broker's evidence; absent, the run records E*TRADE
    * (the only broker wired before provenance existed), never a guess.
    */
-  broker?: "etrade" | "alpaca";
+  broker?: "etrade" | "alpaca" | "public"; // Issue #3990
   /** Issue #14: the Phase 1 discovery runner (createDiscoveryService's
    *  return shape). When absent, the unified options_fit_discovery
    *  action's scope leg fails with an availability error — the same

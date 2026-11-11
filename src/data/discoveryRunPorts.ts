@@ -181,7 +181,7 @@ export interface DiscoverySymbolOutcome {
 
 /** The listing projection of a stored discovery run. */
 /** Issue #3388: the brokers a discovery run can be produced from. */
-export type DiscoveryRunBroker = "etrade" | "alpaca";
+export type DiscoveryRunBroker = "etrade" | "alpaca" | "public"; // Issue #3990: Public runs record their own broker.
 
 /**
  * Issue #3388: normalize a stored or legacy value. Absent or unrecognised

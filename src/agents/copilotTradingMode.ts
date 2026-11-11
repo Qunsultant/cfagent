@@ -13,9 +13,11 @@
  *   COPILOT's default broker, alpaca (owner rule on #3451: "by
  *   default — no selection made — it must be Alpaca in Paper mode";
  *   the paper half comes from the mode default below). That default
- *   lives HERE, in the copilot's resolver, only: the shared store
- *   default (etrade, applied by getTenantProviders) is unchanged
- *   and still governs the manual broker routes. An unbound store
+ *   is restated HERE, in the copilot's resolver: the shared store
+ *   default is alpaca too since #3937 (applied by
+ *   getTenantProviders), so the copilot's default agrees with the
+ *   platform default and the manual broker routes read the same one.
+ *   An unbound store
  *   (no AGENT_DB) or a FAILED read makes the selection UNRESOLVED —
  *   a failure is never mistaken for an absent selection, so the
  *   default never covers a store outage on a money path.

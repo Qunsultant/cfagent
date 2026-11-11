@@ -10,6 +10,7 @@ import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { apiFetch } from "./apiFetch";
 import { syncTarget, connectStatusEndpoint } from "./brokerEndpoints";
 import { brokerPresentation } from "../trading/brokerPresentation";
+import { PublicTokenCard } from "./PublicTokenCard";
 import { brokerCredentialGuidance, isBrokerId } from "../trading/brokerCatalog";
 import { brokerOptions } from "./brokerOptions";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
@@ -31,7 +32,7 @@ import {
   saveStoredAdBannerConfig,
 } from "./adBannerConfig";
 import { useAutoRefresh } from "./autoRefresh";
-import { useTenantProviders, DATA_PROVIDER_OPTIONS } from "./tenantProviders";
+import { useTenantProviders, DATA_PROVIDER_OPTIONS, labelForDataProvider } from "./tenantProviders";
 import { getPollingConfig } from "./pollingConfig";
 import {
   FONT_SCALE_PRESETS,
@@ -174,6 +175,9 @@ export function BrokerDynamicMenu({
   const [localMsg, setLocalMsg] = useState("");
   const [localDiagLoading, setLocalDiagLoading] = useState(false);
   const [showKeyPairSignIn, setShowKeyPairSignIn] = useState(false);
+  // Issue #3990: the personal-token card toggle, mirroring the
+  // key-pair toggle above — one open card per credential kind.
+  const [showTokenCard, setShowTokenCard] = useState(false);
 
   // Central auto-refresh
   const [autoRefreshState, setAutoRefreshState] = useAutoRefresh();
@@ -455,15 +459,24 @@ export function BrokerDynamicMenu({
   const isLive = effectiveEnv === "PROD";
 
 
-  // Issue #3855: the key-pair connect read, gated on the broker's
-  // credential kind — not on its id. A key-pair broker answers on its
-  // own connect surface (the endpoint module decides the URL); a broker
-  // with no connect surface here gets no fetch, never another broker's
-  // status read.
-  const [keyPairStatus, setKeyPairStatus] = useState<{ configured?: boolean; signedIn?: boolean } | null>(null);
+  // Issue #3855: the credential connect read, gated on the broker's
+  // credential kind — not on its id. A key-pair or personal-token
+  // broker answers on its own connect surface (the endpoint module
+  // decides the URL); a broker with no connect surface here gets no
+  // fetch, never another broker's status read. Issue #3990 extends
+  // the read to personal_token (Public): the same three facts
+  // (configured / signedIn / source) from the neutral connect read.
+  const [brokerCredentialStatus, setBrokerCredentialStatus] = useState<{
+    configured?: boolean;
+    signedIn?: boolean;
+  } | null>(null);
 
   useEffect(() => {
-    if (selectedBrokerCredentialKind !== "api_key_pair") return;
+    if (
+      selectedBrokerCredentialKind !== "api_key_pair" &&
+      selectedBrokerCredentialKind !== "personal_token"
+    )
+      return;
     const statusUrl = connectStatusEndpoint(selectedBrokerId);
     if (!statusUrl) return;
     let cancelled = false;
@@ -473,14 +486,14 @@ export function BrokerDynamicMenu({
       .then((data) => {
         if (!cancelled && data && typeof data === "object") {
           const body = data as Record<string, unknown>;
-          setKeyPairStatus({
+          setBrokerCredentialStatus({
             configured: Boolean(body.configured),
             signedIn: Boolean(body.signedIn),
           });
         }
       })
       .catch(() => {
-        if (!cancelled) setKeyPairStatus(null);
+        if (!cancelled) setBrokerCredentialStatus(null);
       });
     return () => {
       cancelled = true;
@@ -488,8 +501,9 @@ export function BrokerDynamicMenu({
   }, [selectedBrokerId, selectedBrokerCredentialKind, effectiveEnv]);
 
   const isConnected =
-    selectedBrokerCredentialKind === "api_key_pair"
-      ? Boolean(keyPairStatus?.configured || keyPairStatus?.signedIn)
+    selectedBrokerCredentialKind === "api_key_pair" ||
+    selectedBrokerCredentialKind === "personal_token"
+      ? Boolean(brokerCredentialStatus?.configured || brokerCredentialStatus?.signedIn)
       : !!oauthStatus?.authenticated;
 
   const handleMouseEnter = () => {
@@ -704,9 +718,13 @@ export function BrokerDynamicMenu({
                 </div>
                 <span className={`brand-status-text ${isConnected ? "connected" : "disconnected"}`}>
                   {isConnected
-                    ? (selectedBrokerCredentialKind === "api_key_pair"
-                        ? (keyPairStatus?.signedIn ? "● User Key Connected" : "● Deployment Key Active")
-                        : "● OAuth Session Active")
+                    ? selectedBrokerCredentialKind === "api_key_pair"
+                      ? brokerCredentialStatus?.signedIn
+                        ? "● User Key Connected"
+                        : "● Deployment Key Active"
+                      : selectedBrokerCredentialKind === "personal_token"
+                      ? "● Personal Token Connected"
+                      : "● OAuth Session Active"
                     : "○ Disconnected"}
                 </span>
               </div>
@@ -749,6 +767,34 @@ export function BrokerDynamicMenu({
             />
           </div>
 
+          {/* Data provider (Second Choice) — issue #3990: the data-source
+              list is separate from the broker list. A broker may also be
+              a data source (kind "broker"); Yahoo and Nasdaq are pure
+              data providers (kind "pure", no trading). The kind rides
+              the tooltip so the split is visible, not implied. */}
+          <div className="etrade-panel-section data-provider-select-section">
+            <div className="section-label-row">
+              <span>Data provider</span>
+              <small>{labelForDataProvider(tenantProviders, tenantProviders.dataProviderId)} selected</small>
+            </div>
+            <PillGroup
+              className="settings-pref-btn-group data-provider-select-pills"
+              ariaLabel="Data provider choice"
+              size="sm"
+              variant="default"
+              options={DATA_PROVIDER_OPTIONS.map((opt) => ({
+                id: opt.id,
+                label: opt.label,
+                tooltip:
+                  opt.kind === "broker"
+                    ? `Select ${opt.label} as data provider (broker — also provides trading)`
+                    : `Select ${opt.label} as data provider (pure data provider — no trading)`,
+              }))}
+              value={tenantProviders.dataProviderId}
+              onChange={(v) => handleSetTenantProviders({ ...tenantProviders, dataProviderId: v })}
+            />
+          </div>
+
           {/* Environment & Connection (Harmonized Single Line with Toggle Button) */}
           <div className="etrade-panel-section">
             <div className="section-label-row">
@@ -786,6 +832,21 @@ export function BrokerDynamicMenu({
                   title={isConnected ? `${selectedBrokerLabel} connection status & BYOK` : `Connect ${selectedBrokerLabel}`}
                 >
                   {showKeyPairSignIn
+                    ? `${brokerIcon} Close info`
+                    : isConnected
+                    ? `${brokerIcon} Connected`
+                    : `${brokerIcon} Connect ${selectedBrokerLabel}`}
+                </Button>
+              ) : selectedBrokerCredentialKind === "personal_token" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="btn-action-mini connect"
+                  onClick={() => setShowTokenCard((open) => !open)}
+                  aria-expanded={showTokenCard}
+                  title={isConnected ? `${selectedBrokerLabel} connection status & token` : `Connect ${selectedBrokerLabel}`}
+                >
+                  {showTokenCard
                     ? `${brokerIcon} Close info`
                     : isConnected
                     ? `${brokerIcon} Connected`
@@ -836,6 +897,13 @@ export function BrokerDynamicMenu({
                   activeEnv={effectiveEnv}
                   collapsedWhenConfigured={false}
                 />
+              </div>
+            )}
+
+            {/* Embedded personal-token card (issue #3990) */}
+            {selectedBrokerCredentialKind === "personal_token" && showTokenCard && (
+              <div className="embedded-public-token">
+                <PublicTokenCard />
               </div>
             )}
           </div>

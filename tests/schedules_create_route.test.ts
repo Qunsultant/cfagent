@@ -217,10 +217,11 @@ describe("POST /api/schedules/create (#111)", () => {
       environment: "TEST",
       trigger: "scheduled",
       // Issue #3655 — the create route stamps broker + data provider
-      // + mode server-side (TEST → paper for the etrade fallback
-      // selection in this fixture's unbound store).
+      // + mode server-side (TEST → paper; the data provider is the
+      // platform default — alpaca since #3990 — for this fixture's
+      // unbound store, the broker the fixture's etrade session).
       brokerId: "etrade",
-      dataProviderId: "etrade",
+      dataProviderId: "alpaca",
       mode: "paper",
       // Issue #3121 S1 — creation provenance travels in the armed
       // payload; createdAt is minted at create time, pinned by shape.
@@ -274,7 +275,7 @@ describe("POST /api/schedules/create (#111)", () => {
       // Issue #3655 — broker + data provider + mode stamped
       // server-side at creation (see the interval test above).
       brokerId: "etrade",
-      dataProviderId: "etrade",
+      dataProviderId: "alpaca",
       mode: "paper",
       // Issue #3121 S1 — creation provenance travels in the armed
       // payload; createdAt is minted at create time, pinned by shape.

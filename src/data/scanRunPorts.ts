@@ -54,7 +54,7 @@ export const SCAN_RUN_MAX_ROWS = 1000;
  * reads back as `etrade`, exactly like the IV series (#3326). The field rides
  * inside `summary_json`, so no column migration is needed.
  */
-export type ScanRunBroker = "etrade" | "alpaca";
+export type ScanRunBroker = "etrade" | "alpaca" | "public"; // Issue #3990: Public runs record their own broker.
 
 export function normalizeScanRunBroker(value: unknown): ScanRunBroker {
   return String(value ?? "").trim().toLowerCase() === "alpaca" ? "alpaca" : "etrade";

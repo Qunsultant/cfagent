@@ -39,6 +39,7 @@ import { resolveTradeEnvironmentFromSettings } from "./brokerEnvironment";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { getPublicConnectionStatus } from "../../security/publicOAuth";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -127,8 +128,9 @@ export async function handleBrokerConnectRoutes(
 ): Promise<Response | null> {
   void sessionId;
   const isConnect = path.endsWith("/broker/connect/alpaca");
+  const isPublicConnect = path.endsWith("/broker/connect/public");
   const isDisconnect = path.endsWith("/broker/disconnect/alpaca");
-  if (!isConnect && !isDisconnect) return null;
+  if (!isConnect && !isPublicConnect && !isDisconnect) return null;
   if (request.method !== "GET" && request.method !== "POST") return null;
 
   const userLogin = request.headers.get("x-user-login") || "";
@@ -152,6 +154,24 @@ export async function handleBrokerConnectRoutes(
       source: resolved.source,
       keyIdLast4: resolved.source === "user" ? stored?.keyIdLast4 ?? resolved.keyIdLast4 : null,
       storedAt: stored?.storedAt ?? null,
+    });
+  }
+
+  // Issue #3990: the neutral Public connect read. Same shape family
+  // as the Alpaca GET (configured / signedIn / source), answered from
+  // the stored Public token set (getPublicConnectionStatus). The token
+  // itself never leaves the server — only a 4+4 hint. POST is not
+  // handled here: the token paste lives at /api/public/connect.
+  if (isPublicConnect && request.method === "GET") {
+    const status = await getPublicConnectionStatus(ctx.env, userLogin);
+    return Response.json({
+      broker: "public",
+      configured: status.connected,
+      signedIn: status.connected,
+      source: status.connected ? "user" : "none",
+      method: status.method,
+      tokenHint: status.tokenHint,
+      mcpUrl: status.mcpUrl,
     });
   }
 
@@ -234,7 +254,11 @@ export async function handleBrokerConnectRoutes(
   }
 
   // Disconnect: both trading types, so a "signed out" surface cannot leave a live
-  // pair behind for the next order to use.
+  // pair behind for the next order to use. Only the disconnect path
+  // reaches here: a POST to /broker/connect/public is not handled by
+  // this router (the token paste lives at /api/public/connect) and
+  // must fall through, never revoke another broker's credentials.
+  if (!isDisconnect) return null;
   await revokeAlpacaCredentials(ctx.env, userLogin);
   const after = await resolveAlpacaPair(ctx.env, userLogin, side);
 

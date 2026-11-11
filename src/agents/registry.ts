@@ -796,6 +796,25 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "The foss_* names are deprecated aliases (#1906) wrapping the canonical commands; each foss_* alias is superseded by the canonical market_data_*/alpaca_* name for the same command. Alias removal is a follow-up slice.",
   },
   {
+    // Issue #3990: the Public.com copilot tools are their own family —
+    // the Public analogue of the Alpaca tools in the market-data
+    // family, but on the Public MCP transport (data allow-list + a
+    // separate trading allow-list) with preview-first placement and
+    // no paper mode (FAILURE_PUBLIC_NO_PAPER_MODE in TEST).
+    id: "public-mcp-commands",
+    name: "Public.com MCP commands",
+    source: "src/mcps/openaimp/publicCommands.ts",
+    status: "live",
+    commands: [
+      "public_get_quote",
+      "public_preview_order",
+      "public_place_order",
+      "public_orders",
+      "public_cancel_order",
+    ],
+    commandSources: [{ file: "src/mcps/openaimp/publicCommands.ts", kind: "readonly-name" }],
+  },
+  {
     // Issue #3883: order cancellation is its own family — one engine, one
     // vocabulary, one receipt across every cancel scope.
     id: "order-cancel-mcp-commands",

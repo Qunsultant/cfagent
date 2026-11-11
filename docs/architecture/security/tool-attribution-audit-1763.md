@@ -10,8 +10,8 @@ and `tests/a2a_entrypoint_auth_1763.test.ts`).
 
 ## Method and scope
 
-- Inventory source: `src/permissions/mcpPermissionPorts.ts`
-  `MCP_TOOL_SCOPES` (82 tools: 73 canonical + 9 deprecated #1906
+- Inventory source: `src/mcps/openaimp/mcpPermissionPorts.ts`
+  `MCP_TOOL_SCOPES` (133 tools: 124 canonical + 9 deprecated #1906
   aliases, completeness-pinned against the live
   factory registry in both directions by #1843's tests) plus the
   scanner surface (`src/services/cloudflareWalletsScanner.ts`) and
@@ -97,9 +97,11 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `alpaca_positions` | mcp:read | L (I / R on other doors) |
 | `foss_alpaca_positions` (deprecated #1906 alias of `alpaca_positions`, same scope) | mcp:read | L (I / R on other doors) |
 | `alpaca_orders` | mcp:read | L (I / R on other doors) |
+| `public_orders` | mcp:read | L (I / R on other doors) — reads the caller's Public orders via the trading allow-list (`get_orders`); attributed to the caller's session/token (#3990) |
 | `foss_alpaca_orders` (deprecated #1906 alias of `alpaca_orders`, same scope) | mcp:read | L (I / R on other doors) |
 | `alpaca_get_quote` | mcp:read | L (I / R on other doors) — live quote with provenance (#3782); the copilot's quote tool for its broker (#3451) |
 | `alpaca_get_option_chain` | mcp:read | L (I / R on other doors) — the broker's own live option chain (#4014): expiry dates + contracts with bid/ask, greeks and IV when sent; refuses with an explicit unavailable error instead of inventing prices, and is the chain source for multi-leg strategies (PMCC) when the tenant's data provider has no optionsChains |
+| `public_get_quote` | mcp:read | L (I / R on other doors) — live quote with provenance from the Public MCP data allow-list (#3990); the copilot's quote tool for its broker |
 | `browser_inspect_page` | mcp:read | L (I / R on other doors) |
 | `web_fetch` | mcp:read | L (I / R on other doors) — the standalone unrendered page fetch (#2760, tracker #2708 A3): acting login carried in the tool audit from context only (no identity argument); failures propagate as named `web_fetch_*` errors, never fabricated content |
 | `get_feed_job_status` | mcp:read | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |
@@ -209,6 +211,9 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `alpaca_cancel_order` (#3883: cancel one order, with bracket-leg semantics) | mcp:trade | L (I / R on other doors) |
 | `alpaca_cancel_ticker` (#3884: every open order for one symbol, filterable by class/side/ladder) | mcp:trade | L (I / R on other doors) |
 | `alpaca_cancel_all` (#3885: every open order, two-step with a single-use preview token and a configured cap) | mcp:trade | L (I / R on other doors) |
+| `public_preview_order` | mcp:trade | L (I / R on other doors) — creates a draft with a provenanced price via the Public preflight; preview only, no placement (#3990) |
+| `public_place_order` | mcp:trade | L (I / R on other doors) — settles a stored preview draft by orderId; preview-first, refuses without orderId; TEST refuses with FAILURE_PUBLIC_NO_PAPER_MODE (Public has no paper trading); PROD places with real money; the result is an acceptance receipt, not a fill (#3990) |
+| `public_cancel_order` | mcp:trade | L (I / R on other doors) — cancels one order via the Public `cancel_order` tool; no cancel-all on the Public surface (#3990) |
 | `foss_alpaca_place_order` (deprecated #1906 alias of `alpaca_place_order`, same scope) | mcp:trade | L (I / R on other doors) |
 | `execute_durable_twap` | mcp:trade | L (I / R on other doors) |
 | `propose_stock_trade` | mcp:trade | L via door 2 only — acting identity required (#2349); refused on doors 1/3 (no acting-identity carrier there). Preview only: the result is a pending-approval proposal; no order is placed |

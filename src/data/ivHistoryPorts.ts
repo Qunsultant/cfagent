@@ -60,7 +60,7 @@ export const IV_WARMING_UP_THRESHOLD = 60;
  * has none. Without this field the only honest options were "refuse Alpaca" or
  * "relabel E*TRADE rows", and relabelling is fabrication.
  */
-export type IvBroker = "etrade" | "alpaca";
+export type IvBroker = "etrade" | "alpaca" | "public"; // Issue #3990: Public runs record their own broker.
 
 /** Legacy rows (and any unrecognised value) were collected from E*TRADE chains. */
 export function normalizeIvBroker(value: unknown): IvBroker {

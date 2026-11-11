@@ -1,11 +1,11 @@
 /**
  * Provider / broker agnosticism, slice 1: tenant selections.
  *
- * Pins: defaults are the etrade data provider / Alpaca broker (#3812);
- * invalid ids are rejected, never stored; a non-etrade broker gets
- * the coded unavailable response, never an E*TRADE error; the
- * unified strategy run record stamps provider/broker into
- * provenance.
+ * Pins: defaults are the Alpaca data provider / Alpaca broker (#3990;
+ * was the etrade data provider / Alpaca broker, #3812); invalid ids
+ * are rejected, never stored; a non-etrade broker gets the coded
+ * unavailable response, never an E*TRADE error; the unified strategy
+ * run record stamps provider/broker into provenance.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -21,16 +21,21 @@ import { resolveOutcome, codedMessage } from "../src/outcomes/outcomeAspects";
 import { recordStrategyScreenRun } from "../src/services/optionsServeRecord";
 
 describe("tenant provider selection ids", () => {
-  it("accepts every registered data provider id and both broker ids", () => {
+  it("accepts every registered data provider id and all three broker ids", () => {
     for (const id of ["etrade", "public", "yahoo", "nasdaq", "alpaca"]) expect(isDataProviderId(id)).toBe(true);
     expect(isBrokerId("etrade")).toBe(true);
     expect(isBrokerId("alpaca")).toBe(true);
+    // Issue #3990: Public.com is a broker now (it was data-only) —
+    // a broker MAY also be a data source, registered with its
+    // declared capabilities.
+    expect(isBrokerId("public")).toBe(true);
   });
 
-  it("rejects unknown ids and non-etrade broker ids are not data providers by accident", () => {
+  it("rejects unknown ids and pure data providers are not brokers by accident", () => {
     expect(isDataProviderId("schwab")).toBe(false);
     expect(isBrokerId("schwab")).toBe(false);
-    expect(isBrokerId("public")).toBe(false);
+    expect(isBrokerId("yahoo")).toBe(false);
+    expect(isBrokerId("nasdaq")).toBe(false);
     expect(normalizeTenantProviders({ dataProviderId: "etrade", brokerId: "schwab" })).toBeNull();
     expect(normalizeTenantProviders({ dataProviderId: "schwab", brokerId: "etrade" })).toBeNull();
     expect(normalizeTenantProviders({ dataProviderId: "etrade" })).toBeNull();
@@ -55,10 +60,10 @@ describe("migration 0027", () => {
 });
 
 describe("in-memory tenant providers store", () => {
-  it("defaults to etrade data provider / alpaca broker for an absent row", async () => {
+  it("defaults to alpaca data provider / alpaca broker for an absent row", async () => {
     const store = new InMemoryCommercialAdapter();
     await expect(store.getTenantProviders("tenant-1")).resolves.toEqual({
-      dataProviderId: "etrade",
+      dataProviderId: "alpaca",
       brokerId: "alpaca",
     });
   });

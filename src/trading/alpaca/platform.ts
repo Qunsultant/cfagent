@@ -14,68 +14,25 @@ import { decodeOrderPriceSource, encodeOrderPriceSource } from "../quotePolicies
 import { computeBracketExits } from "../bracketPercent";
 import { platformQuoteSource } from "../stockQuoteSource";
 import { formatOccSymbol, parseOccSymbol } from "./occSymbol";
-import { withAlpacaCredentials, alpacaTradingSide, normalizeAlpacaBaseUrl } from "./credentials";
+import { withAlpacaCredentials, alpacaTradingSide } from "./credentials";
 import { applyAlpacaPair, resolveAlpacaPair, type AlpacaCredentialSource } from "./credentialResolution";
 import {
-  fetchAlpacaOptionContracts,
-  fetchAlpacaOptionSnapshots,
-  displayPriceFor,
+  assembleAlpacaOptionChain,
+  buildAlpacaOptionsConfig,
+  configuredAlpacaBase,
+  fetchAlpacaOptionExpireDates,
+  resolveAlpacaTradingBase,
   type AlpacaOptionsConfig,
 } from "./optionsData";
 import { AlpacaMarketDataProvider } from "../../services/marketDataResearch";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 
-/**
- * Issue #3158 — single paper/live resolver for the Alpaca adapter.
- * The default base URL is the paper host; a base URL counts as live
- * only when it is set and is not a paper host. The trading client
- * (AlpacaMarketDataProvider.getTradingUrl) uses the same default, so
- * status and placement can never disagree about paper vs live.
- */
-const ALPACA_PAPER_HOST = "https://paper-api.alpaca.markets";
-const ALPACA_LIVE_HOST = "https://api.alpaca.markets";
-
-/**
- * Issue #3866 — the configured URL, normalized once.
- *
- * `resolveAlpacaTradingBase` used to answer a hardcoded host for the `TEST`
- * selection while the client used `env.ALPACA_BASE_URL`. Status therefore
- * advertised a URL the client never called, which is how four portfolio reads
- * failed against an apparently healthy connection.
- */
-function configuredAlpacaBase(env: Env): string {
-  return normalizeAlpacaBaseUrl(env.ALPACA_BASE_URL);
-}
-
-export function resolveAlpacaTradingBase(
-  env: Env,
-  overrideEnv?: string,
-): { baseUrl: string; isLive: boolean; source: "pin" | "selection" | "inference" } {
-  // Issue #3233: an explicit trading type wins over inference. Without it the
-  // legacy rule stands (paper host = paper), so nothing silently changes for
-  // an environment that only sets ALPACA_BASE_URL.
-  const explicit = String(env.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
-  const configured = configuredAlpacaBase(env);
-  if (explicit === "paper") {
-    return { baseUrl: configured.includes("paper-api") ? configured : ALPACA_PAPER_HOST, isLive: false, source: "pin" };
-  }
-  if (explicit === "live") {
-    return { baseUrl: configured.includes("paper-api") ? ALPACA_LIVE_HOST : configured, isLive: true, source: "pin" };
-  }
-  // Issue #3272: the persisted selection is authoritative when the deployment
-  // has not pinned a trading type. TEST means paper, PROD means live - the
-  // same mapping the catalog declares for every broker (#3232), so the hub
-  // switch now means the same thing on both brokers instead of being an
-  // E*TRADE-only control that Alpaca silently ignored.
-  const selection = String(overrideEnv ?? "").trim().toUpperCase();
-  if (selection === "TEST" || selection === "PAPER" || selection === "SANDBOX") {
-    return { baseUrl: configured.includes("paper-api") ? configured : ALPACA_PAPER_HOST, isLive: false, source: "selection" };
-  }
-  if (selection === "PROD" || selection === "LIVE") {
-    return { baseUrl: configured.includes("paper-api") ? ALPACA_LIVE_HOST : configured, isLive: true, source: "selection" };
-  }
-  return { baseUrl: configured, isLive: !configured.includes("paper-api"), source: "inference" };
-}
+// Issue #3990: the paper/live resolver lives in optionsData.ts now
+// (the data adapter reads the same resolution for its options
+// source); re-exported here so existing importers (brokerConnect,
+// stockCopilot, signIn, tests, the trading index) are untouched.
+// The import above is the local binding this module's own calls use.
+export { resolveAlpacaTradingBase };
 
 /**
  * Issue #3158 — upstream failures map to business errors. The HTTP
@@ -509,20 +466,14 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
    * resolver the trading calls use, so a paper selection never reads live data
    * by accident. `ALPACA_OPTIONS_FEED` selects the feed (indicative by default,
    * which needs no OPRA subscription).
+   *
+   * Issue #3990: built by the shared helper in optionsData.ts — the
+   * data adapter's options source builds the same config, so the two
+   * surfaces cannot disagree about keys, feed, or host.
    */
   private optionsConfig(): AlpacaOptionsConfig {
-    const { baseUrl } = resolveAlpacaTradingBase(this.env, this.overrideEnv);
-    return {
-      tradingUrl: baseUrl,
-      dataUrl: this.env.ALPACA_DATA_URL || "https://data.alpaca.markets",
-      headers: {
-        "APCA-API-KEY-ID": this.env.ALPACA_API_KEY || this.env.ALPACA_API_KEY_ID || "",
-        "APCA-API-SECRET-KEY": this.env.ALPACA_SECRET_KEY || this.env.ALPACA_API_SECRET_KEY || "",
-      },
-      feed: this.env.ALPACA_OPTIONS_FEED,
-      // Issue #3515 S1: options fetches share the provider's Alpaca budget.
-      rateLimiter: this.alpacaData.outboundLimiter,
-    };
+    // Issue #3515 S1: options fetches share the provider's Alpaca budget.
+    return buildAlpacaOptionsConfig(this.env, this.alpacaData.outboundLimiter, this.overrideEnv);
   }
 
   /**
@@ -537,21 +488,9 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     requestBudget?: import("../interfaces").OptionRequestBudget,
   ): Promise<BrokerOptionExpireDate[]> {
     await this.ready();
-    if (requestBudget && !requestBudget.tryConsume()) {
-      throw new Error("Alpaca option expire-date request budget exhausted for this run.");
-    }
-    const contracts = await fetchAlpacaOptionContracts(this.optionsConfig(), { symbol });
-    const seen = new Set<string>();
-    const dates: BrokerOptionExpireDate[] = [];
-    for (const row of contracts) {
-      if (seen.has(row.expirationDate)) continue;
-      seen.add(row.expirationDate);
-      const [year, month, day] = row.expirationDate.split("-").map((part) => Number(part));
-      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) continue;
-      dates.push({ year, month, day, ...(expiryType ? { expiryType } : {}) });
-    }
-    dates.sort((a, b) => a.year - b.year || a.month - b.month || a.day - b.day);
-    return dates;
+    // Issue #3990: the assembly lives in optionsData.ts now — the
+    // data adapter's options source reads the same function.
+    return fetchAlpacaOptionExpireDates(this.optionsConfig(), symbol, expiryType, requestBudget);
   }
 
   /**
@@ -576,83 +515,16 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     requestBudget?: import("../interfaces").OptionRequestBudget,
   ): Promise<BrokerOptionChain | null> {
     await this.ready();
-    if (requestBudget && !requestBudget.tryConsume()) {
-      throw new Error("Alpaca option chain request budget exhausted for this run.");
-    }
-    const cfg = this.optionsConfig();
-    const contracts = await fetchAlpacaOptionContracts(cfg, {
-      symbol: params.symbol,
-      expiryYear: params.expiryYear,
-      expiryMonth: params.expiryMonth,
-      expiryDay: params.expiryDay,
-      strikePrice: params.strikePrice,
-      chainType: params.chainType,
-    });
-    if (contracts.length === 0) return null;
-
-    if (requestBudget && !requestBudget.tryConsume()) {
-      throw new Error("Alpaca option snapshot request budget exhausted for this run.");
-    }
-    const symbols = contracts.map((row) => row.symbol);
-    const snapshots = await fetchAlpacaOptionSnapshots(cfg, params.symbol, symbols);
-
-    const underlying = await this.getQuote(params.symbol);
-    const byStrike = new Map<number, { call?: BrokerOptionContract; put?: BrokerOptionContract }>();
-    let matched = 0;
-
-    for (const row of contracts) {
-      const quote = snapshots.get(row.symbol);
-      if (!quote) continue;
-      if (quote.bid === undefined || quote.ask === undefined) continue;
-      const lastPrice = displayPriceFor(quote);
-      if (lastPrice === undefined) continue;
-      const contract: BrokerOptionContract = {
-        optionType: row.type === "call" ? "CALL" : "PUT",
-        strikePrice: row.strikePrice,
-        symbol: row.symbol,
-        bid: quote.bid,
-        ask: quote.ask,
-        lastPrice,
-        ...(quote.volume !== undefined ? { volume: quote.volume } : {}),
-        ...(quote.delta !== undefined ? { delta: quote.delta } : {}),
-        ...(quote.gamma !== undefined ? { gamma: quote.gamma } : {}),
-        ...(quote.theta !== undefined ? { theta: quote.theta } : {}),
-        ...(quote.vega !== undefined ? { vega: quote.vega } : {}),
-        ...(quote.rho !== undefined ? { rho: quote.rho } : {}),
-        ...(quote.impliedVolatility !== undefined
-          ? { impliedVolatility: quote.impliedVolatility }
-          : {}),
-      };
-      const pair = byStrike.get(row.strikePrice) ?? {};
-      if (row.type === "call") pair.call = contract;
-      else pair.put = contract;
-      byStrike.set(row.strikePrice, pair);
-      matched++;
-    }
-
-    if (matched === 0) return null;
-
-    let strikes = [...byStrike.keys()].sort((a, b) => a - b);
-    if (params.noOfStrikes && strikes.length > params.noOfStrikes) {
-      // Centre the window on the underlying so the returned strikes are the
-      // ones around the money, the same intent as E*TRADE's noOfStrikes.
-      const pivot = strikes.reduce((best, s) =>
-        Math.abs(s - underlying.lastPrice) < Math.abs(best - underlying.lastPrice) ? s : best,
-      );
-      const half = Math.floor(params.noOfStrikes / 2);
-      const idx = strikes.indexOf(pivot);
-      strikes = strikes.slice(Math.max(0, idx - half), Math.max(0, idx - half) + params.noOfStrikes);
-    }
-
-    return {
-      symbol: underlying.symbol,
-      underlyingPrice: underlying.lastPrice,
-      selectedExpiry:
-        params.expiryYear && params.expiryMonth && params.expiryDay
-          ? { year: params.expiryYear, month: params.expiryMonth, day: params.expiryDay }
-          : undefined,
-      pairs: strikes.map((strike) => byStrike.get(strike) ?? {}),
-    };
+    // Issue #3990: the assembly lives in optionsData.ts now — the
+    // data adapter's options source reads the same function, so the
+    // two surfaces cannot disagree about a chain. The platform
+    // passes its own getQuote as the underlying fetcher.
+    return assembleAlpacaOptionChain(
+      this.optionsConfig(),
+      params,
+      (symbol) => this.getQuote(symbol),
+      requestBudget,
+    );
   }
 
   /** Verbatim live read with the error carried alongside (#3233 parity with E*TRADE). */

@@ -1826,7 +1826,10 @@ export interface BrokerPositionLot {
 }
 
 export interface BrokerStatus {
-  broker: "etrade" | "alpaca";
+  // Issue #3990: Public joins the broker union. The catalog
+  // (src/trading/brokerCatalog.ts) is the source of truth for which
+  // brokers exist; this field mirrors its BrokerId.
+  broker: "etrade" | "alpaca" | "public";
   name: string;
   configured: boolean;
   /**

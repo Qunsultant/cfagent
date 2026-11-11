@@ -1,0 +1,6 @@
+### Data-provider/broker taxonomy (#3990)
+
+- Default pair is now alpaca/alpaca: the Alpaca data adapter declares and serves `optionsChains` (shared chain assembly from the Alpaca options read path), so the options gate passes for default tenants; fundamentals for an Alpaca-default tenant come from Yahoo by design (ADR 0019). Capability routes unchanged.
+- Taxonomy split: `DATA_PROVIDER_KINDS` marks etrade/public/alpaca as brokers and yahoo/nasdaq as pure data providers; Settings lists brokers under Broker and data sources under Data provider, both derived from the same map. Declared capabilities now equal servable ones (Alpaca drops the false `fundamentals` declaration).
+- Public.com is a live broker: trading platform, catalog entry, personal-token connect in Settings, and five copilot tools (`public_get_quote`, `public_preview_order`, `public_place_order`, `public_orders`, `public_cancel_order`). Public has no paper trading: TEST gets reads + preview only, placement is refused with `FAILURE_PUBLIC_NO_PAPER_MODE` before any broker call; placement is preview-first and returns an acceptance receipt, never a fill.
+- Screening on Public.com: a `public` screener mode (bootstrap, verify → enable, bind over the quotes route) with Public.com provenance, and `screenMarkets` on the Public platform. The MCP server grows to 132 tools (inventory doc reconciled).

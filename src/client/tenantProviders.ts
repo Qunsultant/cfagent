@@ -9,14 +9,19 @@
  * state is a cache of the server value; localStorage holds only
  * the last-known server value as a mirror, used before the boot
  * load completes. A fresh browser with no mirror and no server
- * response stays on the platform defaults (#3812: etrade data
- * provider / alpaca broker), never on a provider/broker the user
- * did not select.
+ * response stays on the platform defaults (#3812 for the broker,
+ * #3990 for the data provider: alpaca / alpaca), never on a
+ * provider/broker the user did not select.
  */
 import { useEffect, useState } from "react";
 import { csrfHeaders } from "./apiFetch";
 import { isBrokerId, type BrokerId } from "../trading";
 import { brokerOptions } from "./brokerOptions";
+import {
+  DATA_PROVIDER_IDS,
+  DATA_PROVIDER_KINDS,
+  type DataProviderKind,
+} from "../trading";
 
 export { isBrokerId, type BrokerId };
 
@@ -72,20 +77,38 @@ function identityFieldsOf(identity: ServedProviderIdentity | undefined): Partial
 }
 
 export const DEFAULT_TENANT_PROVIDERS_STATE: TenantProvidersState = {
-  dataProviderId: "etrade",
+  // Issue #3990: the data default is Alpaca (matching the broker
+  // default; the reason is on the server default in
+  // src/data/commercialPorts.ts). This mirror is what a fresh browser
+  // shows before the server row loads; the server default is pinned
+  // equal.
+  dataProviderId: "alpaca",
   // Issue #3812: the platform's default broker is Alpaca in paper mode
   // (owner rule on #3451). This mirror is what a fresh browser shows
   // before the server row loads; the server default is pinned equal.
   brokerId: "alpaca",
 };
 
-export const DATA_PROVIDER_OPTIONS: Array<{ id: string; label: string }> = [
-  { id: "etrade", label: "E*TRADE" },
-  { id: "public", label: "Public.com" },
-  { id: "yahoo", label: "Yahoo Finance" },
-  { id: "nasdaq", label: "Nasdaq Listings" },
-  { id: "alpaca", label: "Alpaca" },
-];
+/**
+ * Issue #3990 — the Settings data-source list, derived from the
+ * contract's kind map (one entry per provider id, in precedence
+ * order) instead of a second hardcoded list. Labels are display
+ * names only; the kind is what separates brokers (quote data +
+ * trading) from pure data providers in the UI.
+ */
+const DATA_PROVIDER_LABELS: Record<string, string> = {
+  etrade: "E*TRADE",
+  public: "Public.com",
+  yahoo: "Yahoo Finance",
+  nasdaq: "Nasdaq Listings",
+  alpaca: "Alpaca",
+};
+export const DATA_PROVIDER_OPTIONS: Array<{ id: string; label: string; kind: DataProviderKind }> =
+  DATA_PROVIDER_IDS.map((id) => ({
+    id,
+    label: DATA_PROVIDER_LABELS[id] ?? id,
+    kind: DATA_PROVIDER_KINDS[id],
+  }));
 
 /**
  * Issue #3751: the client identity projection — the label a surface

@@ -225,7 +225,7 @@ export function screenerProvenanceLines(result: {
    * because that is what produced it. The artifact never names a broker the run
    * did not use.
    */
-  broker?: "etrade" | "alpaca";
+  broker?: "etrade" | "alpaca" | "public"; // Issue #3990
   /** Issue #3331: the environment the run traded in (TEST = paper). Absent on
    *  legacy runs; the artifact then states the broker without a mode. */
   environment?: "TEST" | "PROD";

@@ -367,7 +367,7 @@ export interface ScannerPipelineRequest extends PlannerInput {
     /** Issue #3327: the broker whose chains this run reads, stamped on
      *  the saved run by the persist stage. Absent, the run records
      *  E*TRADE (the pre-provenance default) — never a guess. */
-    broker?: "etrade" | "alpaca";
+    broker?: "etrade" | "alpaca" | "public"; // Issue #3990
   };
 }
 

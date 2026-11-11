@@ -2,9 +2,12 @@
  * Issue #3839 — Stock Copilot on any declared broker/mode.
  *
  * Pins:
- * 1. The catalog declares Alpaca paper/live and E*TRADE paper/live as
- *    copilot-capable; the list is derived, never hand-written.
- * 2. The copilot selection resolves each of the four combinations, and an
+ * 1. The catalog declares Alpaca paper/live, E*TRADE paper/live, and
+ *    Public paper/live as copilot-capable; the list is derived, never
+ *    hand-written. (Public joins in #3990: TEST maps to the paper
+ *    bucket and placement there is refused with
+ *    FAILURE_PUBLIC_NO_PAPER_MODE — Public has no paper trading.)
+ * 2. The copilot selection resolves each of the six combinations, and an
  *    absent selection still resolves to Alpaca paper.
  * 3. The prompt steering names the ACTIVE broker's tools/mode and bracket
  *    semantics; Alpaca/paper keeps the byte-identical default block.
@@ -39,6 +42,10 @@ const COMBOS = [
   { broker: "alpaca", environment: "PROD", mode: "live" },
   { broker: "etrade", environment: "TEST", mode: "paper" },
   { broker: "etrade", environment: "PROD", mode: "live" },
+  // Issue #3990: Public joins the copilot brokers — TEST is the paper
+  // bucket (placement refused, no paper mode) and PROD is live.
+  { broker: "public", environment: "TEST", mode: "paper" },
+  { broker: "public", environment: "PROD", mode: "live" },
 ] as const;
 
 function makeOrm(): DatabaseORM {
@@ -48,7 +55,7 @@ function makeOrm(): DatabaseORM {
 }
 
 describe("catalog-derived copilot capability (#3839)", () => {
-  it("declares every current broker and mode, including all four copilot combinations", () => {
+  it("declares every current broker and mode, including all six copilot combinations", () => {
     for (const combo of COMBOS) {
       const resolved = resolveBrokerSelection({
         broker: combo.broker,
@@ -59,7 +66,7 @@ describe("catalog-derived copilot capability (#3839)", () => {
       expect(resolved!.tradingType).toBe(combo.mode);
       expect(brokerCopilotCapability(combo.broker).supported).toBe(true);
     }
-    expect(copilotBrokerIds().sort()).toEqual(["alpaca", "etrade"]);
+    expect(copilotBrokerIds().sort()).toEqual(["alpaca", "etrade", "public"]);
   });
 
   it("declares bracket semantics per broker: Alpaca native, E*TRADE preview", () => {
