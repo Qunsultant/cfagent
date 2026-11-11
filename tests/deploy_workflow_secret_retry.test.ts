@@ -25,6 +25,44 @@ const helper = readFileSync(
 /** Any `wrangler <subcommand> put "$name"` invocation. */
 const BROKER_PUT = /npx wrangler [a-z-]+ put "\$name"/;
 
+/**
+ * The steps that push Worker secrets, in workflow order. This is the
+ * accounting the size rule asks for (gitops §7, docs/agents/gitops.md:378-381:
+ * a test that asserts a size must assert accounting — every member declared
+ * once — because a literal count is a change detector every additive PR must
+ * edit). So a new provider step is a deliberate edit here, in the same PR,
+ * naming the step and the issue that added it — never a bumped number.
+ * `stepsSourcingHelper` reads deploy.yml itself, so this list cannot drift
+ * silently from what the workflow does.
+ */
+const SECRET_STEPS = [
+  "Set core secrets",
+  "Set E*TRADE secrets",
+  "Set Alpaca secrets",
+  // The seventh source site (six existed before it), fourth in file order.
+  // #4048 — Public: a deployment credential the provider reads as a fallback.
+  "Set Public.com secrets",
+  "Set Payment Gateway secrets",
+  "Set Google OAuth secrets",
+  "Set Threads secrets",
+];
+
+/**
+ * Name every step whose run block sources scripts/ci/put-secret.sh. Splits on
+ * the `      - ` step marker, keeps the blocks carrying the source line, and
+ * drops the per-environment `on Cloudflare Worker [...target_env]` suffix so
+ * the comparison is about which steps exist, not how each is labelled.
+ */
+function stepsSourcingHelper(): string[] {
+  return workflow
+    .split("\n      - ")
+    .filter((block) => block.includes("source scripts/ci/put-secret.sh"))
+    .map((block) => {
+      const name = block.match(/^name:\s*(.+)$/m)?.[1] ?? "(unnamed step)";
+      return name.replace(/\s+on Cloudflare Worker.*$/, "").trim();
+    });
+}
+
 function section(start: string, end: string): string {
   const from = workflow.indexOf(start);
   const to = workflow.indexOf(end, from + start.length);
@@ -36,8 +74,10 @@ function section(start: string, end: string): string {
 describe("deploy.yml — secret sync (#590)", () => {
   it("keeps no inline wrapper: every secret step sources the shared helper", () => {
     expect(workflow).not.toContain("put_secret() {");
-    // Six steps: core, E*TRADE, Alpaca, gateways, Google OAuth, Threads.
-    expect(workflow.match(/source scripts\/ci\/put-secret\.sh/g) ?? []).toHaveLength(6);
+    // Every step that pushes a secret, named: core, E*TRADE, Alpaca, Public
+    // (#4048), gateways, Google OAuth, Threads. Equality is exact, so an
+    // eighth step fails this pin by name until someone adds it to the list.
+    expect(stepsSourcingHelper()).toEqual(SECRET_STEPS);
   });
 
   it("runs secrets in their own non-blocking job after the code deploy", () => {
@@ -196,11 +236,22 @@ describe("deploy.yml — Slack credentials (#3952)", () => {
     }
   });
 
-  it("keeps the Slack pushes in the existing core-secrets step (no seventh step)", () => {
+  it("keeps the Slack pushes in the existing core-secrets step", () => {
     const core = section("\n  sync-secrets:", "\n      - name: Set E*TRADE secrets");
     for (const name of WIRED) {
       expect(core, `${name} belongs to the core step`).toContain(`optional_secret ${name} `);
     }
-    expect(workflow.match(/source scripts\/ci\/put-secret\.sh/g) ?? []).toHaveLength(6);
+    // What this now protects: the Slack set rides in the core step instead of
+    // a step of its own. The Public step (#4048) joined the job without
+    // splitting Slack out, so the core step still sources the helper, it is
+    // still the first step to do so, and no other step repeats a Slack push.
+    expect(core).toContain("source scripts/ci/put-secret.sh");
+    expect(stepsSourcingHelper()[0]).toBe("Set core secrets");
+    for (const name of WIRED) {
+      expect(
+        workflow.match(new RegExp(`optional_secret ${name} "`, "g")) ?? [],
+        `${name} must be pushed once, from the core step only`,
+      ).toHaveLength(1);
+    }
   });
 });
