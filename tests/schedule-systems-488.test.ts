@@ -63,14 +63,17 @@ describe("schedule systems inventory", () => {
     expect(SCHEDULED_GOAL_IDS_INVENTORY).toEqual(live);
   });
 
-  it("tracks the wrangler.jsonc cron triggers", () => {
+  it("declares no cron trigger in wrangler.jsonc (#4112 owner direction)", () => {
     const wrangler = readFileSync(join(root, "wrangler.jsonc"), "utf8");
-    const slice = block(wrangler, '"crons": [', "]");
-    const live = slice
+    // Comment lines are not entries: the block survives only as a comment.
+    const active = wrangler
       .split("\n")
-      .map((line) => line.trim().match(/^"([^"]+)",?$/)?.[1])
-      .filter((v): v is string => Boolean(v));
-    expect(WORKER_CRON_TRIGGERS_INVENTORY).toEqual(live);
+      .filter((line) => !line.trim().startsWith("//"))
+      .join("\n");
+    expect(active).not.toContain('"crons"');
+    expect(active).not.toContain('"triggers"');
+    // The inventory stays: it is the code's dispatch table, kept for re-enable.
+    expect(WORKER_CRON_TRIGGERS_INVENTORY.length).toBeGreaterThan(0);
   });
 
   it("answers the unification questions with evidence, and carries the rest with an owner", () => {

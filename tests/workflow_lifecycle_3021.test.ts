@@ -276,14 +276,16 @@ describe("workflow binding schedules (#3021 deliverable a)", () => {
     expect(entry!.reason.length).toBeGreaterThan(0);
   });
 
-  it("the registry crons match wrangler.jsonc schedules for the same binding", () => {
+  it("declares no workflow schedule in wrangler.jsonc (#4112 owner direction)", () => {
     const wrangler = JSON.parse(stripJsonc(readFileSync("wrangler.jsonc", "utf8"))) as {
       workflows?: Array<{ binding?: string; schedules?: string[] }>;
     };
-    const byBinding = new Map((wrangler.workflows ?? []).map((w) => [w.binding, w.schedules ?? []]));
-    for (const entry of BINDING_SCHEDULES) {
-      expect(byBinding.get(entry.binding)).toContain(entry.cron);
-    }
+    const declared = (wrangler.workflows ?? []).flatMap((w) => w.schedules ?? []);
+    // The binding stays so an on-demand run still resolves; only the
+    // schedule is gone, so nothing fires on a timer.
+    expect(declared).toEqual([]);
+    // The registry keeps the capability: re-enabling is a wrangler edit.
+    expect(BINDING_SCHEDULES.length).toBeGreaterThan(0);
   });
 
   it("binding schedule rows surface as scheduled runs with workflow-binding provenance", () => {

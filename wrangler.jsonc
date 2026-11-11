@@ -14,7 +14,14 @@
   "assets": { "directory": "./dist/", "binding": "ASSETS", "run_worker_first": ["/", "/index.html"] },
   "workflows": [
     { "name": "trading-trade-workflow", "binding": "TRADE_WORKFLOW", "class_name": "TradingTradeWorkflow" },
-    { "name": "screener-screen-workflow", "binding": "SCREENER_WORKFLOW", "class_name": "ScreenerScreenWorkflow", "schedules": ["*/30 * * * *"] },
+    {
+      "name": "screener-screen-workflow",
+      "binding": "SCREENER_WORKFLOW",
+      "class_name": "ScreenerScreenWorkflow"
+      // Issue #4112 (owner direction): NO schedule. The workflow binding
+      // stays so an on-demand run still resolves; to schedule it again,
+      // add: "schedules": ["*/30 * * * *"]
+    },
     { "name": "payment-workflow", "binding": "PAYMENT_WORKFLOW", "class_name": "PaymentWorkflow" },
     { "name": "saga-workflow", "binding": "SAGA_WORKFLOW", "class_name": "CrossDomainSagaWorkflow" },
     { "name": "job-pipeline-workflow", "binding": "JOB_PIPELINE_WORKFLOW", "class_name": "JobPipelineWorkflow" }
@@ -128,15 +135,19 @@
       { "name": "SANDBOX_AGENT", "class_name": "SandboxAgent" }
     ]
   },
-  // Issue #3492 / #3779 — Cloudflare Containers configuration for SandboxAgent:
-  // attaches an isolated container to the Durable Object for executing
-  // generated quantitative strategies and shell commands.
-  "containers": [
-    {
-      "class_name": "SandboxAgent",
-      "scheduling_policy": "durable_object"
-    }
-  ],
+  // Issue #4112 (owner direction): the deployment provisions NO container.
+  // Cloudflare Containers bill while the application exists, and the
+  // deploy-time strip in scripts/ci/deploy-worker.mjs (#3789) only fires
+  // AFTER a 403 - with Containers permission on the token the block ships.
+  // To re-enable, uncomment and keep the sizing: ONE instance, smallest type.
+  // "containers": [
+  //   {
+  //     "class_name": "SandboxAgent",
+  //     "scheduling_policy": "durable_object",
+  //     "max_instances": 1,
+  //     "instance_type": "lite"
+  //   }
+  // ],
   // Issue #1169 (owner enablement, 2026-11-05) — the AI Search
   // namespace binding the AiSearchAgent namespace path reads
   // (env.AI_SEARCH.get(AI_SEARCH_INSTANCE)); the instance
@@ -207,25 +218,18 @@
       "head_sampling_rate": 1
     }
   },
-  "triggers": {
-    "crons": [
-      "0 3 * * *",
-      // PR #4 — ScheduledAgent tick every 30 min
-      "*/30 * * * *",
-      // Issue #255 — nightly mas_messages retention pass (enforced in the
-      // scheduled() handler; runs against the Orchestrator agent's SQLite)
-      "0 4 * * *"
-      // Issue #319 + #354 — the daily options-research run (21:00 UTC =
-      // 17:00 ET on weekdays) is deliberately NOT a fifth cron trigger: the
-      // account is at the Workers Free ceiling of 5 triggers per account
-      // (error 10072) and a fifth entry fails the entire deploy. It rides
-      // the "*/30" tick instead: src/server.ts scheduled() POSTs
-      // /research/scheduled-tick after the ScheduledAgent tick, and the
-      // route's idempotency guard (src/services/researchScheduleGuard.ts,
-      // last-fired date in the orchestrator's mas_settings) fires it exactly
-      // once per weekday at/after 21:00 UTC. Or use the paid plan.
-    ]
-  },
+  // Issue #4112 (owner direction): NO schedules and NO triggers. Every cron
+  // entry is commented out, so nothing fires - no ScheduledAgent tick, no
+  // nightly research run, no retention pass. The scheduled() handler and
+  // resolveCronEntryPoint stay in code and become unreachable, so restoring a
+  // schedule is an uncomment here, not a code change.
+  // "triggers": {
+  //   "crons": [
+  //     "0 3 * * *",
+  //     "*/30 * * * *",
+  //     "0 4 * * *"
+  //   ]
+  // },
   // PR #6 — Vectorize for VectorMemory
   "vectorize": [
     {
