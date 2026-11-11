@@ -429,6 +429,8 @@ const CONFORMING_INTERIORS: string[] = [
   "src/client/options/OptionsResearchPanel.tsx",
   "src/client/ScannerPanel.tsx",
   "src/client/ETradeTradingHub.tsx",
+  "src/client/WorkflowsHub.tsx",
+  "src/client/MarketDataResearchHub.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):
