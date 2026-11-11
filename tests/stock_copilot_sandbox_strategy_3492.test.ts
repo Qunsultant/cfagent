@@ -196,21 +196,15 @@ describe("Stock Copilot Quick-Chips Registration (#3779)", () => {
 });
 
 describe("Wrangler Containers Configuration & SandboxAgent Readiness (#3492)", () => {
-  it("wrangler.jsonc declares containers configuration for SandboxAgent", () => {
+  it("wrangler.jsonc declares NO container, and records the re-enable sizing (#4112)", () => {
     const raw = readFileSync("wrangler.jsonc", "utf8");
     const wrangler = JSON.parse(stripJsonc(raw));
-    expect(wrangler.containers).toBeDefined();
-    expect(Array.isArray(wrangler.containers)).toBe(true);
-    expect(wrangler.containers).toHaveLength(1);
-    expect(wrangler.containers[0].class_name).toBe("SandboxAgent");
-    // Issue #3789: wrangler 4.156.0 rejects the `image` field on a
-    // Durable Object-managed containers entry ("Unsupported fields for
-    // Durable Object-managed Containers in containers: \"image\"..."),
-    // which broke Deploy from bb24be82 on. The image is supplied at
-    // runtime by ETradeSandboxService.runCommand via
-    // container.start({ image: "cloudflare/debian-trixie", ... }).
-    expect(wrangler.containers[0]).not.toHaveProperty("image");
-    expect(wrangler.containers[0].scheduling_policy).toBe("durable_object");
+    // Owner direction: the deployment provisions no container. The block
+    // survives as a comment carrying the caps to use if it is ever restored.
+    expect(wrangler.containers).toBeUndefined();
+    expect(raw).toContain('"max_instances": 1');
+    expect(raw).toContain('"instance_type": "lite"');
+    expect(raw).toContain('"SANDBOX_AGENT"');
   });
 
   it("SandboxAgent binds container when available on ctx", () => {

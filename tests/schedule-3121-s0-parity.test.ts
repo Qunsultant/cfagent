@@ -60,24 +60,26 @@ const MON_0900_EDT = new Date("2026-10-26T13:00:00Z");
 /** Monday 2026-10-19 21:05 UTC (copied from tests/research-schedule-guard.test.ts). */
 const MON_2105_UTC = new Date(Date.UTC(2026, 9, 19, 21, 5, 0));
 
-describe("S0-P01 worker crons (B-T1-01/02/03): exactly three triggers in wrangler.jsonc", () => {
-  it("pins the three cron entries, with no fourth trigger", () => {
+describe("S0-P01 worker crons: no live trigger (#4112 owner direction)", () => {
+  it("registers no cron, and keeps every expression commented out", () => {
     const wrangler = read("wrangler.jsonc");
-    const cronsStart = wrangler.indexOf('"crons": [') + '"crons": ['.length;
-    expect(cronsStart).toBeGreaterThanOrEqual('"crons": ['.length);
-    const cronsEnd = wrangler.indexOf("]", cronsStart);
-    expect(cronsEnd).toBeGreaterThan(cronsStart);
-    // Strip full-line // comments first: the ceiling note quotes the
-    // refused "0 21 * * 1-5" trigger, which must NOT count as an entry.
-    const block = wrangler
-      .slice(cronsStart, cronsEnd)
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("//"))
-      .join("\n");
-    const entries = [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-    expect(entries).toEqual(["0 3 * * *", "*/30 * * * *", "0 4 * * *"]);
-    expect(WORKER_CRON_TRIGGERS_INVENTORY).toEqual(entries);
-    expect(block).not.toContain("0 21 * * 1-5");
+    // #4112: the owner removed all schedules. The block survives as a comment,
+    // so the expressions are still visible when a schedule is restored.
+    expect(wrangler).not.toMatch(/^\s*"triggers":/m);
+    expect(wrangler).not.toMatch(/^\s*"crons":/m);
+    for (const cron of ["0 3 * * *", "*/30 * * * *", "0 4 * * *"]) {
+      const lines = wrangler.split("\n").filter((l) => l.includes(`"${cron}"`));
+      expect(lines.length, `${cron} is stated`).toBeGreaterThan(0);
+      // Every occurrence must be a comment: the triggers block AND the
+      // workflow schedule that used to carry "*/30 * * * *" (#4112).
+      expect(
+        lines.every((l) => l.trim().startsWith("//")),
+        `${cron} is commented out everywhere`,
+      ).toBe(true);
+    }
+    // The inventory stays: it is what the dispatcher can route once a
+    // schedule is re-enabled, and it is no longer compared to wrangler.
+    expect(WORKER_CRON_TRIGGERS_INVENTORY.length).toBeGreaterThan(0);
   });
 
   it("dispatches on event.cron for exactly those three expressions in scheduled()", () => {
