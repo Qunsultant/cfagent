@@ -94,7 +94,7 @@ export interface PaymentGate {
     rail?: "stripe" | "x402";
   }): Promise<GateDecision>;
   confirmPaid(
-    run: { id: string; userId: string; email: string; family?: ScreenerFamily },
+    run: { id: string; userId: string; email: string; family?: ScreenerFamily; segment?: string },
     proof?: {
       claimTxHash?: string;
       paymentIntentId?: string;
@@ -213,6 +213,15 @@ export interface PaymentWorkflowEvent {
   login?: string;
   /** Structured detail for the audit record (never a client message). */
   detail?: string;
+  /**
+   * Issue #3289 — per-charge recording (§3.9): the product and
+   * version charged, resolved by the gate at check time. Set on
+   * payment.confirmed (and payment.covered, for the failure-credit
+   * path that may follow). The adapter's journal mapping refuses
+   * a per-run event without them.
+   */
+  productId?: string;
+  versionId?: string;
 }
 
 /**
@@ -258,9 +267,16 @@ export interface PaymentWorkflowDeps {
    * run's list price. Called for paid and covered runs alike: a failed
    * covered run consumed one included run, so a replacement is owed
    * there too. Redemption is the account store's job (#2015); this is
-   * issuance only.
+   * issuance only. Issue #3289: the third param carries the
+   * product/version the failed run was charged for (gate-check
+   * resolution), so the claim and the failure-credit journal entry
+   * record which charge the credit replaces.
    */
-  issueFailureCredit: (runRequestId: string, priceUSD: number) => Promise<void>;
+  issueFailureCredit: (
+    runRequestId: string,
+    priceUSD: number,
+    product?: { productId?: string; versionId?: string },
+  ) => Promise<void>;
   /**
    * Issue #2015: consume the coverage a covered run used, in the
    * account store (one included run, or priceUSD of credits).
@@ -363,6 +379,9 @@ async function recordNativeLedgerBestEffort(
     sessionId?: string;
     paymentIntentId?: string;
     claimTxHash?: string;
+    /** Issue #3289: the product/version charged (gate-check resolution). */
+    productId?: string;
+    versionId?: string;
   },
 ): Promise<void> {
   try {
@@ -396,6 +415,9 @@ async function recordNativeLedgerBestEffort(
       sessionId: row.sessionId,
       paymentIntentId: row.paymentIntentId,
       claimTxHash: row.claimTxHash,
+      // Issue #3289: per-charge recording (§3.9).
+      productId: row.productId,
+      versionId: row.versionId,
     });
     if (duplicate) {
       console.log(
@@ -638,7 +660,15 @@ export async function runPaymentWorkflowFlow(
     await traceStep(deps, "await-payment-verified");
     const confirmed = await doStep("confirm-paid", () =>
       deps.gate.confirmPaid(
-        { id: params.runRequestId, userId: params.userId, email: params.email, family: params.family },
+        {
+          id: params.runRequestId,
+          userId: params.userId,
+          email: params.email,
+          family: params.family,
+          // Issue #3289: the stateless confirm resolves the
+          // effective version for the account's segment.
+          segment: deps.account.segment,
+        },
         {
           claimTxHash: verified.claimTxHash,
           paymentIntentId: verified.paymentIntentId,
@@ -670,6 +700,11 @@ export async function runPaymentWorkflowFlow(
         checkoutId: extractCheckoutId(gateDecision.checkout),
         claimTxHash: verified.claimTxHash,
         paymentIntentId: verified.paymentIntentId,
+        // Issue #3289: the gate-check product/version — the
+        // version that was quoted, which the charge journal entry
+        // is recorded against (per-charge recording, §3.9).
+        ...(gateDecision.productId ? { productId: gateDecision.productId } : {}),
+        ...(gateDecision.versionId ? { versionId: gateDecision.versionId } : {}),
       }),
     );
     await traceStep(deps, "record-payment");
@@ -693,6 +728,9 @@ export async function runPaymentWorkflowFlow(
         sessionId: verified.sessionId,
         paymentIntentId: verified.paymentIntentId,
         claimTxHash: verified.claimTxHash,
+        // Issue #3289: per-charge recording (§3.9).
+        productId: gateDecision.productId,
+        versionId: gateDecision.versionId,
       }),
     );
     await traceStep(deps, "record-native-ledger");
@@ -740,6 +778,10 @@ export async function runPaymentWorkflowFlow(
       confirmed.paidVia ?? "cfpay_checkout",
       gateDecision.priceUSD,
       gateDecision.outcomeCode,
+      // Issue #3289: the gate-check product/version, so a failed
+      // run's replacement credit records which charge it replaces.
+      gateDecision.productId,
+      gateDecision.versionId,
     );
   }
 
@@ -755,6 +797,11 @@ export async function runPaymentWorkflowFlow(
       // and login on the audit event. Other covered paths carry no
       // outcome code — the gate sets one only on the quota branch.
       ...(gateDecision.outcomeCode ? { outcomeCode: gateDecision.outcomeCode, login: params.userId } : {}),
+      // Issue #3289: the gate-check product/version, so a failed
+      // covered run's replacement credit records which charge it
+      // replaces.
+      ...(gateDecision.productId ? { productId: gateDecision.productId } : {}),
+      ...(gateDecision.versionId ? { versionId: gateDecision.versionId } : {}),
     }),
   );
   await traceStep(deps, "record-payment");
@@ -779,6 +826,11 @@ export async function runPaymentWorkflowFlow(
     gateDecision.paidVia ?? gateDecision.status,
     gateDecision.priceUSD,
     gateDecision.outcomeCode,
+    // Issue #3289: the gate-check product/version, so a failed
+    // covered run's replacement credit records which charge it
+    // replaces.
+    gateDecision.productId,
+    gateDecision.versionId,
   );
 }
 
@@ -789,6 +841,9 @@ async function startScreenerOrCredit(
   paidVia: string,
   priceUSD: number,
   outcomeCode?: string,
+  /** Issue #3289: the product/version the run was charged for (gate-check resolution). */
+  productId?: string,
+  versionId?: string,
 ): Promise<PaymentWorkflowOutcome> {
   // Issue #3073: same durable step, same boundary - declared here because this
   // helper owns its own `step` handle (the flow's wrapper is out of scope).
@@ -822,7 +877,10 @@ async function startScreenerOrCredit(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await doStep("issue-failure-credit", async () => {
-      await deps.issueFailureCredit(params.runRequestId, priceUSD);
+      await deps.issueFailureCredit(params.runRequestId, priceUSD, {
+        ...(productId ? { productId } : {}),
+        ...(versionId ? { versionId } : {}),
+      });
       await deps.recordEvent({
         runRequestId: params.runRequestId,
         tenantId: params.tenantId,

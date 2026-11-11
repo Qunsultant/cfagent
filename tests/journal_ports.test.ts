@@ -36,7 +36,7 @@ import {
   ensureJournalSchema,
 } from "../src/data/d1JournalAdapter";
 import { InMemoryJournalAdapter } from "../src/data/inMemoryJournalAdapter";
-import { MIGRATION_0009_JOURNAL } from "../src/data/migrationRunner";
+import { MIGRATION_0009_JOURNAL, MIGRATION_0058_PRODUCT_VERSIONS } from "../src/data/migrationRunner";
 import {
   agentJournalAccounts,
   agentJournalEntries,
@@ -125,6 +125,8 @@ describe.each(makers)("journal port conformance (#2155) — $name", ({ make }) =
         tenantId: "tenant-a",
         runRequestId: "run-1",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -164,6 +166,8 @@ describe.each(makers)("journal port conformance (#2155) — $name", ({ make }) =
       tenantId: "tenant-a",
       runRequestId: "run-mixed",
       family: "goal",
+      productId: "prod-per-run-goal",
+      versionId: "cat-goal-default-v1",
       amountUSD: 0.1,
     });
     await expect(
@@ -185,6 +189,8 @@ describe.each(makers)("journal port conformance (#2155) — $name", ({ make }) =
       tenantId: "tenant-a",
       runRequestId: "run-replay",
       family: "stock",
+      productId: "prod-per-run-stock",
+      versionId: "cat-stock-default-v1",
       amountUSD: 0.02,
     });
     const first = await store.postEntries(input);
@@ -201,6 +207,8 @@ describe.each(makers)("journal port conformance (#2155) — $name", ({ make }) =
         tenantId: "tenant-a",
         runRequestId: "run-a",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -219,6 +227,8 @@ describe.each(makers)("journal port conformance (#2155) — $name", ({ make }) =
         tenantId: "tenant-a",
         runRequestId: "run-2",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -228,6 +238,8 @@ describe.each(makers)("journal port conformance (#2155) — $name", ({ make }) =
         tenantId: "tenant-a",
         runRequestId: "run-2",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -237,6 +249,8 @@ describe.each(makers)("journal port conformance (#2155) — $name", ({ make }) =
         tenantId: "tenant-a",
         runRequestId: "run-3",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -277,6 +291,8 @@ describe("journal mappings (#2155)", () => {
       tenantId: "tenant-a",
       runRequestId: "run-x",
       family: "options",
+      productId: "prod-per-run-options",
+      versionId: "cat-options-default-v1",
       amountUSD: 0.05,
     };
     const charge = mapChargeToJournalEntries(input);
@@ -284,6 +300,13 @@ describe("journal mappings (#2155)", () => {
       ["1000", 0.05, 0],
       ["4000", 0, 0.05],
     ]);
+    // Issue #3289: every per-run entry records which product /
+    // version / price applied (per-charge recording, §3.9).
+    for (const e of charge) {
+      expect(e.productId).toBe("prod-per-run-options");
+      expect(e.versionId).toBe("cat-options-default-v1");
+      expect(e.priceUSD).toBe(0.05);
+    }
     const credit = mapFailureCreditToJournalEntries(input);
     expect(credit.map((e) => [e.accountCode, e.debitUSD, e.creditUSD])).toEqual([
       ["4000", 0.05, 0],
@@ -294,9 +317,25 @@ describe("journal mappings (#2155)", () => {
       ["2000", 0.05, 0],
       ["4000", 0, 0.05],
     ]);
+    for (const e of [...credit, ...redemption]) {
+      expect(e.productId).toBe("prod-per-run-options");
+      expect(e.versionId).toBe("cat-options-default-v1");
+      expect(e.priceUSD).toBe(0.05);
+    }
     expect(() =>
       mapChargeToJournalEntries({ ...input, amountUSD: 0 }),
     ).toThrow(/positive finite/);
+    // Issue #3289: the mapping refuses a new per-run event
+    // without the product/version (fail-closed).
+    expect(() =>
+      mapChargeToJournalEntries({
+        transactionRef: "run-x",
+        tenantId: "tenant-a",
+        runRequestId: "run-x",
+        family: "options",
+        amountUSD: 0.05,
+      }),
+    ).toThrow(/requires productId and versionId/);
   });
 });
 
@@ -306,6 +345,10 @@ describe("journal subscription purchase mapping (#2155 follow-up)", () => {
     tenantId: "tenant-a",
     subscriptionId: "sub-abc12345",
     amountUSD: 20,
+    // Issue #3289: a subscription purchase records the version
+    // that was bought — planId IS the version id.
+    productId: "prod-sub-basic",
+    versionId: "plan-basic-v1",
   };
 
   it("maps a purchase to Dr 1000 / Cr 2100, never to revenue", () => {
@@ -320,6 +363,10 @@ describe("journal subscription purchase mapping (#2155 follow-up)", () => {
       expect(e.runRequestId).toBe("sub-abc12345");
       expect(e.family).toBe("subscription");
       expect(e.currency).toBe("USD");
+      // Issue #3289: the purchase records the version bought.
+      expect(e.productId).toBe("prod-sub-basic");
+      expect(e.versionId).toBe("plan-basic-v1");
+      expect(e.priceUSD).toBe(20);
     }
     expect(() => mapSubscriptionPurchaseToJournalEntries({ ...input, amountUSD: 0 })).toThrow(
       /positive finite/,
@@ -429,6 +476,8 @@ describe("journal reconcile (#2155)", () => {
         tenantId: "tenant-a",
         runRequestId: "run-1",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -438,6 +487,8 @@ describe("journal reconcile (#2155)", () => {
         tenantId: "tenant-a",
         runRequestId: "run-1",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -447,6 +498,8 @@ describe("journal reconcile (#2155)", () => {
         tenantId: "tenant-a",
         runRequestId: "run-2",
         family: "goal",
+        productId: "prod-per-run-goal",
+        versionId: "cat-goal-default-v1",
         amountUSD: 0.1,
       }),
     );
@@ -500,7 +553,17 @@ describe("journal structural pins (#2155)", () => {
         `CREATE TABLE IF NOT EXISTS ${table} (`,
       )[1].split(");")[0];
       const ddlColumns = [...block.matchAll(/^\s{2}(\w+) /gm)].map((m) => m[1]);
-      expect(ddlColumns.sort()).toEqual(schemaColumns.sort());
+      // Issue #3289: migration 0058 adds the per-charge
+      // recording columns to agent_journal_entries by ALTER.
+      const alterColumns =
+        table === "agent_journal_entries"
+          ? [
+              ...MIGRATION_0058_PRODUCT_VERSIONS.sql.matchAll(
+                /ALTER TABLE agent_journal_entries ADD COLUMN (\w+)/g,
+              ),
+            ].map((m) => m[1])
+          : [];
+      expect([...ddlColumns, ...alterColumns].sort()).toEqual(schemaColumns.sort());
     }
   });
 });
@@ -534,6 +597,8 @@ describe("journal best-effort wiring (#2155)", () => {
           tenantId: "tenant-a",
           runRequestId: "run-1",
           family: "goal",
+          productId: "prod-per-run-goal",
+          versionId: "cat-goal-default-v1",
           amountUSD: 0.1,
         }),
       ),
@@ -550,6 +615,8 @@ describe("journal best-effort wiring (#2155)", () => {
           tenantId: "tenant-a",
           runRequestId: "run-1",
           family: "goal",
+          productId: "prod-per-run-goal",
+          versionId: "cat-goal-default-v1",
           amountUSD: 0.1,
         }),
       ),

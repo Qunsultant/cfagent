@@ -122,6 +122,14 @@ export interface NativeCommercialAccount {
    * FIRST, before price resolution.
    */
   unlimitedFreeGrant?: UnlimitedFreeGrant | null;
+  /**
+   * Issue #3289 — the account's segment (market), an explicit
+   * operator assignment, default "default". check() resolves
+   * per-run prices for this segment; the segment always
+   * derives from the verified account row, never from a
+   * client claim.
+   */
+  segment?: string;
 }
 
 export interface NativeMonetizationConfig {
@@ -187,8 +195,11 @@ export const NATIVE_PAYMENT_DISCLOSURE =
   "One charge per run-request. Shards, stages, retries and re-serves are free. If a paid run fails, its automatic compensation is a one-time replacement-run credit — a cash refund is never issued automatically. Cash refunds exist only as an operator-initiated action, granted only with operator approval. A payment success page is never proof of payment; payment is confirmed only by re-reading provider state.";
 
 export type NativeGateDecision =
-  | { allowed: true; status: string; runRequestId: string; priceUSD: number; paidVia?: string; outcomeCode?: string }
-  | { allowed: false; status: string; httpStatus: 402; runRequestId: string; priceUSD: number; family: NativeScreenerFamily; checkout?: unknown; disclosure?: string; reason?: string; outcomeCode?: string; nextStep?: ApprovedFreeQuotaAtLimitAction };
+  // Issue #3289: paid outcomes carry the product/version
+  // charged (per-charge recording, §3.9); price-0 outcomes
+  // carry none (no charge was priced).
+  | { allowed: true; status: string; runRequestId: string; priceUSD: number; paidVia?: string; outcomeCode?: string; productId?: string; versionId?: string }
+  | { allowed: false; status: string; httpStatus: 402; runRequestId: string; priceUSD: number; family: NativeScreenerFamily; checkout?: unknown; disclosure?: string; reason?: string; outcomeCode?: string; nextStep?: ApprovedFreeQuotaAtLimitAction; productId?: string; versionId?: string };
 
 interface NativeLedgerRow {
   runRequestId: string;
@@ -202,6 +213,9 @@ interface NativeLedgerRow {
   rail?: CheckoutRail;
   sessionId?: string;
   challengeNonce?: string;
+  /** Issue #3289: the product/version priced for this run (per-charge recording, §3.9). */
+  productId?: string;
+  versionId?: string;
 }
 
 export interface NativeCheckInput {
@@ -243,14 +257,21 @@ export class NativeMonetizationGate {
 
   /**
    * Resolve the per-run price for a family through the catalogue
-   * port (#2185). Fail-closed, exactly: no catalogue configured,
-   * no stored row, an invalid stored value, or a stored price
-   * that is not APPROVED (#2547) all throw before any checkout
-   * is minted or any coverage is consumed. There is no hardcoded
-   * fallback price — a throw here means "no charge", never
-   * "charge a guessed price".
+   * port (#2185), for a segment (#3289). Fail-closed, exactly:
+   * no catalogue configured, no stored row, an invalid stored
+   * value, or a stored price that is not APPROVED (#2547) all
+   * throw before any checkout is minted or any coverage is
+   * consumed. There is no hardcoded fallback price — a throw
+   * here means "no charge", never "charge a guessed price".
+   * The resolution is the EFFECTIVE version for the segment at
+   * now: the returned productId/versionId identify the version
+   * charged, so the charge is recorded against the price that
+   * was actually quoted (per-charge recording, §3.9).
    */
-  async priceFor(family: NativeScreenerFamily): Promise<number> {
+  async resolveChargePricing(
+    family: NativeScreenerFamily,
+    segment: string,
+  ): Promise<{ priceUSD: number; productId: string; versionId: string }> {
     const catalogue = this.config.priceCatalogue;
     if (!catalogue) {
       throw new Error(
@@ -259,18 +280,36 @@ export class NativeMonetizationGate {
     }
     // #2547: only an APPROVED price is chargeable. A proposed
     // price fails closed exactly like a missing one — the seed
-    // values are proposals, not an activation.
-    const price = await catalogue.getApprovedPrice(family);
-    if (price === null || !Number.isFinite(price) || price <= 0) {
-      const entry = typeof catalogue.getEntry === "function" ? await catalogue.getEntry(family).catch(() => null) : null;
-      if (entry && entry.approvalStatus !== "approved") {
-        throw new Error(
-          `Stored price for family ${family} is not approved (status: ${entry.approvalStatus}): refusing to charge (fail-closed).`,
-        );
-      }
+    // values are proposals, not an activation. The entry is the
+    // effective version for the segment, so its approval is the
+    // version's approval, not the family's.
+    const entry =
+      typeof catalogue.getEntry === "function"
+        ? await catalogue.getEntry(family, segment).catch(() => null)
+        : null;
+    if (!entry) {
       throw new Error(`No valid stored price for family ${family}: refusing to charge (fail-closed).`);
     }
-    return price;
+    if (!Number.isFinite(entry.priceUSD) || entry.priceUSD <= 0) {
+      throw new Error(`No valid stored price for family ${family}: refusing to charge (fail-closed).`);
+    }
+    if (entry.approvalStatus !== "approved") {
+      throw new Error(
+        `Stored price for family ${family} is not approved (status: ${entry.approvalStatus}): refusing to charge (fail-closed).`,
+      );
+    }
+    return { priceUSD: entry.priceUSD, productId: entry.productId, versionId: entry.id };
+  }
+
+  /**
+   * Resolve the per-run price for a family — the price alone.
+   * Kept for callers that only need the amount; check() and
+   * confirmPaid resolve through resolveChargePricing so the
+   * product/version ride along. Segment defaults to "default"
+   * here; the gate paths pass the account's segment.
+   */
+  async priceFor(family: NativeScreenerFamily, segment?: string): Promise<number> {
+    return (await this.resolveChargePricing(family, segment ?? "default")).priceUSD;
   }
 
   async check(run: NativeCheckInput): Promise<NativeGateDecision> {
@@ -279,7 +318,7 @@ export class NativeMonetizationGate {
     if (run.tenantId && account.tenantId && run.tenantId !== account.tenantId) throw new Error("Tenant mismatch: run tenant must equal the verified account tenant. No cross-tenant billing.");
     const existing = this.byRun.get(run.id);
     if (existing?.status === "paid") {
-      return { allowed: true, status: "already_paid", runRequestId: run.id, priceUSD: existing.priceUSD, paidVia: existing.paidVia };
+      return { allowed: true, status: "already_paid", runRequestId: run.id, priceUSD: existing.priceUSD, paidVia: existing.paidVia, productId: existing.productId, versionId: existing.versionId };
     }
     // Flag OFF means this gate charges nothing — no checkout, no
     // coverage spend — so the run is free without resolving a
@@ -413,7 +452,16 @@ export class NativeMonetizationGate {
       this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD: 0, status: "paid", paidVia: "unlimited_free_grant" });
       return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: 0, paidVia: "unlimited_free_grant" };
     }
-    const priceUSD = await this.priceFor(run.family);
+    // Issue #3289: price resolution happens ONCE, here, after
+    // the free branches — so the grant, the Free allowance, and
+    // flag-OFF never depend on a price existing — and the
+    // resolved product/version are carried on every paid outcome
+    // and on the byRun row, so the charge is recorded against
+    // the version that was quoted. The segment is the verified
+    // account's segment, never a client claim.
+    const pricing = await this.resolveChargePricing(run.family, account.segment ?? "default");
+    const priceUSD = pricing.priceUSD;
+    const { productId, versionId } = pricing;
 
     const coverage =
       account.tier === "Subscribed" && account.includedRunsRemaining > 0
@@ -424,8 +472,8 @@ export class NativeMonetizationGate {
     if (coverage) {
       if (coverage === "subscription_included") account.includedRunsRemaining -= 1;
       else account.creditsUSD = Math.round((account.creditsUSD - priceUSD) * 100) / 100;
-      this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD, status: "paid", paidVia: coverage });
-      return { allowed: true, status: "paid", runRequestId: run.id, priceUSD, paidVia: coverage };
+      this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD, status: "paid", paidVia: coverage, productId, versionId });
+      return { allowed: true, status: "paid", runRequestId: run.id, priceUSD, paidVia: coverage, productId, versionId };
     }
     // All runs are scheduled behind the scenes: only a one-off scheduled
     // run authorized at submission may checkout; every other scheduled
@@ -433,10 +481,10 @@ export class NativeMonetizationGate {
     const isOneOffScheduled =
       run.trigger === "scheduled" && run.scheduleKind === "one_off" && run.authorizedAtSubmission === true;
     if (run.trigger === "scheduled" && !isOneOffScheduled) {
-      return { allowed: false, status: "coverage_required", httpStatus: 402, runRequestId: run.id, priceUSD, family: run.family, reason: "Scheduled runs need subscription included usage or prepaid credits. No unattended card charge is taken." };
+      return { allowed: false, status: "coverage_required", httpStatus: 402, runRequestId: run.id, priceUSD, family: run.family, reason: "Scheduled runs need subscription included usage or prepaid credits. No unattended card charge is taken.", productId, versionId };
     }
     if (existing?.status === "payment_required") {
-      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD, family: run.family };
+      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD, family: run.family, productId: existing.productId, versionId: existing.versionId };
     }
     const ports = this.config.checkout;
     if (!ports) {
@@ -468,20 +516,24 @@ export class NativeMonetizationGate {
       rail,
       sessionId: rail === "stripe" ? checkout.checkoutId : undefined,
       challengeNonce: rail === "x402" ? checkout.challenge?.nonce : undefined,
+      productId,
+      versionId,
     });
     return {
       allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD, family: run.family, checkout,
       disclosure: NATIVE_PAYMENT_DISCLOSURE,
+      productId,
+      versionId,
     };
   }
 
   async confirmPaid(
-    run: { id: string; userId: string; email: string; family?: NativeScreenerFamily },
+    run: { id: string; userId: string; email: string; family?: NativeScreenerFamily; segment?: string },
     proof: NativeConfirmProof = {},
   ): Promise<NativeGateDecision> {
     if (proof.stripeReturnPage) throw new Error("A Stripe return page is not proof of payment.");
     const existing = this.byRun.get(run.id);
-    if (existing?.status === "paid") return { allowed: true, status: "already_paid", runRequestId: run.id, priceUSD: existing.priceUSD, paidVia: existing.paidVia };
+    if (existing?.status === "paid") return { allowed: true, status: "already_paid", runRequestId: run.id, priceUSD: existing.priceUSD, paidVia: existing.paidVia, productId: existing.productId, versionId: existing.versionId };
     // Replay guard: a claim hash, payment-intent id, or session id
     // already redeemed for another run is rejected, never re-spent.
     for (const key of [proof.claimTxHash, proof.paymentIntentId, proof.sessionId]) {
@@ -515,9 +567,19 @@ export class NativeMonetizationGate {
     // checkout, else the catalogue price for the family (stateless
     // confirm, e.g. after a durable resume re-built the gate). No
     // stored price and no family means no amount to match against:
-    // fail closed without confirming.
-    const expectedPrice =
-      existing?.priceUSD ?? (run.family ? await this.priceFor(run.family) : undefined);
+    // fail closed without confirming. Issue #3289: the stateless
+    // path resolves the effective version for the run's segment
+    // (default "default"); the checked path carries the version
+    // quoted at check time on the byRun row. A pre-0058 byRun row
+    // carries no version — the decision then carries none, and
+    // the best-effort journal post logs the gap instead of
+    // inventing a version.
+    const expectedPricing = existing
+      ? { priceUSD: existing.priceUSD, productId: existing.productId, versionId: existing.versionId }
+      : run.family
+        ? await this.resolveChargePricing(run.family, run.segment ?? "default")
+        : undefined;
+    const expectedPrice = expectedPricing?.priceUSD;
     if (expectedPrice === undefined || !Number.isFinite(expectedPrice) || expectedPrice <= 0) {
       return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: 0, family: run.family ?? existing?.family ?? "goal" };
     }
@@ -525,12 +587,12 @@ export class NativeMonetizationGate {
     if (rail === "stripe") {
       const sessionId = existing?.sessionId ?? proof.sessionId;
       if (!sessionId) {
-        return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? 0, family: run.family ?? existing?.family ?? "goal" };
+        return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? 0, family: run.family ?? existing?.family ?? "goal", productId: expectedPricing?.productId, versionId: expectedPricing?.versionId };
       }
       // A proof naming a different session than the minted checkout
       // is not evidence for this run.
       if (existing?.sessionId && proof.sessionId && existing.sessionId !== proof.sessionId) {
-        return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing.priceUSD, family: existing.family };
+        return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing.priceUSD, family: existing.family, productId: existing.productId, versionId: existing.versionId };
       }
       const evidence = await port.retrieveCardSession({ sessionId });
       const amountMatches = evidence.amountTotalCents === Math.round(expectedPrice * 100);
@@ -543,7 +605,7 @@ export class NativeMonetizationGate {
         evidence.clientReferenceId === run.id &&
         intentMatches;
       if (!confirmed) {
-        return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? expectedPrice, family: run.family ?? existing?.family ?? "goal" };
+        return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? expectedPrice, family: run.family ?? existing?.family ?? "goal", productId: expectedPricing?.productId, versionId: expectedPricing?.versionId };
       }
       this.byRun.set(run.id, {
         ...(existing as NativeLedgerRow),
@@ -553,6 +615,8 @@ export class NativeMonetizationGate {
         priceUSD: expectedPrice,
         status: "paid",
         paidVia: "stripe_checkout",
+        productId: expectedPricing?.productId,
+        versionId: expectedPricing?.versionId,
       });
       for (const key of [sessionId, proof.paymentIntentId, evidence.paymentIntentId, proof.claimTxHash]) {
         if (key) this.byClaim.set(key.toLowerCase(), run.id);
@@ -565,26 +629,26 @@ export class NativeMonetizationGate {
         "stripe",
         run.userId,
       );
-      return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: expectedPrice, paidVia: "stripe_checkout" };
+      return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: expectedPrice, paidVia: "stripe_checkout", productId: expectedPricing?.productId, versionId: expectedPricing?.versionId };
     }
 
     // x402 rail.
     if (!proof.paymentProof) {
-      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? expectedPrice, family: run.family ?? existing?.family ?? "goal" };
+      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? expectedPrice, family: run.family ?? existing?.family ?? "goal", productId: expectedPricing?.productId, versionId: expectedPricing?.versionId };
     }
     const verdict = await port.verifyCryptoPayment({ paymentProof: proof.paymentProof, expectedAmountUSD: expectedPrice });
     if (!verdict.verified || !verdict.payer) {
-      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? expectedPrice, family: run.family ?? existing?.family ?? "goal" };
+      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? expectedPrice, family: run.family ?? existing?.family ?? "goal", productId: expectedPricing?.productId, versionId: expectedPricing?.versionId };
     }
     // Payer match: a claimed payer must equal the verified payer.
     if (proof.payer && proof.payer.toLowerCase() !== verdict.payer.toLowerCase()) {
-      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? expectedPrice, family: run.family ?? existing?.family ?? "goal" };
+      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing?.priceUSD ?? expectedPrice, family: run.family ?? existing?.family ?? "goal", productId: expectedPricing?.productId, versionId: expectedPricing?.versionId };
     }
     // Nonce binding: when this gate minted the challenge, the proof
     // must carry that challenge's nonce — otherwise the proof was
     // minted for a different run's amount.
     if (existing?.challengeNonce && verdict.nonce && existing.challengeNonce !== verdict.nonce) {
-      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing.priceUSD, family: existing.family };
+      return { allowed: false, status: "payment_required", httpStatus: 402, runRequestId: run.id, priceUSD: existing.priceUSD, family: existing.family, productId: existing.productId, versionId: existing.versionId };
     }
     // Stateless nonce binding (#2548): on the durable-resume path
     // there is no `existing` row and no minted-challenge nonce in
@@ -605,6 +669,8 @@ export class NativeMonetizationGate {
       priceUSD: expectedPrice,
       status: "paid",
       paidVia: "x402",
+      productId: expectedPricing?.productId,
+      versionId: expectedPricing?.versionId,
     });
     for (const key of [proof.claimTxHash, verdict.nonce ? `x402:${verdict.nonce}:${verdict.payer}` : undefined]) {
       if (key) this.byClaim.set(key.toLowerCase(), run.id);
@@ -618,7 +684,7 @@ export class NativeMonetizationGate {
       "x402",
       verdict.payer,
     );
-    return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: expectedPrice, paidVia: "x402" };
+    return { allowed: true, status: "paid", runRequestId: run.id, priceUSD: expectedPrice, paidVia: "x402", productId: expectedPricing?.productId, versionId: expectedPricing?.versionId };
   }
 
   /**

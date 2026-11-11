@@ -172,7 +172,12 @@ describe("trial activation service (#3243)", () => {
   async function setup() {
     const subs = new InMemorySubscriptionAdapter();
     const store = new InMemoryCommercialAdapter();
-    const plan = await subs.createPlan({ id: "pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10, trialDays: 14 });
+    const created = await subs.createPlan({ id: "pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10, trialDays: 14 });
+    // Issue #3289: trial activation validates the version is
+    // effective + approved for the buyer's segment — approve the
+    // fixture plan (and re-read it: createPlan returns PROPOSED).
+    await subs.approvePlan(created.id, "test-operator");
+    const plan = (await subs.getPlan(created.id))!;
     return { subs, store, plan };
   }
 
@@ -200,7 +205,11 @@ describe("trial activation service (#3243)", () => {
   it("refuses a plan with no trialDays", async () => {
     const subs = new InMemorySubscriptionAdapter();
     const store = new InMemoryCommercialAdapter();
-    const plan = await subs.createPlan({ id: "plain", name: "Plain", priceUSD: 5, periodDays: 30, includedRuns: 0 });
+    const created = await subs.createPlan({ id: "plain", name: "Plain", priceUSD: 5, periodDays: 30, includedRuns: 0 });
+    // Issue #3289: approve first, so the trialDays refusal (not
+    // the approval refusal) is what this test pins.
+    await subs.approvePlan(created.id, "test-operator");
+    const plan = (await subs.getPlan(created.id))!;
     await expect(
       activateTrialSubscription({ subs, store, userId: "u1", tenantId: "t1", plan, nowMs: NOW }),
     ).rejects.toThrow(/no trial/);
@@ -208,20 +217,28 @@ describe("trial activation service (#3243)", () => {
   });
 
   it("refuses an inactive plan and a second trial of the same plan", async () => {
-    const { subs, store, plan } = await setup();
+    const { subs, store } = await setup();
     await subs.deactivatePlan("pro");
     const inactivePlan = await subs.getPlan("pro");
     expect(inactivePlan?.active).toBe(false);
     await expect(
       activateTrialSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: inactivePlan!, nowMs: NOW }),
     ).rejects.toThrow(/not active/);
-    const activePlan = { ...plan, active: true };
+    // Issue #3289: activation validates the STORED version is
+    // effective + approved — the old spread-hack ({...plan,
+    // active: true}) no longer reactivates a deactivated row, so
+    // the success path uses a fresh active plan with the same terms.
+    const createdPro2 = await subs.createPlan({ id: "pro2", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10, trialDays: 14 });
+    await subs.approvePlan(createdPro2.id, "test-operator");
+    const activePlan = (await subs.getPlan(createdPro2.id))!;
     await activateTrialSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: activePlan, nowMs: NOW });
     await expect(
       activateTrialSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: activePlan, nowMs: NOW }),
     ).rejects.toThrow(/already used/);
     // A different trial plan for the same user is still allowed.
-    const other = await subs.createPlan({ id: "team", name: "Team", priceUSD: 40, periodDays: 30, includedRuns: 5, trialDays: 7 });
+    const createdOther = await subs.createPlan({ id: "team", name: "Team", priceUSD: 40, periodDays: 30, includedRuns: 5, trialDays: 7 });
+    await subs.approvePlan(createdOther.id, "test-operator");
+    const other = (await subs.getPlan(createdOther.id))!;
     const second = await activateTrialSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: other, nowMs: NOW });
     expect(second.subscription.planId).toBe("team");
     expect(second.account.includedRuns).toBe(15);
@@ -300,6 +317,11 @@ describe("trial checkout route (#3243)", () => {
     });
     expect(created?.status).toBe(200);
     expect((await bodyOf(created)).plan.trialDays).toBe(14);
+    // Issue #3289: trial activation validates effective +
+    // approved — approve the plan an operator would approve
+    // before offering it.
+    const approved = await call(ctx, "POST", "/payments/agentic/commercial/plans/approve", "op1", { planId: "pro" });
+    expect(approved?.status).toBe(200);
     const listed = await call(ctx, "GET", "/payments/agentic/commercial/plans", "u1");
     expect((await bodyOf(listed)).plans.find((p: any) => p.id === "pro")?.trialDays).toBe(14);
 

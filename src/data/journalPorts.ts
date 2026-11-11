@@ -83,6 +83,16 @@ export interface JournalEntry {
   tenantId: string;
   runRequestId: string;
   family: string;
+  /**
+   * Issue #3289 — per-charge recording (§3.9): the product and
+   * version whose charge this entry records, and the price
+   * charged. Null on legacy rows (written before 0058) and on
+   * entries that are not a per-run charge (top-up, which has no
+   * product/version). The per-run mappings always set all three.
+   */
+  productId?: string | null;
+  versionId?: string | null;
+  priceUSD?: number | null;
   createdAtMs: number;
 }
 
@@ -108,6 +118,15 @@ export interface JournalEntryInput {
   tenantId: string;
   runRequestId: string;
   family: string;
+  /**
+   * Issue #3289 — per-charge recording (§3.9). Optional on the
+   * port input because not every journal event is a per-run
+   * charge (top-up has none); the per-run MAPPING functions
+   * require them and refuse without them (fail-closed).
+   */
+  productId?: string | null;
+  versionId?: string | null;
+  priceUSD?: number | null;
 }
 
 export interface JournalPort {
@@ -211,6 +230,14 @@ export interface JournalMappingInput {
   /** The ledger row amount. */
   amountUSD: number;
   currency?: string;
+  /**
+   * Issue #3289 — per-charge recording (§3.9): the product and
+   * version whose charge this event records. REQUIRED — a
+   * per-run mapping without them throws (fail-closed). The
+   * entry's priceUSD is the amountUSD (the price charged).
+   */
+  productId: string;
+  versionId: string;
 }
 
 function assertMappingAmount(input: JournalMappingInput): number {
@@ -220,6 +247,13 @@ function assertMappingAmount(input: JournalMappingInput): number {
   }
   if (!input.transactionRef || !input.tenantId || !input.runRequestId || !input.family) {
     throw new Error("Journal mapping requires transactionRef, tenantId, runRequestId, and family.");
+  }
+  // Issue #3289: a per-run event without its product/version is
+  // unrecordable — refuse it here, before any entry is built,
+  // rather than posting an entry that cannot be traced to the
+  // price that was charged.
+  if (!input.productId || !input.versionId) {
+    throw new Error("Journal mapping requires productId and versionId (issue #3289 per-charge recording).");
   }
   return amount;
 }
@@ -238,6 +272,9 @@ export function mapChargeToJournalEntries(input: JournalMappingInput): JournalEn
       tenantId: input.tenantId,
       runRequestId: input.runRequestId,
       family: input.family,
+      productId: input.productId,
+      versionId: input.versionId,
+      priceUSD: amount,
     },
     {
       transactionRef: input.transactionRef,
@@ -248,6 +285,9 @@ export function mapChargeToJournalEntries(input: JournalMappingInput): JournalEn
       tenantId: input.tenantId,
       runRequestId: input.runRequestId,
       family: input.family,
+      productId: input.productId,
+      versionId: input.versionId,
+      priceUSD: amount,
     },
   ];
 }
@@ -266,6 +306,9 @@ export function mapFailureCreditToJournalEntries(input: JournalMappingInput): Jo
       tenantId: input.tenantId,
       runRequestId: input.runRequestId,
       family: input.family,
+      productId: input.productId,
+      versionId: input.versionId,
+      priceUSD: amount,
     },
     {
       transactionRef: input.transactionRef,
@@ -276,6 +319,9 @@ export function mapFailureCreditToJournalEntries(input: JournalMappingInput): Jo
       tenantId: input.tenantId,
       runRequestId: input.runRequestId,
       family: input.family,
+      productId: input.productId,
+      versionId: input.versionId,
+      priceUSD: amount,
     },
   ];
 }
@@ -302,6 +348,14 @@ export interface SubscriptionPurchaseJournalInput {
   /** The plan price at purchase. */
   amountUSD: number;
   currency?: string;
+  /**
+   * Issue #3289 — per-charge recording (§3.9): the product and
+   * version purchased. REQUIRED — a subscription purchase
+   * without them throws (fail-closed). The entry's priceUSD is
+   * the amountUSD (the price charged).
+   */
+  productId: string;
+  versionId: string;
 }
 
 /** subscription purchase → Dr 1000 / Cr 2100. NOT immediate revenue. */
@@ -317,6 +371,14 @@ export function mapSubscriptionPurchaseToJournalEntries(
       "Journal mapping requires transactionRef, tenantId, and subscriptionId.",
     );
   }
+  // Issue #3289: a subscription purchase without its
+  // product/version is unrecordable — refuse it here, before
+  // any entry is built.
+  if (!input.productId || !input.versionId) {
+    throw new Error(
+      "Journal mapping requires productId and versionId (issue #3289 per-charge recording).",
+    );
+  }
   const currency = input.currency ?? "USD";
   return [
     {
@@ -328,6 +390,9 @@ export function mapSubscriptionPurchaseToJournalEntries(
       tenantId: input.tenantId,
       runRequestId: input.subscriptionId,
       family: "subscription",
+      productId: input.productId,
+      versionId: input.versionId,
+      priceUSD: amount,
     },
     {
       transactionRef: input.transactionRef,
@@ -338,6 +403,9 @@ export function mapSubscriptionPurchaseToJournalEntries(
       tenantId: input.tenantId,
       runRequestId: input.subscriptionId,
       family: "subscription",
+      productId: input.productId,
+      versionId: input.versionId,
+      priceUSD: amount,
     },
   ];
 }
@@ -407,6 +475,9 @@ export function mapRedemptionToJournalEntries(input: JournalMappingInput): Journ
       tenantId: input.tenantId,
       runRequestId: input.runRequestId,
       family: input.family,
+      productId: input.productId,
+      versionId: input.versionId,
+      priceUSD: amount,
     },
     {
       transactionRef: input.transactionRef,
@@ -417,6 +488,9 @@ export function mapRedemptionToJournalEntries(input: JournalMappingInput): Journ
       tenantId: input.tenantId,
       runRequestId: input.runRequestId,
       family: input.family,
+      productId: input.productId,
+      versionId: input.versionId,
+      priceUSD: amount,
     },
   ];
 }

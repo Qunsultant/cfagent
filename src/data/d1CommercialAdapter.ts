@@ -24,12 +24,19 @@ import {
 import {
   applyMigrations,
   MIGRATION_0007_COMMERCIAL_STORE,
+  MIGRATION_0008_SUBSCRIPTIONS,
+  MIGRATION_0012_NATIVE_LEDGER,
+  MIGRATION_0009_JOURNAL,
   MIGRATION_0010_PAID_SUBMISSIONS,
+  MIGRATION_0011_PRICE_CATALOGUE,
   MIGRATION_0026_TENANT_AUTO_REFRESH,
+  MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
   MIGRATION_0028_TENANT_PROVIDERS,
   MIGRATION_0040_UNLIMITED_FREE_GRANT,
+  MIGRATION_0058_PRODUCT_VERSIONS,
   type MigrationDb,
 } from "./migrationRunner";
+import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
 import {
   assertIncludedRuns,
   assertNonNegativeCredits,
@@ -78,15 +85,24 @@ export function createD1CommercialDb(d1: D1Database): CommercialDb {
  * adds the per-tenant auto-refresh columns to the tenant
  * settings row, so a commercial call site is also an ensure
  * site for the switch. 0040 (#3245) adds the unlimited-free
- * grant columns to the accounts row, same pattern.
+ * grant columns to the accounts row, same pattern. Issue #3289:
+ * 0058 adds the account segment column and the claim
+ * per-charge columns, so its prerequisites (0008 plans, 0009
+ * journal, 0011 + 0027 catalogue, 0012 native ledger) ride along.
  */
 export async function ensureCommercialSchema(db: CommercialDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0007_COMMERCIAL_STORE,
+    MIGRATION_0008_SUBSCRIPTIONS,
     MIGRATION_0010_PAID_SUBMISSIONS,
+    MIGRATION_0011_PRICE_CATALOGUE,
     MIGRATION_0026_TENANT_AUTO_REFRESH,
+    MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
     MIGRATION_0028_TENANT_PROVIDERS,
     MIGRATION_0040_UNLIMITED_FREE_GRANT,
+    MIGRATION_0009_JOURNAL,
+    MIGRATION_0012_NATIVE_LEDGER,
+    MIGRATION_0058_PRODUCT_VERSIONS,
   ]);
 }
 
@@ -108,6 +124,10 @@ function toAccount(raw: typeof agentCommercialAccounts.$inferSelect): Commercial
       grantedBy !== null && reason !== null
         ? { grantedBy, reason, expiresAtMs }
         : null,
+    // Issue #3289: pre-0058 rows have no segment column — the
+    // migration backfills "default", so a null here can only
+    // mean a row written before the migration ran.
+    segment: raw.segment ?? DEFAULT_SEGMENT,
     updatedAtMs: raw.updatedAtMs,
   };
 }
@@ -133,6 +153,8 @@ export class D1CommercialAdapter implements CommercialStore {
     creditsUSD?: unknown;
     includedRuns?: unknown;
     unlimitedFreeGrant?: unknown;
+    /** Issue #3289: undefined preserves the stored segment, "default" for a new row. */
+    segment?: unknown;
   }): Promise<CommercialAccountRecord> {
     if (!input.userId || !input.tenantId) {
       throw new Error("userId and tenantId are required.");
@@ -154,6 +176,13 @@ export class D1CommercialAdapter implements CommercialStore {
       input.unlimitedFreeGrant,
       existing?.unlimitedFreeGrant,
     );
+    // Issue #3289: same preserve semantics for the segment —
+    // an upsert that says nothing about the segment changes
+    // nothing; a new row starts in the default segment.
+    const segment =
+      input.segment === undefined
+        ? (existing?.segment ?? DEFAULT_SEGMENT)
+        : assertSegment(input.segment);
     const record: CommercialAccountRecord = {
       id: input.userId,
       tenantId: input.tenantId,
@@ -162,6 +191,7 @@ export class D1CommercialAdapter implements CommercialStore {
       creditsUSD: input.creditsUSD === undefined ? 0 : assertNonNegativeCredits(input.creditsUSD),
       includedRuns: input.includedRuns === undefined ? 0 : assertIncludedRuns(input.includedRuns),
       unlimitedFreeGrant,
+      segment,
       updatedAtMs: Date.now(),
     };
     await this.db
@@ -176,6 +206,7 @@ export class D1CommercialAdapter implements CommercialStore {
         unlimitedFreeGrantedBy: record.unlimitedFreeGrant?.grantedBy ?? null,
         unlimitedFreeReason: record.unlimitedFreeGrant?.reason ?? null,
         unlimitedFreeExpiresAtMs: record.unlimitedFreeGrant?.expiresAtMs ?? null,
+        segment: record.segment,
         updatedAtMs: record.updatedAtMs,
       })
       .onConflictDoUpdate({
@@ -189,10 +220,22 @@ export class D1CommercialAdapter implements CommercialStore {
           unlimitedFreeGrantedBy: record.unlimitedFreeGrant?.grantedBy ?? null,
           unlimitedFreeReason: record.unlimitedFreeGrant?.reason ?? null,
           unlimitedFreeExpiresAtMs: record.unlimitedFreeGrant?.expiresAtMs ?? null,
+          segment: record.segment,
           updatedAtMs: record.updatedAtMs,
         },
       });
     return record;
+  }
+
+  async setAccountSegment(userId: string, segment: string): Promise<CommercialAccountRecord> {
+    const account = await this.getAccount(userId);
+    if (!account) throw new Error(`No commercial account for user ${userId}.`);
+    const next = assertSegment(segment);
+    await this.db
+      .update(agentCommercialAccounts)
+      .set({ segment: next, updatedAtMs: Date.now() })
+      .where(eq(agentCommercialAccounts.id, userId));
+    return { ...account, segment: next, updatedAtMs: Date.now() };
   }
 
   async adjustCredits(userId: string, deltaUSD: number): Promise<CommercialAccountRecord> {
@@ -411,12 +454,19 @@ export class D1CommercialAdapter implements CommercialStore {
     userId: string;
     family: string;
     amountUSD: number;
+    productId?: string | null;
+    versionId?: string | null;
+    priceUSD?: number | null;
   }): Promise<CreditClaimRecord> {
     const record: CreditClaimRecord = {
       creditRunId: claim.creditRunId,
       userId: claim.userId,
       family: claim.family,
       amountUSD: round2(claim.amountUSD),
+      // Issue #3289: which charge the credit replaces (§3.9).
+      productId: claim.productId ?? null,
+      versionId: claim.versionId ?? null,
+      priceUSD: claim.priceUSD ?? null,
       createdAtMs: Date.now(),
     };
     // INSERT OR IGNORE: re-recording the same claim is a no-op.
@@ -427,6 +477,9 @@ export class D1CommercialAdapter implements CommercialStore {
         userId: record.userId,
         family: record.family,
         amountUSD: record.amountUSD,
+        productId: record.productId,
+        versionId: record.versionId,
+        priceUSD: record.priceUSD,
         createdAtMs: record.createdAtMs,
       })
       .onConflictDoNothing();
@@ -440,6 +493,9 @@ export class D1CommercialAdapter implements CommercialStore {
       userId: rows[0].userId,
       family: rows[0].family,
       amountUSD: rows[0].amountUSD,
+      productId: rows[0].productId ?? null,
+      versionId: rows[0].versionId ?? null,
+      priceUSD: rows[0].priceUSD ?? null,
       createdAtMs: rows[0].createdAtMs,
     };
   }
@@ -447,11 +503,20 @@ export class D1CommercialAdapter implements CommercialStore {
   async findUnredeemedCredit(
     userId: string,
     family: string,
-  ): Promise<{ creditRunId: string; amountUSD: number } | null> {
+  ): Promise<{
+    creditRunId: string;
+    amountUSD: number;
+    productId?: string | null;
+    versionId?: string | null;
+    priceUSD?: number | null;
+  } | null> {
     const rows = await this.db
       .select({
         creditRunId: agentCreditClaims.creditRunId,
         amountUSD: agentCreditClaims.amountUSD,
+        productId: agentCreditClaims.productId,
+        versionId: agentCreditClaims.versionId,
+        priceUSD: agentCreditClaims.priceUSD,
       })
       .from(agentCreditClaims)
       .leftJoin(
@@ -467,7 +532,15 @@ export class D1CommercialAdapter implements CommercialStore {
       )
       .orderBy(asc(agentCreditClaims.createdAtMs), asc(agentCreditClaims.creditRunId))
       .limit(1);
-    return rows.length === 0 ? null : { creditRunId: rows[0].creditRunId, amountUSD: rows[0].amountUSD };
+    return rows.length === 0
+      ? null
+      : {
+          creditRunId: rows[0].creditRunId,
+          amountUSD: rows[0].amountUSD,
+          productId: rows[0].productId ?? null,
+          versionId: rows[0].versionId ?? null,
+          priceUSD: rows[0].priceUSD ?? null,
+        };
   }
 
   async recordPaidSubmission(input: {

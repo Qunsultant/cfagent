@@ -323,7 +323,7 @@ describe("dedicated paid-submission route (#2015)", () => {
     } as unknown as AgenticPaymentsRouteContext;
     const res = await call(noPortCtx, "POST", "/payments/agentic/commercial/submit", "u1", submitBody);
     expect(res?.status).toBe(503);
-    expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-9", amountUSD: 0.1 });
+    expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-9", amountUSD: 0.1, productId: null, versionId: null, priceUSD: null });
   });
 
   it("reports submission status through the binding", async () => {

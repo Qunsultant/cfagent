@@ -243,8 +243,15 @@ import {
   USAGE_BILLING_DEFAULT_LIMIT,
 } from "../../services/usageBillingSurface";
 import { ensureUsageEventsTable } from "../../services/scheduledReports";
-import { activateSubscription, grantSubscription } from "../../services/subscriptionActivation";
+import { activateSubscription, grantSubscription, assertPlanEffectiveAndApprovedForSegment } from "../../services/subscriptionActivation";
 import { activateTrialSubscription, trialStartedMessage } from "../../services/trialSubscriptionActivation";
+import {
+  createProductAdapter,
+  ensureProductSchema,
+} from "../../data/createProductPorts";
+import type { D1ProductAdapter } from "../../data/d1ProductAdapter";
+import { resolveEffectiveVersion } from "../../data/productPorts";
+import { moveSubscriptionToVersion, setAccountSegment } from "../../services/versionMoves";
 import {
   createLifecycleAdapter,
   ensureLifecycleSchema,
@@ -835,6 +842,16 @@ export async function handleAgenticPaymentsRoutes(
     const adapter = createSubscriptionAdapter(ctx.env as { AGENT_DB?: unknown });
     if (!adapter) {
       return Response.json({ error: "Subscription store unavailable: AGENT_DB is not bound." }, { status: 503 });
+    }
+    return adapter;
+  };
+  // Issue #3289: product store, same fail-closed shape as the
+  // commercial/subscription stores: unbound AGENT_DB is a 503,
+  // never a silent fallback.
+  const requireProducts = (): D1ProductAdapter | Response => {
+    const adapter = createProductAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (!adapter) {
+      return Response.json({ error: "Product store unavailable: AGENT_DB is not bound." }, { status: 503 });
     }
     return adapter;
   };
@@ -1722,18 +1739,32 @@ export async function handleAgenticPaymentsRoutes(
           // the credit is already claimed; a journal failure is a
           // loud log + a reconcile flag. Posted only on start
           // success, never on the start_failed path above.
-          await postJournalBestEffort(async () => {
-            const adapter = createJournalAdapter(ctx.env as { AGENT_DB?: unknown });
-            if (!adapter) return null;
-            await ensureJournalSchema(adapter.db);
-            return adapter;
-          }, mapRedemptionToJournalEntries({
-            transactionRef: runRequestId,
-            tenantId,
-            runRequestId,
-            family,
-            amountUSD: credit.amountUSD,
-          }));
+          // Issue #3289: the redemption records the product/version
+          // of the charge the credit replaces (§3.9). A legacy
+          // claim (pre-0058, no product/version) skips the journal
+          // entry with a loud log — the run already started and
+          // the credit is already spent, so a journal failure
+          // must not fail a delivered run.
+          if (credit.productId && credit.versionId) {
+            await postJournalBestEffort(async () => {
+              const adapter = createJournalAdapter(ctx.env as { AGENT_DB?: unknown });
+              if (!adapter) return null;
+              await ensureJournalSchema(adapter.db);
+              return adapter;
+            }, mapRedemptionToJournalEntries({
+              transactionRef: runRequestId,
+              tenantId,
+              runRequestId,
+              family,
+              amountUSD: credit.amountUSD,
+              productId: credit.productId,
+              versionId: credit.versionId,
+            }));
+          } else {
+            console.error(
+              `[payments] redemption journal entry skipped for run=${runRequestId} (claim ${credit.creditRunId} has no product/version — pre-0058 claim); credit already redeemed.`,
+            );
+          }
           return Response.json({ runRequestId, status: "redeemed_started", creditRunId: credit.creditRunId, workflowId: handle.workflowId });
         }
       }
@@ -2019,7 +2050,14 @@ export async function handleAgenticPaymentsRoutes(
   // monetization flag must be ON for checkout and purchase.
   // ================================================================
 
-  // GET /payments/agentic/commercial/plans — active plans any verified login may buy.
+  // GET /payments/agentic/commercial/plans — the effective version for the caller's segment only.
+  // Issue #3289: a buyer sees ONE version per product — the effective version for THEIR
+  // segment — never a superseded, future, expired, or deactivated one, and never another
+  // segment's version. Approval is NOT filtered here: a PROPOSED effective version stays
+  // visible (the checkout refuses it); hiding it would hide the price the operator is about
+  // to approve. The segment is the verified account's segment, "default" when no account
+  // exists yet. A product with no effective version for the segment is absent, never shown
+  // with a stale price.
   if (path.endsWith("/payments/agentic/commercial/plans") && request.method === "GET") {
     try {
       const login = commercialLogin();
@@ -2030,7 +2068,21 @@ export async function handleAgenticPaymentsRoutes(
       if (store instanceof Response) return store;
       const ensured = await ensureStores(store, subs);
       if (ensured) return ensured;
-      return Response.json({ plans: await subs.listPlans(true) });
+      const segment = (await store.getAccount(login))?.segment ?? "default";
+      const active = await subs.listPlans(true);
+      const byProduct = new Map<string, typeof active>();
+      for (const plan of active) {
+        const list = byProduct.get(plan.productId) ?? [];
+        list.push(plan);
+        byProduct.set(plan.productId, list);
+      }
+      const plans: typeof active = [];
+      for (const versions of byProduct.values()) {
+        const effective = resolveEffectiveVersion(versions, segment, Date.now());
+        if (effective) plans.push(effective);
+      }
+      plans.sort((a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      return Response.json({ plans });
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to list plans" }, { status: 500 });
     }
@@ -2050,6 +2102,8 @@ export async function handleAgenticPaymentsRoutes(
       }
       const body = (await request.json().catch(() => ({}))) as {
         id?: unknown; name?: unknown; priceUSD?: unknown; periodDays?: unknown; includedRuns?: unknown; trialDays?: unknown; monthlyPlanId?: unknown;
+        /** Issue #3289: optional version fields — productId, segment, effectiveFromMs, effectiveToMs, billingPeriod, featuresJson, stripePriceId. The version NUMBER is always server-assigned, never client-supplied. */
+        productId?: unknown; segment?: unknown; effectiveFromMs?: unknown; effectiveToMs?: unknown; billingPeriod?: unknown; featuresJson?: unknown; stripePriceId?: unknown;
       };
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
@@ -2087,7 +2141,42 @@ export async function handleAgenticPaymentsRoutes(
         periodDays: body.periodDays,
         includedRuns: body.includedRuns,
         trialDays: body.trialDays,
+        // Issue #3289: a plan is a version of a product — the
+        // version fields ride through; the version NUMBER is
+        // server-assigned by the adapter (max+1), never the
+        // body's. The adapter derives the productId from the
+        // name when absent; the product row itself is ensured
+        // by the route below.
+        productId: body.productId,
+        segment: body.segment,
+        effectiveFromMs: body.effectiveFromMs,
+        effectiveToMs: body.effectiveToMs,
+        billingPeriod: body.billingPeriod,
+        featuresJson: body.featuresJson,
+        stripePriceId: body.stripePriceId,
       });
+      // Issue #3289: the product row for the version's product
+      // always exists after a plan create — the Products listing
+      // (slice 2) reads products, not plan rows. The product is
+      // name-derived (the adapter derived the same productId
+      // above); a duplicate name for a different billing
+      // cadence is a different product by design (monthly and
+      // annual of one name are separate products, each with its
+      // own version chain — the effective-version resolution is
+      // per product, so one chain cannot sell both cadences).
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      try {
+        await ensureProductSchema(products.db);
+        await products.getOrCreateProduct({ name: plan.name, kind: "subscription" });
+      } catch (err: any) {
+        // The plan is created; a product-row failure must not
+        // fail the create — it is a loud log, and the next plan
+        // create (or the slice-2 backfill) repairs it.
+        console.error(
+          `[payments] product row ensure failed for plan ${plan.id}: ${err?.message || "unknown error"}`,
+        );
+      }
       // Audit (#1969 acceptance): the record alone answers which code, what
       // happened, for which login — code + message + login + structured fields.
       const created = resolveOutcome("SUCCESS_PLAN_CREATED");
@@ -2235,6 +2324,24 @@ export async function handleAgenticPaymentsRoutes(
       // comes from the resolved identity, never the request body; the
       // mint itself stays the native Stripe checkout.
       const tenantId = identity.tenantId ?? login;
+      // Issue #3289: the buyer buys the effective, approved version
+      // for THEIR segment — never a superseded, future, expired, or
+      // unapproved version. Fail-closed before any provider call.
+      // The segment is the verified account's segment ("default"
+      // when no account exists yet).
+      try {
+        await assertPlanEffectiveAndApprovedForSegment(
+          subs,
+          plan,
+          identity.stored?.segment ?? "default",
+          Date.now(),
+        );
+      } catch (err: any) {
+        return Response.json(
+          { error: err.message || "Plan is not the effective approved version for your segment." },
+          { status: 409 },
+        );
+      }
       const ports = createCheckoutPorts(ctx.env as unknown as {
         STRIPE_SECRET_KEY?: string;
         STRIPE_TEST_SECRET_KEY?: string;
@@ -2437,6 +2544,10 @@ export async function handleAgenticPaymentsRoutes(
         tenantId,
         subscriptionId: subscription.id,
         amountUSD: plan.priceUSD,
+        // Issue #3289: per-charge recording (§3.9) — the product
+        // and version purchased (planId IS the version id).
+        productId: plan.productId,
+        versionId: plan.id,
       }));
       const effectiveTier = resolveEffectiveTier(account, [subscription], Date.now());
       return Response.json({ subscription, account, effectiveTier });
@@ -3003,7 +3114,7 @@ export async function handleAgenticPaymentsRoutes(
       const message = err.message || "Failed to start trial";
       const status = /Tenant mismatch/.test(message)
         ? 403
-        : /already used|offers no trial|not active/.test(message)
+        : /already used|offers no trial|not active|not approved|not the effective version/.test(message)
           ? 409
           : /required|must be/.test(message)
             ? 400
@@ -3068,6 +3179,23 @@ export async function handleAgenticPaymentsRoutes(
         return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
       }
       const tenantId = identity.tenantId ?? login;
+      // Issue #3289: same effective+approved-for-segment check as
+      // the one-time checkout mint — the buyer buys the effective
+      // version for THEIR segment. Fail-closed before any provider
+      // call.
+      try {
+        await assertPlanEffectiveAndApprovedForSegment(
+          subs,
+          plan,
+          identity.stored?.segment ?? "default",
+          Date.now(),
+        );
+      } catch (err: any) {
+        return Response.json(
+          { error: err.message || "Plan is not the effective approved version for your segment." },
+          { status: 409 },
+        );
+      }
       const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
       if (!ports) {
         return Response.json({ error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
@@ -3267,6 +3395,10 @@ export async function handleAgenticPaymentsRoutes(
         tenantId,
         subscriptionId: subscription.id,
         amountUSD: plan.priceUSD,
+        // Issue #3289: per-charge recording (§3.9) — the product
+        // and version purchased (planId IS the version id).
+        productId: plan.productId,
+        versionId: plan.id,
       }));
       const effectiveTier = resolveEffectiveTier(afterAccount, [subscription], Date.now());
       return Response.json({ subscription, account: afterAccount, effectiveTier });
@@ -4287,6 +4419,158 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
     } catch (err: any) {
       const message = err.message || "Failed to set price";
       return Response.json({ error: message }, { status: /Invalid|must be/.test(message) ? 400 : 500 });
+    }
+  }
+
+  // Issue #3289 — per-customer version move + segment assignment (slice 1 primitives, operator only).
+  // No UI, no bulk job: these are the move primitives the slice-2 Products UI will call.
+  // POST /payments/agentic/commercial/subscriptions/:subscriptionId/move — move ONE subscription
+  // to another version of the SAME product. The target must be the effective, approved version
+  // for the holder's segment; a move onto a superseded, future, expired, deactivated, or
+  // unapproved version refuses (409), as does a move across products. A move onto the version
+  // already held is a no-op success ({ moved: false }). Runs and credits are untouched.
+  if (
+    path.includes("/payments/agentic/commercial/subscriptions/") &&
+    path.endsWith("/move") &&
+    request.method === "POST"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      const rawId = parts[parts.indexOf("subscriptions") + 1] ?? "";
+      let subscriptionId = rawId;
+      try {
+        subscriptionId = decodeURIComponent(rawId);
+      } catch {
+        subscriptionId = rawId;
+      }
+      const body = (await request.json().catch(() => ({}))) as { toVersionId?: unknown; reason?: unknown };
+      const toVersionId = typeof body.toVersionId === "string" ? body.toVersionId.trim() : "";
+      if (!subscriptionId) return Response.json({ error: "subscriptionId is required." }, { status: 400 });
+      if (!toVersionId) return Response.json({ error: "toVersionId is required." }, { status: 400 });
+      const reason = typeof body.reason === "string" ? body.reason : null;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      try {
+        await ensureProductSchema(products.db);
+      } catch (err: any) {
+        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const result = await moveSubscriptionToVersion({
+        subs,
+        store,
+        products,
+        subscriptionId,
+        toVersionId,
+        movedBy: login as string,
+        reason,
+      });
+      ctx.audit("commercial.product.move", "payments", {
+        userId: result.subscription.userId,
+        subscriptionId: result.subscription.id,
+        fromVersionId: result.fromVersionId,
+        toVersionId: result.toVersionId,
+        movedBy: login,
+        moved: result.moved,
+        ...(reason ? { reason } : {}),
+      });
+      return Response.json({
+        subscription: result.subscription,
+        moved: result.moved,
+        fromVersionId: result.fromVersionId,
+        toVersionId: result.toVersionId,
+      });
+    } catch (err: any) {
+      const message = err.message || "Failed to move subscription";
+      const status = /No subscription|No plan version/.test(message)
+        ? 404
+        : /Cannot move|not the effective version|not approved|not active/.test(message)
+          ? 409
+          : /required|must be/.test(message)
+            ? 400
+            : 500;
+      return Response.json({ error: message }, { status });
+    }
+  }
+
+  // POST /payments/agentic/commercial/accounts/:userId/segment — assign an account's segment
+  // (operator only). The segment changes what the NEXT per-run charge resolves to (and what a
+  // future move may target); it changes nothing about held versions, runs, or credits. The
+  // move audit records the held version when one exists.
+  if (
+    path.includes("/payments/agentic/commercial/accounts/") &&
+    path.endsWith("/segment") &&
+    request.method === "POST"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      const rawId = parts[parts.indexOf("accounts") + 1] ?? "";
+      let userId = rawId;
+      try {
+        userId = decodeURIComponent(rawId);
+      } catch {
+        userId = rawId;
+      }
+      const body = (await request.json().catch(() => ({}))) as { segment?: unknown; reason?: unknown };
+      const segment = typeof body.segment === "string" ? body.segment.trim() : "";
+      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
+      if (!segment) return Response.json({ error: "segment is required." }, { status: 400 });
+      const reason = typeof body.reason === "string" ? body.reason : null;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      try {
+        await ensureProductSchema(products.db);
+      } catch (err: any) {
+        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const result = await setAccountSegment({
+        store,
+        subs,
+        products,
+        userId,
+        segment,
+        movedBy: login as string,
+        reason,
+      });
+      ctx.audit("commercial.account.segment.set", "payments", {
+        userId,
+        previousSegment: result.previousSegment,
+        segment: result.segment,
+        movedBy: login,
+        ...(reason ? { reason } : {}),
+      });
+      return Response.json({
+        account: result.account,
+        previousSegment: result.previousSegment,
+        segment: result.segment,
+      });
+    } catch (err: any) {
+      const message = err.message || "Failed to set account segment";
+      const status = /No commercial account/.test(message)
+        ? 404
+        : /required|must be|Invalid segment/.test(message)
+          ? 400
+          : 500;
+      return Response.json({ error: message }, { status });
     }
   }
 

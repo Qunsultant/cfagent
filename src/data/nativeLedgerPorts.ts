@@ -94,6 +94,13 @@ export interface NativeLedgerRow {
   tenantId: string;
   family: string;
   runRequestId: string;
+  /**
+   * Issue #3289 — per-charge recording (§3.9): the product and
+   * version whose charge this row records. The price is the
+   * row's amount. Null on legacy rows (written before 0058).
+   */
+  productId?: string | null;
+  versionId?: string | null;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -106,6 +113,9 @@ export interface NativeLedgerRowInput {
   family: string;
   priceUSD: number;
   rail: NativeRail;
+  /** Issue #3289 — the product/version charged (carried onto the row when present). */
+  productId?: string;
+  versionId?: string;
   /** Stripe session id (card). First gatewayRef candidate for card. */
   sessionId?: string;
   /** Stripe payment-intent id (card). Second gatewayRef candidate. */
@@ -187,6 +197,9 @@ export function buildNativeChargeTransaction(
     tenantId: input.tenantId,
     family: input.family,
     runRequestId: input.runRequestId,
+    // Issue #3289: per-charge recording (§3.9).
+    productId: input.productId ?? null,
+    versionId: input.versionId ?? null,
     createdAtMs: nowMs,
     updatedAtMs: nowMs,
   };
@@ -227,6 +240,10 @@ export function buildNativeCreditTransaction(
     tenantId: input.tenantId,
     family: input.family,
     runRequestId: input.runRequestId,
+    // Issue #3289: per-charge recording (§3.9) — the credit
+    // carries the product/version of the charge it replaces.
+    productId: input.productId ?? null,
+    versionId: input.versionId ?? null,
     createdAtMs: nowMs,
     updatedAtMs: nowMs,
   };

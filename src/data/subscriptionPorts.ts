@@ -28,6 +28,19 @@
 import type { StoreTier, TierSource } from "./commercialPorts";
 export type { TierSource };
 
+// Issue #3289: the version fields live on the plan record —
+// a plan row IS a version. The resolver and the segment rules
+// are the single definitions in productPorts, never redeclared.
+import {
+  assertSegment,
+  assertVersionBillingPeriod,
+  DEFAULT_SEGMENT,
+  deriveBillingPeriod,
+  subscriptionProductIdForName,
+  type BillingPeriod,
+} from "./productPorts";
+export type { BillingPeriod };
+
 // Issue #3357: the outcome catalog resolver (static JSON, no I/O) so the
 // approval asserts below throw typed, catalog-coded outcomes, never raw.
 import { BusinessError } from "../outcomes/outcomeAspects";
@@ -67,6 +80,29 @@ export interface SubscriptionPlanRecord {
   active: boolean;
   createdAtMs: number;
   updatedAtMs: number;
+  /**
+   * Issue #3289 — the plan row IS a version (migration 0058).
+   * productId is the product it belongs to (derived from the
+   * name when the caller does not supply it); segment is the
+   * market it is sellable to (default "default"); version is
+   * the per-product per-segment number from 1, server-assigned,
+   * never reused, never client-supplied; effectiveFromMs /
+   * effectiveToMs are the launch window (effectiveToMs null =
+   * open-ended); billingPeriod is monthly|annual;
+   * featuresJson is a display-only JSON array of feature
+   * strings (null = none); stripePriceId is the Stripe Price
+   * object for this version (null = not mapped yet).
+   * approvalStatus above is per-version automatically — it
+   * already lives on the row.
+   */
+  productId: string;
+  segment: string;
+  version: number;
+  effectiveFromMs: number;
+  effectiveToMs: number | null;
+  billingPeriod: BillingPeriod;
+  featuresJson: string | null;
+  stripePriceId: string | null;
 }
 
 /** The approver is an audit identity: a blank approver approves nothing. */
@@ -182,6 +218,92 @@ export function assertSubscriptionStatus(status: unknown): SubscriptionStatus {
 }
 
 /**
+ * Issue #3289 — validate/normalize the optional version fields
+ * of a createPlan input. The version NUMBER is never an input:
+ * the adapter assigns max(existing) + 1 for the
+ * product+segment. productId defaults to the name-derived
+ * product, segment to "default", effectiveFromMs to now,
+ * billingPeriod from periodDays, features/stripePrice to null.
+ * effectiveToMs, when present, must be after effectiveFromMs.
+ */
+export function assertPlanVersionInput(
+  input: {
+    productId?: unknown;
+    segment?: unknown;
+    effectiveFromMs?: unknown;
+    effectiveToMs?: unknown;
+    billingPeriod?: unknown;
+    featuresJson?: unknown;
+    stripePriceId?: unknown;
+  },
+  planName: string,
+  periodDays: number,
+  nowMs: number,
+): {
+  productId: string;
+  segment: string;
+  effectiveFromMs: number;
+  effectiveToMs: number | null;
+  billingPeriod: BillingPeriod;
+  featuresJson: string | null;
+  stripePriceId: string | null;
+} {
+  const productId =
+    typeof input.productId === "string" && input.productId.trim()
+      ? input.productId.trim()
+      : subscriptionProductIdForName(planName);
+  const segment =
+    input.segment === undefined || input.segment === null
+      ? DEFAULT_SEGMENT
+      : assertSegment(input.segment);
+  const effectiveFromMs =
+    input.effectiveFromMs === undefined || input.effectiveFromMs === null
+      ? nowMs
+      : Number(input.effectiveFromMs);
+  if (!Number.isFinite(effectiveFromMs) || effectiveFromMs < 0) {
+    throw new Error("effectiveFromMs must be a non-negative epoch-ms number.");
+  }
+  let effectiveToMs: number | null = null;
+  if (input.effectiveToMs !== undefined && input.effectiveToMs !== null) {
+    effectiveToMs = Number(input.effectiveToMs);
+    if (!Number.isFinite(effectiveToMs) || effectiveToMs <= effectiveFromMs) {
+      throw new Error("effectiveToMs must be an epoch-ms number after effectiveFromMs when present.");
+    }
+  }
+  const billingPeriod =
+    input.billingPeriod === undefined || input.billingPeriod === null
+      ? deriveBillingPeriod(periodDays)
+      : assertVersionBillingPeriod(input.billingPeriod);
+  let featuresJson: string | null = null;
+  if (input.featuresJson !== undefined && input.featuresJson !== null) {
+    if (Array.isArray(input.featuresJson)) {
+      if (!input.featuresJson.every((f) => typeof f === "string")) {
+        throw new Error("featuresJson must be a JSON array of strings.");
+      }
+      featuresJson = JSON.stringify(input.featuresJson);
+    } else if (typeof input.featuresJson === "string") {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(input.featuresJson);
+      } catch {
+        throw new Error("featuresJson must be a JSON array of strings.");
+      }
+      if (!Array.isArray(parsed) || !parsed.every((f) => typeof f === "string")) {
+        throw new Error("featuresJson must be a JSON array of strings.");
+      }
+      featuresJson = JSON.stringify(parsed);
+    } else {
+      throw new Error("featuresJson must be a JSON array of strings.");
+    }
+  }
+  const stripePriceId =
+    typeof input.stripePriceId === "string" && input.stripePriceId.trim()
+      ? input.stripePriceId.trim()
+      : null;
+  return { productId, segment, effectiveFromMs, effectiveToMs, billingPeriod, featuresJson, stripePriceId };
+}
+
+/**
  * The effective tier at read time. An unexpired row confers
  * Subscribed even when the stored tier says otherwise (the user
  * paid through periodEnd; the operator's lever is cancellation,
@@ -278,6 +400,14 @@ export interface ProviderBillingPatch {
 }
 
 export interface SubscriptionStore {
+  /**
+   * Issue #3289 — create a plan = create a version of a
+   * product. The version fields are optional (see
+   * assertPlanVersionInput for the defaults); the version
+   * NUMBER is always server-assigned (max existing + 1 for
+   * the product+segment), never client-supplied. A duplicate
+   * effectiveFromMs for the product+segment throws.
+   */
   createPlan(input: {
     id?: unknown;
     name?: unknown;
@@ -285,9 +415,41 @@ export interface SubscriptionStore {
     periodDays?: unknown;
     includedRuns?: unknown;
     trialDays?: unknown;
+    /** Issue #3289: optional version fields (productId, segment, effectiveFromMs, effectiveToMs, billingPeriod, featuresJson, stripePriceId). */
+    productId?: unknown;
+    segment?: unknown;
+    effectiveFromMs?: unknown;
+    effectiveToMs?: unknown;
+    billingPeriod?: unknown;
+    featuresJson?: unknown;
+    stripePriceId?: unknown;
   }): Promise<SubscriptionPlanRecord>;
   getPlan(planId: string): Promise<SubscriptionPlanRecord | null>;
   listPlans(activeOnly: boolean): Promise<SubscriptionPlanRecord[]>;
+  /**
+   * Issue #3289 — all versions of one product (optionally one
+   * segment), oldest effective first. A plan row IS a version,
+   * so this is the version-chain read for subscription
+   * products.
+   */
+  listVersions(productId: string, segment?: string): Promise<SubscriptionPlanRecord[]>;
+  /**
+   * Issue #3289 — the effective version for a product+segment
+   * at nowMs, via the one resolver (null when none is
+   * effective). Segment is required, never defaulted here —
+   * callers pass the account's segment.
+   */
+  getEffectiveVersion(productId: string, segment: string, nowMs: number): Promise<SubscriptionPlanRecord | null>;
+  /**
+   * Issue #3289 — the move primitive: set a subscription row's
+   * planId to another version in one statement. The caller
+   * (versionMoves service) validates the target is effective +
+   * approved for the holder's segment and belongs to the same
+   * product; this method only performs the update. Refuses a
+   * missing subscription row. Follows the updateProviderBilling
+   * precedent (#2662), extended from Billing rows to all rows.
+   */
+  moveSubscriptionToVersion(subscriptionId: string, versionId: string): Promise<SubscriptionRecord>;
   deactivatePlan(planId: string): Promise<SubscriptionPlanRecord>;
   /**
    * Issue #3357 — approve a plan's price, recording the approver
