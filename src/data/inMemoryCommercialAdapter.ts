@@ -24,6 +24,7 @@ import {
   type TenantSettingsRecord,
   type TenantProviders,
 } from "./commercialPorts";
+import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
 
 export class InMemoryCommercialAdapter implements CommercialStore {
   private accounts = new Map<string, CommercialAccountRecord>();
@@ -44,6 +45,8 @@ export class InMemoryCommercialAdapter implements CommercialStore {
     creditsUSD?: unknown;
     includedRuns?: unknown;
     unlimitedFreeGrant?: unknown;
+    /** Issue #3289: undefined preserves the stored segment, "default" for a new row. */
+    segment?: unknown;
   }): Promise<CommercialAccountRecord> {
     if (!input.userId || !input.tenantId) {
       throw new Error("userId and tenantId are required.");
@@ -66,10 +69,23 @@ export class InMemoryCommercialAdapter implements CommercialStore {
         input.unlimitedFreeGrant,
         existing?.unlimitedFreeGrant,
       ),
+      // Issue #3289: same preserve semantics for the segment.
+      segment:
+        input.segment === undefined
+          ? (existing?.segment ?? DEFAULT_SEGMENT)
+          : assertSegment(input.segment),
       updatedAtMs: Date.now(),
     };
     this.accounts.set(record.id, record);
     return record;
+  }
+
+  async setAccountSegment(userId: string, segment: string): Promise<CommercialAccountRecord> {
+    const account = this.accounts.get(userId);
+    if (!account) throw new Error(`No commercial account for user ${userId}.`);
+    const updated = { ...account, segment: assertSegment(segment), updatedAtMs: Date.now() };
+    this.accounts.set(userId, updated);
+    return updated;
   }
 
   async adjustCredits(userId: string, deltaUSD: number): Promise<CommercialAccountRecord> {
@@ -187,6 +203,9 @@ export class InMemoryCommercialAdapter implements CommercialStore {
     userId: string;
     family: string;
     amountUSD: number;
+    productId?: string | null;
+    versionId?: string | null;
+    priceUSD?: number | null;
   }): Promise<CreditClaimRecord> {
     const existing = this.claims.get(claim.creditRunId);
     if (existing) return existing;
@@ -195,6 +214,10 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       userId: claim.userId,
       family: claim.family,
       amountUSD: round2(claim.amountUSD),
+      // Issue #3289: which charge the credit replaces (§3.9).
+      productId: claim.productId ?? null,
+      versionId: claim.versionId ?? null,
+      priceUSD: claim.priceUSD ?? null,
       createdAtMs: Date.now(),
     };
     this.claims.set(record.creditRunId, record);
@@ -204,7 +227,13 @@ export class InMemoryCommercialAdapter implements CommercialStore {
   async findUnredeemedCredit(
     userId: string,
     family: string,
-  ): Promise<{ creditRunId: string; amountUSD: number } | null> {
+  ): Promise<{
+    creditRunId: string;
+    amountUSD: number;
+    productId?: string | null;
+    versionId?: string | null;
+    priceUSD?: number | null;
+  } | null> {
     const matches = [...this.claims.values()]
       .filter((c) => c.userId === userId && c.family === family && !this.redemptions.has(c.creditRunId))
       .sort((a, b) => {
@@ -213,7 +242,13 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       });
     return matches.length === 0
       ? null
-      : { creditRunId: matches[0].creditRunId, amountUSD: matches[0].amountUSD };
+      : {
+          creditRunId: matches[0].creditRunId,
+          amountUSD: matches[0].amountUSD,
+          productId: matches[0].productId ?? null,
+          versionId: matches[0].versionId ?? null,
+          priceUSD: matches[0].priceUSD ?? null,
+        };
   }
 
   async recordPaidSubmission(input: {

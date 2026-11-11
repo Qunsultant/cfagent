@@ -21,7 +21,7 @@ import {
 } from "../src/data/d1NativeLedgerAdapter";
 import { InMemoryNativeLedgerAdapter } from "../src/data/inMemoryNativeLedgerAdapter";
 import { createNativeLedgerAdapter } from "../src/data/createNativeLedgerPorts";
-import { MIGRATION_0012_NATIVE_LEDGER } from "../src/data/migrationRunner";
+import { MIGRATION_0012_NATIVE_LEDGER, MIGRATION_0058_PRODUCT_VERSIONS } from "../src/data/migrationRunner";
 import { agentNativeLedgerRows } from "../src/data/drizzleSchema";
 import {
   aggregateNativeRevenue,
@@ -416,6 +416,13 @@ describe("native ledger structural pins (#2192)", () => {
       "CREATE TABLE IF NOT EXISTS agent_native_ledger_rows (",
     )[1].split(");")[0];
     const ddlColumns = [...block.matchAll(/^\s{2}(\w+) /gm)].map((m) => m[1]);
-    expect(ddlColumns.sort()).toEqual(schemaColumns.sort());
+    // Issue #3289: migration 0058 adds the per-charge
+    // recording columns to agent_native_ledger_rows by ALTER.
+    const alterColumns = [
+      ...MIGRATION_0058_PRODUCT_VERSIONS.sql.matchAll(
+        /ALTER TABLE agent_native_ledger_rows ADD COLUMN (\w+)/g,
+      ),
+    ].map((m) => m[1]);
+    expect([...ddlColumns, ...alterColumns].sort()).toEqual(schemaColumns.sort());
   });
 });

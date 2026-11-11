@@ -19,22 +19,30 @@ import { BusinessError } from "../outcomes/outcomeAspects";
 import { agentSubscriptionPlans, agentSubscriptions } from "./drizzleSchema";
 import {
   applyMigrations,
+  MIGRATION_0007_COMMERCIAL_STORE,
   MIGRATION_0008_SUBSCRIPTIONS,
+  MIGRATION_0012_NATIVE_LEDGER,
+  MIGRATION_0009_JOURNAL,
+  MIGRATION_0011_PRICE_CATALOGUE,
   MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS,
   MIGRATION_0014_BILLING,
+  MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
   MIGRATION_0041_PLAN_TRIAL_DAYS,
   MIGRATION_0049_PLAN_PRICE_APPROVAL,
+  MIGRATION_0058_PRODUCT_VERSIONS,
   type MigrationDb,
 } from "./migrationRunner";
 import {
   assertApproverId,
   assertPlan,
+  assertPlanVersionInput,
   assertSubscriptionStatus,
   type ProviderBillingPatch,
   type SubscriptionPlanRecord,
   type SubscriptionRecord,
   type SubscriptionStore,
 } from "./subscriptionPorts";
+import { resolveEffectiveVersion, subscriptionProductIdForName } from "./productPorts";
 
 /** Drizzle D1 database object carrying the subscription schema. */
 export type SubscriptionDb = DrizzleD1Database<{
@@ -52,9 +60,9 @@ export function createD1SubscriptionDb(d1: D1Database): SubscriptionDb {
   });
 }
 
-/** Idempotent schema-ensure: applies migrations 0008 + 0013 + 0014 + 0041 + 0049 if unapplied (0013 adds the native Stripe id columns; 0014 adds the Billing provider columns + policy table; 0041 adds the plan trial-days column; 0049 adds the plan price-approval columns). */
+/** Idempotent schema-ensure: applies migrations 0008 + 0013 + 0014 + 0041 + 0049 if unapplied (0013 adds the native Stripe id columns; 0014 adds the Billing provider columns + policy table; 0041 adds the plan trial-days column; 0049 adds the plan price-approval columns). Issue #3289: 0058 versions the plans, so its prerequisites ride along — 0007 (accounts/claims), 0008 (plans), 0009 (journal), 0011 + 0027 (catalogue), 0012 (native ledger) — and 0058 itself. */
 export async function ensureSubscriptionSchema(db: SubscriptionDb): Promise<number[]> {
-  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0008_SUBSCRIPTIONS, MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS, MIGRATION_0014_BILLING, MIGRATION_0041_PLAN_TRIAL_DAYS, MIGRATION_0049_PLAN_PRICE_APPROVAL]);
+  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0007_COMMERCIAL_STORE, MIGRATION_0008_SUBSCRIPTIONS, MIGRATION_0009_JOURNAL, MIGRATION_0011_PRICE_CATALOGUE, MIGRATION_0012_NATIVE_LEDGER, MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS, MIGRATION_0014_BILLING, MIGRATION_0027_PRICE_CATALOGUE_APPROVAL, MIGRATION_0041_PLAN_TRIAL_DAYS, MIGRATION_0049_PLAN_PRICE_APPROVAL, MIGRATION_0058_PRODUCT_VERSIONS]);
 }
 
 function toPlan(raw: typeof agentSubscriptionPlans.$inferSelect): SubscriptionPlanRecord {
@@ -75,6 +83,19 @@ function toPlan(raw: typeof agentSubscriptionPlans.$inferSelect): SubscriptionPl
     active: raw.active === 1,
     createdAtMs: raw.createdAtMs,
     updatedAtMs: raw.updatedAtMs,
+    // Issue #3289: pre-0058 rows carry no version columns — the
+    // migration backfills them, so a null/empty here can only
+    // mean a row written before the migration ran; read it as
+    // the backfill would have written it (v1, default segment,
+    // effective at creation, period-derived billing period).
+    productId: raw.productId && raw.productId.length > 0 ? raw.productId : subscriptionProductIdForName(raw.name),
+    segment: raw.segment && raw.segment.length > 0 ? raw.segment : "default",
+    version: typeof raw.version === "number" && raw.version >= 1 ? raw.version : 1,
+    effectiveFromMs: typeof raw.effectiveFromMs === "number" && raw.effectiveFromMs > 0 ? raw.effectiveFromMs : raw.createdAtMs,
+    effectiveToMs: raw.effectiveToMs ?? null,
+    billingPeriod: raw.billingPeriod === "annual" ? "annual" : "monthly",
+    featuresJson: raw.featuresJson ?? null,
+    stripePriceId: raw.stripePriceId ?? null,
   };
 }
 
@@ -110,12 +131,27 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
     periodDays?: unknown;
     includedRuns?: unknown;
     trialDays?: unknown;
+    productId?: unknown;
+    segment?: unknown;
+    effectiveFromMs?: unknown;
+    effectiveToMs?: unknown;
+    billingPeriod?: unknown;
+    featuresJson?: unknown;
+    stripePriceId?: unknown;
   }): Promise<SubscriptionPlanRecord> {
     const plan = assertPlan(input);
     const id = plan.id || `plan-${crypto.randomUUID().slice(0, 8)}`;
     const now = Date.now();
-    // Issue #3357: a plan is created PROPOSED — only an operator
+    // Issue #3289: a plan is created PROPOSED — only an operator
     // approval through POST /plans/approve makes its price chargeable.
+    // The version fields default per assertPlanVersionInput; the
+    // version NUMBER is server-assigned (max existing + 1 for the
+    // product+segment). Two versions may share an effectiveFromMs
+    // (same-ms creation is a race — see the 0058 header note):
+    // the resolver tiebreaks ties by greatest version.
+    const versioned = assertPlanVersionInput(input, plan.name, plan.periodDays, now);
+    const siblings = await this.listVersions(versioned.productId, versioned.segment);
+    const version = siblings.reduce((max, s) => Math.max(max, s.version), 0) + 1;
     const record: SubscriptionPlanRecord = {
       ...plan,
       id,
@@ -125,6 +161,8 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
       active: true,
       createdAtMs: now,
       updatedAtMs: now,
+      ...versioned,
+      version,
     };
     try {
       await this.db.insert(agentSubscriptionPlans).values({
@@ -140,6 +178,14 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
         active: 1,
         createdAtMs: record.createdAtMs,
         updatedAtMs: record.updatedAtMs,
+        productId: record.productId,
+        segment: record.segment,
+        version: record.version,
+        effectiveFromMs: record.effectiveFromMs,
+        effectiveToMs: record.effectiveToMs,
+        billingPeriod: record.billingPeriod,
+        featuresJson: record.featuresJson,
+        stripePriceId: record.stripePriceId,
       });
     } catch {
       const existing = await this.getPlan(id);
@@ -147,6 +193,51 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
       throw new Error(`Failed to create plan ${id}.`);
     }
     return record;
+  }
+
+  async listVersions(productId: string, segment?: string): Promise<SubscriptionPlanRecord[]> {
+    const rows = segment
+      ? await this.db
+          .select()
+          .from(agentSubscriptionPlans)
+          .where(
+            and(
+              eq(agentSubscriptionPlans.productId, productId),
+              eq(agentSubscriptionPlans.segment, segment),
+            ),
+          )
+          .orderBy(asc(agentSubscriptionPlans.effectiveFromMs), asc(agentSubscriptionPlans.version), asc(agentSubscriptionPlans.id))
+      : await this.db
+          .select()
+          .from(agentSubscriptionPlans)
+          .where(eq(agentSubscriptionPlans.productId, productId))
+          .orderBy(asc(agentSubscriptionPlans.effectiveFromMs), asc(agentSubscriptionPlans.version), asc(agentSubscriptionPlans.id));
+    return rows.map(toPlan);
+  }
+
+  async getEffectiveVersion(
+    productId: string,
+    segment: string,
+    nowMs: number,
+  ): Promise<SubscriptionPlanRecord | null> {
+    return resolveEffectiveVersion(await this.listVersions(productId, segment), segment, nowMs);
+  }
+
+  async moveSubscriptionToVersion(
+    subscriptionId: string,
+    versionId: string,
+  ): Promise<SubscriptionRecord> {
+    const existing = await this.getSubscription(subscriptionId);
+    if (!existing) throw new Error(`No subscription ${subscriptionId}.`);
+    const target = await this.getPlan(versionId);
+    if (!target) throw new Error(`No plan version ${versionId}.`);
+    await this.db
+      .update(agentSubscriptions)
+      .set({ planId: versionId, updatedAtMs: Date.now() })
+      .where(eq(agentSubscriptions.id, subscriptionId));
+    const updated = await this.getSubscription(subscriptionId);
+    if (!updated) throw new Error(`No subscription ${subscriptionId}.`);
+    return updated;
   }
 
   async approvePlan(planId: string, approverId: string): Promise<SubscriptionPlanRecord> {

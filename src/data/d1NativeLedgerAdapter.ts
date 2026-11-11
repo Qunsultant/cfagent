@@ -20,7 +20,13 @@ import { and, asc, eq } from "drizzle-orm";
 import { agentNativeLedgerRows } from "./drizzleSchema";
 import {
   applyMigrations,
+  MIGRATION_0007_COMMERCIAL_STORE,
+  MIGRATION_0008_SUBSCRIPTIONS,
+  MIGRATION_0009_JOURNAL,
+  MIGRATION_0011_PRICE_CATALOGUE,
   MIGRATION_0012_NATIVE_LEDGER,
+  MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
+  MIGRATION_0058_PRODUCT_VERSIONS,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -49,10 +55,21 @@ export function createD1NativeLedgerDb(d1: D1Database): NativeLedgerDb {
 /**
  * Idempotent schema-ensure: applies migration 0012 if
  * unapplied. Money paths ensure; read paths may skip ensure
- * when the caller already ensured.
+ * when the caller already ensured. Issue #3289: 0058 adds the
+ * per-charge recording columns to the ledger rows, so its
+ * prerequisites (0007 accounts, 0008 plans, 0009 journal,
+ * 0011 + 0027 catalogue) ride along.
  */
 export async function ensureNativeLedgerSchema(db: NativeLedgerDb): Promise<number[]> {
-  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0012_NATIVE_LEDGER]);
+  return applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0007_COMMERCIAL_STORE,
+    MIGRATION_0008_SUBSCRIPTIONS,
+    MIGRATION_0011_PRICE_CATALOGUE,
+    MIGRATION_0012_NATIVE_LEDGER,
+    MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
+    MIGRATION_0009_JOURNAL,
+    MIGRATION_0058_PRODUCT_VERSIONS,
+  ]);
 }
 
 function toRow(raw: typeof agentNativeLedgerRows.$inferSelect): NativeLedgerRow {
@@ -73,6 +90,9 @@ function toRow(raw: typeof agentNativeLedgerRows.$inferSelect): NativeLedgerRow 
     tenantId: raw.tenantId,
     family: raw.family,
     runRequestId: raw.runRequestId,
+    // Issue #3289: null on legacy rows (written before 0058).
+    productId: raw.productId ?? null,
+    versionId: raw.versionId ?? null,
     createdAtMs: raw.createdAtMs,
     updatedAtMs: raw.updatedAtMs,
   };
@@ -96,6 +116,8 @@ function toValues(row: NativeLedgerRow): typeof agentNativeLedgerRows.$inferInse
     tenantId: row.tenantId,
     family: row.family,
     runRequestId: row.runRequestId,
+    productId: row.productId ?? null,
+    versionId: row.versionId ?? null,
     createdAtMs: row.createdAtMs,
     updatedAtMs: row.updatedAtMs,
   };

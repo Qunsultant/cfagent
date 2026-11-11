@@ -117,6 +117,8 @@ import {
   type PaymentWorkflowStep,
 } from "./paymentWorkflowFlow";
 import { recordWorkflowTraceHop } from "../observability/meshTrace";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { logAspectEvent } from "../aspects/loggingAspect";
 import { meshTraceStoreForEnv } from "../data/createMeshTracePorts";
 import {
@@ -160,6 +162,11 @@ import { createFeatureFlagPort } from "../features/createFeatureFlagPort";
 import { createWorkflowPorts, type WorkflowEnv } from "./createWorkflowPorts";
 import type { WorkflowJobCommand } from "./workflowPorts";
 import { createStageBoundaryEmitter } from "./stageBoundaryEmitter";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/paymentWorkflow",
+});
 
 export type { PaymentWorkflowParams, PaymentWorkflowOutcome };
 
@@ -462,18 +469,33 @@ export class PaymentWorkflow extends ThinkWorkflow<
           // a journal failure is a loud log + a reconcile flag, not
           // a failed payment. Replay is safe: postEntries is a
           // no-op for an already-posted transactionRef.
-          await postJournalBestEffort(async () => {
-            const adapter = createJournalAdapter(this.env as { AGENT_DB?: unknown });
-            if (!adapter) return null;
-            await ensureJournalSchema(adapter.db);
-            return adapter;
-          }, mapChargeToJournalEntries({
-            transactionRef: e.runRequestId,
-            tenantId: p.tenantId,
-            runRequestId: e.runRequestId,
-            family: p.family,
-            amountUSD: e.priceUSD,
-          }));
+          // Issue #3289: per-charge recording (§3.9). The charge
+          // journal entry needs the gate-check product/version; a
+          // cfpay-era confirmation carries none (the draining
+          // cfpay gate never resolved a version) — then the
+          // journal entry is skipped with a loud log, and the DO
+          // row above stays authoritative.
+          if (e.productId && e.versionId) {
+            await postJournalBestEffort(async () => {
+              const adapter = createJournalAdapter(this.env as { AGENT_DB?: unknown });
+              if (!adapter) return null;
+              await ensureJournalSchema(adapter.db);
+              return adapter;
+            }, mapChargeToJournalEntries({
+              transactionRef: e.runRequestId,
+              tenantId: p.tenantId,
+              runRequestId: e.runRequestId,
+              family: p.family,
+              amountUSD: e.priceUSD,
+              productId: e.productId,
+              versionId: e.versionId,
+            }));
+          } else {
+            structuredLog.error("paymentWorkflow.chargeJournalSkipped", {
+              message: `[payment-workflow] charge journal entry skipped for run=${e.runRequestId} (no product/version resolved — cfpay-era confirmation); DO row is authoritative.`,
+              runRequestId: e.runRequestId,
+            });
+          }
           try {
             const rows = await listCfpayLedgerRows(this.env, e.runRequestId);
             const check = reconcileCfpayRun(rows, e.runRequestId, "fulfilled");
@@ -490,7 +512,11 @@ export class PaymentWorkflow extends ThinkWorkflow<
         }
         await recordCfpayAuditEvent(this.env, { ...e, family: p.family });
       },
-      issueFailureCredit: async (runRequestId: string, priceUSD: number) => {
+      issueFailureCredit: async (
+        runRequestId: string,
+        priceUSD: number,
+        product?: { productId?: string; versionId?: string },
+      ) => {
         // Issue #2019/#2015, combined: issuance writes BOTH records.
         // First the durable DO credit row (gateway stripe, action
         // credit, session screener-payment:<runId>), deduped per
@@ -529,6 +555,11 @@ export class PaymentWorkflow extends ThinkWorkflow<
             userId: p.userId,
             family: p.family,
             amountUSD: priceUSD,
+            // Issue #3289: per-charge recording (§3.9) — which
+            // charge the credit replaces.
+            productId: product?.productId ?? null,
+            versionId: product?.versionId ?? null,
+            priceUSD,
           });
         } catch (err) {
           console.error(
@@ -540,22 +571,35 @@ export class PaymentWorkflow extends ThinkWorkflow<
         // journal (Dr 4000 / Cr 2000), BEST-EFFORT like the claim
         // above and independent of it: the DO credit row is the
         // trigger, and a journal failure never fails the credit.
-        await postJournalBestEffort(async () => {
-          const adapter = createJournalAdapter(this.env as { AGENT_DB?: unknown });
-          if (!adapter) return null;
-          await ensureJournalSchema(adapter.db);
-          return adapter;
-        }, mapFailureCreditToJournalEntries({
-          // Distinct from the charge's ref: a failed paid run has
-          // BOTH a charge and a credit under one runRequestId, and
-          // posting the credit under the charge's ref would be
-          // swallowed as a replay (see journalPorts.ts).
-          transactionRef: `${runRequestId}:credit`,
-          tenantId: p.tenantId,
-          runRequestId,
-          family: p.family,
-          amountUSD: priceUSD,
-        }));
+        // Issue #3289: per-charge recording (§3.9) — the credit
+        // carries the product/version of the charge it replaces;
+        // without them the journal entry is skipped with a loud
+        // log (cfpay-era / pre-0058 runs), never invented.
+        if (product?.productId && product?.versionId) {
+          await postJournalBestEffort(async () => {
+            const adapter = createJournalAdapter(this.env as { AGENT_DB?: unknown });
+            if (!adapter) return null;
+            await ensureJournalSchema(adapter.db);
+            return adapter;
+          }, mapFailureCreditToJournalEntries({
+            // Distinct from the charge's ref: a failed paid run has
+            // BOTH a charge and a credit under one runRequestId, and
+            // posting the credit under the charge's ref would be
+            // swallowed as a replay (see journalPorts.ts).
+            transactionRef: `${runRequestId}:credit`,
+            tenantId: p.tenantId,
+            runRequestId,
+            family: p.family,
+            amountUSD: priceUSD,
+            productId: product.productId,
+            versionId: product.versionId,
+          }));
+        } else {
+          structuredLog.error("paymentWorkflow.failureCreditJournalSkipped", {
+            message: `[payment-workflow] failure-credit journal entry skipped for run=${runRequestId} (no product/version resolved); DO credit row is authoritative.`,
+            runRequestId,
+          });
+        }
       },
       consumeCoverage: async (use: { userId: string; paidVia: string; priceUSD: number }) => {
         // Issue #2015: consume the coverage in the D1 account store.

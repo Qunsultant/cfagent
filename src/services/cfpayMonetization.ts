@@ -108,6 +108,14 @@ export interface CommercialAccount {
     reason: string;
     expiresAtMs: number | null;
   } | null;
+  /**
+   * Issue #3289 — the account's segment (market), an explicit
+   * operator assignment, default "default". The native gate
+   * resolves per-run prices for this segment. Absent reads as
+   * the default segment; the segment always derives from the
+   * verified account row, never from a client claim.
+   */
+  segment?: string;
 }
 
 export interface MonetizationConfig {
@@ -127,8 +135,10 @@ export type GateDecision =
   // branch (SUCCESS_APPROVED_FREE_QUOTA_COVERED); the workflow reads it
   // off the shared decision type, so the field lives here. The cfpay
   // gate never sets it (stays undefined); readers guard with a ternary.
-  | { allowed: true; status: string; runRequestId: string; priceUSD: number; paidVia?: string; outcomeCode?: string }
-  | { allowed: false; status: string; httpStatus: 402; runRequestId: string; priceUSD: number; family: ScreenerFamily; checkout?: unknown; disclosure?: string; reason?: string; outcomeCode?: string; nextStep?: string };
+  // Issue #3289: paid outcomes carry the product/version charged
+  // (per-charge recording, §3.9); price-0 outcomes carry none.
+  | { allowed: true; status: string; runRequestId: string; priceUSD: number; paidVia?: string; outcomeCode?: string; productId?: string; versionId?: string }
+  | { allowed: false; status: string; httpStatus: 402; runRequestId: string; priceUSD: number; family: ScreenerFamily; checkout?: unknown; disclosure?: string; reason?: string; outcomeCode?: string; nextStep?: string; productId?: string; versionId?: string };
 
 interface LedgerRow {
   runRequestId: string;
