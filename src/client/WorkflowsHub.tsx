@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import "./workflowsHub.css";
-import { Button, Card, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid } from "./components/ui";
+import { Badge, Button, Card, KpiRibbon, Notice, PageSection, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import {
@@ -16,6 +16,24 @@ import {
   type DecisioningMatrixRow,
   type ParameterBadge,
 } from "./workflowsFaqData";
+
+type WorkflowBadgeColor = "green" | "blue" | "purple" | "orange" | "cyan";
+
+/** Map the workflow catalog's badge colors onto Badge tones. */
+function badgeToneFor(color: WorkflowBadgeColor): BadgeTone {
+  switch (color) {
+    case "green":
+      return "success";
+    case "blue":
+      return "info";
+    case "purple":
+      return "purple";
+    case "orange":
+      return "warning";
+    case "cyan":
+      return "trade";
+  }
+}
 
 export interface WorkflowItem {
   id: string;
@@ -1067,38 +1085,23 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
   };
 
   return (
-    <div className="workflows-hub-container">
-      <PageShell
+    <PageShell
         title="Platform Workflows, Playbooks & Solutions Hub"
         scopeNote="Authoritative architectural specification of all 14 operational workflows (8 Analysis · 6 Execution), step-by-step playbooks for the 8 core quantitative scenarios, algorithmic decision rules, and capability lookup matrix."
       >
 
       {/* Quick Metrics Bar */}
-      <div className="workflows-stats-bar">
-        <div className="workflows-stat-card">
-          <span className="workflows-stat-label">Core Workflows</span>
-          <span className="workflows-stat-value">14 End-to-End</span>
-          <span className="workflows-stat-desc">8 Analysis (A1–A8) · 6 Execution (E1–E6)</span>
-        </div>
-        <div className="workflows-stat-card">
-          <span className="workflows-stat-label">Quantitative Playbooks</span>
-          <span className="workflows-stat-value">8 Scenarios</span>
-          <span className="workflows-stat-desc">24 Step-by-Step Multi-Path Solutions</span>
-        </div>
-        <div className="workflows-stat-card">
-          <span className="workflows-stat-label">Decisioning Engines</span>
-          <span className="workflows-stat-value">6 Deterministic Models</span>
-          <span className="workflows-stat-desc">Mathematical formulations &amp; 15 rejection gates</span>
-        </div>
-        <div className="workflows-stat-card">
-          <span className="workflows-stat-label">Execution Guardrails</span>
-          <span className="workflows-stat-value">100% HITL Safe</span>
-          <span className="workflows-stat-desc">W3C DID attestation &amp; mandatory confirmation</span>
-        </div>
-      </div>
+      <KpiRibbon
+        items={[
+          { label: "Core Workflows", value: "14 End-to-End", sub: "8 Analysis (A1–A8) · 6 Execution (E1–E6)" },
+          { label: "Quantitative Playbooks", value: "8 Scenarios", sub: "24 Step-by-Step Multi-Path Solutions" },
+          { label: "Decisioning Engines", value: "6 Deterministic Models", sub: "Mathematical formulations & 15 rejection gates" },
+          { label: "Execution Guardrails", value: "100% HITL Safe", sub: "W3C DID attestation & mandatory confirmation" },
+        ]}
+      />
 
       {/* Primary Sub-Navigation Tabs */}
-      <div className="workflows-subnav-bar">
+
         <Tabs
           ariaLabel="Workflows sections"
           idBase="workflows"
@@ -1112,109 +1115,97 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           value={activeTab}
           onChange={handleTabChange}
         />
-      </div>
+
 
       {/* VIEW 1: QUANTITATIVE PLAYBOOKS & FAQS (THE 8 CORE QUESTIONS) */}
       {activeTab === "faq" && (
-        <Stack gap="5" className="faq-section-container" role="tabpanel" id="workflows-panel-faq" aria-labelledby="workflows-tab-faq">
+        <PageSection title="Quantitative Playbooks (8 Core FAQs)">
+          <Stack gap="5" role="tabpanel" id="workflows-panel-faq" aria-labelledby="workflows-tab-faq">
           {/* FAQ Search & Category Filter */}
-          <div className="workflows-filter-strip">
-            <div className="workflows-search-box">
-              <span className="workflows-search-icon">🔍</span>
+          <Flex gap="2" wrap align="center">
+            <Flex gap="1-5" align="center">
+              <span aria-hidden="true">🔍</span>
               <TextInput
                 type="text"
-                className="workflows-search-input"
                 placeholder="Search scenarios, parameters, execution methods, formulas, or tickers…"
                 value={faqSearchQuery}
                 onChange={(e) => setFaqSearchQuery(e.target.value)}
               />
-            </div>
-            <div className="workflows-category-chips">
+            </Flex>
+
                             <PillGroup
                 size="sm"
                 options={faqCategories}
                 value={faqCategory}
                 onChange={setFaqCategory}
               />
-            </div>
-          </div>
+
+          </Flex>
 
           {/* Accordion List of the 8 Core Questions */}
-          <div className="workflows-grid">
+          <Stack gap="5">
             {filteredFaqs.map((faq) => {
               const isOpen = expandedFaqId === faq.id;
               return (
-                <div key={faq.id} className={`faq-accordion-card ${isOpen ? "open" : ""}`}>
-                  <div className="faq-card-header" onClick={() => toggleExpandFaq(faq.id)}>
-                    <div className="workflow-header-left">
-                      <div className="workflow-number-badge">
-                        Q0{faq.number}
-                      </div>
-                      <div className="workflow-header-titles">
-                        <h3 className="workflow-title" style={{ fontSize: "var(--font-size-title-sm)" }}>
+                <Card key={faq.id}>
+                  <div onClick={() => toggleExpandFaq(faq.id)}>
+                    <Flex gap="2" align="center">
+                      <Badge tone="neutral">Q0{faq.number}</Badge>
+                      <Stack gap="0">
+                        <h3>
                           &ldquo;{faq.question}&rdquo;
-                          <span className="workflow-tag-badge blue">{faq.categoryLabel}</span>
+                          <Badge tone="info">{faq.categoryLabel}</Badge>
                         </h3>
-                        <p className="workflow-subtitle">{faq.summary}</p>
-                      </div>
-                    </div>
-                    <div className="workflow-header-right">
-                      <span className="workflow-expand-caret">{isOpen ? "▲" : "▼"}</span>
-                    </div>
+                        <p className="ui-meta">{faq.summary}</p>
+                      </Stack>
+                    </Flex>
+                    <span aria-hidden="true">{isOpen ? "▲" : "▼"}</span>
                   </div>
 
                   {isOpen && (
-                    <div className="faq-card-body">
+                    <Stack gap="3">
                       {/* Quick Takeaway Banner */}
                       {faq.quickTakeaway && (
-                        <div className="faq-quick-takeaway">
-                          <span className="faq-quick-takeaway-label">
-                            <span>⚡</span> Quick Solution &amp; Recommended Action (TL;DR)
-                          </span>
-                          <span className="faq-quick-takeaway-text">{faq.quickTakeaway}</span>
-                        </div>
+                        <Notice tone="accent" title="⚡ Quick Solution & Recommended Action (TL;DR)">{faq.quickTakeaway}</Notice>
                       )}
 
                       {/* Key Parameter Badges Row */}
                       {faq.parameterBadges && faq.parameterBadges.length > 0 && (
                         <Stack gap="1-5">
-                          <span className="faq-param-heading">
+                          <span className="ui-meta-sm">
                             ⚙️ Key Input Parameters &amp; Filter Settings
                           </span>
-                          <div className="faq-param-badges">
+                          <Flex gap="1-5" wrap>
                             {faq.parameterBadges.map((badge, bIdx) => (
-                              <div key={bIdx} className="faq-param-badge" title={badge.hint}>
-                                <span className="faq-param-badge-label">{badge.label}:</span>
-                                <span className="faq-param-badge-val">{badge.value}</span>
-                              </div>
+                              <Badge key={bIdx} tone="neutral" title={badge.hint}>{badge.label}: {badge.value}</Badge>
                             ))}
-                          </div>
+                          </Flex>
                         </Stack>
                       )}
 
                       {/* 3 Distinct Execution Methods */}
                       <div>
-                        <h4 className="faq-methods-heading">
+                        <h4>
                           🚀 Multi-Method Execution Paths (3 Ways to Run)
                         </h4>
-                        <div className="faq-methods-grid">
+                        <Grid autoFit minColumnWidth="md" gap="2">
                           {faq.methods.map((method, mIdx) => (
-                            <div key={mIdx} className="faq-method-card">
-                              <div className="faq-method-header">
-                                <span className="faq-method-title">{method.name}</span>
-                                <span className={`workflow-tag-badge ${method.badgeColor}`}>{method.badge}</span>
-                              </div>
-                              <p className="faq-method-desc">{method.description}</p>
-                              <ul className="faq-method-steps">
+                            <Card key={mIdx}>
+                              <Flex justify="between" align="center" gap="2">
+                                <strong>{method.name}</strong>
+                                <Badge tone={badgeToneFor(method.badgeColor)}>{method.badge}</Badge>
+                              </Flex>
+                              <p className="ui-meta">{method.description}</p>
+                              <ul>
                                 {method.actionSteps.map((step, sIdx) => (
                                   <li key={sIdx}>
-                                    <span className="bullet">▸</span>
+                                    <span aria-hidden="true">▸</span>
                                     <span>{step}</span>
                                   </li>
                                 ))}
                               </ul>
                               {method.samplePayloadOrCommand && (
-                                <div className="faq-method-code">
+                                <div className="ui-meta-sm">
                                   {method.samplePayloadOrCommand}
                                 </div>
                               )}
@@ -1223,7 +1214,6 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                                   <Button
                                   variant="primary"
                                   size="sm"
-                                    className="workflow-cta-btn"
                                     onClick={() => onNavigateTab(method.targetTab!)}
                                   >
                                     Open Tab →
@@ -1234,16 +1224,15 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                                   variant="accent"
                                   tone="subtle"
                                   size="sm"
-                                    className="workflow-cta-btn"
                                     onClick={() => onSendPrompt(method.samplePayloadOrCommand || faq.samplePrompt, faq.question)}
                                   >
                                     Ask Agent 💬
                                   </Button>
                                 )}
                               </div>
-                            </div>
+                            </Card>
                           ))}
-                        </div>
+                        </Grid>
                       </div>
 
                       {/* Optimal Output Structure Callout */}
@@ -1259,7 +1248,6 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                         {faq.relatedDecisionRuleId && (
                           <Button
                           variant="ghost"
-                            className="workflow-rule-link"
                             onClick={() => jumpToDecisionRule(faq.relatedDecisionRuleId!)}
                           >
                             <span>⚖️</span> View Governing Decision Rule →
@@ -1268,36 +1256,31 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                       </div>
 
                       {/* Collapsible Theoretical & Mathematical Deep-Dive */}
-                      <details className="faq-theory-accordion">
-                        <summary className="faq-theory-summary">
+                      <details>
+                        <summary>
                           <span>📐 Quantitative Theory &amp; Mathematical Formulation (Expand / Collapse)</span>
                           <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>▼</span>
                         </summary>
-                        <div className="faq-theory-inner">
-                          <div className="faq-theory-content">
-                            {faq.theoreticalContext}
-                          </div>
+                        <div>
+                          <p className="ui-meta">{faq.theoreticalContext}</p>
                           {faq.mathematicalBasis && (
-                            <div className="faq-formula-badge">
-                              Exact Formula: {faq.mathematicalBasis}
-                            </div>
+                            <p className="ui-meta">Exact Formula: {faq.mathematicalBasis}</p>
                           )}
                         </div>
                       </details>
 
                       {/* Action Footer */}
-                      <div className="workflow-action-footer">
+                      <Flex justify="between" align="center" gap="2" wrap>
                         <Flex align="center" gap="3" wrap>
                           <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)" }}>Primary Workflow:</span>
-                          <span className="workflow-tag-badge green">{faq.primaryWorkflow}</span>
+                          <Badge tone="success">{faq.primaryWorkflow}</Badge>
                           <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)" }}>Secondary:</span>
-                          <span className="workflow-tag-badge blue">{faq.secondaryWorkflow}</span>
+                          <Badge tone="info">{faq.secondaryWorkflow}</Badge>
                         </Flex>
 
                         <Flex gap="2">
                           <Button
                           variant="primary"
-                            className="workflow-cta-btn"
                             onClick={() => {
                               if (onNavigateTab) {
                                 onNavigateTab(faq.targetTab);
@@ -1311,7 +1294,6 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                             <Button
                             variant="accent"
                             tone="subtle"
-                              className="workflow-cta-btn"
                               onClick={() => {
                                 onSendPrompt(faq.samplePrompt, faq.question);
                               }}
@@ -1321,24 +1303,26 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                             </Button>
                           )}
                         </Flex>
-                      </div>
-                    </div>
+                      </Flex>
+                    </Stack>
                   )}
-                </div>
+                </Card>
               );
             })}
-          </div>
+          </Stack>
         </Stack>
+        </PageSection>
       )}
 
       {/* VIEW 2: PLATFORM WORKFLOWS (ALL 14 ANALYSIS & EXECUTION WORKFLOWS) */}
       {activeTab === "workflows" && (
-        <Stack gap="5" role="tabpanel" id="workflows-panel-workflows" aria-labelledby="workflows-tab-workflows">
+        <PageSection title="Platform Workflows (14 Track A & E)">
+          <Stack gap="5" role="tabpanel" id="workflows-panel-workflows" aria-labelledby="workflows-tab-workflows">
           {/* Operational process guides (#3464): taxonomy + index. */}
           <Card id="operational-process-guides">
             <Stack gap="3">
-              <h3 className="workflow-title">Operational process guides</h3>
-              <p className="workflow-subtitle">
+              <h3>Operational process guides</h3>
+              <p className="ui-meta">
                 The taxonomy and index are the single entry point for operational processes — how each
                 process is classified, who owns it, and where its guide lives. Future answers link
                 here instead of re-explaining a process.
@@ -1362,7 +1346,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
             </Stack>
           </Card>
           {/* Track Filter Tabs */}
-          <div className="workflow-track-tabs">
+          <Flex gap="2" align="center" wrap>
             <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: "0.3rem" }}>
               Operational Track:
             </span>
@@ -1375,62 +1359,57 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
               value={trackFilter}
               onChange={setTrackFilter}
             />
-          </div>
+          </Flex>
 
           {/* Search & Category Filter Strip */}
-          <div className="workflows-filter-strip">
-            <div className="workflows-search-box">
-              <span className="workflows-search-icon">🔍</span>
+          <Flex gap="2" wrap align="center">
+            <Flex gap="1-5" align="center">
+              <span aria-hidden="true">🔍</span>
               <TextInput
                 type="text"
-                className="workflows-search-input"
                 placeholder="Search workflows by code (A1..E6), name, APIs, endpoints, or parameters…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
-            </div>
+            </Flex>
 
-            <div className="workflows-category-chips">
+
                             <PillGroup
                 size="sm"
                 options={categories}
                 value={selectedCategory}
                 onChange={setSelectedCategory}
               />
-            </div>
-          </div>
+
+          </Flex>
 
           {/* Workflow Accordion List */}
-          <div className="workflows-grid">
+          <Stack gap="5">
             {filteredWorkflows.map((wf) => {
               const isOpen = expandedId === wf.id;
 
               return (
-                <div key={wf.id} className={`workflow-card ${isOpen ? "open" : ""}`}>
+                <Card key={wf.id}>
                   {/* Card Header (Click to toggle) */}
-                  <div className="workflow-card-header" onClick={() => toggleExpand(wf.id)}>
-                    <div className="workflow-header-left">
-                      <div className={`workflow-code-badge ${wf.track}`}>
-                        {wf.codeId}
-                      </div>
-                      <div className="workflow-header-titles">
-                        <h3 className="workflow-title">
+                  <Flex justify="between" align="center" gap="2" onClick={() => toggleExpand(wf.id)}>
+                    <Flex gap="2" align="center">
+                      <Badge tone={wf.track === "analysis" ? "info" : "accent"}>{wf.codeId}</Badge>
+                      <Stack gap="0">
+                        <h3>
                           {wf.title}
-                          <span className={`workflow-track-pill ${wf.track}`}>{wf.trackLabel}</span>
-                          <span className={`workflow-tag-badge ${wf.badgeColor}`}>{wf.badge}</span>
+                          <Badge tone={wf.track === "analysis" ? "info" : "accent"}>{wf.trackLabel}</Badge>
+                          <Badge tone={badgeToneFor(wf.badgeColor)}>{wf.badge}</Badge>
                         </h3>
-                        <p className="workflow-subtitle">{wf.subtitle}</p>
-                      </div>
-                    </div>
+                        <p className="ui-meta">{wf.subtitle}</p>
+                      </Stack>
+                    </Flex>
 
-                    <div className="workflow-header-right">
-                      <span className="workflow-expand-caret">{isOpen ? "▲" : "▼"}</span>
-                    </div>
-                  </div>
+                    <span aria-hidden="true">{isOpen ? "▲" : "▼"}</span>
+                  </Flex>
 
                   {/* Card Body (Expanded view) */}
                   {isOpen && (
-                    <div className="workflow-card-body">
+                    <Stack gap="3">
                       {/* Overview text */}
                       <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-secondary)", lineHeight: 1.5, margin: 0 }}>
                         {wf.overview}
@@ -1445,7 +1424,6 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                           {wf.governingDecisionRuleId && (
                             <Button
                             variant="ghost"
-                              className="workflow-rule-link"
                               onClick={() => jumpToDecisionRule(wf.governingDecisionRuleId!)}
                             >
                               <span>⚖️</span> Governing Decision Rule →
@@ -1459,51 +1437,51 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                         <h4 style={{ fontSize: "var(--font-size-body-sm)", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-accent)", margin: "0 0 0.75rem 0" }}>
                           ⚡ Step-by-Step Execution Pipeline
                         </h4>
-                        <div className="workflow-timeline">
+                        <Grid autoFit minColumnWidth="sm" gap="2">
                           {wf.steps.map((step, idx) => (
-                            <div key={idx} className="workflow-step-node">
-                              <span className="workflow-step-num">{step.step}</span>
-                              <span className="workflow-step-title">{step.title}</span>
-                              <p className="workflow-step-desc">{step.description}</p>
-                            </div>
+                            <Card key={idx}><Stack gap="1">
+                              <Badge tone="accent">{step.step}</Badge>
+                              <strong>{step.title}</strong>
+                              <p className="ui-meta">{step.description}</p>
+                            </Stack></Card>
                           ))}
-                        </div>
+                        </Grid>
                       </div>
 
                       {/* Details Grid: Features & Data Sources */}
-                      <div className="workflow-details-grid">
-                        <div className="workflow-subpanel">
-                          <h5 className="workflow-subpanel-title">
+                      <Grid columns={2} gap="2">
+                        <Card>
+                          <h5>
                             <span>✨</span> Architectural Highlights
                           </h5>
-                          <ul className="workflow-feature-list">
+                          <ul>
                             {wf.keyFeatures.map((feat, idx) => (
                               <li key={idx}>
-                                <span className="workflow-feature-bullet">▸</span>
+                                <span aria-hidden="true">▸</span>
                                 <span>{feat}</span>
                               </li>
                             ))}
                           </ul>
-                        </div>
+                        </Card>
 
-                        <div className="workflow-subpanel">
-                          <h5 className="workflow-subpanel-title">
+                        <Card>
+                          <h5>
                             <span>🌐</span> Upstream Sites &amp; APIs Queried
                           </h5>
-                          <ul className="workflow-feature-list">
+                          <ul>
                             {wf.dataSources.map((ds, idx) => (
                               <li key={idx}>
-                                <span className="workflow-feature-bullet">🔗</span>
+                                <span aria-hidden="true">🔗</span>
                                 <span>{ds}</span>
                               </li>
                             ))}
                           </ul>
-                        </div>
-                      </div>
+                        </Card>
+                      </Grid>
 
                       {/* Upstream APIs & Execution Metrics Breakdown */}
                       {wf.apiMetrics && wf.apiMetrics.length > 0 && (
-                        <div className="workflow-api-metrics-panel" style={{ marginTop: "0.5rem", background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "8px", padding: "var(--space-4)" }}>
+                        <Card>
                           <h5 style={{ margin: "0 0 0.75rem", color: "var(--color-accent)", fontSize: "var(--font-size-body)", textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
                             <span>📊</span> Upstream Subrequests &amp; Edge Execution Metrics
                           </h5>
@@ -1520,25 +1498,23 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                               rowKey={(row) => row.__rowKey}
                             />
                           </div>
-                        </div>
+                        </Card>
                       )}
 
                       {/* FAQ & Gotchas Callout Box */}
-                      <div className="workflow-faq-box">
-                        <div className="workflow-faq-question">💡 Key Nuance: {wf.faq.question}</div>
-                        <p className="workflow-faq-answer">{wf.faq.answer}</p>
-                      </div>
+
+                        <Notice tone="info" title={`💡 Key Nuance: ${wf.faq.question}`}>{wf.faq.answer}</Notice>
+
 
                       {/* Action Footer */}
-                      <div className="workflow-action-footer">
-                        <div className="workflow-api-path">
+                      <Flex justify="between" align="center" gap="2" wrap>
+                        <span className="ui-meta-sm">
                           API: <code>{wf.apiEndpoint}</code>
-                        </div>
+                        </span>
 
                         <Flex gap="2">
                           <Button
                           variant="primary"
-                            className="workflow-cta-btn"
                             onClick={() => {
                               if (onNavigateTab) {
                                 onNavigateTab(wf.targetTab);
@@ -1552,7 +1528,6 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                             <Button
                             variant="accent"
                             tone="subtle"
-                              className="workflow-cta-btn"
                               onClick={() => {
                                 onSendPrompt(wf.sampleQueryOrAction, wf.title);
                               }}
@@ -1562,10 +1537,10 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                             </Button>
                           )}
                         </Flex>
-                      </div>
-                    </div>
+                      </Flex>
+                    </Stack>
                   )}
-                </div>
+                </Card>
               );
             })}
 
@@ -1575,13 +1550,15 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                 <p style={{ fontSize: "var(--font-size-body)", margin: 0 }}>Try clearing filters or search for terms like &quot;A1&quot;, &quot;E1&quot;, &quot;options&quot;, &quot;screener&quot;, &quot;hitl&quot;, or &quot;nasdaq&quot;.</p>
               </div>
             )}
-          </div>
+          </Stack>
         </Stack>
+        </PageSection>
       )}
 
       {/* VIEW 3: ALGORITHMIC DECISIONING RULES (6 ENGINES) */}
       {activeTab === "decisioning" && (
-        <Stack gap="5" role="tabpanel" id="workflows-panel-decisioning" aria-labelledby="workflows-tab-decisioning">
+        <PageSection title="Algorithmic Decisioning Rules (6 Engines)">
+          <Stack gap="5" role="tabpanel" id="workflows-panel-decisioning" aria-labelledby="workflows-tab-decisioning">
           {/* Decisioning Hero Note */}
           <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "10px", padding: "var(--space-5) var(--space-6)" }}>
             <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
@@ -1593,50 +1570,45 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           </div>
 
           {/* Search Strip */}
-          <div className="workflows-filter-strip">
-            <div className="workflows-search-box">
-              <span className="workflows-search-icon">🔍</span>
+          <Flex gap="2" wrap align="center">
+            <Flex gap="1-5" align="center">
+              <span aria-hidden="true">🔍</span>
               <TextInput
                 type="text"
-                className="workflows-search-input"
                 placeholder="Search decision rules, scoring weights, formulas, or rejection codes…"
                 value={decisioningSearchQuery}
                 onChange={(e) => setDecisioningSearchQuery(e.target.value)}
               />
-            </div>
-          </div>
+            </Flex>
+          </Flex>
 
           {/* Decisioning Sections Grid */}
-          <div className="workflows-grid">
+          <Stack gap="5">
             {filteredDecisioning.map((sec) => {
               const isOpen = expandedDecisioningId === sec.id;
               return (
-                <div key={sec.id} className={`workflow-card ${isOpen ? "open" : ""}`}>
-                  <div className="workflow-card-header" onClick={() => toggleExpandDecisioning(sec.id)}>
-                    <div className="workflow-header-left">
-                      <div className="workflow-number-badge">
-                        0{sec.number}
-                      </div>
-                      <div className="workflow-header-titles">
-                        <h3 className="workflow-title">
+                <Card key={sec.id}>
+                  <Flex justify="between" align="center" gap="2" onClick={() => toggleExpandDecisioning(sec.id)}>
+                    <Flex gap="2" align="center">
+                      <Badge tone="neutral">0{sec.number}</Badge>
+                      <Stack gap="0">
+                        <h3>
                           {sec.title}
-                          <span className={`workflow-tag-badge ${sec.badgeColor}`}>{sec.badge}</span>
+                          <Badge tone={badgeToneFor(sec.badgeColor)}>{sec.badge}</Badge>
                           {sec.governedWorkflows && (
                             <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-accent)", background: "var(--color-accent-subtle)", padding: "var(--space-0-5) var(--space-2)", borderRadius: "4px" }}>
                               Governs: {sec.governedWorkflows.join(", ")}
                             </span>
                           )}
                         </h3>
-                        <p className="workflow-subtitle">{sec.subtitle}</p>
-                      </div>
-                    </div>
-                    <div className="workflow-header-right">
-                      <span className="workflow-expand-caret">{isOpen ? "▲" : "▼"}</span>
-                    </div>
-                  </div>
+                        <p className="ui-meta">{sec.subtitle}</p>
+                      </Stack>
+                    </Flex>
+                    <span aria-hidden="true">{isOpen ? "▲" : "▼"}</span>
+                  </Flex>
 
                   {isOpen && (
-                    <div className="workflow-card-body">
+                    <Stack gap="3">
                       {/* Overview Box */}
                       <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-secondary)", lineHeight: 1.55, margin: 0 }}>
                         {sec.overview}
@@ -1647,33 +1619,33 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                         <h4 style={{ fontSize: "var(--font-size-body-sm)", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-accent)", margin: "0 0 0.75rem 0" }}>
                           ⚙️ Mathematical Rules, Constraints &amp; Algorithmic Gates
                         </h4>
-                        <div className="decisioning-rules-grid">
+                        <Grid autoFit minColumnWidth="md" gap="2">
                           {sec.rules.map((rule, rIdx) => (
-                            <div key={rIdx} className="decisioning-rule-card">
-                              <div className="decisioning-rule-title">
+                            <Card key={rIdx}>
+                              <strong>
                                 <span>⚡</span> {rule.name}
-                              </div>
-                              <p className="decisioning-rule-desc">{rule.description}</p>
-                              
+                              </strong>
+                              <p className="ui-meta">{rule.description}</p>
+
                               {rule.formulaOrCode && (
-                                <div className="decisioning-code-block">
+                                <p className="ui-meta-sm">
                                   {rule.formulaOrCode}
-                                </div>
+                                </p>
                               )}
 
                               {rule.parametersOrGates && rule.parametersOrGates.length > 0 && (
-                                <div className="decisioning-param-list">
+                                <Stack gap="1">
                                   {rule.parametersOrGates.map((param, pIdx) => (
-                                    <div key={pIdx} className="decisioning-param-item">
+                                    <Flex gap="1-5" align="center">
                                       <span style={{ color: "var(--color-accent)" }}>▸</span>
                                       <span>{param}</span>
-                                    </div>
+                                    </Flex>
                                   ))}
-                                </div>
+                                </Stack>
                               )}
-                            </div>
+                            </Card>
                           ))}
-                        </div>
+                        </Grid>
                       </div>
 
                       {/* Matrix / Weights Table (if present) */}
@@ -1698,37 +1670,36 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
 
                       {/* Concrete Example Box */}
                       {sec.concreteExample && (
-                        <div className="decisioning-example-box">
-                          <div className="decisioning-example-header">
+                        <Card>
+                          <strong>
                             <span>🧪</span> Real Production Example: {sec.concreteExample.title}
-                          </div>
-                          <div className="decisioning-example-step">
-                            <span className="label">📥 Input:</span>
-                            <span className="val">{sec.concreteExample.input}</span>
-                          </div>
-                          <div className="decisioning-example-step">
-                            <span className="label">⚙️ Engine:</span>
-                            <span className="val">{sec.concreteExample.evaluation}</span>
-                          </div>
-                          <div className="decisioning-example-step">
-                            <span className="label" style={{ color: "var(--color-success)" }}>🎯 Verdict:</span>
-                            <span className="val" style={{ color: "var(--color-success)", fontWeight: 600 }}>{sec.concreteExample.verdict}</span>
-                          </div>
-                        </div>
+                          </strong>
+                          <Flex gap="2">
+                            <span className="ui-meta-sm">📥 Input:</span>
+                            <span>{sec.concreteExample.input}</span>
+                          </Flex>
+                          <Flex gap="2">
+                            <span className="ui-meta-sm">⚙️ Engine:</span>
+                            <span>{sec.concreteExample.evaluation}</span>
+                          </Flex>
+                          <Flex gap="2">
+                            <span className="ui-meta-sm" style={{ color: "var(--color-success)" }}>🎯 Verdict:</span>
+                            <span style={{ color: "var(--color-success)", fontWeight: 600 }}>{sec.concreteExample.verdict}</span>
+                          </Flex>
+                        </Card>
                       )}
 
                       {/* Action Footer */}
-                      <div className="workflow-action-footer">
-                        <div className="workflow-api-path">
+                      <Flex justify="between" align="center" gap="2" wrap>
+                        <span className="ui-meta-sm">
                           Architecture: <code>src/trading/options/ · src/client/options/</code>
-                        </div>
+                        </span>
 
                         <Flex gap="2">
                           {onSendPrompt && (
                             <Button
                             variant="accent"
                             tone="subtle"
-                              className="workflow-cta-btn"
                               onClick={() => {
                                 onSendPrompt(`Explain the decision logic and scoring for ${sec.title}`, sec.title);
                               }}
@@ -1737,19 +1708,21 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                             </Button>
                           )}
                         </Flex>
-                      </div>
-                    </div>
+                      </Flex>
+                    </Stack>
                   )}
-                </div>
+                </Card>
               );
             })}
-          </div>
+          </Stack>
         </Stack>
+        </PageSection>
       )}
 
       {/* VIEW 4: CAPABILITY & LOOKUP MATRIX */}
       {activeTab === "matrix" && (
-        <Stack gap="5" role="tabpanel" id="workflows-panel-matrix" aria-labelledby="workflows-tab-matrix">
+        <PageSection title="Capability & Lookup Matrix">
+          <Stack gap="5" role="tabpanel" id="workflows-panel-matrix" aria-labelledby="workflows-tab-matrix">
           {/* Matrix Header Callout */}
           <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "10px", padding: "var(--space-5) var(--space-6)" }}>
             <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
@@ -1761,42 +1734,43 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           </div>
 
           {/* Matrix Search */}
-          <div className="workflows-filter-strip">
-            <div className="workflows-search-box">
-              <span className="workflows-search-icon">🔍</span>
+          <Flex gap="2" wrap align="center">
+            <Flex gap="1-5" align="center">
+              <span aria-hidden="true">🔍</span>
               <TextInput
                 type="text"
-                className="workflows-search-input"
                 placeholder="Search capability matrix by question, workflow, or parameter…"
                 value={matrixSearchQuery}
                 onChange={(e) => setMatrixSearchQuery(e.target.value)}
               />
-            </div>
-          </div>
+            </Flex>
+          </Flex>
 
           {/* Matrix Table */}
-          <div className="faq-matrix-container" style={{ marginTop: 0 }}>
+
             <div style={{ overflowX: "auto" }}>
                             <Table
                 columns={[
                   { key: "question", header: "User Question / Scenario", render: (row) => (<span style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>“{row.question}”</span>) },
-                  { key: "primary", header: "Primary Workflow", render: (row) => (<span className="workflow-tag-badge green">{row.primaryWorkflow}</span>) },
-                  { key: "secondary", header: "Secondary Workflow", render: (row) => (<span className="workflow-tag-badge blue">{row.secondaryWorkflow}</span>) },
+                  { key: "primary", header: "Primary Workflow", render: (row) => (<Badge tone="success">{row.primaryWorkflow}</Badge>) },
+                  { key: "secondary", header: "Secondary Workflow", render: (row) => (<Badge tone="info">{row.secondaryWorkflow}</Badge>) },
                   { key: "param", header: "Key Input Parameter", render: (row) => (<span style={{ color: "var(--color-accent)", fontSize: "var(--font-size-caption)" }}>{row.keyInputParameter}</span>) },
                   { key: "output", header: "Optimal Output Structure", render: (row) => (<span style={{ color: "var(--color-text-secondary)" }}>{row.optimalOutputStructure}</span>) },
-                  { key: "action", header: "Action", render: (row) => (<Button variant="primary" size="sm" className="workflow-cta-btn" onClick={() => { if (onNavigateTab) { onNavigateTab(row.targetTab); } }}>Try Now →</Button>) },
+                  { key: "action", header: "Action", render: (row) => (<Button variant="primary" size="sm" onClick={() => { if (onNavigateTab) { onNavigateTab(row.targetTab); } }}>Try Now →</Button>) },
                 ]}
                 rows={filteredMatrix.map((row, rIdx) => ({ ...row, __rowKey: `${row.question}-${rIdx}` }))}
                 rowKey={(row) => row.__rowKey}
               />
             </div>
-          </div>
+
         </Stack>
+        </PageSection>
       )}
 
       {/* VIEW 5: WORKFLOW IMPROVEMENTS & ARCHITECTURAL ROADMAP */}
       {activeTab === "improvements" && (
-        <Stack gap="5" role="tabpanel" id="workflows-panel-improvements" aria-labelledby="workflows-tab-improvements">
+        <PageSection title="Optimization Roadmap (6 Enhancements)">
+          <Stack gap="5" role="tabpanel" id="workflows-panel-improvements" aria-labelledby="workflows-tab-improvements">
           {/* Architectural Analysis Hero Note */}
           <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "10px", padding: "var(--space-5) var(--space-6)" }}>
             <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
@@ -1838,28 +1812,28 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           {/* The 6 Improvement Cards */}
           <Grid autoFit minColumnWidth="lg" gap="5">
             {WORKFLOW_IMPROVEMENTS.map((imp) => (
-              <div key={imp.id} className="improvement-card">
-                <div className="improvement-header">
-                  <div className="improvement-title">
-                    <span className="improvement-num">0{imp.number}</span>
+              <Card key={imp.id}>
+
+                  <Flex gap="2" align="center">
+                    <Badge tone="accent">0{imp.number}</Badge>
                     <span>{imp.title}</span>
-                  </div>
-                </div>
+                  </Flex>
 
-                <div className="improvement-block">
-                  <span className="improvement-block-label limitation">⚠️ Current System Limitation:</span>
-                  <p className="improvement-block-desc">{imp.currentLimitation}</p>
-                </div>
 
-                <div className="improvement-block">
-                  <span className="improvement-block-label enhancement">💡 Proposed Architectural Enhancement:</span>
-                  <p className="improvement-block-desc">{imp.proposedEnhancement}</p>
-                </div>
+                <Stack gap="1">
+                  <span className="ui-meta-sm">⚠️ Current System Limitation:</span>
+                  <p className="ui-meta">{imp.currentLimitation}</p>
+                </Stack>
 
-                <div className="improvement-block">
-                  <span className="improvement-block-label impact">🚀 Expected Impact:</span>
-                  <p className="improvement-block-desc" style={{ color: "var(--color-success)" }}>{imp.impact}</p>
-                </div>
+                <Stack gap="1">
+                  <span className="ui-meta-sm">💡 Proposed Architectural Enhancement:</span>
+                  <p className="ui-meta">{imp.proposedEnhancement}</p>
+                </Stack>
+
+                <Stack gap="1">
+                  <span className="ui-meta-sm">🚀 Expected Impact:</span>
+                  <p className="ui-meta" style={{ color: "var(--color-success)" }}>{imp.impact}</p>
+                </Stack>
 
                 <div style={{ marginTop: "0.35rem", display: "flex", gap: "var(--space-1-5)", flexWrap: "wrap", alignItems: "center" }}>
                   <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)" }}>Target Components:</span>
@@ -1869,12 +1843,12 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                     </span>
                   ))}
                 </div>
-              </div>
+              </Card>
             ))}
           </Grid>
         </Stack>
+        </PageSection>
       )}
     </PageShell>
-    </div>
   );
 }

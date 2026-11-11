@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { apiFetch as fetch } from "./apiFetch";
 import { mapScreenError } from "./paidScreenSubmit";
-import { EmptyState, Spinner, Button, Select, Table, TextInput, PageShell, PageSection, FieldShell, Stack, Flex, Grid } from "./components/ui";
+import { Badge, Card, EmptyState, Spinner, Button, Notice, Select, Table, TextInput, PageShell, PageSection, FieldShell, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { ResearchReportActions } from "./ResearchReportActions";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import { TabHoverItem } from "./TabHoverItem";
@@ -436,66 +436,60 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
     setTimeout(() => setCopiedDid(false), 2000);
   };
 
-  const getRecommendationBadgeClass = (rec?: string) => {
-    if (!rec) return "rec-hold";
+  const recommendationToneFor = (rec?: string): BadgeTone => {
+    if (!rec) return "neutral";
     const lower = rec.toLowerCase();
-    if (lower.includes("strong_buy") || lower.includes("strong buy")) return "rec-strong-buy";
-    if (lower.includes("buy")) return "rec-buy";
-    if (lower.includes("underperform") || lower.includes("sell")) return "rec-sell";
-    return "rec-hold";
+    if (lower.includes("strong_buy") || lower.includes("strong buy")) return "success";
+    if (lower.includes("buy")) return "success";
+    if (lower.includes("underperform") || lower.includes("sell")) return "danger";
+    return "neutral";
   };
 
   return (
-    <div className="market-data-research-hub">
+
       <PageShell
         title="Market Data Research & Quoting Engine"
         scopeNote="Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison"
       >
       <div>
-        <div className="provider-status-chips">
-          <span className="chip-provider yf">
-            <span className="dot yf-dot" /> Yahoo Finance Engine
-          </span>
-          <span className="chip-provider alpaca">
-            <span className="dot alpaca-dot" /> Alpaca Data v2 (Paper &amp; Live)
-          </span>
-        </div>
+        <Flex gap="2" wrap>
+          <Badge tone="info" dot>Yahoo Finance Engine</Badge>
+          <Badge tone="success" dot>Alpaca Data v2 (Paper &amp; Live)</Badge>
+        </Flex>
 
         {/* Research Agent DID Box */}
-        <div className="research-did-cluster">
-          <div className="did-box">
-            <span className="metric-label">Research Agent DID</span>
-            <div className="did-attest-row">
-              <code className="did-snippet" title={researchAgentDid}>
+
+          <Card>
+            <span className="ui-meta-sm">Research Agent DID</span>
+            <Flex gap="2" align="center">
+              <code title={researchAgentDid}>
                 did:agent:…:research
               </code>
               <Button
                 type="button"
-                className="btn-tiny-copy"
                 onClick={() => copyDidToClipboard(researchAgentDid)}
                 title="Copy W3C Agent DID"
               >
                 {copiedDid ? "✓" : "📋"}
               </Button>
-            </div>
-            <span className="did-verified-tag">🛡️ Cryptographic Research Attestation</span>
-          </div>
-        </div>
+            </Flex>
+            <Badge tone="success">🛡️ Cryptographic Research Attestation</Badge>
+          </Card>
+
       </div>
 
       <PageSection>
       {/* Symbol Search & Selector Bar */}
-      <div className="symbol-selector-bar">
-        <div className="active-ticker-display">
-          <span className="active-ticker-label">Active Symbol:</span>
-          <span className="active-ticker-badge">{activeSymbol}</span>
-          <span className="active-company-name">{activeQuote?.companyName || "Loading…"}</span>
-        </div>
+      <Flex justify="between" align="center" gap="2" wrap>
+        <Flex gap="2" align="center">
+          <span className="ui-meta-sm">Active Symbol:</span>
+          <Badge tone="accent">{activeSymbol}</Badge>
+          <span className="ui-meta">{activeQuote?.companyName || "Loading…"}</span>
+        </Flex>
 
-        <div className="symbol-input-group">
+        <Flex gap="2" align="center">
           <TextInput
             type="text"
-            className="symbol-search-input"
             placeholder="Search ticker (e.g. AAPL, MSFT, BTC/USD)"
             value={symbolInput}
             onChange={(e) => setSymbolInput(e.target.value.toUpperCase())}
@@ -507,7 +501,6 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
           />
           <Button
             type="button"
-            className="btn-load-symbol"
             onClick={() => {
               if (symbolInput.trim()) handleAnalyzeTicker(symbolInput.trim());
             }}
@@ -517,15 +510,14 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
           {onTradeSymbol && (
             <Button
               type="button"
-              className="btn-trade-etrade"
               title="Trade this symbol via E*TRADE"
               onClick={() => onTradeSymbol(activeSymbol)}
             >
               ⚡ Trade on E*TRADE →
             </Button>
           )}
-        </div>
-      </div>
+        </Flex>
+      </Flex>
 
       {/* Universal Capability Navigation Bar */}
       <CapabilityNavBar
@@ -613,53 +605,47 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
 
       {/* SUBTAB 0: YAHOO FINANCE LIVE MARKET SCREENER */}
       {subTab === "screener" && (
-        <div className="research-section screener-section">
-          <div className="section-intro-card">
-            <div className="section-intro-card-header">
+        <Stack gap="4">
+          <Card>
+            <Flex justify="between" align="start" gap="2">
               <div>
-                <h3 className="section-intro-title">
+                <h3>
                   📊 Yahoo Finance Live Market Screener
                 </h3>
-                <p className="section-intro-desc">
+                <p className="ui-meta">
                   Real-time Level 1 quotes, daily changes, dynamic RSI-14 momentum, and institutional P/E valuations powered 100% by Yahoo Finance API.
                 </p>
               </div>
-              <div className="section-intro-actions">
+              <Flex gap="2">
                 <Button variant="secondary"
                   type="button"
                   onClick={() => fetchScreener()}
                   disabled={screenerLoading}
                  loading={screenerLoading}>
-                  <span className={screenerLoading ? "strat-spin" : ""}>🔄</span>
+                  <span>🔄</span>
                   {"Refresh Screener"}
                 </Button>
-              </div>
-            </div>
-          </div>
+              </Flex>
+            </Flex>
+          </Card>
 
           {/* Active Ticker Dual-Feed & Alpaca Real-Time Intelligence Card (On-Page Screener Integration) */}
-          <div className="active-ticker-dual-card">
-            <div className="dual-card-top-bar">
-              <div className="dual-card-title-group">
-                <span className="dual-card-symbol">
+          <Card>
+            <Flex justify="between" align="center" gap="2" wrap>
+              <Flex gap="2" align="center">
+                <strong>
                   {activeSymbol}
-                </span>
-                <span className="dual-card-company">
+                </strong>
+                <span className="ui-meta">
                   {activeQuote?.companyName || activeQuote?.name || yfinanceQuote?.companyName || yfinanceQuote?.name || `${activeSymbol} Equity`}
                 </span>
-                <span className="dual-card-status-pill">
+                <Badge tone="neutral">
                   Active Analyzed Security
-                </span>
-              </div>
-              <div className="dual-card-status-group">
-                <span className="dual-card-live-tag yahoo-live">
-                  <span className={`status-dot ${yfinanceQuote?.provenance === "live" ? "green" : "amber"}`} />
-                  {yfinanceQuote?.provenance === "live" ? "Yahoo Finance Live" : "Yahoo Finance — non-live market data"}
-                </span>
-                <span className="dual-card-live-tag alpaca-live">
-                  <span className="status-dot amber" />
-                  Alpaca Market Data v2 (On-Page)
-                </span>
+                </Badge>
+              </Flex>
+              <Flex gap="2" align="center">
+                <Badge tone={yfinanceQuote?.provenance === "live" ? "success" : "warning"} dot>{yfinanceQuote?.provenance === "live" ? "Yahoo Finance Live" : "Yahoo Finance — non-live market data"}</Badge>
+                <Badge tone="warning" dot>Alpaca Market Data v2 (On-Page)</Badge>
                 <Button variant="accent" tone="subtle" size="sm"
                   type="button"
                   onClick={() => loadAllSymbolData(activeSymbol)}
@@ -667,8 +653,8 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                  loading={quoteLoading || snapshotLoading}>
                   {"🔄 Refresh Dual Feeds"}
                 </Button>
-              </div>
-            </div>
+              </Flex>
+            </Flex>
 
             {/* Same-profile disclosure (#117): when neither feed is live,
                 both cards show the SAME market-data profile — say so plainly
@@ -691,89 +677,89 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             )}
 
             {/* Dual Feed Columns: Yahoo Finance & Alpaca side-by-side */}
-            <div className="dual-feed-columns-grid">
+            <Grid autoFit minColumnWidth="md" gap="2">
               {/* Yahoo Finance Card */}
-              <div className="dual-feed-card yahoo-card">
-                <div className="dual-feed-card-header">
-                  <span className="dual-feed-card-title yahoo-title">
+              <Card>
+                <Flex justify="between" align="center" gap="2">
+                  <strong>
                     📊 Yahoo Finance Feed
-                  </span>
+                  </strong>
                   <Flex as="span" inline gap="1-5" align="center">
                     <MarketDataResearchProvenanceBadge provenance={yfinanceQuote?.provenance} note={yfinanceQuote?.note} />
-                    <span className="dual-feed-market-state">
+                    <span className="ui-meta-sm">
                       {yfinanceQuote?.marketState || "REGULAR"}
                     </span>
                   </Flex>
-                </div>
-                <div className="dual-feed-price-row">
-                  <span className="dual-feed-price-val">
+                </Flex>
+                <Flex justify="between" align="center" gap="2">
+                  <strong>
                     ${Number(yfinanceQuote?.price || activeQuote?.price || 0).toFixed(2)}
-                  </span>
-                  <span className={`dual-feed-change-val ${(yfinanceQuote?.change || 0) >= 0 ? "gain" : "loss"}`}>
+                  </strong>
+                  <Badge tone={(yfinanceQuote?.change || 0) >= 0 ? "success" : "danger"}>
                     {(yfinanceQuote?.change || 0) >= 0 ? "+" : ""}{Number(yfinanceQuote?.change || 0).toFixed(2)} ({Number(yfinanceQuote?.changePercent || 0).toFixed(2)}%)
-                  </span>
-                </div>
-                <div className="dual-feed-stats-grid">
+                  </Badge>
+                </Flex>
+                <Grid columns={2} gap="2">
                   <div>
-                    <span className="dual-feed-stat-label">Bid / Ask: </span>
-                    <strong className="dual-feed-stat-val">${Number(yfinanceQuote?.bid || 0).toFixed(2)} / ${Number(yfinanceQuote?.ask || 0).toFixed(2)}</strong>
+                    <span className="ui-meta-sm">Bid / Ask: </span>
+                    <strong>${Number(yfinanceQuote?.bid || 0).toFixed(2)} / ${Number(yfinanceQuote?.ask || 0).toFixed(2)}</strong>
                   </div>
                   <div>
-                    <span className="dual-feed-stat-label">Day Range: </span>
-                    <strong className="dual-feed-stat-val">${Number(yfinanceQuote?.low ?? yfinanceQuote?.dayLow ?? 0).toFixed(2)} - ${Number(yfinanceQuote?.high ?? yfinanceQuote?.dayHigh ?? 0).toFixed(2)}</strong>
+                    <span className="ui-meta-sm">Day Range: </span>
+                    <strong>${Number(yfinanceQuote?.low ?? yfinanceQuote?.dayLow ?? 0).toFixed(2)} - ${Number(yfinanceQuote?.high ?? yfinanceQuote?.dayHigh ?? 0).toFixed(2)}</strong>
                   </div>
                   <div>
-                    <span className="dual-feed-stat-label">Volume: </span>
-                    <strong className="dual-feed-stat-val">{Number(yfinanceQuote?.volume || 0).toLocaleString()}</strong>
+                    <span className="ui-meta-sm">Volume: </span>
+                    <strong>{Number(yfinanceQuote?.volume || 0).toLocaleString()}</strong>
                   </div>
                   <div>
-                    <span className="dual-feed-stat-label">P/E Ratio: </span>
-                    <strong className="dual-feed-stat-val">{yfinanceQuote?.trailingPE || yfinanceQuote?.peRatio ? Number(yfinanceQuote?.trailingPE || yfinanceQuote?.peRatio).toFixed(1) : "N/A"}</strong>
+                    <span className="ui-meta-sm">P/E Ratio: </span>
+                    <strong>{yfinanceQuote?.trailingPE || yfinanceQuote?.peRatio ? Number(yfinanceQuote?.trailingPE || yfinanceQuote?.peRatio).toFixed(1) : "N/A"}</strong>
                   </div>
-                </div>
-              </div>
+                </Grid>
+              </Card>
 
               {/* Alpaca Market Data v2 Card */}
-              <div className="dual-feed-card alpaca-card">
-                <div className="dual-feed-card-header">
-                  <span className="dual-feed-card-title alpaca-title">
+              <Card>
+                <Flex justify="between" align="center" gap="2">
+                  <strong>
                     🦙 Alpaca Market Data v2
-                  </span>
+                  </strong>
                   <Flex as="span" inline gap="1-5" align="center">
                     <MarketDataResearchProvenanceBadge provenance={alpacaQuote?.provenance ?? snapshot?.provenance} note={alpacaQuote?.note ?? snapshot?.note} />
-                    <span className="dual-feed-snapshot-badge">
+                    <Badge tone="neutral">
                       {snapshot ? (snapshot.provenance === "live" ? "Live Snapshot" : "Market Data Profile Snapshot") : "Alpaca Feed"}
-                    </span>
+                    </Badge>
                   </Flex>
-                </div>
-                <div className="dual-feed-price-row">
-                  <span className="dual-feed-price-val">
+                </Flex>
+                <Flex justify="between" align="center" gap="2">
+                  <strong>
                     ${Number(alpacaQuote?.price || snapshot?.latestTrade?.price || yfinanceQuote?.price || 0).toFixed(2)}
-                  </span>
-                  <span className="dual-feed-nbbo-val">
+                  </strong>
+                  <span className="ui-meta-sm">
                     NBBO Spread: <strong>{alpacaQuote?.ask && alpacaQuote?.bid ? `$${(alpacaQuote.ask - alpacaQuote.bid).toFixed(3)}` : "—"}</strong>
                   </span>
-                </div>
-                <div className="dual-feed-stats-grid">
+                </Flex>
+                <Grid columns={2} gap="2">
                   <div>
-                    <span className="dual-feed-stat-label">NBBO Bid/Ask: </span>
-                    <strong className="dual-feed-stat-val">${Number(alpacaQuote?.bid || snapshot?.latestQuote?.bidPrice || 0).toFixed(2)} / ${Number(alpacaQuote?.ask || snapshot?.latestQuote?.askPrice || 0).toFixed(2)}</strong>
+                    <span className="ui-meta-sm">NBBO Bid/Ask: </span>
+                    <strong>${Number(alpacaQuote?.bid || snapshot?.latestQuote?.bidPrice || 0).toFixed(2)} / ${Number(alpacaQuote?.ask || snapshot?.latestQuote?.askPrice || 0).toFixed(2)}</strong>
                   </div>
                   <div>
-                    <span className="dual-feed-stat-label">Latest Trade: </span>
-                    <strong className="dual-feed-stat-val">{snapshot?.latestTrade ? `$${snapshot.latestTrade.price} (${snapshot.latestTrade.size} shs)` : "Awaiting trade data"}</strong>
+                    <span className="ui-meta-sm">Latest Trade: </span>
+                    <strong>{snapshot?.latestTrade ? `$${snapshot.latestTrade.price} (${snapshot.latestTrade.size} shs)` : "Awaiting trade data"}</strong>
                   </div>
                   <div>
-                    <span className="dual-feed-stat-label">Minute Bar: </span>
-                    <strong className="dual-feed-stat-val">{snapshot?.minuteBar ? `H: $${snapshot.minuteBar.high} L: $${snapshot.minuteBar.low}` : "Aggregating…"}</strong>
+                    <span className="ui-meta-sm">Minute Bar: </span>
+                    <strong>{snapshot?.minuteBar ? `H: $${snapshot.minuteBar.high} L: $${snapshot.minuteBar.low}` : "Aggregating…"}</strong>
                   </div>
                   <div>
-                    <span className="dual-feed-stat-label">Daily VWAP: </span>
-                    <strong className="dual-feed-stat-val">{snapshot?.dailyBar?.vwap ? `$${Number(snapshot.dailyBar.vwap).toFixed(2)}` : "—"}</strong>
+                    <span className="ui-meta-sm">Daily VWAP: </span>
+                    <strong>{snapshot?.dailyBar?.vwap ? `$${Number(snapshot.dailyBar.vwap).toFixed(2)}` : "—"}</strong>
                   </div>
-                </div>
-              </div>
-            </div>
+                </Grid>
+              </Card>
+            </Grid>
 
             {/* Quick Action Navigation & Drawer Toggle */}
             <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center", paddingTop: "var(--space-1)" }}>
@@ -859,11 +845,11 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 </div>
               </div>
             )}
-          </div>
+          </Card>
 
           {/* Screener Controls Bar */}
-          <div className="screener-controls-bar" style={{ marginBottom: "1rem" }}>
-            <div className="control-item search-item">
+          <Flex gap="2" wrap align="end">
+
               <TextInput label="Search Ticker / Company"
                 type="text"
                 placeholder="e.g. NVDA, Apple, Semiconductors…"
@@ -873,9 +859,9 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   if (e.key === "Enter") fetchScreener();
                 }}
               />
-            </div>
 
-            <div className="control-item">
+
+
               <Select label="Sector"
                 value={screenerSector}
                 onChange={(e) => {
@@ -889,14 +875,15 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 <option value="Communication Services">Communication Services</option>
                 <option value="Consumer Discretionary">Consumer Discretionary</option>
               </Select>
-            </div>
 
-            <div className="control-item">
+
+
               <FieldShell id="marketdata-quick-presets" label="Quick Presets">
                 <Flex gap="1-5">
                   <Button
                     type="button"
-                    className={`btn-filter-pill ${screenerGainersOnly ? "active gainers" : ""}`}
+                    variant="secondary"
+                    tone={screenerGainersOnly ? "solid" : "subtle"}
                     onClick={() => {
                       const next = !screenerGainersOnly;
                       setScreenerGainersOnly(next);
@@ -908,7 +895,8 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   </Button>
                   <Button
                     type="button"
-                    className={`btn-filter-pill ${screenerLosersOnly ? "active losers" : ""}`}
+                    variant="secondary"
+                    tone={screenerLosersOnly ? "solid" : "subtle"}
                     onClick={() => {
                       const next = !screenerLosersOnly;
                       setScreenerLosersOnly(next);
@@ -920,7 +908,8 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   </Button>
                   <Button
                     type="button"
-                    className="btn-filter-pill"
+                    variant="secondary"
+                    tone="subtle"
                     onClick={() => {
                       setScreenerSearch("");
                       setScreenerSector("all");
@@ -935,36 +924,32 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   </Button>
                 </Flex>
               </FieldShell>
-            </div>
+
 
             <Button
               type="button"
               variant="primary"
-              className="btn-run-scan"
               onClick={() => fetchScreener()}
               disabled={screenerLoading}
              loading={screenerLoading}>
               {"🔍 Run Scan"}
             </Button>
-          </div>
+          </Flex>
 
           {/* Screener Results Meta */}
-          <div className="screener-results-header">
+          <Flex justify="between" align="center" gap="2" wrap>
             <span>
               <strong>Filtered:</strong> {screenerSummary} • <strong>Matches:</strong> {screenerStocks.length} equities
             </span>
             <span>
               Data Source: <strong>Yahoo Finance Engine</strong> {screenerLastScanned ? `• ${screenerLastScanned}` : ""}
             </span>
-          </div>
-          {screenerError && <div className="options-error" role="alert">{screenerError}</div>}
+          </Flex>
+          {screenerError && <Notice tone="danger">{screenerError}</Notice>}
 
           {/* Table */}
           {screenerLoading ? (
-            <div className="research-loading-state">
-              <span className="spinner-large" />
-              <p>Scanning equities universe via Yahoo Finance API…</p>
-            </div>
+            <Spinner size="lg" label="Scanning equities universe via Yahoo Finance API…" />
           ) : (
               <Table
                 containerClassName="trading-table-container"
@@ -1001,9 +986,9 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                     header: "Change (1D)",
                     align: "right",
                     render: (stock) => (
-                      <span className={`pill-badge ${stock.change >= 0 ? "positive" : "negative"}`}>
+                      <Badge tone={stock.change >= 0 ? "success" : "danger"}>
                         {stock.change >= 0 ? "+" : ""}{Number(stock.change || 0).toFixed(2)} ({Number(stock.changePercent || 0).toFixed(2)}%)
-                      </span>
+                      </Badge>
                     ),
                   },
                   {
@@ -1031,9 +1016,9 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                     header: "RSI (14)",
                     align: "center",
                     render: (stock) => (
-                      <span className={`pill-badge ${stock.rsi14 > 70 ? "negative" : stock.rsi14 < 35 ? "positive" : "neutral"}`}>
+                      <Badge tone={stock.rsi14 > 70 ? "danger" : stock.rsi14 < 35 ? "success" : "neutral"}>
                         {stock.rsi14 ? stock.rsi14.toFixed(1) : "50.0"}
-                      </span>
+                      </Badge>
                     ),
                   },
                   {
@@ -1133,12 +1118,12 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               { name: "Stock comparison", rows: comparisonResults as unknown as Array<Record<string, unknown>> },
             ]}
           />
-        </div>
+        </Stack>
       )}
 
       {/* SUBTAB 1: AUTONOMOUS RESEARCH REPORT */}
       {subTab === "report" && (
-        <div className="research-section report-section">
+        <Stack gap="4">
           <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginBottom: "0.75rem" }}>
             <Button variant="secondary" size="sm" onClick={onReplayStoredReport} loading={reportReplayLoading} disabled={!activeSymbol}>
               Replay stored report
@@ -1158,32 +1143,29 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             </div>
           )}
           {reportLoading ? (
-            <div className="research-loading-state">
-              <span className="spinner-large" />
-              <p>Synthesizing Yahoo Finance fundamentals, Alpaca pricing, and AI technical summary for {activeSymbol}…</p>
-            </div>
+            <Spinner size="lg" label={`Synthesizing Yahoo Finance fundamentals, Alpaca pricing, and AI technical summary for ${activeSymbol}…`} />
           ) : report ? (
-            <div className="research-report-layout">
+            <Grid autoFit minColumnWidth="md" gap="3">
               {/* Report Header Card */}
-              <div className="report-main-card">
-                <div className="report-card-top">
-                  <div className="company-heading">
-                    <span className="report-ticker">{report.symbol}</span>
-                    <div className="heading-meta">
+              <Card>
+                <Flex justify="between" align="start" gap="2">
+                  <Flex gap="2" align="center">
+                    <strong>{report.symbol}</strong>
+                    <Stack gap="0">
                       <h4>{report.fundamentals.companyName}</h4>
-                      <span className="sector-sub">{report.fundamentals.sector} • {report.fundamentals.industry}</span>
-                    </div>
-                  </div>
+                      <span className="ui-meta-sm">{report.fundamentals.sector} • {report.fundamentals.industry}</span>
+                    </Stack>
+                  </Flex>
 
-                  <div className="report-price-block">
-                    <span className="report-price">${report.quote.price.toFixed(2)}</span>
-                    <span className={`report-change ${report.quote.change >= 0 ? "positive" : "negative"}`}>
+                  <Stack gap="1" align="end">
+                    <strong>${report.quote.price.toFixed(2)}</strong>
+                    <Badge tone={report.quote.change >= 0 ? "success" : "danger"}>
                       {report.quote.change >= 0 ? "+" : ""}{report.quote.change.toFixed(2)} ({report.quote.changePercent >= 0 ? "+" : ""}{report.quote.changePercent.toFixed(2)}%)
-                    </span>
-                    <span className="source-tag">Source: {report.quote.provider.toUpperCase()} Market Data</span>
+                    </Badge>
+                    <span className="ui-meta-sm">Source: {report.quote.provider.toUpperCase()} Market Data</span>
                     <MarketDataResearchProvenanceBadge provenance={report.provenance} />
-                  </div>
-                </div>
+                  </Stack>
+                </Flex>
 
                 {/* Non-live banner (#117): a report built on static/generated
                     inputs must not read as live research. */}
@@ -1205,298 +1187,284 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 )}
 
                 {/* AI Research Synthesis Narrative */}
-                <div className="report-ai-narrative">
-                  <div className="narrative-badge">
-                    <span>🤖 Autonomous AI Research Synthesis</span>
-                  </div>
-                  <p className="narrative-text">{report.aiAnalysis}</p>
-                </div>
+                <Stack gap="2">
+                  <Badge tone="accent">🤖 Autonomous AI Research Synthesis</Badge>
+                  <p>{report.aiAnalysis}</p>
+                </Stack>
 
                 {/* Quick Key Metrics Grid */}
-                <div className="key-metrics-grid">
-                  <div className="metric-pill-item">
-                    <span className="label">Trailing P/E</span>
-                    <span className="value">{report.fundamentals.peTrailing || "N/A"}</span>
-                  </div>
-                  <div className="metric-pill-item">
-                    <span className="label">Forward P/E</span>
-                    <span className="value">{report.fundamentals.peForward || "N/A"}</span>
-                  </div>
-                  <div className="metric-pill-item">
-                    <span className="label">PEG Ratio</span>
-                    <span className="value">{report.fundamentals.pegRatio || "N/A"}</span>
-                  </div>
-                  <div className="metric-pill-item">
-                    <span className="label">Beta</span>
-                    <span className="value">{report.fundamentals.beta || "1.00"}</span>
-                  </div>
-                  <div className="metric-pill-item">
-                    <span className="label">Market Cap</span>
-                    <span className="value">${(report.fundamentals.marketCap / 1e9).toFixed(1)}B</span>
-                  </div>
-                  <div className="metric-pill-item">
-                    <span className="label">{report.fundamentals.provenance === "live" ? "Consensus Target" : "Profile Target Estimate"}</span>
-                    <span className="value target-highlight">
+                <Grid autoFit minColumnWidth="xs" gap="2">
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Trailing P/E</span>
+                    <strong>{report.fundamentals.peTrailing || "N/A"}</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Forward P/E</span>
+                    <strong>{report.fundamentals.peForward || "N/A"}</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">PEG Ratio</span>
+                    <strong>{report.fundamentals.pegRatio || "N/A"}</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Beta</span>
+                    <strong>{report.fundamentals.beta || "1.00"}</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Market Cap</span>
+                    <strong>${(report.fundamentals.marketCap / 1e9).toFixed(1)}B</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">{report.fundamentals.provenance === "live" ? "Consensus Target" : "Profile Target Estimate"}</span>
+                    <strong>
                       ${report.fundamentals.targetMeanPrice ? report.fundamentals.targetMeanPrice.toFixed(2) : "N/A"}
-                    </span>
-                  </div>
-                </div>
+                    </strong>
+                  </Stack>
+                </Grid>
 
                 {/* Technical Overview Cards */}
-                <div className="technical-overview-row">
-                  <div className="tech-stat-card">
-                    <span className="stat-label">14-Day RSI</span>
-                    <span className="stat-num">{report.technicalSummary.rsi14}</span>
-                    <div className="rsi-meter-bar">
-                      <div
-                        className="rsi-fill"
-                        style={{
-                          width: `${Math.min(100, Math.max(0, report.technicalSummary.rsi14))}%`,
-                          background: report.technicalSummary.rsi14 < 35 ? "var(--color-success)" : report.technicalSummary.rsi14 > 70 ? "var(--color-danger)" : "var(--color-accent)",
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="tech-stat-card">
-                    <span className="stat-label">MACD Signal</span>
-                    <span className="stat-num tech-pill">{report.technicalSummary.macd}</span>
-                  </div>
-                  <div className="tech-stat-card">
-                    <span className="stat-label">50 vs 200 SMA Trend</span>
-                    <span className="stat-num tech-pill">{report.technicalSummary.trend50vs200SMA}</span>
-                  </div>
-                  <div className="tech-stat-card">
-                    <span className="stat-label">Support / Resistance</span>
-                    <span className="stat-num">${report.technicalSummary.support} / ${report.technicalSummary.resistance}</span>
-                  </div>
-                </div>
+                <Grid autoFit minColumnWidth="xs" gap="2">
+                  <Card>
+                    <span className="ui-meta-sm">14-Day RSI</span>
+                    <strong>{report.technicalSummary.rsi14}</strong>
+                    <meter min={0} max={100} value={report.technicalSummary.rsi14} aria-label="14-day RSI" />
+                  </Card>
+                  <Card>
+                    <span className="ui-meta-sm">MACD Signal</span>
+                    <Badge tone="neutral">{report.technicalSummary.macd}</Badge>
+                  </Card>
+                  <Card>
+                    <span className="ui-meta-sm">50 vs 200 SMA Trend</span>
+                    <Badge tone="neutral">{report.technicalSummary.trend50vs200SMA}</Badge>
+                  </Card>
+                  <Card>
+                    <span className="ui-meta-sm">Support / Resistance</span>
+                    <strong>${report.technicalSummary.support} / ${report.technicalSummary.resistance}</strong>
+                  </Card>
+                </Grid>
 
                 {/* W3C Agent DID Attestation Stamp */}
-                <div className="report-attestation-footer">
-                  <div className="attest-col">
-                    <span className="attest-label">Attesting Research Agent:</span>
+                <Grid autoFit minColumnWidth="sm" gap="2">
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Attesting Research Agent:</span>
                     <code>{report.agentAttestation.did}</code>
-                  </div>
-                  <div className="attest-col">
-                    <span className="attest-label">Cryptographic Signature:</span>
-                    <code className="sig-snippet">{report.agentAttestation.signature.slice(0, 32)}…</code>
-                  </div>
-                  <div className="attest-col">
-                    <span className="attest-label">Certified Timestamp:</span>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Cryptographic Signature:</span>
+                    <code>{report.agentAttestation.signature.slice(0, 32)}…</code>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Certified Timestamp:</span>
                     <span>{new Date(report.agentAttestation.timestamp).toLocaleString()}</span>
-                  </div>
-                  <div className="attest-col">
-                    <span className="attest-label">Attested Data Provenance:</span>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Attested Data Provenance:</span>
                     <span>{report.agentAttestation.provenance}</span>
-                  </div>
-                </div>
-              </div>
+                  </Stack>
+                </Grid>
+              </Card>
 
               {/* Right Side: Analyst Rating & Action Card */}
-              <div className="report-side-card">
-                <div className="analyst-rating-box">
+              <Stack gap="3">
+                <Card>
                   <h5>{report.fundamentals.provenance === "live" ? "Wall Street Consensus" : "Market Data Profile Rating — not live consensus"}</h5>
-                  <div className={`rating-big-badge ${getRecommendationBadgeClass(report.analystRating)}`}>
+                  <Badge tone={recommendationToneFor(report.analystRating)}>
                     {report.analystRating}
-                  </div>
-                  <div className="target-spread-info">
-                    <div className="spread-row">
+                  </Badge>
+                  <Stack gap="1">
+                    <Flex justify="between" gap="2">
                       <span>Low Target:</span>
                       <span>${report.fundamentals.targetLowPrice?.toFixed(2) || "N/A"}</span>
-                    </div>
-                    <div className="spread-row mean">
+                    </Flex>
+                    <Flex justify="between" gap="2">
                       <span>Mean Target:</span>
-                      <span>${report.fundamentals.targetMeanPrice?.toFixed(2) || "N/A"}</span>
-                    </div>
-                    <div className="spread-row">
+                      <strong>${report.fundamentals.targetMeanPrice?.toFixed(2) || "N/A"}</strong>
+                    </Flex>
+                    <Flex justify="between" gap="2">
                       <span>High Target:</span>
                       <span>${report.fundamentals.targetHighPrice?.toFixed(2) || "N/A"}</span>
-                    </div>
-                    <div className="analyst-count-note">
+                    </Flex>
+                    <p className="ui-meta-sm">
                       {report.fundamentals.provenance === "live"
                         ? `Based on ${report.fundamentals.numberOfAnalystOpinions || 30} Wall Street analyst ratings`
                         : `Targets and the analyst count come from the ${report.fundamentals.provenance} market-data profile — not live Wall Street data.`}
-                    </div>
-                  </div>
-                </div>
+                    </p>
+                  </Stack>
+                </Card>
 
-                <div className="company-description-card">
+                <Card>
                   <h5>Business Overview</h5>
                   <p>{report.fundamentals.description}</p>
-                </div>
+                </Card>
 
                 {onTradeSymbol && (
                   <Button
                     type="button"
-                    className="btn-side-trade"
                     onClick={() => onTradeSymbol(report.symbol)}
                   >
                     ⚡ Trade {report.symbol} on E*TRADE
                   </Button>
                 )}
-              </div>
-            </div>
+              </Stack>
+            </Grid>
           ) : (
             <EmptyState title="No research report available." />
           )}
-        </div>
+        </Stack>
       )}
 
       {/* SUBTAB 2: MULTI-PROVIDER QUOTING */}
       {subTab === "quoting" && (
-        <div className="research-section quoting-section">
-          <div className="quoting-comparison-grid">
+        <Stack gap="4">
+          <Grid autoFit minColumnWidth="md" gap="2">
             {/* Yahoo Finance Quote Card */}
-            <div className="provider-quote-card yf-card">
-              <div className="quote-card-header">
-                <div className="provider-name-row">
-                  <span className="dot yf-dot" />
+            <Card>
+              <Flex justify="between" align="center" gap="2">
+                <Flex gap="2" align="center">
+
                   <h4>Yahoo Finance Engine</h4>
-                </div>
+                </Flex>
                 <Flex as="span" inline gap="1-5" align="center">
                   <MarketDataResearchProvenanceBadge provenance={yfinanceQuote?.provenance} note={yfinanceQuote?.note} />
-                  <span className="provider-tag">yfinance API</span>
+                  <Badge tone="neutral">yfinance API</Badge>
                 </Flex>
-              </div>
+              </Flex>
 
               {yfinanceQuote ? (
-                <div className="quote-card-body">
-                  <div className="quote-price-row">
-                    <span className="big-quote-price">${yfinanceQuote.price.toFixed(2)}</span>
-                    <span className={`quote-change-pill ${yfinanceQuote.change >= 0 ? "positive" : "negative"}`}>
+                <Stack gap="3">
+                  <Flex justify="between" align="center" gap="2">
+                    <strong>${yfinanceQuote.price.toFixed(2)}</strong>
+                    <Badge tone={yfinanceQuote.change >= 0 ? "success" : "danger"}>
                       {yfinanceQuote.change >= 0 ? "+" : ""}{yfinanceQuote.change.toFixed(2)} ({yfinanceQuote.changePercent >= 0 ? "+" : ""}{yfinanceQuote.changePercent.toFixed(2)}%)
-                    </span>
-                  </div>
+                    </Badge>
+                  </Flex>
 
-                  <div className="quote-detail-grid">
-                    <div className="detail-item">
-                      <span className="lbl">Bid</span>
-                      <span className="val">{yfinanceQuote.bid !== undefined ? `$${yfinanceQuote.bid.toFixed(2)}` : "—"}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Ask</span>
-                      <span className="val">{yfinanceQuote.ask !== undefined ? `$${yfinanceQuote.ask.toFixed(2)}` : "—"}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Spread</span>
-                      <span className="val">{yfinanceQuote.ask !== undefined && yfinanceQuote.bid !== undefined ? `$${(yfinanceQuote.ask - yfinanceQuote.bid).toFixed(2)}` : "—"}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Open</span>
-                      <span className="val">${yfinanceQuote.open.toFixed(2)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">High</span>
-                      <span className="val">${yfinanceQuote.high.toFixed(2)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Low</span>
-                      <span className="val">${yfinanceQuote.low.toFixed(2)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Volume</span>
-                      <span className="val">{(yfinanceQuote.volume / 1e6).toFixed(2)}M</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Prev Close</span>
-                      <span className="val">${yfinanceQuote.previousClose.toFixed(2)}</span>
-                    </div>
-                  </div>
+                  <Grid columns={4} gap="2">
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Bid</span>
+                      <strong>{yfinanceQuote.bid !== undefined ? `$${yfinanceQuote.bid.toFixed(2)}` : "—"}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Ask</span>
+                      <strong>{yfinanceQuote.ask !== undefined ? `$${yfinanceQuote.ask.toFixed(2)}` : "—"}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Spread</span>
+                      <strong>{yfinanceQuote.ask !== undefined && yfinanceQuote.bid !== undefined ? `$${(yfinanceQuote.ask - yfinanceQuote.bid).toFixed(2)}` : "—"}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Open</span>
+                      <strong>${yfinanceQuote.open.toFixed(2)}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">High</span>
+                      <strong>${yfinanceQuote.high.toFixed(2)}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Low</span>
+                      <strong>${yfinanceQuote.low.toFixed(2)}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Volume</span>
+                      <strong>{(yfinanceQuote.volume / 1e6).toFixed(2)}M</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Prev Close</span>
+                      <strong>${yfinanceQuote.previousClose.toFixed(2)}</strong>
+                    </Stack>
+                  </Grid>
 
-                  <div className="provider-foot">
+                  <Flex justify="between" align="center" gap="2">
                     <span>Protocol: Market Data Query Endpoint</span>
                     <span>Updated: {new Date(yfinanceQuote.timestamp).toLocaleTimeString()}</span>
-                  </div>
-                </div>
+                  </Flex>
+                </Stack>
               ) : quoteLoading ? (
                 <Spinner size="lg" label="Loading Yahoo Finance quote" />
               ) : (
                 <EmptyState title="No Yahoo Finance quote available" />
               )}
-            </div>
+            </Card>
 
             {/* Alpaca Market Data v2 Quote Card */}
-            <div className="provider-quote-card alpaca-card">
-              <div className="quote-card-header">
-                <div className="provider-name-row">
-                  <span className="dot alpaca-dot" />
+            <Card>
+              <Flex justify="between" align="center" gap="2">
+                <Flex gap="2" align="center">
+
                   <h4>Alpaca Market Data v2</h4>
-                </div>
+                </Flex>
                 <Flex as="span" inline gap="1-5" align="center">
                   <MarketDataResearchProvenanceBadge provenance={alpacaQuote?.provenance} note={alpacaQuote?.note} />
-                  <span className="provider-tag">Level 1/2 REST &amp; Paper</span>
+                  <Badge tone="neutral">Level 1/2 REST &amp; Paper</Badge>
                 </Flex>
-              </div>
+              </Flex>
 
               {alpacaQuote ? (
-                <div className="quote-card-body">
-                  <div className="quote-price-row">
-                    <span className="big-quote-price">${alpacaQuote.price.toFixed(2)}</span>
-                    <span className={`quote-change-pill ${alpacaQuote.change >= 0 ? "positive" : "negative"}`}>
+                <Stack gap="3">
+                  <Flex justify="between" align="center" gap="2">
+                    <strong>${alpacaQuote.price.toFixed(2)}</strong>
+                    <Badge tone={alpacaQuote.change >= 0 ? "success" : "danger"}>
                       {alpacaQuote.change >= 0 ? "+" : ""}{alpacaQuote.change.toFixed(2)} ({alpacaQuote.changePercent >= 0 ? "+" : ""}{alpacaQuote.changePercent.toFixed(2)}%)
-                    </span>
-                  </div>
+                    </Badge>
+                  </Flex>
 
-                  <div className="quote-detail-grid">
-                    <div className="detail-item">
-                      <span className="lbl">NBBO Bid</span>
-                      <span className="val">{alpacaQuote.bid !== undefined ? `$${alpacaQuote.bid.toFixed(2)}` : "—"} ({alpacaQuote.bidSize} shs)</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">NBBO Ask</span>
-                      <span className="val">{alpacaQuote.ask !== undefined ? `$${alpacaQuote.ask.toFixed(2)}` : "—"} ({alpacaQuote.askSize} shs)</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Spread</span>
-                      <span className="val">{alpacaQuote.ask !== undefined && alpacaQuote.bid !== undefined ? `$${(alpacaQuote.ask - alpacaQuote.bid).toFixed(2)}` : "—"}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">VWAP</span>
-                      <span className="val">${alpacaQuote.vwap ? alpacaQuote.vwap.toFixed(2) : alpacaQuote.price.toFixed(2)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Day High</span>
-                      <span className="val">${alpacaQuote.high.toFixed(2)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Day Low</span>
-                      <span className="val">${alpacaQuote.low.toFixed(2)}</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Volume</span>
-                      <span className="val">{(alpacaQuote.volume / 1e6).toFixed(2)}M</span>
-                    </div>
-                    <div className="detail-item">
-                      <span className="lbl">Prev Close</span>
-                      <span className="val">${alpacaQuote.previousClose.toFixed(2)}</span>
-                    </div>
-                  </div>
+                  <Grid columns={4} gap="2">
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">NBBO Bid</span>
+                      <strong>{alpacaQuote.bid !== undefined ? `$${alpacaQuote.bid.toFixed(2)}` : "—"} ({alpacaQuote.bidSize} shs)</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">NBBO Ask</span>
+                      <strong>{alpacaQuote.ask !== undefined ? `$${alpacaQuote.ask.toFixed(2)}` : "—"} ({alpacaQuote.askSize} shs)</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Spread</span>
+                      <strong>{alpacaQuote.ask !== undefined && alpacaQuote.bid !== undefined ? `$${(alpacaQuote.ask - alpacaQuote.bid).toFixed(2)}` : "—"}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">VWAP</span>
+                      <strong>${alpacaQuote.vwap ? alpacaQuote.vwap.toFixed(2) : alpacaQuote.price.toFixed(2)}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Day High</span>
+                      <strong>${alpacaQuote.high.toFixed(2)}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Day Low</span>
+                      <strong>${alpacaQuote.low.toFixed(2)}</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Volume</span>
+                      <strong>{(alpacaQuote.volume / 1e6).toFixed(2)}M</strong>
+                    </Stack>
+                    <Stack gap="0">
+                      <span className="ui-meta-sm">Prev Close</span>
+                      <strong>${alpacaQuote.previousClose.toFixed(2)}</strong>
+                    </Stack>
+                  </Grid>
 
-                  <div className="provider-foot">
+                  <Flex justify="between" align="center" gap="2">
                     <span>Protocol: Alpaca v2 Data Gateway</span>
                     <span>Updated: {new Date(alpacaQuote.timestamp).toLocaleTimeString()}</span>
-                  </div>
-                </div>
+                  </Flex>
+                </Stack>
               ) : quoteLoading ? (
                 <Spinner size="lg" label="Loading Alpaca quote" />
               ) : (
                 <EmptyState title="No Alpaca quote available" />
               )}
-            </div>
-          </div>
-        </div>
+            </Card>
+          </Grid>
+        </Stack>
       )}
 
       {/* SUBTAB 3: FUNDAMENTALS & VALUATIONS */}
       {subTab === "fundamentals" && (
-        <div className="research-section fundamentals-section">
+        <Stack gap="4">
           {fundamentalsLoading ? (
-            <div className="research-loading-state">
-              <span className="spinner-large" />
-              <p>Extracting financial ratios and balance sheet metrics from Yahoo Finance…</p>
-            </div>
+            <Spinner size="lg" label="Extracting financial ratios and balance sheet metrics from Yahoo Finance…" />
           ) : fundamentals ? (
-            <div className="fundamentals-layout">
+            <Stack gap="4">
               <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "0.5rem" }}>
                 <MarketDataResearchProvenanceBadge provenance={fundamentals.provenance} note={fundamentals.note} />
                 {fundamentals.provenance !== "live" && (
@@ -1506,113 +1474,113 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 )}
               </div>
               {/* Valuation Multiples */}
-              <div className="fund-card">
+              <Card>
                 <h5>📊 Valuation Multiples (yfinance)</h5>
-                <div className="fund-grid">
-                  <div className="fund-item">
-                    <span className="lbl">Market Capitalization</span>
-                    <span className="val">${(fundamentals.marketCap / 1e9).toFixed(1)}B</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Enterprise Value</span>
-                    <span className="val">
+                <Grid autoFit minColumnWidth="sm" gap="2">
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Market Capitalization</span>
+                    <strong>${(fundamentals.marketCap / 1e9).toFixed(1)}B</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Enterprise Value</span>
+                    <strong>
                       {fundamentals.enterpriseValue ? `$${(fundamentals.enterpriseValue / 1e9).toFixed(1)}B` : "N/A"}
-                    </span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Trailing P/E</span>
-                    <span className="val">{fundamentals.peTrailing || "N/A"}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Forward P/E</span>
-                    <span className="val">{fundamentals.peForward || "N/A"}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">PEG Ratio (5-yr expected)</span>
-                    <span className="val">{fundamentals.pegRatio || "N/A"}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Price to Book (MRQ)</span>
-                    <span className="val">{fundamentals.priceToBook || "N/A"}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Beta (5-yr monthly)</span>
-                    <span className="val">{fundamentals.beta || "1.00"}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Dividend Yield</span>
-                    <span className="val">{fundamentals.dividendYield ? `${fundamentals.dividendYield}%` : "0.00%"}</span>
-                  </div>
-                </div>
-              </div>
+                    </strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Trailing P/E</span>
+                    <strong>{fundamentals.peTrailing || "N/A"}</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Forward P/E</span>
+                    <strong>{fundamentals.peForward || "N/A"}</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">PEG Ratio (5-yr expected)</span>
+                    <strong>{fundamentals.pegRatio || "N/A"}</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Price to Book (MRQ)</span>
+                    <strong>{fundamentals.priceToBook || "N/A"}</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Beta (5-yr monthly)</span>
+                    <strong>{fundamentals.beta || "1.00"}</strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Dividend Yield</span>
+                    <strong>{fundamentals.dividendYield ? `${fundamentals.dividendYield}%` : "0.00%"}</strong>
+                  </Stack>
+                </Grid>
+              </Card>
 
               {/* Financial Performance & Margins */}
-              <div className="fund-card">
+              <Card>
                 <h5>💰 Financial Performance &amp; Margins</h5>
-                <div className="fund-grid">
-                  <div className="fund-item">
-                    <span className="lbl">Total Revenue (TTM)</span>
-                    <span className="val">
+                <Grid autoFit minColumnWidth="sm" gap="2">
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Total Revenue (TTM)</span>
+                    <strong>
                       {fundamentals.revenue ? `$${(fundamentals.revenue / 1e9).toFixed(1)}B` : "N/A"}
-                    </span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Gross Profit (TTM)</span>
-                    <span className="val">
+                    </strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Gross Profit (TTM)</span>
+                    <strong>
                       {fundamentals.grossProfits ? `$${(fundamentals.grossProfits / 1e9).toFixed(1)}B` : "N/A"}
-                    </span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">EBITDA</span>
-                    <span className="val">
+                    </strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">EBITDA</span>
+                    <strong>
                       {fundamentals.ebitda ? `$${(fundamentals.ebitda / 1e9).toFixed(1)}B` : "N/A"}
-                    </span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Free Cash Flow</span>
-                    <span className="val">
+                    </strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Free Cash Flow</span>
+                    <strong>
                       {fundamentals.freeCashflow ? `$${(fundamentals.freeCashflow / 1e9).toFixed(1)}B` : "N/A"}
-                    </span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Profit Margin</span>
-                    <span className="val">
+                    </strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Profit Margin</span>
+                    <strong>
                       {fundamentals.profitMargins ? `${(fundamentals.profitMargins * 100).toFixed(1)}%` : "N/A"}
-                    </span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Operating Margin</span>
-                    <span className="val">
+                    </strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Operating Margin</span>
+                    <strong>
                       {fundamentals.operatingMargins ? `${(fundamentals.operatingMargins * 100).toFixed(1)}%` : "N/A"}
-                    </span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">Return on Equity</span>
-                    <span className="val">
+                    </strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">Return on Equity</span>
+                    <strong>
                       {fundamentals.returnOnEquity ? `${(fundamentals.returnOnEquity * 100).toFixed(1)}%` : "N/A"}
-                    </span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="lbl">52-Week Range</span>
-                    <span className="val">${fundamentals.fiftyTwoWeekLow.toFixed(2)} - ${fundamentals.fiftyTwoWeekHigh.toFixed(2)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+                    </strong>
+                  </Stack>
+                  <Stack gap="0">
+                    <span className="ui-meta-sm">52-Week Range</span>
+                    <strong>${fundamentals.fiftyTwoWeekLow.toFixed(2)} - ${fundamentals.fiftyTwoWeekHigh.toFixed(2)}</strong>
+                  </Stack>
+                </Grid>
+              </Card>
+            </Stack>
           ) : (
             <EmptyState title="No fundamentals data available." />
           )}
-        </div>
+        </Stack>
       )}
 
       {/* SUBTAB 4: HISTORICAL OHLCV BARS */}
       {subTab === "bars" && (
-        <div className="research-section bars-section">
-          <div className="bars-controls-row">
-            <span className="bars-title">
+        <Stack gap="4">
+          <Flex justify="between" align="center" gap="2" wrap>
+            <span>
               Historical OHLCV Bars for <strong>{activeSymbol}</strong>
             </span>
-            <div className="bars-filters">
+            <Flex gap="2" align="end">
               <Select label="Feed:"
                 value={barProvider}
                 onChange={(e) => {
@@ -1658,8 +1626,8 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                loading={barsLoading}>
                 {"↻ Refresh"}
               </Button>
-            </div>
-          </div>
+            </Flex>
+          </Flex>
 
           {barsMeta && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0.5rem 0.25rem 0.75rem 0.25rem", fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
@@ -1685,9 +1653,9 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 key: "close",
                 header: "Close",
                 render: (bar) => (
-                  <span className={`price-tag ${bar.close >= bar.open ? "positive-text" : "negative-text"}`}>
+                  <strong className={bar.close >= bar.open ? "ui-success" : "ui-danger"}>
                     ${bar.close.toFixed(2)}
-                  </span>
+                  </strong>
                 ),
               },
               {
@@ -1706,72 +1674,67 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             rowKey={(bar, i) => bar.timestamp || String(i)}
             empty={barsLoading ? <Spinner label="Loading historical bars" /> : <EmptyState title="No bars returned." />}
           />
-        </div>
+        </Stack>
       )}
 
       {/* SUBTAB 5: ALPACA MARKET SNAPSHOT */}
       {subTab === "snapshot" && (
-        <div className="research-section snapshot-section">
+        <Stack gap="4">
           {snapshotLoading ? (
-            <div className="research-loading-state">
-              <span className="spinner-large" />
-              <p>Querying real-time Level 1/2 snapshot from Alpaca Market Data v2…</p>
-            </div>
+            <Spinner size="lg" label="Querying real-time Level 1/2 snapshot from Alpaca Market Data v2…" />
           ) : snapshot ? (
-            <div className="snapshot-card">
-              <div className="snapshot-header">
-                <div className="snap-title">
-                  <span className="dot alpaca-dot" />
+            <Card>
+              <Flex justify="between" align="center" gap="2">
+                <Flex gap="2" align="center">
+
                   <h4>Alpaca Market Data v2 Snapshot: {snapshot.symbol}</h4>
-                </div>
+                </Flex>
                 <Flex as="span" inline gap="1-5" align="center">
                   <MarketDataResearchProvenanceBadge provenance={snapshot.provenance} note={snapshot.note} />
-                  <span className="asset-tag">{snapshot.assetClass.toUpperCase()}</span>
+                  <Badge tone="neutral">{snapshot.assetClass.toUpperCase()}</Badge>
                 </Flex>
-              </div>
+              </Flex>
 
-              <div className="snapshot-grid">
-                <div className="snap-item">
-                  <span className="label">Latest Executed Trade</span>
-                  <span className="val big">${snapshot.latestTrade.price.toFixed(2)}</span>
-                  <span className="sub">Size: {snapshot.latestTrade.size} shares • {new Date(snapshot.latestTrade.timestamp).toLocaleTimeString()}</span>
-                </div>
+              <Grid autoFit minColumnWidth="sm" gap="2">
+                <Stack gap="0">
+                  <span className="ui-meta-sm">Latest Executed Trade</span>
+                  <strong>${snapshot.latestTrade.price.toFixed(2)}</strong>
+                  <span className="ui-meta-sm">Size: {snapshot.latestTrade.size} shares • {new Date(snapshot.latestTrade.timestamp).toLocaleTimeString()}</span>
+                </Stack>
 
-                <div className="snap-item">
-                  <span className="label">NBBO Best Bid / Ask</span>
-                  <span className="val">${snapshot.latestQuote.bidPrice.toFixed(2)} / ${snapshot.latestQuote.askPrice.toFixed(2)}</span>
-                  <span className="sub">Sizes: {snapshot.latestQuote.bidSize} x {snapshot.latestQuote.askSize}</span>
-                </div>
+                <Stack gap="0">
+                  <span className="ui-meta-sm">NBBO Best Bid / Ask</span>
+                  <strong>${snapshot.latestQuote.bidPrice.toFixed(2)} / ${snapshot.latestQuote.askPrice.toFixed(2)}</strong>
+                  <span className="ui-meta-sm">Sizes: {snapshot.latestQuote.bidSize} x {snapshot.latestQuote.askSize}</span>
+                </Stack>
 
-                <div className="snap-item">
-                  <span className="label">Daily Bar (Today)</span>
-                  <span className="val">${snapshot.dailyBar.low.toFixed(2)} - ${snapshot.dailyBar.high.toFixed(2)}</span>
-                  <span className="sub">Vol: {(snapshot.dailyBar.volume / 1e6).toFixed(2)}M • VWAP: ${snapshot.dailyBar.vwap ? snapshot.dailyBar.vwap.toFixed(2) : "N/A"}</span>
-                </div>
+                <Stack gap="0">
+                  <span className="ui-meta-sm">Daily Bar (Today)</span>
+                  <strong>${snapshot.dailyBar.low.toFixed(2)} - ${snapshot.dailyBar.high.toFixed(2)}</strong>
+                  <span className="ui-meta-sm">Vol: {(snapshot.dailyBar.volume / 1e6).toFixed(2)}M • VWAP: ${snapshot.dailyBar.vwap ? snapshot.dailyBar.vwap.toFixed(2) : "N/A"}</span>
+                </Stack>
 
-                <div className="snap-item">
-                  <span className="label">Previous Daily Bar</span>
-                  <span className="val">${snapshot.prevDailyBar.close.toFixed(2)} Close</span>
-                  <span className="sub">Range: ${snapshot.prevDailyBar.low.toFixed(2)} - ${snapshot.prevDailyBar.high.toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
+                <Stack gap="0">
+                  <span className="ui-meta-sm">Previous Daily Bar</span>
+                  <strong>${snapshot.prevDailyBar.close.toFixed(2)} Close</strong>
+                  <span className="ui-meta-sm">Range: ${snapshot.prevDailyBar.low.toFixed(2)} - ${snapshot.prevDailyBar.high.toFixed(2)}</span>
+                </Stack>
+              </Grid>
+            </Card>
           ) : (
-            <div className="research-loading-state" style={{ opacity: 0.8 }}>
-              <p>No snapshot data loaded. Enter a ticker above and click Search Market Data.</p>
-            </div>
+            <EmptyState title="No snapshot data loaded." description="Enter a ticker above and click Search Market Data." />
           )}
 
-          <div className="section-intro-card" style={{ marginTop: "1.5rem" }}>
-            <div className="section-intro-card-header" style={{ marginBottom: "0.75rem" }}>
+          <Card>
+            <Flex justify="between" align="start" gap="2">
               <Flex align="center" gap="2">
                 <span style={{ fontSize: "1.25rem" }}>🛡️</span>
-                <h4 className="section-intro-title">
+                <h4>
                   Alpaca Agentic Tracing Stream &amp; Provenance Ledger
                 </h4>
-                <span className="pill-badge positive">
+                <Badge tone="success">
                   W3C DID ATTESTED
-                </span>
+                </Badge>
               </Flex>
               <Button variant="secondary"
                 type="button"
@@ -1780,9 +1743,9 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                loading={tracesLoading}>
                 {"🔄 Refresh Audit Traces"}
               </Button>
-            </div>
+            </Flex>
 
-            <p className="section-intro-desc" style={{ marginBottom: "1rem" }}>
+            <p className="ui-meta" style={{ marginBottom: "1rem" }}>
               Every market inquiry, snapshot lookup, and order routed through Alpaca is cryptographically stamped with Agent DID (<code>did:agent:openaimp:trading</code>) and recorded in the persistent event ledger (<code>mas_events</code>) for end-to-end provenance.
             </p>
 
@@ -1795,9 +1758,9 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 {alpacaTraces.map((tr, idx) => (
                   <div key={tr.id || idx} style={{ background: "var(--color-card)", border: "1px solid var(--color-border-subtle)", borderRadius: "8px", padding: "var(--space-3)", fontSize: "var(--font-size-body)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px", flexWrap: "wrap", gap: "var(--space-1)" }}>
-                      <span className="pill-badge" style={{ background: "var(--color-accent-subtle)", color: "var(--color-accent)", borderColor: "var(--color-border-focus)" }}>
+                      <Badge tone="accent">
                         {tr.type}
-                      </span>
+                      </Badge>
                       <span style={{ color: "var(--color-text-dim)", fontSize: "0.75rem" }}>
                         {new Date(tr.created_at).toLocaleTimeString()} ({new Date(tr.created_at).toLocaleDateString()})
                       </span>
@@ -1854,30 +1817,28 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
 }`}
               </pre>
             </div>
-          </div>
-        </div>
+          </Card>
+        </Stack>
       )}
 
       {/* SUBTAB 6: MULTI-STOCK VALUATION COMPARISON */}
       {subTab === "compare" && (
-        <div className="research-section compare-section">
-          <div className="compare-bar">
+        <Stack gap="4">
+          <Flex gap="2" align="end">
             <TextInput label="Compare Tickers:"
               type="text"
-              className="compare-input"
               value={compareSymbolsInput}
               onChange={(e) => setCompareSymbolsInput(e.target.value.toUpperCase())}
             />
             <Button
               type="button"
               variant="primary"
-              className="btn-run-compare"
               disabled={compareLoading}
               onClick={() => runComparison(compareSymbolsInput)}
              loading={compareLoading}>
               {"⚡ Run Valuation Comparison"}
             </Button>
-          </div>
+          </Flex>
             <Table
             containerClassName="compare-table-wrap"
             columns={[
@@ -1885,25 +1846,25 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 key: "symbol",
                 header: "Symbol & Company",
                 render: ({ symbol, quote, fundamentals: f }) => (
-                  <div className="ticker-company">
-                    <span className="ticker-badge">{symbol}</span>
-                    <span className="company-title">{f.companyName}</span>
+                  <Flex gap="2" align="center">
+                    <Badge tone="accent">{symbol}</Badge>
+                    <strong>{f.companyName}</strong>
                     <MarketDataResearchProvenanceBadge provenance={quote.provenance === "live" && f.provenance === "live" ? "live" : quote.provenance === "generated" || f.provenance === "generated" ? "generated" : "static"} />
-                  </div>
+                  </Flex>
                 ),
               },
               {
                 key: "price",
                 header: "Price",
-                render: ({ quote }) => <span className="price-tag">${quote.price.toFixed(2)}</span>,
+                render: ({ quote }) => <strong>${quote.price.toFixed(2)}</strong>,
               },
               {
                 key: "change",
                 header: "24h Change",
                 render: ({ quote }) => (
-                  <span className={`change-pill ${quote.change >= 0 ? "positive" : "negative"}`}>
+                  <Badge tone={quote.change >= 0 ? "success" : "danger"}>
                     {quote.change >= 0 ? "+" : ""}{quote.change.toFixed(2)} ({quote.change >= 0 ? "+" : ""}{quote.changePercent.toFixed(2)}%)
-                  </span>
+                  </Badge>
                 ),
               },
               { key: "marketCap", header: "Market Cap", render: ({ fundamentals: f }) => `$${(f.marketCap / 1e9).toFixed(1)}B` },
@@ -1916,16 +1877,16 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 key: "target",
                 header: "Target (Mean)",
                 render: ({ fundamentals: f }) => (
-                  <span className="target-val">${f.targetMeanPrice?.toFixed(2) || "N/A"}</span>
+                  <strong>${f.targetMeanPrice?.toFixed(2) || "N/A"}</strong>
                 ),
               },
               {
                 key: "rating",
                 header: "Analyst Rating",
                 render: ({ fundamentals: f }) => (
-                  <span className={`rec-badge ${getRecommendationBadgeClass(f.recommendationKey)}`}>
+                  <Badge tone={recommendationToneFor(f.recommendationKey)}>
                     {f.recommendationKey?.toUpperCase() || "BUY"}
-                  </span>
+                  </Badge>
                 ),
               },
             ]}
@@ -1933,10 +1894,10 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             rowKey={({ symbol }) => symbol}
             empty={compareLoading ? <Spinner label="Gathering multi-stock metrics" /> : <EmptyState title="No stocks to compare." />}
           />
-        </div>
+        </Stack>
       )}
     </PageSection>
     </PageShell>
-    </div>
+
   );
 }
