@@ -62,6 +62,11 @@ import {
 } from "../data/feedDatasetPorts";
 import type { IndexListStore } from "../data/indexListPorts";
 import { executeIndexListRefreshJob } from "./indexListJob";
+import {
+  FEED_JOB_TIMEOUTS,
+  FeedJobTimeoutError,
+  withFeedDeadline,
+} from "./feedJobTimeouts";
 import type { IndexListFetchService } from "./indexListProducer";
 import type { Env } from "../types";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -600,22 +605,39 @@ function symbolsOfList(list: StoredIndexList): string[] {
  *   records FEED_UNIVERSE_REFRESH_FAILED naming the failure;
  * - refresh returns but the re-read still finds no usable list
  *   ⇒ { refreshError } — FEED_UNIVERSE_REFRESH_FAILED (the
- *   refresh completed but produced no usable list).
+ *   refresh completed but produced no usable list);
+ * - #3992 PR-2: the refresh never settles within its named
+ *   bound ⇒ { refreshTimedOut: true } — the caller records
+ *   FEED_REFRESH_TIMEOUT, distinctly from a refresh that
+ *   failed. The race abandons the refresh (it is not aborted
+ *   and may still land its snapshot in the background) but the
+ *   run settles and records exactly once.
  */
 async function resolveUniverseListWithHydration(
   deps: FeedJobDeps,
   universeIndex: IndexId,
-): Promise<{ list: StoredIndexList; refreshError?: string }> {
+): Promise<{
+  list: StoredIndexList;
+  refreshError?: string;
+  refreshTimedOut?: boolean;
+}> {
   const list = await deps.universeStore.latest(universeIndex);
   if (list && symbolsOfList(list).length > 0) return { list };
   if (!deps.indexRefresh) return { list };
   try {
-    await executeIndexListRefreshJob({
-      store: deps.indexRefresh.store,
-      service: deps.indexRefresh.service,
-      indices: [universeIndex],
-    });
+    await withFeedDeadline(
+      executeIndexListRefreshJob({
+        store: deps.indexRefresh.store,
+        service: deps.indexRefresh.service,
+        indices: [universeIndex],
+      }),
+      FEED_JOB_TIMEOUTS.refreshMs,
+      FEED_JOB_CODES.refreshTimeout,
+    );
   } catch (err) {
+    if (err instanceof FeedJobTimeoutError) {
+      return { list, refreshTimedOut: true };
+    }
     return {
       list,
       refreshError: scrubFailureMessage(
@@ -727,10 +749,8 @@ export async function runFeedJob(
   const universeLabel = labelForRunUniverse(registry, universeIndex);
   // #3976: a cold store hydrates through the wired index refresh
   // before the universe is declared missing.
-  const { list, refreshError } = await resolveUniverseListWithHydration(
-    deps,
-    universeIndex,
-  );
+  const { list, refreshError, refreshTimedOut } =
+    await resolveUniverseListWithHydration(deps, universeIndex);
   let symbols = symbolsOfList(list);
   // #3535: a sharded partition pulls only its subset of the
   // universe (universe order preserved; unknown symbols ignored —
@@ -750,6 +770,17 @@ export async function runFeedJob(
     size: symbols.length,
   };
   if (!list || symbols.length === 0) {
+    if (refreshTimedOut) {
+      return record({
+        status: "failed",
+        quotes: [],
+        requested: 0,
+        missingSymbols: [],
+        codedError: FEED_JOB_CODES.refreshTimeout,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+        universe,
+      });
+    }
     if (refreshError !== undefined) {
       return record({
         status: "failed",
@@ -956,10 +987,8 @@ export async function runFeedFundamentalsJob(
   const universeIndex = resolveRunUniverse(def, opts.universe);
   const universeLabel = labelForRunUniverse(registry, universeIndex);
   // #3976: same cold-store hydration as the quotes run.
-  const { list, refreshError } = await resolveUniverseListWithHydration(
-    deps,
-    universeIndex,
-  );
+  const { list, refreshError, refreshTimedOut } =
+    await resolveUniverseListWithHydration(deps, universeIndex);
   let symbols = symbolsOfList(list);
   if (opts.symbols && list) {
     const wanted = new Set(
@@ -976,6 +1005,17 @@ export async function runFeedFundamentalsJob(
     size: symbols.length,
   };
   if (!list || symbols.length === 0) {
+    if (refreshTimedOut) {
+      return record({
+        status: "failed",
+        rows: [],
+        requested: 0,
+        missingSymbols: [],
+        codedError: FEED_JOB_CODES.refreshTimeout,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+        universe,
+      });
+    }
     if (refreshError !== undefined) {
       return record({
         status: "failed",
@@ -1169,10 +1209,8 @@ export async function runFeedTechnicalsJob(
   // #3982: same cold-store hydration as the quotes and
   // fundamentals runs (#3976) — the technicals runner resolves
   // its universe through the shared helper, never a bare read.
-  const { list, refreshError } = await resolveUniverseListWithHydration(
-    deps,
-    universeIndex,
-  );
+  const { list, refreshError, refreshTimedOut } =
+    await resolveUniverseListWithHydration(deps, universeIndex);
   let symbols = symbolsOfList(list);
   if (opts.symbols && list) {
     const wanted = new Set(
@@ -1189,6 +1227,17 @@ export async function runFeedTechnicalsJob(
     size: symbols.length,
   };
   if (!list || symbols.length === 0) {
+    if (refreshTimedOut) {
+      return record({
+        status: "failed",
+        rows: [],
+        requested: 0,
+        missingSymbols: [],
+        codedError: FEED_JOB_CODES.refreshTimeout,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+        universe,
+      });
+    }
     if (refreshError !== undefined) {
       return record({
         status: "failed",
@@ -1440,10 +1489,8 @@ export async function runFeedSentimentJob(
   // fundamentals, and technicals runs (#3976/#3982) — the
   // sentiment runner resolves its universe through the shared
   // helper, never a bare read.
-  const { list, refreshError } = await resolveUniverseListWithHydration(
-    deps,
-    universeIndex,
-  );
+  const { list, refreshError, refreshTimedOut } =
+    await resolveUniverseListWithHydration(deps, universeIndex);
   let symbols = symbolsOfList(list);
   if (opts.symbols && list) {
     const wanted = new Set(
@@ -1460,6 +1507,17 @@ export async function runFeedSentimentJob(
     size: symbols.length,
   };
   if (!list || symbols.length === 0) {
+    if (refreshTimedOut) {
+      return record({
+        status: "failed",
+        rows: [],
+        requested: 0,
+        missingSymbols: [],
+        codedError: FEED_JOB_CODES.refreshTimeout,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+        universe,
+      });
+    }
     if (refreshError !== undefined) {
       return record({
         status: "failed",
