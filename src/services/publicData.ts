@@ -522,7 +522,11 @@ function mapChainContract(
   const bid = numValue(row.bid);
   const ask = numValue(row.ask);
   const lastPrice = numValue(row.last) ?? numValue(row.lastPrice);
-  if (bid === undefined && ask === undefined && lastPrice === undefined) return null;
+  // #4036 parity rule: a contract needs a TWO-SIDED quote to enter the
+  // chain. Alpaca omits anything without bid AND ask (its adapter says so
+  // in optionsData.ts); a last trade alone cannot be priced or traded, so
+  // Public keeps the same rule instead of shipping a one-sided row.
+  if (bid === undefined || ask === undefined) return null;
 
   const out: Partial<ETradeOptionChainContract> & {
     optionType: "CALL" | "PUT";
@@ -531,7 +535,7 @@ function mapChainContract(
   } = { optionType: side, strikePrice: strike, symbol };
   if (bid !== undefined) out.bid = bid;
   if (ask !== undefined) out.ask = ask;
-  if (lastPrice !== undefined) out.lastPrice = lastPrice;
+  out.lastPrice = lastPrice ?? Math.round(((bid + ask) / 2) * 100) / 100;
   const volume = numValue(row.volume);
   if (volume !== undefined) out.volume = volume;
   const openInterest = numValue(row.open_interest) ?? numValue(row.openInterest);
