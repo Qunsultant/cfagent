@@ -49,6 +49,7 @@ import {
 } from "../services/generateJobs";
 import type { GenerateStepDeps } from "../services/generatePipelineJobs";
 import { buildDeliverJobRegistry, createDeliverChannelSenders } from "../services/deliverJobs";
+import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createProviderCaptureAdapter } from "../data/createProviderCapturePorts";
 import { createR2CaptureBlobStorage } from "../data/r2CaptureBlobAdapter";
@@ -261,6 +262,14 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
         generatedStore: createGeneratedDatasetPorts(env),
         deliveryStore: createDeliveryDatasetPorts(env),
         ...createDeliverChannelSenders(env as unknown as Record<string, unknown>),
+        // Duplicate-delivery suppression, re-homed (#3943):
+        // the ONE module; the workflow residency has no DO
+        // SQLite of its own, so the suppressor is in-memory
+        // for this execution (step retries within the run
+        // share it). The durable cross-run guard here is the
+        // delivery-store resume check; a durable claims door
+        // is follow-up work, recorded on #3943's §15.
+        suppressor: createDeliverySuppressor(),
         shardsFor: async (jobId) =>
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],
