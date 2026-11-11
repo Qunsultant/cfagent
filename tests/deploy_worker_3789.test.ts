@@ -46,8 +46,24 @@ function stripJsoncComments(src: string): string {
 }
 
 describe("deploy-worker script helpers (#3789)", () => {
-  it("stripContainersConfig removes the containers block from wrangler.jsonc", () => {
-    const original = readFileSync("wrangler.jsonc", "utf8");
+  it("stripContainersConfig removes a containers block while preserving every other binding", () => {
+    // Fixture, not the repository file: #4112 removed the live block, so the
+    // helper is a defensive no-op here and must still work for any
+    // environment that declares a container.
+    const original = [
+      "{",
+      '  "name": "ai-search-agent",',
+      "  // a comment that must survive the strip",
+      '  "containers": [',
+      '    { "class_name": "SandboxAgent", "scheduling_policy": "durable_object" }',
+      "  ],",
+      '  "durable_objects": { "bindings": [',
+      '    { "name": "SANDBOX_AGENT", "class_name": "SandboxAgent" },',
+      '    { "name": "ORCHESTRATOR_AGENT", "class_name": "OrchestratorAgent" }',
+      "  ] },",
+      '  "ai_search_namespaces": []',
+      "}",
+    ].join("\n");
     expect(original).toContain('"containers"');
 
     const stripped = stripContainersConfig(original);
@@ -61,6 +77,16 @@ describe("deploy-worker script helpers (#3789)", () => {
     expect(parsed.containers).toBeUndefined();
     expect(parsed.name).toBe("ai-search-agent");
     expect(Array.isArray((parsed.durable_objects as any)?.bindings)).toBe(true);
+  });
+
+  it("declares no container and no cron trigger in this repository (#4112)", () => {
+    const live = readFileSync("wrangler.jsonc", "utf8");
+    const active = stripJsoncComments(live);
+    expect(active).not.toContain('"containers"');
+    expect(active).not.toContain('"triggers"');
+    const parsed = JSON.parse(active) as Record<string, unknown>;
+    expect(parsed.containers).toBeUndefined();
+    expect(parsed.triggers).toBeUndefined();
   });
 
   it("isContainersForbiddenError detects Cloudflare Containers 403 Forbidden errors", () => {

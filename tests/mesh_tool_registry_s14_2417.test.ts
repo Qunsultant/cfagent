@@ -207,9 +207,10 @@ describe("degraded status evidence (#2417)", () => {
     expect(read("src/mcps/openaimp/cloudflareAgentCommands.ts")).toContain(
       "new ETradeSandboxService(undefined",
     );
-    // wrangler.jsonc declares Cloudflare Containers configuration for SandboxAgent (#3492).
-    expect(wrangler["containers"]).toBeDefined();
-    expect(wrangler["containers"][0].class_name).toBe("SandboxAgent");
+    // #4112 (owner direction): no container is deployed. The class stays bound,
+    // and re-enabling one is a wrangler.jsonc edit, not a code change.
+    expect(wrangler["containers"]).toBeUndefined();
+    expect(wrangler["durable_objects"]).toBeDefined();
     // With no container bound (outside container runtime), the service honestly does not execute.
     const service = read("src/services/sandboxAgent.ts");
     expect(service).toContain("executed: false");

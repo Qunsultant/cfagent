@@ -76,19 +76,20 @@ function readContainers(): ContainerEntry[] {
 }
 
 describe("wrangler.jsonc containers config (#3789)", () => {
-  it("declares the SandboxAgent Durable Object-managed container entry (capability preserved)", () => {
-    const entries = readContainers();
-    const sandbox = entries.filter(
-      (e) =>
-        e.class_name === "SandboxAgent" && e.scheduling_policy === "durable_object",
-    );
-    expect(sandbox).toHaveLength(1);
+  it("declares no container in the deployment, recording the re-enable sizing (#4112)", () => {
+    // Owner direction superseded the #3492 declaration: the deployment
+    // provisions nothing. The commented block keeps ONE lite instance as the
+    // only shape a re-enable may take.
+    expect(readContainers()).toEqual([]);
+    const raw = readFileSync("wrangler.jsonc", "utf8");
+    expect(raw).toContain('"max_instances": 1');
+    expect(raw).toContain('"instance_type": "lite"');
   });
 
   it("no Durable Object-managed containers entry carries an `image` field (rejected by wrangler 4.156.0)", () => {
     const entries = readContainers();
     const managed = entries.filter((e) => e.scheduling_policy === "durable_object");
-    expect(managed.length).toBeGreaterThan(0);
+    // Zero entries today (#4112); the loop still guards any that return.
     for (const entry of managed) {
       expect(entry, "DO-managed entry must not carry `image`").not.toHaveProperty("image");
     }
