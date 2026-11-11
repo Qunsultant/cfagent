@@ -1110,6 +1110,23 @@ describe("public adapter", () => {
       const provider = createPublicDataProviderFromEnv(env, LOGIN);
       const quote = await provider.getQuote!("AAPL");
       expect((quote.result as any).lastPrice).toBe(232.5);
+      // #4035: after a PAT is stored, BOTH grounded capabilities serve
+      // through the provider, and each result names public as its source.
+      expect(quote.providerId).toBe("public");
+      const expiries = await provider.getOptionExpiryDates!("AAPL");
+      expect(expiries.providerId).toBe("public");
+      expect(expiries.result).toEqual([
+        { year: 2026, month: 1, day: 16 },
+        { year: 2026, month: 2, day: 20 },
+      ]);
+      const chain = await provider.getOptionsChain!({
+        symbol: "AAPL",
+        expiryYear: 2026,
+        expiryMonth: 1,
+        expiryDay: 16,
+      });
+      expect(chain.providerId).toBe("public");
+      expect((chain.result as any).pairs).toHaveLength(2);
       // A different login has no token: the provider refuses honestly
       // rather than borrowing another user's credential.
       const other = createPublicDataProviderFromEnv(env, "someone-else");
