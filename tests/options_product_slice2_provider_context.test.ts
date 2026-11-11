@@ -1,15 +1,17 @@
 /**
  * Options Screener product programme slice 2 (issue #2598) — provider/broker
  * integration-point plumbing, consumption side. Pins:
- * - tenant resolution fails OPEN to the platform defaults (#3812:
- *   etrade data provider / alpaca broker) and flags the fallback
- *   instead of silently relabelling the tenant;
+ * - tenant resolution fails OPEN to the platform defaults (#3812 for the
+ *   broker, #3990 for the data provider: alpaca / alpaca) and flags the
+ *   fallback instead of silently relabelling the tenant;
  * - the module reuses slice 1's canonical ids and defaults (registry
  *   vocabulary + tenantProviders broker ids + DEFAULT_TENANT_PROVIDERS),
  *   never a second source of truth;
  * - E*TRADE broker surfaces show only for broker=etrade, never for alpaca;
  * - capability matrix matches the provider design §3 / adapters.ts:
- *   etrade + public declare optionsChains, yahoo / alpaca / nasdaq do not;
+ *   etrade + public + alpaca declare optionsChains, yahoo / nasdaq do not;
+ *   yahoo declares news (#3932); alpaca declares no fundamentals
+ *   (ADR 0019: Yahoo-covered);
  * - capability-unavailable is coded (existing FAILURE_DATA_PROVIDER_UNAVAILABLE),
  *   never a silent fallback to another provider and never invented data;
  * - broker-unavailable names the real FAILURE_BROKER_UNAVAILABLE catalog
@@ -40,10 +42,11 @@ describe("options product slice 2 provider context", () => {
     expect(DEFAULT_DATA_PROVIDER_ID).toBe(DEFAULT_TENANT_PROVIDERS.dataProviderId);
     expect(DEFAULT_BROKER_ID).toBe(DEFAULT_TENANT_PROVIDERS.brokerId);
     expect([...DATA_PROVIDER_IDS].sort()).toEqual(["alpaca", "etrade", "nasdaq", "public", "yahoo"]);
-    expect([...BROKER_IDS].sort()).toEqual(["alpaca", "etrade"]);
+    // Issue #3990: Public joins the broker list.
+    expect([...BROKER_IDS].sort()).toEqual(["alpaca", "etrade", "public"]);
   });
 
-  it("defaults to the #3812 platform defaults (etrade data / alpaca broker) and flags the fallback on absent input", () => {
+  it("defaults to the platform defaults (alpaca data / alpaca broker, #3990) and flags the fallback on absent input", () => {
     for (const input of [undefined, null, {}]) {
       const ctx = resolveTenantProviderContext(input as never);
       expect(ctx.dataProviderId).toBe(DEFAULT_DATA_PROVIDER_ID);
@@ -69,7 +72,7 @@ describe("options product slice 2 provider context", () => {
 
   it("falls back per field, not wholesale, on unknown values", () => {
     const ctx = resolveTenantProviderContext({ dataProviderId: "bogus-provider", brokerId: "alpaca" });
-    expect(ctx.dataProviderId).toBe("etrade");
+    expect(ctx.dataProviderId).toBe("alpaca");
     expect(ctx.dataProviderFellBack).toBe(true);
     expect(ctx.brokerId).toBe("alpaca");
     expect(ctx.brokerFellBack).toBe(false);
@@ -92,19 +95,25 @@ describe("options product slice 2 provider context", () => {
     expect(resolveOutcome("FAILURE_DATA_PROVIDER_UNAVAILABLE").resolved).toBe(true);
   });
 
-  it("declares optionsChains only for etrade and public", () => {
+  it("declares optionsChains for etrade, public, and alpaca (#3990)", () => {
     expect(dataProviderSupportsCapability("etrade", "optionsChains")).toBe(true);
     expect(dataProviderSupportsCapability("public", "optionsChains")).toBe(true);
-    for (const p of ["yahoo", "alpaca", "nasdaq"]) {
+    expect(dataProviderSupportsCapability("alpaca", "optionsChains")).toBe(true);
+    for (const p of ["yahoo", "nasdaq"]) {
       expect(dataProviderSupportsCapability(p, "optionsChains")).toBe(false);
     }
-    // Yahoo cannot fix options chains: it declares quotes/bars/fundamentals only.
+    // Yahoo options chains exist only through Yahoo's unofficial
+    // v7/finance/options endpoint — not wired (#3990). Yahoo declares
+    // quotes/bars/fundamentals/news only.
     expect(dataProviderSupportsCapability("yahoo", "quotes")).toBe(true);
     expect(dataProviderSupportsCapability("yahoo", "historicalBars")).toBe(true);
     expect(dataProviderSupportsCapability("yahoo", "fundamentals")).toBe(true);
+    expect(dataProviderSupportsCapability("yahoo", "news")).toBe(true);
     expect(dataProviderSupportsCapability("nasdaq", "screenUniverse")).toBe(true);
-    // News is declared by no adapter.
-    for (const p of DATA_PROVIDER_IDS) {
+    // Alpaca declares no fundamentals (ADR 0019: Yahoo-covered).
+    expect(dataProviderSupportsCapability("alpaca", "fundamentals")).toBe(false);
+    // News is declared by Yahoo only (#3932).
+    for (const p of ["etrade", "public", "nasdaq", "alpaca"]) {
       expect(dataProviderSupportsCapability(p, "news")).toBe(false);
     }
     // Unknown providers declare nothing: no invented capability.

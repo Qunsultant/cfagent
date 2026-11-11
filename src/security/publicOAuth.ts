@@ -57,7 +57,7 @@ import {
 } from "./oauth2Core";
 import { PublicMcpClient, PUBLIC_MCP_URL } from "../mcps/public/publicMcp";
 
-export const DEFAULT_PUBLIC_OAUTH_SCOPES = "openid offline_access marketdata trading.read";
+export const DEFAULT_PUBLIC_OAUTH_SCOPES = "openid offline_access marketdata trading.read trading.write";
 
 /** Path serving this app's Client ID Metadata Document; the client_id is <origin> + this path. */
 export const PUBLIC_CLIENT_METADATA_PATH = "/.well-known/oauth-client-id-metadata-document";

@@ -82,6 +82,30 @@ export const DATA_PROVIDER_IDS = [
 ] as const;
 export type DataProviderId = (typeof DATA_PROVIDER_IDS)[number];
 
+/**
+ * Issue #3990 — the taxonomy split. A data provider is either a
+ * BROKER (etrade, public, alpaca: quote data AND trading — a broker
+ * may also be a data source, registered with its declared
+ * capabilities) or PURE (yahoo, nasdaq: symbols, delayed quotes,
+ * technicals, fundamentals, sentiment — no trading). The two lists
+ * are derived from this map, never hand-maintained twice: a sixth
+ * provider adds one line here and appears in exactly one list.
+ */
+export type DataProviderKind = "broker" | "pure";
+export const DATA_PROVIDER_KINDS: Record<DataProviderId, DataProviderKind> = {
+  etrade: "broker",
+  public: "broker",
+  yahoo: "pure",
+  nasdaq: "pure",
+  alpaca: "broker",
+} as const;
+export const BROKER_DATA_PROVIDER_IDS = DATA_PROVIDER_IDS.filter(
+  (id) => DATA_PROVIDER_KINDS[id] === "broker",
+);
+export const PURE_DATA_PROVIDER_IDS = DATA_PROVIDER_IDS.filter(
+  (id) => DATA_PROVIDER_KINDS[id] === "pure",
+);
+
 /** The capability vocabulary every provider declares from. */
 export const DATA_PROVIDER_CAPABILITIES = [
   "quotes",
@@ -128,6 +152,27 @@ export interface OptionsChainRequest {
 
 /** optionsChains — the E*TRADE chain shape; null = provider has no chain for the request. */
 export type OptionsChainResult = ETradeOptionChain | null;
+
+/**
+ * Issue #3990: the options-chains source a market-data adapter serves
+ * through, injected like the news fetcher (ISP — a provider implements
+ * exactly the capabilities it declares). The Alpaca adapter's source
+ * is built from src/trading/alpaca/optionsData.ts; tests inject a stub.
+ * Both halves travel together: chains and their expiry calendar are
+ * one capability (contract comment on getOptionExpiryDates).
+ */
+export interface OptionsChainSource {
+  getChain(
+    request: OptionsChainRequest,
+    runContext?: DataRunContext,
+    requestBudget?: import("../interfaces").OptionRequestBudget
+  ): Promise<OptionsChainResult>;
+  getExpiryDates(
+    symbol: string,
+    runContext?: DataRunContext,
+    requestBudget?: import("../interfaces").OptionRequestBudget
+  ): Promise<ETradeOptionExpireDate[]>;
+}
 
 /** screenUniverse — listed-stock universe membership (nasdaqListings shape). */
 export type ScreenUniverseResult = NasdaqStockListing[];

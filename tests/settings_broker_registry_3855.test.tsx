@@ -25,8 +25,10 @@ import {
 
 const HERE = join(__dirname, "..");
 
-/** A third broker, as a catalog double: kind api_key_pair, its own label. */
-const THREE_BROKER_CATALOG = {
+/** A fourth broker, as a catalog double: kind api_key_pair, its own label. */
+// Issue #3990: the live catalog already has three brokers (etrade,
+// alpaca, public), so the double makes four.
+const FOUR_BROKER_CATALOG = {
   ...BROKER_CATALOG,
   ibkr: {
     id: "ibkr",
@@ -35,7 +37,7 @@ const THREE_BROKER_CATALOG = {
   },
 } as const;
 
-/** The presentation double for the three-broker catalog. */
+/** The presentation double for the four-broker catalog. */
 function presentDouble(id: string): { icon: string } {
   if (id === "ibkr") return { icon: "🏦" };
   return brokerPresentation(id);
@@ -61,13 +63,13 @@ describe("settings broker list is registry-driven (#3855)", () => {
     expect(options.find((o) => o.id === "alpaca")?.icon).toBe("🦙");
   });
 
-  it("a third broker registered in the catalog appears with no settings-UI edit", () => {
-    const options = brokerOptions(THREE_BROKER_CATALOG, presentDouble);
-    expect(options.map((o) => o.id)).toEqual(["etrade", "alpaca", "ibkr"]);
-    const third = options.find((o) => o.id === "ibkr");
-    expect(third?.label).toBe("Interactive Brokers");
-    expect(third?.credentialKind).toBe("api_key_pair");
-    expect(third?.icon).toBe("🏦");
+  it("a fourth broker registered in the catalog appears with no settings-UI edit", () => {
+    const options = brokerOptions(FOUR_BROKER_CATALOG, presentDouble);
+    expect(options.map((o) => o.id)).toEqual(["etrade", "alpaca", "public", "ibkr"]);
+    const fourth = options.find((o) => o.id === "ibkr");
+    expect(fourth?.label).toBe("Interactive Brokers");
+    expect(fourth?.credentialKind).toBe("api_key_pair");
+    expect(fourth?.icon).toBe("🏦");
   });
 
   it("unregistering a broker removes it from the list", () => {

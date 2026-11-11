@@ -7,7 +7,9 @@
  * no chain to price against — even though E*TRADE, a capable provider, was
  * enabled. Chains are now served by a capable provider and the run record
  * carries `requestedDataProviderId`, so nothing is labelled with a provider
- * that did not serve it.
+ * that did not serve it. Since #3990 Alpaca declares optionsChains (via the
+ * repo's Alpaca options read path), so it is served directly; the
+ * substitution path below covers the providers that still do not declare it.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -17,7 +19,7 @@ import {
 
 describe("Issue #4014 — options chain serving provider", () => {
   it("serves the selected provider untouched when it declares optionsChains", () => {
-    for (const id of ["etrade", "public"]) {
+    for (const id of ["etrade", "public", "alpaca"]) {
       const serving = optionsChainsServingProvider(id);
       expect(serving).toEqual({
         servingProviderId: id,
@@ -32,7 +34,7 @@ describe("Issue #4014 — options chain serving provider", () => {
   });
 
   it("serves from a capable provider and keeps the selection visible otherwise", () => {
-    for (const id of ["yahoo", "alpaca", "nasdaq", "bogus"]) {
+    for (const id of ["yahoo", "nasdaq", "bogus"]) {
       expect(optionsChainsServingProvider(id)).toEqual({
         servingProviderId: "etrade",
         requestedDataProviderId: id,

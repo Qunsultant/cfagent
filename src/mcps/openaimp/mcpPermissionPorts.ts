@@ -178,10 +178,15 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   alpaca_account: "mcp:read",
   alpaca_positions: "mcp:read",
   alpaca_orders: "mcp:read",
+  // Issue #3990: the Public orders read, like the Alpaca read above.
+  public_orders: "mcp:read",
   // Issue #3782: the Alpaca quote tool is a read, like the other
   // Alpaca reads above.
   alpaca_get_quote: "mcp:read",
   alpaca_get_option_chain: "mcp:read",
+  // Issue #3990: the Public quote tool is a read, like the Alpaca
+  // read above.
+  public_get_quote: "mcp:read",
   // #1906: deprecated aliases for the renamed market-data tools above;
   // same scopes as their canonical tools. Use canonical names instead.
   // Removal is a follow-up slice.
@@ -353,6 +358,12 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // Issue #3885: “cancel everything” is a trade-scope act with its own
   // two-step gate (preview token + configured cap).
   alpaca_cancel_all: "mcp:trade",
+  // Issue #3990: the Public order tools are trade-scope, mirroring
+  // Alpaca's — preview is a trade-scope draft (a proposal, never a
+  // placed order), placing and cancelling change broker state.
+  public_preview_order: "mcp:trade",
+  public_place_order: "mcp:trade",
+  public_cancel_order: "mcp:trade",
   // Issue #3888: the externalized limits. Reading them is trade-scope
   // data (the same values every order engine enforces), and a change
   // moves a risk ceiling, so it belongs behind the same scope.

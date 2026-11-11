@@ -75,6 +75,23 @@ export function diagnosticsEndpoint(brokerId: string = readTenantProvidersState(
 export function connectStatusEndpoint(brokerId: string = readTenantProvidersState().brokerId): string | null {
   if (brokerId === "etrade") return "/api/etrade/oauth/status";
   if (brokerId === "alpaca") return "/api/broker/connect/alpaca";
+  if (brokerId === "public") return "/api/broker/connect/public";
+  return null;
+}
+
+/**
+ * Issue #3990: where a personal-token broker's token is pasted and
+ * dropped. Only Public uses this kind today; a broker with no token
+ * surface here gets null ("do not call"), never another broker's
+ * connect endpoint.
+ */
+export function tokenConnectEndpoint(brokerId: string = readTenantProvidersState().brokerId): string | null {
+  if (brokerId === "public") return "/api/public/connect";
+  return null;
+}
+
+export function tokenDisconnectEndpoint(brokerId: string = readTenantProvidersState().brokerId): string | null {
+  if (brokerId === "public") return "/api/public/disconnect";
   return null;
 }
 

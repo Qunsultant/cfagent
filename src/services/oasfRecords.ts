@@ -247,6 +247,14 @@ export const MCP_FAMILY_OASF_SKILLS: Record<string, OasfSkillRef[]> = {
     SK.portfolioManagement,
     SK.tradingStrategy,
   ],
+  // Issue #3990: Public.com copilot tools — the Public analogue of the
+  // market-data family (quotes + orders on the Public MCP transport).
+  "public-mcp-commands": [
+    SK.marketResearch,
+    SK.equityResearch,
+    SK.portfolioManagement,
+    SK.tradingStrategy,
+  ],
   // Issue #3883: cancellation — the risk-reducing half of order control.
   "order-cancel-mcp-commands": [
     SK.tradingStrategy,

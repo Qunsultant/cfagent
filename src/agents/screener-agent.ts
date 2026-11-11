@@ -90,11 +90,13 @@ import {
   bindAlpacaQuoteDeps,
   bindEtradeQuoteDeps,
   bindNasdaqUniverseDeps,
+  bindPublicQuoteDeps,
   bindYahooScreenerDeps,
   bootstrapDataProviders,
   createAlpacaDataProvider,
   createETradeDataProvider,
   createNasdaqDataProvider,
+  createPublicDataProviderFromEnv,
   createYahooDataProvider,
   DataProviderRegistry,
   etradeQuoteProviderFromRoute,
@@ -104,11 +106,13 @@ import {
   listProviderConfigs,
   nasdaqUniverseProviderFromRoute,
   nasdaqUniverseRouteBundle,
+  publicQuoteProviderFromRoute,
   resolveYahooHistoryDeps,
   transitionProvider,
   transitionProviderViaPort,
   verifyAlpacaDataProvider,
   verifyNasdaqDataProvider,
+  verifyPublicDataProvider,
   verifyYahooDataProvider,
   withPersistedBarsFirst,
   yahooQuoteProviderFromRoute,
@@ -176,7 +180,7 @@ export interface ScreenerRunRequest {
    * that produced them. Absent, the run keeps the legacy E*TRADE wording
    * rather than borrowing the currently selected broker's name.
    */
-  broker?: "etrade" | "alpaca";
+  broker?: "etrade" | "alpaca" | "public"; // Issue #3990
   /**
    * Issue #3655: live/paper mode for this run, derived from (broker,
    * environment). Recorded on the result for provenance; never
@@ -249,7 +253,7 @@ export interface ScreenerRunResult {
    * the only broker wired then — and the artifact says so rather than
    * claiming whichever broker happens to be selected now.
    */
-  broker?: "etrade" | "alpaca";
+  broker?: "etrade" | "alpaca" | "public"; // Issue #3990
   /** Issue #3331: the environment the run read quotes in (TEST = paper). */
   environment?: "TEST" | "PROD";
   /**
@@ -1306,6 +1310,48 @@ export class ScreenerAgent extends PortThink {
           userLogin,
         });
       }
+      // Issue #3990: Public-provider runs acquire through the
+      // data-provider platform, mirroring the #3655 alpaca cutover:
+      // bootstrap this DO's platform store (seed + routes), verify
+      // + enable public through the lifecycle API when it is not
+      // already enabled, resolve the quotes route's public adapter,
+      // and bind the pipeline deps over it (batch via getQuotesBatch,
+      // per-symbol via getQuote — capture + outcome tracking ride
+      // along under the run id). A Public-provider run never touches
+      // the broker (no ETradeService constructed) and never falls
+      // back to it. Public quotes are keyed by the signed-in user's
+      // own Public token (verify resolves it from the session store
+      // when no credential ref is passed), not an E*TRADE session —
+      // and public serves nothing until an operator enables it (the
+      // seed is "registered", Slice C). The run fails explicitly
+      // when the token is absent, exactly as a missing Alpaca key
+      // fails an Alpaca run.
+      let platformPublicDeps: ReturnType<typeof bindPublicQuoteDeps> | undefined;
+      if (provider === "public") {
+        await this.platformBootstrap();
+        platformRunId ??= crypto.randomUUID();
+        const publicConfig = await this.platformConfig("public");
+        if (!publicConfig || publicConfig.lifecycleState !== "enabled" || !publicConfig.enabled) {
+          await this.platformTransition("public", "verify", userLogin, {
+            verifier: async () => verifyPublicDataProvider(this.env, userLogin, null),
+          });
+          await this.platformTransition("public", "enable", userLogin, {});
+        }
+        const publicRegistry = new DataProviderRegistry();
+        const publicAdapter = createPublicDataProviderFromEnv(this.env, userLogin, {
+          capture: await this.platformCaptureDeps(),
+        });
+        publicRegistry.register(publicAdapter);
+        const publicProvider = publicQuoteProviderFromRoute(
+          publicRegistry,
+          await this.platformConfigs(),
+          await this.platformRoutes()
+        );
+        platformPublicDeps = bindPublicQuoteDeps(publicProvider, {
+          runId: platformRunId,
+          userLogin,
+        });
+      }
       // Issue #1331: technicals history through the platform —
       // the historicalBars route's yahoo primary, resolved with
       // capture + outcome tracking under the run id (shared with
@@ -1417,6 +1463,13 @@ export class ScreenerAgent extends PortThink {
               maxSymbols: selectedSymbols.length,
               quoteDeps: platformAlpacaDeps!,
             })
+          : provider === "public"
+            ? await acquireUniverse({
+                mode: "public",
+                symbols: selectedSymbols,
+                maxSymbols: selectedSymbols.length,
+                quoteDeps: platformPublicDeps!,
+              })
           : await acquireUniverse({
               mode: "etrade-only",
               symbols: selectedSymbols,

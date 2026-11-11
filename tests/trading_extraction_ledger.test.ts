@@ -73,6 +73,10 @@ const PINNED_STAR_REEXPORTS = [
   "./etrade/client",
   "./etrade/platform",
   "./alpaca/platform",
+  // Issue #3990: the Public.com trading platform joins the public
+  // trading surface (broker-neutral — same ITradingPlatform contract
+  // as etrade/alpaca, over the Public MCP transport).
+  "./public/platform",
   "./alpaca/fillLots",
   "./alpaca/occSymbol",
   // Issue #3351: the Alpaca sign-in surface, exported through the boundary so
