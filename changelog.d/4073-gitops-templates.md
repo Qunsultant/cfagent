@@ -1,0 +1,3 @@
+### Changed
+
+- **GitOps: parallel delineation, handoff-ready completion, single-PR sizing (#4073)**: `docs/agents/gitops.md` now requires every sub-issue to declare Parallel/Serial + Depends on + Conflicts with (§5, §20), a Remaining work line in the §15 completion report so unfinished work is pick-up-ready after each issue/sub-issue completes, and single-PR sizing (one sub-issue = one PR; oversized work splits the sub-issue, not the PR). Workflow templates updated to match: `.github/ISSUE_TEMPLATE/task.md` (Parallelism section, one-PR sizing, Remaining work line), `.github/pull_request_template.md` and `.github/PULL_REQUEST_TEMPLATE/docs.md` (PR completes its linked issue in full). Qunsultant/cfagent#4073

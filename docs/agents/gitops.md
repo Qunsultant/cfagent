@@ -185,6 +185,11 @@ Excluded:
 
 ## Dependencies
 
+## Parallelism (issue #4070)
+Parallel or Serial:
+Depends on (issue numbers, or none):
+Conflicts with (shared files/surfaces, or none):
+
 ## Change management (expected)
 Expected impact:
 Migration and data impact:
@@ -250,6 +255,7 @@ All development on this issue must follow:
 - Workflows operationalized:
 - How to harness this value from UX:
 - Process docs updated (file + commit, or none with reason):
+- Remaining work (issue #4071 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):
 ```
 
@@ -315,6 +321,8 @@ than 400 lines of generated snapshots). Use these two tests instead:
 A PR that fails either test is split BEFORE implementation work starts
 on the oversized half — not after review has already begun.
 
+Single-PR sizing (issue #4072): size each sub-issue so all its relevant work completes in a SINGLE PR. If the work does not fit one PR, split the sub-issue — not the PR. Each new sub-issue is itself one-PR-sized, with its own Parallelism declaration and explicit ordering when the split is serial. A genuinely inseparable multi-PR change is the exception: it is recorded as sub-issues with explicit serial ordering under the parent, not as one sub-issue with many PRs.
+
 ### Phased work: epics and sub-issues (issue #1303)
 
 Large work ships as phases, not as one PR. The structure is:
@@ -326,6 +334,12 @@ Large work ships as phases, not as one PR. The structure is:
   branch, and PR. Blocking order goes in the sub-issue Dependencies
   section; dependent phases use §20 stacked PRs where they overlap in
   time.
+- Each sub-issue declares its parallelism (issue #4070): Parallel or
+  Serial, Depends on (issue numbers, or none), Conflicts with (shared
+  files/surfaces, or none). A Parallel sub-issue may be claimed and
+  worked at any time; a Serial sub-issue starts only once its
+  dependencies are merged. If a sub-issue's status changes, the author
+  updates the declaration in the same PR that discovers it.
 - A phase PR closes only its own sub-issue, never the epic (see §9:
   closing keywords only when the PR fully resolves the issue). The epic
   closes only when every sub-issue is closed, with a §15 report covering
@@ -785,6 +799,8 @@ Closes #123
 ## Full report
 The full report for this PR lives in the linked issue's completion report (gitops §15). This PR body is a pointer, not a second record.
 
+This PR completes its linked issue in full (issue #4072: one sub-issue = one PR). If the issue's work does not fit this PR, split the issue first — do not split the work across PRs.
+
 ## Checklist
 - [ ] Required checks green on the current merge with `main`
 - [ ] Pins my change alters are updated in this PR (gitops §7)
@@ -1184,6 +1200,7 @@ Agents cannot approve their own exceptions.
 - Workflows operationalized:
 - How to harness this value from UX:
 - Process docs updated (file + commit, or none with reason):
+- Remaining work (issue #4071 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):
 ```
 
@@ -1370,6 +1387,8 @@ implementation work (§18.2).
 - While awaiting a write approval (branch push, PR, merge, comment), the
   same: start the next independent issue instead of idling.
 - Multiple PRs from one agent may be in CI simultaneously.
+
+Every sub-issue declares its parallelism (issue #4070) in its body — Parallel or Serial, Depends on, Conflicts with — so a collaborator can tell from the issue alone whether they can start it now. The declaration is the source of truth for what may run in parallel; the independence test below is how to verify it when uncertain.
 
 ### The independence test
 
