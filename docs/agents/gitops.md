@@ -830,6 +830,8 @@ Open a draft PR early enough to expose scope and CI feedback, after issue and br
 
 Every pull request carries its creating agent's name as a hashtag in the `## Agent` field — the same attribution rule as §5 (owner direction, 2026-10-20).
 
+Template variants (issue #4091): the docs-only / chore shape lives in `.github/PULL_REQUEST_TEMPLATE/docs.md` and the hotfix shape in `.github/PULL_REQUEST_TEMPLATE/hotfix.md`. GitHub shows no chooser for PR templates — the single `.github/pull_request_template.md` auto-fills every new PR body, and the variants fill the body only when selected with `?template=docs.md` (or `?template=hotfix.md`) on the compare URL. The default template points at both variants so agents learn they exist.
+
 ```markdown
 ## Agent
 #<agent-hashtag>

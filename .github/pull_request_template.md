@@ -1,3 +1,9 @@
+<!-- PR template variants (issue #4091): the docs-only / chore shape lives in
+.github/PULL_REQUEST_TEMPLATE/docs.md and the hotfix shape in
+.github/PULL_REQUEST_TEMPLATE/hotfix.md. GitHub shows no chooser for PR
+templates: this single file auto-fills every new PR body, and the variants
+fill the body only when selected with ?template=docs.md (or ?template=hotfix.md)
+on the compare URL. -->
 <!-- Web UI single-file submits: the gate checks the body, not just the file.
 Before creating the PR from the web editor, make sure the body carries:
 1. An agent hashtag in the ## Agent field, in the form #<agent>-<id>
