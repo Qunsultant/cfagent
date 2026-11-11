@@ -1438,8 +1438,12 @@ export function meshStockCopilotDoorContextFromMcp(context: McpToolContext): Sto
 
 export class StockCopilotStatusCommand implements IMcpToolCommand<Record<string, never>> {
   readonly name = "stock_copilot_status";
+  // Issue #4164: this payload also answers "how many strategies do you
+  // know" (`strategies`) and "which broker in which mode" (`activeBroker`,
+  // `activeMode`) - the two questions the copilot used to answer from
+  // synthesized knowledge after a failed document search.
   readonly description =
-    "Inspect the real-time status of the autonomous Stock Copilot trading loop: active broker and mode (Alpaca Paper), current trading session, enabled sessions, open positions with bracket exit targets (take-profit, stop-loss), recently closed trades, and recent cycle activity/refusal telemetry.";
+    "Inspect the real-time status of the autonomous Stock Copilot trading loop. This is the authoritative source for: the strategies the loop runs (`strategies` — the answer to \"how many / which strategies do you know\"), the active broker and mode (`activeBroker`, `activeMode` — the answer to \"which broker in which mode\"), the current and enabled sessions, open positions with bracket exit targets (take-profit, stop-loss), recently closed trades, and recent cycle activity/refusal telemetry.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {},
