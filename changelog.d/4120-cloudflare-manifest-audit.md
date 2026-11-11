@@ -1,0 +1,3 @@
+### Fixed
+
+- **The manifest no longer claims KV namespaces were deleted (#4120).** `wrangler.jsonc` said "no KV namespaces remain … deleted owner-side"; the account still holds `AGENT_SESSIONS` and `SESSIONS`, unbound and unused. The comment now states that no KV binding is declared, names the two leftovers, and assigns their removal to the owner. Comes from a full reverse-engineering audit of the live Cloudflare account against the manifest, which found the Worker otherwise mirrored exactly: 48 declared vars and 48 live with zero value drift, and equal counts for every binding type (14 durable objects, 6 queues, 5 workflows, 1 each D1/R2/Vectorize/AI/AI Search/Analytics/Email/Browser/Flagship/Assets, 0 containers).
