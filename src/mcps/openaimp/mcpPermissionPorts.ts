@@ -187,6 +187,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // Issue #3990: the Public quote tool is a read, like the Alpaca
   // read above.
   public_get_quote: "mcp:read",
+  // Issue #4048: the account read is a read too — it never trades.
+  public_account: "mcp:read",
   // #1906: deprecated aliases for the renamed market-data tools above;
   // same scopes as their canonical tools. Use canonical names instead.
   // Removal is a follow-up slice.

@@ -359,6 +359,23 @@ jobs:
           require_secret ALPACA_PAPER_SECRET_KEY "$S_ALPACA_PAPER_SECRET_KEY"
           require_secret ALPACA_PAPER_URL "$S_ALPACA_PAPER_URL"
 
+      - name: Set Public.com secrets on Cloudflare Worker [${{ needs.load-environment.outputs.target_env }}]
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          S_PUBLIC_API_KEY: ${{ secrets.PUBLIC_API_KEY }}
+          S_PUBLIC_LIVE_URL: ${{ secrets.PUBLIC_LIVE_URL }}
+        run: |
+          set -euo pipefail
+          source scripts/ci/put-secret.sh
+
+          # #4048: the deployment credential Public reads as a FALLBACK (a
+          # user's stored personal token always wins). Both are optional:
+          # optional_secret warns and skips an absent value, so the per-user
+          # connect flow keeps working on a deployment without them.
+          optional_secret PUBLIC_API_KEY "$S_PUBLIC_API_KEY"
+          optional_secret PUBLIC_LIVE_URL "$S_PUBLIC_LIVE_URL"
+
       - name: Set Payment Gateway secrets on Cloudflare Worker [${{ needs.load-environment.outputs.target_env }}]
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

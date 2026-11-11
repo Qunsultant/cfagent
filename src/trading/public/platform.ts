@@ -62,7 +62,7 @@ import {
   publicRefusedExecution,
   publicSingleLegArgs,
 } from "../../services/publicTrading";
-import { getPublicAccessToken } from "../../security/publicOAuth";
+import { getPublicAccessToken, getPublicCredentialSource } from "../../security/publicOAuth";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 import { decodeOrderPriceSource, encodeOrderPriceSource } from "../quotePolicies";
 import { computeBracketExits } from "../bracketPercent";
@@ -123,6 +123,22 @@ export class PublicTradingPlatform implements ITradingPlatform {
 
   private tradingType(): TradingType {
     return this.environment() === "PROD" ? "live" : "paper";
+  }
+
+  /**
+   * Issue #4048: the deployment credential (PUBLIC_API_KEY) is a READ
+   * credential, shared by every tenant on the deployment. Every mutating
+   * call refuses it HERE, at the platform seam both the copilot tools and
+   * the neutral broker routes resolve through — otherwise a tenant who
+   * never connected a token would preview, place and cancel live orders
+   * on the operator's account.
+   */
+  private async refuseDeploymentCredential(): Promise<void> {
+    if ((await getPublicCredentialSource(this.env, this.userLogin)) === "deployment") {
+      throw new Error(
+        "PUBLIC_DEPLOYMENT_CREDENTIAL_READ_ONLY: the deployment PUBLIC_API_KEY serves reads only and is shared by every tenant on this deployment; paste your own Public token in Settings to preview, place or cancel orders."
+      );
+    }
   }
 
   /** Refuse a TEST-mode placement with the named outcome, before any MCP call. Returns the refusal or null. */
@@ -251,6 +267,7 @@ export class PublicTradingPlatform implements ITradingPlatform {
   }
 
   async previewOrder(params: OrderPreviewParams): Promise<BrokerOrderDraft> {
+    await this.refuseDeploymentCredential();
     const action = params.action ?? params.orderAction ?? "BUY";
     const userDid = getUserDid(params.sessionId || this.userLogin);
     const orderType = params.orderType ?? "MARKET";
@@ -376,6 +393,7 @@ export class PublicTradingPlatform implements ITradingPlatform {
     decision: "approved" | "rejected",
     expectedTerms?: ExpectedTradeTerms
   ): Promise<BrokerOrderExecutionResult> {
+    await this.refuseDeploymentCredential();
     const now = new Date().toISOString();
     const record = this.orm?.trades?.findById(orderId) as
       | {
@@ -504,6 +522,7 @@ export class PublicTradingPlatform implements ITradingPlatform {
   }
 
   async placeOrderRemote(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult> {
+    await this.refuseDeploymentCredential();
     const refusal = this.noPaperModeRefusal({
       orderId: params.orderId,
       symbol: params.symbol,
@@ -558,6 +577,7 @@ export class PublicTradingPlatform implements ITradingPlatform {
   }
 
   async cancelOrderRemote(orderId: string | number): Promise<BrokerCancelOrderResult> {
+    await this.refuseDeploymentCredential();
     const text = await this.trading.callTradingTool("cancel_order", {
       order_id: { names: ["order_id", "orderId", "id"], value: String(orderId) },
     });

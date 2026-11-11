@@ -1761,6 +1761,9 @@ export interface BrokerPosition {
   strikePrice?: number;
   /** ISO date (yyyy-mm-dd) of option expiry, when applicable. */
   expirationDate?: string;
+  /** Issue #4048: false when the broker sent no average cost, so the
+   * cost basis and the gain fields derived from it are unknown (0 here). */
+  costBasisKnown?: boolean;
   pricePaid: number;
   costBasis: number;
   currentPrice: number;
