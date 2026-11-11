@@ -1,7 +1,7 @@
 # `SERVICE_USER_LOGIN` — the service identity for unattended work
 
 > Operator runbook for the service-identity configuration introduced by
-> #1185 (design #1066). Companion to [etrade.md](etrade.md) §8, "Life after
+> #1185 (design #1066). Companion to [etrade.md](../../architecture/security/etrade.md) §8, "Life after
 > `default_trader`".
 
 ## What it is

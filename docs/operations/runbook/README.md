@@ -12,7 +12,7 @@ not in bulk, so each move stays a reviewable pure rename.
 | --- | --- | --- |
 | Screening System Runbook (operator runbook for the goal/scenario screening system, Epic #1096 Phase 6) | `docs/operations/runbook/screening-system-runbook.md` | Current |
 | Stuck Runs Runbook (detection, diagnosis, and safe intervention for long-running async job runs, issue #2567) | `docs/operations/runbook/stuck-runs.md` | Current |
-| Service Identity Operator Runbook (operator runbook for the service-identity configuration) | `docs/architecture/security/service-identity.md` | Current — candidate to move here |
+| Service Identity Operator Runbook (operator runbook for the service-identity configuration) | `docs/operations/runbook/service-identity.md` | Current |
 | Audit Tamper-Response Runbook (verification-failure alert, affected-range handling, evidence preservation, review, re-verification; plus gate-blocked money execution, issue #3156) | `docs/operations/runbook/audit-tamper-response.md` | Current |
 
 ## Missing
