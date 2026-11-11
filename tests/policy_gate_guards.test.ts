@@ -24,6 +24,8 @@
  *   and labels only; commit messages are not fallback context
  * - (h) process documentation line (gitops §23: PR body must carry the
  *   §9 "Process documentation impact:" checklist line, presence only)
+ * - (k) out-of-scope line (gitops §5/§9, issue #4099: PR body must carry
+ *   the §9 "Out of scope:" line, presence only; "None" is a valid value)
  *
  * Uses an isolated, temporary git repository to ensure deterministic test
  * execution across all environments and shallow CI clones.
@@ -496,7 +498,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate({
       PR_TITLE: "feat: admin provisioning UI",
       PR_BODY:
-        "Related: Qunsultant/cfagent#2511 (not closing: the issue closes only after live proof).\n\n## Agent\n#ceo-aimp\n\nProcess documentation impact: none",
+        "Related: Qunsultant/cfagent#2511 (not closing: the issue closes only after live proof).\n\n## Agent\n#ceo-aimp\n\nProcess documentation impact: none\n\nOut of scope: none",
       PR_LABELS: "lane:ceo-aimp",
     });
     expect(res.stdout).not.toContain("(a) linked issue");
@@ -506,7 +508,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate({
       PR_TITLE: "feat: admin provisioning UI",
       PR_BODY:
-        "Related: OpenAIMP/cfagent#2511 (not closing: the issue closes only after live proof).\n\n## Agent\n#ceo-aimp\n\nProcess documentation impact: none",
+        "Related: OpenAIMP/cfagent#2511 (not closing: the issue closes only after live proof).\n\n## Agent\n#ceo-aimp\n\nProcess documentation impact: none\n\nOut of scope: none",
       PR_LABELS: "lane:ceo-aimp",
     });
     expect(res.stdout).not.toContain("(a) linked issue");
@@ -516,7 +518,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate({
       PR_TITLE: "feat: admin provisioning UI",
       PR_BODY:
-        "No linked issue here.\n\n## Agent\n#ceo-aimp\n\nProcess documentation impact: none",
+        "No linked issue here.\n\n## Agent\n#ceo-aimp\n\nProcess documentation impact: none\n\nOut of scope: none",
       PR_LABELS: "lane:ceo-aimp",
     });
     expect(res.stdout).toContain("(a) linked issue");
@@ -585,7 +587,7 @@ describe("rewritten wrapper", () => {
     const resStale = runPolicyGate(
       {
         PR_TITLE: "feat: stale branch work (#1684) #CTO-mbshr",
-        PR_BODY: "Fixes #1684\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+        PR_BODY: "Fixes #1684\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         PR_LABELS: "lane:cto-mbshr",
       },
       ["--base", "main", "--head", "branch-stale-reversion"]
@@ -613,7 +615,7 @@ describe("rewritten wrapper", () => {
       const resRevert = runPolicyGate(
         {
           PR_TITLE: "feat: revert someone else's file (#1684) #CTO-mbshr",
-          PR_BODY: "Fixes #1684\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+          PR_BODY: "Fixes #1684\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
           PR_LABELS: "lane:cto-mbshr",
         },
         ["--base", "fixture-base-3917", "--head", "branch-real-revert-3917"]
@@ -631,7 +633,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "feat: add awesome feature (#1684) #CTO-mbshr",
-        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         PR_LABELS: "lane:cto-mbshr",
       },
       ["--base", "main", "--head", "branch-compliant"]
@@ -645,7 +647,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "feat: fragment-only change (#1684) #CTO-mbshr",
-        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         PR_LABELS: "lane:cto-mbshr",
       },
       ["--base", "main", "--head", "branch-fragment"]
@@ -688,7 +690,37 @@ describe("rewritten wrapper", () => {
       {
         PR_TITLE: "feat: add awesome feature (#1684) #CTO-mbshr",
         PR_BODY:
+          "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
+        PR_LABELS: "lane:cto-mbshr",
+      },
+      ["--base", "main", "--head", "branch-compliant"]
+    );
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("Policy gate passed");
+  });
+
+  it("rejects a PR missing the out-of-scope line (gitops §5/§9, issue #4099)", () => {
+    runGit(tempRepoDir, ["checkout", "branch-compliant"]);
+    const res = runPolicyGate(
+      {
+        PR_TITLE: "feat: add awesome feature (#1684) #CTO-mbshr",
+        PR_BODY:
           "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+        PR_LABELS: "lane:cto-mbshr",
+      },
+      ["--base", "main", "--head", "branch-compliant"]
+    );
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain("(k) out of scope");
+  });
+
+  it("passes Policy Gate (k) when the out-of-scope line is present", () => {
+    runGit(tempRepoDir, ["checkout", "branch-compliant"]);
+    const res = runPolicyGate(
+      {
+        PR_TITLE: "feat: add awesome feature (#1684) #CTO-mbshr",
+        PR_BODY:
+          "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: [Out-of-Scope] rollout runbook — see #4099",
         PR_LABELS: "lane:cto-mbshr",
       },
       ["--base", "main", "--head", "branch-compliant"]
@@ -715,7 +747,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "refactor: delete src file (#1684) #CTO-mbshr",
-        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         PR_LABELS: "lane:cto-mbshr",
       },
       ["--base", "main", "--head", "branch-src-deletion"]
@@ -730,7 +762,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "refactor: deprecate old API (#1684) #CTO-mbshr",
-        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         PR_LABELS: "lane:cto-mbshr",
       },
       ["--base", "main", "--head", "branch-deprecation-good"]
@@ -744,7 +776,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "refactor: deprecate without successor (#1684) #CTO-mbshr",
-        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         PR_LABELS: "lane:cto-mbshr",
       },
       ["--base", "main", "--head", "branch-deprecation-bad"]
@@ -758,7 +790,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "feat: fallback for deprecated endpoint (#3504) #ceo-aimp",
-        PR_BODY: "Fixes #3504\n\n## Agent\n#ceo-aimp\n\n- [ ] Process documentation impact: none",
+        PR_BODY: "Fixes #3504\n\n## Agent\n#ceo-aimp\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         PR_LABELS: "lane:ceo-aimp",
       },
       ["--base", "main", "--head", "branch-deprecation-prose"]
@@ -786,7 +818,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "refactor: rename test file with edits (#1917) #CAIO-quns",
-        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated",
+        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated\n\nOut of scope: none",
         PR_LABELS: "lane:caio-quns",
       },
       ["--base", "main", "--head", "branch-test-rename-allowed"]
@@ -801,7 +833,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "refactor: rename test file dropping one test (#1917) #CAIO-quns",
-        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated",
+        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated\n\nOut of scope: none",
         PR_LABELS: "lane:caio-quns",
       },
       ["--base", "main", "--head", "branch-test-rename-drops-test"]
@@ -815,7 +847,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "refactor: delete test file, add unrelated file (#1917) #CAIO-quns",
-        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated",
+        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated\n\nOut of scope: none",
         PR_LABELS: "lane:caio-quns",
       },
       ["--base", "main", "--head", "branch-test-deletion-unrelated-add"]
@@ -829,7 +861,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "refactor: rename src file with heavy edits (#1917) #CAIO-quns",
-        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated",
+        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated\n\nOut of scope: none",
         PR_LABELS: "lane:caio-quns",
       },
       ["--base", "main", "--head", "branch-src-rename-heavy-edit"]
@@ -844,7 +876,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "refactor: move test file keeping titles (#1917) #CAIO-quns",
-        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated",
+        PR_BODY: "Fixes #1917\n\n## Agent\n#CAIO-quns\n\n- [ ] Process documentation impact: gitops §22 + AGENTS.md updated\n\nOut of scope: none",
         PR_LABELS: "lane:caio-quns",
       },
       ["--base", "main", "--head", "branch-test-move-exact-titles"]
@@ -862,14 +894,14 @@ describe("rewritten wrapper", () => {
       {
         number: 101,
         title: "feat: first PR missing changelog (#1684)",
-        body: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [x] Process documentation impact: none",
+        body: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [x] Process documentation impact: none\n\nOut of scope: none",
         labels: ["lane:cto-mbshr"],
         head: "branch-no-changelog",
       },
       {
         number: 102,
         title: "feat: second PR with fragment (#1684)",
-        body: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [x] Process documentation impact: none",
+        body: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [x] Process documentation impact: none\n\nOut of scope: none",
         labels: ["lane:cto-mbshr"],
         head: "branch-fragment",
       },
@@ -889,7 +921,7 @@ describe("rewritten wrapper", () => {
       {
         number: 102,
         title: "feat: second PR with fragment (#1684)",
-        body: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [x] Process documentation impact: none",
+        body: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [x] Process documentation impact: none\n\nOut of scope: none",
         labels: ["lane:cto-mbshr"],
         head: "branch-fragment",
       },
@@ -913,7 +945,7 @@ describe("rewritten wrapper", () => {
           {
             number: 103,
             title: "refactor: delete src file (#1684)",
-            body: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [x] Process documentation impact: none",
+            body: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [x] Process documentation impact: none\n\nOut of scope: none",
             labels: ["lane:cto-mbshr"],
             head: "branch-src-deletion",
           },
@@ -952,7 +984,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "feat: sim fragment (#1684) #CTO-mbshr",
-        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none",
+        PR_BODY: "Fixes #1684\n\n## Agent\n#CTO-mbshr\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         PR_LABELS: "lane:cto-mbshr",
       },
       ["--base", mainWithFresh, "--head", mergeHead]
@@ -1020,7 +1052,7 @@ describe("rewritten wrapper", () => {
       {
         number: 200,
         title: "fix: mq false positive regression (#2519) #CFO-qunso",
-        body: "Fixes #2519\n\n## Agent\n#CFO-qunso\n\n- [x] Process documentation impact: none",
+        body: "Fixes #2519\n\n## Agent\n#CFO-qunso\n\n- [x] Process documentation impact: none\n\nOut of scope: none",
         labels: ["lane:cfo-qunso"],
         // prHead is cut from main~1, so it lacks fresh.ts.
         // The per-PR merge-base fix should diff it against main~1 only.
@@ -1063,7 +1095,7 @@ describe("rewritten wrapper", () => {
     const res = runPolicyGate(
       {
         PR_TITLE: "feat: branch with merged main (#2546) #COO-spr9",
-        PR_BODY: "Fixes #2546\n\n## Agent\n#COO-spr9\n\n- [ ] Process documentation impact: none",
+        PR_BODY: "Fixes #2546\n\n## Agent\n#COO-spr9\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         PR_LABELS: "lane:coo-spr9",
       },
       ["--base", "main", "--head", branchHead]
@@ -1173,7 +1205,7 @@ describe("rewritten wrapper", () => {
       {
         number: 2571,
         title: "fix: pr test (#2571) #COO-spr9",
-        body: "Fixes #2571\n\n## Agent\n#COO-spr9\n\n- [ ] Process documentation impact: none",
+        body: "Fixes #2571\n\n## Agent\n#COO-spr9\n\n- [ ] Process documentation impact: none\n\nOut of scope: none",
         labels: ["lane:coo-spr9"],
         head: prHead,
       },
