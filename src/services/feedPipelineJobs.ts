@@ -143,6 +143,13 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     aliases: ["dow", "dow jones", "yahoo dow"],
   },
   {
+    jobId: "yahoo-sp400-quotes",
+    sourceId: "yahoo",
+    dataset: "quotes",
+    label: "Yahoo quotes — S&P MidCap 400",
+    aliases: ["sp400", "s&p 400", "yahoo sp400"],
+  },
+  {
     jobId: "alpaca-nasdaq100-quotes",
     sourceId: "alpaca",
     dataset: "quotes",
