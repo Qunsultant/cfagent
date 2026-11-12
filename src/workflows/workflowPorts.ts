@@ -99,7 +99,7 @@
 
 import type { StageName } from "../messaging/messagingPorts";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
-import type { BrokerId } from "../trading/brokerCatalog";
+import type { BrokerId } from "../trading";
 
 /** Re-exported for workflow callers (single import surface). */
 export type { StageName };
