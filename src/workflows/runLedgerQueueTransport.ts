@@ -20,6 +20,13 @@ import {
   type MessageEnvelope,
 } from "../messaging/messagingPorts";
 import type { StageQueueSend } from "./stageQueueTransport";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/runLedgerQueueTransport",
+});
 
 export type RunLedgerProjectLedger = "reports" | "async_jobs";
 
@@ -135,10 +142,13 @@ export async function publishRunLedgerProject(args: {
   try {
     await args.queue.send(message);
   } catch (err) {
-    console.error(
-      "[runLedgerQueueTransport] run-ledger.project publish failed (DO row persisted, projection unqueued):",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("runLedgerQueueTransport.publish_failed", {
+      message: `[runLedgerQueueTransport] run-ledger.project publish failed for ${ledger}/${naturalKey} (DO row persisted, projection unqueued): ${err instanceof Error ? err.message : String(err)}`,
+      ledger,
+      naturalKey,
+      tenantId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { published: false, reason: err instanceof Error ? err.message : String(err) };
   }
   return { published: true, message };
