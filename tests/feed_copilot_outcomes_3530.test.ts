@@ -467,7 +467,7 @@ describe("feed-job schedule copilot tools (#3530 slice B)", () => {
     expect(result.jobId).toBe("yahoo-nasdaq100-quotes");
     expect(result.schedule).toEqual({
       enabled: true,
-      interval: "every 60 minutes",
+      interval: "every 43200 minutes",
       cron: null,
     });
     expect(result.nextScheduledRun).toBeNull();
@@ -497,7 +497,7 @@ describe("feed-job schedule copilot tools (#3530 slice B)", () => {
     )) as any;
     expect(off.schedule).toEqual({
       enabled: false,
-      interval: "every 60 minutes",
+      interval: "every 43200 minutes",
       cron: null,
     });
     const cron = (await new SetFeedJobScheduleCommand().execute(
