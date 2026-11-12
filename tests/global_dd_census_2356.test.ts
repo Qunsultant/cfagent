@@ -547,7 +547,10 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
     layer: ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts"],
   },
   unified_schedules: {
-    layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts"],
+    // Issue #3121 Phase 2 (#3124) — the index-schema module is a
+    // layer writer like masRetentionIndexSchema.ts below: DDL only
+    // (CREATE INDEX IF NOT EXISTS), never a row write.
+    layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts", "src/data/unifiedScheduleIndexSchema.ts"],
   },
   mas_enrichment_runs: { layer: ["src/data/doSqliteEnrichmentAdapter.ts"] },
   mas_messages: {

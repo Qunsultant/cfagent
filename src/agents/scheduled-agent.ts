@@ -67,6 +67,7 @@ import {
 } from "../services/consolidatedScheduling";
 import { SHARED_ORCHESTRATOR_INSTANCE, getServiceUserLogin } from "../security/serviceIdentity";
 import { SqlUnifiedScheduleStore } from "../data/doSqliteUnifiedScheduleAdapter";
+import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
 import { goalToRecord, recordToGoal } from "../services/unifiedScheduleManagement";
 import {
   fetchLedgerRuns,
@@ -377,6 +378,15 @@ export interface ScheduledAgentCronOpts {
    * plane's own scheduled-firing seam.
    */
   feedRefreshExecutor?: () => Promise<FeedRefreshJobResult[]>;
+  /**
+   * Issue #3121 Phase 2 (#3124) — single evaluation scan: a caller
+   * that already loaded the goals (triggerGoal) passes its snapshot
+   * so onCron evaluates without re-listing the store. The snapshot
+   * is the loader's `{ goals, records }` pair: the goals to evaluate
+   * and the full loaded record list the save step reuses for removal
+   * sync and createdAt preservation. Absent, onCron loads as before.
+   */
+  preloadedGoals?: { goals: ScheduledGoal[]; records: UnifiedScheduleRecord[] };
 }
 
 /**
@@ -455,15 +465,35 @@ export class ScheduledAgent extends PortThink {
   }
 
   private async getGoals(): Promise<ScheduledGoal[]> {
+    return (await this.loadGoalRecords()).goals;
+  }
+
+  /**
+   * Issue #3121 Phase 2 (#3124) — single evaluation scan: the one
+   * load behind `getGoals`, returning the goals AND the full loaded
+   * record list. The records snapshot is what the save step reuses
+   * for removal sync and createdAt preservation, so an evaluation
+   * that loads then saves costs one store scan instead of two. The
+   * snapshot is the FULL loaded list — including rows that do not
+   * map to a goal and KV-imported rows — so the save behaves
+   * exactly like the re-list it replaces in the sequential flow.
+   * Every branch below is `getGoals` verbatim, plus the records
+   * carried alongside: the KV import, the empty-store seed, and the
+   * no-SQL fallback are unchanged.
+   */
+  private async loadGoalRecords(): Promise<{
+    goals: ScheduledGoal[];
+    records: UnifiedScheduleRecord[];
+  }> {
     const store = this.unifiedScheduleStore();
     if (!store) {
       // No SQL storage: the `"goals"` KV key, unchanged.
       const stored = await this.ctx.storage.get<ScheduledGoal[]>("goals");
       if (!stored) {
         await this.ctx.storage.put("goals", DEFAULT_SCHEDULES);
-        return DEFAULT_SCHEDULES;
+        return { goals: DEFAULT_SCHEDULES, records: [] };
       }
-      return stored;
+      return { goals: stored, records: [] };
     }
     // One-way KV → store import: goals that only exist under the
     // legacy key move into the unified store once, keyed by id; the
@@ -472,6 +502,7 @@ export class ScheduledAgent extends PortThink {
     const goals = stored
       .map((record) => recordToGoal(record))
       .filter((goal): goal is ScheduledGoal => goal !== undefined);
+    const records = [...stored];
     const kvGoals = await this.ctx.storage
       .get<ScheduledGoal[]>("goals")
       .catch(() => undefined);
@@ -480,7 +511,9 @@ export class ScheduledAgent extends PortThink {
       for (const goal of kvGoals) {
         if (!goal || typeof goal.id !== "string" || known.has(goal.id)) continue;
         try {
-          store.save(goalToRecord(goal));
+          const record = goalToRecord(goal);
+          store.save(record);
+          records.push(record);
           goals.push(goal);
           known.add(goal.id);
         } catch {
@@ -493,6 +526,7 @@ export class ScheduledAgent extends PortThink {
       // Distinct created_at values (one second apart) preserve the
       // seed order under the store's created_at ordering.
       const baseMs = Date.now();
+      const seeded: UnifiedScheduleRecord[] = [];
       for (let i = 0; i < DEFAULT_SCHEDULES.length; i++) {
         const goal = DEFAULT_SCHEDULES[i];
         try {
@@ -500,26 +534,41 @@ export class ScheduledAgent extends PortThink {
           record.createdAt = new Date(baseMs + i * 1000).toISOString();
           record.updatedAt = record.createdAt;
           store.save(record);
+          seeded.push(record);
         } catch {
           // Seed best-effort; the return below still serves the goals.
         }
       }
-      return [...DEFAULT_SCHEDULES];
+      return { goals: [...DEFAULT_SCHEDULES], records: seeded };
     }
-    return goals;
+    return { goals, records };
   }
 
-  private async saveGoals(goals: ScheduledGoal[]): Promise<void> {
+  /**
+   * Issue #3121 Phase 2 (#3124) — single evaluation scan: `existing`
+   * is the already-loaded record list from `loadGoalRecords` (or
+   * `onCron`'s preloaded snapshot). When a caller passes it, the
+   * save reuses it for removal sync and createdAt preservation
+   * instead of re-listing the store — one scan per evaluation. When
+   * no snapshot is passed, the save re-lists as before (the fallback
+   * for any caller without one). The snapshot must be the FULL loaded
+   * list, including rows that do not map to a goal, so a malformed
+   * row is still pruned exactly as the re-list pruned it.
+   */
+  private async saveGoals(
+    goals: ScheduledGoal[],
+    existing?: UnifiedScheduleRecord[],
+  ): Promise<void> {
     const store = this.unifiedScheduleStore();
     if (!store) {
       await this.ctx.storage.put("goals", goals);
       return;
     }
     const nowIso = new Date().toISOString();
-    const existing = store.listByKind("goal");
-    const existingById = new Map(existing.map((record) => [record.id, record]));
+    const existingRecords = existing ?? store.listByKind("goal");
+    const existingById = new Map(existingRecords.map((record) => [record.id, record]));
     const wanted = new Set(goals.map((goal) => goal.id));
-    for (const record of existing) {
+    for (const record of existingRecords) {
       if (wanted.has(record.id)) continue;
       try {
         store.remove(record.id);
@@ -1335,7 +1384,10 @@ export class ScheduledAgent extends PortThink {
       errors: [],
     };
 
-    const goals = await this.getGoals();
+    // Issue #3121 Phase 2 (#3124) — single evaluation scan: the
+    // tick evaluates from one load; the save step below reuses the
+    // same snapshot instead of re-listing the store.
+    const { goals, records } = opts?.preloadedGoals ?? (await this.loadGoalRecords());
     // #1517: global-halt state for governed chain goals only; other
     // goals are unaffected. A supplied sql wins over a supplied flag
     // only when the flag is absent — an explicit halted:true is never
@@ -2125,7 +2177,7 @@ export class ScheduledAgent extends PortThink {
       );
     }
 
-    await this.saveGoals(goals);
+    await this.saveGoals(goals, records);
     await this.recordTick(tick);
     return tick;
   }
@@ -2246,7 +2298,9 @@ export class ScheduledAgent extends PortThink {
     if (!Number.isFinite(goal.budgetCents) || goal.budgetCents <= 0) {
       throw new Error("budgetCents must be a positive number.");
     }
-    const goals = await this.getGoals();
+    // Issue #3121 Phase 2 (#3124) — single evaluation scan: the
+    // save below reuses this load's snapshot.
+    const { goals, records } = await this.loadGoalRecords();
     if (goals.some((g) => g.id === id)) throw new Error(`Goal already exists: ${id}`);
     const { OPERATION_CATALOG } = await import("../orchestrate");
     const known = OPERATION_CATALOG.some((e) => e.operations.includes(goal.operation));
@@ -2271,7 +2325,7 @@ export class ScheduledAgent extends PortThink {
       ...(provenance ? { provenance } : {}),
     };
     goals.push(created);
-    await this.saveGoals(goals);
+    await this.saveGoals(goals, records);
     // Issue #3121 S3 (#3312) — the lifecycle event is emitted by
     // the mutation, not the route: every entry path (route, A2A,
     // mesh door) flows through here. Best-effort; a failed audit
@@ -2287,11 +2341,14 @@ export class ScheduledAgent extends PortThink {
 
   /** Remove a scheduled goal by ID. */
   async removeGoal(id: string, actor?: string | null): Promise<boolean> {
-    const goals = await this.getGoals();
+    // Issue #3121 Phase 2 (#3124) — single evaluation scan: the
+    // snapshot is taken before the splice, so the save still finds
+    // the removed row and deletes it — one scan, same removal.
+    const { goals, records } = await this.loadGoalRecords();
     const idx = goals.findIndex((g: ScheduledGoal) => g.id === id);
     if (idx < 0) return false;
     goals.splice(idx, 1);
-    await this.saveGoals(goals);
+    await this.saveGoals(goals, records);
     // Issue #3121 S3 (#3312) — only an actual removal is a
     // lifecycle event; a miss is a state answer, not an event.
     await this.auditGoalLifecycle("schedule.goal.removed", id, undefined, actor);
@@ -2304,11 +2361,13 @@ export class ScheduledAgent extends PortThink {
     enabled: boolean,
     actor?: string | null,
   ): Promise<boolean> {
-    const goals = await this.getGoals();
+    // Issue #3121 Phase 2 (#3124) — single evaluation scan: the
+    // save below reuses this load's snapshot.
+    const { goals, records } = await this.loadGoalRecords();
     const goal = goals.find((g: ScheduledGoal) => g.id === id);
     if (!goal) return false;
     goal.enabled = enabled;
-    await this.saveGoals(goals);
+    await this.saveGoals(goals, records);
     // Issue #3121 S3 (#3312) — only an actual state change is a
     // lifecycle event; a miss is a state answer, not an event.
     await this.auditGoalLifecycle(
@@ -2544,7 +2603,9 @@ export class ScheduledAgent extends PortThink {
     if (!record) {
       throw new Error(`Unknown synthesized schedule: ${id}.`);
     }
-    const goals = await this.getGoals();
+    // Issue #3121 Phase 2 (#3124) — single evaluation scan: the
+    // save below reuses this load's snapshot.
+    const { goals, records: goalRecords } = await this.loadGoalRecords();
     const existing = goals.find((g) => g.id === id);
     if (existing) {
       if (existing.operation !== CHAIN_EXECUTE_OPERATION) {
@@ -2563,7 +2624,7 @@ export class ScheduledAgent extends PortThink {
     // unchanged below — creation-only stamping, never rewritten.
     goal.provenance = systemProvenance("synthesized-materialization");
     goals.push(goal);
-    await this.saveGoals(goals);
+    await this.saveGoals(goals, goalRecords);
     return goal;
   }
 
@@ -2830,7 +2891,12 @@ export class ScheduledAgent extends PortThink {
     env?: Env,
     actor?: string | null,
   ): Promise<ScheduleTick> {
-    const goals = await this.getGoals();
+    // Issue #3121 Phase 2 (#3124) — single evaluation scan: this
+    // load's snapshot threads through onCron and the restore path
+    // below, so a manual trigger costs one store scan instead of
+    // five. No await sits between this load and the onCron call, so
+    // the snapshot cannot go stale in between.
+    const { goals, records } = await this.loadGoalRecords();
     const goal = goals.find((g: ScheduledGoal) => g.id === id);
     if (!goal) {
       return {
@@ -2847,7 +2913,10 @@ export class ScheduledAgent extends PortThink {
         ? env
         : this.env;
 
-    const tick = await this.onCron(targetEnv, { forceGoalId: id });
+    const tick = await this.onCron(targetEnv, {
+      forceGoalId: id,
+      preloadedGoals: { goals, records },
+    });
     // Issue #3121 S3 (#3312) — a trigger of a missing goal is no
     // lifecycle event (no goal changed state); a found goal's manual
     // firing is. The condition is the route's S1 condition, moved
@@ -2861,11 +2930,14 @@ export class ScheduledAgent extends PortThink {
       );
     }
     if (tick.jobsCreated === 0 && tick.errors.length === 0) {
-      const currentGoals = await this.getGoals();
-      const currentGoal = currentGoals.find((g: ScheduledGoal) => g.id === id);
+      // The restore reuses the same in-memory goals onCron evaluated
+      // and saved — no re-read: the snapshot's createdAt values are
+      // the stored ones, so the reset save preserves them exactly
+      // as the re-read did.
+      const currentGoal = goals.find((g: ScheduledGoal) => g.id === id);
       if (currentGoal) {
         currentGoal.lastRun = origLastRun;
-        await this.saveGoals(currentGoals);
+        await this.saveGoals(goals, records);
       }
     }
     return tick;
