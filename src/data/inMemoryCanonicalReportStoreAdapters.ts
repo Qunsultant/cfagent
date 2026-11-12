@@ -37,6 +37,8 @@ function toHit(r: StoredReport): CanonicalReportStoredRow {
     summary: r.summary,
     body: r.body,
     created_at: r.created_at,
+    generation_id: r.generation_id,
+    user_login: r.user_login,
     body_r2_key: r.body_r2_key,
     fanout_outcome: r.fanout_outcome,
   };

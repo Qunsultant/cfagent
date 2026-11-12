@@ -116,6 +116,7 @@ import { ETradeBrowserService } from "../services/browserAgent";
 import { runGovernanceSeed } from "./orchestrator/governanceSeed";
 import { runShardJobReconcile, type ReconcileShardJobsReport } from "./orchestrator/shardJobReconcile";
 import { runCanonicalReportSeed, type SeedCanonicalReportsResult } from "./orchestrator/canonicalReportSeed";
+import { reconcileRunLedgerProjection, type ReconcileRunLedgerResult } from "./orchestrator/runLedgerReconcile";
 import {
   deliverWorkflowGoalScreenOutcome as deliverGoalScreenOutcome,
   persistWorkflowGoalScreenReport,
@@ -133,10 +134,16 @@ import { ScheduledTasksService, type AutonomousOptionsAnalysisOptions, type Auto
 import {
   canonicalResearchEmailBody,
   canonicalResearchWebhookBody,
+  getScheduledReportById,
   storeReportAtGeneration,
   type CanonicalStoreResult,
   type ScheduledReportInput,
 } from "../services/scheduledReports";
+import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
+import {
+  projectAsyncJobBestEffort,
+  projectCanonicalReportBestEffort,
+} from "../services/runLedgerProjectionHooks";
 // Issue #359-01: reports + HITL routes live in src/agents/routes/reports.ts;
 // routeRequest delegates to handleReportsRoutes at the original position.
 import { handleReportsRoutes } from "./routes/reports";
@@ -976,6 +983,88 @@ export class OrchestratorAgent extends PortThink {
       setBy,
       nowMs: Date.now(),
     });
+  }
+
+  /**
+   * Issue #4116 — the sweep carrier's DO door: a one-off
+   * backfill + repair pass projecting THIS instance's
+   * mas_reports and mas_async_jobs rows into D1. Thin wrapper
+   * over reconcileRunLedgerProjection (./orchestrator/
+   * runLedgerReconcile). Invoked by the admin-gated POST
+   * /api/ops/run-ledger-reconcile route; never auto-run (no
+   * boot, deploy, or tick path calls it). A second call
+   * reconciles zero rows when everything is already current.
+   */
+  async reconcileRunLedgerProjection(args?: {
+    limit?: number;
+  }): Promise<ReconcileRunLedgerResult> {
+    this.ensureTables();
+    return reconcileRunLedgerProjection({
+      env: this.env,
+      sql: this.ctx.storage.sql as never,
+      sessionId: this.sessionKey(),
+      limit: args?.limit,
+      nowMs: Date.now(),
+    });
+  }
+
+  /**
+   * Issue #4116 — the queue carrier's DO door: re-read one DO
+   * row named by a run-ledger.project claim-check message and
+   * project it into D1 through the shared projector. Called by
+   * the screener-events queue branch (per-user instance first,
+   * shared fallback). The hook runs with skipQueue: the caller
+   * IS the queue carrier's delivery, so publishing again would
+   * loop the message back onto the queue with a fresh id.
+   *
+   * Returns "missing-row" when this instance does not hold the
+   * row (the caller tries the shared instance); THROWS when the
+   * row exists but the projection cannot land (the queue core
+   * turns the throw into a retry, then the DLQ — the carrier's
+   * no-silent-loss landing). "already-current" is a success:
+   * the row is already projected, so there is nothing to do.
+   */
+  async projectQueuedRunLedger(input: {
+    ledger: "reports" | "async_jobs";
+    naturalKey: string;
+    tenantId: string;
+    userLogin: string;
+  }): Promise<{ status: "projected" | "already-current" | "missing-row" }> {
+    this.ensureTables();
+    const sql = this.ctx.storage.sql as never;
+    if (input.ledger === "reports") {
+      const hit = getScheduledReportById(sql, input.naturalKey, { userLogin: input.userLogin });
+      if (!hit) return { status: "missing-row" };
+      const posted = await projectCanonicalReportBestEffort({
+        env: this.env,
+        sql,
+        reportId: hit.id,
+        generationId: hit.generationId,
+        userLogin: input.userLogin,
+        skipQueue: true,
+      });
+      if (!posted) {
+        throw new Error(`run-ledger projection skipped for report ${input.naturalKey} (no carrier configured or store unavailable)`);
+      }
+      if (!posted.posted) {
+        throw new Error(`run-ledger projection failed for report ${input.naturalKey}: ${posted.skipped ?? "unknown"}`);
+      }
+      return { status: posted.projected ? "projected" : "already-current" };
+    }
+    const row = createAsyncJobPorts(sql).read.getRow(input.naturalKey, this.sessionKey());
+    if (!row) return { status: "missing-row" };
+    const posted = await projectAsyncJobBestEffort({
+      env: this.env,
+      row,
+      skipQueue: true,
+    });
+    if (!posted) {
+      throw new Error(`run-ledger projection skipped for async job ${input.naturalKey} (no carrier configured or store unavailable)`);
+    }
+    if (!posted.posted) {
+      throw new Error(`run-ledger projection failed for async job ${input.naturalKey}: ${posted.skipped ?? "unknown"}`);
+    }
+    return { status: posted.projected ? "projected" : "already-current" };
   }
   /**
    * Issue #2223 (slice 1): A2A door, cfpay signature — the edge

@@ -26,7 +26,7 @@ import type {
 
 const TABLE = "mas_reports";
 const HIT_COLUMNS =
-  "id, run_id, title, source, summary, body, created_at, body_r2_key, fanout_outcome";
+  "id, run_id, title, source, summary, body, created_at, generation_id, user_login, body_r2_key, fanout_outcome";
 
 /** Add a column to the table when it is missing (additive migration). */
 function ensureColumn(

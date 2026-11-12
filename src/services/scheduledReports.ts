@@ -1373,6 +1373,17 @@ export interface ScheduledReportHit {
   body: string;
   createdAt: string;
   /**
+   * Issue #4116 — the generation id the row was stored under
+   * (the twin-link key for the D1 projection). Null for legacy
+   * rows stored before #308, which never carried one.
+   */
+  generationId: string | null;
+  /**
+   * Issue #4116 — the row's owning login (the D1 projection's
+   * owner scope). Null for legacy rows stored before #584.
+   */
+  userLogin: string | null;
+  /**
    * Issue #338: R2 pointer for the canonical body, or null when the body
    * is stored inline in `body` (NULL = inline, per the accepted design).
    * S1 plumbing only — readers surface the pointer; S2 resolves it.
@@ -1399,6 +1410,14 @@ function scheduledReportHitFromRow(
     summary: String(r.summary ?? ""),
     body: String(r.body ?? ""),
     createdAt: String(r.created_at ?? ""),
+    generationId:
+      typeof r.generation_id === "string" && r.generation_id !== ""
+        ? r.generation_id
+        : null,
+    userLogin:
+      typeof r.user_login === "string" && r.user_login !== ""
+        ? r.user_login
+        : null,
     bodyR2Key: typeof key === "string" && key ? key : null,
     fanoutOutcome: parseFanoutOutcome(r.fanout_outcome),
   };
