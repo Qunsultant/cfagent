@@ -390,6 +390,22 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             <Badge tone="neutral" size="xs">
               System
             </Badge>
+            {/* Issue #3122 — agent-created schedules carry an Agent
+                badge (provenance origin agent on the payload); user-
+                and system-created rows show no badge. */}
+            {s.payload?.provenance?.origin === "agent" ? (
+              <Badge
+                tone="info"
+                size="xs"
+                title={
+                  s.payload.provenance.agentId
+                    ? `Created by agent ${s.payload.provenance.agentId}`
+                    : "Created by an agent"
+                }
+              >
+                Agent
+              </Badge>
+            ) : null}
             <Badge tone={s.paused ? "warning" : "success"} size="xs" dot>
               {s.paused ? "Paused" : "Active"}
             </Badge>

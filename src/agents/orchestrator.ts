@@ -64,12 +64,18 @@ import {
 import type { PaymentsFlowScopedModes } from "../config/paymentsFlowModes";
 import { BROKER_CATALOG, brokerCopilotCapability, diffScanRuns, isCopilotBroker } from "../trading";
 import { createOptionsDiscoveryPorts } from "../data/createOptionsDiscoveryPorts";
+import { createUnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
 
 import { createOrmPorts } from "../data/createOrmPorts";
 import { SqlLegacyChatStore } from "../data/doSqliteLegacyChatAdapter";
 import { createDidAttestation, resolveAgentDidDocument } from "./did";
 import { createMAS } from "./mas";
 import { dispatchOrchestratorA2A, orchestratorA2AOutcome, type OrchestratorA2AOutcome } from "./orchestrator/a2aDispatch";
+import {
+  createAgentScheduleExecutorDepsForDo,
+  executeAgentScheduleAction,
+  nlqPortToAgentSdkAdapter,
+} from "../services/agentScheduleCapability";
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
 import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
 import { handleSettingsWebhook } from "./orchestrator/settingsWebhook";
@@ -994,14 +1000,37 @@ export class OrchestratorAgent extends PortThink {
     void origin; // reserved for per-origin policy (cfpay parity); unused in v1
     this.ensureTables();
     const sessionId = this.sessionKey();
+    // Issue #3122 — one capability instance for this turn: the NLQ
+    // executor and the schedule.* A2A ops share it (same PDP,
+    // thresholds, ledger, pending approvals — never two enforcement
+    // paths). No principal is passed to the A2A ops: A2A actions
+    // carry no principal login today (#4143), so they refuse
+    // fail-closed until the envelope carries one.
+    const agentScheduleCapability = createAgentScheduleExecutorDepsForDo(
+      this.env,
+      this.ctx.storage.sql,
+      (type, payload) => this.audit(type, "orchestrator", payload),
+      {
+        sdk: nlqPortToAgentSdkAdapter(
+          this.nlqSchedulingPort(),
+          // Issue #3122 (store integration, #3123): the armed alarm is
+          // adopted into the unified store (record id = alarm id).
+          createUnifiedSchedulePorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).unifiedSchedules,
+        ),
+      },
+    );
     const data = await dispatchOrchestratorA2A(this.env, body, {
       sessionId,
       sql: this.ctx.storage.sql,
       audit: (type, agent, payload) => this.audit(type, agent, payload),
+      agentScheduleExecute: (request) => executeAgentScheduleAction(agentScheduleCapability, request),
       nlqExecute: async (query: string) => {
         const plan = await planNLQ(this.env, query);
         return executeNLQQueryAsync(this.getOrm(), sessionId, plan, this.env, undefined, undefined, {
           schedulingPort: this.nlqSchedulingPort(),
+          // Issue #3122 — NLQ schedule actions route through the agent
+          // schedule capability (PDP, classification, approval, ledger).
+          agentScheduleCapability,
           stockScreenPort: this.nlqStockScreenPort(),
           socialBriefPort: this.nlqSocialBriefPort() ?? undefined,
         });
@@ -2736,6 +2765,21 @@ export class OrchestratorAgent extends PortThink {
       scanRunStore: createOptionsDiscoveryPorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).scanRuns,
       profileStore: createOptionsDiscoveryPorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).strategyProfiles,
       schedulingPort: this.nlqSchedulingPort(),
+      // Issue #3122 — NLQ schedule actions in the chat fallback route
+      // through the agent schedule capability.
+      agentScheduleCapability: createAgentScheduleExecutorDepsForDo(
+        this.env,
+        this.ctx.storage.sql,
+        (type, payload) => this.audit(type, "orchestrator", payload),
+        {
+          sdk: nlqPortToAgentSdkAdapter(
+            this.nlqSchedulingPort(),
+            // Issue #3122 (store integration, #3123): the armed alarm is
+            // adopted into the unified store (record id = alarm id).
+            createUnifiedSchedulePorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).unifiedSchedules,
+          ),
+        },
+      ),
       stockScreenPort: this.nlqStockScreenPort(),
     };
   }

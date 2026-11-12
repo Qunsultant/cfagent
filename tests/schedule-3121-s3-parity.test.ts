@@ -589,7 +589,12 @@ describe("S3-P05 #3312 — the DO-side audit sink covers every entry path (#3121
         id: "g-a2a",
         name: "A2A goal",
         cron: "0 6 * * *",
-        op: "search.query",
+        // Issue #3122 (F2): the A2A path refuses descriptor-only
+        // operations ("search.query" mints a pending descriptor and
+        // executes nothing at firing), so this test arms an
+        // executing operation instead — the audit-actor assertion
+        // below is operation-independent.
+        op: "social.publish",
         budgetCents: 250,
       },
       "https://agent.test",

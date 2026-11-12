@@ -27,7 +27,10 @@ export const AGENT_CARDS: AgentCard[] = [
     endpoint: "/a2a/orchestrator",
     cardPath: "/a2a/orchestrator/agent-card.json",
     capabilities: ["planning", "supervision", "parallel-execution"],
-    operations: ["search.query", "payments.draft", "payments.confirm", "tasks.create", "memory.remember", "memory.recall", "nlq.execute"],
+    // Issue #3122 — the agent schedule-management capability (the
+    // schedule.* ops in ./orchestrator/a2aDispatch.ts); the anti-drift
+    // pin requires card ops == served ops.
+    operations: ["search.query", "payments.draft", "payments.confirm", "tasks.create", "memory.remember", "memory.recall", "nlq.execute", "schedule.create", "schedule.list", "schedule.update", "schedule.pause", "schedule.resume", "schedule.trigger", "schedule.delete"],
   },
   {
     name: "search",

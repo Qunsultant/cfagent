@@ -141,6 +141,16 @@ export interface NLQSocialBriefPort {
  *  stock-screen port (issue #982). */
 export interface NLQExecutionDeps extends OptionsStrategyDeps {
   schedulingPort?: NLQSchedulingPort;
+  /**
+   * Issue #3122 — the agent schedule capability, bound by the
+   * orchestrator (which owns the env + DO sql + audit sink). When
+   * present, NLQ schedule actions route through it (PDP, classifier,
+   * approval gate, agent provenance, ledger audit); when absent the
+   * executor still enforces the F1 allow-list and stamps agent
+   * provenance, but cannot PDP-enforce — those callers are recorded
+   * in #3122's §15 as remaining work.
+   */
+  agentScheduleCapability?: import("../../services/agentScheduleCapability").AgentScheduleExecutorDeps;
   stockScreenPort?: NLQStockScreenPort;
   socialBriefPort?: NLQSocialBriefPort;
   /**

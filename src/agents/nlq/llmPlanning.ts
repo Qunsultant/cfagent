@@ -109,7 +109,7 @@ Return JSON ONLY matching this structure:
   "targetTable": string,
   "tradingData": { "action": string, "symbol": string, "orderAction": "BUY"|"SELL", "quantity": number, "limitPrice": number, "filters": {} },
   "researchData": { "action": string, "symbol": string, "symbols": [] },
-  "scheduleData": { "action": string, "scheduleType": string, "delayInSeconds": number, "description": string },
+  "scheduleData": { "action": string, "scheduleType": string, "delayInSeconds": number, "description": string, "callback": "sendScheduledReminder"|"autonomousMarketScreen"|"autonomousOptionsAnalysis"|"autonomousStrategyDiscovery"|"autonomousGoalScreen" },
   "terms": string,
   "limit": number
 }`, options?.untrustedContent),
