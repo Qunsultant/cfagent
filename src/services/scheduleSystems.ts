@@ -101,9 +101,9 @@ export const SCHEDULE_UNIFICATION_ANSWERS: ScheduleUnificationAnswer[] = [
   {
     question: "How many schedule systems are there?",
     answer:
-      "Three: Orchestrator durable schedules, ScheduledAgent goals, and Worker cron triggers. There is no single schedule store on current main.",
+      "Three execution systems — Orchestrator durable schedules, ScheduledAgent goals, and Worker cron triggers — behind ONE logical schedule store (issue #3121 Phase 2, #3123): the unified ScheduleStore port (`unified_schedules`, one record model, one management service), physically placed by ownership — OrchestratorAgent instances host screen/followup/worker-duty records, the ScheduledAgent hosts goal records — with the Agents SDK scheduler staying the alarm substrate.",
     evidence:
-      "SCHEDULE_SYSTEMS in this module; wrangler.jsonc crons; src/agents/scheduled-agent.ts goals store; OrchestratorAgent this.schedule API store.",
+      "SCHEDULE_SYSTEMS in this module; src/data/unifiedSchedulePorts.ts; src/services/unifiedScheduleManagement.ts; src/agents/scheduled-agent.ts goals in the unified store; OrchestratorAgent this.schedule API arms the alarm.",
   },
   {
     question: "Which component manages durable schedules?",
@@ -115,9 +115,9 @@ export const SCHEDULE_UNIFICATION_ANSWERS: ScheduleUnificationAnswer[] = [
   {
     question: "Are ScheduledAgent goals and Orchestrator durable schedules the same thing?",
     answer:
-      "No. Different stores (ScheduledAgent DO SQL vs Orchestrator DO SQLite), different creation surfaces (/api/schedule/goals vs /api/schedules/create), and different execution (tick-evaluated, budget-checked job creation vs direct callback wake). Treating a goal id as a schedule id, or vice versa, is a category error.",
+      "No. One logical store now holds both (the unified `unified_schedules` table behind the ScheduleStore port), but different creation surfaces (/api/schedule/goals vs /api/schedules/create) and different execution (tick-evaluated, budget-checked job creation vs direct callback wake). Treating a goal id as a schedule id, or vice versa, is a category error.",
     evidence:
-      "src/schedule.ts DEFAULT_SCHEDULES vs src/agents/orchestrator.ts CREATABLE_SCHEDULE_CALLBACKS; src/server.ts scheduled() */30 dispatch.",
+      "src/schedule.ts DEFAULT_SCHEDULES vs src/agents/orchestrator.ts CREATABLE_SCHEDULE_CALLBACKS; src/server.ts scheduled() */30 dispatch; src/data/unifiedSchedulePorts.ts (one record model, kind=goal vs kind=screen).",
   },
   {
     question: "What, if anything, unifies the two user-facing systems today?",
@@ -135,9 +135,9 @@ export const SCHEDULE_UNIFICATION_ANSWERS: ScheduleUnificationAnswer[] = [
   {
     question: "What does the unified Jobs UI list?",
     answer:
-      "One surface (PlatformAdmin Jobs panel) listing all three systems' jobs: ScheduledAgent goals with their per-run history, Orchestrator durable schedules with theirs, and Worker cron triggers read-only and labelled deployment-only. It merges the management surface only — the stores, endpoints, and existing panels all stay.",
+      "One surface (PlatformAdmin Jobs panel) listing all three systems' jobs: ScheduledAgent goals with their per-run history, Orchestrator durable schedules with theirs, and Worker cron triggers read-only and labelled deployment-only. It merges the management surface and the run-ledger read (one merged read, GET /api/ledger/runs) — the stores, endpoints, and existing panels all stay.",
     evidence:
-      "UNIFIED_JOBS_UI in this module; src/client/JobsPanel.tsx; GET /api/schedule/runs, GET /api/schedules/runs, GET /api/schedule/systems.",
+      "UNIFIED_JOBS_UI in this module; src/client/JobsPanel.tsx; GET /api/ledger/runs (the one merged read); GET /api/schedule/systems.",
   },
   {
     question: "What does a per-run job record contain?",

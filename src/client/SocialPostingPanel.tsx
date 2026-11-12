@@ -21,7 +21,7 @@ import {
   triggerGoal,
   type ScheduledGoal,
   type ScheduleTick,
-} from "./scheduleApi";
+} from "./jobsApi";
 import {
   DAILY_SOCIAL_POST_GOAL_ID,
   SOCIAL_BRIEF_MAX_CHARS,

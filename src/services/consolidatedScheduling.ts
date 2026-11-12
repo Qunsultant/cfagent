@@ -29,7 +29,7 @@ import type {
 import type { ScheduleProvenance } from "../schedule";
 import { isDue, isValidCron, zonedDateParts } from "../schedule";
 import { WORKER_CRON_TRIGGERS_INVENTORY } from "./scheduleSystems";
-import type { ResolvedScheduleTiming } from "./scheduleManagement";
+import type { ResolvedScheduleTiming } from "./unifiedScheduleManagement";
 
 export type { JobRunLedgerTrigger, JobRunTrigger, LedgerLinkage };
 export type { ScheduleProvenance };

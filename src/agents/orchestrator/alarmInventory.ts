@@ -111,6 +111,14 @@ export const ALARM_SURFACE_REGISTER: readonly AlarmSurfaceEntry[] = [
       "Documentation-only reference to the framework jobs table's hung-timeout column: the module names cf_agents_jobs.hung_timeout_seconds to pin where the 30s SDK default lives (O1); it performs no queue I/O, arms nothing, and reads no rows. The reference stays so the mechanism location is greppable from the scheduler core instead of living only in node_modules.",
     singleShot: true,
   },
+  {
+    file: "src/data/unifiedSchedulePorts.ts",
+    kind: "framework-queue-index",
+    what: "The one ScheduleStore port (#3121 Phase 2, #3123): the record model + table name for unified_schedules; names cf_agents_jobs only to state the SDK table stays the alarm substrate.",
+    documentedGap:
+      "Documentation-only reference to the framework jobs table: the module names cf_agents_jobs in its header comment to record that the SDK table stays the alarm substrate (framework-owned, cannot be replaced); it performs no queue I/O, arms nothing, and reads no rows — arming goes through the ScheduleAlarms port (ctx.schedule/scheduleEvery) in the routes. The reference stays so the substrate decision is greppable from the store port.",
+    singleShot: true,
+  },
 ];
 
 /** The files the register covers. */

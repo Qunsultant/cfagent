@@ -18,6 +18,7 @@
  *   POST        /schedules/trigger-options-analysis
  *   POST        /schedules/trigger-retention      (issue #255)
  *   POST        /schedules/record-cron-dispatch    (issue #3121 S5 — Worker cron dispatch ledger row)
+ *   POST        /schedules/runs/record             (issue #3121 Phase 2 #3123 — ledger record route)
  *   POST        /schedules/trigger-iv-collection  (issue #15)
  *   POST        /schedules/trigger-discovery      (issue #126)
  *   POST        /schedules/:id/pause               (issue #273)
@@ -46,11 +47,10 @@ import {
   resolveTenantProviders,
 } from "../../services/tenantProviders";
 import { tradingTypeFor } from "../../trading";
-import { isLoginShaped } from "../../security/serviceIdentity";
+import { isLoginShaped, getServiceUserLogin } from "../../security/serviceIdentity";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
 import {
   buildScheduleProvenance,
-  carryScheduleProvenance,
   stampScheduleProvenance,
 } from "../../services/consolidatedScheduling";
 import { runStorageRetention } from "../../security/storageRetention";
@@ -79,13 +79,22 @@ import {
 import { ScheduledTasksService } from "../../services/scheduledTasks";
 import { pickFeedLoadParams } from "../../services/feedSnapshotStore";
 import {
-  pausedRecordToListItem,
-  resolveScheduleUpdate,
-  scheduleToPausedRecord,
-  type PausedScheduleRecord,
-  type ResolvedScheduleTiming,
-  type ScheduleDefinitionLike,
-} from "../../services/scheduleManagement";
+  deleteUnifiedSchedule,
+  getUnifiedScheduleDetail,
+  listUnifiedScheduleItems,
+  pauseUnifiedSchedule,
+  resumeUnifiedSchedule,
+  screenScheduleToRecord,
+  triggerUnifiedSchedule,
+  unifiedRecordToListItem,
+  updateUnifiedSchedule,
+  type ScheduleAlarms,
+  type ScheduleAlarmLike,
+} from "../../services/unifiedScheduleManagement";
+import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import { recordLedgerRun } from "../../services/unifiedLedger";
+import { buildJobRunRecord, type JobRunRecordInput } from "../../services/jobRunRecords";
+import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import type { DatabaseORM } from "../../orm";
 import type { AgentName, Env } from "../../types";
 
@@ -248,11 +257,40 @@ export async function handleSchedulesRoutes(
   sessionId: string,
   ctx: SchedulesRouteContext
 ): Promise<Response | null> {
-    // Issue #273 helpers: the paused-job store lives in the agent's own
-    // SQLite (see services/scheduleManagement.ts); subpath ids come from
-    // the /schedules/<id>/<action> shape via regex (not a counted
-    // route condition).
-    const pausedStore = () => createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).pausedSchedulesSync;
+    // Issue #3121 Phase 2 (#3123): the one schedule store — the
+    // unified DO-SQLite `unified_schedules` table — and the one
+    // management path behind every route in this file. Subpath ids
+    // come from the /schedules/<id>/<action> shape via regex (not a
+    // counted route condition).
+    const unifiedStore = () =>
+      createUnifiedSchedulePorts({
+        sql: ctx.agentCtx.storage.sql,
+        storage: ctx.agentCtx.storage,
+      }).unifiedSchedulesSync;
+    const alarms: ScheduleAlarms = {
+      list: () =>
+        ctx
+          .listSchedules()
+          .then((s) => s as unknown as ScheduleAlarmLike[]),
+      get: (id) =>
+        ctx
+          .getScheduleById(id)
+          .then((s) => (s ? (s as unknown as ScheduleAlarmLike) : undefined)),
+      cancel: (id) => ctx.cancelSchedule(id),
+      arm: (timing, callback, payload) => {
+        if (timing.type === "cron")
+          return ctx
+            .schedule(timing.cron, callback, payload, { idempotent: true })
+            .then((s) => s as unknown as ScheduleAlarmLike);
+        if (timing.type === "interval")
+          return ctx
+            .scheduleEvery(timing.intervalSeconds, callback, payload)
+            .then((s) => s as unknown as ScheduleAlarmLike);
+        return ctx
+          .schedule(new Date(timing.time * 1000), callback, payload)
+          .then((s) => s as unknown as ScheduleAlarmLike);
+      },
+    };
     const subpathId = (p: string): string => {
       const m = p.match(/\/schedules\/([^/]+)\//);
       if (!m) return "";
@@ -261,24 +299,6 @@ export async function handleSchedulesRoutes(
       } catch {
         return m[1];
       }
-    };
-    const timingFromDefinition = (def: {
-      type: string;
-      cron?: string;
-      intervalSeconds?: number;
-      time?: number;
-    }): ResolvedScheduleTiming | null => {
-      if (def.type === "cron" && def.cron) return { type: "cron", cron: def.cron };
-      if (def.type === "interval" && def.intervalSeconds)
-        return { type: "interval", intervalSeconds: def.intervalSeconds };
-      if ((def.type === "scheduled" || def.type === "delayed") && def.time !== undefined)
-        return { type: def.type, time: def.time };
-      return null;
-    };
-    const armFromTiming = (timing: ResolvedScheduleTiming, callback: string, payload: unknown) => {
-      if (timing.type === "cron") return ctx.schedule(timing.cron, callback, payload, { idempotent: true });
-      if (timing.type === "interval") return ctx.scheduleEvery(timing.intervalSeconds, callback, payload);
-      return ctx.schedule(new Date(timing.time * 1000), callback, payload);
     };
 
     // List all schedules (supports ?type=cron|interval|delayed|scheduled)
@@ -290,24 +310,13 @@ export async function handleSchedulesRoutes(
         // broken scheduling binding as "you have no schedules" (audit
         // finding F14). A failure now surfaces as the 500 below.
         const typeParam = url.searchParams.get("type");
-        const schedules = await ctx.listSchedules(
-          typeParam ? { type: typeParam as ScheduleCriteria["type"] } : undefined
+        const items = await listUnifiedScheduleItems(
+          { store: unifiedStore(), alarms },
+          typeParam ?? undefined,
         );
-        // Issue #273: paused jobs are cancelled SDK schedules, so they
-        // are merged back in from the paused store (flagged `paused`,
-        // no next run) — pausing never makes a job vanish from the UI.
-        let pausedItems: ReturnType<typeof pausedRecordToListItem>[] = [];
-        try {
-          pausedItems = pausedStore()
-            .list()
-            .filter((r) => !typeParam || r.type === typeParam)
-            .map(pausedRecordToListItem);
-        } catch {
-          pausedItems = [];
-        }
         return Response.json({
-          count: schedules.length + pausedItems.length,
-          schedules: [...schedules, ...pausedItems],
+          count: items.length,
+          schedules: items,
           creatableCallbacks: [...ctx.creatableScheduleCallbacks],
           timestamp: new Date().toISOString(),
         });
@@ -334,15 +343,8 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
-        let cancelled = await ctx.cancelSchedule(scheduleId);
-        if (!cancelled) {
-          // Issue #273: deleting a paused job deletes its stored record.
-          try {
-            cancelled = pausedStore().remove(scheduleId);
-          } catch {
-            cancelled = false;
-          }
-        }
+        const deleted = await deleteUnifiedSchedule({ store: unifiedStore(), alarms }, scheduleId);
+        const cancelled = deleted.cancelled;
         ctx.audit("schedule.cancelled", "orchestrator", { scheduleId, success: cancelled });
         return Response.json({ scheduleId, cancelled });
       } catch (err: any) {
@@ -371,7 +373,7 @@ export async function handleSchedulesRoutes(
         const preview = schedules.map((s) => ({ id: s.id, callback: s.callback }));
         let pausedPreserved = 0;
         try {
-          pausedPreserved = pausedStore().list().length;
+          pausedPreserved = unifiedStore().listByState("paused").length;
         } catch {
           pausedPreserved = 0;
         }
@@ -449,6 +451,54 @@ export async function handleSchedulesRoutes(
         return Response.json({ error: err.message || "Failed to list job runs" }, { status: 500 });
       }
     }
+
+    // Issue #3121 Phase 2 (#3123) — ledger record route. The
+    // ScheduledAgent posts goal rows to the one physical ledger
+    // (this instance's job_run_records) through this background-
+    // gated route (same gate as record-cron-dispatch, §12 of the
+    // S5 design). Placed here, next to the runs reads: no earlier
+    // branch can swallow it — the earlier POST branches match only
+    // `/schedules/cancel`, `/schedules/cancel-all`, the
+    // `/:id/pause|resume|trigger` suffixes, `/schedules/create`,
+    // `/schedules` exactly, or the other `trigger-*` suffixes —
+    // and the generic `/schedules/` branches above are GET, DELETE,
+    // or PUT, never POST. Body: a full JobRunRecord. A malformed
+    // shape is 400 (the validator is the build); a store failure
+    // is 500. The record itself goes through the one entry.
+    if (path.endsWith("/schedules/runs/record") && request.method === "POST") {
+      const attribution = resolveActorAttribution(
+        request.headers,
+        getServiceUserLogin(ctx.env),
+      );
+      if (attribution.actorKind !== "background") {
+        return Response.json(
+          { success: false, error: "Background service dispatch required." },
+          { status: 401 },
+        );
+      }
+      const body = (await request.json().catch(() => null)) as unknown;
+      if (!body || typeof body !== "object") {
+        return Response.json({ success: false, error: "Invalid ledger record." }, { status: 400 });
+      }
+      try {
+        buildJobRunRecord(body as JobRunRecordInput);
+      } catch (err) {
+        return Response.json(
+          { success: false, error: err instanceof Error ? err.message : "Invalid ledger record." },
+          { status: 400 },
+        );
+      }
+      try {
+        const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
+        const built = recordLedgerRun(store, body as JobRunRecordInput);
+        return Response.json({ success: true, jobId: built.jobId, scheduleId: built.scheduleId ?? null });
+      } catch (err) {
+        return Response.json(
+          { success: false, error: err instanceof Error ? err.message : "Failed to record ledger run." },
+          { status: 500 },
+        );
+      }
+    }
     if (path === "/schedules/callbacks" && request.method === "GET") {
       return Response.json({ ok: true, callbacks: ctx.creatableScheduleCallbacks });
     }
@@ -457,50 +507,32 @@ export async function handleSchedulesRoutes(
     if (path.includes("/schedules/") && request.method === "GET") {
       try {
         const scheduleId = path.split("/schedules/").pop() || "";
-        const schedule = await ctx.getScheduleById(scheduleId);
-        if (!schedule) {
-          // Issue #273: a paused job resolves from the paused store.
-          // The lookup degrades to the plain 404 if the store is
-          // unavailable — it must never mask the not-found answer.
-          let paused: PausedScheduleRecord | undefined;
-          try {
-            paused = pausedStore().get(scheduleId);
-          } catch {
-            paused = undefined;
-          }
-          if (paused) return Response.json(pausedRecordToListItem(paused));
-          return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
+        const detail = await getUnifiedScheduleDetail({ store: unifiedStore(), alarms }, scheduleId);
+        if (!detail.ok) {
+          return Response.json({ error: detail.error }, { status: detail.status });
         }
-        return Response.json(schedule);
+        return Response.json(detail.detail);
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to get schedule" }, { status: 500 });
       }
     }
 
     // Pause a schedule (POST /api/schedules/:id/pause) — issue #273.
-    // The SDK schedule is cancelled, but its full definition is kept in
-    // the paused store so the job stays listed (status: paused) and can
-    // be resumed or edited in place.
+    // The SDK schedule is cancelled, but its definition and state
+    // live in the unified store as a paused record, so the job stays
+    // listed (status: paused) and can be resumed or edited in place.
     if (path.includes("/schedules/") && path.endsWith("/pause") && request.method === "POST") {
       try {
         const scheduleId = subpathId(path);
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
-        const store = pausedStore();
-        const already = store.get(scheduleId);
-        if (already) {
-          return Response.json({ success: true, schedule: pausedRecordToListItem(already) });
+        const result = await pauseUnifiedSchedule({ store: unifiedStore(), alarms }, scheduleId, new Date().toISOString());
+        if (!result.ok) {
+          return Response.json({ error: result.error }, { status: result.status });
         }
-        const schedule = await ctx.getScheduleById(scheduleId);
-        if (!schedule) {
-          return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
-        }
-        const record = scheduleToPausedRecord(schedule, new Date().toISOString());
-        store.save(record);
-        await ctx.cancelSchedule(scheduleId);
-        ctx.audit("schedule.paused", "orchestrator", { scheduleId, callback: schedule.callback });
-        return Response.json({ success: true, schedule: pausedRecordToListItem(record) });
+        ctx.audit("schedule.paused", "orchestrator", { scheduleId, callback: result.record.callback });
+        return Response.json({ success: true, schedule: unifiedRecordToListItem(result.record) });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to pause schedule" }, { status: 500 });
       }
@@ -513,19 +545,12 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
-        const store = pausedStore();
-        const record = store.get(scheduleId);
-        if (!record) {
-          return Response.json({ error: `Schedule '${scheduleId}' is not paused` }, { status: 404 });
+        const result = await resumeUnifiedSchedule({ store: unifiedStore(), alarms }, scheduleId, new Date().toISOString());
+        if (!result.ok) {
+          return Response.json({ error: result.error }, { status: result.status });
         }
-        const timing = timingFromDefinition(record);
-        if (!timing) {
-          return Response.json({ error: `Paused schedule '${scheduleId}' has an incomplete definition and cannot be resumed` }, { status: 500 });
-        }
-        const schedule = await armFromTiming(timing, record.callback, record.payload);
-        store.remove(scheduleId);
-        ctx.audit("schedule.resumed", "orchestrator", { scheduleId, newScheduleId: schedule?.id, callback: record.callback });
-        return Response.json({ success: true, previousId: scheduleId, schedule });
+        ctx.audit("schedule.resumed", "orchestrator", { scheduleId, newScheduleId: result.alarm?.id, callback: result.record.callback });
+        return Response.json({ success: true, previousId: result.previousId, schedule: result.alarm });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to resume schedule" }, { status: 500 });
       }
@@ -538,41 +563,39 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
-        if (pausedStore().get(scheduleId)) {
+        const result = await triggerUnifiedSchedule(
+          { store: unifiedStore(), alarms },
+          scheduleId,
+          async (callback, payload) => {
+            // Issue #2964: record the manual run. Callbacks whose method
+            // wrapper records its own runs (the creatable four, plus the
+            // four internal callbacks #3788 wrapped) record outcome-aware
+            // runs themselves, so the route must not double-record them;
+            // other callbacks have no wrapper, so the route records the
+            // invocation itself (invocation-level success, since the
+            // callback reports no outcome). Paused schedules refused
+            // inside the service with 409 record nothing — no run happened.
+            if ((RECORDED_SCHEDULE_CALLBACKS as readonly string[]).includes(callback)) {
+              await ctx.runScheduleCallback(callback, payload);
+            } else {
+              await recordScheduleCallbackRun(
+                ctx.agentCtx.storage.sql,
+                callback,
+                payload,
+                { id: scheduleId },
+                () => ctx.runScheduleCallback(callback, payload),
+              );
+            }
+          },
+        );
+        if (!result.ok) {
           return Response.json(
-            { success: false, error: "Schedule is paused — resume it before triggering." },
-            { status: 409 }
+            { success: false, error: result.error },
+            { status: result.status },
           );
         }
-        const schedule = await ctx.getScheduleById(scheduleId);
-        if (!schedule) {
-          return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
-        }
-        const payload =
-          schedule.payload && typeof schedule.payload === "object"
-            ? { ...(schedule.payload as Record<string, unknown>), trigger: "manual", scheduleId }
-            : schedule.payload;
-        // Issue #2964: record the manual run. Callbacks whose method
-        // wrapper records its own runs (the creatable four, plus the
-        // four internal callbacks #3788 wrapped) record outcome-aware
-        // runs themselves, so the route must not double-record them;
-        // other callbacks have no wrapper, so the route records the
-        // invocation itself (invocation-level success, since the
-        // callback reports no outcome). Paused schedules refused
-        // above with 409 record nothing — no run happened.
-        if ((RECORDED_SCHEDULE_CALLBACKS as readonly string[]).includes(schedule.callback)) {
-          await ctx.runScheduleCallback(schedule.callback, payload);
-        } else {
-          await recordScheduleCallbackRun(
-            ctx.agentCtx.storage.sql,
-            schedule.callback,
-            payload,
-            { id: scheduleId },
-            () => ctx.runScheduleCallback(schedule.callback, payload),
-          );
-        }
-        ctx.audit("schedule.triggered", "orchestrator", { scheduleId, callback: schedule.callback });
-        return Response.json({ success: true, scheduleId, callback: schedule.callback });
+        ctx.audit("schedule.triggered", "orchestrator", { scheduleId: result.scheduleId, callback: result.callback });
+        return Response.json({ success: true, scheduleId: result.scheduleId, callback: result.callback });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to trigger schedule" }, { status: 500 });
       }
@@ -580,7 +603,7 @@ export async function handleSchedulesRoutes(
 
     // Update a schedule (PUT /api/schedules/:id) — issue #273: change
     // the cron/interval and/or payload atomically (cancel + recreate
-    // under the hood; paused jobs update in place in the paused store).
+    // under the hood; paused jobs update in place in the unified store).
     if (path.includes("/schedules/") && request.method === "PUT") {
       try {
         const scheduleId = path.split("/schedules/").pop() || "";
@@ -588,53 +611,21 @@ export async function handleSchedulesRoutes(
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
         const body = (await request.json().catch(() => ({}))) as any;
-        const store = pausedStore();
-        const paused = store.get(scheduleId);
-        if (paused) {
-          const resolution = resolveScheduleUpdate(paused, body, Date.now());
-          if (!resolution.ok) {
-            return Response.json({ success: false, error: resolution.error }, { status: 400 });
-          }
-          const updated: PausedScheduleRecord = {
-            id: paused.id,
-            callback: paused.callback,
-            // Issue #3121 S1 — a rebuilt payload keeps the original
-            // creation provenance verbatim (an update never rewrites
-            // creation time); a payload with no prior provenance is
-            // returned untouched.
-            payload: carryScheduleProvenance(paused.payload, resolution.payload),
-            type: resolution.timing.type,
-            pausedAt: paused.pausedAt,
-            ...(resolution.timing.type === "cron" ? { cron: resolution.timing.cron } : {}),
-            ...(resolution.timing.type === "interval" ? { intervalSeconds: resolution.timing.intervalSeconds } : {}),
-            ...(resolution.timing.type === "scheduled" || resolution.timing.type === "delayed"
-              ? { time: resolution.timing.time }
-              : {}),
-          };
-          store.save(updated);
-          ctx.audit("schedule.updated", "orchestrator", { scheduleId, callback: paused.callback, paused: true });
-          return Response.json({ success: true, schedule: pausedRecordToListItem(updated) });
-        }
-        const existing = await ctx.getScheduleById(scheduleId);
-        if (!existing) {
-          return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
-        }
-        const resolution = resolveScheduleUpdate(
-          existing as unknown as ScheduleDefinitionLike,
+        const result = await updateUnifiedSchedule(
+          { store: unifiedStore(), alarms },
+          scheduleId,
           body,
-          Date.now()
+          Date.now(),
         );
-        if (!resolution.ok) {
-          return Response.json({ success: false, error: resolution.error }, { status: 400 });
+        if (!result.ok) {
+          return Response.json({ success: false, error: result.error }, { status: result.status });
         }
-        await ctx.cancelSchedule(scheduleId);
-        const schedule = await armFromTiming(
-          resolution.timing,
-          existing.callback,
-          carryScheduleProvenance(existing.payload, resolution.payload),
-        );
-        ctx.audit("schedule.updated", "orchestrator", { scheduleId, newScheduleId: schedule?.id, callback: existing.callback });
-        return Response.json({ success: true, previousId: scheduleId, schedule });
+        if (result.alarm) {
+          ctx.audit("schedule.updated", "orchestrator", { scheduleId, newScheduleId: result.alarm.id, callback: result.record.callback });
+          return Response.json({ success: true, previousId: result.previousId, schedule: result.alarm });
+        }
+        ctx.audit("schedule.updated", "orchestrator", { scheduleId, callback: result.record.callback, paused: true });
+        return Response.json({ success: true, schedule: unifiedRecordToListItem(result.record) });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to update schedule" }, { status: 500 });
       }
@@ -880,7 +871,33 @@ export async function handleSchedulesRoutes(
         } catch {
           duplicate = undefined;
         }
+        // Issue #3121 Phase 2 (#3123) — adoption: the armed alarm's
+        // definition and state live in the unified store (record id =
+        // the SDK alarm id; alarmId tracks the SDK-assigned id across
+        // re-arms). Insert-if-absent: a record that already exists
+        // (an idempotent re-arm, a duplicate) is never clobbered —
+        // overwriting it would reset createdAt and the list order.
+        // Best-effort: the alarm is armed either way — a failed
+        // record write must not fail the creation, and the schedule
+        // adopts a record when it is next touched.
+        const adoptRecord = (armed: Schedule<unknown>) => {
+          try {
+            const store = unifiedStore();
+            if (!store.get(armed.id)) {
+              store.save(
+                screenScheduleToRecord(
+                  armed as unknown as ScheduleAlarmLike,
+                  new Date().toISOString(),
+                  trustedUserLogin || null,
+                ),
+              );
+            }
+          } catch {
+            // Adoption failure is not a creation failure.
+          }
+        };
         if (duplicate) {
+          adoptRecord(duplicate);
           ctx.audit("schedule.duplicate_suppressed", "orchestrator", {
             scheduleId: (duplicate as any).id,
             callback,
@@ -922,6 +939,7 @@ export async function handleSchedulesRoutes(
         }
 
         ctx.audit("schedule.created", "orchestrator", { scheduleId: schedule?.id, callback, scheduleType });
+        if (schedule) adoptRecord(schedule);
         return Response.json({ success: true, schedule });
       } catch (err: any) {
         // A throwing SDK scheduling call created nothing, so it gets the

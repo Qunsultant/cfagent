@@ -55,7 +55,7 @@ export interface CancelAllResult {
   pausedPreserved: number;
 }
 
-export type ClearableTable = "mas_async_jobs" | "mas_job_outcomes" | "mas_job_outcomes_meta" | "mas_events" | "paused_schedules";
+export type ClearableTable = "mas_async_jobs" | "mas_job_outcomes" | "mas_job_outcomes_meta" | "mas_events" | "unified_schedules";
 
 export interface ClearTablePreview {
   table: string;
@@ -413,7 +413,7 @@ export type SelectiveSqlRow =
   | "mas_job_outcomes_meta"
   | "mas_messages"
   | "mas_events"
-  | "paused_schedules";
+  | "unified_schedules";
 
 export type SelectiveKvRow =
   | "memberships"

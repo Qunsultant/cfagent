@@ -3,7 +3,7 @@
  * authenticated user (cron 35 * * * *, staggered off the equity-screen
  * minutes), following the ensureStaleSweepSchedule pattern. It must
  * never double-arm, and it must respect a scan the user paused in the
- * Schedules tab (#273's paused store).
+ * Schedules tab (#273's unified store, state paused).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -45,7 +45,7 @@ vi.mock("agents", () => {
   };
 });
 import { OrchestratorAgent, STRATEGY_SCAN_CRON } from "../src/agents/orchestrator";
-import { SqlPausedScheduleStore } from "../src/services/scheduleManagement";
+import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
 import { MockSqlStorage } from "./mock-sql";
 
 let scheduleCalls: any[];
@@ -117,28 +117,44 @@ describe("ensureStrategyScanSchedule (#275)", () => {
   });
 
   it("respects a paused scan (#273): a paused record blocks re-arming", async () => {
-    const store = new SqlPausedScheduleStore(sql as any);
+    const store = new SqlUnifiedScheduleStore(sql as any);
     store.save({
       id: "paused-scan",
+      kind: "screen",
+      state: "paused",
       callback: "autonomousOptionsAnalysis",
-      payload: { userLogin: "venus", environment: "PROD", universe: "NASDAQ100", trigger: "scheduled" },
-      type: "cron",
-      cron: "35 * * * *",
+      definition: {
+        type: "cron",
+        callback: "autonomousOptionsAnalysis",
+        payload: { userLogin: "venus", environment: "PROD", universe: "NASDAQ100", trigger: "scheduled" },
+        cron: "35 * * * *",
+      },
+      alarmId: "paused-scan",
       pausedAt: "2026-10-20T16:00:00.000Z",
+      createdAt: "2026-10-20T16:00:00.000Z",
+      updatedAt: "2026-10-20T16:00:00.000Z",
     });
     await agent.ensureStrategyScanSchedule({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(0);
   });
 
   it("an unrelated paused job does not block arming", async () => {
-    const store = new SqlPausedScheduleStore(sql as any);
+    const store = new SqlUnifiedScheduleStore(sql as any);
     store.save({
       id: "paused-screen",
+      kind: "screen",
+      state: "paused",
       callback: "autonomousMarketScreen",
-      payload: { userLogin: "venus", universe: "SP500" },
-      type: "cron",
-      cron: "5 * * * *",
+      definition: {
+        type: "cron",
+        callback: "autonomousMarketScreen",
+        payload: { userLogin: "venus", universe: "SP500" },
+        cron: "5 * * * *",
+      },
+      alarmId: "paused-screen",
       pausedAt: "2026-10-20T16:00:00.000Z",
+      createdAt: "2026-10-20T16:00:00.000Z",
+      updatedAt: "2026-10-20T16:00:00.000Z",
     });
     await agent.ensureStrategyScanSchedule({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(1);

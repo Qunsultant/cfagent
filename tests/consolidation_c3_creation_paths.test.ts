@@ -13,7 +13,7 @@
  *                               scheduling port in nlqPorts.ts)
  *   3. UI (ScheduledOptionsManager / StrategyDiscoveryPanel) — via
  *      the REST create route; no client-side arming exists.
- *   4. PUT update path          src/services/scheduleManagement.ts
+ *   4. PUT update path          src/services/unifiedScheduleManagement.ts
  *      (resolveScheduleUpdate re-validates through the builder)
  *   5. Strategy-scan baseline   src/agents/orchestrator/
  *      arm                        scheduleMaintenance.ts (#1277:
@@ -122,7 +122,7 @@ describe("screen-schedule creation paths — enumeration pin", () => {
     for (const file of [
       "src/agents/routes/schedules.ts",
       "src/agents/nlq/execution.ts",
-      "src/services/scheduleManagement.ts",
+      "src/services/unifiedScheduleManagement.ts",
       "src/agents/orchestrator/scheduleMaintenance.ts",
     ]) {
       expect(readFileSync(file, "utf8")).toContain("buildSchedulePayload");

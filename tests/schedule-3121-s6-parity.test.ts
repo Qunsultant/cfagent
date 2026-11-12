@@ -38,8 +38,11 @@
  *   SYSTEMS allowlist (S5 decision 9 follow-up).
  * - S6-P07 retired-module determination: every S0 old-home module
  *   still has a live production importer (declared pairs, each
- *   proven by an import); no `*.deprecated.*` scheduling file
- *   exists and the deprecation ledger carries no #3121 entry.
+ *   proven by an import) — except `src/services/scheduleManagement.ts`,
+ *   retired by #3123 (its pair is replaced by the unified successor
+ *   pair below); the deprecated set is exactly the three known AOP
+ *   files plus the five #3123 renames, and the deprecation ledger
+ *   carries the five #3123 entries.
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -283,17 +286,20 @@ describe("S6-P06 worker-cron admitted to the ledger builder (S5 decision 9)", ()
   });
 });
 
-describe("S6-P07 retired-module determination: zero renames", () => {
+describe("S6-P07 retired-module determination: the #3123 renames", () => {
   /**
    * Each pair is one S0 old-home module plus one live production
    * importer that must import it (consumer analysis on main 7c461e5,
    * 2026-11-11). A module is retired only when its capability fully
-   * moved AND all consumers migrated; every module below still has
-   * a live consumer, so none is retired and none is renamed.
+   * moved AND all consumers migrated. Issue #3121 Phase 2 (#3123)
+   * retired exactly one pair below — `src/services/scheduleManagement.ts`
+   * (capability moved to unifiedScheduleManagement.ts, all consumers
+   * migrated) — so that pair is replaced by the successor pair; every
+   * other module below still has a live consumer.
    */
   const LIVE_CONSUMERS: Array<[string, string, string]> = [
     ["src/agents/routes/schedules.ts", "src/agents/orchestrator/routeRequest.ts", "schedules"],
-    ["src/services/scheduleManagement.ts", "src/agents/routes/schedules.ts", "scheduleManagement"],
+    ["src/services/unifiedScheduleManagement.ts", "src/agents/routes/schedules.ts", "unifiedScheduleManagement"],
     ["src/agents/orchestrator/scheduleCallbacks.ts", "src/agents/orchestrator.ts", "scheduleCallbacks"],
     ["src/agents/orchestrator/scheduleCallbackRunRecords.ts", "src/agents/routes/cronDispatchRecord.ts", "scheduleCallbackRunRecords"],
     ["src/agents/scheduled-agent.ts", "src/server/exports.ts", "scheduled-agent"],
@@ -327,7 +333,7 @@ describe("S6-P07 retired-module determination: zero renames", () => {
     }
   });
 
-  it("no scheduling module was deprecated: the deprecated set is exactly the three known AOP files", () => {
+  it("the deprecated set is exactly the three known AOP files plus the five #3123 renames", () => {
     const found: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(join(dir), { withFileTypes: true })) {
@@ -343,14 +349,27 @@ describe("S6-P07 retired-module determination: zero renames", () => {
     walk("docs");
     expect(found.sort()).toEqual([
       "docs/compliance/anti-drift-controls.deprecated.md",
+      "src/client/scheduleApi.deprecated.ts",
+      "src/data/doSqlitePausedScheduleAdapter.deprecated.ts",
+      "src/data/inMemoryPausedScheduleAdapter.deprecated.ts",
+      "src/data/pausedSchedulePorts.deprecated.ts",
       "src/errors/errorAspects.deprecated.ts",
       "src/errors/errorCatalog.deprecated.json",
+      "src/services/scheduleManagement.deprecated.ts",
     ]);
   });
 
-  it("the deprecation ledger carries no #3121 scheduling entry", () => {
+  it("the deprecation ledger carries the five #3123 entries", () => {
     const ledger = source("docs/architecture/transition/deprecations.md");
-    expect(ledger).not.toContain("#3121");
-    expect(ledger.toLowerCase()).not.toContain("schedul");
+    expect(ledger).toContain("#3123");
+    for (const file of [
+      "src/data/pausedSchedulePorts.deprecated.ts",
+      "src/data/doSqlitePausedScheduleAdapter.deprecated.ts",
+      "src/data/inMemoryPausedScheduleAdapter.deprecated.ts",
+      "src/services/scheduleManagement.deprecated.ts",
+      "src/client/scheduleApi.deprecated.ts",
+    ]) {
+      expect(ledger).toContain(file);
+    }
   });
 });

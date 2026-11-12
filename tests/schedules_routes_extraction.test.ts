@@ -37,6 +37,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 
 vi.mock("../src/services/scheduledTasks", () => ({
   ScheduledTasksService: vi.fn(),
@@ -69,12 +70,31 @@ import {
 
 const src = (rel: string) => readFileSync(`src/${rel}`, "utf8");
 
+/**
+ * node:sqlite double for the SqlStorage seam (same shape as #2964 /
+ * the #3123 pins). The routes read the unified store through
+ * `ctx.agentCtx.storage.sql` — production DOs always carry a real
+ * SqlStorage, so the fake carries a real one too; the old `{}` stub
+ * made every store touch throw `sql.exec is not a function`.
+ */
+class SqliteTestStorage {
+  readonly sqlite = new DatabaseSync(":memory:");
+  exec(query: string, ...params: unknown[]): unknown[] {
+    const stmt = this.sqlite.prepare(query);
+    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
+      return stmt.all(...(params as never[])) as unknown[];
+    }
+    stmt.run(...(params as never[]));
+    return [];
+  }
+}
+
 const baseCtx = (
   overrides: Partial<SchedulesRouteContext> = {}
 ): SchedulesRouteContext =>
   ({
     env: {},
-    agentCtx: { storage: { sql: {} } },
+    agentCtx: { storage: { sql: new SqliteTestStorage() } },
     audit: vi.fn(),
     listSchedules: vi.fn(async () => []),
     cancelSchedule: vi.fn(async () => true),
@@ -197,15 +217,25 @@ describe("schedules behavior (extraction #379)", () => {
   });
 
   it("GET /schedules lists through the SDK port and passes the type filter", async () => {
-    const rows = [{ id: "a" }, { id: "b" }];
+    // Rows carry the timing type: the unified list (#3123) filters
+    // the merged alarms + records AFTER the port call, so a typeless
+    // row would not survive ?type=cron.
+    const rows = [
+      { id: "a", type: "cron", callback: "autonomousMarketScreen" },
+      { id: "b", type: "cron", callback: "autonomousMarketScreen" },
+    ];
     const listSchedules = vi.fn(async () => rows);
     const ctx = baseCtx({ listSchedules: listSchedules as any });
     const res = await handleSchedulesRoutes(req("GET", "/schedules?type=cron"), urlOf("/schedules?type=cron"), "/schedules", "s1", ctx);
     expect((res as Response).status).toBe(200);
-    expect(listSchedules).toHaveBeenCalledWith({ type: "cron" });
+    // The alarms port lists all; the type filter is applied by the
+    // unified list (it must cover records too, which the SDK port
+    // cannot see) — so the port is called with no arguments.
+    expect(listSchedules).toHaveBeenCalledWith();
     const body = await (res as Response).json();
     expect(body.count).toBe(2);
-    expect(body.schedules).toEqual(rows);
+    expect(body.schedules.map((s: any) => s.id)).toEqual(["a", "b"]);
+    expect(body.schedules.every((s: any) => s.type === "cron")).toBe(true);
   });
 
   it("GET /schedules surfaces a listing failure as a 500, never an empty 200 (#108)", async () => {

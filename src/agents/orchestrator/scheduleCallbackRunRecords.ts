@@ -28,11 +28,11 @@ import {
   type CronDispatchRecordInput,
 } from "../../services/consolidatedCronEntries";
 import {
-  buildJobRunRecord,
   resolveScheduleRunJobId,
   resolveScheduleRunTrigger,
   type JobRunRecord,
 } from "../../services/jobRunRecords";
+import { recordLedgerRun } from "../../services/unifiedLedger";
 import { buildLedgerLinkage } from "../../services/consolidatedScheduling";
 import type { ScheduledCallbackOutcome } from "./scheduledCallbacks";
 
@@ -78,7 +78,7 @@ function storeRecord(
 ): void {
   try {
     const store = new SqlJobRunRecordStore(sql);
-    store.record(buildJobRunRecord({ system: "orchestrator-schedule", ...record }));
+    recordLedgerRun(store, { system: "orchestrator-schedule", ...record });
   } catch (err) {
     // Recording never breaks the callback — but a swallowed store
     // failure is unobservable, so a caller that supplied a hook hears
@@ -113,7 +113,11 @@ export function recordCronDispatchRun(
   parsed: CronDispatchRecordInput,
 ): void {
   const store = new SqlJobRunRecordStore(sql);
-  store.record(buildCronDispatchRecord(parsed));
+  // Issue #3121 Phase 2 (#3123): the dispatch row is pre-built by
+  // buildCronDispatchRecord (which validates through the same
+  // builder, then restamps the system to "worker-cron"); it records
+  // through the one entry, which re-validates the built row.
+  recordLedgerRun(store, buildCronDispatchRecord(parsed));
 }
 
 /**
