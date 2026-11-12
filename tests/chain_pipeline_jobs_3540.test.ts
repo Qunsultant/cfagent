@@ -283,6 +283,9 @@ describe("pipeline chain registry + catalog (#3540)", () => {
       "yahoo-sector-health-care-quotes-pipeline",
       "yahoo-sector-financials-quotes-pipeline",
       "yahoo-sector-information-technology-quotes-pipeline",
+      "yahoo-sector-communication-services-quotes-pipeline",
+      "yahoo-sector-utilities-quotes-pipeline",
+      "yahoo-sector-real-estate-quotes-pipeline",
       "alpaca-nasdaq100-quotes-pipeline",
       "etrade-nasdaq100-quotes-pipeline",
       "public-nasdaq100-quotes-pipeline",
@@ -341,7 +344,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
   });
 
   it("resolves names in the family idiom and refuses ambiguous/unknown names", () => {
-    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(16);
+    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(19);
     expect(resolvePipelineChain(CHAIN_ID)?.jobId).toBe(CHAIN_ID);
     expect(resolvePipelineChain("yahoo nasdaq100 pipeline")?.jobId).toBe(CHAIN_ID);
     expect(resolvePipelineChain("yahoo-nasdaq100-pipeline")?.jobId).toBe(CHAIN_ID);
@@ -367,7 +370,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
 describe("pipeline chain definitions (#3540)", () => {
   it("every chain definition resolves as a valid J1 job composed of the stage jobs' own nodes", () => {
     const raws = buildAllChainPipelineJobDefinitions({});
-    expect(raws).toHaveLength(16);
+    expect(raws).toHaveLength(19);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("feed");
@@ -429,7 +432,7 @@ describe("pipeline chain definitions (#3540)", () => {
     expect(params[7]).toMatchObject({ deliverJobId: DELIVER_ID });
   });
 
-  it("ensure is idempotent and registerSchedules declares the whole plane (103)", async () => {
+  it("ensure is idempotent and registerSchedules declares the whole plane (121)", async () => {
     const h = await makeHarness();
     const first = await h.stores.definitions.getDefinition(CHAIN_ID);
     await ensureChainPipelineJobs(h.control, h.stores, {});
@@ -441,9 +444,9 @@ describe("pipeline chain definitions (#3540)", () => {
     // #3932: one more job on the plane — the parameterized
     // sentiment job (one definition, folded into every chain).
     // #4065 pin update: three options-chains jobs join the plane.
-    expect(registrations).toHaveLength(103);
+    expect(registrations).toHaveLength(121);
     const chainRegs = registrations.filter((r) => r.jobId.endsWith("-pipeline"));
-    expect(chainRegs).toHaveLength(16);
+    expect(chainRegs).toHaveLength(19);
     expect(chainRegs.every((r) => r.nodePath === "")).toBe(true);
   });
 });
