@@ -31,6 +31,14 @@
  * - E*TRADE-live runs and options-only runs are unchanged: no
  *   marker, and the guard is not even consulted for options-only
  *   runs (no stock leg to fall back).
+ *
+ * Issue #4279 (#3550 S4): the unchained scheduled path no longer
+ * runs the agent inline — it submits the goal command to the one
+ * engine. The guard + fallback still run first, and the fallback
+ * rides the submission (provider "yahoo" + the marker) into the
+ * engine job; a run failure now lives on the engine job, not on
+ * the tick. The chained tests below still pin the direct fallback
+ * path (chain mode keeps it until S5 #4280).
  */
 import { describe, it, expect, vi } from "vitest";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
@@ -44,6 +52,27 @@ import {
 } from "../src/services/screeningRuntime";
 import { generateGoalScreenPdf } from "../src/services/goalScreenReports";
 import { STOCK_SCREENING_PROVIDER_ID } from "../src/trading/screeningProvider";
+
+vi.mock("../src/services/goalScreenWorkflowSubmission", () => ({
+  buildGoalScreenCommand: vi.fn(() => ({ __cannedGoalCommand: true })),
+  startGoalScreenWorkflow: vi.fn(),
+}));
+
+import {
+  buildGoalScreenCommand,
+  startGoalScreenWorkflow,
+} from "../src/services/goalScreenWorkflowSubmission";
+
+const mockedBuild = vi.mocked(buildGoalScreenCommand);
+const mockedStart = vi.mocked(startGoalScreenWorkflow);
+
+const HANDLE = {
+  workflowId: "screen-goal-screen-scheduled-test_trader-income-2026-11-12T00-00-00-000Z",
+  jobId: "goal-screen:scheduled:test_trader:income:2026-11-12T00:00:00.000Z",
+  status: "queued" as const,
+  existing: false,
+  statusUrl: "/api/jobs/history?chainId=goal-screen%3Ascheduled%3Atest_trader%3Aincome%3A2026-11-12T00%3A00%3A00.000Z",
+};
 
 const FALLBACK_MARKER = { from: "etrade", reason: "etrade-auth-dead" } as const;
 
@@ -75,9 +104,10 @@ function goalService(opts: {
 }) {
   const mockEnv = {
     ETRADE_ENVIRONMENT: "sandbox",
-    // #2051: goal_workflow is default-ON; these tests pin the
-    // DIRECT fallback path, so they force the flag OFF rather
-    // than follow the new default into the workflow path.
+    // #2051: goal_workflow is default-ON. The chained test pins
+    // the DIRECT fallback path (chain mode keeps it until S5
+    // #4280); the unchained tests pin the workflow submission.
+    // The flag no longer gates either entry (#4279).
     FEATURE_FLAGS: JSON.stringify({ goal_workflow: false }),
   } as unknown as Env;
   const mockOrm = new DatabaseORM(new MockSqlStorage() as any);
@@ -136,37 +166,49 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
     expect(bridge.mock.calls[0][0].providerFallback).toEqual({ ...FALLBACK_MARKER });
   });
 
-  it("a fallback that itself fails takes the normal failure path naming the fallback", async () => {
+  it("a fallback that itself fails is submitted to the engine carrying the marker (#4279: the run failure now lives on the engine job, not the tick)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const { service, audit, runGoalScreen } = goalService({
       blocked: true,
       agentResult: () => fakeGoalResult({ status: "failed", hits: [], counts: { stocksScanned: 0, stocksMatched: 0, optionsUnderlyingsScanned: 0, optionsContractsMatched: 0, hits: 0 } }),
     });
     const result = await service.autonomousGoalScreen({ goalKind: "income" });
-    expect(result.success).toBe(false);
-    expect(runGoalScreen).toHaveBeenCalledTimes(1);
-    expect(runGoalScreen.mock.calls[0][0].provider).toBe("yahoo");
-    const failed = audit.mock.calls.find((c) => c[0] === "goal_screen.run_failed");
-    expect(failed).toBeDefined();
-    expect(failed[1].providerFallback).toEqual({ ...FALLBACK_MARKER });
+    expect(result.success).toBe(true);
+    expect((result as any).data.status).toBe("queued");
+    // The direct agent is never consulted on the unchained path.
+    expect(runGoalScreen).not.toHaveBeenCalled();
+    // The fallback rides the submission into the engine job.
+    expect(mockedBuild).toHaveBeenCalledTimes(1);
+    const submitted = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
+    expect(submitted.provider).toBe("yahoo");
+    expect(submitted.providerFallback).toEqual({ ...FALLBACK_MARKER });
+    // No tick-level failure audit: the run's failure, if any, is
+    // the engine job's (the goal result carries the marker there).
+    expect(audit.mock.calls.find((c) => c[0] === "goal_screen.run_failed")).toBeUndefined();
   });
 
-  it("an E*TRADE-live run is unchanged: no marker anywhere", async () => {
+  it("an E*TRADE-live run is unchanged: no marker anywhere (#4279: the submission carries no provider override)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const { service, audit, guard, runGoalScreen } = goalService({
       blocked: false,
       agentResult: () => fakeGoalResult(),
     });
     const result = await service.autonomousGoalScreen({ goalKind: "income" });
     expect(result.success).toBe(true);
+    expect((result as any).data.status).toBe("queued");
     expect(guard).toHaveBeenCalledTimes(1);
-    const req = runGoalScreen.mock.calls[0][0];
-    expect(req.provider).toBeUndefined();
-    expect(req.providerFallback).toBeUndefined();
+    expect(runGoalScreen).not.toHaveBeenCalled();
+    const submitted = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
+    expect(submitted.provider).toBeUndefined();
+    expect(submitted.providerFallback).toBeUndefined();
     expect((result as any).data.providerFallback).toBeUndefined();
-    const completed = audit.mock.calls.find((c) => c[0] === "goal_screen.run_completed");
-    expect(completed[1].providerFallback).toBeUndefined();
+    const submitted_audit = audit.mock.calls.find((c) => c[0] === "goal_screen.workflow_submitted");
+    expect(submitted_audit).toBeDefined();
+    expect((submitted_audit[1] as Record<string, unknown>).providerFallback).toBeUndefined();
   });
 
-  it("an options-only run never consults the guard and carries no marker", async () => {
+  it("an options-only run never consults the guard and carries no marker (#4279)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const { service, guard, runGoalScreen } = goalService({
       blocked: true,
       agentResult: () => fakeGoalResult(),
@@ -176,10 +218,12 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
       assetClasses: ["options"],
     });
     expect(result.success).toBe(true);
+    expect((result as any).data.status).toBe("queued");
     expect(guard).not.toHaveBeenCalled();
-    const req = runGoalScreen.mock.calls[0][0];
-    expect(req.provider).toBeUndefined();
-    expect(req.providerFallback).toBeUndefined();
+    expect(runGoalScreen).not.toHaveBeenCalled();
+    const submitted = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
+    expect(submitted.provider).toBeUndefined();
+    expect(submitted.providerFallback).toBeUndefined();
   });
 
   it("executeGoalScreenRun stamps the marker onto the recorded result when the agent did not", async () => {

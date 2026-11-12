@@ -40,10 +40,16 @@ import {
   type RunStockScreenViaEngine,
   type ScreenEngineAgentGates,
 } from "../workflows/runStockScreenViaEngine";
+import {
+  runGoalScreenViaEngine,
+  type RunGoalScreenViaEngine,
+} from "../workflows/runGoalScreenViaEngine";
+import { workflowTenantId } from "../workflows/screenerWorkflowRoutes";
+import type { GoalScreenSubmissionInput } from "../services/goalScreenWorkflowSubmission";
+import type { SqlStorage } from "../data/repositoryPorts";
 import type { StockScreenRunSpec } from "../workflows/stockScreenRunSpec";
 import type { ScreenerTask } from "../services/screenerTaskLedger";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
-import type { GoalDrivenScreenResult } from "../services/goalDrivenScreen";
 
 /**
  * The operations this dispatch serves. This constant is the
@@ -101,20 +107,6 @@ export interface ScreenerA2ADataResult {
   error?: string;
 }
 
-/** The goal-screen request shape (the method's inline parameter). */
-export interface ScreenerGoalScreenRequest {
-  scenario: ScenarioDefinition;
-  trigger: "manual" | "scheduled";
-  idempotencyKey: string;
-  userLogin?: string;
-  environment?: "TEST" | "PROD";
-  assetClasses?: ScreeningProviderAssetClass[];
-  symbols?: string[];
-  baseStockFilter?: StockScreenerFilter;
-  baseOptionsFilter?: OptionScreenerFilter;
-  provider?: "yahoo";
-}
-
 /** The ScreenerAgent method surface the dispatch delegates to. */
 export interface ScreenerA2AExecutor {
   /**
@@ -124,12 +116,14 @@ export interface ScreenerA2AExecutor {
    * invite the next bypass). The seam admits through the gates
    * below; they are optional on the interface so older executors
    * keep compiling, but run_screen fails closed without them.
+   *
+   * Issue #4279: run_goal_screen likewise no longer delegates to
+   * the agent's runGoalScreen — it goes through the one goal seam
+   * (runGoalScreenViaEngine, injected on the deps below). The
+   * direct method is gone from this interface for the same reason.
    */
   isScreenRunning?: ScreenEngineAgentGates["isScreenRunning"];
   chargeScreenQuota?: ScreenEngineAgentGates["chargeScreenQuota"];
-  runGoalScreen(
-    req: ScreenerGoalScreenRequest,
-  ): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }>;
   getLatest(): Promise<ScreenerRunResult | null>;
   getHistory(): Promise<ScreenerRunResult[]>;
   listScreenerTasks(limit?: number): Promise<ScreenerTask[]>;
@@ -149,6 +143,20 @@ export interface ScreenerA2ADeps {
    * substitute the seam — it never selects a different engine.
    */
   runStockScreenViaEngine?: RunStockScreenViaEngine;
+  /**
+   * Issue #4279: the one goal seam run_goal_screen runs through.
+   * Optional: absent, the dispatch calls the real seam; tests
+   * inject a fake. Same idiom as runStockScreenViaEngine.
+   */
+  runGoalScreenViaEngine?: RunGoalScreenViaEngine;
+  /**
+   * Issue #4279: the DO SQL store the goal seam reads the
+   * canonical row back from. Bound by the class (the dispatch
+   * itself holds no storage); absent, run_goal_screen fails
+   * closed as not configured instead of returning a result it
+   * cannot read back.
+   */
+  getSql?: () => SqlStorage;
 }
 
 /**
@@ -238,9 +246,10 @@ async function executeOperation(
   operation: ScreenerA2AOperation,
   args: Record<string, unknown>,
   env: Env,
-  executor: ScreenerA2AExecutor,
-  seam?: RunStockScreenViaEngine,
+  deps: ScreenerA2ADeps,
 ): Promise<{ result: unknown; failureError?: string }> {
+  const executor = deps.executor!;
+  const seam = deps.runStockScreenViaEngine;
   switch (operation) {
     case "screener.run_screen": {
       const userLogin = serviceLoginOrFail(env, operation);
@@ -357,45 +366,81 @@ async function executeOperation(
       if (typeof idempotencyKey !== "string" || idempotencyKey.trim().length === 0) {
         throw new ScreenerA2AInputError(`Operation "${operation}" requires a non-empty string "idempotencyKey" argument.`);
       }
-      const req: ScreenerGoalScreenRequest = {
-        scenario: args.scenario as unknown as ScenarioDefinition,
-        trigger: triggerArg(args, operation),
-        idempotencyKey,
-        userLogin,
-      };
       const environment = environmentArg(args, operation);
-      if (environment !== undefined) req.environment = environment;
+      let assetClasses: ScreeningProviderAssetClass[] | undefined;
       if (args.assetClasses !== undefined) {
         if (!Array.isArray(args.assetClasses) || !args.assetClasses.every((v) => typeof v === "string")) {
           throw new ScreenerA2AInputError(`Operation "${operation}" requires "assetClasses" to be an array of strings when present.`);
         }
-        req.assetClasses = args.assetClasses as ScreeningProviderAssetClass[];
+        assetClasses = args.assetClasses as ScreeningProviderAssetClass[];
       }
+      let symbols: string[] | undefined;
       if (args.symbols !== undefined) {
         if (!Array.isArray(args.symbols) || !args.symbols.every((v) => typeof v === "string")) {
           throw new ScreenerA2AInputError(`Operation "${operation}" requires "symbols" to be an array of strings when present.`);
         }
-        req.symbols = args.symbols as string[];
+        symbols = args.symbols as string[];
       }
+      let baseStockFilter: StockScreenerFilter | undefined;
       if (args.baseStockFilter !== undefined) {
         if (!isRecord(args.baseStockFilter)) {
           throw new ScreenerA2AInputError(`Operation "${operation}" requires "baseStockFilter" to be an object when present.`);
         }
-        req.baseStockFilter = args.baseStockFilter as StockScreenerFilter;
+        baseStockFilter = args.baseStockFilter as StockScreenerFilter;
       }
+      let baseOptionsFilter: OptionScreenerFilter | undefined;
       if (args.baseOptionsFilter !== undefined) {
         if (!isRecord(args.baseOptionsFilter)) {
           throw new ScreenerA2AInputError(`Operation "${operation}" requires "baseOptionsFilter" to be an object when present.`);
         }
-        req.baseOptionsFilter = args.baseOptionsFilter as OptionScreenerFilter;
+        baseOptionsFilter = args.baseOptionsFilter as OptionScreenerFilter;
       }
+      let provider: "yahoo" | undefined;
       if (args.provider !== undefined) {
         if (args.provider !== "yahoo") {
           throw new ScreenerA2AInputError(`Operation "${operation}" requires "provider" to be "yahoo" when present (the goal screen's only alternate provider).`);
         }
-        req.provider = args.provider;
+        provider = args.provider;
       }
-      const result = await executor.runGoalScreen(req);
+      // Issue #4279: run_goal_screen goes through the one goal seam
+      // (was executor.runGoalScreen). The submission carries the
+      // A2A caller's base filters onto the goal command, so the
+      // migration does not silently drop them; delivery is absent,
+      // exactly as the direct path (the dispatch returns the result
+      // to the A2A caller — it never delivered). The read-back needs
+      // the DO SQL store: without the class's getSql the run cannot
+      // be read back, so the operation fails closed as not
+      // configured instead of returning a result it cannot read.
+      if (!deps.getSql) {
+        throw new ScreenerA2ANotConfiguredError(
+          `Operation "${operation}" requires the dispatch's getSql store binding — refusing to run a goal screen whose result cannot be read back (issue #4279).`,
+        );
+      }
+      const submission: GoalScreenSubmissionInput = {
+        jobId: idempotencyKey,
+        source: "a2a",
+        trigger: triggerArg(args, operation),
+        userLogin,
+        tenantId: workflowTenantId(env),
+        scenario: args.scenario as unknown as ScenarioDefinition,
+        scenarioSource: "built",
+        ...(assetClasses ? { assetClasses } : {}),
+        ...(symbols ? { symbols } : {}),
+        ...(environment !== undefined ? { environment } : {}),
+        ...(provider ? { provider } : {}),
+        ...(baseStockFilter ? { baseStockFilter } : {}),
+        ...(baseOptionsFilter ? { baseOptionsFilter } : {}),
+      };
+      const runGoal = deps.runGoalScreenViaEngine ?? runGoalScreenViaEngine;
+      const result = await runGoal({
+        env,
+        submission,
+        getSql: deps.getSql,
+        readTask: async (key) => {
+          const tasks = await executor.listScreenerTasks(200);
+          return tasks.find((t) => t.idempotencyKey === key) ?? null;
+        },
+      });
       return { result };
     }
     case "screener.latest":
@@ -444,7 +489,7 @@ export async function dispatchScreenerA2A(
       // injected executor there is no honest way to serve this.
       throw new Error("Screener executor is not configured for this dispatch context.");
     }
-    const { result, failureError } = await executeOperation(op, args, env, deps.executor, deps.runStockScreenViaEngine);
+    const { result, failureError } = await executeOperation(op, args, env, deps);
     if (failureError !== undefined) {
       return {
         ok: false,

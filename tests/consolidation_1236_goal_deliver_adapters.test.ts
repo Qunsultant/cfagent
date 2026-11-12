@@ -27,6 +27,27 @@ vi.mock("../src/services/screeningRuntime", async (importOriginal) => {
   return { ...original, executeGoalScreenRun: executeGoalScreenRun };
 });
 
+vi.mock("../src/services/goalScreenWorkflowSubmission", () => ({
+  buildGoalScreenCommand: vi.fn(() => ({ __cannedGoalCommand: true })),
+  startGoalScreenWorkflow: vi.fn(),
+}));
+
+import {
+  buildGoalScreenCommand,
+  startGoalScreenWorkflow,
+} from "../src/services/goalScreenWorkflowSubmission";
+
+const mockedBuild = vi.mocked(buildGoalScreenCommand);
+const mockedStart = vi.mocked(startGoalScreenWorkflow);
+
+const HANDLE = {
+  workflowId: "screen-goal-screen-scheduled-goal_test_trader-income-2026-11-12T00-00-00-000Z",
+  jobId: "goal-screen:scheduled:goal_test_trader:income:2026-11-12T00:00:00.000Z",
+  status: "queued" as const,
+  existing: false,
+  statusUrl: "/api/jobs/history?chainId=goal-screen%3Ascheduled%3Agoal_test_trader%3Aincome%3A2026-11-12T00%3A00%3A00.000Z",
+};
+
 const CHAIN = { serveDelaySeconds: 60, deliverDelaySeconds: 3600 };
 const NOW = "2026-10-24T00:00:00.000Z";
 
@@ -189,9 +210,10 @@ describe("goal bridge deliver suppression (#1236)", () => {
       APP_ENV: "TEST",
       SESSION_STORE: sessionStoreNs,
       SCREENER_AGENT: { idFromName: (n: string) => n, get: () => ({}) },
-      // #2051: goal_workflow is default-ON; these tests pin the
-      // DIRECT deliver path, so they force the flag OFF rather
-      // than follow the new default into the workflow path.
+      // #2051: goal_workflow is default-ON. The chained tests pin
+      // the DIRECT deliver path (chain mode keeps it until S5
+      // #4280); the unchained test pins the workflow submission.
+      // The flag no longer gates either entry (#4279).
       FEATURE_FLAGS: JSON.stringify({ goal_workflow: false }),
     } as unknown as Env;
   });
@@ -229,7 +251,8 @@ describe("goal bridge deliver suppression (#1236)", () => {
     expect(outcome.stageChain).toEqual(CHAIN);
   });
 
-  it("unchained goal: direct deliver passes through; bridge never runs", async () => {
+  it("unchained goal: the workflow submission carries the deliver channels; bridge never runs (#4279: the direct path is retired for unchained runs)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const bridge = vi.fn().mockResolvedValue(undefined);
     const service = makeService(bridge);
     const result = await service.autonomousGoalScreen({
@@ -238,8 +261,13 @@ describe("goal bridge deliver suppression (#1236)", () => {
       pushToSlack: true,
     });
     expect(result.success).toBe(true);
-    expect(executeGoalScreenRun.mock.calls[0][0].deliver).toEqual(["email", "slack"]);
+    expect((result as { data: Record<string, unknown> }).data.status).toBe("queued");
+    expect(executeGoalScreenRun).not.toHaveBeenCalled();
     expect(bridge).not.toHaveBeenCalled();
+    // The deliver channels ride the submission — the engine job's
+    // deliver stage reads them from the goal command.
+    expect(mockedBuild).toHaveBeenCalledTimes(1);
+    expect((mockedBuild.mock.calls[0][0] as Record<string, unknown>).deliverChannels).toEqual(["email", "slack"]);
   });
 
   it("chained goal with no recipients: bridge allowlist is empty (no invented deliveries)", async () => {

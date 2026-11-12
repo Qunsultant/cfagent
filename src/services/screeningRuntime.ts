@@ -60,7 +60,9 @@ import {
 import {
   runGoalDrivenScreenWithLedger,
   type GoalDrivenScreenResult,
+  type GoalScreenProvider,
   type OptionsWorkflowDeps,
+  type StockWorkflowDeps,
 } from "./goalDrivenScreen";
 import type { ScreenerTask, ScreenerTaskLedger } from "./screenerTaskLedger";
 import {
@@ -222,6 +224,12 @@ export async function runProductionGoalScreen(input: {
    *  (production always is); a Pick-only fake fails closed, never
    *  silently. Absent -> the registry path, unchanged. */
   optionsWorkflow?: Omit<OptionsWorkflowDeps, "screener">;
+  /** Issue #4279 ([One engine] #3550 S4): the goal stock leg's
+   *  engine deps (the S3 seam's env + agent). Absent -> the
+   *  registry path, unchanged. */
+  stockWorkflow?: StockWorkflowDeps;
+  environment?: "TEST" | "PROD";
+  provider?: GoalScreenProvider;
 }): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }> {
   const registry = createProductionScreeningRegistry({
     stockScreener: input.stockScreener,
@@ -252,6 +260,9 @@ export async function runProductionGoalScreen(input: {
     baseOptionsFilter: input.baseOptionsFilter,
     now: input.now,
     ...(optionsWorkflow ? { optionsWorkflow } : {}),
+    ...(input.stockWorkflow ? { stockWorkflow: input.stockWorkflow } : {}),
+    ...(input.environment ? { environment: input.environment } : {}),
+    ...(input.provider ? { provider: input.provider } : {}),
   });
 }
 

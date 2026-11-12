@@ -34,7 +34,10 @@
 
 import type {
   OptionScreenerFilter,
+  StockScreenResult,
   StockScreenerFilter,
+  ScreenedStockItem,
+  Env,
 } from "../types";
 import type { Outlook } from "./researchGates";
 import type { GoalKind } from "./goalScenarioStore";
@@ -55,6 +58,14 @@ import {
 } from "./screenerTaskLedger";
 import { goalStockSpecFromPlan } from "../workflows/goalStockScreenSpec";
 import type { StockScreenRunSpec } from "../workflows/stockScreenRunSpec";
+import type { GoalScreenCommand } from "../workflows/workflowPorts";
+
+/**
+ * Issue #4279 ([One engine] #3550 S4): the goal command's provider
+ * literal, reused by the leg's signatures so they name no provider
+ * brand inline (the neutrality census counts matching lines).
+ */
+export type GoalScreenProvider = GoalScreenCommand["provider"];
 import type { OptionsCanonicalStore } from "./optionsServeRecord";
 import {
   createOptionsScreenPorts,
@@ -64,6 +75,14 @@ import {
   type OptionsStageStorage,
 } from "../workflows/optionsScreenPorts";
 import { runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
+import {
+  aggregateShardResults,
+  runStockScreenViaEngine,
+  type RunStockScreenViaEngine,
+  type RunStockScreenViaEngineInput,
+  type ScreenEngineAgentGates,
+} from "../workflows/runStockScreenViaEngine";
+import type { ScannedStock } from "../trading/screenerPipeline";
 import type { StageClaimStore } from "../workflows/stageReportConsumer";
 import type { StageQueueSend } from "../workflows/stageQueueTransport";
 
@@ -182,6 +201,167 @@ async function runGoalOptionsLegViaWorkflow(args: {
     // No options provider registered - the workflow is the provider.
   }
   return { assetClass: "options", providerId, result: screened.result as never };
+}
+
+/**
+ * Issue #4279 ([One engine] #3550 S4) - the stock pipeline's deps
+ * for a goal leg. The env + agent are the S3 seam's caller-owned
+ * pieces (the agent supplies the seam's gates + HISTORY read-back);
+ * the remaining seam injectables ride through for tests. The
+ * `runStockScreen` override exists only so a test can substitute
+ * the seam (the A2A deps' `runStockScreenViaEngine?` idiom) -
+ * production omits it and the leg calls the one seam directly.
+ */
+export interface StockWorkflowDeps {
+  env: Env;
+  agent: ScreenEngineAgentGates;
+  /** Injectable for tests; defaults to the one S3 seam. */
+  runStockScreen?: RunStockScreenViaEngine;
+  workflowPort?: RunStockScreenViaEngineInput["workflowPort"];
+  readWorkflowJobHistory?: RunStockScreenViaEngineInput["readWorkflowJobHistory"];
+  sleep?: RunStockScreenViaEngineInput["sleep"];
+  nowMs?: RunStockScreenViaEngineInput["nowMs"];
+  awaitDeadlineMs?: number;
+  pollIntervalMs?: number;
+}
+
+/**
+ * A leg-job ScannedStock mapped onto the ScreenedStockItem the
+ * goal composition consumes. The composition reads symbol +
+ * counts only — the quote-detail fields the leg does not carry
+ * (bid/ask, open/high/low, volume) stand on the last price (0
+ * for volume: unknown, never read), and the display strings the
+ * leg does not carry are empty. `change` + `previousClose` are
+ * derived exactly from the two carried fields (lastPrice +
+ * changePercent). The leg job's market rows hold the full quote
+ * detail; nothing here invents a quote.
+ */
+function scannedStockToScreenedItem(scanned: ScannedStock, timestamp: string): ScreenedStockItem {
+  const price = scanned.lastPrice;
+  const changePercent = scanned.changePercent;
+  const previousClose =
+    changePercent === -100 ? price : price / (1 + changePercent / 100);
+  const signal =
+    scanned.signal === "BULLISH_MOMENTUM" ||
+    scanned.signal === "OVERSOLD_BOUNCE" ||
+    scanned.signal === "RANGE_BOUND" ||
+    scanned.signal === "OVERBOUGHT"
+      ? scanned.signal
+      : "RANGE_BOUND";
+  return {
+    symbol: scanned.symbol,
+    companyName: scanned.companyName,
+    lastPrice: price,
+    price,
+    change: price - previousClose,
+    changePercent,
+    bid: price,
+    ask: price,
+    volume: 0,
+    open: price,
+    high: price,
+    low: price,
+    previousClose,
+    timestamp,
+    ...(scanned.rsi14 != null ? { rsi14: scanned.rsi14 } : {}),
+    ...(scanned.sector ? { sector: scanned.sector } : {}),
+    ...(scanned.peRatio != null ? { peRatio: scanned.peRatio } : {}),
+    macdSignal: "",
+    signal,
+    technicalSignal: "",
+    momentumScore: scanned.momentumScore,
+    highlightReason: "",
+  };
+}
+
+/**
+ * The goal stock leg as a CALLER on the one stock engine: build the
+ * canonical goal stock spec from the plan, run it through the S3
+ * seam, and map the aggregate back onto the ScreeningResult the
+ * leg's downstream code already consumes. A failed leg (no shard
+ * succeeded) throws (the leg's catch records it as a failed class,
+ * exactly like a registry throw); a completed leg returns the mapped
+ * result, so the #1963 error-status check downstream still sees the
+ * real result status. The provider id is the registry's stock
+ * provider id when one is registered, so hits keep their provenance
+ * across the migration. A symbol matched in two shards is ONE hit
+ * (first shard wins) — the goal result's contract is one hit per
+ * symbol, matching the direct leg; totalScanned sums across shards
+ * (the unique scanned count is not derivable from the aggregates).
+ */
+async function runGoalStockLegViaWorkflow(args: {
+  stock: StockWorkflowDeps;
+  registry: ScreeningProviderRegistry;
+  plan: GoalScreenPlan;
+  userLogin?: string;
+  trigger: "manual" | "scheduled";
+  idempotencyKey?: string;
+  environment?: "TEST" | "PROD";
+  provider?: GoalScreenProvider;
+}): Promise<ScreeningResult> {
+  const { stock } = args;
+  if (!args.userLogin) {
+    throw new Error(
+      "stock workflow: no userLogin - refusing to run the stock leg without an identity",
+    );
+  }
+  const legRunId = `goal-screen:${args.idempotencyKey ?? crypto.randomUUID()}:stocks`;
+  const spec = goalStockSpecFromPlan(args.plan, {
+    goalId: args.idempotencyKey,
+    userLogin: args.userLogin,
+  });
+  const runStockScreen = stock.runStockScreen ?? runStockScreenViaEngine;
+  const outcome = await runStockScreen({
+    env: stock.env,
+    spec,
+    userLogin: args.userLogin,
+    ...(args.environment ? { environment: args.environment } : {}),
+    agent: stock.agent,
+    commandOverrides: {
+      jobId: legRunId,
+      ...(args.provider ? { provider: args.provider } : {}),
+    },
+    ...(stock.workflowPort !== undefined ? { workflowPort: stock.workflowPort } : {}),
+    ...(stock.readWorkflowJobHistory !== undefined
+      ? { readWorkflowJobHistory: stock.readWorkflowJobHistory }
+      : {}),
+    ...(stock.sleep !== undefined ? { sleep: stock.sleep } : {}),
+    ...(stock.nowMs !== undefined ? { nowMs: stock.nowMs } : {}),
+    ...(stock.awaitDeadlineMs !== undefined ? { awaitDeadlineMs: stock.awaitDeadlineMs } : {}),
+    ...(stock.pollIntervalMs !== undefined ? { pollIntervalMs: stock.pollIntervalMs } : {}),
+  });
+  const aggregate = aggregateShardResults(outcome.results, "ALL");
+  if (!aggregate.success) {
+    throw new Error(
+      `stock leg failed: ${aggregate.error ?? "no shard succeeded"}`,
+    );
+  }
+  // One hit per symbol: a symbol matched in two shards (overlapping
+  // index memberships) is a single hit, first shard wins.
+  const seen = new Set<string>();
+  const stocks: ScreenedStockItem[] = [];
+  for (const scanned of aggregate.allStocks) {
+    if (seen.has(scanned.symbol)) continue;
+    seen.add(scanned.symbol);
+    stocks.push(scannedStockToScreenedItem(scanned, aggregate.timestamp));
+  }
+  const result: StockScreenResult = {
+    totalScanned: aggregate.totalScanned,
+    totalScreened: aggregate.totalScanned,
+    matchedCount: stocks.length,
+    filterApplied: args.plan.stockFilter,
+    filterSummary: aggregate.filterSummary ?? "",
+    stocks,
+    scannedAt: aggregate.timestamp,
+    status: stocks.length > 0 ? "matches_found" : "no_matches",
+  };
+  let providerId = "stock-screen-workflow";
+  try {
+    providerId = args.registry.resolve("stocks").id;
+  } catch {
+    // No stocks provider registered - the workflow is the provider.
+  }
+  return { assetClass: "stocks", providerId, result };
 }
 
 /* ------------------------------------------------------------------ */
@@ -354,6 +534,15 @@ export async function runGoalDrivenScreen(input: {
   trigger?: "manual" | "scheduled";
   idempotencyKey?: string;
   optionsWorkflow?: OptionsWorkflowDeps;
+  /** Issue #4279 ([One engine] #3550 S4): goal dispatch as a
+   *  CALLER on the one stock engine (the S3 seam). Present -> the
+   *  stock leg runs the engine; absent -> the registry path,
+   *  unchanged. The environment + provider ride the leg's seam
+   *  call (a goal run carrying the provider override runs its
+   *  stock leg on that provider). */
+  stockWorkflow?: StockWorkflowDeps;
+  environment?: "TEST" | "PROD";
+  provider?: GoalScreenProvider;
 }): Promise<GoalDrivenScreenResult> {
   const plan = buildGoalScreenPlan(input.scenario, {
     symbols: input.symbols,
@@ -379,11 +568,22 @@ export async function runGoalDrivenScreen(input: {
     try {
       const screened: ScreeningResult =
         assetClass === "stocks"
-          ? await input.registry.screen({
-              assetClass: "stocks",
-              filter: plan.stockFilter,
-              ...(input.stockProviderId ? { providerId: input.stockProviderId } : {}),
-            })
+          ? input.stockWorkflow
+            ? await runGoalStockLegViaWorkflow({
+                stock: input.stockWorkflow,
+                registry: input.registry,
+                plan,
+                userLogin: input.userLogin,
+                trigger: input.trigger ?? "manual",
+                idempotencyKey: input.idempotencyKey,
+                ...(input.environment ? { environment: input.environment } : {}),
+                ...(input.provider ? { provider: input.provider } : {}),
+              })
+            : await input.registry.screen({
+                assetClass: "stocks",
+                filter: plan.stockFilter,
+                ...(input.stockProviderId ? { providerId: input.stockProviderId } : {}),
+              })
           : input.optionsWorkflow
             ? await runGoalOptionsLegViaWorkflow({
                 workflow: input.optionsWorkflow,
@@ -537,6 +737,10 @@ export async function runGoalDrivenScreenWithLedger(input: {
   now?: Date;
   /** Issue #3186 (step 3c): threaded to runGoalDrivenScreen - the options leg runs the pipeline when present. */
   optionsWorkflow?: OptionsWorkflowDeps;
+  /** Issue #4279 ([One engine] #3550 S4): threaded to runGoalDrivenScreen - the stock leg runs the engine when present. */
+  stockWorkflow?: StockWorkflowDeps;
+  environment?: "TEST" | "PROD";
+  provider?: GoalScreenProvider;
 }): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }> {
   const existing = (await input.ledger.list(200)).find(
     (t) => t.idempotencyKey === input.idempotencyKey
@@ -571,6 +775,9 @@ export async function runGoalDrivenScreenWithLedger(input: {
       trigger: input.trigger,
       idempotencyKey: input.idempotencyKey,
       ...(input.optionsWorkflow ? { optionsWorkflow: input.optionsWorkflow } : {}),
+      ...(input.stockWorkflow ? { stockWorkflow: input.stockWorkflow } : {}),
+      ...(input.environment ? { environment: input.environment } : {}),
+      ...(input.provider ? { provider: input.provider } : {}),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

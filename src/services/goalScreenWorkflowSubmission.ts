@@ -67,6 +67,9 @@ export interface GoalScreenSubmissionInput {
     from: "etrade";
     reason: string;
   };
+  /** Issue #4279 ([One engine] #3550 S4): caller base filters, carried onto the goal command (see GoalScreenCommand). */
+  baseStockFilter?: import("../types").StockScreenerFilter;
+  baseOptionsFilter?: import("../types").OptionScreenerFilter;
 }
 
 /**
@@ -101,6 +104,8 @@ export function buildGoalScreenCommand(
       ...(input.emailTo ? { emailTo: input.emailTo } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.providerFallback ? { providerFallback: input.providerFallback } : {}),
+      ...(input.baseStockFilter ? { baseStockFilter: input.baseStockFilter } : {}),
+      ...(input.baseOptionsFilter ? { baseOptionsFilter: input.baseOptionsFilter } : {}),
     },
   };
 }

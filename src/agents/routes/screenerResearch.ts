@@ -1573,47 +1573,18 @@ export async function handleScreenerResearchRoutes(
           { status: 400 }
         );
       }
-      // Issue #1996 (#1972 slice 1): opt-in workflow
-      // submission, mirroring the market routes' async
-      // pattern. Every validation above already ran, so a
-      // bad goalKind / symbols / assetClasses / deliver
-      // 400s BEFORE any submission attempt. A successful
-      // start answers 202 with the run handle; a null start
-      // (no workflow binding, no projection store, start
-      // error) falls through to the synchronous direct path
-      // unchanged — the direct path stays byte-identical
-      // when async is not requested, and is the fallback
-      // when it is.
-      // Issue #1997: the opt-in path above is flag-gated.
-      // Flag OFF → the async request falls through to direct
-      // unchanged (the #1996 fallback behavior is preserved
-      // only behind the flag). Flag ON → the workflow is
-      // REQUIRED: a failed start answers a coded 500, never a
-      // silent fallback to direct.
-      const goalWorkflowOn =
-        body.async === true &&
-        (await (
-          await import("../../features/createFeatureFlagPort")
-        ).createFeatureFlagPort(ctx.env).isEnabled("goal_workflow"));
-      // Issue #2186 (slice 10): monetization ON never runs a free
-      // screen. The workflow path below routes through PaymentWorkflow;
-      // the synchronous direct path cannot carry a payment workflow, so
-      // when the workflow path is inactive the run is refused with 402
-      // instead of silently running free. Flag OFF → unchanged.
+      // Issue #4279 (#3550 S4): the workflow path is now THE path —
+      // the goal_workflow flag gate is retired for this entry, and
+      // the synchronous direct path below is gone. Every manual goal
+      // screen answers the 202 workflow acceptance (the panel
+      // already sends async: true and tracks the staged run); a
+      // failed start answers the coded 500, never a silent
+      // fallback to direct. Monetization ON still routes through
+      // PaymentWorkflow inside the workflow path below.
       const monetizationOn = await (
         await import("../../features/createFeatureFlagPort")
       ).createFeatureFlagPort(ctx.env).isEnabled("monetization");
-      if (monetizationOn && !goalWorkflowOn) {
-        return Response.json(
-          {
-            error: "monetization_enabled_workflow_required",
-            detail:
-              "Monetization is on: goal screens must go through the payment workflow via async workflow submission (async: true with the goal_workflow flag) or the paid submission route.",
-          },
-          { status: 402 },
-        );
-      }
-      if (goalWorkflowOn) {
+      {
         const { buildGoalScreenCommand, startGoalScreenWorkflow } =
           await import("../../services/goalScreenWorkflowSubmission");
         const { workflowAcceptedResponse, workflowTenantId } =
@@ -1844,39 +1815,6 @@ export async function handleScreenerResearchRoutes(
           );
         }
       }
-      const out = await runtime.executeGoalScreenRun({
-        agent: ctx.getScreenerAgent(userLogin),
-        orm,
-        env: ctx.env,
-        userLogin,
-        scenario,
-        scenarioSource,
-        trigger: "manual",
-        idempotencyKey: `goal-screen:manual:${userLogin}:${scenario.goalKind}:${new Date().toISOString()}`,
-        ...(body.environment === "TEST" || body.environment === "PROD"
-          ? { environment: body.environment }
-          : {}),
-        ...(body.assetClasses
-          ? { assetClasses: body.assetClasses as ("stocks" | "options")[] }
-          : {}),
-        ...(body.symbols ? { symbols: body.symbols } : {}),
-        ...(body.deliver ? { deliver: body.deliver as ("slack" | "email" | "webhook" | "voice")[] } : {}),
-        ...(body.emailTo ? { emailTo: body.emailTo } : {}),
-        actor: sessionId,
-      });
-      const payload = {
-        success: true,
-        executed: out.executed,
-        taskId: out.taskId,
-        taskStatus: out.taskStatus,
-        scenarioSource,
-        ...(out.result ? { result: out.result } : {}),
-        ...(out.delivery ? { delivery: out.delivery } : {}),
-      };
-      // A run that failed on every requested asset class is a failed
-      // screen: the REST screen idiom answers 502, with the labeled
-      // result in the body — never a bare error, never a fake success.
-      return Response.json(payload, { status: out.result?.status === "failed" ? 502 : 200 });
     }
 
     // Consolidation C1 (issue #1201, epic #1151 R1): backtest-on-

@@ -222,7 +222,8 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
     expect(failedPayload.code).toBe("start_failed");
   });
 
-  it("without the async flag the direct path runs and no workflow start is attempted", async () => {
+  it("without the async flag the workflow still runs and the direct path never runs (#4279: async is no longer the gate)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const agent = {
       runGoalScreen: vi.fn(async () => ({
         task: { id: "task-9", status: "completed" },
@@ -239,9 +240,9 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
       ctx,
     );
     expect(res).not.toBeNull();
-    expect(res!.status).toBe(200);
-    expect(mockedStart).not.toHaveBeenCalled();
-    expect(agent.runGoalScreen).toHaveBeenCalledTimes(1);
+    expect(res!.status).toBe(202);
+    expect(mockedStart).toHaveBeenCalledTimes(1);
+    expect(agent.runGoalScreen).not.toHaveBeenCalled();
   });
 });
 

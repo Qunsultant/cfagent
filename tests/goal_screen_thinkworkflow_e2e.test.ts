@@ -46,6 +46,27 @@ import { MockSqlStorage } from "./mock-sql";
 import type { GoalDrivenScreenResult } from "../src/services/goalDrivenScreen";
 import { STOCK_SCREENING_PROVIDER_ID } from "../src/trading/screeningProvider";
 
+// Issue #4279 (#3550 S4): the route test below pins the workflow
+// submission, so only the start is mocked — the real command
+// builder stays, because the orchestration test above builds its
+// command through it.
+vi.mock("../src/services/goalScreenWorkflowSubmission", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/services/goalScreenWorkflowSubmission")>();
+  return { ...original, startGoalScreenWorkflow: vi.fn() };
+});
+
+import { startGoalScreenWorkflow } from "../src/services/goalScreenWorkflowSubmission";
+
+const mockedStart = vi.mocked(startGoalScreenWorkflow);
+
+const HANDLE = {
+  workflowId: "screen-goal-screen-manual-alice-income-2026-11-12T00-00-00-000Z",
+  jobId: "goal-screen:manual:alice:income:2026-11-12T00:00:00.000Z",
+  status: "queued" as const,
+  existing: false,
+  statusUrl: "/api/jobs/history?chainId=goal-screen%3Amanual%3Aalice%3Aincome%3A2026-11-12T00%3A00%3A00.000Z",
+};
+
 function sampleGoalResult(overrides: Partial<GoalDrivenScreenResult> = {}): GoalDrivenScreenResult {
   return {
     goalKind: "income",
@@ -412,7 +433,8 @@ describe("Goal Screen ThinkWorkflow & Reports End-to-End (#2625)", () => {
     expect(foreignResp!.status).toBe(404);
   });
 
-  it("handles direct goal screen submission producing result with all 3 artifact keys", async () => {
+  it("submits a goal screen from the route and answers 202 with the run handle (#4279: the direct submission is retired; the engine path produces the artifacts — see the orchestration test above)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const blobStorage = new InMemoryBlobStorage();
     const env = { REPORTS_BUCKET: undefined };
     const sql = new MockSqlStorage();
@@ -462,15 +484,14 @@ describe("Goal Screen ThinkWorkflow & Reports End-to-End (#2625)", () => {
     );
 
     expect(resp).not.toBeNull();
-    expect(resp!.status).toBe(200);
+    expect(resp!.status).toBe(202);
+    expect(mockedStart).toHaveBeenCalledTimes(1);
+    // The direct agent is never consulted: the artifacts are
+    // produced by the engine job's analysis stage, not the route.
+    expect(agent.runGoalScreen).not.toHaveBeenCalled();
     const body = (await resp!.json()) as Record<string, any>;
-    expect(body.success).toBe(true);
-    expect(body.result).toBeDefined();
-    expect(body.result.pdfKey).toMatch(/^goal_screen:pdf:/);
-    expect(body.result.xlsxKey).toMatch(/^goal_screen:xlsx:/);
-    expect(body.result.csvKey).toMatch(/^goal_screen:csv:/);
-    expect(blobStorage.has(body.result.pdfKey)).toBe(true);
-    expect(blobStorage.has(body.result.xlsxKey)).toBe(true);
-    expect(blobStorage.has(body.result.csvKey)).toBe(true);
+    expect(body.workflowId).toBe(HANDLE.workflowId);
+    expect(body.jobId).toBe(HANDLE.jobId);
+    expect(body.result).toBeUndefined();
   });
 });

@@ -19,7 +19,7 @@
  *   (workflow-residency) stores; host surfaces must use a
  *   D1-backed control, never the host control.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
 import { InMemoryMessagingAdapter } from "../src/messaging/inMemoryMessagingAdapter";
@@ -403,6 +403,45 @@ describe("goal-leg dispatch (#4192)", () => {
     expect(c.childRunIds).toEqual([]);
     expect(h.parentStored).toHaveLength(1);
     expect(h.parentStored[0]?.goalScreen).toBe(true);
+  });
+
+  it("the default goal runner is the engine method, never the direct runGoalScreen (#4279)", async () => {
+    const h = await makeCutoverHarness();
+    const engineSpy = vi.spyOn(h.agent, "runGoalScreenOnEngine").mockResolvedValue({
+      task: { id: "goal-task-4279" },
+      executed: true,
+      result: {
+        scenario: { goalKind: "growth", direction: "long" },
+        success: true,
+        counts: {
+          stocksScanned: 1,
+          stocksMatched: 1,
+          optionsUnderlyingsScanned: 0,
+          optionsContractsMatched: 0,
+          hits: 0,
+        },
+        opportunities: [],
+        allStocks: [],
+      },
+    } as never);
+    const directSpy = vi.spyOn(h.agent, "runGoalScreen").mockResolvedValue({
+      task: { id: "goal-task-direct" },
+      executed: true,
+    } as never);
+    const command = marketCommand({
+      jobId: "goal-4279",
+      shards: [{ shardId: "s0", symbols: [listing("AAPL")] }],
+      goalScreen: {
+        scenario: { goalKind: "growth", direction: "long" } as any,
+        scenarioSource: "built",
+        symbols: ["AAPL"],
+      },
+    });
+    const c = await runScreenerScreenOnEngine(fakeStep, dispatchDeps(h), command);
+    expect(c.lifecycle).toBe("ReportGenerated");
+    expect(engineSpy).toHaveBeenCalledTimes(1);
+    expect(directSpy).not.toHaveBeenCalled();
+    expect(h.stored).toHaveLength(1);
   });
 });
 
