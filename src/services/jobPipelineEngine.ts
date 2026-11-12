@@ -166,7 +166,9 @@ import {
 } from "../workflows/stageRunnerPlan";
 import {
   OPTIONS_ADDRESSABLE_STAGES,
+  STRATEGY_ADDRESSABLE_STAGES,
   type OptionsPipelineStage,
+  type StrategyPipelineStage,
 } from "../workflows/stageRuntimeIds";
 import type { PipelineStage } from "../types";
 
@@ -492,25 +494,46 @@ export function optionsVocabularyStageForNodeKind(kind: string): OptionsPipeline
 }
 
 /**
- * A stage addressable by (runId, stageId): a catalog stage or an
- * options execution stage. The seven *ByVocabulary operations take
- * this union; the (jobId, nodePath) twins they delegate to still
- * take node paths, so their meanings are unchanged.
+ * Issue #4272 (#3552 S2) — the strategy vocabulary in the engine:
+ * the strategy job's 8 execution stages (STRATEGY_ADDRESSABLE_STAGES,
+ * pinned by #4272) name themselves, exactly as the options job's do
+ * (#4061). No second list: the strategy vocabulary IS the #4067 pin
+ * under the strategy family's name (the strategy pipeline is the
+ * eight-stage options pipeline over strategy ports, #4271), so the
+ * pin stays the single source of truth. A strategy job node's kind
+ * IS its vocabulary stage, so the kind names the stage by identity.
  */
-export type VocabularyStage = StageName | OptionsPipelineStage;
+export function strategyVocabularyStageForNodeKind(kind: string): StrategyPipelineStage | null {
+  return (STRATEGY_ADDRESSABLE_STAGES as readonly string[]).includes(kind)
+    ? (kind as StrategyPipelineStage)
+    : null;
+}
+
+/**
+ * A stage addressable by (runId, stageId): a catalog stage, an
+ * options execution stage, or a strategy execution stage. The seven
+ * *ByVocabulary operations take this union; the (jobId, nodePath)
+ * twins they delegate to still take node paths, so their meanings
+ * are unchanged.
+ */
+export type VocabularyStage = StageName | OptionsPipelineStage | StrategyPipelineStage;
 
 /**
  * Resolve a vocabulary stage of a job definition to its node
  * path — the (runId, stageId) address's node half. A node claims
- * a stage under either naming rule: its kind maps to the catalog
- * stage (#3945), or its kind IS the options stage (#4061). One
- * node matching both rules is one match, not two — the shared
- * "deliver" id resolves once. Exactly one node may claim the
- * stage: none refuses `stage_vocabulary_unknown`, two or more
- * refuse `stage_vocabulary_ambiguous` (a stage split across nodes
- * is not one addressable stage). The walk is pre-order, root first
- * — a root whose kind is a vocabulary stage (the chain's feed
- * root) resolves to "".
+ * a stage under any naming rule: its kind maps to the catalog
+ * stage (#3945), its kind IS the options stage (#4061), or its
+ * kind IS the strategy stage (#4272 — the same 8 kinds, so a
+ * strategy job's node claims its stage under the strategy rule
+ * too). One node matching several rules is one match, not
+ * several — the shared "deliver" id resolves once, and a node
+ * whose kind is both an options and a strategy stage resolves
+ * once. Exactly one node may claim the stage: none refuses
+ * `stage_vocabulary_unknown`, two or more refuse
+ * `stage_vocabulary_ambiguous` (a stage split across nodes is not
+ * one addressable stage). The walk is pre-order, root first — a
+ * root whose kind is a vocabulary stage (the chain's feed root)
+ * resolves to "".
  *
  * Shared kind name, documented: the J-pipeline kind "enrich" IS
  * the gather stage, and the options enrich stage carries that
@@ -526,7 +549,8 @@ export function vocabularyStageNodePath(
   const walk = (node: JobNodeConfig, path: string): void => {
     if (
       vocabularyStageForNodeKind(node.kind) === stage ||
-      optionsVocabularyStageForNodeKind(node.kind) === stage
+      optionsVocabularyStageForNodeKind(node.kind) === stage ||
+      strategyVocabularyStageForNodeKind(node.kind) === stage
     )
       matches.push(path);
     const children = node.children ?? [];
