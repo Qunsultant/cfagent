@@ -13,6 +13,46 @@ vi.mock("../src/services/providerConnections", async (importOriginal) => {
     }),
   };
 });
+// Issue #4278: the monolithic scheduled screen runs through the one
+// engine seam (runStockScreenViaEngine), not the agent's runScreen.
+// These tests drive the service through its mocked ScreenerAgent
+// stub, so the seam is mocked to delegate to that stub: it flattens
+// the seam input back into the runScreen request the stub expects
+// and returns the stub's result as the engine run's one shard. The
+// service-level assertions (request shape, failure surfacing, audit,
+// broadcast) then pin the service's handling, not the seam — the
+// seam itself is pinned in tests/stock_entry_routing_4278.test.ts.
+vi.mock("../src/workflows/runStockScreenViaEngine", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("../src/workflows/runStockScreenViaEngine")>();
+  return {
+    ...orig,
+    runStockScreenViaEngine: async (input: any) => {
+      const flat = {
+        trigger: input.spec.trigger,
+        sector: input.commandOverrides?.sector,
+        universe: input.spec.universe,
+        maxSymbols: input.commandOverrides?.maxSymbols,
+        filters: input.spec.filters,
+        userLogin: input.userLogin,
+        environment: input.environment,
+        portfolioContext: input.portfolioContext,
+        provider: input.commandOverrides?.provider,
+        broker: input.commandOverrides?.broker,
+        ...(input.commandOverrides?.mode
+          ? { mode: input.commandOverrides.mode, modeSource: input.commandOverrides.modeSource }
+          : {}),
+      };
+      const result = await input.agent.runScreen(flat);
+      return {
+        results: [result],
+        collation: null,
+        jobId: input.spec?.jobId ?? "screener:scheduled:test",
+        workflowId: "wf-1",
+      };
+    },
+  };
+});
+
 
 import { makeFakeSessionStore } from "./fake-session-store";
 import { storeAccessTokens } from "../src/security/etradeOAuth";

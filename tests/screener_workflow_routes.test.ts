@@ -2,10 +2,15 @@
  * Issue #1737 — route async paths: opt-in `async` starts a
  * workflow and returns 202 without awaiting the scan; the
  * default (no flag) and any start failure fall back to the
- * synchronous path byte-unchanged. Premium's async branch
- * sits behind the payment gate (handleGatedEndpoint) and is
- * not route-testable here; it uses the same helper + 202
- * shape these tests pin.
+ * synchronous path byte-unchanged. Issue #4278: that sync
+ * path runs through the one engine seam (runStockScreenViaEngine),
+ * not the direct agent call — so the sync tests below inject
+ * the seam fake on the ctx, and a SUCCESS sync result is no
+ * longer re-persisted/delivered by the route (the workflow's
+ * store/deliver steps own it). Premium's async branch sits
+ * behind the payment gate (handleGatedEndpoint) and is not
+ * route-testable here; it uses the same helper + 202 shape
+ * these tests pin.
  */
 import { describe, expect, it } from "vitest";
 import { executeEtradeScreen } from "../src/agents/routes/etradeBrokerScreen";
@@ -35,6 +40,14 @@ const throwingAgent = {
     throw new Error("sync path must not run on the async branch");
   },
 } as never;
+
+/** Issue #4278: the sync path's engine seam, faked — the route trusts it to have stored/delivered the success result. */
+const seamFake = async () => ({
+  results: [cannedResult()],
+  collation: null,
+  jobId: "screener:manual:TECH:2026-10-26T12:00:00.000Z",
+  workflowId: "wf-1",
+});
 
 function cannedResult() {
   return {
@@ -82,7 +95,7 @@ describe("etrade screen async path", () => {
     expect(audits.map((a) => a.type)).toContain("etrade.screen_enqueued");
   });
 
-  it("async flag without bindings falls back to sync (never crashes)", async () => {
+  it("async flag without bindings runs the sync branch through the engine seam (never crashes)", async () => {
     const audits: Array<{ type: string }> = [];
     const persisted: unknown[] = [];
     const bridged: unknown[] = [];
@@ -98,8 +111,11 @@ describe("etrade screen async path", () => {
       scheduleScreenerFollowups: async (o: unknown) => {
         bridged.push(o);
       },
+      // Issue #4278: the sync branch runs through the seam now.
+      runStockScreenViaEngine: seamFake,
     } as never;
-    const agent = { runScreen: async () => cannedResult() } as never;
+    // The agent is the seam's gates + read-back; the fake seam ignores it.
+    const agent = {} as never;
     const res = await executeEtradeScreen({
       ctx,
       sessionId: "s1",
@@ -112,8 +128,11 @@ describe("etrade screen async path", () => {
     });
     expect(res.status).toBe(200);
     expect(audits.map((a) => a.type)).toContain("etrade.screened");
-    expect(persisted).toHaveLength(1);
-    expect(bridged).toHaveLength(1);
+    // Issue #4278: the SUCCESS sync result is stored + delivered
+    // by the workflow's own steps — the route persists/delivers
+    // nothing for it, so both finalizers stay empty here.
+    expect(persisted).toHaveLength(0);
+    expect(bridged).toHaveLength(0);
   });
 
   it("no flag keeps the synchronous path", async () => {
@@ -126,8 +145,11 @@ describe("etrade screen async path", () => {
       },
       persistScreenerReportCanonical: async () => {},
       scheduleScreenerFollowups: async () => {},
+      // Issue #4278: the sync path runs through the seam now.
+      runStockScreenViaEngine: seamFake,
     } as never;
-    const agent = { runScreen: async () => cannedResult() } as never;
+    // The agent is the seam's gates + read-back; the fake seam ignores it.
+    const agent = {} as never;
     const res = await executeEtradeScreen({
       ctx,
       sessionId: "s1",
@@ -158,6 +180,8 @@ describe("market-data screen async path", () => {
         persistScreenerReportCanonical: async (r: unknown) => {
           persisted.push(r);
         },
+        // Issue #4278: the sync path runs through the seam now.
+        runStockScreenViaEngine: seamFake,
       } as never,
     };
   }
@@ -179,13 +203,15 @@ describe("market-data screen async path", () => {
   it("no flag keeps the synchronous path", async () => {
     const { audits, persisted, ctx } = marketDataCtx(
       { SCREENER_WORKFLOW: fakeBinding(), AGENT_DB: {} },
-      { runScreen: async () => cannedResult() },
+      {},
     );
     const url = new URL("https://x/market-data/screen?universe=TECH");
     const req = new Request(url, { headers: { "x-user-login": "alice" } });
     const res = await handleMarketDataCompareScreenRoutes(req, url, "/market-data/screen", "s1", ctx);
     expect(res?.status).toBe(200);
     expect(audits.map((a) => a.type)).toContain("market_data.screener.executed");
-    expect(persisted).toHaveLength(1);
+    // Issue #4278: the SUCCESS sync result is stored by the
+    // workflow's own store step — the route persists nothing.
+    expect(persisted).toHaveLength(0);
   });
 });

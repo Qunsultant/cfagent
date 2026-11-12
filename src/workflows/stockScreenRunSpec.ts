@@ -64,7 +64,7 @@ export interface StockScreenDelivery {
   generatePdf?: boolean;
 }
 
-export type StockScreenSource = "etrade" | "market-data" | "goal" | "nlq" | "mesh" | "research";
+export type StockScreenSource = "etrade" | "market-data" | "goal" | "nlq" | "mesh" | "research" | "premium" | "scheduled";
 
 /**
  * Issue #2908 (G1 under #2764) — the run's trigger vocabulary.

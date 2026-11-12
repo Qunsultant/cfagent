@@ -15,13 +15,12 @@ import type { SocialBriefStore } from "../social/briefStore";
 import {
   buildParentScreenCommand,
   shardsForUniverse,
-  startStockScreenWorkflowOrNull,
 } from "../../workflows/screenExecutionBroker";
-import { planStockScreenRun } from "../../workflows/stockScreenPlanner";
 import { createWorkflowPorts } from "../../workflows/createWorkflowPorts";
 import { workflowTenantId } from "../../workflows/screenerWorkflowRoutes";
 import {
   assertWorkflowJobCommand,
+  WorkflowError,
   workflowStatusUrl,
   type WorkflowCollation,
   type WorkflowJobCommand,
@@ -100,7 +99,9 @@ export interface NlqPortsContext {
    * Issue #2369 test seam: workflow port override (a
    * binding-seam fake). Absent → createWorkflowPorts(env)
    * per call; explicit null → the workflow path is
-   * unavailable and the port keeps the legacy direct call.
+   * unavailable and the port refuses coded (issue #4278 —
+   * the legacy direct call is gone; a screen is a workflow
+   * run or it does not run).
    */
   workflowPort?: WorkflowPort | null;
   /**
@@ -290,43 +291,15 @@ export function nlqStockScreenPort(ctx: NlqPortsContext): NLQStockScreenPort {
       if (await chatMonetizationOn(ctx)) {
         return runChatPaidScreen(ctx, { filters, userLogin: login, universe });
       }
-      const viaWorkflow = await runChatScreenViaWorkflow(ctx, { filters, userLogin: login, universe });
-      if (viaWorkflow) return viaWorkflow;
-      // Issue #2867: the direct fallback is planned through the
-      // one planner — same values (universe from the filters,
-      // else the planner default; trigger manual), derived once.
-      const fallbackPlan = planStockScreenRun(
-        { trigger: "manual", filters, universe },
-        new Date().toISOString(),
-      );
-      // Issue #2914 (G7): the fallback runs through spec +
-      // broker + planner, not around them. The spec carries
-      // source "nlq" and asyncRequested false, so the broker
-      // returns null — its sync-branch routing decision, per
-      // its own contract — and only then does the caller run
-      // sync. A future async NLQ path would route through
-      // this same consult instead of growing a second start.
-      await startStockScreenWorkflowOrNull({
-        env: ctx.env,
-        spec: {
-          source: "nlq",
-          trigger: "manual",
-          deliver: false,
-          filters,
-          universe: fallbackPlan.universe,
-          asyncRequested: false,
-          delivery: {},
-          userLogin: login,
-        },
-        userLogin: login,
-      });
-      return ctx.getScreenerAgent(userLogin).runScreen({
-        trigger: "manual",
-        filters,
-        universe: fallbackPlan.universe,
-        userLogin,
-        maxItems: 10,
-      });
+      // Issue #4278: the direct fallback is gone. A screen is a
+      // workflow run or it does not run: runChatScreenViaWorkflow
+      // throws (coded) when the port is unavailable or the start
+      // fails, and a started run always returns its assembled
+      // result — including an honest tracked failure on
+      // deadline/terminal — never a silent second direct run.
+      // (The #2867 planner fallback and the #2914 G7 broker
+      // consult lived here only to reach that direct call.)
+      return runChatScreenViaWorkflow(ctx, { filters, userLogin: login, universe });
     },
   };
 }
@@ -452,10 +425,18 @@ async function recordChatScreenStartHop(
 async function runChatScreenViaWorkflow(
   ctx: NlqPortsContext,
   req: { filters: StockScreenerFilter; userLogin: string; universe?: string },
-): Promise<NLQStockScreenRunResult | null> {
+): Promise<NLQStockScreenRunResult> {
   const ports: WorkflowPort | null =
     ctx.workflowPort !== undefined ? ctx.workflowPort : createWorkflowPorts(ctx.env);
-  if (!ports) return null;
+  // Issue #4278: no port, no run — the legacy direct fallback
+  // this null return fed is gone, so the refusal is coded
+  // instead of a null the caller would have to interpret.
+  if (!ports) {
+    throw new WorkflowError(
+      "unavailable",
+      "NLQ stock screen unavailable: the workflow port could not be built (SCREENER_WORKFLOW binding or AGENT_DB projection store unbound). No direct fallback run was started — a screen is a workflow run or it does not run.",
+    );
+  }
 
   const { command, jobId, tenantId, shards, startedAtIso } = buildChatScreenCommand(ctx, req);
   const nowMs = ctx.nowMs ?? (() => Date.now());
@@ -465,10 +446,13 @@ async function runChatScreenViaWorkflow(
     handle = await ports.start(assertWorkflowJobCommand(command));
   } catch (err) {
     structuredLog.warn("nlqPorts.chat_screen_workflow_start_failed", {
-      message: "[nlq-stock-screen] Workflow start failed; falling back to the direct screen:",
+      message: "[nlq-stock-screen] Workflow start failed; no direct fallback run was started:",
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    throw new WorkflowError(
+      "start_failed",
+      `NLQ stock screen workflow start failed: ${err instanceof Error ? err.message : String(err)}. No direct fallback run was started.`,
+    );
   }
 
   // Issue #2428: the run exists — record its start hop on the

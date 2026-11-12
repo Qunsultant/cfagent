@@ -105,6 +105,14 @@ export interface EtradeBrokerRouteContext {
   traceId?: string | null;
   /** Screener agent (owner: OrchestratorAgent - was `this.getScreenerAgent()`). */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
+  /**
+   * Issue #4278: the one engine seam (runStockScreenViaEngine)
+   * this route's sync screen runs through. Optional: absent in
+   * production construction, the route calls the real seam;
+   * tests inject a fake. The field exists only so a test can
+   * substitute the seam — it never selects a different engine.
+   */
+  runStockScreenViaEngine?: import("../../workflows/runStockScreenViaEngine").RunStockScreenViaEngine;
   /** Canonical-copy screener persistence (owner: OrchestratorAgent - was `this.persistScreenerReportCanonical`). */
   persistScreenerReportCanonical(result: {
     timestamp: string;

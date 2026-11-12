@@ -23,6 +23,7 @@ import { isPortfolioContextEnabled } from "../../services/screeningFlags";
 import type { ETradeService } from "../../services/etrade";
 import { workflowAcceptedResponse } from "../../workflows/screenerWorkflowRoutes";
 import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionBroker";
+import { runStockScreenViaEngine } from "../../workflows/runStockScreenViaEngine";
 import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { publishManualScreenerRun } from "./etradeBroker";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
@@ -218,7 +219,8 @@ export async function executeEtradeScreen(args: {
   const asyncRequested = spec.asyncRequested;
   // Issue #17: the portfolio-context flag is read here (orchestrator
   // storage owns mas_settings; the screener agent cannot read it) and
-  // rides the run request — runSharded spreads it onto every shard.
+  // rides the run request — the engine seam carries it onto the
+  // command, so every shard sees it (issue #4278).
   const portfolioContext = isPortfolioContextEnabled(ctx.readSettingRaw);
   // Issue #2827: async path via ScreenExecutionBroker. The
   // workflow owns store + deliver per shard, so nothing is
@@ -246,12 +248,26 @@ export async function executeEtradeScreen(args: {
     }
   }
   if (universe === "ALL") {
-    const shards = await agent.runSharded({ trigger: "manual", filters: validatedFilters, userLogin, environment: requestedEnv, portfolioContext });
-    // Issue #2861: persist-then-deliver, unified with the single-run
-    // path below — previously this block delivered every shard
-    // before persisting any of them.
+    // Issue #4278: the sharded sync screen runs through the one
+    // engine seam (was agent.runSharded). The workflow's own
+    // store + deliver steps own every SUCCESS shard — persisting
+    // or delivering one here would double it (the workflow
+    // delivers under deliveryId `workflow:<jobId>:<shardId>`,
+    // this route under `manual:<timestamp>:<universe>`, two
+    // different suppression keys). A FAILED shard never reached
+    // the workflow's store step, so it keeps the #2861
+    // persist-then-deliver finalizer, criteria stamped as before.
+    const { results: shards } = await (ctx.runStockScreenViaEngine ?? runStockScreenViaEngine)({
+      env: ctx.env,
+      spec,
+      userLogin,
+      environment: requestedEnv,
+      portfolioContext,
+      readSettingRaw: ctx.readSettingRaw,
+      agent,
+    });
     await persistThenDeliverAll({
-      results: shards,
+      results: shards.filter((r) => !r.success),
       // Issue #2863: record the run's criteria with each shard's
       // canonical copy, so future replays can show them.
       persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) }),
@@ -293,18 +309,20 @@ export async function executeEtradeScreen(args: {
   // result), persist-then-deliver the failure before propagating.
   let result;
   try {
-    result = await agent.runScreen({
-      trigger: "manual",
-      filters: validatedFilters,
-      universe: universe as any,
+    // Issue #4278: the sync screen runs through the one engine
+    // seam (was agent.runScreen) — same spec, same agent for the
+    // gates + read-back, same throw contract below (429s, quota,
+    // fabricate + persist + deliver + rethrow on a throw).
+    const outcome = await (ctx.runStockScreenViaEngine ?? runStockScreenViaEngine)({
+      env: ctx.env,
+      spec,
       userLogin,
-      // The screener runs in its own Durable Object, so it cannot infer the
-      // environment selected on this orchestrator request. Carry the same
-      // authenticated account context into the shared manual/scheduled
-      // screening pipeline.
       environment: requestedEnv,
       portfolioContext,
+      readSettingRaw: ctx.readSettingRaw,
+      agent,
     });
+    result = outcome.results[0];
   } catch (screenErr) {
     const error = screenErr instanceof Error ? screenErr.message : String(screenErr);
     // Issue #832: "already running" is not a failure — return 429, don't spam Slack.
@@ -367,18 +385,19 @@ export async function executeEtradeScreen(args: {
     count: result.allStocks.length,
     success: result.success,
   });
-  // Issue #307/#308: store the canonical report copy (one row per
-  // generation) so manual screens are searchable like scheduled ones.
-  // Issue #911: pass userLogin so the report is stored under the
-  // correct user scope (not "default").
-  // Issue #2861: same persist-then-deliver finalizer as the
-  // sharded path above; order unchanged here, now pinned.
-  await persistThenDeliverAll({
-    results: [result],
-    persist: persistCanonical,
-    deliver: deliverResult,
-  });
+  // Issue #4278: a SUCCESS result was already stored + delivered
+  // by the workflow's own store/deliver steps — persisting or
+  // delivering it here would double it (see the ALL branch
+  // above). A FAILED result never reached those steps, so it
+  // keeps the #307/#308 + #2861 persist-then-deliver finalizer
+  // (canonical copy, correct user scope per #911), and only then
+  // answers 502.
   if (!result.success) {
+    await persistThenDeliverAll({
+      results: [result],
+      persist: persistCanonical,
+      deliver: deliverResult,
+    });
     return Response.json({ error: result.error || "E*TRADE unavailable" }, { status: 502 });
   }
   return Response.json({

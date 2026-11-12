@@ -110,6 +110,38 @@ const screenerMocks = vi.hoisted(() => {
   return { fns, persist };
 });
 
+// Issue #4278: the screen runs through the one engine seam, not the
+// agent's runScreen. The seam fake delegates to the stub agent's
+// runScreen: it flattens the seam input back into the runScreen
+// request (provider/sector ride the spec on the routes, the
+// overrides on the scheduled path) and returns the stub's result
+// as the engine run's one shard. The seam itself is pinned in
+// tests/stock_entry_routing_4278.test.ts.
+const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input: any) => {
+  const flat = {
+    trigger: input.spec.trigger,
+    sector: input.commandOverrides?.sector ?? input.spec.filters?.sector,
+    universe: input.spec.universe,
+    maxSymbols: input.commandOverrides?.maxSymbols,
+    filters: input.spec.filters,
+    userLogin: input.userLogin,
+    environment: input.environment,
+    portfolioContext: input.portfolioContext,
+    provider: input.commandOverrides?.provider ?? input.spec.provider,
+    broker: input.commandOverrides?.broker,
+    ...(input.commandOverrides?.mode
+      ? { mode: input.commandOverrides.mode, modeSource: input.commandOverrides.modeSource }
+      : {}),
+  };
+  const result = await runScreen(flat);
+  return {
+    results: [result],
+    collation: null,
+    jobId: input.spec?.jobId ?? "test-job",
+    workflowId: "wf-1",
+  };
+};
+
 import {
   handleMarketDataQuoteResearchRoutes,
   handleMarketDataCompareScreenRoutes,
@@ -129,6 +161,7 @@ const baseCtx = (overrides: Partial<MarketDataResearchRouteContext> = {}): Marke
     env: { MARKER: "env" } as any,
     audit: vi.fn(),
     getScreenerAgent: () => ({ runScreen: screenerMocks.fns.runScreen, runSharded: screenerMocks.fns.runSharded }),
+    runStockScreenViaEngine: delegateSeamFake(screenerMocks.fns.runScreen),
     persistScreenerReportCanonical: screenerMocks.persist,
     ...overrides,
   }) as unknown as MarketDataResearchRouteContext;
@@ -292,14 +325,13 @@ describe("market-data research handler behavior (extraction #377)", () => {
     expect(body.stocks).toEqual([{ symbol: "NVDA" }]);
     expect(body.results).toEqual([{ symbol: "NVDA" }]);
     // Issue #1007: the run goes through the one pipeline — ScreenerAgent
-    // with provider "yahoo" and the validated filters — and the run is
-    // stored as a canonical report (the seam the old engine never had).
+    // with provider "yahoo" and the validated filters. Issue #4278: the
+    // canonical copy is stored by the workflow's own store step, not by
+    // the route — a SUCCESS run skips the route's persist finalizer.
     expect(screenerMocks.fns.runScreen).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "yahoo", trigger: "manual", filters })
     );
-    expect(screenerMocks.persist).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "yahoo", success: true })
-    );
+    expect(screenerMocks.persist).not.toHaveBeenCalled();
     expect(ctx.audit).toHaveBeenCalledWith(
       "market_data.screener.executed",
       "research",

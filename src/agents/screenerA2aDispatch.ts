@@ -34,6 +34,13 @@ import type { Env } from "../types";
 import type { OptionScreenerFilter, StockScreenerFilter } from "../types";
 import type { ScreeningProviderAssetClass } from "../trading";
 import type { ScreenerRunRequest, ScreenerRunResult } from "./screener-agent";
+import {
+  aggregateShardResults,
+  runStockScreenViaEngine,
+  type RunStockScreenViaEngine,
+  type ScreenEngineAgentGates,
+} from "../workflows/runStockScreenViaEngine";
+import type { StockScreenRunSpec } from "../workflows/stockScreenRunSpec";
 import type { ScreenerTask } from "../services/screenerTaskLedger";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
 import type { GoalDrivenScreenResult } from "../services/goalDrivenScreen";
@@ -110,7 +117,16 @@ export interface ScreenerGoalScreenRequest {
 
 /** The ScreenerAgent method surface the dispatch delegates to. */
 export interface ScreenerA2AExecutor {
-  runScreen(req: ScreenerRunRequest): Promise<ScreenerRunResult>;
+  /**
+   * Issue #4278: run_screen no longer delegates to the agent's
+   * runScreen — it goes through the one engine seam, so the
+   * direct method is gone from this interface (keeping it would
+   * invite the next bypass). The seam admits through the gates
+   * below; they are optional on the interface so older executors
+   * keep compiling, but run_screen fails closed without them.
+   */
+  isScreenRunning?: ScreenEngineAgentGates["isScreenRunning"];
+  chargeScreenQuota?: ScreenEngineAgentGates["chargeScreenQuota"];
   runGoalScreen(
     req: ScreenerGoalScreenRequest,
   ): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }>;
@@ -126,6 +142,13 @@ export interface ScreenerA2ADeps {
    * honestly instead of fabricating a result.
    */
   executor?: ScreenerA2AExecutor;
+  /**
+   * Issue #4278: the one engine seam run_screen runs through.
+   * Optional: absent, the dispatch calls the real seam; tests
+   * inject a fake. The field exists only so a test can
+   * substitute the seam — it never selects a different engine.
+   */
+  runStockScreenViaEngine?: RunStockScreenViaEngine;
 }
 
 /**
@@ -216,6 +239,7 @@ async function executeOperation(
   args: Record<string, unknown>,
   env: Env,
   executor: ScreenerA2AExecutor,
+  seam?: RunStockScreenViaEngine,
 ): Promise<{ result: unknown; failureError?: string }> {
   switch (operation) {
     case "screener.run_screen": {
@@ -266,7 +290,57 @@ async function executeOperation(
         }
         req.portfolioContext = args.portfolioContext;
       }
-      const result = await executor.runScreen(req);
+      // Issue #4278: run_screen goes through the one engine seam
+      // (was executor.runScreen). The spec carries trigger /
+      // filters; the overrides carry provider, sector, caps, and
+      // symbols. Deliver is false: the operation returns the
+      // result to the A2A caller, and no bridge delivery exists
+      // on this door (the direct path never delivered either —
+      // runScreen only persists + marks the deliver boundary).
+      // Universe ALL fans out on the engine — the direct path
+      // screened ZERO symbols for ALL (resolveUniverse refuses
+      // it) — and the shards aggregate back into the one ALL
+      // result this operation has always returned. The gates are
+      // fail-closed: a run without them cannot be admitted.
+      if (!executor.isScreenRunning || !executor.chargeScreenQuota) {
+        throw new Error(
+          "screener.run_screen requires the executor's isScreenRunning + chargeScreenQuota gates — refusing to run ungated or uncharged (issue #4278).",
+        );
+      }
+      const runEngine = seam ?? runStockScreenViaEngine;
+      const spec: StockScreenRunSpec = {
+        source: "mesh",
+        trigger: req.trigger,
+        deliver: false,
+        filters: req.filters ?? {},
+        universe: req.universe ?? (req.symbols ? "symbols" : "TECH"),
+        asyncRequested: false,
+        delivery: {},
+        userLogin,
+      };
+      const outcome = await runEngine({
+        env,
+        spec,
+        userLogin,
+        ...(req.environment !== undefined ? { environment: req.environment } : {}),
+        ...(req.portfolioContext !== undefined ? { portfolioContext: req.portfolioContext } : {}),
+        agent: {
+          isScreenRunning: (universe, login) => executor.isScreenRunning!(universe, login),
+          chargeScreenQuota: (input) => executor.chargeScreenQuota!(input),
+          getHistory: () => executor.getHistory(),
+        },
+        commandOverrides: {
+          ...(req.provider ? { provider: req.provider } : {}),
+          ...(req.sector ? { sector: req.sector } : {}),
+          ...(req.maxItems !== undefined ? { maxItems: req.maxItems } : {}),
+          ...(req.maxSymbols !== undefined ? { maxSymbols: req.maxSymbols } : {}),
+          ...(req.symbols ? { shards: [{ shardId: "symbols", symbols: req.symbols }] } : {}),
+        },
+      });
+      const result =
+        outcome.results.length === 1
+          ? outcome.results[0]
+          : aggregateShardResults(outcome.results, "ALL");
       // The class's own honest-failure shape: success:false + error.
       // The record stays attached so the caller sees what ran.
       if (result && result.success === false) {
@@ -370,7 +444,7 @@ export async function dispatchScreenerA2A(
       // injected executor there is no honest way to serve this.
       throw new Error("Screener executor is not configured for this dispatch context.");
     }
-    const { result, failureError } = await executeOperation(op, args, env, deps.executor);
+    const { result, failureError } = await executeOperation(op, args, env, deps.executor, deps.runStockScreenViaEngine);
     if (failureError !== undefined) {
       return {
         ok: false,

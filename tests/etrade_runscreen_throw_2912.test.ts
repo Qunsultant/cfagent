@@ -1,6 +1,8 @@
 /**
  * Issue #2912 (G5): the E*TRADE runScreen-throw failure path must
- * persist-then-deliver like the success paths.
+ * persist-then-deliver like the success paths. Issue #4278: the
+ * throw under test comes from the engine seam now (the route calls
+ * the seam, not the agent) — the failure path itself is unchanged.
  *
  * Before this slice, a runScreen throw (issue #424) published a failure
  * notification from a minimal object and never wrote a canonical row —
@@ -26,7 +28,12 @@ import { listScheduledReports } from "../src/services/scheduledReports";
 import { runSummaryFromReport } from "../src/services/runSummaries";
 import { MockSqlStorage } from "./mock-sql";
 
-function routeCtx(events: string[], persisted: unknown[], bridged: unknown[]) {
+function routeCtx(
+  events: string[],
+  persisted: unknown[],
+  bridged: unknown[],
+  seam: (input: unknown) => Promise<unknown>,
+) {
   return {
     env: {},
     readSettingRaw: () => null,
@@ -39,6 +46,9 @@ function routeCtx(events: string[], persisted: unknown[], bridged: unknown[]) {
       events.push("deliver");
       bridged.push(o);
     },
+    // Issue #4278: the throw under test comes from the engine
+    // seam now (the route calls the seam, not the agent).
+    runStockScreenViaEngine: seam,
   } as never;
 }
 
@@ -62,14 +72,13 @@ describe("E*TRADE runScreen throw (#2912)", () => {
     const events: string[] = [];
     const persisted: unknown[] = [];
     const bridged: unknown[] = [];
-    const agent = {
-      runScreen: async () => {
-        throw new Error("E*TRADE unavailable");
-      },
-    } as never;
+    // The agent is the seam's gates + read-back; the fake seam below throws instead.
+    const agent = {} as never;
     await expect(
       executeEtradeScreen({
-        ctx: routeCtx(events, persisted, bridged),
+        ctx: routeCtx(events, persisted, bridged, async () => {
+          throw new Error("E*TRADE unavailable");
+        }),
         sessionId: "s1",
         requestedEnv: "TEST",
         userLogin: "alice",
@@ -98,13 +107,11 @@ describe("E*TRADE runScreen throw (#2912)", () => {
     const events: string[] = [];
     const persisted: unknown[] = [];
     const bridged: unknown[] = [];
-    const agent = {
-      runScreen: async () => {
-        throw new Error("screen already running for this account");
-      },
-    } as never;
+    const agent = {} as never;
     const res = await executeEtradeScreen({
-      ctx: routeCtx(events, persisted, bridged),
+      ctx: routeCtx(events, persisted, bridged, async () => {
+        throw new Error("screen already running for this account");
+      }),
       sessionId: "s1",
       requestedEnv: "TEST",
       userLogin: "alice",

@@ -88,6 +88,38 @@ import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter
 const USER = "trader@example.com";
 const TENANT = "tenant-2373";
 
+// Issue #4278: the screen runs through the one engine seam, not the
+// agent's runScreen. The seam fake delegates to the stub agent's
+// runScreen: it flattens the seam input back into the runScreen
+// request (provider/sector ride the spec on the routes, the
+// overrides on the scheduled path) and returns the stub's result
+// as the engine run's one shard. The seam itself is pinned in
+// tests/stock_entry_routing_4278.test.ts.
+const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input: any) => {
+  const flat = {
+    trigger: input.spec.trigger,
+    sector: input.commandOverrides?.sector ?? input.spec.filters?.sector,
+    universe: input.spec.universe,
+    maxSymbols: input.commandOverrides?.maxSymbols,
+    filters: input.spec.filters,
+    userLogin: input.userLogin,
+    environment: input.environment,
+    portfolioContext: input.portfolioContext,
+    provider: input.commandOverrides?.provider ?? input.spec.provider,
+    broker: input.commandOverrides?.broker,
+    ...(input.commandOverrides?.mode
+      ? { mode: input.commandOverrides.mode, modeSource: input.commandOverrides.modeSource }
+      : {}),
+  };
+  const result = await runScreen(flat);
+  return {
+    results: [result],
+    collation: null,
+    jobId: input.spec?.jobId ?? "test-job",
+    workflowId: "wf-1",
+  };
+};
+
 function stockService(opts: { sharded: boolean }) {
   const env = { IAAA_TENANT_ID: TENANT } as any;
   const service = new ScheduledTasksService(
@@ -119,6 +151,7 @@ function stockService(opts: { sharded: boolean }) {
   (service as any).audit = audit;
   (service as any).guardScheduledAuth = guard;
   (service as any).getScreenerAgent = () => ({ runScreen, isScreenRunning });
+  (service as any).runStockScreenViaEngine = delegateSeamFake(runScreen);
   (service as any).publishScreenerEvent = vi.fn(async () => undefined);
   return { service, audit, guard, runScreen, isScreenRunning };
 }

@@ -99,6 +99,7 @@
 
 import type { StageName } from "../messaging/messagingPorts";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
+import type { BrokerId } from "../trading/brokerCatalog";
 
 /** Re-exported for workflow callers (single import surface). */
 export type { StageName };
@@ -292,6 +293,18 @@ export interface WorkflowJobCommand {
   sector?: string;
   /** Data provider ("etrade" | "yahoo"; the screen defaults it when absent). */
   provider?: string;
+  /**
+   * Issue #4278 — provenance-only carry for the routed entries:
+   * the broker whose quotes the run reads, and the live/paper
+   * mode + its source, recorded on the result (ScreenerRunRequest
+   * already carries them; the command did not, so a scheduled
+   * run routed through the engine would have lost them from its
+   * stored row). Quote sourcing keys on `provider`, never on
+   * these — they change nothing about what the run does.
+   */
+  broker?: BrokerId;
+  mode?: "live" | "paper";
+  modeSource?: "pin" | "selection" | "inference";
   /** Screen criteria (filters object, as the route parsed it). */
   filters?: Record<string, unknown>;
   maxItems?: number;

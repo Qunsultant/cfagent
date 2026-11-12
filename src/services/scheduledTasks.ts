@@ -37,6 +37,7 @@ import type { ScreenerTrace } from "./screenerTrace";
 import { withRetry } from "./resilience";
 import { resolvePipelinePolicy } from "./pipelinePolicy";
 import { planScheduledScreen } from "../workflows/stockScreenPlanner";
+import { runStockScreenViaEngine, type RunStockScreenViaEngine } from "../workflows/runStockScreenViaEngine";
 import { classifyScreenFailure, logScreenRunEvent } from "../workflows/screenRunAspects";
 import { DynamicMarketScreener } from "../trading";
 import { TradingPlatformRegistry, platformChainSource } from "../trading";
@@ -521,6 +522,14 @@ export class ScheduledTasksService {
      *  binding (messaging_ports pin). Absent, the pipeline runs
      *  unpublished, exactly as before. */
     private stageQueue?: import("../workflows/stageQueueTransport").StageQueueSend | null,
+    /**
+     * Issue #4278: the one engine seam (runStockScreenViaEngine)
+     * the monolithic scheduled screen runs through. Optional:
+     * absent, the service calls the real seam; tests inject a
+     * fake. The field exists only so a test can substitute the
+     * seam — it never selects a different engine.
+     */
+    private runStockScreenViaEngine?: RunStockScreenViaEngine,
   ) {}
 
   /**
@@ -1600,19 +1609,43 @@ export class ScheduledTasksService {
         },
         timestamp,
       );
-      // Issue #261/#270: delegate screening to ScreenerAgent.
-      const result = await this.getScreenerAgent(userLogin).runScreen({
-        trigger: options.trigger || "scheduled",
-        sector: scheduledPlan.sector,
-        universe: scheduledPlan.universe,
-        maxSymbols: options.maxItems,
-        filters: screenFilters,
+      // Issue #4278: the monolithic scheduled run goes through
+      // the one engine seam (was getScreenerAgent(userLogin)
+      // .runScreen). Spec: source scheduled, trigger scheduled,
+      // deliver false — delivery stays the service's
+      // publishScreenerEvent bus path below, exactly as before.
+      // The overrides carry the fields the spec cannot express:
+      // the effective provider, the sector, the
+      // maxSymbols cap, and the broker/mode provenance the direct
+      // call stamped on the request. The dup, failure, audit, and
+      // bus-publication handling below is unchanged.
+      const { results: [result] } = await (this.runStockScreenViaEngine ?? runStockScreenViaEngine)({
+        env: this.env,
+        spec: {
+          source: "scheduled",
+          trigger: "scheduled",
+          deliver: false,
+          // Issue #4278: StockScreenRunSpec.filters is required
+          // (the direct runScreen call accepted undefined) — an
+          // absent filter set is the empty filter, same semantics.
+          filters: screenFilters ?? {},
+          universe: scheduledPlan.universe,
+          jobId: `screener:scheduled:${scheduledPlan.universe}:${timestamp}`,
+          asyncRequested: false,
+          delivery: {},
+          userLogin,
+        },
         userLogin,
         environment: options.environment,
         portfolioContext,
-        provider: scheduledPlan.provider,
-        broker: runBrokerIdResolved,
-        ...(runModeResolved ? { mode: runModeResolved.mode, modeSource: runModeResolved.modeSource } : {}),
+        agent: this.getScreenerAgent(userLogin),
+        commandOverrides: {
+          ...(scheduledPlan.provider ? { provider: scheduledPlan.provider } : {}),
+          sector: scheduledPlan.sector,
+          ...(options.maxItems !== undefined ? { maxSymbols: options.maxItems } : {}),
+          ...(runBrokerIdResolved ? { broker: runBrokerIdResolved } : {}),
+          ...(runModeResolved ? { mode: runModeResolved.mode, modeSource: runModeResolved.modeSource } : {}),
+        },
       });
 
       if (result.skippedDuplicate) {

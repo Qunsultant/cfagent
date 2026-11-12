@@ -6,11 +6,12 @@
  *  - NLQ + mesh parent commands come from the broker's one
  *    command builder: nlqPorts.ts and meshScreenDoor.ts
  *    contain no `type: "run-screen"` literal any more.
- *  - The NLQ direct fallback goes through spec + broker +
- *    planner: nlqPorts.ts consults startStockScreenWorkflowOrNull
- *    before its sync run (broker null = the sync branch, per
- *    the broker's own contract — asyncRequested false -> null,
- *    caller runs sync).
+ *  - Issue #4278: the NLQ direct fallback is GONE — the port
+ *    routes only through the workflow (runChatScreenViaWorkflow)
+ *    and refuses coded when the port is unavailable or the
+ *    start fails. The #2914 broker-consult pin below is
+ *    superseded: nlqPorts.ts contains no broker consult and no
+ *    direct agent call any more.
  *  - Scheduled sharded starts through the broker: the broker
  *    owns the chain start (planFeedStart + shardSubmit), so
  *    scheduledTasks.ts contains no planFeedStart. The literal
@@ -19,9 +20,12 @@
  *    equivalent) and the chain run model (chain_id) is read
  *    by workflowRuns — see the broker header note.
  *  - Direct ScreenerAgent.runScreen lives only in the
- *    allow-listed files, each with its role named (broker
- *    sync branch, broker-consulted fallback, workflow runner
- *    seam, agent internals, paid-fulfillment sync exception).
+ *    allow-listed files, each with its role named (agent
+ *    internals, NLQ port call, workflow runner seams). Issue
+ *    #4278 removed every routed direct call: the REST routes,
+ *    the scheduled service, the NLQ port, the premium sync
+ *    path, and the A2A dispatch all run through the one engine
+ *    seam now.
  *  - persistRun is delivery cache, not a recorder: its body
  *    writes LATEST/HISTORY + artifact keys and no canonical
  *    row; the capability inventory names the cache entry.
@@ -185,8 +189,8 @@ describe("scheduled sharded start through the broker (#2914)", () => {
   });
 });
 
-describe("NLQ fallback via spec/broker/planner (#2914)", () => {
-  it("with no workflow binding, the fallback still returns the sync run (planner universe, maxItems 10)", async () => {
+describe("NLQ port has no direct fallback (#4278, supersedes #2914)", () => {
+  it("with no workflow binding, the port refuses coded — the agent is never called", async () => {
     const agentCalls: Array<Record<string, unknown>> = [];
     const ctx = {
       schedule: async () => ({}),
@@ -204,13 +208,13 @@ describe("NLQ fallback via spec/broker/planner (#2914)", () => {
       ensureTables: () => {
         throw new Error("unused");
       },
+      workflowPort: null,
     } as never;
     const port = nlqStockScreenPort(ctx);
-    const out = await port.runScreen({ filters: { minPrice: 10 }, userLogin: "alice" });
-    expect(agentCalls).toHaveLength(1);
-    expect(agentCalls[0]["universe"]).toBe("TECH");
-    expect(agentCalls[0]["maxItems"]).toBe(10);
-    expect((out as { success?: boolean }).success).toBe(true);
+    await expect(port.runScreen({ filters: { minPrice: 10 }, userLogin: "alice" })).rejects.toThrow(
+      /workflow/i,
+    );
+    expect(agentCalls).toHaveLength(0);
   });
 });
 
@@ -221,8 +225,12 @@ describe("caller pins (#2914)", () => {
     }
   });
 
-  it("the NLQ fallback consults the broker before its sync run", () => {
-    expect(read("agents/orchestrator/nlqPorts.ts")).toContain("startStockScreenWorkflowOrNull");
+  it("the NLQ port routes only through the workflow — no broker consult, no direct agent call", () => {
+    const text = read("agents/orchestrator/nlqPorts.ts");
+    expect(text).toContain("runChatScreenViaWorkflow");
+    expect(text).not.toContain("startStockScreenWorkflowOrNull");
+    expect(text).not.toContain("planStockScreenRun");
+    expect(text).not.toMatch(/\.runScreen\(/);
   });
 
   it("scheduledTasks no longer starts the sharded chain by hand", () => {
@@ -231,19 +239,14 @@ describe("caller pins (#2914)", () => {
 
   it("direct ScreenerAgent.runScreen lives only in allow-listed files", () => {
     const allowed = new Map<string, string>([
-      // Broker sync branch: broker returned null, caller runs sync.
-      ["src/agents/routes/etradeBrokerScreen.ts", "REST sync after broker null"],
-      ["src/agents/routes/marketDataResearch.ts", "market-data sync after broker null"],
-      ["src/services/scheduledTasks.ts", "scheduled monolithic sync after broker null"],
-      // Broker-consulted fallback: spec + broker + planner, then sync.
-      ["src/agents/orchestrator/nlqPorts.ts", "NLQ fallback via spec/broker/planner"],
-      // Paid fulfillment sync: async attempt first, sync on unbound — out of G7 scope (own jobId scheme, own tests), named here not silently passed.
-      ["src/agents/routes/premium.ts", "paid fulfillment sync exception"],
+      // Issue #4278: every routed direct call is gone — the REST
+      // routes, the scheduled service, the NLQ port, the premium
+      // sync path, and the A2A dispatch all run through the one
+      // engine seam (runStockScreenViaEngine) now. What remains:
       // The agent's own internals: definition, wiring, runSharded fan-out.
       ["src/agents/screener-agent.ts", "agent internals"],
-      // Port calls, not agent calls: NLQ executor binds the port; A2A dispatches through an injected executor.
+      // Port calls, not agent calls: the NLQ executor calls the stock-screen port.
       ["src/agents/nlq/execution.ts", "port call (stockScreenPort)"],
-      ["src/agents/screenerA2aDispatch.ts", "port call (injected executor)"],
       // Workflow execution seams: the adapter's canned steps
       // drive the injected runner (the test-only seam); the
       // retired flow stays listed while frozen.

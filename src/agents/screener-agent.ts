@@ -1012,6 +1012,34 @@ export class ScreenerAgent extends PortThink {
   }
 
   /**
+   * Issue #4278: charge one screen against a user's request
+   * quota — the thin wrapper the one engine seam (runStockScreenViaEngine)
+   * charges through, one charge per shard, BEFORE the workflow
+   * starts (the runScreen gate order: lock probe first, charge
+   * second, start last). The tenant partition defaults to the
+   * login, exactly as the runScreen gate charged it; pass the
+   * same tenantId the probe saw, or the charge lands in the
+   * wrong partition. A refusal throws (UserRequestQuotaExceededError
+   * / UserRequestQuotaUnavailableError); a charge that lands
+   * stands even if the start then fails, as on the direct path.
+   */
+  async chargeScreenQuota(input: {
+    userLogin?: string;
+    tenantId?: string;
+    runId: string;
+  }): Promise<void> {
+    const login = input.userLogin ?? (await this.userLogin());
+    checkAndChargeUserRequestQuota({
+      port: this.userRequestQuota(),
+      policy: this.userRequestQuotaPolicy(),
+      tenantId: input.tenantId ?? login,
+      userLogin: login,
+      kind: "screen",
+      runId: input.runId,
+    });
+  }
+
+  /**
    * Issue #2842: all override rows for a user (newest first),
    * for the admin surface. Same partition rule as the usage view.
    */
@@ -1091,7 +1119,11 @@ export class ScreenerAgent extends PortThink {
     void origin; // reserved for per-origin policy (cfpay parity); unused in v1
     const data = await dispatchScreenerA2A(this.env, body, {
       executor: {
-        runScreen: (req) => this.runScreen(req),
+        // Issue #4278: the gates the one engine seam admits
+        // run_screen through (the direct runScreen binding is
+        // gone with the executor's runScreen field).
+        isScreenRunning: (universe, userLogin) => this.isScreenRunning(universe, userLogin),
+        chargeScreenQuota: (input) => this.chargeScreenQuota(input),
         runGoalScreen: (req) => this.runGoalScreen(req),
         getLatest: () => this.getLatest(),
         getHistory: () => this.getHistory(),
