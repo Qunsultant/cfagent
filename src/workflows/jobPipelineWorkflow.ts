@@ -239,9 +239,9 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // also executes fully; a transport this deployment does not
     // configure records its channel not_configured per report
     // (deliverJobs.ts carries the rule). The screener steps
-    // compose here too (#4190): registration only in this slice
-    // — the quote/history deps refuse by name until the S2
-    // cutover wires the platform binding.
+    // compose here too (#4190, wired in #4192): the agent binds
+    // the quote/history deps itself at stage time, so a screener
+    // job dispatched here executes fully in this residency.
     steps: createPipelineStepRegistry(
       feedStepDepsForWorkflow(env, stores),
       {
@@ -278,10 +278,8 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],
       },
-      // Issue #4190 (#3550 S1): the screener steps compose here
-      // too — registration only; no job names them until the S2
-      // cutover, and the quote/history deps refuse by name until
-      // then, so production behavior is unchanged.
+      // Issue #4190 (#3550 S1, wired in #4192): the screener steps compose here
+      // too — the agent binds the quote/history deps itself at stage time.
       screenerStepDepsForWorkflow(env),
     ),
     invocation: "workflow-shard",

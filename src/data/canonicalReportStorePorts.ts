@@ -57,6 +57,19 @@ export interface CanonicalReportStoredRow {
   summary: string;
   body: string;
   created_at: string;
+  /**
+   * Issue #4116 — the generation id the row was stored under
+   * (the twin-link key for the D1 projection). NULL for legacy
+   * rows stored before #308, which never carried one.
+   */
+  generation_id: string | null;
+  /**
+   * Issue #4116 — the row's owning login (the D1 projection's
+   * owner scope: D1-only reads filter by it exactly like the
+   * DO read filters by userLogin). NULL for legacy rows stored
+   * before #584, which never carried an owner.
+   */
+  user_login: string | null;
   body_r2_key: string | null;
   fanout_outcome: string | null;
 }

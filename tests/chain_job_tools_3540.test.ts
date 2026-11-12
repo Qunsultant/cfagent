@@ -394,7 +394,7 @@ describe("pipeline-chain copilot tools (#3540)", () => {
     expect(view.stages.every((s: { status: string }) => s.status === "not-run")).toBe(true);
   });
 
-  it("list_pipeline_chains lists all eight chains with their roll-ups", async () => {
+  it("list_pipeline_chains lists all nineteen chains with their roll-ups", async () => {
     const { context } = await makeContext();
     const result = (await new ListPipelineChainsCommand().execute({}, context)) as any;
     expect(result.jobs.map((j: { jobId: string }) => j.jobId)).toEqual([
@@ -403,6 +403,17 @@ describe("pipeline-chain copilot tools (#3540)", () => {
       "yahoo-sp500-quotes-pipeline",
       "yahoo-dow-quotes-pipeline",
       "yahoo-sp400-quotes-pipeline",
+      "yahoo-sector-energy-quotes-pipeline",
+      "yahoo-sector-materials-quotes-pipeline",
+      "yahoo-sector-industrials-quotes-pipeline",
+      "yahoo-sector-consumer-discretionary-quotes-pipeline",
+      "yahoo-sector-consumer-staples-quotes-pipeline",
+      "yahoo-sector-health-care-quotes-pipeline",
+      "yahoo-sector-financials-quotes-pipeline",
+      "yahoo-sector-information-technology-quotes-pipeline",
+      "yahoo-sector-communication-services-quotes-pipeline",
+      "yahoo-sector-utilities-quotes-pipeline",
+      "yahoo-sector-real-estate-quotes-pipeline",
       "alpaca-nasdaq100-quotes-pipeline",
       "etrade-nasdaq100-quotes-pipeline",
       "public-nasdaq100-quotes-pipeline",

@@ -476,6 +476,7 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/audit/history",
   "ANY /api/reports/list",
   "ANY /api/reports/seed-canonical",
+  "ANY /api/ops/run-ledger-reconcile",
   "ANY /api/retrieval/populate-market-graph",
   "ANY /api/iaaa/access-request",
   "ANY /api/iaaa/access-requests",
@@ -589,10 +590,13 @@ describe("server route inventory pin (#2902)", () => {
     // delegation, retrieval after the reports delegation, MCP and
     // payments after the IAAA delegation, browser snapshots after the
     // quotes delegation. Later slices extend this list in dispatch order.
+    // #3311 adds the schedule webhook delegation right after the
+    // Messaging Saga delegation (the webhook family it belongs to).
     expect(calls).toEqual([
       "handleCoreEarlyRoutes",
       "handlePrivacyRoutes",
       "handleMessagingSagaRoutes",
+      "handleScheduleWebhookRoutes",
       "handleTradingScheduleRoutes",
       "handleMessagingSocialRoutes",
       "handleAuthMeRoutes",
@@ -624,7 +628,7 @@ describe("server route inventory pin (#2902)", () => {
     expect(serverSrc).toContain('from "./server/auth"');
   });
 
-  it("server.ts stays at the Slice 9 achieved size (314 lines, contract §2)", () => {
+  it("server.ts stays at the Slice 9 achieved size (320 lines, contract §2)", () => {
     // Slice 9 (#2902 Cleanup) sets the pin the slice actually achieves:
     // server.ts 669 lines → 291 lines (dead imports pruned per
     // tsc --noUnusedLocals, exports moved to src/server/exports.ts).
@@ -646,9 +650,12 @@ describe("server route inventory pin (#2902)", () => {
     // mail routes through routeAgentEmail, everything else falls
     // through to the NLQ handler) (304 → 314). The routing logic
     // itself lives in src/actors/agentEmailRouting.ts, not here.
+    // #3311 records a fourth deliberate growth: +6 lines for the
+    // schedule webhook delegation (1 import line + a 3-line comment
+    // + the 2-line dispatch branch) (314 → 320).
     const src = readFileSync("src/server.ts", "utf8");
     const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
-    expect(lines).toBeLessThanOrEqual(314);
+    expect(lines).toBeLessThanOrEqual(320);
   });
 });
 
@@ -809,6 +816,7 @@ describe("core dispatch smoke (#2902 Slice 2)", () => {
       ["POST", "/nlq/webhook", 503],
       ["POST", "/api/trading/nlq/webhook", 503],
       ["POST", "/api/nlq/webhook", 503],
+      ["POST", "/api/schedules/webhook/followup", 503],
       ["POST", "/api/qa/investigate", 401],
       ["POST", "/api/memory/search", 401],
       ["GET", "/api/social/brief", 401],

@@ -244,11 +244,15 @@ describe("caller pins (#2914)", () => {
       // Port calls, not agent calls: NLQ executor binds the port; A2A dispatches through an injected executor.
       ["src/agents/nlq/execution.ts", "port call (stockScreenPort)"],
       ["src/agents/screenerA2aDispatch.ts", "port call (injected executor)"],
-      // Workflow execution seams: the workflow's runner port wraps the agent; children run through it, never around it.
-      ["src/workflows/screenerWorkflow.ts", "workflow runner seam"],
-      ["src/workflows/screenerWorkflowFlow.ts", "workflow runner seam"],
+      // Workflow execution seams: the adapter's canned steps
+      // drive the injected runner (the test-only seam); the
+      // retired flow stays listed while frozen.
+      ["src/workflows/inMemoryWorkflowAdapter.ts", "workflow runner seam"],
+      ["src/workflows/screenerWorkflowFlow.deprecated.ts", "workflow runner seam"],
     ]);
     const offenders: string[] = [];
+    /** Issue #4247 — allow-list keys use "/", the walk yields "\" on Windows. */
+    const posixPath = (p: string): string => p.split(/[\\/]/).join("/");
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = join(dir, entry.name);
@@ -258,7 +262,8 @@ describe("caller pins (#2914)", () => {
           if (/\.runScreen\(/.test(text) && !/runScreenInner/.test(text.split(".runScreen(")[0].slice(-40))) {
             // Count only genuine .runScreen( sites (runScreenInner excluded by name).
             const sites = (text.match(/(?<!Inner)\.runScreen\(/g) ?? []).length;
-            if (sites > 0 && !allowed.has(path)) offenders.push(`${path} (${sites})`);
+            const rel = posixPath(path);
+            if (sites > 0 && !allowed.has(rel)) offenders.push(`${rel} (${sites})`);
           }
         }
       }

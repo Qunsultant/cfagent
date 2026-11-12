@@ -1,16 +1,27 @@
 name: Auto Update Open PRs (GitHub App)
 
+# Issue #4264 — triggers reduced to manual dispatch only.
+#
+# This workflow used to rebuild every open *unqueued* PR branch against main
+# (on every push to main, on CI/CodeQL completion, and on a 5-minute cron).
+# With a merge queue that is redundant and harmful:
+#   - §11: the queue builds each entry on the latest base and runs merge_group
+#     checks there, so an up-to-date branch is not a precondition and chasing a
+#     moving main is explicitly discouraged;
+#   - it updated by *merge commit*, which §6/#1853 forbids: merge commits are
+#     what make rebase-merge refuse later ("cannot be rebased");
+#   - it starved PRs of a green window — on 2026-11-12 #4219's head moved three
+#     times in ~20 minutes, restarting five required checks each time, so no PR
+#     ever finished its checks. That is why the oldest PRs never merged.
+#
+# Nothing is lost by making this manual: the auto-merge / auto-enqueue half
+# already has its own home in auto-merge-trusted.yml (#1509), which applies the
+# auto-merge label and enables rebase auto-merge for eligible PRs. Keeping this
+# file (rather than deleting it) preserves its update logic for manual use.
+#
+# The update logic below is kept intact for manual runs; the merge queue is now
+# the only thing that rebuilds a PR.
 on:
-  push:
-    branches:
-      - main
-  workflow_run:
-    workflows:
-      - "Continuous Integration & Test Verification"
-      - "CodeQL"
-    types: [completed]
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:

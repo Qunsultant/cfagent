@@ -1,11 +1,15 @@
 /**
- * Issue #1737 — workflow port, flows, adapters, command
+ * Issue #1737 — workflow port, collation, adapters, command
  * envelope. TDD: written against the port contract before
  * the routes land on it.
  *
- * The fake step executes do() immediately and advances a
- * virtual clock on sleep(), so poll loops and deadlines
- * behave deterministically without real waiting.
+ * #4192: the child-workflow flows are retired — screens run
+ * through the one engine now, and the flow-direct describes
+ * below drive the in-memory adapter (the engine path with
+ * canned runners) instead of runShardFlow/runParentFlow.
+ * The fake step executes do() immediately; there is no
+ * virtual clock and no poll loop — the engine owns pacing,
+ * retries, and fan-out.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -17,16 +21,14 @@ import { createWorkflowPorts } from "../src/workflows/createWorkflowPorts";
 import { InMemoryWorkflowAdapter } from "../src/workflows/inMemoryWorkflowAdapter";
 import {
   collateShards,
-  runParentFlow,
-  runShardFlow,
+  finalizeScreenerCollation,
   shardSummaryFromResult,
   asShardScreenResult,
   stageTransitionsForShard,
-  type ChildWorkflowOps,
   type ScreenerWorkflowDeps,
-  type ScreenerWorkflowStep,
+  type ShardOutcome,
   type ShardScreenResult,
-} from "../src/workflows/screenerWorkflowFlow";
+} from "../src/workflows/screenerCollation";
 import {
   fromWorkflowCommandEnvelope,
   toWorkflowCommandEnvelope,
@@ -35,6 +37,7 @@ import {
   assertWorkflowJobCommand,
   workflowIdForJob,
   WorkflowError,
+  type ParentScreenReportInput,
   type WorkflowInstanceStatus,
   type WorkflowJobCommand,
 } from "../src/workflows/workflowPorts";
@@ -44,14 +47,8 @@ import {
 /* ------------------------------------------------------------------ */
 
 function makeClock(startMs = 1_000_000) {
-  let now = startMs;
-  const step: ScreenerWorkflowStep = {
-    do: async (_name, fn) => fn(),
-    sleep: async (_name, ms) => {
-      now += ms;
-    },
-  };
-  return { nowMs: () => now, step };
+  const now = startMs;
+  return { nowMs: () => now };
 }
 
 function parentCommand(overrides: Partial<WorkflowJobCommand> = {}): WorkflowJobCommand {
@@ -88,6 +85,8 @@ interface DepsBundle {
   /** Opaque payloads the child store/deliver steps received. */
   stored: unknown[];
   delivered: unknown[];
+  /** Parent canonical rows the finalize stored (the parent door). */
+  parentStored: ParentScreenReportInput[];
   clock: ReturnType<typeof makeClock>;
   deps: ScreenerWorkflowDeps;
 }
@@ -96,6 +95,7 @@ function makeDeps(runScreen?: ScreenerWorkflowDeps["screenRunner"]["runScreen"])
   const store = new InMemoryShardJobAdapter();
   const stored: unknown[] = [];
   const delivered: unknown[] = [];
+  const parentStored: ParentScreenReportInput[] = [];
   const clock = makeClock();
   const deps: ScreenerWorkflowDeps = {
     screenRunner: {
@@ -115,35 +115,23 @@ function makeDeps(runScreen?: ScreenerWorkflowDeps["screenRunner"]["runScreen"])
     deliverOutcome: async (payload) => {
       delivered.push(payload);
     },
+    storeParentReport: async (input) => {
+      parentStored.push(input);
+      return { stored: true, reportId: "parent-1" };
+    },
     nowMs: clock.nowMs,
   };
-  return { store, stored, delivered, clock, deps };
-}
-
-/** Child ops keyed by child workflow id, with canned statuses. */
-function makeChildOps(
-  statuses: Record<string, { status: WorkflowInstanceStatus; output?: unknown; error?: { message: string } }>,
-  created: string[] = [],
-): ChildWorkflowOps {
-  return {
-    createChild: async (cmd) => {
-      created.push(cmd.shard?.shardId ?? "?");
-      return { workflowId: workflowIdForJob(cmd.jobId) };
-    },
-    getChildStatus: async (workflowId) => {
-      const s = statuses[workflowId];
-      if (!s) return { status: "running" };
-      return s;
-    },
-  };
-}
-
-function childId(parentJobId: string, shardId: string): string {
-  return workflowIdForJob(`${parentJobId}:shard:${shardId}`);
+  return { store, stored, delivered, parentStored, clock, deps };
 }
 
 async function latestParentRow(store: ShardJobStore, jobId: string) {
   return store.latestJob("tenant-1", jobId, jobId);
+}
+
+/** The collation the parent row carries (the door's read-back). */
+async function collationFor(store: ShardJobStore, jobId: string) {
+  const row = await latestParentRow(store, jobId);
+  return JSON.parse(row?.resultJson ?? "{}") as Record<string, unknown>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -327,30 +315,22 @@ describe("shard result helpers", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Shard flow                                                          */
+/* Adapter: one shard runs the six engine stages                     */
+/* (store + deliver per unit; the collation is the door's            */
+/* read-back from the parent row)                                    */
 /* ------------------------------------------------------------------ */
 
-function shardCommand(overrides: Partial<WorkflowJobCommand> = {}): WorkflowJobCommand {
-  return {
-    ...parentCommand(),
-    role: "shard",
-    parentJobId: "job-1",
-    shard: { shardId: "TECH", universe: "TECH" },
-    shards: [{ shardId: "TECH", universe: "TECH" }],
-    jobId: "job-1:shard:TECH",
-    ...overrides,
-  };
-}
-
-describe("runShardFlow (child owns store + deliver)", () => {
+describe("adapter: one shard runs the six engine stages (store + deliver per unit)", () => {
   it("executes, stores + delivers its full result, projects its row, returns a stripped summary", async () => {
     const b = makeDeps();
-    const output = await runShardFlow(shardCommand(), b.clock.step, b.deps);
-    expect(output.success).toBe(true);
-    expect(output.stored).toBe(true);
-    expect(output.delivered).toBe(true);
-    // Claim-check: bulk data never leaves the child.
-    expect("full" in output).toBe(false);
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }] }));
+    expect(h.status).toBe("complete");
+    // Claim-check: bulk data never leaves the run — the
+    // collation carries summaries + flags only.
+    const collation = await collationFor(b.store, "job-1");
+    expect(collation.lifecycle).toBe("ReportGenerated");
+    expect("full" in collation).toBe(false);
     expect(b.stored).toEqual([{ marker: "full-result", universe: "TECH", trigger: "manual" }]);
     expect(b.delivered).toEqual([{ marker: "full-result", universe: "TECH", trigger: "manual" }]);
     const rows = await b.store.listJobsForChain("tenant-1", "job-1");
@@ -360,8 +340,11 @@ describe("runShardFlow (child owns store + deliver)", () => {
 
   it("deliver=false skips the deliver step (market-data/premium shape)", async () => {
     const b = makeDeps();
-    const output = await runShardFlow(shardCommand({ deliver: false }), b.clock.step, b.deps);
-    expect(output.delivered).toBe(false);
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(
+      parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }], deliver: false }),
+    );
+    expect(h.status).toBe("complete");
     expect(b.delivered).toHaveLength(0);
     expect(b.stored).toHaveLength(1);
   });
@@ -371,10 +354,13 @@ describe("runShardFlow (child owns store + deliver)", () => {
     b.deps.storeReport = async () => {
       throw new Error("R2 down");
     };
-    const output = await runShardFlow(shardCommand(), b.clock.step, b.deps);
-    expect(output.success).toBe(true);
-    expect(output.stored).toBe(false);
-    expect(output.storeError).toBe("R2 down");
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }] }));
+    expect(h.status).toBe("complete");
+    const collation = await collationFor(b.store, "job-1");
+    expect(collation.lifecycle).toBe("Completed");
+    expect(collation.storeErrors).toEqual({ TECH: "R2 down" });
+    expect((collation.shards as { stored?: boolean }[])[0]?.stored).toBe(false);
   });
 
   it("a deliver failure is recorded, never fatal", async () => {
@@ -382,30 +368,57 @@ describe("runShardFlow (child owns store + deliver)", () => {
     b.deps.deliverOutcome = async () => {
       throw new Error("pipeline down");
     };
-    const output = await runShardFlow(shardCommand(), b.clock.step, b.deps);
-    expect(output.delivered).toBe(false);
-    expect(output.deliverError).toBe("pipeline down");
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }] }));
+    expect(h.status).toBe("complete");
+    const collation = await collationFor(b.store, "job-1");
+    expect(collation.lifecycle).toBe("ReportGenerated");
+    expect(collation.deliverErrors).toEqual({ TECH: "pipeline down" });
   });
 
-  it("a failed screen is still stored + delivered (canonical attempt record, sync-path parity)", async () => {
+  it("a failed screen fails the run loudly (failed leg rows + Failed collation)", async () => {
+    // #4192: the engine path has no child to store a failed
+    // screen's payload — a market failure throws at analysis,
+    // the unit fails, and the attempt record is the failed
+    // leg rows + the Failed collation on the parent canonical
+    // row (never a canonical report). The collation itself is
+    // the dispatch return; the adapter path reads it back
+    // from the parent door, the way the cutover tests do.
     const b = makeDeps(async (req) => ({
       ...okResult({ success: false, error: "no quotes", universe: req.universe }),
       full: { marker: "full-failed" },
     }));
-    const output = await runShardFlow(shardCommand(), b.clock.step, b.deps);
-    expect(output.success).toBe(false);
-    expect(output.stored).toBe(true);
-    expect(output.delivered).toBe(true);
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }] }));
+    expect(h.status).toBe("complete");
+    expect(b.stored).toHaveLength(0);
+    expect(b.delivered).toHaveLength(0);
+    expect(b.parentStored).toHaveLength(1);
+    expect(b.parentStored[0]?.collation.lifecycle).toBe("Failed");
     const rows = await b.store.listJobsForChain("tenant-1", "job-1");
     // Slice-2 rule: a failed leg keys as leg:<stepId> (no job id).
     expect(rows.find((r) => r.jobKey === "leg:TECH")?.status).toBe("failed");
+    const failedParent = await b.store.latestJob("tenant-1", "job-1", "leg:parent");
+    expect(failedParent?.status).toBe("failed");
+    expect(JSON.parse(failedParent?.resultJson ?? "{}").detail).toMatch(/Workflow Failed: 0\/1 shards/);
   });
 
-  it("a throwing runner propagates (step retry is the runtime's job)", async () => {
+  it("a throwing runner fails the run (Failed collation; only failed legs land)", async () => {
     const b = makeDeps(async () => {
       throw new Error("provider down");
     });
-    await expect(runShardFlow(shardCommand(), b.clock.step, b.deps)).rejects.toThrow("provider down");
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }] }));
+    // The run settles (complete) with a Failed collation —
+    // a throwing unit is a failed run, not an execution
+    // error; only an infra failure errors the adapter.
+    expect(h.status).toBe("complete");
+    expect(b.parentStored).toHaveLength(1);
+    expect(b.parentStored[0]?.collation.lifecycle).toBe("Failed");
+    expect(b.parentStored[0]?.collation.error).toMatch(/provider down/);
+    const rows = await b.store.listJobsForChain("tenant-1", "job-1");
+    expect(rows.find((r) => r.jobKey === "leg:TECH")?.status).toBe("failed");
+    expect(rows.find((r) => r.jobKey === "leg:parent")?.status).toBe("failed");
   });
 });
 
@@ -413,23 +426,32 @@ describe("runShardFlow (child owns store + deliver)", () => {
 /* Parent flow                                                         */
 /* ------------------------------------------------------------------ */
 
-describe("runParentFlow (collates child flags; never stores or delivers)", () => {
-  it("happy path: 2 stored shards → ReportGenerated, rows projected, parent deps untouched", async () => {
-    const b = makeDeps();
-    const ops = makeChildOps({
-      [childId("job-1", "TECH")]: { status: "complete", output: { ...okResult({ universe: "TECH", pdfKey: "pdf-tech" }), stored: true, delivered: true } },
-      [childId("job-1", "HEALTH")]: { status: "complete", output: { ...okResult({ universe: "HEALTH", pdfKey: "pdf-health" }), stored: true, delivered: true } },
-    });
-    const c = await runParentFlow(parentCommand(), b.clock.step, b.deps, ops);
+describe("adapter: parent dispatches via the engine (collates unit flags; never stores or delivers itself)", () => {
+  // The runner records a pdf key per universe, the way the
+  // old tests' faked child outputs did.
+  function pdfDeps() {
+    return makeDeps(async (req) => ({
+      ...okResult({ universe: req.universe, pdfKey: `pdf-${(req.universe ?? "").toLowerCase()}` }),
+      full: { marker: "full-result", universe: req.universe },
+    }));
+  }
+
+  it("happy path: 2 stored shards → ReportGenerated, rows projected, doors called once per shard", async () => {
+    const b = pdfDeps();
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand());
+    expect(h.status).toBe("complete");
+    const c = await collationFor(b.store, "job-1");
     expect(c.lifecycle).toBe("ReportGenerated");
     expect(c.qualified).toBe(false);
     expect(c.reportKeys).toEqual(["pdf-tech", "pdf-health"]);
     expect(c.storedShards).toEqual(["TECH", "HEALTH"]);
     expect(c.deliveredShards).toEqual(["TECH", "HEALTH"]);
-    // The parent never calls store/deliver itself: fake
-    // children never touch the parent's deps.
-    expect(b.stored).toHaveLength(0);
-    expect(b.delivered).toHaveLength(0);
+    // The parent never calls store/deliver itself: the
+    // ENGINE's per-unit store/deliver steps call the doors,
+    // once per shard, with the full payloads.
+    expect(b.stored).toHaveLength(2);
+    expect(b.delivered).toHaveLength(2);
     const parentRow = await latestParentRow(b.store, "job-1");
     expect(parentRow?.status).toBe("completed");
     expect(JSON.parse(parentRow?.resultJson ?? "{}").lifecycle).toBe("ReportGenerated");
@@ -440,32 +462,47 @@ describe("runParentFlow (collates child flags; never stores or delivers)", () =>
   });
 
   it("a completed-but-unstored shard → Completed (not ReportGenerated) + storeErrors", async () => {
-    const b = makeDeps();
-    const ops = makeChildOps({
-      [childId("job-1", "TECH")]: { status: "complete", output: { ...okResult({ universe: "TECH" }), stored: false, delivered: false, storeError: "R2 down" } },
-      [childId("job-1", "HEALTH")]: { status: "complete", output: { ...okResult({ universe: "HEALTH" }), stored: true, delivered: true } },
-    });
-    const c = await runParentFlow(parentCommand(), b.clock.step, b.deps, ops);
+    const b = pdfDeps();
+    b.deps.storeReport = async (payload) => {
+      if ((payload as { universe?: string }).universe === "TECH") {
+        throw new Error("R2 down");
+      }
+      b.stored.push(payload);
+    };
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand());
+    expect(h.status).toBe("complete");
+    const c = await collationFor(b.store, "job-1");
     expect(c.lifecycle).toBe("Completed");
     expect(c.storeErrors).toEqual({ TECH: "R2 down" });
     expect(c.storedShards).toEqual(["HEALTH"]);
   });
 
-  it("timeout: hanging shard → timed_out, qualified partial, BudgetConstrained", async () => {
+  it("timeout: a timed_out shard → qualified partial, BudgetConstrained", async () => {
+    // #4192: the engine has no poll loop — a hanging unit is
+    // the engine's timeout, not the screener's. What this
+    // pins is the collation's handling of a timed_out shard:
+    // the usable shards still reach ReportGenerated, the run
+    // is qualified, and BudgetConstrained is recorded.
     const b = makeDeps();
-    const ops = makeChildOps({
-      [childId("job-1", "TECH")]: { status: "complete", output: { ...okResult({ universe: "TECH" }), stored: true, delivered: true } },
-      // HEALTH never completes: always running.
-    });
-    const c = await runParentFlow(
-      parentCommand({ shardTimeoutMs: 1000, pollIntervalMs: 100 }),
-      b.clock.step,
-      b.deps,
-      ops,
+    const outcomes: ShardOutcome[] = [
+      { shardId: "TECH", status: "completed", totalScanned: 10, expectedCount: 10, matchedCount: 2, stored: true, delivered: true },
+      { shardId: "HEALTH", status: "timed_out", error: "deadline exceeded" },
+    ];
+    const c = await finalizeScreenerCollation(
+      { shardStore: b.store, nowMs: b.clock.nowMs },
+      {
+        command: parentCommand(),
+        outcomes,
+        lifecycleTransitions: [
+          { lifecycle: "Idle", atMs: 1_000_000 },
+          { lifecycle: "Running", atMs: 1_000_000 },
+        ],
+        stageTransitions: [],
+        screenMode: "deterministic",
+        startedAtMs: 1_000_000,
+      },
     );
-    // ReportGenerated = every COMPLETED shard stored; a
-    // qualified partial reaches it when its usable shards are
-    // all stored. It is still qualified, not a full screen.
     expect(c.lifecycle).toBe("ReportGenerated");
     expect(c.qualified).toBe(true);
     expect(c.shards.find((s) => s.shardId === "HEALTH")?.status).toBe("timed_out");
@@ -473,53 +510,78 @@ describe("runParentFlow (collates child flags; never stores or delivers)", () =>
   });
 
   it("all failed → Failed", async () => {
-    const b = makeDeps();
-    const ops = makeChildOps({
-      [childId("job-1", "TECH")]: { status: "complete", output: okResult({ success: false, error: "no quotes" }) },
-      [childId("job-1", "HEALTH")]: { status: "errored", error: { message: "child crashed" } },
-    });
-    const c = await runParentFlow(parentCommand(), b.clock.step, b.deps, ops);
-    expect(c.lifecycle).toBe("Failed");
+    const b = makeDeps(async (req) => ({
+      ...okResult({ success: false, error: "no quotes", universe: req.universe }),
+      full: { marker: "full-failed" },
+    }));
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand());
+    expect(h.status).toBe("complete");
+    expect(b.parentStored).toHaveLength(1);
+    expect(b.parentStored[0]?.collation.lifecycle).toBe("Failed");
+    const failedParent = await b.store.latestJob("tenant-1", "job-1", "leg:parent");
+    expect(JSON.parse(failedParent?.resultJson ?? "{}").detail).toMatch(/Workflow Failed: 0\/2 shards/);
   });
 
-  it("malformed child output → failed shard, never a collation crash", async () => {
-    const b = makeDeps();
-    const ops = makeChildOps({
-      [childId("job-1", "TECH")]: { status: "complete", output: { nonsense: true } },
-      [childId("job-1", "HEALTH")]: { status: "complete", output: { ...okResult({ universe: "HEALTH" }), stored: true, delivered: true } },
+  it("malformed stage output → failed shard, never a collation crash", async () => {
+    const b = makeDeps(async (req) => {
+      if (req.universe === "TECH") {
+        // A result missing its counts: the composer's
+        // validation fails the shard, never a collation crash.
+        return {
+          success: true,
+          timestamp: "2026-10-26T12:00:00.000Z",
+        } as unknown as ShardScreenResult;
+      }
+      return {
+        ...okResult({ universe: req.universe }),
+        full: { marker: "full-result", universe: req.universe },
+      };
     });
-    const c = await runParentFlow(parentCommand(), b.clock.step, b.deps, ops);
-    expect(c.shards.find((s) => s.shardId === "TECH")?.status).toBe("failed");
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand());
+    expect(h.status).toBe("complete");
+    const c = await collationFor(b.store, "job-1");
+    expect((c.shards as { shardId: string; status: string }[]).find((s) => s.shardId === "TECH")?.status).toBe("failed");
     expect(c.lifecycle).toBe("ReportGenerated");
     expect(c.qualified).toBe(true);
   });
 
-  it("maxParallelShards=1 creates shards in order, one batch at a time", async () => {
-    const b = makeDeps();
-    const created: string[] = [];
+  it("three shards all run once (fan-out batching is the engine's now)", async () => {
+    // #4192: maxParallelShards sequenced child creation; the
+    // engine owns fan-out now, so this pins that every shard
+    // runs exactly once and projects its row — not the order.
+    const seen: string[] = [];
+    const b = makeDeps(async (req) => {
+      seen.push(req.universe ?? "?");
+      return {
+        ...okResult({ universe: req.universe }),
+        full: { marker: "full-result", universe: req.universe },
+      };
+    });
     const shards = ["A", "B", "C"].map((s) => ({ shardId: s, universe: s }));
-    const statuses: Record<string, { status: WorkflowInstanceStatus; output?: unknown }> = {};
-    for (const s of shards) {
-      statuses[childId("job-1", s.shardId)] = { status: "complete", output: { ...okResult({ universe: s.shardId }), stored: true, delivered: true } };
-    }
-    const ops = makeChildOps(statuses, created);
-    await runParentFlow(parentCommand({ shards, maxParallelShards: 1 }), b.clock.step, b.deps, ops);
-    expect(created).toEqual(["A", "B", "C"]);
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand({ shards }));
+    expect(h.status).toBe("complete");
+    expect(seen.sort()).toEqual(["A", "B", "C"]);
+    const rows = await b.store.listJobsForChain("tenant-1", "job-1");
+    expect(rows.map((r) => r.jobKey).sort()).toEqual(
+      ["job-1", "shard:A", "shard:B", "shard:C"].sort(),
+    );
   });
 
   it("prod-shaped over-long jobId reaches announce (#2129)", async () => {
     // The 07:56 goal run's jobId shape: 115 chars, over the 100-char
     // provider ceiling. Before #2123 the parent flow threw computing
     // its workflow id before the announce step, so no row ever
-    // landed. The flow must complete and project rows for it.
+    // landed. The engine path must complete and project rows for it.
     const longJobId = `goal-screen:manual:${"a".repeat(64)}:income:2026-10-28T11:56:42.466Z`;
     expect(longJobId.length).toBe(115);
-    const b = makeDeps();
-    const ops = makeChildOps({
-      [childId(longJobId, "TECH")]: { status: "complete", output: { ...okResult({ universe: "TECH" }), stored: true, delivered: true } },
-      [childId(longJobId, "HEALTH")]: { status: "complete", output: { ...okResult({ universe: "HEALTH" }), stored: true, delivered: true } },
-    });
-    const c = await runParentFlow(parentCommand({ jobId: longJobId }), b.clock.step, b.deps, ops);
+    const b = pdfDeps();
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand({ jobId: longJobId }));
+    expect(h.status).toBe("complete");
+    const c = await collationFor(b.store, longJobId);
     expect(c.lifecycle).toBe("ReportGenerated");
     const rows = await b.store.listJobsForChain("tenant-1", longJobId);
     expect(rows.map((r) => r.jobKey).sort()).toEqual(
@@ -533,19 +595,20 @@ describe("runParentFlow (collates child flags; never stores or delivers)", () =>
     // projectBestEffort's silent no-op hid vanished runs: the
     // panel polled an empty history with no worker-log trace.
     const b = makeDeps();
-    const deps = { ...b.deps, shardStore: undefined as unknown as ShardJobStore };
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const deps = { ...b.deps, shardStore: null };
+    // #4192: the retired flow warned with a plain
+    // console.warn; the collation warns through the
+    // structured logger, whose console sink writes the JSON
+    // event via console.info.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
-      const ops = makeChildOps({
-        [childId("job-1", "TECH")]: { status: "complete", output: { ...okResult({ universe: "TECH" }), stored: true, delivered: true } },
-        [childId("job-1", "HEALTH")]: { status: "complete", output: { ...okResult({ universe: "HEALTH" }), stored: true, delivered: true } },
-      });
-      const c = await runParentFlow(parentCommand(), b.clock.step, deps, ops);
-      expect(c.lifecycle).toBe("ReportGenerated");
-      const warned = warn.mock.calls.map((args) => String(args[0]));
+      const adapter = new InMemoryWorkflowAdapter(deps);
+      const h = await adapter.start(parentCommand());
+      expect(h.status).toBe("complete");
+      const warned = info.mock.calls.map((args) => String(args[0]));
       expect(warned.some((m) => m.includes("job-1") && m.includes("feed"))).toBe(true);
     } finally {
-      warn.mockRestore();
+      info.mockRestore();
     }
   });
 });
@@ -592,7 +655,7 @@ describe("adapter conformance: start/status/idempotency", () => {
     await expect(adapter.start(parentCommand({ jobId: "" }))).rejects.toThrow(WorkflowError);
   });
 
-  it("in-memory adapter: start runs the flow, duplicate start never re-executes", async () => {
+  it("in-memory adapter: start runs the engine, duplicate start never re-executes", async () => {
     let runs = 0;
     const b = makeDeps(async (req) => {
       runs += 1;
@@ -606,7 +669,7 @@ describe("adapter conformance: start/status/idempotency", () => {
     expect(h1.existing).toBe(false);
     expect(h1.status).toBe("complete");
     expect(runs).toBe(2);
-    // Real children ran: each stored + delivered its own full
+    // Real units ran: each stored + delivered its own full
     // result (the parent never touches store/deliver).
     expect(b.stored).toHaveLength(2);
     expect(b.delivered).toHaveLength(2);
@@ -618,8 +681,9 @@ describe("adapter conformance: start/status/idempotency", () => {
     expect(await adapter.status("missing")).toBeNull();
     const parentRow = await latestParentRow(b.store, "job-1");
     expect(JSON.parse(parentRow?.resultJson ?? "{}").lifecycle).toBe("ReportGenerated");
-    // Real children ran: their rows exist (parent project-final
-    // dedups against them via the replay rule, never duplicates).
+    // Real units ran: their rows exist (finalize
+    // project-final dedups against them via the replay rule,
+    // never duplicates).
     const rows = await b.store.listJobsForChain("tenant-1", "job-1");
     expect(rows.map((r) => r.jobKey).sort()).toEqual(
       ["job-1", "shard:HEALTH", "shard:TECH"].sort(),
@@ -670,10 +734,11 @@ describe("port purity (provider-neutral domain surface)", () => {
     expect(src).not.toContain(".retry(");
   };
 
-  it("port, flow, envelope, in-memory adapter, and composition root carry no provider concepts", () => {
+  it("port, collation, envelope, in-memory adapter, and composition root carry no provider concepts", () => {
     for (const f of [
       "src/workflows/workflowPorts.ts",
-      "src/workflows/screenerWorkflowFlow.ts",
+      "src/workflows/screenerCollation.ts",
+      "src/workflows/screenerWorkflowFlow.deprecated.ts",
       "src/workflows/workflowCommandEnvelope.ts",
       "src/workflows/inMemoryWorkflowAdapter.ts",
       "src/workflows/createWorkflowPorts.ts",
@@ -702,16 +767,16 @@ describe("shard artifact keys and trigger (#2080)", () => {
   });
 
   it("stores the trigger and artifact keys on the canonical payload", async () => {
-    const command = shardCommand();
     const b = makeDeps(async (req) => ({
       ...okResult({ universe: req.universe }),
       xlsxKey: "screener:xlsx:x",
       csvKey: "screener:csv:c",
       full: { marker: "full-result", universe: req.universe },
     }));
-    await runShardFlow(command, b.clock.step, b.deps);
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    await adapter.start(parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }] }));
     expect(b.stored[0]).toMatchObject({
-      trigger: command.trigger,
+      trigger: "manual",
       xlsxKey: "screener:xlsx:x",
       csvKey: "screener:csv:c",
       marker: "full-result",

@@ -28,6 +28,10 @@ import {
   type WorkflowPort,
 } from "../../workflows/workflowPorts";
 import { readJobHistory } from "../../data/createShardJobPorts";
+import {
+  CHAT_AWAIT_POLL_INTERVAL_MS,
+  resolveChatAwaitDeadlineMs,
+} from "./chatAwaitBudget";
 import type { ShardJobRow } from "../../data/shardJobPorts";
 import { meshTraceStoreForEnv } from "../../data/createMeshTracePorts";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
@@ -328,7 +332,7 @@ export function nlqStockScreenPort(ctx: NlqPortsContext): NLQStockScreenPort {
 }
 
 /** Cadence for the port's own status-surface polls (the workflow's internal child polling is the command's pollIntervalMs). */
-const CHAT_SCREEN_POLL_INTERVAL_MS = 2_000;
+const CHAT_SCREEN_POLL_INTERVAL_MS = CHAT_AWAIT_POLL_INTERVAL_MS;
 /**
  * Bound on the port's await. Generous against the workflow's
  * own per-shard deadlines (10 min per batch); on expiry the
@@ -336,7 +340,8 @@ const CHAT_SCREEN_POLL_INTERVAL_MS = 2_000;
  * in the workflow and stays visible at its status URL — never
  * a fake success and never a silent second direct run.
  */
-const CHAT_SCREEN_AWAIT_DEADLINE_MS = 15 * 60_000;
+// Issue #4202 — the shared chat await budget (./chatAwaitBudget.ts). This port
+// carried the door's fifteen-minute literal a second time; one budget now.
 /** The parent workflow's child-poll cadence for chat runs (its durable sleeps; granularity only). */
 const CHAT_SCREEN_PARENT_POLL_INTERVAL_MS = 5_000;
 
@@ -475,7 +480,7 @@ async function runChatScreenViaWorkflow(
   const sleep =
     ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const pollIntervalMs = ctx.workflowPollIntervalMs ?? CHAT_SCREEN_POLL_INTERVAL_MS;
-  const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? CHAT_SCREEN_AWAIT_DEADLINE_MS);
+  const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? resolveChatAwaitDeadlineMs(ctx.env));
   // A terminal instance whose collation has not projected yet
   // gets a few extra polls — projection lag is not a failure.
   let terminalPolls = 0;
@@ -785,7 +790,7 @@ async function awaitChatPaidScreenOutcome(
     ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const nowMs = ctx.nowMs ?? (() => Date.now());
   const pollIntervalMs = ctx.workflowPollIntervalMs ?? CHAT_SCREEN_POLL_INTERVAL_MS;
-  const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? CHAT_SCREEN_AWAIT_DEADLINE_MS);
+  const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? resolveChatAwaitDeadlineMs(ctx.env));
   const readPaymentStatus =
     ctx.paymentWorkflowStatus ??
     ((id: string) => defaultPaymentWorkflowStatus(ctx.env, id));
@@ -1037,10 +1042,16 @@ async function assembleChatScreenResult(
     .filter((b): b is StoredScreenBody => b !== undefined);
 
   if (matched.length === 0) {
+    // #4192: a Failed run projects no collation on the parent
+    // row (the final leg lands under leg:parent with only its
+    // detail), so the shard outcome's error — the specific
+    // cause on the failed leg — comes before the parent's
+    // generic detail. The order below is the doc comment's:
+    // collation's, shard outcome's, projection detail's.
     const error =
       collation?.error ??
-      detailFor("leg:parent") ??
       shards.map((s) => shardError(s.shardId)).find((e) => typeof e === "string") ??
+      detailFor("leg:parent") ??
       `Screen workflow run ${jobId} ${args.terminalNote}; it remains tracked at ${workflowStatusUrl(jobId)}.`;
     return {
       timestamp: args.startedAtIso,

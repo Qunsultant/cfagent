@@ -105,6 +105,10 @@ import type { ShardJobRow } from "../../data/shardJobPorts";
 import { meshTraceStoreForEnv } from "../../data/createMeshTracePorts";
 import type { MeshTraceStore } from "../../data/meshTracePorts";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
+import {
+  CHAT_AWAIT_POLL_INTERVAL_MS,
+  resolveChatAwaitDeadlineMs,
+} from "./chatAwaitBudget";
 import { CREDITS_TOP_UP_HINT } from "../../services/providerUxLinks";
 import {
   listScheduledReports,
@@ -357,9 +361,11 @@ export function meshScreenDoorContextFromMcp(context: McpToolContext): MeshScree
 /* ------------------------------------------------------------------ */
 
 /** Cadence for the door's own status-surface polls (the workflow's internal child polling is the command's pollIntervalMs). */
-const SCREEN_DOOR_POLL_INTERVAL_MS = 2_000;
+const SCREEN_DOOR_POLL_INTERVAL_MS = CHAT_AWAIT_POLL_INTERVAL_MS;
 /** Bound on the door's await (parity with the port: on expiry an honest tracked failure — the run stays visible at its status URL). */
-const SCREEN_DOOR_AWAIT_DEADLINE_MS = 15 * 60_000;
+// Issue #4202 — this was a fifteen-minute literal. A pending request is a
+// resident Durable Object, so that window was billed per run (see
+// ./chatAwaitBudget.ts). The budget is shared with the NLQ port now.
 /** The parent workflow's child-poll cadence for door runs. */
 const SCREEN_DOOR_PARENT_POLL_INTERVAL_MS = 5_000;
 
@@ -730,7 +736,7 @@ async function awaitScreenOutcome(
     ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const nowMs = ctx.nowMs ?? (() => Date.now());
   const pollIntervalMs = ctx.workflowPollIntervalMs ?? SCREEN_DOOR_POLL_INTERVAL_MS;
-  const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? SCREEN_DOOR_AWAIT_DEADLINE_MS);
+  const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? resolveChatAwaitDeadlineMs(ctx.env));
   // A terminal instance whose collation has not projected yet
   // gets a few extra polls — projection lag is not a failure.
   let terminalPolls = 0;
@@ -1051,7 +1057,7 @@ async function awaitPaidScreenOutcome(
     ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const nowMs = ctx.nowMs ?? (() => Date.now());
   const pollIntervalMs = ctx.workflowPollIntervalMs ?? SCREEN_DOOR_POLL_INTERVAL_MS;
-  const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? SCREEN_DOOR_AWAIT_DEADLINE_MS);
+  const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? resolveChatAwaitDeadlineMs(ctx.env));
   const readPaymentStatus =
     ctx.paymentWorkflowStatus ??
     ((id: string) => defaultPaymentWorkflowStatus(ctx.env, id));

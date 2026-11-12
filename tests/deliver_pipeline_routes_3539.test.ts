@@ -349,6 +349,17 @@ describe("pipeline deliver-jobs routes (#3539)", () => {
       "yahoo-sp500-quotes-enrich-analyze-generate-deliver",
       "yahoo-dow-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp400-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-energy-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-materials-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-industrials-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-consumer-discretionary-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-consumer-staples-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-health-care-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-financials-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-information-technology-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-communication-services-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-utilities-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-real-estate-quotes-enrich-analyze-generate-deliver",
     ]);
     const alpaca = await callRoute(ctx, "GET", "/data-providers/alpaca/deliver-jobs");
     const alpacaBody = (await alpaca.json()) as { jobs: DeliverJobSurfaceView[] };
@@ -362,7 +373,7 @@ describe("pipeline deliver-jobs routes (#3539)", () => {
     const body = (await res.json()) as any;
     const yahoo = body.providers.find((p: any) => p.id === "yahoo");
     expect(Array.isArray(yahoo.deliverJobs)).toBe(true);
-    expect(yahoo.deliverJobs).toHaveLength(5);
+    expect(yahoo.deliverJobs).toHaveLength(16);
     expect(yahoo.deliverJobs[0]).toMatchObject({ jobId: DELIVER_ID, deliver: { state: "never-run" } });
   });
 

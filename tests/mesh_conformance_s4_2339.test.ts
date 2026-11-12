@@ -608,10 +608,15 @@ function countByAspect(): Record<Aspect, Record<CellState, number>> {
   return counts;
 }
 
-/** Parse the doc's summary table: `| \`aspect\` | I | N | G |` + Total row. */
+/**
+ * Parse the doc's summary table: `| \`aspect\` | I | N | G |` + Total row.
+ *
+ * Issue #4247 — split on CRLF too: the row regexes anchor with `$`, and a
+ * Windows checkout hands us lines ending in "\r", which no row would match.
+ */
 function parseDocSummary(doc: string) {
   const rows = new Map<string, [number, number, number]>();
-  for (const line of doc.split("\n")) {
+  for (const line of doc.split(/\r?\n/)) {
     const m = line.match(/^\| `([a-z-]+)` \| (\d+) \| (\d+) \| (\d+) \|$/);
     if (m) rows.set(m[1], [Number(m[2]), Number(m[3]), Number(m[4])]);
     const t = line.match(/^\| Total \| (\d+) \| (\d+) \| (\d+) \|$/);
@@ -624,7 +629,7 @@ function parseDocSummary(doc: string) {
 function parseDocCells(doc: string) {
   const out = new Map<string, Map<string, string>>();
   let current: string | null = null;
-  for (const line of doc.split("\n")) {
+  for (const line of doc.split(/\r?\n/)) {
     const h = line.match(/^#{1,4}\s+(.*)$/);
     if (h) {
       const name = h[1].trim();

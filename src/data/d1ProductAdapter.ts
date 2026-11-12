@@ -11,7 +11,7 @@
  * BEGIN/COMMIT, not Postgres-equivalent atomicity on D1).
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { agentBulkMoves, agentProducts, agentVersionMoves } from "./drizzleSchema";
 import {
   applyMigrations,
@@ -25,8 +25,10 @@ import {
   type MigrationDb,
 } from "./migrationRunner";
 import {
+  assertBulkMoveStatus,
   assertProduct,
   assertSegment,
+  type BulkMoveRecord,
   type ProductKind,
   type ProductRecord,
   type ProductStore,
@@ -96,6 +98,23 @@ function toMove(raw: typeof agentVersionMoves.$inferSelect): VersionMoveRecord {
     movedBy: raw.movedBy,
     reason: raw.reason ?? null,
     movedAtMs: raw.movedAtMs,
+  };
+}
+
+function toBulkMove(raw: typeof agentBulkMoves.$inferSelect): BulkMoveRecord {
+  return {
+    id: raw.id,
+    productId: raw.productId,
+    segmentScope: raw.segmentScope ?? null,
+    targetVersionIdsJson: raw.targetVersionIdsJson,
+    movedBy: raw.movedBy,
+    reason: raw.reason ?? null,
+    status: assertBulkMoveStatus(raw.status),
+    movedCount: raw.movedCount,
+    skippedCount: raw.skippedCount,
+    failedCount: raw.failedCount,
+    startedAtMs: raw.startedAtMs,
+    finishedAtMs: raw.finishedAtMs ?? null,
   };
 }
 
@@ -183,6 +202,18 @@ export class D1ProductAdapter implements ProductStore {
     if (!move.userId) throw new Error("Version move requires userId.");
     if (!move.movedBy) throw new Error("Version move requires movedBy.");
     const segment = assertSegment(move.segment);
+    // The (bulkMoveId, userId) backstop, mirrored from the
+    // in-memory adapter: a retry returns the EXISTING row,
+    // never a phantom record whose id was never persisted.
+    // The onConflictDoNothing below stays as the race backstop.
+    if (move.bulkMoveId) {
+      const existing = await this.db
+        .select()
+        .from(agentVersionMoves)
+        .where(and(eq(agentVersionMoves.bulkMoveId, move.bulkMoveId), eq(agentVersionMoves.userId, move.userId)))
+        .limit(1);
+      if (existing.length > 0) return toMove(existing[0]);
+    }
     const record: VersionMoveRecord = {
       id:
         typeof move.id === "string" && move.id.trim()
@@ -230,6 +261,117 @@ export class D1ProductAdapter implements ProductStore {
       .select()
       .from(agentVersionMoves)
       .where(eq(agentVersionMoves.userId, userId))
+      .orderBy(asc(agentVersionMoves.movedAtMs), asc(agentVersionMoves.id));
+    return rows.map(toMove);
+  }
+
+  async createBulkMove(input: {
+    id?: string;
+    productId: unknown;
+    segmentScope?: string | null;
+    targetVersionIdsJson: unknown;
+    movedBy: unknown;
+    reason?: string | null;
+    startedAtMs?: number;
+  }): Promise<BulkMoveRecord> {
+    const productId = typeof input.productId === "string" && input.productId.trim() ? input.productId.trim() : "";
+    if (!productId) throw new Error("Bulk move requires productId.");
+    const movedBy = typeof input.movedBy === "string" && input.movedBy.trim() ? input.movedBy.trim() : "";
+    if (!movedBy) throw new Error("Bulk move requires movedBy.");
+    if (typeof input.targetVersionIdsJson !== "string") {
+      throw new Error("Bulk move requires targetVersionIdsJson.");
+    }
+    const segmentScope =
+      input.segmentScope === undefined || input.segmentScope === null ? null : assertSegment(input.segmentScope);
+    const record: BulkMoveRecord = {
+      id:
+        typeof input.id === "string" && input.id.trim()
+          ? input.id.trim()
+          : `bulk-${crypto.randomUUID().slice(0, 8)}`,
+      productId,
+      segmentScope,
+      targetVersionIdsJson: input.targetVersionIdsJson,
+      movedBy,
+      reason: input.reason ?? null,
+      status: "running",
+      movedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      startedAtMs: input.startedAtMs ?? Date.now(),
+      finishedAtMs: null,
+    };
+    try {
+      await this.db.insert(agentBulkMoves).values({
+        id: record.id,
+        productId: record.productId,
+        segmentScope: record.segmentScope,
+        targetVersionIdsJson: record.targetVersionIdsJson,
+        movedBy: record.movedBy,
+        reason: record.reason,
+        status: record.status,
+        movedCount: record.movedCount,
+        skippedCount: record.skippedCount,
+        failedCount: record.failedCount,
+        startedAtMs: record.startedAtMs,
+        finishedAtMs: record.finishedAtMs,
+      });
+    } catch {
+      // Same mapping as createProduct: a failed insert on an
+      // existing id is a duplicate, not a raw query error.
+      const existing = await this.getBulkMove(record.id);
+      if (existing) throw new Error(`Bulk move ${record.id} already exists.`);
+      throw new Error(`Failed to create bulk move ${record.id}.`);
+    }
+    return record;
+  }
+
+  async getBulkMove(bulkMoveId: string): Promise<BulkMoveRecord | null> {
+    const rows = await this.db
+      .select()
+      .from(agentBulkMoves)
+      .where(eq(agentBulkMoves.id, bulkMoveId))
+      .limit(1);
+    return rows.length === 0 ? null : toBulkMove(rows[0]);
+  }
+
+  async updateBulkMove(
+    bulkMoveId: string,
+    patch: {
+      status?: BulkMoveRecord["status"];
+      movedCount?: number;
+      skippedCount?: number;
+      failedCount?: number;
+      finishedAtMs?: number | null;
+    },
+  ): Promise<BulkMoveRecord> {
+    const set: Partial<typeof agentBulkMoves.$inferInsert> = {};
+    if (patch.status !== undefined) set.status = assertBulkMoveStatus(patch.status);
+    if (patch.movedCount !== undefined) set.movedCount = patch.movedCount;
+    if (patch.skippedCount !== undefined) set.skippedCount = patch.skippedCount;
+    if (patch.failedCount !== undefined) set.failedCount = patch.failedCount;
+    if (patch.finishedAtMs !== undefined) set.finishedAtMs = patch.finishedAtMs;
+    if (Object.keys(set).length > 0) {
+      await this.db.update(agentBulkMoves).set(set).where(eq(agentBulkMoves.id, bulkMoveId));
+    }
+    const updated = await this.getBulkMove(bulkMoveId);
+    if (!updated) throw new Error(`No bulk move ${bulkMoveId}.`);
+    return updated;
+  }
+
+  async listBulkMoves(productId: string): Promise<BulkMoveRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(agentBulkMoves)
+      .where(eq(agentBulkMoves.productId, productId))
+      .orderBy(desc(agentBulkMoves.startedAtMs), desc(agentBulkMoves.id));
+    return rows.map(toBulkMove);
+  }
+
+  async listMovesForBulkMove(bulkMoveId: string): Promise<VersionMoveRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(agentVersionMoves)
+      .where(eq(agentVersionMoves.bulkMoveId, bulkMoveId))
       .orderBy(asc(agentVersionMoves.movedAtMs), asc(agentVersionMoves.id));
     return rows.map(toMove);
   }

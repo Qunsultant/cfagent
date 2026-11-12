@@ -3,7 +3,7 @@
  * dead-letter record for terminal queue drops.
  *
  * The F-32 gap, as it stands on current main: the screener queues
- * already have platform dead-letter queues (max_retries 3, then
+ * already have platform dead-letter queues (max_retries 2, then
  * screener-events-dlq / screener-events-delivery-dlq, pinned by
  * #2544), so a retryable handler failure IS bounded — it lands in
  * the DLQ instead of looping forever. What was NOT auditable was

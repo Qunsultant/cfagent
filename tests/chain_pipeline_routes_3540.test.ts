@@ -458,6 +458,17 @@ describe("pipeline-chain routes (#3540)", () => {
       "yahoo-sp500-quotes-pipeline",
       "yahoo-dow-quotes-pipeline",
       "yahoo-sp400-quotes-pipeline",
+      "yahoo-sector-energy-quotes-pipeline",
+      "yahoo-sector-materials-quotes-pipeline",
+      "yahoo-sector-industrials-quotes-pipeline",
+      "yahoo-sector-consumer-discretionary-quotes-pipeline",
+      "yahoo-sector-consumer-staples-quotes-pipeline",
+      "yahoo-sector-health-care-quotes-pipeline",
+      "yahoo-sector-financials-quotes-pipeline",
+      "yahoo-sector-information-technology-quotes-pipeline",
+      "yahoo-sector-communication-services-quotes-pipeline",
+      "yahoo-sector-utilities-quotes-pipeline",
+      "yahoo-sector-real-estate-quotes-pipeline",
     ]);
     expect(body.jobs[0].frontier).toBe("feed");
     expect(body.jobs[0].stages).toHaveLength(5);
@@ -478,6 +489,17 @@ describe("pipeline-chain routes (#3540)", () => {
       "yahoo-sp500-quotes-pipeline",
       "yahoo-dow-quotes-pipeline",
       "yahoo-sp400-quotes-pipeline",
+      "yahoo-sector-energy-quotes-pipeline",
+      "yahoo-sector-materials-quotes-pipeline",
+      "yahoo-sector-industrials-quotes-pipeline",
+      "yahoo-sector-consumer-discretionary-quotes-pipeline",
+      "yahoo-sector-consumer-staples-quotes-pipeline",
+      "yahoo-sector-health-care-quotes-pipeline",
+      "yahoo-sector-financials-quotes-pipeline",
+      "yahoo-sector-information-technology-quotes-pipeline",
+      "yahoo-sector-communication-services-quotes-pipeline",
+      "yahoo-sector-utilities-quotes-pipeline",
+      "yahoo-sector-real-estate-quotes-pipeline",
     ]);
   });
 

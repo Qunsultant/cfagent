@@ -11,8 +11,10 @@
  * no products at all.
  */
 import {
+  assertBulkMoveStatus,
   assertProduct,
   assertSegment,
+  type BulkMoveRecord,
   type ProductKind,
   type ProductRecord,
   type ProductStore,
@@ -22,6 +24,7 @@ import {
 export class InMemoryProductAdapter implements ProductStore {
   private products = new Map<string, ProductRecord>();
   private moves: VersionMoveRecord[] = [];
+  private bulkMoves = new Map<string, BulkMoveRecord>();
 
   async createProduct(input: {
     id?: unknown;
@@ -115,6 +118,85 @@ export class InMemoryProductAdapter implements ProductStore {
   async listMovesForUser(userId: string): Promise<VersionMoveRecord[]> {
     return this.moves
       .filter((m) => m.userId === userId)
+      .sort((a, b) => a.movedAtMs - b.movedAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+
+  async createBulkMove(input: {
+    id?: string;
+    productId: unknown;
+    segmentScope?: string | null;
+    targetVersionIdsJson: unknown;
+    movedBy: unknown;
+    reason?: string | null;
+    startedAtMs?: number;
+  }): Promise<BulkMoveRecord> {
+    const productId = typeof input.productId === "string" && input.productId.trim() ? input.productId.trim() : "";
+    if (!productId) throw new Error("Bulk move requires productId.");
+    const movedBy = typeof input.movedBy === "string" && input.movedBy.trim() ? input.movedBy.trim() : "";
+    if (!movedBy) throw new Error("Bulk move requires movedBy.");
+    if (typeof input.targetVersionIdsJson !== "string") {
+      throw new Error("Bulk move requires targetVersionIdsJson.");
+    }
+    const segmentScope =
+      input.segmentScope === undefined || input.segmentScope === null ? null : assertSegment(input.segmentScope);
+    const id =
+      typeof input.id === "string" && input.id.trim() ? input.id.trim() : `bulk-${crypto.randomUUID().slice(0, 8)}`;
+    if (this.bulkMoves.has(id)) throw new Error(`Bulk move ${id} already exists.`);
+    const record: BulkMoveRecord = {
+      id,
+      productId,
+      segmentScope,
+      targetVersionIdsJson: input.targetVersionIdsJson,
+      movedBy,
+      reason: input.reason ?? null,
+      status: "running",
+      movedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      startedAtMs: input.startedAtMs ?? Date.now(),
+      finishedAtMs: null,
+    };
+    this.bulkMoves.set(id, record);
+    return record;
+  }
+
+  async getBulkMove(bulkMoveId: string): Promise<BulkMoveRecord | null> {
+    return this.bulkMoves.get(bulkMoveId) ?? null;
+  }
+
+  async updateBulkMove(
+    bulkMoveId: string,
+    patch: {
+      status?: BulkMoveRecord["status"];
+      movedCount?: number;
+      skippedCount?: number;
+      failedCount?: number;
+      finishedAtMs?: number | null;
+    },
+  ): Promise<BulkMoveRecord> {
+    const existing = this.bulkMoves.get(bulkMoveId);
+    if (!existing) throw new Error(`No bulk move ${bulkMoveId}.`);
+    const updated: BulkMoveRecord = {
+      ...existing,
+      ...(patch.status !== undefined ? { status: assertBulkMoveStatus(patch.status) } : {}),
+      ...(patch.movedCount !== undefined ? { movedCount: patch.movedCount } : {}),
+      ...(patch.skippedCount !== undefined ? { skippedCount: patch.skippedCount } : {}),
+      ...(patch.failedCount !== undefined ? { failedCount: patch.failedCount } : {}),
+      ...(patch.finishedAtMs !== undefined ? { finishedAtMs: patch.finishedAtMs } : {}),
+    };
+    this.bulkMoves.set(bulkMoveId, updated);
+    return updated;
+  }
+
+  async listBulkMoves(productId: string): Promise<BulkMoveRecord[]> {
+    return [...this.bulkMoves.values()]
+      .filter((b) => b.productId === productId)
+      .sort((a, b) => b.startedAtMs - a.startedAtMs || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  }
+
+  async listMovesForBulkMove(bulkMoveId: string): Promise<VersionMoveRecord[]> {
+    return this.moves
+      .filter((m) => m.bulkMoveId === bulkMoveId)
       .sort((a, b) => a.movedAtMs - b.movedAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 }

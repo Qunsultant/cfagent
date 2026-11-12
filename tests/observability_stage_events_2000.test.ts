@@ -2,16 +2,16 @@
  * Issue #2000 Phase 5 slice 4 — stage events into the #1743 stream
  * as NEW TYPE VALUES ONLY (no schema change).
  *
- * The staged path's stage vocabulary comes from the screener flow
- * (src/workflows/screenerWorkflowFlow.ts stage outcomes):
+ * The staged path's stage vocabulary comes from the #1743 fold
+ * whitelist (src/observability/observabilityPorts.ts):
  * feed, gather, analysis, deliver — each with a completed and a
  * failed form. One fold case per type; each carries counts+ids
  * only (tenantId, runId, optional count). Prompt text, thesis
  * text, identities, error messages, and any other user material
  * never survive the fold, even when a producer envelope carries
  * them. Unknown types fold to null (whitelist closed) — note in
- * particular that `serve` is NOT in the flow's stage vocabulary,
- * so a serve stage event folds to null by design.
+ * particular that `serve` is NOT in the whitelist, so a serve
+ * stage event folds to null by design.
  */
 import { describe, it, expect } from "vitest";
 import {

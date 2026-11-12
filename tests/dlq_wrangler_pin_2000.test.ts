@@ -1,7 +1,7 @@
 /**
  * Phase 5 Slice 1 (#2000) — structural pin on the queue bindings.
  *
- * Both consumers keep max_retries: 3 and a dead_letter_queue;
+ * Both consumers keep max_retries: 2 and a dead_letter_queue;
  * both DLQ queues keep producer bindings (the DLQ queues
  * themselves are never replay targets — replay re-drives to
  * the source queues, which also keep producer bindings).
@@ -42,7 +42,7 @@ function stripJsonc(src: string): string {
 }
 
 describe("DLQ binding structural pin (#2000 slice 1)", () => {
-  it("both consumers keep max_retries 3 + dead_letter_queue; DLQ and source queues keep producer bindings", () => {
+  it("both consumers keep max_retries 2 + dead_letter_queue; DLQ and source queues keep producer bindings", () => {
     const wrangler = JSON.parse(stripJsonc(readFileSync("wrangler.jsonc", "utf8"))) as {
       queues?: { producers?: Array<{ queue: string }>; consumers?: Array<{ queue: string; max_retries?: number; dead_letter_queue?: string }> };
     };
@@ -50,9 +50,9 @@ describe("DLQ binding structural pin (#2000 slice 1)", () => {
     const producers = new Set((wrangler.queues?.producers ?? []).map((p) => p.queue));
     const screener = consumers.get("screener-events");
     const delivery = consumers.get("screener-events-delivery");
-    expect(screener?.max_retries).toBe(3);
+    expect(screener?.max_retries).toBe(2);
     expect(screener?.dead_letter_queue).toBe("screener-events-dlq");
-    expect(delivery?.max_retries).toBe(3);
+    expect(delivery?.max_retries).toBe(2);
     expect(delivery?.dead_letter_queue).toBe("screener-events-delivery-dlq");
     for (const q of ["screener-events", "screener-events-delivery", "screener-events-dlq", "screener-events-delivery-dlq"]) {
       expect(producers.has(q)).toBe(true);

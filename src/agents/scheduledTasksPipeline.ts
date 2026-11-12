@@ -454,10 +454,8 @@ export function createScheduledAgentPipelineControl(
       analyzeStepDepsForScheduledAgent(ctx),
       generateStepDepsForScheduledAgent(ctx),
       deliverStepDepsForScheduledAgent(ctx),
-      // Issue #4190 (#3550 S1): the screener steps compose here
-      // too — registration only; no job names them until the S2
-      // cutover, and the quote/history deps refuse by name until
-      // then, so production behavior is unchanged.
+      // Issue #4190 (#3550 S1, wired in #4192): the screener steps compose here
+      // too — the agent binds the quote/history deps itself at stage time.
       screenerStepDepsForScheduledAgent(ctx),
     ),
     invocation: "sync",
@@ -724,8 +722,8 @@ export async function startPipelineJobWorkflow(
       analyzeStepDepsForScheduledAgent(ctx),
       generateStepDepsForScheduledAgent(ctx),
       deliverStepDepsForScheduledAgent(ctx),
-      // Issue #4190 (#3550 S1): the screener steps compose here
-      // too — registration only (see the host control above).
+      // Issue #4190 (#3550 S1, wired in #4192): the screener steps compose here
+      // too — the agent binds the quote/history deps itself at stage time.
       screenerStepDepsForScheduledAgent(ctx),
     ),
     invocation: "workflow-shard",

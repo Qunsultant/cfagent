@@ -3,10 +3,11 @@
  * PaymentWorkflow (#2014; live — header corrected 2026-11-01, #2551).
  *
  * This is the flow module behind PaymentWorkflow, mirroring the repo pattern:
- * ScreenerScreenWorkflow delegates to screenerWorkflowFlow.ts and
- * TradingTradeWorkflow delegates to runTradeApprovalFlow. The workflow class
- * itself is a thin adapter; every decision lives here, behind fakeable
- * interfaces, so it is unit-testable without a worker runtime.
+ * ScreenerScreenWorkflow dispatches through the one engine
+ * (runScreenerScreenOnEngine) and TradingTradeWorkflow delegates
+ * to runTradeApprovalFlow. The workflow class itself is a thin
+ * adapter; every decision lives here, behind fakeable interfaces,
+ * so it is unit-testable without a worker runtime.
  *
  * Deterministic, NOT model-driven. No step prompts a model, no step lets a
  * model choose an amount, a recipient, or whether to pay. Amounts come from

@@ -384,6 +384,36 @@ function measure(): Map<string, number> {
  * the id rewritten). One new row, dispositioned INTEGRATION:
  * feed-run-residency-and-scheduled-silence-3992.md yahoo 1. The rest
  * of the doc and its companion fragment name no provider brand.
+ * Baseline update (#4065, 2026-11-11): the options-chains feed
+ * jobs land — one options-chains job per optionsChains-serving
+ * source (etrade, alpaca, public), each a parameterized
+ * definition on the #3930 idiom, with a persisted
+ * options-chains dataset. 0 new rows, 7 raises, all
+ * dispositioned INTEGRATION — the pipeline/job-system
+ * provider-id registries and provider wiring name the provider
+ * they serve, which is their job (the seed-time disposition):
+ * the growth is the new jobs' own id/label/sourceId/alias
+ * lines only (feedJobs.ts alpaca 5->7 / etrade 5->7 / nasdaq
+ * 10->11; feedPipelineJobs.ts alpaca 5->9 / etrade 4->8 /
+ * nasdaq 20->23 / public.com 2->3). The prose brand mentions
+ * were neutralized instead: the registry comment names the
+ * three serving sources without brands, the runner's evidence
+ * note drops its brand parenthetical, and the dataset
+ * definition uses the neutral BrokerOptionChain /
+ * BrokerOptionExpireDate aliases (the non-deprecated names) —
+ * so no feedDatasetPorts.ts etrade row is created and the
+ * feedJobs.ts yahoo row does not move. The PLATFORM slice is
+ * untouched (still 189 rows / 1050 lines). Totals move
+ * 1161/9142 -> 1161/9159.
+ * Baseline update (#4190, 2026-11-12): the screener substrate (#3550 S1)
+ * adds six ScreenerAgent stage methods that duplicate runScreenInner's
+ * per-stage provider branches (the live path is untouched in S1; the
+ * stage methods name the provider their branch serves, exactly as the
+ * bodies they mirror do) — dispositioned INTEGRATION, the provider
+ * branches' own names: 4 raises (screener-agent.ts etrade 71->85 /
+ * alpaca 18->22 / yahoo 58->66 / nasdaq 7->10). The counts fall back
+ * when S2 repoints the live path at the engine and the duplicated
+ * branches are retired. Totals move 1161/9142 -> 1161/9171.
  * Baseline update (#4193, 2026-11-12): the S&P 400 universe joins
  * the feed workflow as a Yahoo quotes feed job - one registry
  * definition in the feed-job registry and one entry in the feed
@@ -391,6 +421,48 @@ function measure(): Map<string, number> {
  * (INTEGRATION at seed: naming the provider is their job), and
  * the only growth is the new job's own id/label lines: 2 raises
  * (feedJobs.ts/yahoo 26->28, feedPipelineJobs.ts/yahoo 31->35).
+ * Baseline update (#4216, 2026-11-12): the four GICS sector universes join
+ * the feed workflow as Yahoo quotes feed jobs (Energy, Materials,
+ * Industrials, Consumer Discretionary) - one registry definition per
+ * sector in the feed-job registry and one entry each in the feed
+ * pipeline catalog. Both files are the provider-id registries
+ * (INTEGRATION at seed: naming the provider is their job), and
+ * the only growth is the new jobs' own id/label/alias lines: 2 raises
+ * (feedJobs.ts/yahoo 28->34, feedPipelineJobs.ts/yahoo 35->52).
+ * Totals move 1175/9224 -> 1175/9247.
+ * Baseline update (#4225, 2026-11-12): the next four GICS sector universes join
+ * the feed workflow as Yahoo quotes feed jobs (Consumer Staples,
+ * Health Care, Financials, Information Technology) - one registry definition per
+ * sector in the feed-job registry and one entry each in the feed
+ * pipeline catalog. Both files are the provider-id registries
+ * (INTEGRATION at seed: naming the provider is their job), and
+ * the only growth is the new jobs' own id/label/alias lines: 2 raises
+ * (feedJobs.ts/yahoo 34->40, feedPipelineJobs.ts/yahoo 52->71).
+ * Totals move 1175/9247 -> 1175/9272.
+ * Baseline update (#4250, 2026-11-12): the last three GICS sector universes join
+ * the feed workflow as Yahoo quotes feed jobs (Communication Services,
+ * Utilities, Real Estate) - one registry definition per
+ * sector in the feed-job registry and one entry each in the feed
+ * pipeline catalog. Both files are the provider-id registries
+ * (INTEGRATION at seed: naming the provider is their job), and
+ * the only growth is the new jobs' own id/label/alias lines: 2 raises
+ * (feedJobs.ts/yahoo 40->45, feedPipelineJobs.ts/yahoo 71->85).
+ * Totals move 1175/9272 -> 1175/9291.
+ * Baseline update (#4192, 2026-11-12): the screener cutover
+ * (#3550 S2) moves runScreenInner's platform quote/history
+ * binding into shared agent methods (bindScreenerQuoteDeps /
+ * bindScreenerHistoryDeps) so the stage methods bind the deps
+ * themselves when the step handler omits them — the blocks move
+ * verbatim, and the only growth is the binding's own names:
+ * the method signature + guard + return legs + call sites:
+ * 3 raises (screener-agent.ts etrade 85->94 / alpaca 22->24 /
+ * yahoo 66->68), dispositioned INTEGRATION — the binding names
+ * the provider its leg serves, which is its job (the #4190
+ * precedent). Recounted at ship: the etradeService parameter
+ * threading at the stage call sites added two more named lines
+ * after the first count (92->94). The counts fall back when the
+ * duplicated runScreenInner branches are retired.
+ * Totals move 1175/9291 -> 1175/9304.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -594,7 +666,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (678 rows / 6515 lines) ----
+  // ---- INTEGRATION (679 rows / 6522 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -618,6 +690,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/security/vendor-risk-1774.md", "alpaca", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "etrade", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "public.com", 1],
+  // #3135 INTEGRATION: the token-mapping doc names the layout file
+  // ETradeTradingHub.tsx by its registered name (a data-bearing
+  // identifier) in the scope list and Used-by columns; neutralizing
+  // the file name would break traceability to the file.
+  ["docs/architecture/UX/token-mapping-order-options-autopilot.md", "etrade", 7],
   ["docs/operations/data/data-provider-platform.md", "alpaca", 13],
   ["docs/operations/data/data-provider-platform.md", "etrade", 8],
   ["docs/operations/data/data-provider-platform.md", "nasdaq", 5],
@@ -764,9 +841,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/scheduledTasksPipeline.ts", "alpaca", 1],
   ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "yahoo", 1],
-  ["src/agents/screener-agent.ts", "alpaca", 22],
-  ["src/agents/screener-agent.ts", "etrade", 85],
-  ["src/agents/screener-agent.ts", "yahoo", 66],
+  ["src/agents/screener-agent.ts", "alpaca", 24],
+  ["src/agents/screener-agent.ts", "etrade", 94],
+  ["src/agents/screener-agent.ts", "yahoo", 68],
   ["src/agents/screenerA2aDispatch.ts", "etrade", 2],
   ["src/agents/screenerA2aDispatch.ts", "yahoo", 5],
   ["src/agents/slackA2aDispatch.ts", "etrade", 11],
@@ -1036,15 +1113,15 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/etradeOAuth.ts", "etrade", 3],
   ["src/services/eventCalendar.ts", "etrade", 1],
   ["src/services/eventCalendar.ts", "yahoo", 5],
-  ["src/services/feedJobs.ts", "alpaca", 5],
-  ["src/services/feedJobs.ts", "etrade", 5],
-  ["src/services/feedJobs.ts", "nasdaq", 10],
-  ["src/services/feedJobs.ts", "yahoo", 28],
-  ["src/services/feedPipelineJobs.ts", "alpaca", 5],
-  ["src/services/feedPipelineJobs.ts", "etrade", 4],
-  ["src/services/feedPipelineJobs.ts", "nasdaq", 20],
-  ["src/services/feedPipelineJobs.ts", "public.com", 2],
-  ["src/services/feedPipelineJobs.ts", "yahoo", 35],
+  ["src/services/feedJobs.ts", "alpaca", 7],
+  ["src/services/feedJobs.ts", "etrade", 7],
+  ["src/services/feedJobs.ts", "nasdaq", 11],
+  ["src/services/feedJobs.ts", "yahoo", 45],
+  ["src/services/feedPipelineJobs.ts", "alpaca", 9],
+  ["src/services/feedPipelineJobs.ts", "etrade", 8],
+  ["src/services/feedPipelineJobs.ts", "nasdaq", 23],
+  ["src/services/feedPipelineJobs.ts", "public.com", 3],
+  ["src/services/feedPipelineJobs.ts", "yahoo", 85],
   ["src/services/feedProviderWiring.ts", "alpaca", 2],
   ["src/services/feedProviderWiring.ts", "etrade", 4],
   ["src/services/feedProviderWiring.ts", "nasdaq", 1],
@@ -1259,8 +1336,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/workflows/sagaWorkflowFlow.ts", "etrade", 4],
   ["src/workflows/screenExecutionBroker.ts", "etrade", 5],
   ["src/workflows/screenRunFinalize.ts", "etrade", 3],
-  ["src/workflows/screenerWorkflowFlow.ts", "etrade", 2],
-  ["src/workflows/screenerWorkflowFlow.ts", "yahoo", 2],
+  ["src/workflows/screenerCollation.ts", "etrade", 2],
+  ["src/workflows/screenerCollation.ts", "yahoo", 2],
   ["src/workflows/stageRuntimeIds.ts", "etrade", 4],
   ["src/workflows/stockCleanupRegister.ts", "etrade", 1],
   ["src/workflows/stockScreenCapability.ts", "etrade", 9],

@@ -48,16 +48,24 @@ import {
   type DeadLetterSink,
 } from "./deadLetter";
 import { isLoginShaped } from "../security/serviceIdentity";
+import {
+  extractRunLedgerProject,
+  type RunLedgerProjectMessage,
+} from "../workflows/runLedgerQueueTransport";
 
 /**
  * Report §3.2 — the screener-events consumer config, pinned
  * against wrangler.jsonc by test (gitops §7, the pin rule).
  */
 export const SCREENER_EVENTS_CONSUMER_CONFIG: QueueConsumerConfig = {
-  maxBatchSize: 10,
-  maxBatchTimeoutSeconds: 30,
-  maxRetries: 3,
-  maxConcurrency: 4,
+  // Issue #4213 (owner direction) — DO usage: one invocation at a time,
+  // smaller batches, two retries (was 10 / 30s / 3 / 4). Mirrored in
+  // wrangler.jsonc and held equal to it by the queue-consumer config
+  // pin (the migration step-1 slice, #2544).
+  maxBatchSize: 5,
+  maxBatchTimeoutSeconds: 10,
+  maxRetries: 2,
+  maxConcurrency: 1,
   deadLetterQueue: "screener-events-dlq",
 };
 
@@ -67,9 +75,13 @@ export const SCREENER_EVENTS_CONSUMER_CONFIG: QueueConsumerConfig = {
  * against wrangler.jsonc by the same test.
  */
 export const SCREENER_EVENTS_DELIVERY_CONSUMER_CONFIG: QueueConsumerConfig = {
-  maxBatchSize: 10,
-  maxRetries: 3,
-  maxConcurrency: 2,
+  // Issue #4213 — same DO-usage caps as the work consumer. The batch timeout
+  // becomes explicit here (10s) because the manifest now sets it on this queue
+  // too; the two are pinned equal, so an omitted field on either side fails.
+  maxBatchSize: 5,
+  maxBatchTimeoutSeconds: 10,
+  maxRetries: 2,
+  maxConcurrency: 1,
   deadLetterQueue: "screener-events-delivery-dlq",
 };
 
@@ -131,6 +143,21 @@ export interface ScreenerEventsWorkHandlerDeps {
     unitId: string
   ) => Promise<"dispatched" | "denied">;
   /**
+   * Issue #4116 — the run-ledger.project dispatch (the queue
+   * carrier's consumer half): routes the claim-check message to
+   * the owning Orchestrator instance, which re-reads the DO row
+   * and applies the shared projector. It THROWS when the DO row
+   * is missing (persist-then-publish ordering guarantees it
+   * exists) — the port core turns the throw into "retry", so the
+   * platform re-delivers up to max_retries and then DLQs the
+   * message. Absent, a run-ledger.project envelope is dropped
+   * with a no_handler dead-letter record (today's behavior for
+   * an unhandled type) — the production wiring supplies it.
+   */
+  dispatchRunLedgerProject?: (
+    project: RunLedgerProjectMessage,
+  ) => Promise<"projected" | "already-current">;
+  /**
    * Issue #1764 — dead-letter sink for terminal drops. Defaults
    * to the console sink (one parseable `[dead-letter]` line per
    * drop); tests inject a capturing sink. A drop still acks —
@@ -166,6 +193,29 @@ export function createScreenerEventsWorkHandler(
   const sink = deps.onDeadLetter ?? consoleDeadLetterSink;
   const persist = deps.persistDeadLetter;
   return async (envelope): Promise<ConsumeOutcome> => {
+    // Issue #4116 — the run-ledger.project envelope is claimed
+    // BEFORE the options_analysis extractor: it is a different
+    // work type on the same queue, and the options extractor
+    // returns null for it (which would dead-letter a live
+    // projection message). The dispatch applies the shared
+    // projector; a throw becomes "retry" in the port core.
+    const project = extractRunLedgerProject(envelope);
+    if (project) {
+      if (!deps.dispatchRunLedgerProject) {
+        const record = createDeadLetterRecord({
+          queue: "screener-events",
+          reason: "no_handler",
+          messageId: envelope.id,
+          runId: project.naturalKey,
+          detail: `No handler for envelope type "${envelope.type}" — dropping; the run-ledger dispatch is not wired in this deployment.`,
+        });
+        sink.record(record);
+        await persist?.(record, envelope);
+        return "drop";
+      }
+      await deps.dispatchRunLedgerProject(project);
+      return "processed";
+    }
     const work = extractScreenerEventsWork(envelope);
     if (!work) {
       const record = createDeadLetterRecord({

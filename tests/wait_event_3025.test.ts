@@ -1,26 +1,34 @@
-﻿/**
- * Issue #3025 â€” pins for the event-first shard wait.
+/**
+ * Issue #3025 — pins for the parent's completion semantics: the
+ * parent never returns before the shards settle, and a slow or
+ * failed shard does not lose the run.
  *
- * The loop's cost was the repeated sleep+poll per round; its value was
- * that a lost signal still resolves. These pins hold both: the parent
- * waits on an event when the step surface supports it, reconciles with
- * a single status sweep (not a poll loop) when it does not arrive, and
- * keeps the deadline-bounded sleep only for a surface that cannot wait.
+ * #4192: the SHARD_DONE_EVENT wait retired with the child-workflow
+ * flow. There is no event anymore — notifyParentShardDone is gone,
+ * nothing emits the event, and the parent completes when the engine
+ * run settles. These pins now drive the engine path through
+ * InMemoryWorkflowAdapter: "the parent waited for the shards"
+ * becomes "start returned complete AND the collation + rows are all
+ * present", asserted via adapter status + parent-row collation +
+ * per-shard rows, never via a waits list. The deadline case lives
+ * at the collation level (finalizeScreenerCollation with a
+ * timed_out outcome), the way the anchor file does it.
  */
 import { describe, expect, it } from "vitest";
+import { InMemoryShardJobAdapter } from "../src/data/inMemoryShardJobAdapter";
+import type { ShardJobStore } from "../src/data/shardJobPorts";
+import { InMemoryWorkflowAdapter } from "../src/workflows/inMemoryWorkflowAdapter";
 import {
-  runParentFlow,
-  type ChildWorkflowOps,
+  finalizeScreenerCollation,
   type ScreenerWorkflowDeps,
-  type ScreenerWorkflowStep,
-} from "../src/workflows/screenerWorkflowFlow";
-import { notifyParentShardDone } from "../src/workflows/screenerWorkflow";
+  type ShardOutcome,
+  type ShardScreenResult,
+} from "../src/workflows/screenerCollation";
 import {
-  SHARD_DONE_EVENT,
   workflowIdForJob,
+  type ParentScreenReportInput,
   type WorkflowJobCommand,
 } from "../src/workflows/workflowPorts";
-import type { Env } from "../src/types";
 
 function command(shardCount: number, extra: Partial<WorkflowJobCommand> = {}): WorkflowJobCommand {
   return {
@@ -35,135 +43,184 @@ function command(shardCount: number, extra: Partial<WorkflowJobCommand> = {}): W
       shardId: `S${i + 1}`,
       universe: `U${i + 1}`,
     })),
-    deliver: false,
+    deliver: true,
     ...extra,
   } as WorkflowJobCommand;
 }
 
-function deps(nowMs: () => number): ScreenerWorkflowDeps {
+function okResult(overrides: Partial<ShardScreenResult> = {}): ShardScreenResult {
   return {
-    screenRunner: { runScreen: async () => ({ success: true }) as never },
-    shardStore: null,
-    storeReport: async () => undefined,
-    deliverOutcome: async () => undefined,
-    nowMs,
-    ndModeEnabled: false,
+    success: true,
+    timestamp: "2026-11-03T00:00:00.000Z",
+    totalScanned: 10,
+    expectedCount: 10,
+    matchedCount: 2,
+    ...overrides,
   };
 }
 
-/** A step surface that CAN wait: records what it did, never sleeps. */
-function waitingStep(behaviour: "signal" | "timeout") {
-  let now = 1_000_000;
-  const names: string[] = [];
-  const waits: Array<{ name: string; type: string; timeoutMs: number }> = [];
-  const step: ScreenerWorkflowStep = {
-    do: async (name, fn) => {
-      names.push(name);
-      return fn();
-    },
-    sleep: async (name, ms) => {
-      names.push(name);
-      now += ms;
-    },
-    waitForEvent: async (name, opts) => {
-      names.push(name);
-      waits.push({ name, type: opts.type, timeoutMs: opts.timeoutMs });
-      if (behaviour === "signal") return { shardId: "S1" } as never;
-      now += opts.timeoutMs; // the deadline passes while waiting
-      throw new Error("timeout");
-    },
-  };
-  return { step, names, waits, nowMs: () => now };
+interface DepsBundle {
+  store: InMemoryShardJobAdapter;
+  stored: unknown[];
+  delivered: unknown[];
+  /** Parent canonical rows the finalize stored (the parent door). */
+  parentStored: ParentScreenReportInput[];
+  deps: ScreenerWorkflowDeps;
 }
 
-/** A step surface that CANNOT wait (older adapter / test double). */
-function legacyStep() {
-  let now = 1_000_000;
-  const names: string[] = [];
-  const step: ScreenerWorkflowStep = {
-    do: async (name, fn) => {
-      names.push(name);
-      return fn();
+function makeDeps(runScreen?: ScreenerWorkflowDeps["screenRunner"]["runScreen"]): DepsBundle {
+  const store = new InMemoryShardJobAdapter();
+  const stored: unknown[] = [];
+  const delivered: unknown[] = [];
+  const parentStored: ParentScreenReportInput[] = [];
+  const deps: ScreenerWorkflowDeps = {
+    screenRunner: {
+      runScreen:
+        runScreen ??
+        (async (req) => ({
+          ...okResult({ universe: req.universe }),
+          full: { marker: "full-result", universe: req.universe },
+        })),
     },
-    sleep: async (name, ms) => {
-      names.push(name);
-      now += ms;
+    shardStore: store,
+    storeReport: async (payload) => {
+      stored.push(payload);
     },
+    deliverOutcome: async (payload) => {
+      delivered.push(payload);
+    },
+    storeParentReport: async (input) => {
+      parentStored.push(input);
+      return { stored: true, reportId: "parent-1" };
+    },
+    nowMs: () => 1_000_000,
   };
-  return { step, names, nowMs: () => now };
+  return { store, stored, delivered, parentStored, deps };
 }
 
-function instantChildren(created: WorkflowJobCommand[]): ChildWorkflowOps {
-  return {
-    createChild: async (cmd) => {
-      created.push(cmd);
-      return { workflowId: `wf-${cmd.shards[0]!.shardId}` };
-    },
-    getChildStatus: async () => ({
-      status: "complete" as const,
-      output: {
-        success: true,
-        timestamp: "2026-11-03T00:00:00.000Z",
-        totalScanned: 10,
-        expectedCount: 10,
-        matchedCount: 2,
-      },
-    }),
-  };
+async function latestParentRow(store: ShardJobStore, jobId: string) {
+  return store.latestJob("tenant-1", jobId, jobId);
 }
 
-describe("event-first batch wait (#3025)", () => {
-  it("waits on the shard event instead of sleeping, and carries the parent id to the child", async () => {
-    const c = waitingStep("signal");
-    const created: WorkflowJobCommand[] = [];
-    const collation = await runParentFlow(command(2), c.step, deps(c.nowMs), instantChildren(created));
-    expect(collation.shards.every((s) => s.status === "completed")).toBe(true);
-    expect(c.waits.length).toBeGreaterThan(0);
-    expect(c.waits[0]!.type).toBe(SHARD_DONE_EVENT);
-    expect(c.names.some((n) => n.startsWith("poll-wait-"))).toBe(false);
-    expect(created.map((cmd) => cmd.parentWorkflowId)).toEqual([workflowIdForJob("job-3025"), workflowIdForJob("job-3025")]);
+/** The collation the parent row carries (the door's read-back). */
+async function collationFor(store: ShardJobStore, jobId: string) {
+  const row = await latestParentRow(store, jobId);
+  return JSON.parse(row?.resultJson ?? "{}") as Record<string, unknown>;
+}
+
+describe("parent completion semantics (#3025)", () => {
+  it("start returns only once all shards have settled, and the parent id is the job's workflow id", async () => {
+    // #4192: no event, no poll loop — adapter.start() resolves
+    // only when the run has settled, so "the parent waited for
+    // the shards" is "start returned complete AND the collation
+    // + rows are all present".
+    const b = makeDeps();
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(command(2));
+    expect(h.status).toBe("complete");
+    expect(h.workflowId).toBe(workflowIdForJob("job-3025"));
+    expect((await adapter.status(h.workflowId))?.status).toBe("complete");
+    const collation = await collationFor(b.store, "job-3025");
+    expect(collation.lifecycle).toBe("ReportGenerated");
+    expect(
+      (collation.shards as { shardId: string; status: string }[]).every(
+        (s) => s.status === "completed",
+      ),
+    ).toBe(true);
+    const rows = await b.store.listJobsForChain("tenant-1", "job-3025");
+    expect(rows.map((r) => r.jobKey).sort()).toEqual(
+      ["job-3025", "shard:S1", "shard:S2"].sort(),
+    );
+    expect(rows.find((r) => r.jobKey === "shard:S1")?.status).toBe("completed");
+    expect(rows.find((r) => r.jobKey === "shard:S2")?.status).toBe("completed");
   });
 
   it("bounds the wait by the shard deadline", async () => {
-    const c = waitingStep("signal");
-    await runParentFlow(
-      command(1, { shardTimeoutMs: 5_000 }),
-      c.step,
-      deps(c.nowMs),
-      instantChildren([]),
+    // #4192: the engine has no poll loop — a hanging unit is
+    // the engine's policy timeout, not the screener's. What
+    // this pins is the collation's handling of a shard that
+    // hit its deadline: the usable shard still reaches
+    // ReportGenerated, the run is qualified, and
+    // BudgetConstrained is recorded.
+    const b = makeDeps();
+    const outcomes: ShardOutcome[] = [
+      { shardId: "S1", status: "completed", totalScanned: 10, expectedCount: 10, matchedCount: 2, stored: true, delivered: true },
+      { shardId: "S2", status: "timed_out", error: "deadline exceeded" },
+    ];
+    const c = await finalizeScreenerCollation(
+      { shardStore: b.store, nowMs: b.deps.nowMs },
+      {
+        command: command(2, { shardTimeoutMs: 5_000 }),
+        outcomes,
+        lifecycleTransitions: [
+          { lifecycle: "Idle", atMs: 1_000_000 },
+          { lifecycle: "Running", atMs: 1_000_000 },
+        ],
+        stageTransitions: [],
+        screenMode: "deterministic",
+        startedAtMs: 1_000_000,
+      },
     );
-    expect(c.waits[0]!.timeoutMs).toBeGreaterThan(0);
-    expect(c.waits[0]!.timeoutMs).toBeLessThanOrEqual(5_000);
+    expect(c.lifecycle).toBe("ReportGenerated");
+    expect(c.qualified).toBe(true);
+    expect(c.shards.find((s) => s.shardId === "S2")?.status).toBe("timed_out");
+    expect(c.lifecycleTransitions.map((t) => t.lifecycle)).toContain("BudgetConstrained");
   });
 
   it("reconciles with status reads, not a poll loop, when no signal arrives", async () => {
-    const c = waitingStep("timeout");
-    const collation = await runParentFlow(
-      command(1, { shardTimeoutMs: 1_000 }),
-      c.step,
-      deps(c.nowMs),
-      instantChildren([]),
-    );
-    // One sweep, not a loop: poll-0 exists, poll-1 does not.
-    expect(c.names).toContain("poll-0");
-    expect(c.names).not.toContain("poll-1");
-    expect(collation.shards).toHaveLength(1);
+    // #4192: there is no signal to wait for and no sweep to
+    // run — a shard that never completes (market failure)
+    // still settles the run: start returns complete, the
+    // Failed collation lands on the parent canonical row, and
+    // the failed legs are visible. The run is not lost.
+    const b = makeDeps(async (req) => ({
+      ...okResult({ success: false, error: "no quotes", universe: req.universe }),
+      full: { marker: "full-failed" },
+    }));
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(command(1));
+    expect(h.status).toBe("complete");
+    expect(b.stored).toHaveLength(0);
+    expect(b.delivered).toHaveLength(0);
+    expect(b.parentStored).toHaveLength(1);
+    expect(b.parentStored[0]?.collation.lifecycle).toBe("Failed");
+    const rows = await b.store.listJobsForChain("tenant-1", "job-3025");
+    expect(rows.find((r) => r.jobKey === "leg:S1")?.status).toBe("failed");
+    const failedParent = await b.store.latestJob("tenant-1", "job-3025", "leg:parent");
+    expect(failedParent?.status).toBe("failed");
+    expect(JSON.parse(failedParent?.resultJson ?? "{}").detail).toMatch(/Workflow Failed: 0\/1 shards/);
   });
 
   it("keeps the deadline-bounded sleep only for a surface that cannot wait", async () => {
-    const c = legacyStep();
-    const collation = await runParentFlow(
-      command(1, { maxParallelShards: 1 }),
-      c.step,
-      deps(c.nowMs),
-      instantChildren([]),
-    );
-    expect(c.names.some((n) => n.startsWith("poll-wait-"))).toBe(true);
-    expect(collation.shards[0]?.status).toBe("completed");
+    // #4192: the surface that cannot wait is gone with the
+    // child flow — the engine owns pacing and fan-out now, so
+    // there is no wait surface at all, bounded or otherwise.
+    // What survives is the single-shard run itself: it runs
+    // exactly once and settles complete, even with the old
+    // maxParallelShards hint on the command.
+    const seen: string[] = [];
+    const b = makeDeps(async (req) => {
+      seen.push(req.universe ?? "?");
+      return {
+        ...okResult({ universe: req.universe }),
+        full: { marker: "full-result", universe: req.universe },
+      };
+    });
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(command(1, { maxParallelShards: 1 }));
+    expect(h.status).toBe("complete");
+    expect(seen).toEqual(["U1"]);
+    const collation = await collationFor(b.store, "job-3025");
+    expect(collation.lifecycle).toBe("ReportGenerated");
+    expect(
+      (collation.shards as { shardId: string; status: string }[])[0]?.status,
+    ).toBe("completed");
+    const rows = await b.store.listJobsForChain("tenant-1", "job-3025");
+    expect(rows.find((r) => r.jobKey === "shard:S1")?.status).toBe("completed");
   });
 });
 
-describe("child completion signal (#3025)", () => {
+describe("shard completion reaches the parent (#3025)", () => {
   const shardCommand = (extra: Partial<WorkflowJobCommand> = {}) =>
     ({
       ...command(1),
@@ -175,47 +232,62 @@ describe("child completion signal (#3025)", () => {
     }) as WorkflowJobCommand;
 
   it("sends the shard-done event to the parent instance, payload = shard id", async () => {
-    const sent: Array<{ instance: string; type: string; payload: unknown }> = [];
-    const env = {
-      SCREENER_WORKFLOW: {
-        get: async (id: string) => ({
-          sendEvent: async (event: { type: string; payload: unknown }) => {
-            sent.push({ instance: id, ...event });
-          },
-        }),
-      },
-    } as unknown as Env;
-    await notifyParentShardDone(env, shardCommand());
-    expect(sent).toEqual([
-      { instance: "wf-parent", type: SHARD_DONE_EVENT, payload: { shardId: "S1" } },
+    // #4192: the event is retired — no instance receives a
+    // shard-done send anymore. What survives is the intent:
+    // the parent learns exactly which shard finished, now
+    // from the settled collation on its own row instead of
+    // from an event payload.
+    const b = makeDeps();
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(command(1));
+    expect(h.status).toBe("complete");
+    const collation = await collationFor(b.store, "job-3025");
+    expect(collation.shards).toEqual([
+      expect.objectContaining({ shardId: "S1", status: "completed" }),
     ]);
+    const rows = await b.store.listJobsForChain("tenant-1", "job-3025");
+    expect(rows.find((r) => r.jobKey === "shard:S1")?.status).toBe("completed");
   });
 
   it("does not signal when the command carries no parent instance (older parent)", async () => {
-    let called = 0;
-    const env = {
-      SCREENER_WORKFLOW: {
-        get: async () => ({
-          sendEvent: async () => {
-            called += 1;
-          },
-        }),
-      },
-    } as unknown as Env;
-    await notifyParentShardDone(env, shardCommand({ parentWorkflowId: undefined }));
-    expect(called).toBe(0);
+    // #4192: there is no shard role on the engine path at
+    // all — a shard command (with or without a parent
+    // instance to signal) is refused by name, settles
+    // errored, and never runs a child or touches the runner.
+    let runs = 0;
+    const b = makeDeps(async (req) => {
+      runs += 1;
+      return {
+        ...okResult({ universe: req.universe }),
+        full: { marker: "full-result", universe: req.universe },
+      };
+    });
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(shardCommand({ parentWorkflowId: undefined }));
+    expect(h.status).toBe("errored");
+    expect((await adapter.status(h.workflowId))?.status).toBe("errored");
+    expect(runs).toBe(0);
+    expect(b.stored).toHaveLength(0);
+    expect(b.parentStored).toHaveLength(0);
   });
 
   it("swallows a failed send: the parent's deadline sweep is the backstop", async () => {
-    const env = {
-      SCREENER_WORKFLOW: {
-        get: async () => {
-          throw new Error("instance gone");
-        },
-      },
-    } as unknown as Env;
-    await expect(notifyParentShardDone(env, shardCommand())).resolves.toBeUndefined();
+    // #4192: there is no send to fail and no deadline sweep —
+    // the backstop is the engine settling the run. A throwing
+    // shard fails fast, start still returns complete, and the
+    // Failed collation + failed legs land visibly instead of
+    // the run being lost.
+    const b = makeDeps(async () => {
+      throw new Error("provider down");
+    });
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(command(1));
+    expect(h.status).toBe("complete");
+    expect(b.parentStored).toHaveLength(1);
+    expect(b.parentStored[0]?.collation.lifecycle).toBe("Failed");
+    expect(b.parentStored[0]?.collation.error).toMatch(/provider down/);
+    const rows = await b.store.listJobsForChain("tenant-1", "job-3025");
+    expect(rows.find((r) => r.jobKey === "leg:S1")?.status).toBe("failed");
+    expect(rows.find((r) => r.jobKey === "leg:parent")?.status).toBe("failed");
   });
 });
-
-

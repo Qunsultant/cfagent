@@ -39,11 +39,19 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC_FILES: string[] = [];
+/**
+ * Issue #4247 — the allow-lists below are keyed `src/services/...` with forward
+ * slashes, while `readdirSync` + `join` yield backslashes on Windows. Normalize
+ * at the seam so one checkout cannot make the census disagree with itself.
+ */
+function posixPath(p: string): string {
+  return p.split(/[\\/]/).join("/");
+}
 function walk(dir: string): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) walk(path);
-    else if (entry.name.endsWith(".ts")) SRC_FILES.push(path);
+    else if (entry.name.endsWith(".ts")) SRC_FILES.push(posixPath(path));
   }
 }
 walk("src");
@@ -972,7 +980,9 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   ["src/server/routes/auth.ts", "wiredAccessRequestStore", 1],
   ["src/server/routes/auth.ts", "wiredMembershipStore", 4],
   ["src/server/routes/platform.ts", "wiredMembershipStore", 2],
-  ["src/server/routes/privacy.ts", "wiredMembershipStore", 4],
+  // #4116 (2026-11-12): the /api/ops/run-ledger-reconcile route composes
+  // wiredMembershipStore once, following the IAAA admin pattern; 4 -> 5.
+  ["src/server/routes/privacy.ts", "wiredMembershipStore", 5],
 ];
 
 describe("global D-D census: step 5b — session family port composition sites (#2433)", () => {
@@ -1256,7 +1266,7 @@ describe("global D-D census: step 5e — residual bucket family port composition
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = join(dir, entry.name);
         if (entry.isDirectory()) walkTests(path);
-        else if (entry.name.endsWith(".ts")) testFiles.push(path);
+        else if (entry.name.endsWith(".ts")) testFiles.push(posixPath(path));
       }
     })("tests");
     const pairs: Array<[string, string]> = [];

@@ -114,6 +114,12 @@ import {
   type AgentSdkTiming,
 } from "../../services/agentScheduleCapability";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { scheduleWebhookFollowupBodySchema } from "../../api/ingressSchemas";
+import {
+  buildScheduleWebhookFollowupSubmission,
+  buildScheduleWebhookMintRecord,
+  SCHEDULE_WEBHOOK_AUDIT_EVENTS,
+} from "../../services/scheduleWebhookFollowup";
 import { createPendingScheduleApprovalPort } from "../../data/doSqlitePendingScheduleApprovalsAdapter";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
@@ -318,6 +324,140 @@ export async function handleSchedulesRoutes(
         return m[1];
       }
     };
+
+    // Issue #3311 — webhook-triggered scheduling: a workflow step
+    // calls POST /schedules/webhook/followup (via the HMAC edge in
+    // src/server/routes/scheduleWebhook.ts) and the scheduler mints a
+    // scheduled follow-up job/sub-job on the async-job chain. The
+    // branch sits FIRST: no other branch may swallow this path.
+    //
+    // Order: edge-marker gate (a call that did not pass the edge is
+    // refused — the DO never mints on an unauthenticated forward) →
+    // trusted identity (the header the edge stamped from the verified
+    // body, never a caller header) → zod re-validation (the edge
+    // already validated; the DO never trusts the forwarder blindly) →
+    // PDP via #3122's evaluateAgentSchedulePdp (task:create; proceeds
+    // when PDP is disabled, exactly as #3122 does) → capability
+    // allow-list + submission build (the service module throws a
+    // business error) → the one submitAsyncJob minter → the mint
+    // ledger row (best-effort: a failed write is audited, never
+    // breaks the mint) → both audits (call + mint).
+    //
+    // The follow-up fires under the chain's own guards (not-before,
+    // claim, retry-once, recovery bounds) — no new firing path, no
+    // T4 semantics change. Approval gate: none here — the caller is
+    // a workflow executing the owner's already-authorized pipeline,
+    // not an agent proposing a new consequential action (recorded in
+    // #3311 for owner amendment at review).
+    if (path.endsWith("/schedules/webhook/followup") && request.method === "POST") {
+      try {
+        if (request.headers.get("x-schedule-webhook") !== "1") {
+          return Response.json(
+            { error: "Schedule webhook calls must arrive through the authenticated webhook edge." },
+            { status: 401 },
+          );
+        }
+        const context = await ctx.getScreenerExecutionContext();
+        const trusted = resolveTrustedScheduleIdentity({
+          headerLogin: request.headers.get("x-user-login") || "",
+          headerEnvironment: (request.headers.get("x-environment") || "").toUpperCase(),
+          context,
+          configuredEnvironment: resolveEnvironmentConfig(ctx.env).name as ScheduleEnv,
+        });
+        if (!trusted.userLogin) {
+          return Response.json({ error: "An authenticated user identity is required for a schedule webhook follow-up." }, { status: 401 });
+        }
+        const userLogin = trusted.userLogin;
+        const rawBody = (await request.json().catch(() => null)) as unknown;
+        const shaped = scheduleWebhookFollowupBodySchema.safeParse(rawBody);
+        if (!shaped.success) {
+          ctx.audit(SCHEDULE_WEBHOOK_AUDIT_EVENTS.denied, "orchestrator", {
+            userLogin,
+            workflowId: (rawBody as Record<string, unknown> | null)?.workflowId ?? null,
+            reason: "webhook body failed validation",
+          });
+          return Response.json({ error: "Webhook body is invalid." }, { status: 400 });
+        }
+        const validBody = shaped.data;
+        ctx.audit(SCHEDULE_WEBHOOK_AUDIT_EVENTS.received, "orchestrator", {
+          userLogin,
+          workflowId: validBody.workflowId,
+          scheduleId: validBody.scheduleId ?? null,
+          capability: validBody.capability,
+          runAt: validBody.runAt,
+        });
+        const pdp = await evaluateAgentSchedulePdp(createAgentSchedulePdpDeps(ctx.env), {
+          principal: { login: userLogin, agentId: "schedule-webhook" },
+          tenantId: resolveIaaaTenant(ctx.env),
+          action: "create",
+          nowMs: Date.now(),
+        });
+        if (pdp.enforced && !pdp.allowed) {
+          ctx.audit(SCHEDULE_WEBHOOK_AUDIT_EVENTS.denied, "orchestrator", {
+            userLogin,
+            workflowId: validBody.workflowId,
+            scheduleId: validBody.scheduleId ?? null,
+            capability: validBody.capability,
+            reason: pdp.reason ?? "PDP denied",
+          });
+          return Response.json({ error: "This webhook caller is not authorized to mint a schedule follow-up." }, { status: 403 });
+        }
+        let submission: import("../../types").AsyncJobSubmission;
+        try {
+          submission = buildScheduleWebhookFollowupSubmission(validBody);
+        } catch (err) {
+          ctx.audit(SCHEDULE_WEBHOOK_AUDIT_EVENTS.denied, "orchestrator", {
+            userLogin,
+            workflowId: validBody.workflowId,
+            scheduleId: validBody.scheduleId ?? null,
+            capability: validBody.capability,
+            reason: err instanceof Error ? err.message : String(err),
+          });
+          return Response.json({ error: err instanceof Error ? err.message : "Follow-up could not be built." }, { status: 400 });
+        }
+        if (!ctx.submitAsyncJob) {
+          return Response.json({ error: "Follow-up submission is not wired on this host." }, { status: 500 });
+        }
+        const submitted = await ctx.submitAsyncJob(submission);
+        const nowIso = new Date().toISOString();
+        try {
+          recordLedgerRun(new SqlJobRunRecordStore(ctx.agentCtx.storage.sql), {
+            system: "orchestrator-schedule",
+            ...buildScheduleWebhookMintRecord({ jobId: submitted.jobId, body: validBody, nowIso }),
+          });
+        } catch (err) {
+          // Recording never breaks the mint — but a swallowed store
+          // failure is unobservable, so it is audited instead.
+          ctx.audit(SCHEDULE_WEBHOOK_AUDIT_EVENTS.mintLedgerFailed, "orchestrator", {
+            userLogin,
+            workflowId: validBody.workflowId,
+            jobId: submitted.jobId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          structuredLog.warn("schedules.webhook_mint_ledger_failed", {
+            message: "[Schedules] schedule webhook mint ledger write failed:",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        ctx.audit(SCHEDULE_WEBHOOK_AUDIT_EVENTS.minted, "orchestrator", {
+          userLogin,
+          workflowId: validBody.workflowId,
+          scheduleId: validBody.scheduleId ?? null,
+          capability: validBody.capability,
+          runAt: validBody.runAt,
+          jobId: submitted.jobId,
+        });
+        return Response.json({
+          ...submitted,
+          capability: validBody.capability,
+          runAt: validBody.runAt,
+          workflowId: validBody.workflowId,
+          scheduleId: validBody.scheduleId ?? null,
+        });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to mint schedule webhook follow-up" }, { status: 500 });
+      }
+    }
 
     // List all schedules (supports ?type=cron|interval|delayed|scheduled)
     if ((path.endsWith("/schedules") || path.endsWith("/api/schedules") || path === "/schedules" || path === "/api/schedules") && request.method === "GET") {

@@ -34,6 +34,32 @@ export interface PollSchedule {
 }
 
 /**
+ * Issue #4213 — the largest delay a timer can actually be armed with.
+ *
+ * `setTimeout`/`setInterval` take a signed 32-bit delay. A cadence above this
+ * ceiling is out of contract: engines either wrap the value (3e12 wraps to
+ * ~24.5 days on a WebIDL `long` conversion) or clamp it, and either way the
+ * caller's intent — "poll effectively never", the shape #4213 sets for the
+ * options-flow and goal-tracking cadences — depends on integer wrap rather
+ * than on a stated rule. One value is all it takes to wrap to a *small* delay,
+ * which would turn a cost cut into a poll storm.
+ *
+ * The scheduler therefore arms `min(cadence, MAX_TIMER_DELAY_MS)`: a cadence
+ * above the ceiling still means "not in this session", and the behaviour is
+ * identical on every engine instead of inherited from its integer conversion.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * Clamp a cadence to what a timer can hold. Non-finite and negative values arm
+ * immediately, which is the behaviour `setTimeout` already had for them.
+ */
+function armDelayMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms < 0) return 0;
+  return Math.min(MAX_TIMER_DELAY_MS, ms);
+}
+
+/**
  * Runs `run` on a schedule that pauses while the tab is hidden and switches
  * cadence between idle and busy. Returns a stop function.
  *
@@ -62,7 +88,7 @@ export function startPolling(
   const arm = () => {
     clear();
     if (stopped || isHidden()) return;
-    timer = setTimeout(() => void tick(), delay());
+    timer = setTimeout(() => void tick(), armDelayMs(delay()));
   };
 
   const tick = async () => {

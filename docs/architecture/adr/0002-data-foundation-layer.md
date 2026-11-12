@@ -665,3 +665,55 @@ built here.
   (proving cloud-agnosticism with the dialect-conformance
   suite) is deferred by the owner (2026-10-26, "for now do
   R1/sqlite") and is not in the current program order.
+
+## Addendum — issue #4116: one system-of-record D1 for run ledgers (2026-11-12)
+
+The DO-authoritative / D1-projection pattern this ADR establishes
+now covers the run ledgers: `mas_reports` and `mas_async_jobs`
+project into `agent_reports` and `agent_async_jobs`
+(migrations 0059–0060), behind three carriers — queue
+(`run-ledger.project` claim-check messages on `screener-events`),
+direct ORM best-effort post, and a one-off sweep backfill
+(`POST /api/ops/run-ledger-reconcile`). All three are
+independently configurable per tenant (externalized, no defaults
+in code; unconfigured = named refusal, fail closed) and all
+three apply the ONE shared ordering rule identically:
+idempotent upsert keyed on the natural key
+(`ON CONFLICT DO NOTHING` for the new tables) + last-write-wins
+by source `updated_at`. The existing versioned `agent_reports`
+table reuses its read-before-write discipline (version+1 on
+change, skip when already current) as the same rule's form.
+
+Decisions pinned in this slice:
+
+- **Instance / cursor:** no instance enumeration exists, so the
+  sweep takes an optional instance hint (default: the shared
+  orchestrator) and is single-shot restart-from-top with a
+  100-row bound per ledger — no durable cursor.
+- **Twin linkage:** the projection keys dedup to the #3121
+  linkage — a pipeline run that generated a canonical report
+  must not appear as both rows once projected. The link
+  resolves only when exactly one candidate run window contains
+  the row's `created_at`; otherwise NULL (the twin survives
+  honestly). D1-only reads absorb linked job-run-record rows
+  into the canonical row.
+- **Owner scoping:** `agent_reports.user_login` (migration 0060)
+  carries the DO row's owner so D1-only reads preserve the DO
+  read's owner filter; async jobs stay session-scoped via the
+  already-carried `session_id`. A re-projection that now knows
+  the owner (or the twin link) when the stored row has null
+  lands it as version+1; identical replays still skip.
+- **Pointer bodies:** `agent_reports.body_r2_key` carries the
+  R2 pointer for pointer rows; the D1-only read resolves it
+  from R2, read-only — never the DO backfill, which would write
+  to the DO in a read path.
+- **Read cutover:** the three surfaces (`/api/runs`, Workflow
+  Runs, `/api/runs/details`) read D1 alone when the tenant's
+  `readMode` is `d1-only`; anything else keeps the Option B
+  merged view. The response carries `ledgerReadMode`. Cutover
+  is per tenant and reversible.
+- **Explicitly not projected:** `mas_stage_claims` — no read
+  surface consumes stage claims, claims live in multiple DOs
+  with no instance enumeration, and claim semantics stay
+  DO-authoritative (an owner decision for later, not a gap
+  left untracked in this slice's design record).

@@ -84,18 +84,21 @@ export const SCREENER_NODE_STEPS: Record<(typeof SCREENER_NODE_KINDS)[number], s
  * (FeedStepDeps et al.): the agent resolution, the bound quote /
  * history deps for one request, and the store / deliver doors.
  * The quote/history deps are resolved per request because the
- * platform binding is per-provider (and per-run in production);
- * a host that cannot bind them refuses by name at execution
- * (never an unwired fetch), exactly as the feed step refuses
+ * platform binding is per-provider (and per-run in production).
+ * Both are OPTIONAL: when a host omits them the agent binds
+ * them itself from the platform (bindScreenerQuoteDeps /
+ * bindScreenerHistoryDeps, issue #4192) — a host that cannot
+ * bind them refuses by name at execution (never an unwired
+ * fetch), exactly as the feed step refuses
  * FEED_JOB_NOT_CONFIGURED.
  */
 export interface ScreenerStepDeps {
   /** The ScreenerAgent port for one owner login (a DO stub in production). */
   agentFor: (userLogin: string) => ScreenerAgentPort;
-  /** The bound quote deps for one screen request. */
-  quoteDepsFor: (req: ScreenerRunRequest) => ScreenerQuoteDepsBundle;
-  /** The bound history deps for one screen request. */
-  historyDepsFor: (req: ScreenerRunRequest) => YahooHistoryDeps;
+  /** The bound quote deps for one screen request (test override seam; omitted = agent binds them). */
+  quoteDepsFor?: (req: ScreenerRunRequest) => ScreenerQuoteDepsBundle;
+  /** The bound history deps for one screen request (test override seam; omitted = agent binds them). */
+  historyDepsFor?: (req: ScreenerRunRequest) => YahooHistoryDeps;
   /**
    * The canonical-store door (the flow's storeReport, moved
    * here): market payloads go through recordWorkflowScreenReport,
@@ -226,7 +229,7 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
     const goalScreen = goalScreenParam(params);
     const output = await agent.screenFeedStage(ctx.runId, {
       request: req,
-      quoteDeps: goalScreen ? {} : deps.quoteDepsFor(req),
+      ...(deps.quoteDepsFor ? { quoteDeps: goalScreen ? {} : deps.quoteDepsFor(req) } : {}),
       symbols,
       timestamp: ctx.now,
       ...(goalScreen ? { goalScreen } : {}),
@@ -243,7 +246,7 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
     const req = screenRequestFromParams(params, shardSymbolsFor(params, ctx.shardKey), ctx.shardKey);
     const output = await agent.screenGatherStage(ctx.runId, {
       request: req,
-      historyDeps: deps.historyDepsFor(req),
+      ...(deps.historyDepsFor ? { historyDeps: deps.historyDepsFor(req) } : {}),
       feedOutput: prior,
       ...(goalScreenParam(params) ? { goalScreen: goalScreenParam(params)! } : {}),
     });
@@ -478,27 +481,15 @@ function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
 /**
  * The screener-step wiring for the ScheduledAgent host — the
  * mirror of the host's feedStepDepsForScheduledAgent. The quote
- * / history deps refuse by name in this slice: the platform
- * binding blocks live in runScreenInner until the S2 cutover
- * wires them here (a screener job dispatched on this host
- * before then refuses SCREENER_QUOTE_DEPS_NOT_WIRED at its
- * feed stage, never an unwired fetch). The store / deliver
+ * / history deps are omitted here: the agent binds them itself
+ * from the platform at stage time (bindScreenerQuoteDeps /
+ * bindScreenerHistoryDeps, issue #4192). The store / deliver
  * doors are real (the orchestrator stub, lazy).
  */
 export function screenerStepDepsForScheduledAgent(ctx: { env: Env }): ScreenerStepDeps {
   const env = ctx.env;
   return {
     agentFor: (userLogin) => screenerAgentStub(env, userLogin),
-    quoteDepsFor: () => {
-      throw new Error(
-        "SCREENER_QUOTE_DEPS_NOT_WIRED: the screener feed stage needs bound quote deps — the S2 cutover wires the platform binding. Refusing an unwired fetch.",
-      );
-    },
-    historyDepsFor: () => {
-      throw new Error(
-        "SCREENER_HISTORY_DEPS_NOT_WIRED: the screener gather stage needs bound history deps — the S2 cutover wires the platform binding. Refusing an unwired fetch.",
-      );
-    },
     storeReport: buildStoreDoor(env),
     deliverOutcome: buildDeliverDoor(env),
   };
@@ -506,22 +497,13 @@ export function screenerStepDepsForScheduledAgent(ctx: { env: Env }): ScreenerSt
 
 /**
  * The screener-step wiring for the workflow residency — the
- * mirror of feedStepDepsForWorkflow. Same refusal rule as the
- * host (the platform binding lands in S2); same real doors.
+ * mirror of feedStepDepsForWorkflow. Same rule as the host
+ * (the agent binds the quote/history deps at stage time,
+ * #4192); same real doors.
  */
 export function screenerStepDepsForWorkflow(env: Env): ScreenerStepDeps {
   return {
     agentFor: (userLogin) => screenerAgentStub(env, userLogin),
-    quoteDepsFor: () => {
-      throw new Error(
-        "SCREENER_QUOTE_DEPS_NOT_WIRED: the screener feed stage needs bound quote deps — the S2 cutover wires the platform binding. Refusing an unwired fetch.",
-      );
-    },
-    historyDepsFor: () => {
-      throw new Error(
-        "SCREENER_HISTORY_DEPS_NOT_WIRED: the screener gather stage needs bound history deps — the S2 cutover wires the platform binding. Refusing an unwired fetch.",
-      );
-    },
     storeReport: buildStoreDoor(env),
     deliverOutcome: buildDeliverDoor(env),
   };

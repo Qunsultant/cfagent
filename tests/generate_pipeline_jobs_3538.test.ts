@@ -257,6 +257,17 @@ describe("generate pipeline catalog + resolution (#3538)", () => {
       "yahoo-sp500-quotes-enrich-analyze-generate",
       "yahoo-dow-quotes-enrich-analyze-generate",
       "yahoo-sp400-quotes-enrich-analyze-generate",
+      "yahoo-sector-energy-quotes-enrich-analyze-generate",
+      "yahoo-sector-materials-quotes-enrich-analyze-generate",
+      "yahoo-sector-industrials-quotes-enrich-analyze-generate",
+      "yahoo-sector-consumer-discretionary-quotes-enrich-analyze-generate",
+      "yahoo-sector-consumer-staples-quotes-enrich-analyze-generate",
+      "yahoo-sector-health-care-quotes-enrich-analyze-generate",
+      "yahoo-sector-financials-quotes-enrich-analyze-generate",
+      "yahoo-sector-information-technology-quotes-enrich-analyze-generate",
+      "yahoo-sector-communication-services-quotes-enrich-analyze-generate",
+      "yahoo-sector-utilities-quotes-enrich-analyze-generate",
+      "yahoo-sector-real-estate-quotes-enrich-analyze-generate",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate",
       "etrade-nasdaq100-quotes-enrich-analyze-generate",
       "public-nasdaq100-quotes-enrich-analyze-generate",
@@ -276,7 +287,7 @@ describe("generate pipeline catalog + resolution (#3538)", () => {
 
   it("every catalog definition resolves as a valid J1 job definition", () => {
     const raws = buildAllGeneratePipelineJobDefinitions({});
-    expect(raws).toHaveLength(8);
+    expect(raws).toHaveLength(19);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("generate");
@@ -300,7 +311,8 @@ describe("generate pipeline catalog + resolution (#3538)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(36);
+    // #4065 pin update: three options-chains jobs join the plane.
+    expect(registrations).toHaveLength(83);
     expect(specs.map((s) => s.jobId)).toContain(GENERATE_ID);
   });
 });

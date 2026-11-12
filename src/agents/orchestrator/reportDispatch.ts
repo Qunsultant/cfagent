@@ -31,6 +31,7 @@ import {
 } from "../../services/scheduledReports";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { projectCanonicalReportBestEffort } from "../../services/runLedgerProjectionHooks";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -344,7 +345,7 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
     // Issue #338 S2b: store through the R2 seam (pointer row when
     // REPORTS_BUCKET is bound, inline fallback otherwise) — the same
     // flip the research path took in S2.
-    await storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, {
+    const stored = await storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, {
       runId: generationId,
       generationId,
       title: `Market screen — ${String(result.universe ?? result.sector ?? "ALL")} (${String(result.trigger ?? "scheduled")})`,
@@ -400,6 +401,20 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
       },
       createdAt: result.timestamp,
     });
+    // Issue #4116 — project the landed row into D1 (ORM + queue
+    // carriers, per the tenant's config). Inside the same
+    // never-fail try: the hook re-reads the stored row (the store
+    // may have deduped to a pre-existing row) and never throws,
+    // so a projection failure cannot fail the screen.
+    if (stored) {
+      await projectCanonicalReportBestEffort({
+        env: ctx.env,
+        sql: ctx.ensureTables(),
+        reportId: stored.reportId,
+        generationId,
+        userLogin: result.userLogin,
+      });
+    }
     // Issue #2869 slice 1 — publish AFTER the canonical row
     // lands, never before: persist-then-publish ordering from
     // the stageMessage contract. Only successful runs with a
@@ -453,7 +468,21 @@ export async function persistPipelineGenerateReportCanonical(
     });
     return null;
   }
-  return storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, input);
+  const stored = await storeReportAtGenerationWithR2(ctx.ensureTables(), ctx.env, input);
+  // Issue #4116 — project the landed row into D1 (ORM + queue
+  // carriers, per the tenant's config). The hook re-reads the
+  // stored row and never throws; a missing generationId skips
+  // it (the sweep backstops the row by id).
+  if (stored && input.generationId) {
+    await projectCanonicalReportBestEffort({
+      env: ctx.env,
+      sql: ctx.ensureTables(),
+      reportId: stored.reportId,
+      generationId: input.generationId,
+      userLogin: input.userLogin,
+    });
+  }
+  return stored;
 }
 
 /**
@@ -595,6 +624,20 @@ export async function persistParentScreenReportCanonical(
     },
     createdAt: input.createdAt,
   });
+  // Issue #4116 — project the landed parent row into D1 (ORM +
+  // queue carriers, per the tenant's config). generationId =
+  // runId = the parent jobId by construction, so the twin link
+  // resolves to the parent job's jobRunRecord. The hook never
+  // throws; a projection failure cannot fail the parent run.
+  if (stored) {
+    await projectCanonicalReportBestEffort({
+      env: ctx.env,
+      sql: ctx.ensureTables(),
+      reportId: stored.reportId,
+      generationId: input.jobId,
+      userLogin: input.userLogin,
+    });
+  }
   return stored ? { reportId: stored.reportId } : null;
 }
 

@@ -53,10 +53,13 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
  * producer binding declares alongside it.
  */
 export const JOB_PIPELINE_EVENTS_CONSUMER_CONFIG: QueueConsumerConfig = {
-  maxBatchSize: 10,
-  maxBatchTimeoutSeconds: 30,
-  maxRetries: 3,
-  maxConcurrency: 2,
+  // Issue #4213 (owner direction) — DO usage: one invocation at a time,
+  // smaller batches, two retries (was 10 / 30s / 3 / 2). Mirrored in
+  // wrangler.jsonc and held equal to it by tests/feed_pipeline_host_3543.test.ts.
+  maxBatchSize: 5,
+  maxBatchTimeoutSeconds: 10,
+  maxRetries: 2,
+  maxConcurrency: 1,
   deadLetterQueue: "job-pipeline-events-dlq",
 };
 

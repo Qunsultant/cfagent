@@ -648,7 +648,7 @@ path; the two converge only at #3550.
 
 | Family | Bespoke implementation today | Adoption | Status |
 |---|---|---|---|
-| Stock screens | the screener workflow family | #3550 | **Filed** — open, unstarted |
+| Stock screens | the screener workflow family (child-workflow flow retired 2026-11-12, #4192) | #3550 | **In progress** — S1 substrate merged (#4190); S2 cutover building (#4192, production screens dispatch through the engine) |
 | Options screens | the options screen workflows | #3551 | **Filed** — open, unstarted |
 | Goal + strategy screens | the goal/strategy screen paths | #3552 | **Filed** — open, unstarted |
 | Trading | the trading workflow family | #3553 | **Filed** — open, unstarted |
@@ -659,7 +659,12 @@ The adoption tracker is #3549 (one engine: re-base on the stage
 runner + uniform stage control). Until a family's row moves, that
 family's workflows do not have stages in the §4.1 sense at all:
 each runs its own workflow substrate with its own step code —
-exactly the duplication the adoptions retire.
+exactly the duplication the adoptions retire. The stock row has
+moved: its stages now execute on the engine under §4.3's reading
+(the six screener nodes, collation composed from persisted stage
+outputs), and the bespoke child-workflow flow is deprecated
+(`src/workflows/screenerWorkflowFlow.deprecated.ts`, successor
+the engine path via `ScreenerScreenWorkflow.run()`).
 
 ### 4.5 What this changes for the pipeline J-sequence (J1–J7)
 
@@ -1552,7 +1557,7 @@ The CBO rows below were added 2026-11-11; their statuses are as of that date.
 | Referral / invite codes | Extra free runs on top of sign-up and grants, by code | Filed — discussion later, no build | #3307 |
 | Upgrade offers | At the limit the user is asked to upgrade or buy credits, with a plan comparison | Filed — no upgrade/upsell UI exists today; the client maps any 402 to one fixed checkout message | #3246 |
 | Monthly + annual subscriptions | Monthly + annual plans; annual discount 15% as a PROPOSED configurable value | Filed — no billing period in the plan shape; annual dollar prices (Basic $509.90 / Premium $611.90) NOT owner-approved | #3357 |
-| Product configuration UI | Versioned products, effective-dated launches, legacy vs new customers on different products/versions; operates grandfathering | Filed — decided as a requirement, unbuilt | #3289 |
+| Product configuration UI | Versioned products, effective-dated launches, legacy vs new customers on different products/versions; operates grandfathering | Shipped — slice 1 data + resolution (PR #4126), slice 2 Products UI + bulk moves | #3289 |
 | Free-for-lifetime | Access free forever; any activity requires payment | Filed — undecided option, distinct from the operator grant and the time-boxed trial | #3247 |
 
 Two open conformance points, live on main (recorded in entitlements-01.md §8;
@@ -1835,7 +1840,10 @@ owner's word, not on this document.
 
 - **Current:** the generic engine Live in pipeline use; six
   bespoke families unadopted; 0% code reuse between the engine
-  and the bespoke workflows (§7.2).
+  and the bespoke workflows (§7.2). Cost posture (#4213): every
+  workflow binding is capped at `concurrency.limit: 1`, so a
+  second run of the same workflow queues behind the first
+  instead of running beside it.
 - **Future:** one engine executing both composition modes over
   one spec format (§4.2); every family onboarded (§4.4).
 - **Roadmap:** #3700 product definition → #3842's J-stages-onto-
@@ -1862,7 +1870,11 @@ owner's word, not on this document.
 
 - **Current:** the table-backed ledger queue Live; shard chains
   Live; two real queue substrates carrying narrow traffic
-  (§6.3); the stage transport at slice 1 of 3.
+  (§6.3); the stage transport at slice 1 of 3. Cost posture
+  (#4213): all three consumers run one invocation at a time
+  (`max_concurrency: 1`), in 5-message batches flushed after
+  10s, with 2 retries before the DLQ — the backlog drains
+  serially, deliberately.
 - **Future:** one message per stage boundary on the transport;
   the ledger remaining the truth in all cases (§6.4).
 - **Roadmap:** the transport's remaining slices are scoped on

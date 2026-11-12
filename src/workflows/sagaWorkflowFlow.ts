@@ -418,8 +418,9 @@ export type LegTerminal =
 
 /**
  * Poll one leg to a terminal state on the durable sleep + poll
- * pattern (mirroring screenerWorkflowFlow's pollBatch): deadline
- * check first, then sleep, then one status read per round.
+ * pattern (the retired screener flow's pollBatch pattern — the
+ * screener itself now settles via the engine, no poll loop):
+ * deadline check first, then sleep, then one status read per round.
  * Unknown/missing statuses keep polling — only a terminal status
  * or the deadline ends the loop. A missing binding throws
  * immediately (the port fails loud, never burns a deadline).

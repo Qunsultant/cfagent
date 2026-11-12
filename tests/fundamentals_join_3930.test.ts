@@ -547,7 +547,7 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
         expect(def.elements).toContain(element);
       }
     }
-    expect(registry.list()).toHaveLength(8);
+    expect(registry.list()).toHaveLength(19);
   });
 
   it("the join knob opts one job out (quotes-only preserved) and falls back to auto on bad values", () => {
@@ -780,14 +780,14 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
         universe: "sp100",
       },
     ]);
-    expect(ENRICH_PIPELINE_CATALOG).toHaveLength(8);
+    expect(ENRICH_PIPELINE_CATALOG).toHaveLength(19);
   });
 });
 
 describe("the chains fold the parameterized fundamentals node (#3930)", () => {
   it("every chain declares the fundamentals job and its own universe", () => {
     const registry = buildPipelineChainRegistry({});
-    expect(registry.list()).toHaveLength(8);
+    expect(registry.list()).toHaveLength(19);
     for (const chain of registry.list()) {
       expect(chain.fundamentalsJobId).toBe(FUND_ID);
     }
@@ -796,6 +796,17 @@ describe("the chains fold the parameterized fundamentals node (#3930)", () => {
     expect(registry.forId("yahoo-sp500-quotes-pipeline")!.universeIndex).toBe("sp500");
     expect(registry.forId("yahoo-dow-quotes-pipeline")!.universeIndex).toBe("dow");
     expect(registry.forId("yahoo-sp400-quotes-pipeline")!.universeIndex).toBe("sp400");
+    expect(registry.forId("yahoo-sector-energy-quotes-pipeline")!.universeIndex).toBe("sector-energy");
+    expect(registry.forId("yahoo-sector-materials-quotes-pipeline")!.universeIndex).toBe("sector-materials");
+    expect(registry.forId("yahoo-sector-industrials-quotes-pipeline")!.universeIndex).toBe("sector-industrials");
+    expect(registry.forId("yahoo-sector-consumer-discretionary-quotes-pipeline")!.universeIndex).toBe("sector-consumer-discretionary");
+    expect(registry.forId("yahoo-sector-consumer-staples-quotes-pipeline")!.universeIndex).toBe("sector-consumer-staples");
+    expect(registry.forId("yahoo-sector-health-care-quotes-pipeline")!.universeIndex).toBe("sector-health-care");
+    expect(registry.forId("yahoo-sector-financials-quotes-pipeline")!.universeIndex).toBe("sector-financials");
+    expect(registry.forId("yahoo-sector-information-technology-quotes-pipeline")!.universeIndex).toBe("sector-information-technology");
+    expect(registry.forId("yahoo-sector-communication-services-quotes-pipeline")!.universeIndex).toBe("sector-communication-services");
+    expect(registry.forId("yahoo-sector-utilities-quotes-pipeline")!.universeIndex).toBe("sector-utilities");
+    expect(registry.forId("yahoo-sector-real-estate-quotes-pipeline")!.universeIndex).toBe("sector-real-estate");
     expect(registry.forId("alpaca-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
     expect(registry.forId("etrade-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
     expect(registry.forId("public-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
@@ -810,7 +821,7 @@ describe("the chains fold the parameterized fundamentals node (#3930)", () => {
         children?: Array<unknown>;
       };
     }>;
-    expect(raws).toHaveLength(8);
+    expect(raws).toHaveLength(19);
     const walk = (raw: (typeof raws)[number]) => {
       const nodes: Array<{ step?: string; params?: Record<string, unknown> }> = [];
       let node: (typeof raw)["root"] | undefined = raw.root;
@@ -842,7 +853,7 @@ describe("the chains fold the parameterized fundamentals node (#3930)", () => {
     // technicals, and sentiment fold in, #3931/#3932).
     expect(walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
     expect(walk(byId.get("yahoo-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
-    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(8);
+    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(19);
   });
 });
 

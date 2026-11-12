@@ -68,7 +68,7 @@ export interface MeshSurfaceEntry {
 }
 
 export interface MeshChannelEntry {
-  id: "web-chat" | "slack" | "email" | "voice" | "webhook" | "nlq-webhook";
+  id: "web-chat" | "slack" | "email" | "voice" | "webhook" | "nlq-webhook" | "schedule-webhook";
   name: string;
   /** Where the channel enters the Worker. */
   ingress: string;
@@ -662,6 +662,23 @@ export const MESH_CHANNELS: MeshChannelEntry[] = [
       "Shared NLQ pipeline with the social brief port withheld — webhook bodies are untrusted external content (#1077); scheduling and discovery ports stand. Email delivery of action results is refused at the route.",
     adapter:
       "src/server.ts — handleNlqWebhookRequest (single-owner handler for all three spellings).",
+  },
+  {
+    id: "schedule-webhook",
+    name: "Schedule webhook",
+    ingress:
+      "POST /api/schedules/webhook/followup in src/server.ts — the single canonical spelling delegates to the single-owner handler handleScheduleWebhookRequest (#3311)",
+    terminatesAt:
+      "OrchestratorAgent (the asserted owner's instance, x-user-login stamped from the HMAC-verified body)",
+    posture: "FORWARDER",
+    identity:
+      "HMAC-authenticated SYSTEM caller, not a user session: a well-formed caller-asserted userLogin attributes the run to that login (the run-as owner, #2331); the edge stamps x-user-login from the verified body, never a caller header.",
+    gate:
+      "HMAC signature over the raw body (INBOUND_SCHEDULE_WEBHOOK_SECRET — unconfigured → 503, invalid → 401), 5-minute timestamp window, nonce replay claim, per-source-IP throttle, 128 KB body cap; the DO route then PDP-authorizes task:create (#3122) and mints only the followup.report/deliver/notify capabilities.",
+    parity:
+      "Follow-up minting only — the webhook mints T4 follow-ups onto the async-job chain; it does not arm schedules, run tools, or change T4 chain semantics (retry, recovery, stuck detection).",
+    adapter:
+      "src/server/routes/scheduleWebhook.ts — handleScheduleWebhookRequest (edge) → src/agents/routes/schedules.ts webhook branch (DO mint).",
   },
 ];
 

@@ -88,13 +88,24 @@ async function pollRecords(
 }
 
 describe("the generate → deliver host hand-off (#3539)", () => {
-  it("the host manages the eight deliver jobs", () => {
+  it("the host manages the nineteen deliver jobs", () => {
     expect(pipelineDeliverJobIds()).toEqual([
       "yahoo-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp100-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp500-quotes-enrich-analyze-generate-deliver",
       "yahoo-dow-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp400-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-energy-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-materials-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-industrials-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-consumer-discretionary-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-consumer-staples-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-health-care-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-financials-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-information-technology-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-communication-services-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-utilities-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-real-estate-quotes-enrich-analyze-generate-deliver",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "etrade-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "public-nasdaq100-quotes-enrich-analyze-generate-deliver",
