@@ -87,8 +87,8 @@ jobs:
           # Only PRs that carry this workflow's label are enrolled; a fork branch
           # has no label and is skipped by construction.
           PR_NODE_ID=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH" --state open \
-            --json number,nodeId,labels \
-            --jq '[.[] | select(any(.labels[]?; .name == "auto-merge"))][0].nodeId // empty')
+            --json number,id,labels \
+            --jq '[.[] | select(any(.labels[]?; .name == "auto-merge"))][0].id // empty')
           if [ -z "$PR_NODE_ID" ]; then
             echo "No open auto-merge PR for branch '$HEAD_BRANCH'; nothing to enqueue."
             exit 0
