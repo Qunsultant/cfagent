@@ -294,6 +294,10 @@ describe("feed job registry (#3530 S2)", () => {
       // parameterized by universe — no per-universe copies).
       "yahoo-nasdaq100-sentiment",
       "yahoo-nasdaq100-technicals",
+      "yahoo-sector-consumer-discretionary-quotes",
+      "yahoo-sector-energy-quotes",
+      "yahoo-sector-industrials-quotes",
+      "yahoo-sector-materials-quotes",
       "yahoo-sp100-quotes",
       "yahoo-sp400-quotes",
       "yahoo-sp500-quotes",
