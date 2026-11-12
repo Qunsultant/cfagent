@@ -43,7 +43,7 @@ import {
   type StoredDiscoveryRun,
 } from "../discoveryApi";
 import { discoveryTriggerLabel, downloadDiscoveryExport } from "../runExport";
-import { brokerSupports, isBrokerId } from "../../trading/brokerCatalog";
+import { brokerSupports, isBrokerId } from "../../trading";
 import { readTenantProvidersState } from "../tenantProviders";
 import { ConfidenceMethodBreakdown } from "./ConfidenceMethodBreakdown";
 import {

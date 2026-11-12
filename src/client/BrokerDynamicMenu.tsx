@@ -9,9 +9,9 @@ import { PillGroup, Button, TextInput, Select } from "./components/ui";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { apiFetch } from "./apiFetch";
 import { syncTarget, connectStatusEndpoint } from "./brokerEndpoints";
-import { brokerPresentation } from "../trading/brokerPresentation";
+import { brokerPresentation } from "../trading";
 import { PublicTokenCard } from "./PublicTokenCard";
-import { brokerCredentialGuidance, isBrokerId } from "../trading/brokerCatalog";
+import { brokerCredentialGuidance, isBrokerId } from "../trading";
 import { brokerOptions } from "./brokerOptions";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
 import {

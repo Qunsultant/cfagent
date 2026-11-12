@@ -8,7 +8,7 @@ import {
   tradingTypeFor,
   type BrokerId,
   type TradingEnvironment,
-} from "../trading/brokerCatalog";
+} from "../trading";
 import { BrokerSurfaceGate } from "./BrokerSurfaceGate";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { AlpacaCancelAllControl } from "./AlpacaCancelAllControl";

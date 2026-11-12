@@ -6,7 +6,7 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { OptionsStrategyCard } from "./OptionsStrategyCard";
-import { brokerPresentation } from "../../trading/brokerPresentation";
+import { brokerPresentation } from "../../trading";
 export function ToolResultView({
   toolType,
   data,

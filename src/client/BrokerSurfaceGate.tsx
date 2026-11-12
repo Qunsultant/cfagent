@@ -1,7 +1,7 @@
 import React from "react";
 import { Notice } from "./components/ui";
-import { BROKER_CATALOG, type BrokerId } from "../trading/brokerCatalog";
-import { panelAvailability, SURFACE_LABELS, type BrokerPanelSurface } from "../trading/brokerPanels";
+import { BROKER_CATALOG, type BrokerId } from "../trading";
+import { panelAvailability, SURFACE_LABELS, type BrokerPanelSurface } from "../trading";
 
 export interface BrokerSurfaceGateProps {
   /** The broker the user selected — never a default. */

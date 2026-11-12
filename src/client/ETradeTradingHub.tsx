@@ -33,7 +33,7 @@ import {
   fetchVoiceSurfaceBackend,
   TRADING_DESK_VOICE_SURFACE,
 } from "./copilotChannelsApi";
-import { brokerModeBadge, brokerPresentation } from "../trading/brokerPresentation";
+import { brokerModeBadge, brokerPresentation } from "../trading";
 import {
   accountsFromPayload,
   formatMoney,

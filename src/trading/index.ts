@@ -169,6 +169,12 @@ export * from "./channels/signedLinks";
 // different values. External code used the options value, so an explicit
 // named export — which always wins over `export *` — pins that binding.
 export { MAX_SCAN_SYMBOLS } from "./options/opportunityScanner";
+// Disambiguation (#4270): toLeg lives in ./options/strategies/legs, which
+// the barrel does NOT star-export — a star export would make `contractKey`
+// ambiguous, because ./options/strategyEngine already re-exports the same
+// `contractKey` from legs. A named export joins the surface without that
+// collision, the same pattern as MAX_SCAN_SYMBOLS above.
+export { toLeg } from "./options/strategies/legs";
 export * from "./etrade/quoteTrace";
 export * from "./quotePolicies";
 

@@ -14,7 +14,7 @@ import {
   FlowSummary,
   FlowFilterConfig,
   SavedFilterPreset,
-} from "../../../trading/options/flows/types";
+} from "../../../trading";
 import {
   DEFAULT_SAVED_PRESETS,
   DEFAULT_FILTER_CONFIG,
@@ -27,7 +27,7 @@ import {
   summarizeFlowProvenance,
   FLOW_PROVENANCE_LABELS,
   FLOW_PROVENANCE_NOTICE,
-} from "../../../trading/options/flows/flowService";
+} from "../../../trading";
 import { newsSentimentPresentation } from "./newsSentimentDisplay";
 import { FlowFiltersSidebar } from "./FlowFiltersSidebar";
 import { FlowSummaryDualBars } from "./FlowSummaryDualBars";

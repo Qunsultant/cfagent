@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Button, PageSection, Select, Table } from "./components/ui";
-import { brokerSupports, isBrokerId } from "../trading/brokerCatalog";
+import { brokerSupports, isBrokerId } from "../trading";
 import { readTenantProvidersState } from "./tenantProviders";
 
 /**

@@ -29,7 +29,7 @@ import { RiskAnalysisPanel } from "./RiskAnalysisPanel";
 import { PageChromeContext } from "./components/ui/PageShell";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import { buildTradeLegs, describeTradeLeg } from "./trading/strategyAutobuild";
-import { brokerModeBadge, brokerPresentation } from "../trading/brokerPresentation";
+import { brokerModeBadge, brokerPresentation } from "../trading";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { safeNumberFormat, safePriceFormat } from "./formatters";
 
