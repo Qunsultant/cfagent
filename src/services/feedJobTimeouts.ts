@@ -1,9 +1,7 @@
 /**
  * Issue #3992 PR-1 — the feed-job deadline substrate: the timeout
  * catalogue, the timeout error, and the race helper the later PRs
- * wire into the feed runners and the feed.pull step. This module
- * changes NO behaviour on its own: nothing imports it yet except
- * its pin suite.
+ * wire into the feed runners and the feed.pull step.
  *
  * Why this exists (incident #3976's live confirmation): a feed
  * run could hang forever and record nothing, because every
@@ -19,12 +17,29 @@
  * shape at feed-leg granularity; the executor's 90-minute
  * deadline (ASYNC_JOB_MAX_RUNTIME_MINUTES) stays the outer
  * backstop, not the failure surface.
+ *
+ * Issue #4312 — the bounds are env-configurable, not literals:
+ * FEED_JOB_TIMEOUTS below is the defaults table only. Production
+ * callers resolve through resolveFeedJobTimeouts(env) instead,
+ * so an operator changes a bound by setting its knob, never by
+ * editing this file.
  */
 
+/** The resolved bounds for one feed run, in milliseconds. */
+export interface FeedJobTimeouts {
+  refreshMs: number;
+  fetchMs: number;
+  captureMs: number;
+  executionMs: number;
+}
+
 /**
- * The named, configurable bounds for one feed run, in
- * milliseconds. The values are configuration, recorded on
- * issue #3992 — not constants discovered in code.
+ * The DEFAULTS table for one feed run's bounds, in
+ * milliseconds — the values recorded on issue #3992, not
+ * constants discovered in code. This is the fallback only:
+ * production callers resolve through resolveFeedJobTimeouts(env),
+ * which reads each bound from its env knob below and falls back
+ * to this table per bound when the knob is absent.
  *
  * Basis for every value: the observed legs are seconds-scale —
  * one Wikipedia index page fetch (refresh), one batch quote
@@ -37,7 +52,7 @@
  * recorded as a named feed failure long before the executor
  * kills the job with no feed record at all.
  */
-export const FEED_JOB_TIMEOUTS = {
+export const FEED_JOB_TIMEOUTS: FeedJobTimeouts = {
   /** Bound for the universe index-refresh leg. */
   refreshMs: 30_000,
   /** Bound for one provider fetch leg (the batch quote request). */
@@ -46,7 +61,64 @@ export const FEED_JOB_TIMEOUTS = {
   captureMs: 30_000,
   /** Bound for a whole feed.pull execution, above every leg. */
   executionMs: 240_000,
+};
+
+/**
+ * The env knobs, one per bound (#4312). An operator changes a
+ * bound by setting its knob — no code change, no redeploy of
+ * this module. Values are milliseconds; a knob holds either a
+ * decimal string ("60000") or a number (120000).
+ */
+export const FEED_JOB_TIMEOUT_KNOBS = {
+  refreshMs: "FEED_JOB_REFRESH_MS",
+  fetchMs: "FEED_JOB_FETCH_MS",
+  captureMs: "FEED_JOB_CAPTURE_MS",
+  executionMs: "FEED_JOB_EXECUTION_MS",
 } as const;
+
+/**
+ * Resolve one bound from its env knob (#4312), in the feed-knob
+ * idiom (an env record passed in, fallback to the recorded
+ * default — cf. resolveFeedJobCadenceMinutes in feedJobs.ts).
+ * Absent knob ⇒ the default. A present knob must name a
+ * positive finite number of milliseconds; anything else is a
+ * configuration error, refused by NAME (naming the knob and the
+ * raw value) — never silently treated as the default, another
+ * bound, or "no deadline". The withFeedDeadline guard stays as
+ * the backstop for bounds that arrive any other way.
+ */
+export function resolveFeedJobTimeoutMs(
+  env: Record<string, unknown>,
+  knob: string,
+  fallback: number,
+): number {
+  const raw = env[knob];
+  if (raw === undefined) return fallback;
+  const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    const shown = typeof raw === "string" ? `"${raw}"` : String(raw);
+    throw new Error(
+      `Invalid ${knob} value ${shown}: the bound must be a positive finite number of milliseconds.`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Resolve all four feed-job bounds from env (#4312). Each knob
+ * is independent: a set knob overrides only its own bound, the
+ * rest fall back to FEED_JOB_TIMEOUTS per bound.
+ */
+export function resolveFeedJobTimeouts(
+  env: Record<string, unknown> = {},
+): FeedJobTimeouts {
+  return {
+    refreshMs: resolveFeedJobTimeoutMs(env, FEED_JOB_TIMEOUT_KNOBS.refreshMs, FEED_JOB_TIMEOUTS.refreshMs),
+    fetchMs: resolveFeedJobTimeoutMs(env, FEED_JOB_TIMEOUT_KNOBS.fetchMs, FEED_JOB_TIMEOUTS.fetchMs),
+    captureMs: resolveFeedJobTimeoutMs(env, FEED_JOB_TIMEOUT_KNOBS.captureMs, FEED_JOB_TIMEOUTS.captureMs),
+    executionMs: resolveFeedJobTimeoutMs(env, FEED_JOB_TIMEOUT_KNOBS.executionMs, FEED_JOB_TIMEOUTS.executionMs),
+  };
+}
 
 /**
  * A feed leg exceeded its named bound. Carries the leg's stable
