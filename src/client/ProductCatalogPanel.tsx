@@ -26,6 +26,7 @@ import { PageSection, PageShell } from "./components/ui/PageShell";
 import { Select } from "./components/ui/Select";
 import { TextInput } from "./components/ui/TextInput";
 import { Table, type TableColumn } from "./components/ui/Table";
+import { AmbientOfferCompare, type PlanChoice } from "./PlanCompare";
 import {
   composeMarketingDraft,
   TEASER_CANDIDATE_CAP,
@@ -370,7 +371,6 @@ function SellingSection({
 
   useEffect(() => {
     if (openSignal > 0) void open();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openSignal]);
 
   async function subscribe() {
@@ -518,6 +518,31 @@ function SellingSection({
   const trialRow = rows.find((r) => r.planId === selectedPlanId && r.provider === "trial") ?? null;
   const trialExpired = trialRow !== null && trialRow.periodEndMs <= Date.now();
 
+  // Issue #3246 — the trial-end offer: this panel has NO family
+  // context (plans carry no family; subscription products are not
+  // family-scoped), and the trial_end trigger requires a family,
+  // so the surface renders the AMBIENT compare (GET
+  // /offer/compare, family omitted) below the trial-ended notice
+  // — the same component and payload shape, honestly labeled.
+  // The compare's actions navigate to the native checkout (the
+  // one-time purchase route is the only acceptance path for an
+  // offer; this panel's own Billing checkout confers tier only
+  // and would strand the user), carrying the trial_end trigger
+  // for the acceptance audit.
+  const goToCheckoutOffer = (choice: PlanChoice) => {
+    const params = new URLSearchParams({
+      tab: "checkout",
+      checkoutTab: "subscriptions",
+      plan: choice.versionId,
+      offer: "trial_end",
+    });
+    window.location.assign(`?${params.toString()}`);
+  };
+  const goToTopUpOffer = () => {
+    const params = new URLSearchParams({ tab: "checkout", checkoutTab: "topup", offer: "trial_end" });
+    window.location.assign(`?${params.toString()}`);
+  };
+
   return (
     <PageSection
       title="Selling"
@@ -603,9 +628,15 @@ function SellingSection({
             </Notice>
           )}
           {trialExpired && selectedPlan && (
-            <Notice tone="neutral" title="Trial Ended">
-              {trialEndedMessage(selectedPlan.name)}
-            </Notice>
+            <>
+              <Notice tone="neutral" title="Trial Ended">
+                {trialEndedMessage(selectedPlan.name)}
+              </Notice>
+              <AmbientOfferCompare
+                onChoosePlan={(choice) => goToCheckoutOffer(choice)}
+                onBuyCredits={goToTopUpOffer}
+              />
+            </>
           )}
           {!minted && selling.plans.length === 0 && (
             <Notice tone="neutral">No active subscription plan — operator data missing.</Notice>

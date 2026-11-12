@@ -61,6 +61,8 @@ import {
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { startPolling } from "./polling";
 import { codedMessage } from "../outcomes/outcomeAspects";
+import { AmbientOfferCompare, type PlanChoice } from "./PlanCompare";
+import { UpgradeOffer } from "./UpgradeOffer";
 import {
   buildGoalCommand,
   buildNonGoalCommand,
@@ -73,6 +75,7 @@ import {
   getPricing,
   getSubmissionStatus,
   getSubscriptionStatus,
+  isOfferTrigger,
   listPlans,
   parseSymbols,
   submitRun,
@@ -83,6 +86,8 @@ import {
   topUpConfirm,
   type ChallengeFlow,
   type CommercialAccountView,
+  type OfferContext,
+  type OfferTrigger,
   type PlatformIdentityView,
   type PlanView,
   type Pricing,
@@ -124,6 +129,22 @@ function managedByLabel(row: SubscriptionView): string {
 
 function newJobId(): string {
   return `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Issue #3246 — preselection from an offer deep link
+ * (`?plan=<versionId>&offer=<trigger>`): the plan param matches
+ * ONLY a fetched effective plan. A superseded or unknown id is
+ * ignored — the panel never mints, highlights, or audits a plan
+ * it did not fetch. The offer param must be a known trigger.
+ */
+export function matchPreselectedPlan(plans: PlanView[], planParam: string | null): PlanView | null {
+  if (!planParam) return null;
+  return plans.find((p) => p.id === planParam) ?? null;
+}
+
+export function parseOfferTriggerParam(value: string | null): OfferTrigger | null {
+  return value !== null && isOfferTrigger(value) ? value : null;
 }
 
 export function CheckoutPanel({ userLogin }: { userLogin: string }) {
@@ -200,6 +221,22 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   const [topUpDone, setTopUpDone] = React.useState<string | null>(null);
   const [topUpProof, setTopUpProof] = React.useState("");
 
+  // Issue #3246 — offer preselection and acceptance context. The
+  // offer context is audit-only: it is included in the NEXT mint
+  // call only (subscription checkout or top-up mint) and cleared
+  // after that mint — a re-mint is not from the offer. It never
+  // changes a price, a plan, or an authorization. The preselected
+  // plan is a marker on a fetched plan row only — never an
+  // auto-mint, never a preselected purchase.
+  const [offerContext, setOfferContext] = React.useState<OfferContext | null>(null);
+  const [preselectedPlanId, setPreselectedPlanId] = React.useState<string | null>(null);
+  const offerParamsApplied = React.useRef(false);
+  // Quota-exhausted offer (design §5.4): set when the pay-tab
+  // poller sees the quota_exhausted outcome, with the family the
+  // run was submitted under.
+  const [quotaOffer, setQuotaOffer] = React.useState(false);
+  const [quotaOfferFamily, setQuotaOfferFamily] = React.useState<ScreenerFamily | null>(null);
+
   // Top-up field errors (#3574): client-side validation errors are
   // field-associated (TextInput `error` → aria-invalid + aria-describedby
   // to the field error span, ux-architecture §13). The form-level
@@ -240,6 +277,19 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
       }
     }
   }, [userLogin]);
+
+  // Issue #3246 — apply the offer deep-link params once, when the
+  // fetched plans first arrive. Unknown or superseded plan ids
+  // and unknown triggers are ignored silently.
+  React.useEffect(() => {
+    if (offerParamsApplied.current || !plans) return;
+    offerParamsApplied.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const matched = matchPreselectedPlan(plans, params.get("plan"));
+    if (matched) setPreselectedPlanId(matched.id);
+    const trigger = parseOfferTriggerParam(params.get("offer"));
+    if (trigger) setOfferContext({ trigger });
+  }, [plans]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -304,6 +354,11 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
           setRunStatus(
             codedMessage(res.outcomeCode ?? "FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED"),
           );
+          // Issue #3246: the quota-exhausted outcome surfaces the
+          // upgrade offer in the pay tab, for the family the run
+          // was submitted under.
+          setQuotaOffer(true);
+          setQuotaOfferFamily(family);
         } else if (res.outcomeCode === "SUCCESS_APPROVED_FREE_QUOTA_COVERED") {
           setRunStatus(codedMessage(res.outcomeCode));
         } else {
@@ -331,6 +386,8 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
     setSubmitResult(null);
     setRunStatus(null);
     setCheckResult(null);
+    setQuotaOffer(false);
+    setQuotaOfferFamily(null);
     if (!email.trim()) {
       setSubmitError("Enter the checkout contact email.");
       return;
@@ -411,6 +468,25 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
     }
   };
 
+  // Issue #3246 — the ambient compare's actions. Choosing a plan
+  // marks the matching fetched plan row and records the offer
+  // context for the next mint; a version that matches no fetched
+  // plan (superseded between fetches) is ignored, never
+  // highlighted. Buying credits moves to the top-up tab with the
+  // offer context attached to the next mint.
+  const handleCompareChoose = (choice: PlanChoice, shownAtMs: number) => {
+    if (!plans) return;
+    const matched = matchPreselectedPlan(plans, choice.versionId);
+    if (!matched) return;
+    setPreselectedPlanId(matched.id);
+    setOfferContext({ trigger: "ambient", shownAtMs });
+  };
+
+  const handleCompareBuyCredits = () => {
+    setOfferContext({ trigger: "ambient" });
+    setTab("topup");
+  };
+
   const handleBuyCheckout = async (plan: PlanView) => {
     setBuyError(null);
     setBuyDone(null);
@@ -425,7 +501,17 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
     // server identity (#2219), never from this panel.
     setBuying(true);
     try {
-      const res = await subscriptionCheckout({ planId: plan.id, email: email.trim() });
+      // Issue #3246: the offer context rides the mint call only
+      // when the purchase was started from an offer, and is
+      // cleared after the mint — a re-mint is not from the offer.
+      const context = offerContext ?? undefined;
+      const res = await subscriptionCheckout({
+        planId: plan.id,
+        email: email.trim(),
+        ...(context ? { offerContext: context } : {}),
+      });
+      setOfferContext(null);
+      setPreselectedPlanId(null);
       setBuyPlan(plan);
       setBuyCheckoutId(res.checkoutRequestId);
       // The native subscription checkout always returns a URL (slice
@@ -530,7 +616,17 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
     }
     setTopUpMinting(true);
     try {
-      const res = await topUpCheckout({ amountUSD: amount, rail: topUpRail, email: email.trim() });
+      // Issue #3246: the offer context rides the mint call only
+      // when the top-up was started from an offer, and is cleared
+      // after the mint — a re-mint is not from the offer.
+      const context = offerContext ?? undefined;
+      const res = await topUpCheckout({
+        amountUSD: amount,
+        rail: topUpRail,
+        email: email.trim(),
+        ...(context ? { offerContext: context } : {}),
+      });
+      setOfferContext(null);
       setTopUpMint(res);
     } catch (err) {
       setTopUpError(errText(err));
@@ -705,9 +801,19 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
                     Payment workflow started (workflow {submitResult.workflowId}). Complete the payment for this
                     request, then tap “I have paid — verify” below.
                   </Notice>
-                  <p>
-                    Workflow status: {runStatus ?? "starting…"} {polling && <Spinner size="sm" />}
-                  </p>
+                  {quotaOffer && quotaOfferFamily ? (
+                    <UpgradeOffer
+                      trigger="quota_exhausted"
+                      family={quotaOfferFamily}
+                      fallback={
+                        runStatus ?? codedMessage("FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED")
+                      }
+                    />
+                  ) : (
+                    <p>
+                      Workflow status: {runStatus ?? "starting…"} {polling && <Spinner size="sm" />}
+                    </p>
+                  )}
                   <Button loading={checking} onClick={handleCheckPayment}>
                     I have paid — verify
                   </Button>{" "}
@@ -778,10 +884,31 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
                   )}
                 </p>
               )}
+              {/* Issue #3246: the ambient plan comparison. It fetches
+                  the server-computed offer and renders nothing on any
+                  failure — the plans table below is unaffected. */}
+              <AmbientOfferCompare
+                onChoosePlan={handleCompareChoose}
+                onBuyCredits={handleCompareBuyCredits}
+              />
               {plans && plans.length > 0 ? (
                 <Table
                   columns={[
-                    { key: "name", header: "Plan", render: (row: PlanView) => row.name },
+                    {
+                      key: "name",
+                      header: "Plan",
+                      render: (row: PlanView) => (
+                        <>
+                          {row.name}
+                          {preselectedPlanId === row.id && (
+                            <>
+                              {" "}
+                              <Badge tone="accent">Selected from your plan comparison</Badge>
+                            </>
+                          )}
+                        </>
+                      ),
+                    },
                     { key: "price", header: "Price", render: (row: PlanView) => formatUSD(row.priceUSD), align: "right" },
                     {
                       key: "period",

@@ -287,6 +287,13 @@ export const subscriptionCheckout = (body: {
   /** Issue #2219: legacy/optional only — the server derives the tenant from the resolved identity. */
   tenantId?: string;
   email: string;
+  /**
+   * Issue #3246: audit-only offer context, present only when the
+   * checkout was started from an upgrade offer. The server audits
+   * `commercial.offer.accepted` when present and ignores it when
+   * absent; it authorizes nothing and changes no price.
+   */
+  offerContext?: OfferContext;
 }): Promise<{ checkoutRequestId: string; checkoutUrl: string; checkoutSessionId: string; plan: PlanView }> =>
   post("/subscription/checkout", body);
 export const subscriptionPurchase = (body: {
@@ -375,6 +382,12 @@ export const topUpCheckout = (body: {
   amountUSD: number;
   rail?: "card" | "x402";
   email: string;
+  /**
+   * Issue #3246: audit-only offer context, present only when the
+   * top-up was started from an upgrade offer (same contract as
+   * the subscription checkout's offerContext).
+   */
+  offerContext?: OfferContext;
 }): Promise<TopUpCheckoutView> => post<TopUpCheckoutView>("/top-up/checkout", body);
 export const topUpConfirm = (body: {
   topUpRequestId: string;
@@ -382,6 +395,217 @@ export const topUpConfirm = (body: {
   paymentProof?: string;
   payer?: string;
 }): Promise<TopUpConfirmView> => post<TopUpConfirmView>("/top-up/confirm", body);
+
+/**
+ * Issue #3246 — upgrade-offer payload views (slice 1 server shape,
+ * design §2.4). The client renders the payload verbatim: every
+ * number shown comes from here, never from client state, query
+ * params, or storage. These are client-declared views of the
+ * server's OfferPayload (src/services/upgradeOffers.ts), following
+ * the PlanView precedent — the client never imports server code.
+ */
+export type OfferTrigger =
+  | "manual_402"
+  | "skip_notice"
+  | "trial_end"
+  | "quota_exhausted"
+  | "ambient";
+
+export const OFFER_TRIGGERS: readonly OfferTrigger[] = [
+  "manual_402",
+  "skip_notice",
+  "trial_end",
+  "quota_exhausted",
+  "ambient",
+];
+
+export function isOfferTrigger(value: unknown): value is OfferTrigger {
+  return typeof value === "string" && (OFFER_TRIGGERS as readonly string[]).includes(value);
+}
+
+/** Audit-only context a mint route accepts with an offer-started purchase (§4.3). */
+export interface OfferContext {
+  trigger: OfferTrigger;
+  shownAtMs?: number;
+}
+
+export interface OfferTargetView {
+  productId: string;
+  name: string;
+  versionId: string;
+  priceUSD: number;
+  approvalStatus: "approved" | "proposed";
+  buyable: boolean;
+  unavailableReason?: "proposed" | "billing_managed";
+  billingPeriod: "monthly" | "annual";
+  includedRuns: number;
+  periodDays: number;
+  trialDays: number | null;
+  features: string[];
+  effectiveFromMs: number;
+  annualOption?: {
+    versionId: string;
+    priceUSD: number;
+    savingsVsMonthlyUSD: number;
+  };
+  recommended: boolean;
+}
+
+/** Slice 3: one runs-pack offer row. Always empty until slice 3 lands. */
+export interface RunsPackOfferView {
+  productId: string;
+  name: string;
+  versionId: string;
+  runs: number;
+  priceUSD: number;
+  effectiveFromMs: number;
+}
+
+export interface ReferralMentionView {
+  redeemableUSD: number;
+  totalEarnedUSD: number;
+  earnAmountUSD: number;
+  vestingDelayMs: number;
+  attributedReferrer: string | null;
+}
+
+export interface FreeAccessMentionView {
+  kind: "lifetime" | "limited";
+  expiresAtMs: number | null;
+}
+
+export interface OfferPayloadView {
+  trigger: OfferTrigger;
+  eligible: boolean;
+  reasonCode?: string;
+  family?: ScreenerFamily;
+  current: {
+    effectiveTier: string;
+    heldPlan: {
+      planId: string;
+      productId: string;
+      name: string;
+      heldPriceUSD: number;
+      billingPeriod: "monthly" | "annual";
+      includedRuns: number;
+      periodEndMs: number;
+      billingManaged: boolean;
+    } | null;
+    includedRunsRemaining: number;
+    packRunsRemaining: number;
+    creditsUSD: number;
+    freeRunsRemaining?: number | null;
+    segment: string;
+  };
+  targets: OfferTargetView[];
+  downgradeTargets: OfferTargetView[];
+  unavailableTargets: OfferTargetView[];
+  runsPacks: RunsPackOfferView[];
+  mentions: {
+    referral: ReferralMentionView | null;
+    freeAccess: FreeAccessMentionView | null;
+  };
+  perRun: {
+    family: ScreenerFamily;
+    priceUSD: number;
+    productId: string;
+    versionId: string;
+  } | null;
+  topUp: { minUSD: number; maxUSD: number } | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOfferTargetView(value: unknown): value is OfferTargetView {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.productId === "string" &&
+    typeof value.name === "string" &&
+    typeof value.versionId === "string" &&
+    typeof value.priceUSD === "number" &&
+    (value.approvalStatus === "approved" || value.approvalStatus === "proposed") &&
+    typeof value.buyable === "boolean" &&
+    (value.billingPeriod === "monthly" || value.billingPeriod === "annual") &&
+    typeof value.includedRuns === "number" &&
+    typeof value.periodDays === "number" &&
+    (value.trialDays === null || typeof value.trialDays === "number") &&
+    Array.isArray(value.features) &&
+    typeof value.effectiveFromMs === "number" &&
+    typeof value.recommended === "boolean"
+  );
+}
+
+/**
+ * Structural guard for an offer payload: the offer surfaces render
+ * the fixed fallback copy on ANY malformed payload (never a blank
+ * section, never a crash on a half-shaped body). The check is
+ * structural only — it never invents or repairs a value.
+ */
+export function isOfferPayloadView(value: unknown): value is OfferPayloadView {
+  if (!isRecord(value)) return false;
+  if (!isOfferTrigger(value.trigger) || typeof value.eligible !== "boolean") return false;
+  if (!isRecord(value.current)) return false;
+  const current = value.current;
+  if (
+    typeof current.effectiveTier !== "string" ||
+    typeof current.includedRunsRemaining !== "number" ||
+    typeof current.packRunsRemaining !== "number" ||
+    typeof current.creditsUSD !== "number" ||
+    typeof current.segment !== "string"
+  ) {
+    return false;
+  }
+  if (current.heldPlan !== null) {
+    if (!isRecord(current.heldPlan)) return false;
+    const held = current.heldPlan;
+    if (
+      typeof held.planId !== "string" ||
+      typeof held.productId !== "string" ||
+      typeof held.name !== "string" ||
+      typeof held.heldPriceUSD !== "number" ||
+      (held.billingPeriod !== "monthly" && held.billingPeriod !== "annual") ||
+      typeof held.includedRuns !== "number" ||
+      typeof held.periodEndMs !== "number" ||
+      typeof held.billingManaged !== "boolean"
+    ) {
+      return false;
+    }
+  }
+  if (
+    !Array.isArray(value.targets) ||
+    !value.targets.every(isOfferTargetView) ||
+    !Array.isArray(value.downgradeTargets) ||
+    !value.downgradeTargets.every(isOfferTargetView) ||
+    !Array.isArray(value.unavailableTargets) ||
+    !value.unavailableTargets.every(isOfferTargetView) ||
+    !Array.isArray(value.runsPacks)
+  ) {
+    return false;
+  }
+  if (!isRecord(value.mentions)) return false;
+  if (value.perRun !== null && !isRecord(value.perRun)) return false;
+  if (value.topUp !== null && !isRecord(value.topUp)) return false;
+  return true;
+}
+
+/** POST /offer — a triggered offer. Family is required (the route 400s without it). */
+export const postOffer = (body: {
+  trigger: Exclude<OfferTrigger, "ambient">;
+  family: ScreenerFamily;
+  runRequestId?: string;
+}): Promise<OfferPayloadView> => post<OfferPayloadView>("/offer", body);
+
+/** GET /offer/compare — the ambient compare surface. Family is optional. */
+export const getOfferCompare = (family?: ScreenerFamily): Promise<OfferPayloadView> =>
+  get<OfferPayloadView>(family ? `/offer/compare?family=${encodeURIComponent(family)}` : "/offer/compare");
+
+/** POST /offer/dismiss — record a dismissal (never for `ambient`; the route 400s it). */
+export const postOfferDismiss = (body: {
+  trigger: Exclude<OfferTrigger, "ambient">;
+  family?: ScreenerFamily;
+}): Promise<{ suppressedUntilMs: number }> => post<{ suppressedUntilMs: number }>("/offer/dismiss", body);
 
 /** Split a comma-separated symbols field into a clean list. */
 export function parseSymbols(input: string): string[] {

@@ -36,6 +36,7 @@ import {
 import { ScreenerPresetManager } from "./ScreenerPresetManager";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "./components/CapabilityNavBar";
 import { ScreenerResultsView, type ScreenerResultData } from "./ScreenerResultsView";
+import { UpgradeOffer } from "./UpgradeOffer";
 import { RunDetailView, type RunDetailConfirmation } from "./RunDetailView";
 import { MorningDigest } from "./MorningDigest";
 import { MarketDataResearchHub, type User as ResearchUser } from "./MarketDataResearchHub";
@@ -308,6 +309,11 @@ export function StockHub({
   const [summary, setSummary] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Issue #3246: the at-limit offer, set only when a screen
+  // submission answers 402. The offer component fetches the
+  // server-computed offer (a read, never a paid submission) and
+  // renders the fixed error string as its fallback.
+  const [offer402, setOffer402] = useState<{ runRequestId?: string } | null>(null);
   // Issue #3239: paid-seam state for the manual run — the monetization
   // flag decides whether the run rides the payment workflow, and a
   // 202 payment_started parks here until the payment is verified.
@@ -426,6 +432,7 @@ export function StockHub({
     if (!endpoint || loading) return;
     setLoading(true);
     setError("");
+    setOffer402(null);
     setRetryPaid(false);
     setPaymentStarted(null);
     setPaymentCheck("");
@@ -553,6 +560,10 @@ export function StockHub({
       }
       if (!response.ok) {
         if (isMonetizationWorkflowError(response.status, data.error)) setRetryPaid(true);
+        // Issue #3246: a 402 surfaces the upgrade offer (with the
+        // run request id when the body carries one) instead of the
+        // bare fixed string; every other error keeps the string.
+        if (response.status === 402) setOffer402({ runRequestId: data.runRequestId });
         throw new Error(mapScreenError(response.status, data.error));
       }
       if (data.validationError) throw new Error(data.validationError);
@@ -1135,10 +1146,18 @@ export function StockHub({
                 )}
               </Notice>
             )}
-            {error && (
+            {error && !offer402 && (
               <Notice tone="danger" density="compact" onDismiss={() => setError("")}>
                 {error}
               </Notice>
+            )}
+            {error && offer402 && (
+              <UpgradeOffer
+                trigger="manual_402"
+                family="stock"
+                runRequestId={offer402.runRequestId}
+                fallback={error}
+              />
             )}
             {retryPaid && (
               <Button onClick={() => void retryPaidScreen()} disabled={loading}>Start payment workflow</Button>
