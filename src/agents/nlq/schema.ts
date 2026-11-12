@@ -84,6 +84,7 @@ export const nlqPlanSchema = z.object({
           "options_opportunities",
           "options_fit_discovery",
           "options_comparison",
+          "options_stage_control",
           "options_flow",
           "watchlist_save",
           "watchlist_list",

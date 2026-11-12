@@ -316,6 +316,11 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // scan that persists nothing itself and moves no money; the
   // write scope matches its sibling screen door).
   run_options_strategy_screen: "mcp:write",
+  // #4066: Options Copilot per-stage chat control — drives one stage
+  // of one options run through the engine control plane (a write
+  // operation on the run's stage state, same scope as the screen
+  // door and stock_copilot_control).
+  options_copilot_stage_control: "mcp:write",
   // #3513: Stock Copilot loop control (pause/resume & sessions)
   stock_copilot_control: "mcp:write",
   // #3769: Stock Copilot autonomous platform gap remediation

@@ -642,6 +642,10 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
       ...union,
       "run_stock_screen",
       "run_options_strategy_screen",
+      // #4066: Options Copilot stage-control door — the new command
+      // joins the mesh-door family as a standalone (no census door
+      // class of its own; it routes on the OrchestratorAgent).
+      "options_copilot_stage_control",
       "stock_copilot_status",
       "stock_copilot_control",
       "stock_copilot_introspect",

@@ -176,6 +176,16 @@ import {
   type MeshOptionsStrategyScreenResult,
 } from "../../agents/orchestrator/meshOptionsStrategyDoor";
 import {
+  controlOptionsStageViaDoor,
+  meshOptionsStageControlDoorContextFromMcp,
+  type OptionsStageControlDoorInput,
+  type OptionsStageControlDoorResult,
+} from "../../agents/orchestrator/meshOptionsStageControlDoor";
+import {
+  OPTIONS_PIPELINE_STAGES,
+  type OptionsPipelineStage,
+} from "../../workflows/stageRuntimeIds";
+import {
   getStockCopilotStatusViaDoor,
   controlStockCopilotViaDoor,
   introspectStockCopilotViaDoor,
@@ -1386,6 +1396,61 @@ export class RunOptionsStrategyScreenCommand implements IMcpToolCommand<MeshOpti
       status: result.status,
       count: result.count,
       strategyTypes: result.constraints.strategyTypes,
+    });
+    return result;
+  }
+}
+
+export class OptionsCopilotStageControlCommand implements IMcpToolCommand<OptionsStageControlDoorInput> {
+  readonly name = "options_copilot_stage_control";
+  readonly description =
+    "Drive one stage of one options screen run from the Options Copilot turn: run, re-run, stop, resume, or cancel a stage by (runId, stageId) on the 8-stage options vocabulary (plan, chainFetch, enrich, screen, risk, persistCanonicalResults, shapeReport, deliver). The run must have been dispatched from the copilot turn through the engine-routed workflow, so its engine record is durable in this host; runs on other hosts, in-memory paid-screen runs, and runs dispatched before #4066 persisted requests refuse by name with the stage + reason, never as an absence. The manual route's shapeReport/deliver cannot be rebuilt in a chat turn and refuse by name. Research only — places no orders. Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      runId: {
+        type: "string",
+        description: "The options run id to control (the engine job is options-screen:<runId>).",
+      },
+      stage: {
+        type: "string",
+        enum: [...OPTIONS_PIPELINE_STAGES],
+        description: "One of the 8 addressable options stages.",
+      },
+      operation: {
+        type: "string",
+        enum: ["run", "rerun", "stop", "resume", "cancel"],
+        description: "The stage operation, with the pinned engine meanings (run / re-run / stop / resume / cancel).",
+      },
+    },
+  };
+  readonly zodSchema = z.object({
+    runId: z.string().min(1).describe("The options run id to control"),
+    stage: z
+      .enum([...OPTIONS_PIPELINE_STAGES] as [OptionsPipelineStage, ...OptionsPipelineStage[]])
+      .describe("One of the 8 addressable options stages"),
+    operation: z
+      .enum(["run", "rerun", "stop", "resume", "cancel"])
+      .describe("The stage operation"),
+  });
+
+  async execute(
+    input: OptionsStageControlDoorInput,
+    context: McpToolContext,
+  ): Promise<OptionsStageControlDoorResult> {
+    const actingLogin = context.actingLogin?.();
+    await recordDoorHop(context, this.name, "OrchestratorAgent");
+    const result = await controlOptionsStageViaDoor(
+      meshOptionsStageControlDoorContextFromMcp(context),
+      actingLogin,
+      input,
+    );
+    context.audit("options_copilot_stage_control", "mcp", {
+      actingLogin: actingLogin ?? null,
+      runId: result.runId,
+      stage: result.stage,
+      operation: result.operation,
+      state: result.state,
     });
     return result;
   }

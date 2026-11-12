@@ -78,6 +78,12 @@ import type { PanelDiscoveryResult } from "../services/recommendationKernel";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import type { EtapiScreenerConfig } from "../config/etapiConfig";
 import type { OptionScreenFetchError, OptionScreenResult, OptionScreenerFilter } from "../types";
+// Issue #4066: these values come from the trading barrel
+// (src/trading/index.ts), the sole public import surface under the
+// #290 boundary — leaf imports of trading internals trip the
+// boundary test. The barrel is already client-reachable on main
+// (NLQ execution -> nlqOptionsStrategy imports values from it), so
+// importing values from it here adds no new client-bundle surface.
 import {
   DynamicOptionsScreener,
   OptionsDataAgent,
@@ -101,6 +107,21 @@ export const OPTIONS_SCREEN_JOB_ID_PREFIX = "options-screen";
 /** The step name the options job's nodes reference. */
 export const OPTIONS_SCREEN_STEP = "options.runStage";
 
+/**
+ * The step name the options job's ROOT references. The engine's
+ * stage-input contract (#4066): a node's input is its parent's
+ * stage-output artifact, and a parent with no step produces a null
+ * hand-off — so a root with no step leaves all eight stages without
+ * a persisted input, and no stage operation (run / re-run / resume)
+ * can ever execute on them (stage_input_missing). The root step
+ * produces the dispatch request as the run's hand-off, so every
+ * stage's input is the request it was dispatched with. The child
+ * step ignores ctx.input (it reads the request from its deps and
+ * the earlier stages' artifacts from the stage storage); the root
+ * output exists only to satisfy the contract.
+ */
+export const OPTIONS_SCREEN_ROOT_STEP = "options.runRoot";
+
 /** The engine job id for one options run. */
 export function optionsScreenJobId(runId: string): string {
   return `${OPTIONS_SCREEN_JOB_ID_PREFIX}:${runId}`;
@@ -112,13 +133,29 @@ export function optionsScreenJobId(runId: string): string {
  * each child one `options.runStage` step carrying its stageId. Sequential
  * + batch + sync + monolith: the stages run in pipeline order, the
  * dispatch awaits the terminal state, and the run is one unit.
+ *
+ * Issue #4066: the dispatch request rides the raw config (`request`).
+ * The resolved config ignores it (only jobId/name/root/config are
+ * resolved), but defineJob persists the whole rawConfig in the
+ * definitions store — so a later control action can read the run's
+ * request back out of the stored definition and rebuild the step's
+ * ports to run / re-run / resume one of its stages. The request is
+ * plain JSON-shaped dispatch data (filter / strategyRequest / scan
+ * spec); nothing non-serializable rides it. One job is one run, so
+ * the definition IS the run's record — the request belongs to it.
+ *
+ * The root carries the `options.runRoot` step (see
+ * OPTIONS_SCREEN_ROOT_STEP): without it the root produces a null
+ * hand-off and no stage operation can execute on this job.
  */
-export function optionsScreenJobDefinition(jobId: string): Record<string, unknown> {
+export function optionsScreenJobDefinition(jobId: string, request?: unknown): Record<string, unknown> {
   return {
     jobId,
     name: `Options screen ${jobId}`,
+    ...(request !== undefined ? { request } : {}),
     root: {
       kind: "options-screen",
+      steps: [{ step: OPTIONS_SCREEN_ROOT_STEP }],
       executionMode: {
         concurrency: "sequential",
         pacing: "batch",
@@ -193,6 +230,15 @@ export function registerOptionsScreenStep(
   registry: JobStepRegistry,
   deps: OptionsScreenStepDeps,
 ): JobStepRegistry {
+  // The root step (see OPTIONS_SCREEN_ROOT_STEP): produces the
+  // dispatch request as the run's hand-off, so every stage has a
+  // persisted input and is independently addressable. Registered
+  // alongside the stage step so every control that rebuilds the
+  // registry (dispatch and per-stage control alike) carries both.
+  registry.register(OPTIONS_SCREEN_ROOT_STEP, async () => ({
+    output: deps.request,
+    descriptor: `options screen ${deps.runId} input`,
+  }));
   registry.register(OPTIONS_SCREEN_STEP, async (ctx: JobStepContext) => {
     const stageId = ctx.params?.stageId;
     if (typeof stageId !== "string" || !(OPTIONS_PIPELINE_STAGES as readonly string[]).includes(stageId)) {
@@ -260,6 +306,14 @@ export async function runOptionsPanelViaEngine(
   options: PipelineOptions = {},
   userLogin?: string,
   universeDeps?: NasdaqUniverseDeps,
+  /**
+   * Issue #4066: the engine stores the panel run records over. Absent,
+   * in-memory stores are built explicitly (the #4069 accepted-absent
+   * discipline) — a leg that has a SQL handle passes
+   * optionsEngineStoresFromSql(sql) instead, so the run is addressable
+   * by a later per-stage control action from the copilot turn.
+   */
+  engineStores?: OptionsEngineStores | null,
 ): Promise<PipelineResult> {
   const runId = `options-panel:service:${request.symbol}:${new Date().toISOString()}`;
   const storage = memoryStageStorage();
@@ -294,6 +348,7 @@ export async function runOptionsPanelViaEngine(
       }),
       claims: memoryStageClaims(),
       queue: null,
+      ...(engineStores ? { engineStores } : {}),
     },
   );
   if (outcome.outcome !== "completed") {
@@ -556,7 +611,10 @@ export async function runOptionsScreenViaEngine(
     invocation: "sync",
   });
   const jobId = optionsScreenJobId(params.runId);
-  await control.defineJob(optionsScreenJobDefinition(jobId));
+  // Issue #4066: the dispatch request rides the job definition's
+  // rawConfig (persisted by defineJob) so a later per-stage control
+  // action can rebuild this run's step ports from it.
+  await control.defineJob(optionsScreenJobDefinition(jobId, params.request));
   const dispatch = await control.runJob(jobId, { trigger: params.trigger ?? "manual" });
   if (dispatch.state === "completed") {
     return { outcome: "completed", runId: params.runId, stages: stageRecords, published };
