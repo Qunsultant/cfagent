@@ -34,6 +34,12 @@ import type {
   ScanMode,
 } from "../trading";
 import type { ProfileRef } from "../trading";
+import type { LedgerLinkage } from "./jobRunRecordPorts";
+import { isMissingIdLiteral } from "../services/consolidatedScheduling";
+
+/** Re-exported so scan-store consumers name the §4 linkage shape
+ *  from the port, not from the ledger's home. */
+export type { LedgerLinkage } from "./jobRunRecordPorts";
 
 /** Days a persisted scan run is retained. 365 matches the settled
  *  retention for discovery runs: diffing a scan against the same setup
@@ -58,6 +64,26 @@ export type ScanRunBroker = "etrade" | "alpaca" | "public"; // Issue #3990: Publ
 
 export function normalizeScanRunBroker(value: unknown): ScanRunBroker {
   return String(value ?? "").trim().toLowerCase() === "alpaca" ? "alpaca" : "etrade";
+}
+
+/**
+ * Issue #3314: normalize a §4 linkage for stamping onto a scan row —
+ * the S1 value shape (`LedgerLinkage` ids) with S1 null-handling: a
+ * missing id, or a poisoned #3650 literal ("undefined"/"null"), reads
+ * as an explicit null, never an invented id. One definition for both
+ * scan adapters (no parallel linkage scheme); the trigger is NOT part
+ * of it — it still rides `summary_json` (the #3264 fix, unchanged).
+ */
+export function normalizeScanRunLinkage(
+  linkage: Pick<LedgerLinkage, "scheduleId" | "asyncJobId" | "workflowId"> | undefined,
+): { scheduleId: string | null; asyncJobId: string | null; workflowId: string | null } {
+  const clean = (value: unknown): string | null =>
+    typeof value === "string" && value.trim() && !isMissingIdLiteral(value) ? value : null;
+  return {
+    scheduleId: clean(linkage?.scheduleId),
+    asyncJobId: clean(linkage?.asyncJobId),
+    workflowId: clean(linkage?.workflowId),
+  };
 }
 
 /** The listing projection of a stored run: everything a history view
@@ -107,6 +133,20 @@ export interface ScanRunSummary {
   /** Issue #3327: the broker whose chains the run read. Absent on runs saved
    *  before provenance existed — readers normalize absent to `etrade`. */
   broker?: ScanRunBroker | null;
+  /**
+   * Issue #3314: the §4 linkage ids (the S1 shape) stamped onto the
+   * row at save time — the schedule that armed the run, the async job
+   * it is or links to, the workflow it ran through. Optional
+   * deliberately, same pattern as trigger: rows saved before #3314 —
+   * and saves whose caller knew no linkage — lack the fields at
+   * runtime; readers must treat absent as null, never a guessed id.
+   * The columns carry the same three values (explicit NULLs), so the
+   * row joins its ledger row on `schedule_id` (+ the generated_at
+   * window) without parsing JSON.
+   */
+  scheduleId?: string | null;
+  asyncJobId?: string | null;
+  workflowId?: string | null;
   /** The login that saved the run (issue #103 per-user scoping).
    *  Optional deliberately: runs persisted before scoping existed —
    *  and runs saved by contexts with no identity — carry none, and
@@ -132,8 +172,11 @@ export interface ScanRunStore {
    *  very id; absent, the store's idFactory mints one as before.
    *  `trigger` (issue #3264) stamps the producing run's trigger so
    *  the history row can say how the run started; absent, the row
-   *  records none. */
-  save(result: OpportunityScanResult, options?: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled"; broker?: ScanRunBroker }): Promise<StoredScanRun>;
+   *  records none. `linkage` (issue #3314) stamps the §4 linkage ids
+   *  onto the row's columns (and the summary) so the row joins its
+   *  ledger row; absent, the columns read NULL — an explicit absence,
+   *  never a guessed id. */
+  save(result: OpportunityScanResult, options?: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled"; broker?: ScanRunBroker; linkage?: Pick<LedgerLinkage, "scheduleId" | "asyncJobId" | "workflowId"> }): Promise<StoredScanRun>;
   /** Newest-first summaries (generatedAt descending, id descending on
    *  ties), paginated by limit/offset, filtered by the visibility
    *  rule when a `userLogin` scope is given (and when it is not — an
@@ -161,6 +204,23 @@ export interface ScanRunStore {
   updateXlsxKey(id: string, xlsxKey: string, options?: { userLogin?: string }): Promise<boolean>;
   /** CSV twin of updatePdfKey, same discipline as updateXlsxKey. */
   updateCsvKey(id: string, csvKey: string, options?: { userLogin?: string }): Promise<boolean>;
+  /** Stamp the §4 linkage onto an already-saved run (issue #3314:
+   *  the scheduled path's persist stage runs inside the workflow,
+   *  where the schedule id is unknowable — threading it through the
+   *  workflow command is #4198's scope — so the scheduled task
+   *  backfills it here, after the workflow returns, where both the
+   *  scan id and the schedule id are known; same visibility,
+   *  unknown-id and never-throws discipline as updatePdfKey).
+   *  Updates the linkage columns and the summary (the result JSON
+   *  carries no linkage, so it is untouched). Returns true when a
+   *  visible row was updated, false when the id is unknown or
+   *  invisible to `userLogin`. A poisoned #3650 literal stamps as
+   *  null, never as an id. */
+  updateLedgerLinkage(
+    id: string,
+    linkage: Pick<LedgerLinkage, "scheduleId" | "asyncJobId" | "workflowId">,
+    options?: { userLogin?: string },
+  ): Promise<boolean>;
   /** Delete rows older than the retention window (relative to `now`)
    *  and rows beyond the row cap; returns how many rows were deleted.
    *  Retention is global (not per-user), as before issue #103. */

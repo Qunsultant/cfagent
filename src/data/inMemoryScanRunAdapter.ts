@@ -15,6 +15,8 @@ import {
   type ScanRunSummary,
   type StoredScanRun,
   normalizeScanRunBroker,
+  normalizeScanRunLinkage,
+  type LedgerLinkage,
   type ScanRunBroker,
 } from "./scanRunPorts";
 
@@ -24,6 +26,7 @@ function summarize(
   userLogin?: string,
   trigger?: "manual" | "scheduled",
   broker?: ScanRunBroker,
+  linkage?: { scheduleId: string | null; asyncJobId: string | null; workflowId: string | null },
 ): ScanRunSummary {
   return {
     id,
@@ -43,6 +46,15 @@ function summarize(
     // Issue #3327: provenance rides inside the summary object.
     broker: normalizeScanRunBroker(broker),
     ...(userLogin !== undefined ? { userLogin } : {}),
+    // Issue #3314: same §4 linkage rule as the DO-SQLite adapter —
+    // stamped only when the caller passed a linkage.
+    ...(linkage
+      ? {
+          scheduleId: linkage.scheduleId,
+          asyncJobId: linkage.asyncJobId,
+          workflowId: linkage.workflowId,
+        }
+      : {}),
   };
 }
 
@@ -71,10 +83,20 @@ export class InMemoryScanRunStore implements ScanRunStore {
 
   async save(
     result: OpportunityScanResult,
-    options: { userLogin?: string; id?: string; trigger?: "manual" | "scheduled"; broker?: ScanRunBroker } = {},
+    options: {
+      userLogin?: string;
+      id?: string;
+      trigger?: "manual" | "scheduled";
+      broker?: ScanRunBroker;
+      linkage?: Pick<LedgerLinkage, "scheduleId" | "asyncJobId" | "workflowId">;
+    } = {},
   ): Promise<StoredScanRun> {
+    // Issue #3314: same linkage rule as the DO-SQLite adapter —
+    // normalized once, stamped only when the caller passed one.
+    const linkage =
+      options.linkage !== undefined ? normalizeScanRunLinkage(options.linkage) : undefined;
     const run: StoredScanRun = {
-      ...summarize(options.id ?? this.idFactory(), result, options.userLogin, options.trigger, options.broker),
+      ...summarize(options.id ?? this.idFactory(), result, options.userLogin, options.trigger, options.broker, linkage),
       result,
     };
     this.runs.push(run);
@@ -125,6 +147,22 @@ export class InMemoryScanRunStore implements ScanRunStore {
     if (!run || !visibleToCaller(run, options.userLogin)) return false;
     run.csvKey = csvKey;
     run.result = { ...run.result, csvKey };
+    return true;
+  }
+
+  async updateLedgerLinkage(
+    id: string,
+    linkage: Pick<LedgerLinkage, "scheduleId" | "asyncJobId" | "workflowId">,
+    options: { userLogin?: string } = {},
+  ): Promise<boolean> {
+    // Issue #3314: same backfill contract as the DO-SQLite adapter —
+    // the result carries no linkage, so only the summary moves.
+    const run = this.runs.find((r) => r.id === id) ?? null;
+    if (!run || !visibleToCaller(run, options.userLogin)) return false;
+    const clean = normalizeScanRunLinkage(linkage);
+    run.scheduleId = clean.scheduleId;
+    run.asyncJobId = clean.asyncJobId;
+    run.workflowId = clean.workflowId;
     return true;
   }
 

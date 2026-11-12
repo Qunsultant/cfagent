@@ -3024,6 +3024,30 @@ export class ScheduledTasksService {
       );
       const scanData = response.data as any;
       auditRunId = scanData?.scanRunId || reportRunId;
+      // Issue #3314: stamp the arming schedule's §4 linkage onto the
+      // scan-store row once the run id is known — the persist stage
+      // inside the workflow cannot know it (the workflow command
+      // carries no scheduleId; threading it through is #4198's
+      // scope), so the stamp happens here, after the workflow
+      // returns, where both the scan id and the schedule id are
+      // known. Failures warn only — a row without its linkage is
+      // still a recorded run. A run with no arming schedule records
+      // the absence explicitly: the save already stamped nulls, so
+      // no backfill runs for it.
+      if (options.scheduleId && typeof scanData?.scanRunId === "string" && scanData.scanRunId && this.scanRunStore) {
+        try {
+          await this.scanRunStore.updateLedgerLinkage(
+            scanData.scanRunId,
+            { scheduleId: options.scheduleId, asyncJobId: null, workflowId: null },
+            { userLogin },
+          );
+        } catch (stampErr) {
+          structuredLog.warn("scheduledTasks.options_scan_row_linkage_stamp_failed", {
+            message: "[ScheduledTasksService] Options scan-row linkage stamp failed",
+            error: stampErr instanceof Error ? stampErr.message : String(stampErr),
+          });
+        }
+      }
       if (!response.success) throw new Error(response.summary || "Scheduled options scan failed");
       const scannedCount = Number(scanData?.scanned ?? 0);
       const coverageErrors = Number(scanData?.coverage?.errors ?? 0);

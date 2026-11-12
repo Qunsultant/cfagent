@@ -213,7 +213,8 @@ describe("S0-P08 per-run records (B-T2-07, B-T3-08): job_run_records shape and v
       // Issue #3121 S1 — the §4 consolidated-ledger linkage, stamped
       // at write time (B-L-01 closed). The #3264 gap is closed for
       // job_run_records: a run row now joins to its schedule, workflow,
-      // and async job; B-L-02/03 (async jobs, scans) remain — see S0-P24.
+      // and async job; B-L-02 (async jobs) remains, B-L-03 closed by
+      // #3314 (scan rows carry the three id columns) — see S0-P24.
       "trigger",
       "scheduleId",
       "asyncJobId",
@@ -515,7 +516,7 @@ describe("S0-P23 keyless options runs (B-T4-05): a keyless run is recorded, neve
   });
 });
 
-describe("S0-P24 ledger gap (B-L-01/02/03): S1 closes B-L-01 on job_run_records; B-L-02/03 remain", () => {
+describe("S0-P24 ledger gap (B-L-01/02/03): S1 closes B-L-01 on job_run_records; #3314 closes B-L-03 on mas_opportunity_scans; B-L-02 remains", () => {
   it("pins job_run_records as carrying the four §4 linkage columns (B-L-01 closed by S1)", () => {
     const adapter = read("src/data/doSqliteJobRunRecordAdapter.ts");
     for (const col of ["trigger_text", "schedule_id", "async_job_id", "workflow_id"]) {
@@ -532,15 +533,17 @@ describe("S0-P24 ledger gap (B-L-01/02/03): S1 closes B-L-01 on job_run_records;
     expect(adapter).not.toContain("workflow_id");
   });
 
-  it("pins mas_opportunity_scans as carrying no linkage columns", () => {
+  it("pins mas_opportunity_scans as carrying the three §4 linkage id columns (#3314; trigger still rides summary_json)", () => {
     const scans = read("src/data/doSqliteScanRunAdapter.ts");
     const create = scans.slice(
       scans.indexOf("CREATE TABLE IF NOT EXISTS"),
       scans.indexOf(";", scans.indexOf("CREATE TABLE IF NOT EXISTS")),
     );
-    for (const col of ["trigger", "schedule_id", "async_job_id", "workflow_id"]) {
-      expect(create).not.toContain(col);
+    for (const col of ["schedule_id", "async_job_id", "workflow_id"]) {
+      expect(create).toContain(col);
     }
+    // Issue #3264: trigger still rides summary_json — no trigger column.
+    expect(create).not.toContain("trigger");
     expect(create).toContain("user_login");
   });
 });
