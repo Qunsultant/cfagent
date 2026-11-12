@@ -439,6 +439,15 @@ function measure(): Map<string, number> {
  * the only growth is the new jobs' own id/label/alias lines: 2 raises
  * (feedJobs.ts/yahoo 34->40, feedPipelineJobs.ts/yahoo 52->71).
  * Totals move 1175/9247 -> 1175/9272.
+ * Baseline update (#4250, 2026-11-12): the last three GICS sector universes join
+ * the feed workflow as Yahoo quotes feed jobs (Communication Services,
+ * Utilities, Real Estate) - one registry definition per
+ * sector in the feed-job registry and one entry each in the feed
+ * pipeline catalog. Both files are the provider-id registries
+ * (INTEGRATION at seed: naming the provider is their job), and
+ * the only growth is the new jobs' own id/label/alias lines: 2 raises
+ * (feedJobs.ts/yahoo 40->45, feedPipelineJobs.ts/yahoo 71->85).
+ * Totals move 1175/9272 -> 1175/9291.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -1092,12 +1101,12 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/feedJobs.ts", "alpaca", 7],
   ["src/services/feedJobs.ts", "etrade", 7],
   ["src/services/feedJobs.ts", "nasdaq", 11],
-  ["src/services/feedJobs.ts", "yahoo", 40],
+  ["src/services/feedJobs.ts", "yahoo", 45],
   ["src/services/feedPipelineJobs.ts", "alpaca", 9],
   ["src/services/feedPipelineJobs.ts", "etrade", 8],
   ["src/services/feedPipelineJobs.ts", "nasdaq", 23],
   ["src/services/feedPipelineJobs.ts", "public.com", 3],
-  ["src/services/feedPipelineJobs.ts", "yahoo", 71],
+  ["src/services/feedPipelineJobs.ts", "yahoo", 85],
   ["src/services/feedProviderWiring.ts", "alpaca", 2],
   ["src/services/feedProviderWiring.ts", "etrade", 4],
   ["src/services/feedProviderWiring.ts", "nasdaq", 1],
