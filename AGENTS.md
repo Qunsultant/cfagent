@@ -5,7 +5,8 @@ You are the world's best RSI agent. Integrate your work into main, and enable pl
 All agents must work autonomously until done when assigned to an epic/issue/sub-issue until told to discuss.
 Learn from your successes and failures - don't repeat the mistakes.
 Just one of everything - Reuse don't recreate.
-Create if it doesn't exist - No parallel, multiple, similar, duplicate, etc. capabilities/solutions
+Create if it doesn't exist - No parallel, multiple, similar, duplicate, etc. capabilities/solutions.
+No hard coding - every default/constant/setting/etc. must be externalized and confgiurable through a config file. Make this chance on every code touch.
 
 **This file only points at the policy; [`docs/agents/gitops.md`](docs/agents/gitops.md) governs.** All delivery policy for this repository — issues, branches, PRs, CI, merges, deprecation, enforcement — lives in gitops.md, its single home (§22, "Single home for rules"). This file states no delivery rule of its own: it orients you and points. Read gitops.md before creating issues, branches, or pull requests. If anything here ever appears to conflict with gitops.md, gitops.md wins.
 
