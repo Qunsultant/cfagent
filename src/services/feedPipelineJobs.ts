@@ -36,6 +36,7 @@ import {
   resolveRunUniverse,
   runFeedFundamentalsJob,
   runFeedJob,
+  runFeedOptionsChainsJob,
   runFeedSentimentJob,
   runFeedTechnicalsJob,
   FEED_JOB_CODES,
@@ -162,6 +163,30 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     dataset: "quotes",
     label: "Public.com quotes — Nasdaq-100",
     aliases: ["public", "public.com"],
+  },
+  {
+    jobId: "etrade-options-chains",
+    sourceId: "etrade",
+    dataset: "options-chains",
+    // #4065: ONE chains job per optionsChains-serving source —
+    // the label names the source; a run's universe/symbols
+    // input names what it actually pulls.
+    label: "E*TRADE options chains — parameterized (default Nasdaq-100)",
+    aliases: ["options chains", "etrade options chains"],
+  },
+  {
+    jobId: "alpaca-options-chains",
+    sourceId: "alpaca",
+    dataset: "options-chains",
+    label: "Alpaca options chains — parameterized (default Nasdaq-100)",
+    aliases: ["alpaca options chains"],
+  },
+  {
+    jobId: "public-options-chains",
+    sourceId: "public",
+    dataset: "options-chains",
+    label: "Public.com options chains — parameterized (default Nasdaq-100)",
+    aliases: ["public options chains"],
   },
   {
     jobId: NASDAQ100_UNIVERSE_JOB_ID,
@@ -435,6 +460,23 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
       ...(deps.userLogin ? { userLogin: deps.userLogin } : {}),
       ...(universeParam ? { universe: effectiveUniverse } : {}),
       ...(symbols ? { symbols } : {}),
+      // #4065 — the chains run's fetch window rides the step
+      // params (the composition passes the screen's DTE window
+      // in); absent ⇒ the runner's defaults. A non-numeric
+      // value is ignored, never coerced into a window the
+      // caller did not name.
+      ...(typeof ctx.params.minDte === "number" &&
+      Number.isFinite(ctx.params.minDte)
+        ? { minDte: ctx.params.minDte }
+        : {}),
+      ...(typeof ctx.params.maxDte === "number" &&
+      Number.isFinite(ctx.params.maxDte)
+        ? { maxDte: ctx.params.maxDte }
+        : {}),
+      ...(typeof ctx.params.maxExpirationsPerSymbol === "number" &&
+      Number.isFinite(ctx.params.maxExpirationsPerSymbol)
+        ? { maxExpirationsPerSymbol: ctx.params.maxExpirationsPerSymbol }
+        : {}),
     };
     const runnerDeps = {
       provider,
@@ -454,7 +496,14 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
                 def.id,
                 runOpts,
               )
-            : await runFeedJob(deps.registry, runnerDeps, def.id, runOpts);
+            : def.dataset === "options-chains"
+              ? await runFeedOptionsChainsJob(
+                  deps.registry,
+                  runnerDeps,
+                  def.id,
+                  runOpts,
+                )
+              : await runFeedJob(deps.registry, runnerDeps, def.id, runOpts);
     if (result.status === "failed") {
       // The feed run recorded its own failure in the dataset
       // store; the pipeline run fails with the same coded error

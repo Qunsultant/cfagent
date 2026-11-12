@@ -299,7 +299,8 @@ describe("generate pipeline catalog + resolution (#3538)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(32);
+    // #4065 pin update: three options-chains jobs join the plane.
+    expect(registrations).toHaveLength(35);
     expect(specs.map((s) => s.jobId)).toContain(GENERATE_ID);
   });
 });

@@ -311,7 +311,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
     }
   });
 
-  it("registerSchedules registers the full plane incl. deliver (39 declarations)", async () => {
+  it("registerSchedules registers the full plane incl. deliver (42 declarations)", async () => {
     const h = await makeHarness();
     const specs: Array<{ jobId: string }> = [];
     const registrations = await h.control.registerSchedules({
@@ -320,7 +320,8 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(39);
+    // #4065 pin update: three options-chains jobs join the plane.
+    expect(registrations).toHaveLength(42);
     expect(specs.map((s) => s.jobId)).toContain(DELIVER_ID);
   });
 });
