@@ -27,11 +27,14 @@ const autoMergeTrustedYml = readFileSync(
 );
 
 describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
-  it("triggers auto-update-prs-app.yml proactively on CI completion, push, schedule, and workflow_dispatch (#2629)", () => {
-    expect(autoUpdateYml).toMatch(/schedule:\s*[\r\n]+\s*-\s*cron:\s*['"]\*\s*\/\s*5/);
+  it("leaves the merge queue as the sole PR rebuilder — auto-update is manual-only (#4264)", () => {
+    // #4264 retired the push / workflow_run / schedule triggers: the queue
+    // builds each entry on the latest base and runs merge_group checks there,
+    // and the bot updated branches by merge commit, which §6/#1853 forbids.
     expect(autoUpdateYml).toContain("workflow_dispatch:");
-    expect(autoUpdateYml).toContain("workflow_run:");
-    expect(autoUpdateYml).toContain("Continuous Integration & Test Verification");
+    expect(autoUpdateYml).not.toMatch(/^\s*schedule:\s*$/m);
+    expect(autoUpdateYml).not.toMatch(/^\s*workflow_run:\s*$/m);
+    expect(autoUpdateYml).not.toMatch(/^\s*push:\s*$/m);
   });
 
   it("queries id and autoMergeRequest { mergeMethod } in auto-update-prs-app queueQuery (#2629)", () => {
