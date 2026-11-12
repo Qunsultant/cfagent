@@ -751,7 +751,10 @@ describe("feed read path + status (#3530 S1)", () => {
     expect(status.lastRun).toMatchObject({ runId: "feed-run-read", status: "completed", received: 3 });
     expect(status.snapshot).toMatchObject({ rowsPersisted: 3, ageSeconds: 1800, stale: false });
 
-    const staleStatus = await buildFeedStatus(datasetStore, def, T0 + 10 * 3600_000);
+    // #4306 S1: the stale threshold is 44,640 minutes (31 days) now,
+    // so the stale probe must sit beyond it — 10 hours no longer
+    // exceeds the threshold.
+    const staleStatus = await buildFeedStatus(datasetStore, def, T0 + 32 * 24 * 3600_000);
     expect(staleStatus.snapshot?.stale).toBe(true);
   });
 
