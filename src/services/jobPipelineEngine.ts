@@ -105,7 +105,7 @@ import {
 } from "./pipelinePolicy";
 import { computeBackoffDelayMs } from "./resilience";
 import {
-  FEED_JOB_TIMEOUTS,
+  resolveFeedJobTimeouts,
   withFeedDeadline,
 } from "./feedJobTimeouts";
 import { FEED_JOB_CODES } from "./feedJobCodes";
@@ -130,16 +130,21 @@ function jobTreeInvokesStep(node: JobNodeConfig, stepName: string): boolean {
 /**
  * Resolve a feed run's whole-execution bound (#3992 PR-4): a
  * positive finite injected value wins; absent, non-positive, or
- * non-finite falls back to the catalogue value
- * FEED_JOB_TIMEOUTS.executionMs. Configuration-shaped input can
- * never silently mean "no deadline" — the catalogue is the
- * floor of meaning, exactly as withFeedDeadline refuses a
- * non-positive bound by name.
+ * non-finite falls back to the env-resolved execution bound
+ * (#4312 — resolveFeedJobTimeouts(env).executionMs, itself
+ * falling back to the recorded 240s default when no knob is
+ * set). Configuration-shaped input can never silently mean "no
+ * deadline" — the resolved bound is the floor of meaning,
+ * exactly as withFeedDeadline refuses a non-positive bound by
+ * name.
  */
-export function resolveFeedExecutionDeadlineMs(injected?: number): number {
+export function resolveFeedExecutionDeadlineMs(
+  injected?: number,
+  env: Record<string, unknown> = {},
+): number {
   return typeof injected === "number" && Number.isFinite(injected) && injected > 0
     ? injected
-    : FEED_JOB_TIMEOUTS.executionMs;
+    : resolveFeedJobTimeouts(env).executionMs;
 }
 import {
   DEFAULT_STAGE_TIMEOUT_MS,
@@ -254,10 +259,10 @@ export interface JobPipelineDeps {
    * this many milliseconds and settles the run failed with
    * FEED_DEADLINE_EXCEEDED past it. Resolved through
    * resolveFeedExecutionDeadlineMs — absent / non-positive /
-   * non-finite means the catalogue value
-   * FEED_JOB_TIMEOUTS.executionMs (240s), so hosts that never
-   * set this are bounded by default. Non-feed jobs are never
-   * raced by this bound.
+   * non-finite means the env-resolved execution bound (#4312,
+   * 240s when no knob is set), so hosts that never set this are
+   * bounded by default. Non-feed jobs are never raced by this
+   * bound.
    */
   feedExecutionDeadlineMs?: number;
   /** The schedule host stage scheduling registers with. registerSchedules takes its host explicitly; scheduleStage falls back to this. */
