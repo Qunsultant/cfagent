@@ -152,6 +152,30 @@ export const agentReports = sqliteTable(
     provenanceWriter: text("provenance_writer").notNull(),
     provenanceSourceDo: text("provenance_source_do").notNull(),
     provenanceSourceVersion: text("provenance_source_version").notNull(),
+    /**
+     * Issue #4116 — the D1 job run record this projected report is
+     * the twin of (the #3946 twin-rows link, resolved at projection
+     * time by generation_id + run window, only when unambiguous).
+     * Null when no job record links to this report — the twin
+     * survives as its own row, never merged by guesswork.
+     */
+    linkedJobRunId: text("linked_job_run_id"),
+    /**
+     * Issue #4116 — the projected report's owning login (the
+     * DO row's user_login). The D1-only reads filter by it
+     * exactly like the DO read filters by userLogin, so the
+     * cutover preserves owner scoping. Null for rows projected
+     * before this column landed (the seed backfills it).
+     */
+    userLogin: text("user_login"),
+    /**
+     * Issue #4116 (migration 0060) — the R2 pointer for
+     * pointer rows (the DO row's body_r2_key). Null when the
+     * body is inline. The D1-only read resolves it from R2,
+     * read-only, so a projected pointer row stays readable
+     * from D1 alone.
+     */
+    bodyR2Key: text("body_r2_key"),
   },
   (table) => [
     primaryKey({
@@ -348,6 +372,28 @@ export const agentTenantChannels = sqliteTable("agent_tenant_channels", {
   webhookEnabled: integer("webhook_enabled").notNull().default(1),
   copilotEnabled: integer("copilot_enabled").notNull().default(1),
   docsEnabled: integer("docs_enabled").notNull().default(1),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Issue #4116 — per-tenant run-ledger projection carrier flags.
+ * One row per tenant, one flag per carrier (queues / ORM / sweep)
+ * plus the read mode the surfaces use. NO defaults anywhere: the
+ * columns carry no `.default()` (contrast agentTenantChannels,
+ * whose absent row means "everything enabled" — the wrong
+ * direction here). Absent row = unconfigured: the tenant projects
+ * nothing and the read names it, never silently degrades to a
+ * default carrier. readMode is "merged" (today's Option B view)
+ * or "d1-only"; it is set explicitly by the operator — the read
+ * seam treats an absent row as merged (the documented pre-cutover
+ * state) and reports the mode in the response, never silently.
+ */
+export const agentTenantProjectionCarriers = sqliteTable("agent_tenant_projection_carriers", {
+  tenantId: text("tenant_id").primaryKey(),
+  queuesEnabled: integer("queues_enabled").notNull(),
+  ormEnabled: integer("orm_enabled").notNull(),
+  sweepEnabled: integer("sweep_enabled").notNull(),
+  readMode: text("read_mode").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
 
@@ -1552,6 +1598,48 @@ export const jobRunRecords = sqliteTable("job_run_records", {
   detail: text("detail"),
   descriptor: text("descriptor"),
   artifactRefsJson: text("artifact_refs_json"),
+});
+
+/**
+ * Issue #4116 — the D1 projection of the DO mas_async_jobs ledger.
+ * One row per async job (natural key job_id), mirroring the DO
+ * columns the Workflow Runs read consumes, plus the tenant that
+ * owns the projection and the twin link. The DO row stays
+ * authoritative; this table is the projection — a failed
+ * projection never fails the DO write, and a stale projection
+ * write never overwrites a newer row (the adapter's conditional
+ * upsert compares updated_at). Timestamps stay ISO text, the
+ * async-job family's own shape; projectedAtMs is when this D1
+ * row was last written by the projector.
+ */
+export const agentAsyncJobs = sqliteTable("agent_async_jobs", {
+  jobId: text("job_id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  sessionId: text("session_id").notNull(),
+  capability: text("capability").notNull(),
+  displayName: text("display_name").notNull(),
+  status: text("status").notNull(),
+  payloadJson: text("payload_json").notNull(),
+  resultJson: text("result_json"),
+  responseStatus: text("response_status"),
+  error: text("error"),
+  errorCode: text("error_code"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+  parentJobId: text("parent_job_id"),
+  jobKind: text("job_kind"),
+  channel: text("channel"),
+  notBefore: text("not_before"),
+  stage: text("stage"),
+  chainId: text("chain_id"),
+  stuckAlertedAt: text("stuck_alerted_at"),
+  trigger: text("trigger"),
+  triggeredBy: text("triggered_by"),
+  scheduleId: text("schedule_id"),
+  lastActivityAt: text("last_activity_at"),
+  projectedAtMs: integer("projected_at_ms").notNull(),
 });
 
 /**

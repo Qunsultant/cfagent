@@ -36,6 +36,8 @@ import {
 import { InMemoryAuditReportAdapter } from "../src/data/inMemoryAuditReportAdapter";
 import {
   MIGRATION_0004_AGENT_AUDIT_REPORTS,
+  MIGRATION_0059_RUN_LEDGER,
+  MIGRATION_0060_RUN_LEDGER_OWNER,
   applyMigrations,
 } from "../src/data/migrationRunner";
 import {
@@ -262,6 +264,15 @@ describe("migration 0004 (#1688)", () => {
   });
 
   it("migration DDL and Drizzle schema agree on columns for both tables", () => {
+    // Issue #4116: the drizzle schema is the CURRENT table shape
+    // (0004 + the 0059/0060 ALTERs), so the expected columns are
+    // the 0004 DDL columns plus every column the later migrations
+    // ADD to that table. A drizzle column with no migration still
+    // fails this pin — the pin is updated, not loosened.
+    const addedColumns = (sqlText: string, table: string): string[] =>
+      [...sqlText.matchAll(new RegExp(`ALTER TABLE ${table} ADD COLUMN (\\w+)`, "g"))].map(
+        (m) => m[1],
+      );
     const pairs: Array<[string, unknown, string]> = [
       ["agent_chain_audit", agentChainAudit, MIGRATION_0004_AGENT_AUDIT_REPORTS.sql],
       ["agent_reports", agentReports, MIGRATION_0004_AGENT_AUDIT_REPORTS.sql],
@@ -277,7 +288,12 @@ describe("migration 0004 (#1688)", () => {
         .split(`CREATE TABLE IF NOT EXISTS ${table} (`)[1]
         .split("\n);")[0];
       const ddlColumns = [...block.matchAll(/^\s{2}(\w+) /gm)].map((m) => m[1]);
-      expect(ddlColumns.sort()).toEqual(schemaColumns.sort());
+      const expected = [
+        ...ddlColumns,
+        ...addedColumns(MIGRATION_0059_RUN_LEDGER.sql, table),
+        ...addedColumns(MIGRATION_0060_RUN_LEDGER_OWNER.sql, table),
+      ];
+      expect(expected.sort()).toEqual(schemaColumns.sort());
     }
   });
 });
