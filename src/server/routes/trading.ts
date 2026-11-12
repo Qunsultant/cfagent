@@ -28,6 +28,11 @@ import { mergeLedgerRuns } from "../../services/unifiedLedger";
 import { workerDutiesFromInventory } from "../../services/unifiedScheduleManagement";
 import type { JobRunRecord } from "../../services/jobRunRecords";
 import { requireAuth } from "../auth";
+import { evaluateRoutePep } from "../../security/pepGateway";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
+import { createKvPermissionDenialStore } from "../../security/iaaaPermissionDenialStore";
+import { sessionStore } from "../../security/session";
 import { confirmSlackLink, INBOUND_EMAIL_ORCHESTRATOR_INSTANCE, verifyApprovalLinkForPrincipal, DEFAULT_SAVED_PRESETS, getDynamicLiveFlowItems, getDynamicFlowSummary, summarizeFlowProvenance, fetchRealMarketNews, fetchRealSecInsiderFilings, fetchRealCongressDisclosures, MarketCapCategory, AssetClassCategory } from "../../trading";
 import { handleMarketQuotesHttp } from "../../services/marketStream";
 import { getQuoteSource, setQuoteSource, normalizeQuoteSource, type QuoteSourceStore } from "../../services/quoteSourceSetting";
@@ -108,6 +113,12 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
         setGoalEnabled(id: string, enabled: boolean, actor?: string | null): Promise<boolean>;
         triggerGoal(id: string, env?: unknown, actor?: string | null): Promise<unknown>;
         listJobRuns(jobId?: string, limit?: number): Promise<unknown[]>;
+        // Issue #3122 — pending goal-approval decisions (the DO
+        // methods enforce the state machine and arm under the
+        // original requester's principal).
+        listPendingGoalApprovals(): Promise<unknown[]>;
+        approvePendingGoalApproval(id: string, decidedBy: string): Promise<unknown>;
+        rejectPendingGoalApproval(id: string, decidedBy: string): Promise<unknown>;
       }>((env as any).SCHEDULED_AGENT, "default");
 
       // Issue #3121 S3 (#3312) — goal lifecycle audit: the four
@@ -203,6 +214,46 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
           // inventory, in the same shape as every other schedule.
           workerDuties: workerDutiesFromInventory(new Date().toISOString()),
         });
+      }
+      // Issue #3122 — pending-approval decisions for agent-created
+      // goals. GET lists the pending queue (the approval UI, #4142);
+      // POST approve/reject decides one. The approver is PDP-checked
+      // here for action:approve in the resolved tenant (Worker-side
+      // PEP, the auth.ts pattern); the DO method enforces the state
+      // machine and arms the recorded definition under the ORIGINAL
+      // requester's principal. A failed arming leaves the approval
+      // pending for retry.
+      if (path === "/api/schedule/goals/approvals" && request.method === "GET") {
+        return Response.json({ ok: true, approvals: await sched.listPendingGoalApprovals() });
+      }
+      const approvalMatch = path.match(/^\/api\/schedule\/goals\/approvals\/([^/]+)\/(approve|reject)$/);
+      if (approvalMatch && request.method === "POST") {
+        const [, id, decision] = approvalMatch;
+        const pep = await evaluateRoutePep({
+          env,
+          session,
+          tenantId: resolveIaaaTenant(env),
+          permission: "action:approve",
+          membershipStore: createKvMembershipStore(sessionStore(env)),
+          permissionDenialStore: createKvPermissionDenialStore(sessionStore(env)),
+          nowMs: Date.now(),
+        });
+        if (pep.enforced && !pep.allowed) {
+          if (pep.graceExpired) {
+            return Response.json({ error: "Legacy session PDP grace expired: re-login through wiring to restore gated actions.", code: "legacy_pdp_grace_expired" }, { status: 403 });
+          }
+          return Response.json({ error: "Authorization denied: action:approve permission required." }, { status: 403 });
+        }
+        try {
+          if (decision === "approve") {
+            const result = (await sched.approvePendingGoalApproval(id, session.githubLogin)) as { approval: unknown; scheduleId?: unknown };
+            return Response.json({ ok: true, ...result });
+          }
+          const approval = await sched.rejectPendingGoalApproval(id, session.githubLogin);
+          return Response.json({ ok: true, approval });
+        } catch (err) {
+          return Response.json({ error: err instanceof Error ? err.message : "Could not decide the approval." }, { status: 400 });
+        }
       }
       const goalMatch = path.match(/^\/api\/schedule\/goals\/([^/]+)\/(enabled|trigger)$/);
       if (goalMatch && request.method === "POST") {

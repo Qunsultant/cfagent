@@ -41,9 +41,11 @@ export interface ScheduledGoal {
  *
  * Travels in the schedule payload (the SDK-owned table schema is
  * untouched: the payload is the app's JSON blob on the row). `origin`
- * is who created the schedule: a user-facing route (`user`) or
- * framework machinery (`system`). `createdBy` is the creator identity
- * when one was established at creation — the session login for a user
+ * is who created the schedule: a user-facing route (`user`), an
+ * agent acting for a tenant (`agent`, #3122 — `agentId` names the
+ * acting agent), or framework machinery (`system`). `createdBy` is
+ * the creator identity when one was established at creation — the
+ * session login for a user create, the principal login for an agent
  * create, `"system"` for framework-internal rows — and `null` when no
  * creator identity was established (recorded explicitly, never
  * invented). `reason` names the framework cause for system rows
@@ -52,8 +54,10 @@ export interface ScheduledGoal {
  * supplied one. `createdAt` is the creation ISO timestamp.
  */
 export interface ScheduleProvenance {
-  origin: "user" | "system";
+  origin: "user" | "system" | "agent";
   createdBy: string | null;
+  /** Issue #3122 — the acting agent id for `origin: "agent"` rows. */
+  agentId?: string;
   reason?: string;
   createdAt: string;
 }

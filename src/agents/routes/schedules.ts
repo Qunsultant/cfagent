@@ -25,6 +25,9 @@
  *   POST        /schedules/:id/resume              (issue #273)
  *   POST        /schedules/:id/trigger             (issue #273)
  *   PUT         /schedules/:id                     (issue #273)
+ *   GET         /schedules/approvals               (issue #3122 — list pending agent-schedule approvals)
+ *   POST        /schedules/approvals/:id/approve   (issue #3122 — PDP-checked approve + arm)
+ *   POST        /schedules/approvals/:id/reject    (issue #3122 — PDP-checked reject)
  *
  * The handler ends with an explicit `return null` - never undefined.
  *
@@ -96,7 +99,22 @@ import { recordLedgerRun } from "../../services/unifiedLedger";
 import { buildJobRunRecord, type JobRunRecordInput } from "../../services/jobRunRecords";
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import type { DatabaseORM } from "../../orm";
-import type { AgentName, Env } from "../../types";
+import type { AgentName, AgentScheduleItem, Env } from "../../types";
+import {
+  adoptAgentSdkScheduleRecord,
+  createAgentScheduleExecutorDepsForDo,
+  createAgentSchedulePdpDeps,
+  decidePendingScheduleApproval,
+  evaluateAgentSchedulePdp,
+  executeAgentScheduleAction,
+  removeAgentSdkScheduleRecord,
+  resolvePendingScheduleApproval,
+  type AgentScheduleActionResult,
+  type AgentSdkScheduleAdapter,
+  type AgentSdkTiming,
+} from "../../services/agentScheduleCapability";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { createPendingScheduleApprovalPort } from "../../data/doSqlitePendingScheduleApprovalsAdapter";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -349,6 +367,146 @@ export async function handleSchedulesRoutes(
         return Response.json({ scheduleId, cancelled });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to cancel schedule" }, { status: 500 });
+      }
+    }
+
+    // Issue #3122 — pending-approval decisions for agent schedules.
+    // GET /api/schedules/approvals lists pending approvals (the queue
+    // the approval UI reads, #4142); POST
+    // /api/schedules/approvals/:id/approve arms the recorded
+    // definition through the capability (the approver is PDP-checked
+    // for action:approve; the arming runs under the ORIGINAL
+    // requester's principal with the approval as its gate-skip
+    // token); /reject records the rejection and arms nothing. A
+    // failed arming leaves the approval pending, so the approver can
+    // retry once the cause is fixed.
+    if (request.method === "GET" && (path.endsWith("/schedules/approvals") || path.endsWith("/api/schedules/approvals"))) {
+      try {
+        const port = createPendingScheduleApprovalPort(ctx.agentCtx.storage.sql);
+        const approvals = (await port.load()).filter((entry) => entry.status === "pending");
+        return Response.json({ count: approvals.length, approvals });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to list pending approvals" }, { status: 500 });
+      }
+    }
+    const approvalsMatch = path.match(/\/schedules\/approvals\/([^/]+)\/(approve|reject)$/);
+    if (request.method === "POST" && approvalsMatch) {
+      const approvalId = (() => {
+        try {
+          return decodeURIComponent(approvalsMatch[1]);
+        } catch {
+          return approvalsMatch[1];
+        }
+      })();
+      const decision = approvalsMatch[2] as "approve" | "reject";
+      try {
+        const context = await ctx.getScreenerExecutionContext();
+        const trusted = resolveTrustedScheduleIdentity({
+          headerLogin: request.headers.get("x-user-login") || "",
+          headerEnvironment: (request.headers.get("x-environment") || "").toUpperCase(),
+          context,
+          configuredEnvironment: resolveEnvironmentConfig(ctx.env).name as ScheduleEnv,
+        });
+        if (!trusted.userLogin) {
+          return Response.json({ error: "An authenticated user identity is required to decide a schedule approval." }, { status: 401 });
+        }
+        // PDP: the approver needs action:approve in the tenant scope.
+        const pdp = await evaluateAgentSchedulePdp(createAgentSchedulePdpDeps(ctx.env), {
+          principal: { login: trusted.userLogin, agentId: "schedule-approvals-api" },
+          tenantId: resolveIaaaTenant(ctx.env),
+          action: "approve",
+          nowMs: Date.now(),
+        });
+        if (pdp.enforced && !pdp.allowed) {
+          return Response.json({ error: `Approval denied by policy: ${pdp.reason ?? "action:approve not granted"}` }, { status: 403 });
+        }
+        const port = createPendingScheduleApprovalPort(ctx.agentCtx.storage.sql);
+        const entry = resolvePendingScheduleApproval(await port.load(), approvalId);
+        if (!entry) {
+          return Response.json({ error: `Pending approval '${approvalId}' was not found.` }, { status: 404 });
+        }
+        if (entry.status !== "pending") {
+          return Response.json({ error: `Pending approval '${approvalId}' is already decided (${entry.status}).` }, { status: 409 });
+        }
+        const nowIso = new Date().toISOString();
+        if (decision === "reject") {
+          await port.save(decidePendingScheduleApproval(await port.load(), approvalId, "rejected", trusted.userLogin, nowIso));
+          ctx.audit("agent.schedule.approval-rejected", "orchestrator", { pendingApprovalId: approvalId, decidedBy: trusted.userLogin, kind: entry.kind });
+          return Response.json({ approvalId, status: "rejected" });
+        }
+        // Approve: arm the recorded definition through the capability
+        // under the original requester's principal. A goal definition
+        // cannot arm from this DO (goals live in the ScheduledAgent
+        // DO) — it is decided on the goal endpoint instead.
+        if (entry.kind !== "sdk") {
+          return Response.json({ error: `Pending approval '${approvalId}' is a goal approval; decide it at POST /api/schedule/goals/approvals/${approvalId}/approve.` }, { status: 409 });
+        }
+        const def = entry.definition as Record<string, unknown>;
+        const toItem = (s: unknown): AgentScheduleItem => s as unknown as AgentScheduleItem;
+        const sdkAdapter: AgentSdkScheduleAdapter = {
+          list: async () => (await ctx.listSchedules()).map(toItem),
+          get: async (id) => {
+            const found = await ctx.getScheduleById(id);
+            return found === undefined ? undefined : toItem(found);
+          },
+          create: async ({ timing, callback, payload }) => {
+            let armed: AgentScheduleItem;
+            if (timing.type === "cron") armed = toItem(await ctx.schedule(timing.cron, callback, payload, { idempotent: true }));
+            else if (timing.type === "interval") armed = toItem(await ctx.scheduleEvery(timing.intervalSeconds, callback, payload));
+            else if (timing.type === "scheduled") armed = toItem(await ctx.schedule(new Date(timing.time * 1000), callback, payload));
+            else armed = toItem(await ctx.schedule(timing.delayInSeconds, callback, payload));
+            // Issue #3122 (store integration, #3123): the approved arming
+            // adopts its record into the unified store (record id = alarm
+            // id), so an approved schedule lives in the one store.
+            await adoptAgentSdkScheduleRecord(unifiedStore(), armed, new Date().toISOString());
+            return armed;
+          },
+          cancel: async (id) => {
+            const cancelled = await ctx.cancelSchedule(id);
+            if (cancelled) await removeAgentSdkScheduleRecord(unifiedStore(), id);
+            return cancelled;
+          },
+        };
+        const capabilityDeps = createAgentScheduleExecutorDepsForDo(
+          ctx.env,
+          ctx.agentCtx.storage.sql,
+          (type, payload) => ctx.audit(type, "orchestrator", payload),
+          { sdk: sdkAdapter },
+        );
+        const principal = { login: entry.requestedBy, agentId: entry.agentId };
+        const tenantId = resolveIaaaTenant(ctx.env);
+        let armed: AgentScheduleActionResult;
+        if (def.callback !== undefined) {
+          armed = await executeAgentScheduleAction(capabilityDeps, {
+            action: "create",
+            kind: "sdk",
+            principal,
+            tenantId,
+            callback: String(def.callback),
+            timing: def.timing as AgentSdkTiming,
+            ...(def.payload !== undefined ? { payload: def.payload } : {}),
+            approvedPendingId: approvalId,
+          });
+        } else {
+          armed = await executeAgentScheduleAction(capabilityDeps, {
+            action: "update",
+            kind: "sdk",
+            principal,
+            tenantId,
+            scheduleId: String(def.scheduleId),
+            ...(def.timing !== undefined ? { timing: def.timing as AgentSdkTiming } : {}),
+            ...(def.payload !== undefined ? { payload: def.payload } : {}),
+            approvedPendingId: approvalId,
+          });
+        }
+        if (!armed.ok) {
+          return Response.json({ error: `Approval could not be armed: ${armed.reason}` }, { status: 502 });
+        }
+        await port.save(decidePendingScheduleApproval(await port.load(), approvalId, "approved", trusted.userLogin, nowIso));
+        ctx.audit("agent.schedule.approval-approved", "orchestrator", { pendingApprovalId: approvalId, decidedBy: trusted.userLogin, kind: entry.kind, scheduleId: armed.scheduleId });
+        return Response.json({ approvalId, status: "approved", scheduleId: armed.scheduleId });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to decide the schedule approval" }, { status: 500 });
       }
     }
 

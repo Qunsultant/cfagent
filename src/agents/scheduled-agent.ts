@@ -74,6 +74,19 @@ import {
   mergeLedgerRuns,
   postLedgerRun,
 } from "../services/unifiedLedger";
+import {
+  createAgentSchedulePdpDeps,
+  decidePendingScheduleApproval,
+  evaluateAgentSchedulePdp,
+  executeAgentScheduleAction,
+  resolvePendingScheduleApproval,
+  type AgentGoalScheduleAdapter,
+  type AgentScheduleActionResult,
+  type AgentScheduleExecutorDeps,
+  type PendingScheduleApproval,
+} from "../services/agentScheduleCapability";
+import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
+import { resolveEnvironmentConfig } from "../config/environment";
 import { createSocialStoresFromNamespace } from "./social/durableStores";
 // Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535): the
 // job pipeline's host wiring — declarations, control-plane
@@ -418,6 +431,15 @@ export interface ScheduledAgentCronOpts {
  * (#2412).
  */
 export const SCHEDULED_AGENT_AUDIT_ACTOR = "scheduled-agent";
+
+/**
+ * Issue #3122 — the DO storage key for pending agent-schedule
+ * approvals (goal kind). Same KV-list pattern as goals / ticks /
+ * jobRunRecords on this DO; the orchestrator DO keeps its own
+ * pending approvals in its sql table (same port shape, separate
+ * instance — each DO decides only its own approvals).
+ */
+export const PENDING_SCHEDULE_APPROVALS_KEY = "pendingScheduleApprovals";
 
 export class ScheduledAgent extends PortThink {
   /**
@@ -2194,6 +2216,37 @@ export class ScheduledAgent extends PortThink {
   }
 
   /**
+   * Issue #3121 S3 (S3-P07) — the ONE audit poster call site: every
+   * schedule audit event posts through this helper to the one
+   * `mas_events` funnel (the orchestrator's `POST /api/audit/event`
+   * via the ORCHESTRATOR_AGENT stub on the shared instance) — the
+   * goal-lifecycle sink (auditGoalLifecycle below) and the
+   * capability executor's audit dep (agentScheduleExecutorDeps)
+   * alike, so no second audit system can creep in as a second
+   * poster. Best-effort (the auditGoalLifecycle swallow rule): a
+   * missing binding or a failed post never fails the action it
+   * records. Callers choose await (lifecycle sink, so the event
+   * lands before the mutation returns) vs void (executor dep,
+   * fire-and-forget).
+   */
+  private async postScheduleAuditEvent(event: {
+    type: string;
+    agent: string;
+    payload: Record<string, unknown>;
+  }): Promise<void> {
+    try {
+      const auditAgent = actorGateway.stub<DoStubLike>(
+        this.env.ORCHESTRATOR_AGENT,
+        SHARED_ORCHESTRATOR_INSTANCE,
+      );
+      await postGoalScheduleAuditEvent((req) => auditAgent.fetch(req), event);
+    } catch {
+      // Best-effort audit: a missing binding or a failed post
+      // must never fail the action it records.
+    }
+  }
+
+  /**
    * Issue #3121 S3 (#3312) — the DO-side goal-lifecycle audit sink.
    *
    * S1 wired the four `schedule.goal.*` events at the
@@ -2235,24 +2288,14 @@ export class ScheduledAgent extends PortThink {
     actor?: string | null,
   ): Promise<void> {
     if (!goalId) return;
-    try {
-      const auditAgent = actorGateway.stub<DoStubLike>(
-        this.env.ORCHESTRATOR_AGENT,
-        SHARED_ORCHESTRATOR_INSTANCE,
-      );
-      await postGoalScheduleAuditEvent(
-        (req) => auditAgent.fetch(req),
-        buildGoalScheduleAuditEvent({
-          event,
-          goalId,
-          actor: actor ?? undefined,
-          ...extra,
-        }),
-      );
-    } catch {
-      // Best-effort audit: a missing binding or a failed post
-      // must never fail the mutation it records.
-    }
+    await this.postScheduleAuditEvent(
+      buildGoalScheduleAuditEvent({
+        event,
+        goalId,
+        actor: actor ?? undefined,
+        ...extra,
+      }),
+    );
   }
 
   /**
@@ -2941,5 +2984,148 @@ export class ScheduledAgent extends PortThink {
       }
     }
     return tick;
+  }
+
+  /**
+   * Issue #3122 — the agent schedule capability bound to this DO's
+   * stores. Goals adapter over getGoals/saveGoals/triggerGoal (the
+   * mutation funnel, so goal lifecycle events still emit exactly
+   * once); ledger rows go to the DO-native jobRunRecords list
+   * (recordJobRun — the per-run view the Jobs UI reads); audit
+   * events post best-effort to the orchestrator audit channel (the
+   * auditGoalLifecycle swallow rule: a failed post never fails the
+   * action); pending approvals live under
+   * PENDING_SCHEDULE_APPROVALS_KEY. PDP is the same compiled policy
+   * + membership PIP as evaluateRoutePep, via authorize() with the
+   * alias-resolved principal (the session precondition of
+   * evaluateRoutePep cannot be met inside the DO).
+   */
+  private agentScheduleExecutorDeps(): AgentScheduleExecutorDeps {
+    const goalsAdapter: AgentGoalScheduleAdapter = {
+      list: async () => (await this.getGoals()) as unknown as Array<Record<string, unknown>>,
+      add: async (goal) => {
+        const created = await this.addGoal(
+          goal as unknown as Parameters<ScheduledAgent["addGoal"]>[0],
+        );
+        return created as unknown as Record<string, unknown>;
+      },
+      remove: (id) => this.removeGoal(id),
+      setEnabled: (id, enabled) => this.setGoalEnabled(id, enabled),
+      trigger: (id) => this.triggerGoal(id),
+    };
+    return {
+      pdp: (input) => evaluateAgentSchedulePdp(createAgentSchedulePdpDeps(this.env), input),
+      config: resolveEnvironmentConfig(this.env).agentSchedule,
+      nowMs: () => Date.now(),
+      nowIso: () => new Date().toISOString(),
+      recordLedger: (record) => {
+        void this.recordJobRun(record);
+      },
+      audit: (type, payload) => {
+        // S3-P07: the one poster call site — this dep posts through
+        // postScheduleAuditEvent (fire-and-forget), never directly.
+        void this.postScheduleAuditEvent({
+          type,
+          agent: "scheduled-agent",
+          payload,
+        });
+      },
+      pendingApprovals: {
+        load: async () =>
+          (await this.ctx.storage.get<PendingScheduleApproval[]>(PENDING_SCHEDULE_APPROVALS_KEY)) ?? [],
+        save: async (list) => {
+          await this.ctx.storage.put(PENDING_SCHEDULE_APPROVALS_KEY, list);
+        },
+      },
+      stores: { goals: goalsAdapter },
+    };
+  }
+
+  /** List pending goal approvals (the queue the approval UI reads, #4142). */
+  async listPendingGoalApprovals(): Promise<PendingScheduleApproval[]> {
+    const all =
+      (await this.ctx.storage.get<PendingScheduleApproval[]>(PENDING_SCHEDULE_APPROVALS_KEY)) ?? [];
+    return all.filter((entry) => entry.status === "pending");
+  }
+
+  /**
+   * Decide a pending goal approval. Approve arms the recorded goal
+   * definition through the capability under the original requester's
+   * principal (the approver is PDP-checked for action:approve on the
+   * route before this is called); reject arms nothing. The state
+   * machine is enforced here (pending → decided, once). A failed
+   * arming throws and leaves the approval pending, so the approver
+   * can retry once the cause is fixed.
+   */
+  async approvePendingGoalApproval(
+    id: string,
+    decidedBy: string,
+  ): Promise<{ approval: PendingScheduleApproval; scheduleId?: string }> {
+    const all =
+      (await this.ctx.storage.get<PendingScheduleApproval[]>(PENDING_SCHEDULE_APPROVALS_KEY)) ?? [];
+    const entry = resolvePendingScheduleApproval(all, id);
+    if (!entry) throw new Error(`Pending approval '${id}' was not found.`);
+    if (entry.status !== "pending") {
+      throw new Error(`Pending approval '${id}' is already decided (${entry.status}).`);
+    }
+    if (entry.kind !== "goal") {
+      throw new Error(`Pending approval '${id}' is not a goal approval.`);
+    }
+    const def = entry.definition as Record<string, unknown>;
+    const deps = this.agentScheduleExecutorDeps();
+    const principal = { login: entry.requestedBy, agentId: entry.agentId };
+    const tenantId = resolveIaaaTenant(this.env);
+    let armed: AgentScheduleActionResult;
+    if (def.scheduleId !== undefined) {
+      armed = await executeAgentScheduleAction(deps, {
+        action: "update",
+        kind: "goal",
+        principal,
+        tenantId,
+        scheduleId: String(def.scheduleId),
+        goal: def.goal as Record<string, unknown>,
+        approvedPendingId: id,
+      });
+    } else {
+      armed = await executeAgentScheduleAction(deps, {
+        action: "create",
+        kind: "goal",
+        principal,
+        tenantId,
+        operation: String((def.goal as Record<string, unknown>).operation ?? ""),
+        goal: def.goal as Record<string, unknown>,
+        approvedPendingId: id,
+      });
+    }
+    if (!armed.ok) {
+      throw new Error(`Approval could not be armed: ${armed.reason}`);
+    }
+    const nowIso = new Date().toISOString();
+    const decided = decidePendingScheduleApproval(all, id, "approved", decidedBy, nowIso);
+    await this.ctx.storage.put(PENDING_SCHEDULE_APPROVALS_KEY, decided);
+    return {
+      approval: decided.find((item) => item.id === id)!,
+      ...(armed.scheduleId !== undefined ? { scheduleId: armed.scheduleId } : {}),
+    };
+  }
+
+  /** Reject a pending goal approval; arms nothing. */
+  async rejectPendingGoalApproval(id: string, decidedBy: string): Promise<PendingScheduleApproval> {
+    const all =
+      (await this.ctx.storage.get<PendingScheduleApproval[]>(PENDING_SCHEDULE_APPROVALS_KEY)) ?? [];
+    const entry = resolvePendingScheduleApproval(all, id);
+    if (!entry) throw new Error(`Pending approval '${id}' was not found.`);
+    if (entry.status !== "pending") {
+      throw new Error(`Pending approval '${id}' is already decided (${entry.status}).`);
+    }
+    const decided = decidePendingScheduleApproval(
+      all,
+      id,
+      "rejected",
+      decidedBy,
+      new Date().toISOString(),
+    );
+    await this.ctx.storage.put(PENDING_SCHEDULE_APPROVALS_KEY, decided);
+    return decided.find((item) => item.id === id)!;
   }
 }

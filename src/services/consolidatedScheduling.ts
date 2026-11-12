@@ -525,8 +525,10 @@ export async function postGoalScheduleAuditEvent(
  * minting a new one (an update never rewrites creation time).
  */
 export function buildScheduleProvenance(input: {
-  origin: "user" | "system";
+  origin: "user" | "system" | "agent";
   createdBy: string | null;
+  /** Issue #3122 — required when origin is "agent". */
+  agentId?: string;
   reason?: string;
   createdAt?: string;
 }): ScheduleProvenance {
@@ -534,9 +536,15 @@ export function buildScheduleProvenance(input: {
   if (!Number.isFinite(Date.parse(createdAt))) {
     throw new Error("Schedule provenance createdAt is not an ISO timestamp.");
   }
+  if (input.origin === "agent") {
+    if (typeof input.agentId !== "string" || !input.agentId.trim()) {
+      throw new Error("Schedule provenance for origin \"agent\" requires an agentId.");
+    }
+  }
   return {
     origin: input.origin,
     createdBy: input.createdBy,
+    ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
     ...(input.reason !== undefined ? { reason: input.reason } : {}),
     createdAt,
   };
@@ -602,7 +610,7 @@ export function provenanceFromPayload(payload: unknown): ScheduleProvenance | un
   const value = (payload as Record<string, unknown>).provenance;
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
-  if (record.origin !== "user" && record.origin !== "system") return undefined;
+  if (record.origin !== "user" && record.origin !== "system" && record.origin !== "agent") return undefined;
   if (
     record.createdBy !== null &&
     (typeof record.createdBy !== "string" || !record.createdBy.trim())
@@ -618,9 +626,18 @@ export function provenanceFromPayload(payload: unknown): ScheduleProvenance | un
   if (record.reason !== undefined && typeof record.reason !== "string") {
     return undefined;
   }
+  // Issue #3122 — an agent stamp without an agent id is malformed
+  // (the acting agent is the point of the stamp); a user/system stamp
+  // never carries one.
+  if (record.origin === "agent") {
+    if (typeof record.agentId !== "string" || !record.agentId.trim()) return undefined;
+  }
   return {
     origin: record.origin,
     createdBy: record.createdBy as string | null,
+    ...(record.origin === "agent" && typeof record.agentId === "string"
+      ? { agentId: record.agentId }
+      : {}),
     ...(typeof record.reason === "string" ? { reason: record.reason } : {}),
     createdAt: record.createdAt,
   };

@@ -35,6 +35,10 @@ import type {
   PipelineStage,
 } from "../../types";
 import { recordScreeningActivity } from "../../services/screeningActivity";
+import {
+  createAgentScheduleExecutorDepsForDo,
+  nlqPortToAgentSdkAdapter,
+} from "../../services/agentScheduleCapability";
 import { buildFeedJobRegistry } from "../../services/feedJobs";
 import { FEED_PIPELINE_CATALOG, resolveFeedJob } from "../../services/feedPipelineJobs";
 import { recordJobOutcome } from "../../services/jobOutcomes";
@@ -79,6 +83,7 @@ import {
   type DeliverySuppressor,
 } from "../../workflows/screenDeliverySuppression";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
+import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { createDiscoveryService } from "../../services/discoveryService";
 import { buildDataProviderPorts } from "../../data/buildDataProviderPorts";
 import { createFitDiscoveryRunner } from "../../services/fitDiscoveryRunner";
@@ -2301,7 +2306,7 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
             ctx.env,
             jobUserLoginForNlq,
             getUserDid(ctx.sessionKey()),
-            { scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), stockScreenPort: ctx.nlqStockScreenPort(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin: jobUserLoginForNlq, orm: ctx.getOrm(), sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, ctx.getOrm(), jobUserLoginForNlq), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin: jobUserLoginForNlq, sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }) },
+            { scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), agentScheduleCapability: createAgentScheduleExecutorDepsForDo(ctx.env, ctx.agentCtx.storage.sql, (type, payload) => ctx.audit(type, "orchestrator", payload), { sdk: nlqPortToAgentSdkAdapter(ctx.nlqSchedulingPort(), createUnifiedSchedulePorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).unifiedSchedules) }), stockScreenPort: ctx.nlqStockScreenPort(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin: jobUserLoginForNlq, orm: ctx.getOrm(), sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, ctx.getOrm(), jobUserLoginForNlq), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin: jobUserLoginForNlq, sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }) },
         ),
         executionDeadline.promise,
       ]);

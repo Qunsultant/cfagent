@@ -28,7 +28,7 @@ import {
 // as "— / not applicable"), reused, not re-implemented.
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
 import { ledgerLinkageCell, ledgerLinkageTitle } from "./ScheduleRunLedgerPanel";
-import { TextInput, Select, Button, Checkbox, Modal } from "./components/ui";
+import { TextInput, Select, Button, Checkbox, Modal, Badge } from "./components/ui";
 import { DelegationContractPreview } from "./DelegationContractPreview";
 import { buildDelegationContract } from "./delegationContract";
 
@@ -263,6 +263,22 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
         >
           <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
             <strong>{g.name}</strong>
+            {/* Issue #3122 — agent-created goals carry an Agent badge
+                (provenance origin agent); user- and system-created
+                goals show no badge. */}
+            {g.provenance?.origin === "agent" ? (
+              <Badge
+                tone="info"
+                size="xs"
+                title={
+                  g.provenance.agentId
+                    ? `Created by agent ${g.provenance.agentId}`
+                    : "Created by an agent"
+                }
+              >
+                Agent
+              </Badge>
+            ) : null}
             <code style={{ fontSize: 12 }}>{g.id}</code>
             <span style={{ fontSize: 12, opacity: 0.7 }}>{g.cron}</span>
             <span
