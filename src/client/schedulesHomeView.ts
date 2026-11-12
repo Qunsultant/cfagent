@@ -56,6 +56,13 @@
  * back/forward never re-lands on a retired address).
  */
 
+import {
+  isRunLedgerFilter,
+  resolveRunLedgerDefaultFilter,
+  resolveRunLedgerFilters,
+  type RunLedgerFilter,
+} from "../config/runLedgerModes";
+
 /** The one schedules home tab id. */
 export const SCHEDULES_HOME_TAB = "schedules";
 
@@ -104,6 +111,13 @@ export interface SchedulesDeepLink {
   scheduleId: string | null;
   /** `run=<id>`: one job's run history (ledger filter; a run row's identity is its jobId). */
   runId: string | null;
+  /**
+   * `kind=<filter>` (issue #4262 S1): the ledger's selected kind filter.
+   * Only the runs view reads it; every other view carries the resolved
+   * default so the value is never undefined. An unknown id, or one the
+   * configured filter set does not show, resolves to the configured default.
+   */
+  kind: RunLedgerFilter;
 }
 
 function nonEmptyParam(params: URLSearchParams, key: string): string | null {
@@ -118,10 +132,17 @@ export function parseSchedulesDeepLink(search: string): SchedulesDeepLink {
   const params = new URLSearchParams(search);
   const runId = nonEmptyParam(params, "run");
   const scheduleId = nonEmptyParam(params, "schedule");
+  const filters = resolveRunLedgerFilters();
+  const rawKind = nonEmptyParam(params, "kind")?.toLowerCase() ?? null;
+  const kind: RunLedgerFilter =
+    rawKind && isRunLedgerFilter(rawKind) && filters.includes(rawKind)
+      ? rawKind
+      : resolveRunLedgerDefaultFilter({}, filters);
   return {
     view: normalizeSchedulesHomeView(params.get("view"), runId !== null),
     scheduleId,
     runId,
+    kind,
   };
 }
 

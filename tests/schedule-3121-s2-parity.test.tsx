@@ -101,6 +101,9 @@ describe("S2-P01 sub-route parsing — view ids, ledger alias, deep links (#3121
       view: "list",
       scheduleId: null,
       runId: null,
+      // Issue #4262 (S1): the ledger kind filter, resolved to the configured
+      // default when the URL names none.
+      kind: "all",
     });
     expect(parseSchedulesDeepLink("?tab=schedules&view=runs").view).toBe("runs");
     expect(parseSchedulesDeepLink("?tab=schedules&view=ledger").view).toBe("runs");
@@ -114,15 +117,17 @@ describe("S2-P01 sub-route parsing — view ids, ledger alias, deep links (#3121
       view: "list",
       scheduleId: "sched-1",
       runId: null,
+      kind: "all",
     });
     expect(parseSchedulesDeepLink("?tab=schedules&run=job-9")).toEqual({
       view: "runs",
       scheduleId: null,
       runId: "job-9",
+      kind: "all",
     });
     expect(
       parseSchedulesDeepLink("?tab=schedules&view=runs&schedule=sched-1&run=job-9"),
-    ).toEqual({ view: "runs", scheduleId: "sched-1", runId: "job-9" });
+    ).toEqual({ view: "runs", scheduleId: "sched-1", runId: "job-9", kind: "all" });
     expect(parseSchedulesDeepLink("?tab=schedules&schedule=  ").scheduleId).toBeNull();
   });
 
