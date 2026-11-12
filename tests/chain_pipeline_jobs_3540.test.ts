@@ -363,7 +363,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
       PIPELINE_CHAIN_YAHOO_NASDAQ100_QUOTES_PIPELINE_CADENCE_MINUTES: "15",
     });
     expect(registry.forId(CHAIN_ID)?.cadenceMinutes).toBe(15);
-    expect(registry.forId("alpaca-nasdaq100-quotes-pipeline")?.cadenceMinutes).toBe(60);
+    expect(registry.forId("alpaca-nasdaq100-quotes-pipeline")?.cadenceMinutes).toBe(43200);
   });
 });
 
@@ -375,7 +375,7 @@ describe("pipeline chain definitions (#3540)", () => {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("feed");
       expect(resolved.config.schedule.enabled).toBe(true);
-      expect(resolved.config.schedule.interval).toBe("every 60 minutes");
+      expect(resolved.config.schedule.interval).toBe("every 43200 minutes");
       // Only the root (the feed stage) carries a schedule — the
       // chain's cadence; every nested stage's own schedule is
       // stripped (the stage jobs keep theirs on their own
