@@ -127,7 +127,19 @@
   `buildLedgerLinkage` (trigger manual, scheduleId = record id,
   asyncJobId = created job, workflowId null). The §9 row for the
   B-T3-06 direct one-shot firing now reads landed. #3394 (B-T2-07)
-  stays open.
+  landed — see the #3394 amendment below.
+- **#3394 amendment (Slice #3394, #3121):** the B-T2-07 named gap is
+  closed as a joinability proof, not a behavior change — the recording
+  itself landed in #3788 (`recordScheduleCallbackRun` wrappers on the
+  four internal-only callback methods); #3394 proves each firing joins
+  to its schedule (SDK firing: scheduleId = schedule id, explicit
+  nulls for workflow/async job; no-schedule firing: explicit nulls;
+  manual trigger: exactly one row, the wrapper's, never a second
+  invocation-level record) with pins 3394-P01–P04. The §9 row for the
+  B-T2-07 internal-callback firing records now reads landed. Out of
+  scope, filed not dropped: `sendScheduledReminder` has no recording
+  wrapper — its SDK firings leave no per-run record
+  (Qunsultant/cfagent#4186).
 - **S6 amendment (Slice S6, #3121 — final parity):** the §9 map is
   proved complete against §1 (§9.7 traces every §1 item plus the §2
   drift items and the §7 open items to a landed slice, a preserved
@@ -276,11 +288,18 @@ it does not re-inventory it.
   (`recordScheduleCallbackRun`) into `job_run_records` with the outcome
   the callback itself reports (success/failure/skipped); a throwing
   delegate records failure and the throw still propagates; recording
-  never breaks the callback. Manual triggers of non-creatable callbacks
-  via the generic trigger route are recorded invocation-level. Named gap
-  (carried, not fixed here): SDK firings of internal-only callbacks
-  (`executeAsyncJob`, `expireStaleOrderDraft`, `collectIvHistory`,
-  `autoRenewETradeTokens`) leave no per-run record. [S0-P08]
+  never breaks the callback. Since #3788 the four internal-only
+  callbacks (`executeAsyncJob`, `expireStaleOrderDraft`,
+  `collectIvHistory`, `autoRenewETradeTokens`) record the same way, via
+  `recordScheduleCallbackRun` wrappers on the orchestrator methods
+  (the trigger route treats them as self-recording and does not add a
+  second invocation-level record); #3394 proves the joinability (an
+  SDK firing joins its schedule to its row; a firing with no
+  originating schedule records explicit nulls). Manual triggers of
+  other non-creatable callbacks via the generic trigger route are
+  recorded invocation-level. Remaining gap, filed not dropped:
+  `sendScheduledReminder` has no recording wrapper — its SDK firings
+  leave no per-run record (Qunsultant/cfagent#4186). [S0-P08]
 - B-T2-08 — Baseline reconciliation on agent start:
   `removeUnownedBaselineSchedules` removes baselines not owned by the
   instance. [S0-P09]
@@ -1071,7 +1090,7 @@ no home and no filed issue is a defect in the map.
 | System-job trigger routes (7) | B-T2-05 | Trigger routes | S2 — landed |
 | Per-schedule audit events (8, B-T2-06 funnel) | B-T2-06 | `SCHEDULE_LIFECYCLE_AUDIT_EVENTS` + `ctx.audit` | S1 (map); S2 — landed |
 | Per-run records for creatable callbacks + manual triggers | B-T2-07 | `recordScheduleCallbackRun` → `job_run_records` | S1 — landed |
-| Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | — no home — | **Filed #3394 (open)** |
+| Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | `recordScheduleCallbackRun` → `job_run_records` | #3394 — landed (recording via #3788 wrappers; joinability proven per callback, SDK + no-schedule explicit nulls + route exactly-once) |
 | Baseline reconciliation on agent start | B-T2-08 | `removeUnownedBaselineSchedules` | S2 — landed |
 | Renewal (`0 3`), tick (`*/30`), retention (`0 4`) incl. #2331 gate + #2037 trace | B-T1-01..03 | `scheduled()` dispatch → named entry points (`src/services/consolidatedCronEntries.ts`) | S5 — landed |
 | Piggyback research guard (#354) + retention constants | B-T1-04..05 | `researchScheduleGuard.ts` + `storageRetention.ts` | S5 — landed (preserved verbatim, guards unchanged) |

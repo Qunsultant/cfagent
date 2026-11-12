@@ -555,6 +555,45 @@ describe("orchestrator runs routes (#2964)", () => {
     expect(runs[0].triggeredBy).toBe("manual");
   });
 
+  it("3394-P04: triggering each other self-recording internal callback records exactly once", async () => {
+    for (const [callback, descriptor] of [
+      ["executeAsyncJob", "async job executed"],
+      ["expireStaleOrderDraft", "stale order draft expired"],
+      ["autoRenewETradeTokens", "E*TRADE tokens renewed"],
+    ] as const) {
+      const ctx = baseCtx({
+        getScheduleById: vi.fn(async () => ({
+          id: "sched-9",
+          callback,
+          payload: {},
+          type: "cron",
+        })),
+      });
+      // Simulate the real method wrapper: it records the run itself
+      // through recordScheduleCallbackRun, so the route must not add
+      // a second invocation-level record.
+      ctx.runScheduleCallback = vi.fn(async (cb: string, payload: unknown) => {
+        await recordScheduleCallbackRun(
+          (ctx.agentCtx as any).storage.sql as never,
+          cb,
+          payload,
+          { id: "sched-9" },
+          async () => ({ outcome: "success", descriptor }),
+        );
+      });
+      const res = await call(ctx, "/schedules/sched-9/trigger", "POST");
+      expect(res?.status).toBe(200);
+      const store = new SqlJobRunRecordStore(
+        (ctx.agentCtx as any).storage.sql as never,
+      );
+      const runs = store.listByJob("sched-9");
+      expect(runs).toHaveLength(1);
+      expect(runs[0].outcome).toBe("success");
+      expect(runs[0].descriptor).toBe(descriptor);
+      expect(runs[0].triggeredBy).toBe("manual");
+    }
+  });
+
   it("triggering a missing schedule 404s and records nothing", async () => {
     const ctx = baseCtx();
     const res = await call(ctx, "/schedules/nope/trigger", "POST");
