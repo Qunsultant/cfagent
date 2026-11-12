@@ -225,6 +225,13 @@ export interface Env {
   CHAT_AUTO_REFRESH_FLOOR_S?: string;
   GOAL_TRACK_POLL_MS?: string;
   GOAL_TRACK_DEADLINE_MS?: string;
+  // Issue #4202 — the chat await budget (ms): how long a chat turn may wait on
+  // a screen/payment run before answering "still running". Absent → 120000
+  // (src/agents/orchestrator/chatAwaitBudget.ts). The knob shortens only:
+  // values above the ceiling resolve to it, because the ceiling is what keeps
+  // the OrchestratorAgent from being billed as a resident object per run.
+  // Rollback is unsetting the var and redeploying — no code change.
+  CHAT_AWAIT_BUDGET_MS?: string;
   // Issue #2443 — TickerAgent push cadence, seconds. Optional;
   // absence means the TICKER_PUSH_INTERVAL_SECONDS default (5s)
   // applies. Changing this value changes live tick cadence and is a
