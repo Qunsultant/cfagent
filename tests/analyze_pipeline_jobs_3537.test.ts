@@ -234,6 +234,10 @@ describe("analyze pipeline catalog + resolution (#3537)", () => {
       "yahoo-sp500-quotes-enrich-analyze",
       "yahoo-dow-quotes-enrich-analyze",
       "yahoo-sp400-quotes-enrich-analyze",
+      "yahoo-sector-energy-quotes-enrich-analyze",
+      "yahoo-sector-materials-quotes-enrich-analyze",
+      "yahoo-sector-industrials-quotes-enrich-analyze",
+      "yahoo-sector-consumer-discretionary-quotes-enrich-analyze",
       "alpaca-nasdaq100-quotes-enrich-analyze",
       "etrade-nasdaq100-quotes-enrich-analyze",
       "public-nasdaq100-quotes-enrich-analyze",
@@ -255,7 +259,7 @@ describe("analyze pipeline catalog + resolution (#3537)", () => {
 
   it("every catalog definition resolves as a valid J1 job definition", () => {
     const raws = buildAllAnalyzePipelineJobDefinitions({});
-    expect(raws).toHaveLength(8);
+    expect(raws).toHaveLength(12);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("analyze");
@@ -276,7 +280,7 @@ describe("analyze pipeline catalog + resolution (#3537)", () => {
       },
     });
     // #4065 pin update: three options-chains jobs join the plane.
-    expect(registrations).toHaveLength(31);
+    expect(registrations).toHaveLength(43);
     expect(specs.map((s) => s.jobId)).toContain(ANALYZE_ID);
   });
 });
