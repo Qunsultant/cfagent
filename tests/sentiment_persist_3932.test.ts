@@ -771,7 +771,7 @@ describe("the enrich join carries sourced sentiment (#3932)", () => {
         expect(def.elements).toContain(element);
       }
     }
-    expect(registry.list()).toHaveLength(12);
+    expect(registry.list()).toHaveLength(16);
   });
 
   it("the sentiment join knob opts one job out of the sentiment element", () => {
@@ -1042,7 +1042,7 @@ describe("every chain folds the sentiment node in (#3932)", () => {
         chain.deliverJobId,
       ]);
     }
-    expect(registry.list()).toHaveLength(12);
+    expect(registry.list()).toHaveLength(16);
   });
 
   it("the chain's sentiment node runs with the chain's universe", () => {
@@ -1054,7 +1054,7 @@ describe("every chain folds the sentiment node in (#3932)", () => {
         children?: Array<unknown>;
       };
     }>;
-    expect(raws).toHaveLength(12);
+    expect(raws).toHaveLength(16);
     const walk = (raw: (typeof raws)[number]) => {
       const nodes: Array<{ step?: string; params?: Record<string, unknown> }> = [];
       let node: (typeof raw)["root"] | undefined = raw.root;
