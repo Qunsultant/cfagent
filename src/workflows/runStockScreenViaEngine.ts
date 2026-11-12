@@ -66,7 +66,7 @@ import {
   workflowTenantId,
 } from "./screenerWorkflowRoutes";
 import type { StockScreenRunSpec } from "./stockScreenRunSpec";
-import type { BrokerId } from "../trading/brokerCatalog";
+import type { BrokerId } from "../trading";
 import { workflowTriggerForSpec } from "./stockScreenRunSpec";
 import {
   assertWorkflowJobCommand,
