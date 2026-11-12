@@ -78,6 +78,8 @@ export interface AuditEventRow {
   provenanceSourceVersion: string;
 }
 
+/** Tenant-scoped reads over the audit trail. */
+
 /** A draft audit event, before the row id is assigned. */
 export interface AuditEventDraft {
   tenantId: string;
@@ -138,6 +140,25 @@ export interface CanonicalReportRow {
   provenanceSourceDo: string;
   /** Row-shape version of the mapping (1 in slice 3). */
   provenanceSourceVersion: string;
+  /**
+   * Issue #4116 — the D1 job run record this projected report is
+   * the twin of (the #3946 twin-rows link, resolved at projection
+   * time, only when unambiguous). Null when unlinked.
+   */
+  linkedJobRunId: string | null;
+  /**
+   * Issue #4116 (migration 0060) — the projected report's owning
+   * login (the DO row's user_login). D1-only reads filter by it
+   * exactly like the DO read filters by userLogin. Null for rows
+   * projected before this column landed.
+   */
+  userLogin: string | null;
+  /**
+   * Issue #4116 (migration 0060) — the R2 pointer for pointer
+   * rows (the DO row's body_r2_key). Null when the body is
+   * inline. The D1-only read resolves it from R2, read-only.
+   */
+  bodyR2Key: string | null;
 }
 
 /** Tenant-scoped reads over the report projection. */
@@ -147,7 +168,10 @@ export interface ReportReader {
     reportId: string,
   ): Promise<CanonicalReportRow | null>;
   /** Latest row per report for one tenant, newest first. */
-  listReports(tenantId: string): Promise<CanonicalReportRow[]>;
+  listReports(
+    tenantId: string,
+    opts?: { userLogin?: string; limit?: number },
+  ): Promise<CanonicalReportRow[]>;
 }
 
 /** Idempotent versioned writes over the report projection. */

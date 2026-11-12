@@ -133,6 +133,20 @@
  *   KEEP means no purge exists for this table; the retention
  *   slice (slice 6, issue #1701) enforces only the BOUNDED
  *   table (agent_shard_jobs).
+ * - agent_async_jobs (AgentDB projection of mas_async_jobs,
+ *   issue #4116, migration 0059) — KEEP, mirroring the
+ *   mas_async_jobs discipline it projects. One row per async
+ *   job, keyed on the job id; the projection is an idempotent
+ *   upsert (a newer write lands, a stale write never
+ *   overwrites), so pruning the projection would destroy the
+ *   D1-only Workflow Runs read's job rows while the DO rows
+ *   live on. The DO remains authoritative.
+ * - agent_tenant_projection_carriers (tenant-scoped carrier
+ *   config, issue #4116, migration 0059) — KEEP. One row per
+ *   tenant (queues / ORM / sweep flags + readMode); the row
+ *   IS the tenant's projection configuration, and deleting it
+ *   would silently flip the tenant back to the merged view
+ *   (unconfigured = merged). No purge exists for this table.
  * - agent_governance (AgentDB projection, slice 0, issue #1548) —
  *   KEEP, decided up front per R8 (line added by slice 6,
  *   issue #1701, which found it missing). Halt transition

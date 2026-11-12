@@ -318,10 +318,13 @@ export class DoSqliteAsyncJobStore
   // ------------------------------------------------------------------
 
   getRow(jobId: string, sessionId: string): AsyncJobStoredRow | undefined {
+    // Single-line SELECT: the shared MockSqlStorage SELECT parser
+    // does not span newlines inside the column list (a multi-line
+    // SELECT silently returns no rows under the mock) — the same
+    // lesson as insertQueued's single-line INSERT below. The SQL
+    // is identical; only the layout changes.
     const rows = Array.from(this.sql.exec(
-      `SELECT job_id, session_id, capability, display_name, status, result_json, response_status,
-            error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, last_activity_at, error_code
-     FROM mas_async_jobs WHERE job_id = ? AND session_id = ?`,
+      "SELECT job_id, session_id, capability, display_name, status, result_json, response_status, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, last_activity_at, error_code FROM mas_async_jobs WHERE job_id = ? AND session_id = ?",
       jobId,
       sessionId,
     )) as unknown as AsyncJobStoredRow[];

@@ -34,6 +34,10 @@ export interface CanonicalSourceReport {
   summary: string;
   body: string;
   createdAt: string;
+  /** Issue #4116 (migration 0060) — the owning login, when the DO row carries one. */
+  userLogin?: string;
+  /** Issue #4116 (migration 0060) — the R2 body pointer, when the DO row is a pointer row. */
+  bodyR2Key?: string | null;
 }
 
 export interface CanonicalReportSeedContext {
@@ -65,6 +69,8 @@ export async function runCanonicalReportSeed(
     createdAtMs: Number.isNaN(Date.parse(report.createdAt))
       ? ctx.nowMs
       : Date.parse(report.createdAt),
+    userLogin: report.userLogin ?? null,
+    bodyR2Key: report.bodyR2Key ?? null,
   }));
   return seedCanonicalReports({
     store: adapter,
