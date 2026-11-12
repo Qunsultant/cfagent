@@ -34,6 +34,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FEED_JOB_TIMEOUTS,
   FeedJobTimeoutError,
+  resolveFeedJobTimeouts,
   withFeedDeadline,
   type FeedDeadlineTimers,
 } from "../src/services/feedJobTimeouts";
@@ -223,5 +224,70 @@ describe("withFeedDeadline (#3992 PR-1)", () => {
     fire?.();
     await assertion;
     await expect(result).rejects.toMatchObject({ code: "FEED_CAPTURE_TIMEOUT" });
+  });
+});
+
+describe("resolveFeedJobTimeouts (#4312)", () => {
+  it("resolves the recorded defaults from an empty or absent env", () => {
+    expect(resolveFeedJobTimeouts({})).toEqual({
+      refreshMs: 30_000,
+      fetchMs: 60_000,
+      captureMs: 30_000,
+      executionMs: 240_000,
+    });
+    expect(resolveFeedJobTimeouts()).toEqual(FEED_JOB_TIMEOUTS);
+  });
+
+  it.each([
+    ["FEED_JOB_REFRESH_MS", "5000", { refreshMs: 5_000 }],
+    ["FEED_JOB_FETCH_MS", "90000", { fetchMs: 90_000 }],
+    ["FEED_JOB_CAPTURE_MS", "10000", { captureMs: 10_000 }],
+    ["FEED_JOB_EXECUTION_MS", "60000", { executionMs: 60_000 }],
+  ] as const)(
+    "overrides only %s from its knob and leaves the other bounds at defaults",
+    (knob, raw, changed) => {
+      const resolved = resolveFeedJobTimeouts({ [knob]: raw });
+      expect(resolved).toEqual({ ...FEED_JOB_TIMEOUTS, ...changed });
+    },
+  );
+
+  it("overrides every bound at once when every knob is set", () => {
+    expect(
+      resolveFeedJobTimeouts({
+        FEED_JOB_REFRESH_MS: "1000",
+        FEED_JOB_FETCH_MS: "2000",
+        FEED_JOB_CAPTURE_MS: "3000",
+        FEED_JOB_EXECUTION_MS: "4000",
+      }),
+    ).toEqual({ refreshMs: 1_000, fetchMs: 2_000, captureMs: 3_000, executionMs: 4_000 });
+  });
+
+  it("accepts a numeric knob value", () => {
+    expect(
+      resolveFeedJobTimeouts({ FEED_JOB_EXECUTION_MS: 120_000 }).executionMs,
+    ).toBe(120_000);
+  });
+
+  it.each([
+    ["FEED_JOB_REFRESH_MS", "0"],
+    ["FEED_JOB_REFRESH_MS", "-5"],
+    ["FEED_JOB_REFRESH_MS", "abc"],
+    ["FEED_JOB_REFRESH_MS", ""],
+    ["FEED_JOB_REFRESH_MS", "NaN"],
+    ["FEED_JOB_REFRESH_MS", "Infinity"],
+    ["FEED_JOB_FETCH_MS", "0"],
+    ["FEED_JOB_CAPTURE_MS", "-1"],
+    ["FEED_JOB_EXECUTION_MS", "not-a-number"],
+  ] as const)(
+    "refuses the invalid %s value %s by name, never falling back silently",
+    (knob, raw) => {
+      expect(() => resolveFeedJobTimeouts({ [knob]: raw })).toThrow(knob);
+    },
+  );
+
+  it("refuses a present non-string, non-numeric knob value by name", () => {
+    expect(() => resolveFeedJobTimeouts({ FEED_JOB_FETCH_MS: true })).toThrow(
+      "FEED_JOB_FETCH_MS",
+    );
   });
 });
