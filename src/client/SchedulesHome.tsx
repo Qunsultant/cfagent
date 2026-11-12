@@ -39,6 +39,7 @@ import { ScheduleQueueView } from "./ScheduleQueueView";
 import { useBrokerEnvironment } from "./brokerEnvironment";
 import { navigateToTab, subscribeToRouteChanges } from "./router";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
+import { resolveRunLedgerDefaultFilter } from "../config/runLedgerModes";
 import {
   SCHEDULES_HOME_VIEW_LABELS,
   SCHEDULES_HOME_VIEWS,
@@ -67,7 +68,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
   const [deepLink, setDeepLink] = useState<SchedulesDeepLink>(() =>
     typeof window !== "undefined"
       ? parseSchedulesDeepLink(window.location.search)
-      : { view: "list", scheduleId: null, runId: null },
+      : { view: "list", scheduleId: null, runId: null, kind: resolveRunLedgerDefaultFilter() },
   );
 
   useEffect(() => {
@@ -116,7 +117,11 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
             <span>Run ledger</span>
             <small>Every run with its schedule, async-job, and workflow linkage</small>
           </div>
-          <ScheduleRunLedgerPanel scheduleId={deepLink.scheduleId} runId={deepLink.runId} />
+          <ScheduleRunLedgerPanel
+            scheduleId={deepLink.scheduleId}
+            runId={deepLink.runId}
+            kind={deepLink.kind}
+          />
         </Card>
       </TabPanel>
 

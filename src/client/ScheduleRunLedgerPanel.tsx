@@ -24,6 +24,7 @@ import {
   Button,
   EmptyState,
   Notice,
+  SegmentedControl,
   Spinner,
   Table,
   type TableColumn,
@@ -35,6 +36,18 @@ import {
   type JobRunRecord,
 } from "../services/jobRunRecords";
 import { navigateToTab } from "./router";
+import {
+  RUN_LEDGER_FILTER_LABELS,
+  resolveRunLedgerDefaultFilter,
+  resolveRunLedgerFilters,
+  type RunLedgerFilter,
+  type RunLedgerKind,
+} from "../config/runLedgerModes";
+import {
+  classifyRunKind,
+  countRunsByKind,
+  filterRunsByKind,
+} from "../services/runLedgerKinds";
 import { AsyncJobResultViewer } from "./AsyncJobResultViewer";
 
 /**
@@ -102,6 +115,8 @@ export function filterLedgerRuns(
 export interface ScheduleRunLedgerPanelProps {
   scheduleId?: string | null;
   runId?: string | null;
+  /** The selected kind filter (issue #4262); an unknown/absent id uses the configured default. */
+  kind?: RunLedgerFilter | null;
 }
 
 /**
@@ -142,6 +157,14 @@ function ledgerColumns(
     )
   ) },
   { key: "operation", header: "Operation", render: (r) => <>{r.operation}</> },
+  {
+    // Issue #4262 (S1) — the row's kind, visible rather than implied.
+    key: "kind",
+    header: "Kind",
+    render: (r) => (
+      <Badge size="xs" tone="neutral">{RUN_LEDGER_FILTER_LABELS[classifyRunKind(r)]}</Badge>
+    ),
+  },
   { key: "system", header: "System", render: (r) => <>{r.system}</> },
   { key: "started", header: "Started", render: (r) => <>{fmtTime(r.started)}</> },
   {
@@ -215,6 +238,7 @@ function ledgerColumns(
 export function ScheduleRunLedgerPanel({
   scheduleId = null,
   runId = null,
+  kind = null,
 }: ScheduleRunLedgerPanelProps = {}) {
   const [runs, setRuns] = useState<JobRunRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -238,6 +262,13 @@ export function ScheduleRunLedgerPanel({
   }, [refresh]);
 
   const visible = filterLedgerRuns(runs, scheduleId, runId);
+  // Issue #4262 (S1) — the one ledger's kind filters. The filter set and the
+  // default come from config (src/config/runLedgerModes.ts), never literals.
+  const filters = useMemo(() => resolveRunLedgerFilters(), []);
+  const activeFilter: RunLedgerFilter =
+    kind && filters.includes(kind) ? kind : resolveRunLedgerDefaultFilter({}, filters);
+  const counts = useMemo(() => countRunsByKind(visible), [visible]);
+  const rows = useMemo(() => filterRunsByKind(visible, activeFilter), [visible, activeFilter]);
   const filterLabel = runId ?? scheduleId;
   // Issue #3605 — the async job whose detail is open below the table.
   const [selectedAsyncJobId, setSelectedAsyncJobId] = useState<string | null>(null);
@@ -253,6 +284,30 @@ export function ScheduleRunLedgerPanel({
   return (
     <div className="schedule-run-ledger">
       <div className="schedules-toolbar">
+        {/* Issue #4262 (S1) — one ledger, filtered by kind. The set comes from
+            config, so a deployment can show fewer (or different) buttons. */}
+        {filters.length > 1 && (
+          <SegmentedControl
+            ariaLabel="Run kind"
+            size="sm"
+            options={filters.map((id) => ({
+              id,
+              label: RUN_LEDGER_FILTER_LABELS[id],
+              badge:
+                id === "all"
+                  ? visible.length
+                  : counts[id as RunLedgerKind] ?? 0,
+            }))}
+            value={activeFilter}
+            onChange={(id) =>
+              navigateToTab("schedules", "runs", {
+                kind: id,
+                ...(scheduleId ? { schedule: scheduleId } : {}),
+                ...(runId ? { run: runId } : {}),
+              })
+            }
+          />
+        )}
         <Button
           type="button"
           variant="secondary"
@@ -296,7 +351,7 @@ export function ScheduleRunLedgerPanel({
       ) : (
         <Table
           columns={columns}
-          rows={visible}
+          rows={rows}
           rowKey={(r, i) => `${r.jobId}:${r.started}:${i}`}
           rowTitle={(r) => `${r.jobId} · ${r.operation} · ${r.started}`}
           caption="Consolidated run ledger — every run with its schedule, async-job, and workflow linkage"
@@ -306,7 +361,9 @@ export function ScheduleRunLedgerPanel({
               description={
                 filterLabel
                   ? "No run in the ledger links to this id — the filter, not the ledger, is empty."
-                  : "No schedule or goal has recorded a run yet."
+                  : activeFilter === "all"
+                    ? "No schedule or goal has recorded a run yet."
+                    : "No " + RUN_LEDGER_FILTER_LABELS[activeFilter] + " run is recorded in the ledger — switch to All to see every kind."
               }
             />
           }
