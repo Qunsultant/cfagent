@@ -16,6 +16,7 @@ import {
   type JobRunRecordStore,
 } from "./jobRunRecordPorts";
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
+import { ensureJobRunRecordIndexes } from "./jobRunRecordIndexSchema";
 
 function ensureTable(sql: SqlStorage): void {
   sql.exec(`CREATE TABLE IF NOT EXISTS ${JOB_RUN_RECORDS_TABLE} (
@@ -78,6 +79,9 @@ function ensureTable(sql: SqlStorage): void {
     sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN mode_source TEXT`);
   }
   sql.exec(`CREATE INDEX IF NOT EXISTS ${JOB_RUN_RECORDS_TABLE}_job_idx ON ${JOB_RUN_RECORDS_TABLE} (job_id, started DESC, id DESC)`);
+  // Issue #3121 Phase 2 (#3124) — the recent-read ordering index
+  // (src/data/jobRunRecordIndexSchema.ts, #2280 pattern).
+  ensureJobRunRecordIndexes(sql);
 }
 
 function rowToRecord(row: Record<string, unknown>): JobRunRecord {

@@ -29,6 +29,7 @@ import {
   type UnifiedScheduleRecord,
   type UnifiedScheduleState,
 } from "./unifiedSchedulePorts";
+import { ensureUnifiedScheduleIndexes } from "./unifiedScheduleIndexSchema";
 
 function ensureTable(sql: SqlStorage): void {
   sql.exec(`CREATE TABLE IF NOT EXISTS ${UNIFIED_SCHEDULES_TABLE} (
@@ -47,6 +48,9 @@ function ensureTable(sql: SqlStorage): void {
     )`);
   sql.exec(`CREATE INDEX IF NOT EXISTS ${UNIFIED_SCHEDULES_TABLE}_kind_idx ON ${UNIFIED_SCHEDULES_TABLE} (kind, created_at ASC, id ASC)`);
   sql.exec(`CREATE INDEX IF NOT EXISTS ${UNIFIED_SCHEDULES_TABLE}_state_idx ON ${UNIFIED_SCHEDULES_TABLE} (state, created_at ASC, id ASC)`);
+  // Issue #3121 Phase 2 (#3124) — the unfiltered-list ordering index
+  // (src/data/unifiedScheduleIndexSchema.ts, #2280 pattern).
+  ensureUnifiedScheduleIndexes(sql);
 }
 
 function saveSync(sql: SqlStorage, record: UnifiedScheduleRecord): void {
