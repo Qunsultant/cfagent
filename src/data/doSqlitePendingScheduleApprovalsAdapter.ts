@@ -52,7 +52,7 @@ function rowToApproval(row: Record<string, unknown>): PendingScheduleApproval {
   };
 }
 
-/** Synchronous DO-SQLite pending-approvals store (mirrors SqlPausedScheduleStore). */
+/** Synchronous DO-SQLite pending-approvals store. */
 export class SqlPendingScheduleApprovalStore {
   constructor(private sql: SqlStorage) {}
 

@@ -1341,6 +1341,16 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
       "memory.remember",
       "memory.recall",
       "nlq.execute",
+      // Issue #3122 — the agent schedule-management capability,
+      // served through the one capability in
+      // src/agents/orchestrator/a2aDispatch.ts (ORCHESTRATOR_A2A_OPERATIONS).
+      "schedule.create",
+      "schedule.list",
+      "schedule.update",
+      "schedule.pause",
+      "schedule.resume",
+      "schedule.trigger",
+      "schedule.delete",
     ],
     gate: A2A_EDGE_GATE,
     notes:

@@ -2216,6 +2216,37 @@ export class ScheduledAgent extends PortThink {
   }
 
   /**
+   * Issue #3121 S3 (S3-P07) — the ONE audit poster call site: every
+   * schedule audit event posts through this helper to the one
+   * `mas_events` funnel (the orchestrator's `POST /api/audit/event`
+   * via the ORCHESTRATOR_AGENT stub on the shared instance) — the
+   * goal-lifecycle sink (auditGoalLifecycle below) and the
+   * capability executor's audit dep (agentScheduleExecutorDeps)
+   * alike, so no second audit system can creep in as a second
+   * poster. Best-effort (the auditGoalLifecycle swallow rule): a
+   * missing binding or a failed post never fails the action it
+   * records. Callers choose await (lifecycle sink, so the event
+   * lands before the mutation returns) vs void (executor dep,
+   * fire-and-forget).
+   */
+  private async postScheduleAuditEvent(event: {
+    type: string;
+    agent: string;
+    payload: Record<string, unknown>;
+  }): Promise<void> {
+    try {
+      const auditAgent = actorGateway.stub<DoStubLike>(
+        this.env.ORCHESTRATOR_AGENT,
+        SHARED_ORCHESTRATOR_INSTANCE,
+      );
+      await postGoalScheduleAuditEvent((req) => auditAgent.fetch(req), event);
+    } catch {
+      // Best-effort audit: a missing binding or a failed post
+      // must never fail the action it records.
+    }
+  }
+
+  /**
    * Issue #3121 S3 (#3312) — the DO-side goal-lifecycle audit sink.
    *
    * S1 wired the four `schedule.goal.*` events at the
@@ -2257,24 +2288,14 @@ export class ScheduledAgent extends PortThink {
     actor?: string | null,
   ): Promise<void> {
     if (!goalId) return;
-    try {
-      const auditAgent = actorGateway.stub<DoStubLike>(
-        this.env.ORCHESTRATOR_AGENT,
-        SHARED_ORCHESTRATOR_INSTANCE,
-      );
-      await postGoalScheduleAuditEvent(
-        (req) => auditAgent.fetch(req),
-        buildGoalScheduleAuditEvent({
-          event,
-          goalId,
-          actor: actor ?? undefined,
-          ...extra,
-        }),
-      );
-    } catch {
-      // Best-effort audit: a missing binding or a failed post
-      // must never fail the mutation it records.
-    }
+    await this.postScheduleAuditEvent(
+      buildGoalScheduleAuditEvent({
+        event,
+        goalId,
+        actor: actor ?? undefined,
+        ...extra,
+      }),
+    );
   }
 
   /**
@@ -3001,19 +3022,13 @@ export class ScheduledAgent extends PortThink {
         void this.recordJobRun(record);
       },
       audit: (type, payload) => {
-        try {
-          const auditAgent = actorGateway.stub<DoStubLike>(
-            this.env.ORCHESTRATOR_AGENT,
-            SHARED_ORCHESTRATOR_INSTANCE,
-          );
-          void postGoalScheduleAuditEvent((req) => auditAgent.fetch(req), {
-            type,
-            agent: "scheduled-agent",
-            payload,
-          });
-        } catch {
-          // Best-effort: a failed audit post never fails the action.
-        }
+        // S3-P07: the one poster call site — this dep posts through
+        // postScheduleAuditEvent (fire-and-forget), never directly.
+        void this.postScheduleAuditEvent({
+          type,
+          agent: "scheduled-agent",
+          payload,
+        });
       },
       pendingApprovals: {
         load: async () =>
