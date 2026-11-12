@@ -308,7 +308,8 @@ export interface ScreenerEngineRunState {
 
 export interface ScreenerFeedStageInput {
   request: ScreenerRunRequest;
-  quoteDeps: ScreenerQuoteDepsBundle;
+  /** Bound by the step handler when present; the agent binds them itself when omitted (#4192). */
+  quoteDeps?: ScreenerQuoteDepsBundle;
   /** This unit's symbols (the shard's row, or the flat list under monolith). */
   symbols: NasdaqStockListing[];
   timestamp: string;
@@ -336,7 +337,8 @@ export interface ScreenerFeedStageOutput {
 
 export interface ScreenerGatherStageInput {
   request: ScreenerRunRequest;
-  historyDeps: YahooHistoryDeps;
+  /** Bound by the step handler when present; the agent binds them itself when omitted (#4192). */
+  historyDeps?: YahooHistoryDeps;
   feedOutput: ScreenerFeedStageOutput;
   goalScreen?: GoalScreenCommand;
 }
@@ -1408,161 +1410,13 @@ export class ScreenerAgent extends PortThink {
       const { QuoteTrace } = await import("../trading");
       const quoteTrace = new QuoteTrace();
       quoteTrace.setNasdaqSymbols(selectedSymbols.map(s => typeof s === 'string' ? s : s.symbol));
-      // Issue #1356: E*TRADE-provider runs acquire through the
-      // platform quote seam (replacing the E2 LiveScreenerDeps
-      // binding): bootstrap this DO's platform store (seed +
-      // enable etrade — no separate verify→enable step, unlike the
-      // nasdaq/yahoo blocks), mint the run id, construct the
-      // adapter over the session-scoped ETradeService (D2: the
-      // from-env fallback login is not equivalent to this
-      // construction, so the service stays the adapter's fetcher),
-      // resolve the quotes route's etrade primary, and
-      // bind the pipeline deps over it (batch via getQuotesBatch,
-      // per-symbol via getQuote — the QuoteTrace rides along
-      // unchanged through the adapter options, capture + outcome
-      // tracking under the run id). Non-E*TRADE modes are
-      // untouched. (The deps type is taken from the binding
-      // helper's return — the #290 boundary keeps trading-internal
-      // type paths out of this module; only the barrel is imported.)
-      let platformQuoteDeps: ReturnType<typeof bindEtradeQuoteDeps> | undefined;
-      if (etrade) {
-        await this.platformBootstrap();
-        platformRunId ??= crypto.randomUUID();
-        const etradeAdapter = createETradeDataProvider(etrade, {
-          capture: await this.platformCaptureDeps(),
-          trace: quoteTrace,
-        });
-        const etradeRegistry = new DataProviderRegistry();
-        etradeRegistry.register(etradeAdapter);
-        const etradeProvider = etradeQuoteProviderFromRoute(
-          etradeRegistry,
-          await this.platformConfigs(),
-          await this.platformRoutes()
-        );
-        platformQuoteDeps = bindEtradeQuoteDeps(etradeProvider, {
-          runId: platformRunId,
-          userLogin,
-        });
-      }
-      // Issue #1317: Yahoo-provider runs acquire through the
-      // data-provider platform, mirroring the E2 etrade cutover:
-      // bootstrap this DO's platform store (seed + routes), verify
-      // + enable yahoo through the lifecycle API when it is not
-      // already enabled, resolve the quotes route's gap-fill
-      // assignment to the yahoo adapter, and bind the pipeline deps
-      // over it (batch via getQuotesBatch, per-symbol via getQuote
-      // — capture + outcome tracking ride along under the run id).
-      // A Yahoo-provider run never touches the broker (no
-      // ETradeService constructed) and never falls back to it. The
-      // req.yahooDeps seam stays as a test override.
-      let platformYahooDeps: ReturnType<typeof bindYahooScreenerDeps> | undefined;
-      if (provider === "yahoo" && !req.yahooDeps) {
-        await this.platformBootstrap();
-        platformRunId ??= crypto.randomUUID();
-        const yahooConfig = await this.platformConfig("yahoo");
-        if (!yahooConfig || yahooConfig.lifecycleState !== "enabled" || !yahooConfig.enabled) {
-          await this.platformTransition("yahoo", "verify", userLogin, {
-            verifier: async () => verifyYahooDataProvider(this.env),
-          });
-          await this.platformTransition("yahoo", "enable", userLogin, {});
-        }
-        const yahooRegistry = new DataProviderRegistry();
-        const yahooAdapter = createYahooDataProvider(new YahooFinanceProvider(this.env), this.env, {
-          capture: await this.platformCaptureDeps(),
-          // Issue #1745: pipeline Yahoo quotes run behind the yahoo
-          // breaker (stale-cache fallback on trip).
-          breaker: defaultBreakerRegistry().breakerFor("yahoo"),
-        });
-        yahooRegistry.register(yahooAdapter);
-        const yahooProvider = yahooQuoteProviderFromRoute(
-          yahooRegistry,
-          await this.platformConfigs(),
-          await this.platformRoutes()
-        );
-        platformYahooDeps = bindYahooScreenerDeps(yahooProvider, {
-          runId: platformRunId,
-          userLogin,
-        });
-      }
-      // Issue #3655: Alpaca-provider runs acquire through the
-      // data-provider platform, mirroring the #1317 yahoo cutover:
-      // bootstrap this DO's platform store (seed + routes), verify
-      // + enable alpaca through the lifecycle API when it is not
-      // already enabled, resolve the quotes route's alpaca adapter,
-      // and bind the pipeline deps over it (batch via getQuotesBatch,
-      // per-symbol via getQuote — capture + outcome tracking ride
-      // along under the run id). An Alpaca-provider run never touches
-      // the broker (no ETradeService constructed) and never falls
-      // back to it. Alpaca quotes are keyed by the deployment Alpaca
-      // API keys, not an E*TRADE session.
-      let platformAlpacaDeps: ReturnType<typeof bindAlpacaQuoteDeps> | undefined;
-      if (provider === "alpaca") {
-        await this.platformBootstrap();
-        platformRunId ??= crypto.randomUUID();
-        const alpacaConfig = await this.platformConfig("alpaca");
-        if (!alpacaConfig || alpacaConfig.lifecycleState !== "enabled" || !alpacaConfig.enabled) {
-          await this.platformTransition("alpaca", "verify", userLogin, {
-            verifier: async () => verifyAlpacaDataProvider(this.env),
-          });
-          await this.platformTransition("alpaca", "enable", userLogin, {});
-        }
-        const alpacaRegistry = new DataProviderRegistry();
-        const alpacaAdapter = createAlpacaDataProvider(new AlpacaMarketDataProvider(this.env), this.env, {
-          capture: await this.platformCaptureDeps(),
-        });
-        alpacaRegistry.register(alpacaAdapter);
-        const alpacaProvider = alpacaQuoteProviderFromRoute(
-          alpacaRegistry,
-          await this.platformConfigs(),
-          await this.platformRoutes()
-        );
-        platformAlpacaDeps = bindAlpacaQuoteDeps(alpacaProvider, {
-          runId: platformRunId,
-          userLogin,
-        });
-      }
-      // Issue #3990: Public-provider runs acquire through the
-      // data-provider platform, mirroring the #3655 alpaca cutover:
-      // bootstrap this DO's platform store (seed + routes), verify
-      // + enable public through the lifecycle API when it is not
-      // already enabled, resolve the quotes route's public adapter,
-      // and bind the pipeline deps over it (batch via getQuotesBatch,
-      // per-symbol via getQuote — capture + outcome tracking ride
-      // along under the run id). A Public-provider run never touches
-      // the broker (no ETradeService constructed) and never falls
-      // back to it. Public quotes are keyed by the signed-in user's
-      // own Public token (verify resolves it from the session store
-      // when no credential ref is passed), not an E*TRADE session —
-      // and public serves nothing until an operator enables it (the
-      // seed is "registered", Slice C). The run fails explicitly
-      // when the token is absent, exactly as a missing Alpaca key
-      // fails an Alpaca run.
-      let platformPublicDeps: ReturnType<typeof bindPublicQuoteDeps> | undefined;
-      if (provider === "public") {
-        await this.platformBootstrap();
-        platformRunId ??= crypto.randomUUID();
-        const publicConfig = await this.platformConfig("public");
-        if (!publicConfig || publicConfig.lifecycleState !== "enabled" || !publicConfig.enabled) {
-          await this.platformTransition("public", "verify", userLogin, {
-            verifier: async () => verifyPublicDataProvider(this.env, userLogin, null),
-          });
-          await this.platformTransition("public", "enable", userLogin, {});
-        }
-        const publicRegistry = new DataProviderRegistry();
-        const publicAdapter = createPublicDataProviderFromEnv(this.env, userLogin, {
-          capture: await this.platformCaptureDeps(),
-        });
-        publicRegistry.register(publicAdapter);
-        const publicProvider = publicQuoteProviderFromRoute(
-          publicRegistry,
-          await this.platformConfigs(),
-          await this.platformRoutes()
-        );
-        platformPublicDeps = bindPublicQuoteDeps(publicProvider, {
-          runId: platformRunId,
-          userLogin,
-        });
-      }
+      platformRunId ??= crypto.randomUUID();
+      const quoteBundle = await this.bindScreenerQuoteDeps(provider, {
+        userLogin,
+        platformRunId,
+        ...(req.yahooDeps ? { yahooDepsOverride: req.yahooDeps } : {}),
+        ...(etrade ? { etradeService: etrade, quoteTrace } : {}),
+      });
       // Issue #1331: technicals history through the platform —
       // the historicalBars route's yahoo primary, resolved with
       // capture + outcome tracking under the run id (shared with
@@ -1577,16 +1431,10 @@ export class ScreenerAgent extends PortThink {
       // + heartbeat beat intact) and every symbol gets honest null
       // technicals — the screen itself never fails on history
       // resolution. See resolveYahooHistoryDeps.
-      const platformPorts = await this.dataProviderPorts();
-      const platformHistoryDeps = (await resolveYahooHistoryDeps({
-        sql: this.ctx.storage.sql,
-        env: this.env,
+      const platformHistoryDeps = await this.bindScreenerHistoryDeps({
         userLogin,
-        blobStorage: this.ctx.storage,
-        runId: platformRunId,
-        ...(platformPorts.config ? { configPort: platformPorts.config } : {}),
-        ...(platformPorts.captures ? { capturePort: platformPorts.captures } : {}),
-      })) ?? { fetchBars: async () => null };
+        platformRunId,
+      });
       // Issue #3931: persisted technicals are the PRIMARY source
       // for this run's technicals leg — the technicals job's
       // stored daily bars, read once up front. A fresh copy
@@ -1663,29 +1511,27 @@ export class ScreenerAgent extends PortThink {
             mode: "yahoo",
             symbols: selectedSymbols,
             maxSymbols: selectedSymbols.length,
-            yahooDeps:
-              req.yahooDeps ??
-              platformYahooDeps!,
+            yahooDeps: quoteBundle.yahoo!,
           })
         : provider === "alpaca"
           ? await acquireUniverse({
               mode: "alpaca",
               symbols: selectedSymbols,
               maxSymbols: selectedSymbols.length,
-              quoteDeps: platformAlpacaDeps!,
+              quoteDeps: quoteBundle.alpaca!,
             })
           : provider === "public"
             ? await acquireUniverse({
                 mode: "public",
                 symbols: selectedSymbols,
                 maxSymbols: selectedSymbols.length,
-                quoteDeps: platformPublicDeps!,
+                quoteDeps: quoteBundle.public!,
               })
           : await acquireUniverse({
               mode: "etrade-only",
               symbols: selectedSymbols,
               maxSymbols: selectedSymbols.length,
-              quoteDeps: platformQuoteDeps!,
+              quoteDeps: quoteBundle.etrade!,
             });
       await beat();
       // Issue #2869 slice 2 — quotes fetched for the resolved
@@ -2098,6 +1944,223 @@ export class ScreenerAgent extends PortThink {
   }
 
   /**
+   * Issue #4192 — bind the platform quote deps for the planned
+   * provider, shared by runScreenInner and screenFeedStage.
+   * The binding lives on the agent (the DO instance holds the
+   * platform bootstrap / config / capture deps); the workflow
+   * / host step-handler process cannot reach it, so the agent
+   * binds the deps itself when the input omits them. One
+   * binding, moved not copied: the provider mentions in this
+   * file are unchanged (the neutrality census counts them).
+   * A missing leg for the planned provider is a named refusal,
+   * never a fallback.
+   */
+  async bindScreenerQuoteDeps(
+    provider: StockScreenProvider,
+    opts: {
+      userLogin: string;
+      platformRunId: string;
+      yahooDepsOverride?: YahooScreenerDeps;
+      etradeService?: ETradeService | null;
+      quoteTrace?: QuoteTrace;
+    },
+  ): Promise<ScreenerQuoteDepsBundle> {
+    const { userLogin, platformRunId } = opts;
+    if (provider === "etrade" && (!opts.etradeService || !opts.quoteTrace)) {
+      throw new Error(
+        "SCREENER_QUOTE_DEPS_MISSING: no E*TRADE service bound for this run — the agent's platform binding needs the session-scoped service and quote trace.",
+      );
+    }
+    const etradeService = opts.etradeService;
+    const quoteTrace = opts.quoteTrace;
+    // Issue #1356: E*TRADE-provider runs acquire through the
+    // platform quote seam (replacing the E2 LiveScreenerDeps
+    // binding): bootstrap this DO's platform store (seed +
+    // enable etrade — no separate verify→enable step, unlike the
+    // nasdaq/yahoo blocks), mint the run id, construct the
+    // adapter over the session-scoped ETradeService (D2: the
+    // from-env fallback login is not equivalent to this
+    // construction, so the service stays the adapter's fetcher),
+    // resolve the quotes route's etrade primary, and
+    // bind the pipeline deps over it (batch via getQuotesBatch,
+    // per-symbol via getQuote — the QuoteTrace rides along
+    // unchanged through the adapter options, capture + outcome
+    // tracking under the run id). Non-E*TRADE modes are
+    // untouched. (The deps type is taken from the binding
+    // helper's return — the #290 boundary keeps trading-internal
+    // type paths out of this module; only the barrel is imported.)
+    let platformQuoteDeps: ReturnType<typeof bindEtradeQuoteDeps> | undefined;
+    if (provider === "etrade") {
+      await this.platformBootstrap();
+      const etradeAdapter = createETradeDataProvider(etradeService!, {
+        capture: await this.platformCaptureDeps(),
+        trace: quoteTrace!,
+      });
+      const etradeRegistry = new DataProviderRegistry();
+      etradeRegistry.register(etradeAdapter);
+      const etradeProvider = etradeQuoteProviderFromRoute(
+        etradeRegistry,
+        await this.platformConfigs(),
+        await this.platformRoutes()
+      );
+      platformQuoteDeps = bindEtradeQuoteDeps(etradeProvider, {
+        runId: platformRunId,
+        userLogin,
+      });
+    }
+    // Issue #1317: Yahoo-provider runs acquire through the
+    // data-provider platform, mirroring the E2 etrade cutover:
+    // bootstrap this DO's platform store (seed + routes), verify
+    // + enable yahoo through the lifecycle API when it is not
+    // already enabled, resolve the quotes route's gap-fill
+    // assignment to the yahoo adapter, and bind the pipeline deps
+    // over it (batch via getQuotesBatch, per-symbol via getQuote
+    // — capture + outcome tracking ride along under the run id).
+    // A Yahoo-provider run never touches the broker (no
+    // ETradeService constructed) and never falls back to it. The
+    // yahooDepsOverride seam stays as a test override.
+    let platformYahooDeps: ReturnType<typeof bindYahooScreenerDeps> | undefined;
+    if (provider === "yahoo" && !opts.yahooDepsOverride) {
+      await this.platformBootstrap();
+      const yahooConfig = await this.platformConfig("yahoo");
+      if (!yahooConfig || yahooConfig.lifecycleState !== "enabled" || !yahooConfig.enabled) {
+        await this.platformTransition("yahoo", "verify", userLogin, {
+          verifier: async () => verifyYahooDataProvider(this.env),
+        });
+        await this.platformTransition("yahoo", "enable", userLogin, {});
+      }
+      const yahooRegistry = new DataProviderRegistry();
+      const yahooAdapter = createYahooDataProvider(new YahooFinanceProvider(this.env), this.env, {
+        capture: await this.platformCaptureDeps(),
+        // Issue #1745: pipeline Yahoo quotes run behind the yahoo
+        // breaker (stale-cache fallback on trip).
+        breaker: defaultBreakerRegistry().breakerFor("yahoo"),
+      });
+      yahooRegistry.register(yahooAdapter);
+      const yahooProvider = yahooQuoteProviderFromRoute(
+        yahooRegistry,
+        await this.platformConfigs(),
+        await this.platformRoutes()
+      );
+      platformYahooDeps = bindYahooScreenerDeps(yahooProvider, {
+        runId: platformRunId,
+        userLogin,
+      });
+    }
+    // Issue #3655: Alpaca-provider runs acquire through the
+    // data-provider platform, mirroring the #1317 yahoo cutover:
+    // bootstrap this DO's platform store (seed + routes), verify
+    // + enable alpaca through the lifecycle API when it is not
+    // already enabled, resolve the quotes route's alpaca adapter,
+    // and bind the pipeline deps over it (batch via getQuotesBatch,
+    // per-symbol via getQuote — capture + outcome tracking ride
+    // along under the run id). An Alpaca-provider run never touches
+    // the broker (no ETradeService constructed) and never falls
+    // back to it. Alpaca quotes are keyed by the deployment Alpaca
+    // API keys, not an E*TRADE session.
+    let platformAlpacaDeps: ReturnType<typeof bindAlpacaQuoteDeps> | undefined;
+    if (provider === "alpaca") {
+      await this.platformBootstrap();
+      const alpacaConfig = await this.platformConfig("alpaca");
+      if (!alpacaConfig || alpacaConfig.lifecycleState !== "enabled" || !alpacaConfig.enabled) {
+        await this.platformTransition("alpaca", "verify", userLogin, {
+          verifier: async () => verifyAlpacaDataProvider(this.env),
+        });
+        await this.platformTransition("alpaca", "enable", userLogin, {});
+      }
+      const alpacaRegistry = new DataProviderRegistry();
+      const alpacaAdapter = createAlpacaDataProvider(new AlpacaMarketDataProvider(this.env), this.env, {
+        capture: await this.platformCaptureDeps(),
+      });
+      alpacaRegistry.register(alpacaAdapter);
+      const alpacaProvider = alpacaQuoteProviderFromRoute(
+        alpacaRegistry,
+        await this.platformConfigs(),
+        await this.platformRoutes()
+      );
+      platformAlpacaDeps = bindAlpacaQuoteDeps(alpacaProvider, {
+        runId: platformRunId,
+        userLogin,
+      });
+    }
+    // Issue #3990: Public-provider runs acquire through the
+    // data-provider platform, mirroring the #3655 alpaca cutover:
+    // bootstrap this DO's platform store (seed + routes), verify
+    // + enable public through the lifecycle API when it is not
+    // already enabled, resolve the quotes route's public adapter,
+    // and bind the pipeline deps over it (batch via getQuotesBatch,
+    // per-symbol via getQuote — capture + outcome tracking ride
+    // along under the run id). A Public-provider run never touches
+    // the broker (no ETradeService constructed) and never falls
+    // back to it. Public quotes are keyed by the signed-in user's
+    // own Public token (verify resolves it from the session store
+    // when no credential ref is passed), not an E*TRADE session —
+    // and public serves nothing until an operator enables it (the
+    // seed is "registered", Slice C). The run fails explicitly
+    // when the token is absent, exactly as a missing Alpaca key
+    // fails an Alpaca run.
+    let platformPublicDeps: ReturnType<typeof bindPublicQuoteDeps> | undefined;
+    if (provider === "public") {
+      await this.platformBootstrap();
+      const publicConfig = await this.platformConfig("public");
+      if (!publicConfig || publicConfig.lifecycleState !== "enabled" || !publicConfig.enabled) {
+        await this.platformTransition("public", "verify", userLogin, {
+          verifier: async () => verifyPublicDataProvider(this.env, userLogin, null),
+        });
+        await this.platformTransition("public", "enable", userLogin, {});
+      }
+      const publicRegistry = new DataProviderRegistry();
+      const publicAdapter = createPublicDataProviderFromEnv(this.env, userLogin, {
+        capture: await this.platformCaptureDeps(),
+      });
+      publicRegistry.register(publicAdapter);
+      const publicProvider = publicQuoteProviderFromRoute(
+        publicRegistry,
+        await this.platformConfigs(),
+        await this.platformRoutes()
+      );
+      platformPublicDeps = bindPublicQuoteDeps(publicProvider, {
+        runId: platformRunId,
+        userLogin,
+      });
+    }
+    return {
+      ...(platformYahooDeps ?? opts.yahooDepsOverride
+        ? { yahoo: platformYahooDeps ?? opts.yahooDepsOverride }
+        : {}),
+      ...(platformQuoteDeps ? { etrade: platformQuoteDeps } : {}),
+      ...(platformAlpacaDeps ? { alpaca: platformAlpacaDeps } : {}),
+      ...(platformPublicDeps ? { public: platformPublicDeps } : {}),
+    };
+  }
+
+  /**
+   * Issue #4192 — bind the platform history deps, shared by
+   * runScreenInner and screenGatherStage. Resolution failure
+   * degrades to a null-fetching deps object, so the batch
+   * still runs and every symbol gets honest null technicals
+   * — the screen itself never fails on history resolution
+   * (see resolveYahooHistoryDeps).
+   */
+  async bindScreenerHistoryDeps(opts: {
+    userLogin: string;
+    platformRunId: string;
+  }): Promise<YahooHistoryDeps> {
+    const platformPorts = await this.dataProviderPorts();
+    const deps = await resolveYahooHistoryDeps({
+      sql: this.ctx.storage.sql,
+      env: this.env,
+      userLogin: opts.userLogin,
+      blobStorage: this.ctx.storage,
+      runId: opts.platformRunId,
+      ...(platformPorts.config ? { configPort: platformPorts.config } : {}),
+      ...(platformPorts.captures ? { capturePort: platformPorts.captures } : {}),
+    });
+    return deps ?? { fetchBars: async () => null };
+  }
+
+
+  /**
    * FEED stage (catalog: feed — quotes): plan + universe
    * resolution + provider quote-deps binding + acquireUniverse.
    * The same service calls runScreenInner makes today, in the
@@ -2235,9 +2298,21 @@ export class ScreenerAgent extends PortThink {
     state.quoteTrace.setNasdaqSymbols(selectedSymbols.map((s) => (typeof s === "string" ? s : s.symbol)));
 
     // Provider-scoped acquisition (#261, #1007). The deps arrive
-    // pre-bound from the step handler; a missing leg for the
-    // planned provider is a named refusal, never a fallback.
-    const bundle = input.quoteDeps;
+    // pre-bound from the step handler when present; otherwise the
+    // agent binds them itself from the platform (the handler
+    // process cannot reach the agent's platform binding — issue
+    // #4192). A missing leg for the planned provider is a named
+    // refusal, never a fallback.
+    const bundle =
+      input.quoteDeps ??
+      (await this.bindScreenerQuoteDeps(provider, {
+        userLogin,
+        platformRunId: state.platformRunId,
+        ...(req.yahooDeps ? { yahooDepsOverride: req.yahooDeps } : {}),
+        ...(state.etrade
+          ? { etradeService: state.etrade, quoteTrace: state.quoteTrace }
+          : {}),
+      }));
     const acquired =
       provider === "yahoo"
         ? await acquireUniverse({
@@ -2251,20 +2326,20 @@ export class ScreenerAgent extends PortThink {
               mode: "alpaca",
               symbols: selectedSymbols,
               maxSymbols: selectedSymbols.length,
-              quoteDeps: bundle.alpaca ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no Alpaca quote deps bound for this run — the S2 cutover wires the platform binding."); })(),
+              quoteDeps: bundle.alpaca ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no Alpaca quote deps bound for this run — the agent's platform binding did not produce an Alpaca leg."); })(),
             })
           : provider === "public"
             ? await acquireUniverse({
                 mode: "public",
                 symbols: selectedSymbols,
                 maxSymbols: selectedSymbols.length,
-                quoteDeps: bundle.public ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no Public quote deps bound for this run — the S2 cutover wires the platform binding."); })(),
+                quoteDeps: bundle.public ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no Public quote deps bound for this run — the agent's platform binding did not produce a Public leg."); })(),
               })
             : await acquireUniverse({
                 mode: "etrade-only",
                 symbols: selectedSymbols,
                 maxSymbols: selectedSymbols.length,
-                quoteDeps: bundle.etrade ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no E*TRADE quote deps bound for this run — the S2 cutover wires the platform binding."); })(),
+                quoteDeps: bundle.etrade ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no E*TRADE quote deps bound for this run — the agent's platform binding did not produce an E*TRADE leg."); })(),
               });
     state.acquired = acquired;
     await this.beatScreenerEngineState(state);
@@ -2304,9 +2379,17 @@ export class ScreenerAgent extends PortThink {
     state.acquired = feedOutput.acquired;
 
     // Issue #1331: bars come through the platform history deps.
-    // The handler supplies the bound deps; the persisted-first
-    // reads below are best-effort, exactly as in runScreenInner.
-    let historyDeps = input.historyDeps;
+    // The handler supplies the bound deps when present; otherwise
+    // the agent binds them itself from the platform (the handler
+    // process cannot reach the agent's platform binding — issue
+    // #4192). The persisted-first reads below are best-effort,
+    // exactly as in runScreenInner.
+    let historyDeps =
+      input.historyDeps ??
+      (await this.bindScreenerHistoryDeps({
+        userLogin: state.userLogin,
+        platformRunId: feedOutput.platformRunId,
+      }));
     try {
       const datasetStore = createFeedDatasetAdapter(this.env);
       if (datasetStore) {

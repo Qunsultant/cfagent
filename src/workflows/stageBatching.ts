@@ -116,8 +116,8 @@ export function createBatchCheckpoint(batchIds: readonly string[]): BatchCheckpo
 /**
  * The missing-batch manifest for a workflow collation: every
  * shard that did not complete is a missing batch. Reuses
- * the Slice 6 collation (collateShards) — no second
- * checkpoint store, no second manifest shape.
+ * the Slice 6 collation (screenerCollation.collateShards) —
+ * no second checkpoint store, no second manifest shape.
  */
 export function missingBatchManifest(collation: {
   shards: Array<{ shardId: string; status: string }>;

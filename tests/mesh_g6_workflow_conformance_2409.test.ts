@@ -8,10 +8,14 @@
  *
  * WHAT THE HARNESS SIMULATES — named honestly, per the slice's
  * evidence discipline. The repo's tests run under plain vitest
- * (no workers pool), and all three workflows are thin adapters
- * over pure flow cores driven by fakeable step interfaces (the
- * programme's established test shape). Eviction is therefore
- * simulated at the flow/step seam with a JOURNALING STEP FAKE:
+ * (no workers pool). #4192: the screener workflow no longer
+ * runs through that seam — its sections below drive the one
+ * engine via InMemoryWorkflowAdapter (no journal, no virtual
+ * clock, no child workflows, no poll loop). The trading and
+ * payment workflows still are thin adapters over pure flow
+ * cores driven by fakeable step interfaces (the programme's
+ * established test shape). Eviction is therefore simulated
+ * at their flow/step seam with a JOURNALING STEP FAKE:
  *
  *   - A durable journal (a Map that survives across
  *     "incarnations" of a run) records each completed step's
@@ -42,8 +46,7 @@
  * and nothing in this file claims otherwise.
  *
  * Fakes live only at the binding/external seams: the screen
- * runner, the store/deliver doors, the child-workflow ops, the
- * broker platform (the repo's claim-then-execute contract
+ * runner, the store/deliver doors, the broker platform (the repo's claim-then-execute contract
  * double, as in the G4 suite), the payment gate, and the cfpay
  * ledger endpoint. The flows, the real TradingAgent approval
  * door + settle core, the real cfpay ledger client, the real
@@ -121,15 +124,15 @@ import {
 import { TradingPlatformRegistry } from "../src/trading";
 import { MockSqlStorage } from "./mock-sql";
 import {
-  runParentFlow,
-  runShardFlow,
-  type ChildWorkflowOps,
   type ScreenerWorkflowDeps,
-  type ScreenerWorkflowStep,
   type ShardScreenResult,
-} from "../src/workflows/screenerWorkflowFlow";
+} from "../src/workflows/screenerCollation";
 import { InMemoryWorkflowAdapter } from "../src/workflows/inMemoryWorkflowAdapter";
-import { workflowIdForJob, type WorkflowJobCommand } from "../src/workflows/workflowPorts";
+import {
+  workflowIdForJob,
+  type ParentScreenReportInput,
+  type WorkflowJobCommand,
+} from "../src/workflows/workflowPorts";
 import {
   runPaymentWorkflowFlow,
   type PaymentGate,
@@ -242,21 +245,6 @@ async function flushIncarnation(): Promise<void> {
   }
 }
 
-function screenerStep(
-  journal: StepJournal,
-  plan: EvictionPlan,
-  advanceClock: (ms: number) => void,
-): ScreenerWorkflowStep {
-  return {
-    do: (name, fn) => journalDo(journal, plan, name, fn),
-    sleep: async (name, ms) => {
-      await journalDo(journal, plan, name, async () => {
-        advanceClock(ms);
-      });
-    },
-  };
-}
-
 function paymentStep(journal: StepJournal, plan: EvictionPlan): PaymentWorkflowStep {
   return {
     waitForEvent: (name) => journalWait(journal, plan, name) as never,
@@ -289,8 +277,6 @@ function parentCommand(overrides: Partial<WorkflowJobCommand> = {}): WorkflowJob
       { shardId: "HEALTH", universe: "HEALTH" },
     ],
     deliver: true,
-    pollIntervalMs: 1_000,
-    shardTimeoutMs: 600_000,
     ...overrides,
   };
 }
@@ -314,9 +300,9 @@ interface ScreenerBundle {
   deliveries: unknown[];
   /** The keyed canonical store the store door writes: screener:<timestamp> -> report id. */
   canonical: Map<string, string>;
+  /** Parent canonical rows the finalize stored (the parent door). */
+  parentStored: ParentScreenReportInput[];
   deps: ScreenerWorkflowDeps;
-  nowMs: () => number;
-  advanceClock: (ms: number) => void;
 }
 
 function makeScreenerBundle(): ScreenerBundle {
@@ -325,7 +311,9 @@ function makeScreenerBundle(): ScreenerBundle {
   const storePayloads: unknown[] = [];
   const deliveries: unknown[] = [];
   const canonical = new Map<string, string>();
-  let now = 1_000_000;
+  const parentStored: ParentScreenReportInput[] = [];
+  // #4192: no virtual clock — the engine owns pacing. nowMs
+  // is a fixed instant; the run settles synchronously.
   const deps: ScreenerWorkflowDeps = {
     screenRunner: {
       runScreen: async (req) => {
@@ -337,7 +325,11 @@ function makeScreenerBundle(): ScreenerBundle {
           expectedCount: 10,
           matchedCount: 2,
           universe: req.universe,
-          full: { marker: "full-result", universe: req.universe },
+          full: {
+            marker: "full-result",
+            universe: req.universe,
+            timestamp: "2026-10-30T12:00:00.000Z",
+          },
         } as ShardScreenResult;
       },
     },
@@ -355,7 +347,11 @@ function makeScreenerBundle(): ScreenerBundle {
     deliverOutcome: async (payload) => {
       deliveries.push(payload);
     },
-    nowMs: () => now,
+    storeParentReport: async (input) => {
+      parentStored.push(input);
+      return { stored: true, reportId: "parent-1" };
+    },
+    nowMs: () => 1_000_000,
   };
   return {
     store,
@@ -363,134 +359,98 @@ function makeScreenerBundle(): ScreenerBundle {
     storePayloads,
     deliveries,
     canonical,
+    parentStored,
     deps,
-    nowMs: () => now,
-    advanceClock: (ms) => {
-      now += ms;
-    },
   };
 }
 
-describe("G6 screener shard flow — eviction/resume (#2409)", () => {
-  it("eviction between steps: the resumed incarnation replays the journal and completes the shard exactly once", async () => {
+/** The collation the parent row carries (the door's read-back). */
+async function collationFor(store: InMemoryShardJobAdapter, jobId: string) {
+  const row = await store.latestJob("tenant-1", jobId, jobId);
+  return JSON.parse(row?.resultJson ?? "{}") as Record<string, unknown>;
+}
+
+describe("G6 screener shard flow — engine path, exactly once (#2409, #4192)", () => {
+  it("a single shard runs through the engine exactly once: one screen, one store, one delivery, one canonical record", async () => {
+    // #4192: no journal, no incarnations — the engine runs
+    // the shard's six stages once and settles. What the
+    // eviction pins proved (no re-run, no duplicate store /
+    // delivery) is now the engine's single execution: the run
+    // completes and every count is exactly one.
     const b = makeScreenerBundle();
-    const journal = newJournal();
-    const plan = newPlan({ before: new Set(["deliver-shard"]) });
-
-    // Incarnation 1: screen + store land, then the instance is
-    // discarded just before the deliver step.
-    await expect(
-      runShardFlow(shardCommand(), screenerStep(journal, plan, b.advanceClock), b.deps),
-    ).rejects.toBeInstanceOf(SimulatedEviction);
-    expect(b.screens).toEqual(["TECH"]);
-    expect(b.storePayloads).toHaveLength(1);
-    expect(b.deliveries).toHaveLength(0);
-
-    // Incarnation 2: same journal. Completed steps replay from
-    // the journal — the screen is NOT re-run and the report is
-    // NOT re-stored; only the remaining steps execute.
-    const output = await runShardFlow(
-      shardCommand(),
-      screenerStep(journal, plan, b.advanceClock),
-      b.deps,
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(
+      parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }] }),
     );
-    expect(output.success).toBe(true);
-    expect(output.stored).toBe(true);
-    expect(output.delivered).toBe(true);
+    expect(h.status).toBe("complete");
     expect(b.screens).toEqual(["TECH"]);
     expect(b.storePayloads).toHaveLength(1);
     expect(b.deliveries).toHaveLength(1);
+    expect(b.canonical.size).toBe(1);
+    const collation = await collationFor(b.store, "job-g6-1");
+    expect(collation.lifecycle).toBe("ReportGenerated");
+    expect(b.parentStored).toHaveLength(1);
+    expect(b.parentStored[0]?.collation.lifecycle).toBe("ReportGenerated");
 
     const rows = await b.store.listJobsForChain("tenant-1", "job-g6-1");
     expect(rows.find((r) => r.jobKey === "shard:TECH")?.status).toBe("completed");
+
+    // A duplicate start adopts the existing run — nothing
+    // re-executes, nothing re-stores or re-delivers.
+    const h2 = await adapter.start(
+      parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }] }),
+    );
+    expect(h2.existing).toBe(true);
+    expect(b.screens).toEqual(["TECH"]);
+    expect(b.storePayloads).toHaveLength(1);
+    expect(b.deliveries).toHaveLength(1);
   });
 
-  it("commit-window eviction at store: the replayed store converges on ONE canonical record (no duplicate report)", async () => {
+  it("the keyed canonical store converges on ONE canonical record (no duplicate report)", async () => {
+    // #4192: the commit-window replay — the store lands, the
+    // memo is lost, the store is re-invoked with the identical
+    // payload — has NO engine equivalent: the engine executes
+    // the store step once and there is no journal to lose.
+    // What survives is the convergence pin itself: one run
+    // writes exactly one canonical record, keyed
+    // screener:<timestamp>, and the shard still delivers
+    // exactly once.
     const b = makeScreenerBundle();
-    const journal = newJournal();
-    const plan = newPlan({ after: new Set(["store-shard"]) });
-
-    // Incarnation 1: the store write lands, then the instance
-    // is discarded before the step result is journaled.
-    await expect(
-      runShardFlow(shardCommand(), screenerStep(journal, plan, b.advanceClock), b.deps),
-    ).rejects.toBeInstanceOf(SimulatedEviction);
-    expect(b.storePayloads).toHaveLength(1);
-
-    // Incarnation 2: the store step is re-invoked (its memo was
-    // lost) with the identical payload; the keyed canonical
-    // store converges instead of duplicating.
-    const output = await runShardFlow(
-      shardCommand(),
-      screenerStep(journal, plan, b.advanceClock),
-      b.deps,
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(
+      parentCommand({ shards: [{ shardId: "TECH", universe: "TECH" }] }),
     );
-    expect(output.stored).toBe(true);
-    expect(output.delivered).toBe(true);
-    expect(b.screens).toEqual(["TECH"]); // the screen itself was journaled — never re-run
-    expect(b.storePayloads).toHaveLength(2); // the writer WAS re-invoked…
-    expect(b.storePayloads[1]).toEqual(b.storePayloads[0]); // …with the identical payload…
-    expect(b.canonical.size).toBe(1); // …and exactly one canonical record exists
+    expect(h.status).toBe("complete");
+    expect(b.screens).toEqual(["TECH"]);
+    expect(b.storePayloads).toHaveLength(1);
+    expect([...b.canonical.keys()]).toEqual(["screener:2026-10-30T12:00:00.000Z"]);
+    expect(b.canonical.size).toBe(1); // exactly one canonical record exists
     expect(b.deliveries).toHaveLength(1); // delivery still happens exactly once
   });
 });
 
-describe("G6 screener parent flow — eviction/resume (#2409)", () => {
-  it("eviction mid-poll: fan-out is not repeated, shard progress survives, the collation completes", async () => {
+describe("G6 screener parent flow — engine path (#2409, #4192)", () => {
+  it("fan-out runs each shard once, the collation completes, and a duplicate start never re-runs", async () => {
+    // #4192: no poll loop, no child ops — the engine owns
+    // fan-out. The eviction pin's intent (fan-out not
+    // repeated, shard progress survives, the collation
+    // completes) is now: one adapter start runs every shard
+    // exactly once and projects the terminal rows; a second
+    // start adopts the existing run instead of fanning out
+    // again.
     const b = makeScreenerBundle();
-    const journal = newJournal();
-    const plan = newPlan({ before: new Set(["poll-1"]) });
-
-    // Child ops fake (the binding seam): createChild runs the
-    // real shard flow eagerly under its own journal; the child
-    // reports "running" on its first status read and its real
-    // terminal output afterwards — a child that finishes
-    // between two polls.
-    let createCount = 0;
-    const childOutputs = new Map<string, unknown>();
-    const statusReads = new Map<string, number>();
-    const childOps: ChildWorkflowOps = {
-      createChild: async (cmd) => {
-        createCount++;
-        const workflowId = `child-${cmd.shard?.shardId ?? "?"}`;
-        const out = await runShardFlow(
-          cmd,
-          screenerStep(newJournal(), newPlan(), b.advanceClock),
-          b.deps,
-        );
-        childOutputs.set(workflowId, out);
-        return { workflowId };
-      },
-      getChildStatus: async (workflowId) => {
-        const n = (statusReads.get(workflowId) ?? 0) + 1;
-        statusReads.set(workflowId, n);
-        if (n === 1) return { status: "running" };
-        return { status: "complete", output: childOutputs.get(workflowId) };
-      },
-    };
-
-    // Incarnation 1: announce + fan-out + first poll land in
-    // the journal; the instance is discarded before poll-1.
-    await expect(
-      runParentFlow(parentCommand(), screenerStep(journal, plan, b.advanceClock), b.deps, childOps),
-    ).rejects.toBeInstanceOf(SimulatedEviction);
-    expect(createCount).toBe(2);
-    expect(b.screens).toEqual(["TECH", "HEALTH"]);
-
-    // Incarnation 2: announce and fan-out replay from the
-    // journal — no duplicate children, no re-run screens — and
-    // the journaled poll-0 snapshot (children still running)
-    // replays before poll-1 observes completion.
-    const collation = await runParentFlow(
-      parentCommand(),
-      screenerStep(journal, plan, b.advanceClock),
-      b.deps,
-      childOps,
-    );
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand());
+    expect(h.status).toBe("complete");
+    expect(b.screens.sort()).toEqual(["HEALTH", "TECH"]);
+    expect(b.deliveries).toHaveLength(2); // one delivery per shard, from the single runs
+    const collation = await collationFor(b.store, "job-g6-1");
     expect(collation.lifecycle).toBe("ReportGenerated");
-    expect(createCount).toBe(2);
-    expect(b.screens).toEqual(["TECH", "HEALTH"]);
-    expect(b.deliveries).toHaveLength(2); // one delivery per shard, from the single child runs
+
+    const h2 = await adapter.start(parentCommand());
+    expect(h2.existing).toBe(true);
+    expect(b.screens.sort()).toEqual(["HEALTH", "TECH"]);
+    expect(b.deliveries).toHaveLength(2);
 
     // The projection (the /api/jobs/history tracking home)
     // tells the same story: one parent row at its terminal
@@ -559,6 +519,7 @@ describe("G6 screener status surface — WorkflowPort + projection (#2409)", () 
   it("a failed screen is a truthful terminal failure in the projection (failed shard row, no false completion)", async () => {
     const store = new InMemoryShardJobAdapter();
     let now = 1_000_000;
+    const parentStored: ParentScreenReportInput[] = [];
     const deps: ScreenerWorkflowDeps = {
       screenRunner: {
         runScreen: async (req) => ({
@@ -575,6 +536,10 @@ describe("G6 screener status surface — WorkflowPort + projection (#2409)", () 
       shardStore: store,
       storeReport: async () => {},
       deliverOutcome: async () => {},
+      storeParentReport: async (input) => {
+        parentStored.push(input);
+        return { stored: true, reportId: "parent-1" };
+      },
       nowMs: () => now,
     };
     const adapter = new InMemoryWorkflowAdapter(deps);
@@ -583,6 +548,12 @@ describe("G6 screener status surface — WorkflowPort + projection (#2409)", () 
     );
     const status = await adapter.status(handle.workflowId);
     expect(status?.status).toBe("complete"); // the workflow ran to its terminal collation…
+    // …and the parent canonical row carries the Failed
+    // collation (a market failure throws at analysis, so the
+    // unit never stores or delivers).
+    expect(parentStored).toHaveLength(1);
+    expect(parentStored[0]?.collation.lifecycle).toBe("Failed");
+    expect(parentStored[0]?.collation.error).toMatch(/provider down/);
     const rows = await store.listJobsForChain("tenant-1", "job-g6-fail");
     // …and the collation it projected is an honest failure, not
     // a success. The projector keys FAILED legs by step
@@ -593,8 +564,25 @@ describe("G6 screener status surface — WorkflowPort + projection (#2409)", () 
     expect(rows.find((r) => r.jobKey === "leg:TECH")?.status).toBe("failed");
     expect(rows.find((r) => r.jobKey === "leg:parent")?.status).toBe("failed");
     expect(rows.find((r) => r.jobKey === "leg:parent")?.detail).toContain("qualified partial");
+    expect(rows.find((r) => r.jobKey === "leg:parent")?.detail).toMatch(/Workflow Failed: 0\/1 shards/);
     expect(rows.find((r) => r.jobKey === "shard:TECH")).toBeUndefined();
     void now;
+  });
+
+  it("a shard-role command is refused on the engine path — no child workflows are created (#4192)", async () => {
+    // The retired flow's shard entry point is gone: the
+    // engine dispatches the parent command's shards as job
+    // units, never as child workflows. The dispatch refuses
+    // the role and the adapter records it as an errored
+    // instance (start never throws); nothing screens.
+    const b = makeScreenerBundle();
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(shardCommand());
+    expect(h.status).toBe("errored");
+    expect((await adapter.status(h.workflowId))?.status).toBe("errored");
+    expect(b.screens).toHaveLength(0);
+    expect(b.storePayloads).toHaveLength(0);
+    expect(b.deliveries).toHaveLength(0);
   });
 });
 
@@ -1234,12 +1222,27 @@ describe("G6 payment submission — idempotent retry at the caller seam (#2409)"
 /* Screener honest run states — the #462/#1963 partial contract        */
 /* ------------------------------------------------------------------ */
 
-describe("G6 screener parent flow — honest partial (#462/#1963 contract, #2409)", () => {
-  it("a partial run is honestly partial: the collation is qualified, the failed shard is recorded failed, the completed shard completed", async () => {
+describe("G6 screener parent flow — honest failure (#462/#1963 contract, #2409, #4192)", () => {
+  it("a failed shard fails the run honestly: Failed collation, every shard failed, nothing stored or delivered", async () => {
     const b = makeScreenerBundle();
-    // Universe-aware runner: HEALTH's screen fails (its store/
-    // deliver still run — the child owns a canonical record of
-    // the attempt, per the shard flow's contract).
+    // Universe-aware runner: HEALTH's screen fails.
+    // #4192 — ENGINE GAP, reported, not worked around: the
+    // #462/#1963 qualified-partial shape (TECH completes and
+    // stores while HEALTH fails) has NO engine equivalent for
+    // a market-screen failure. A market failure throws at
+    // analysis, the unit fails fast RUN-WIDE, and the composer
+    // fails every shard — TECH's screen ran but its output
+    // never reached the store, so it lands as "never reached
+    // analysis" (src/workflows/screenerCollation.ts:454) and
+    // the collation is Failed 0/2 with zero stores or
+    // deliveries. (The cutover suite pins the same fail-fast
+    // shape for a feed outage.) A qualified partial on the
+    // engine arises only from composer-level failures — a
+    // malformed stage output (anchor suite) or a failed goal
+    // leg (cutover suite) — never from a failing market
+    // screen. What survives here is the honesty half of the
+    // contract: the failure is on the record per shard, never
+    // a silent full success and never an invented partial.
     b.deps.screenRunner.runScreen = async (req) => {
       b.screens.push(req.universe);
       const ok = req.universe !== "HEALTH";
@@ -1251,48 +1254,44 @@ describe("G6 screener parent flow — honest partial (#462/#1963 contract, #2409
         matchedCount: ok ? 2 : 0,
         universe: req.universe,
         ...(ok ? {} : { error: "provider down" }),
-        full: { marker: "full-result", universe: req.universe },
+        full: {
+          marker: "full-result",
+          universe: req.universe,
+          timestamp: "2026-10-30T12:00:00.000Z",
+        },
       } as ShardScreenResult;
     };
-    const childOutputs = new Map<string, unknown>();
-    const childOps: ChildWorkflowOps = {
-      createChild: async (cmd) => {
-        const workflowId = `child-${cmd.shard?.shardId ?? "?"}`;
-        const out = await runShardFlow(
-          cmd,
-          screenerStep(newJournal(), newPlan(), b.advanceClock),
-          b.deps,
-        );
-        childOutputs.set(workflowId, out);
-        return { workflowId };
-      },
-      getChildStatus: async (workflowId) => ({
-        status: "complete",
-        output: childOutputs.get(workflowId),
-      }),
-    };
-
-    const collation = await runParentFlow(
-      parentCommand(),
-      screenerStep(newJournal(), newPlan(), b.advanceClock),
-      b.deps,
-      childOps,
-    );
-    // The collation's honesty contract (documented on
-    // collateShards itself): a run with a failed shard is
-    // QUALIFIED — the partial is on the record, never a silent
-    // full success — with per-shard outcomes carrying the
-    // failure. ("ReportGenerated" as a lifecycle describes the
-    // report artifact every completed-and-stored shard fed;
-    // the qualification is what keeps it honest.)
-    expect(collation.qualified).toBe(true);
-    expect(collation.shards.find((s) => s.shardId === "TECH")?.status).toBe("completed");
-    expect(collation.shards.find((s) => s.shardId === "HEALTH")?.status).toBe("failed");
+    const adapter = new InMemoryWorkflowAdapter(b.deps);
+    const h = await adapter.start(parentCommand());
+    expect(h.status).toBe("complete");
+    // Both screens ran, but the run failed before either
+    // shard stored or delivered.
+    expect(b.screens.sort()).toEqual(["HEALTH", "TECH"]);
+    expect(b.storePayloads).toHaveLength(0);
+    expect(b.deliveries).toHaveLength(0);
+    // The parent canonical row carries the Failed collation
+    // (the projected parent row itself stays the submitted
+    // announce row — the failure lives at leg:parent).
+    expect(b.parentStored).toHaveLength(1);
+    const collation = b.parentStored[0]?.collation;
+    expect(collation?.lifecycle).toBe("Failed");
+    expect(collation?.qualified).toBe(true);
+    // collateShards takes the FIRST outcome's error for the
+    // collation: TECH's "never reached analysis" (the
+    // provider's own "provider down" lives on HEALTH's
+    // outcome, asserted below).
+    expect(collation?.error).toMatch(/never reached analysis/);
+    const shards = (collation?.shards ?? []) as { shardId: string; status: string; error?: string }[];
+    expect(shards.find((s) => s.shardId === "TECH")?.status).toBe("failed");
+    expect(shards.find((s) => s.shardId === "TECH")?.error).toMatch(/never reached analysis/);
+    expect(shards.find((s) => s.shardId === "HEALTH")?.status).toBe("failed");
+    expect(shards.find((s) => s.shardId === "HEALTH")?.error).toMatch(/provider down/);
     const rows = await b.store.listJobsForChain("tenant-1", "job-g6-1");
-    expect(rows.find((r) => r.jobKey === "shard:TECH")?.status).toBe("completed");
+    expect(rows.find((r) => r.jobKey === "shard:TECH")).toBeUndefined();
+    expect(rows.find((r) => r.jobKey === "leg:TECH")?.status).toBe("failed");
     expect(rows.find((r) => r.jobKey === "leg:HEALTH")?.status).toBe("failed");
-    expect(rows.find((r) => r.jobKey === "job-g6-1")?.status).toBe("completed");
-    expect(rows.find((r) => r.jobKey === "job-g6-1")?.detail).toContain("qualified partial");
+    expect(rows.find((r) => r.jobKey === "leg:parent")?.status).toBe("failed");
+    expect(rows.find((r) => r.jobKey === "leg:parent")?.detail).toMatch(/Workflow Failed: 0\/2 shards/);
   });
 });
 

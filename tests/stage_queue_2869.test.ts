@@ -17,7 +17,7 @@ import {
   missingBatchManifest,
   planBatches,
 } from "../src/workflows/stageBatching";
-import { collateShards } from "../src/workflows/screenerWorkflowFlow";
+import { collateShards } from "../src/workflows/screenerCollation";
 
 function analysisDoneMessage(overrides: Record<string, unknown> = {}) {
   return stageMessage({

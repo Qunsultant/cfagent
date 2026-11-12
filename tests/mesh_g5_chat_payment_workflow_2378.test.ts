@@ -40,7 +40,7 @@ import { InMemoryShardJobAdapter } from "../src/data/inMemoryShardJobAdapter";
 import type {
   ScreenerWorkflowDeps,
   ShardScreenResult,
-} from "../src/workflows/screenerWorkflowFlow";
+} from "../src/workflows/screenerCollation";
 import type {
   WorkflowJobCommand,
   WorkflowPort,
