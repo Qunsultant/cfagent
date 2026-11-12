@@ -236,6 +236,9 @@ describe("pipeline feed-jobs routes (#3535)", () => {
       "yahoo-sector-health-care-quotes",
       "yahoo-sector-financials-quotes",
       "yahoo-sector-information-technology-quotes",
+      "yahoo-sector-communication-services-quotes",
+      "yahoo-sector-utilities-quotes",
+      "yahoo-sector-real-estate-quotes",
     ]);
     const alpaca = await callRoute(ctx, "GET", "/data-providers/alpaca/feed-jobs");
     const alpacaBody = (await alpaca.json()) as { jobs: FeedJobSurfaceView[] };
@@ -253,7 +256,7 @@ describe("pipeline feed-jobs routes (#3535)", () => {
     const body = (await res.json()) as any;
     const yahoo = body.providers.find((p: any) => p.id === "yahoo");
     expect(Array.isArray(yahoo.feedJobs)).toBe(true);
-    expect(yahoo.feedJobs).toHaveLength(16);
+    expect(yahoo.feedJobs).toHaveLength(19);
     expect(yahoo.feedJobs[0]).toMatchObject({ jobId: YAHOO_NASDAQ100_QUOTES_JOB_ID, feed: { state: "never-run" } });
   });
 

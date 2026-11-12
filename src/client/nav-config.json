@@ -1508,6 +1508,12 @@
           "icon": "Runs"
         },
         {
+          "id": "products",
+          "label": "Products",
+          "description": "Product + version configuration, bulk moves",
+          "icon": "Billing"
+        },
+        {
           "id": "iaaa-admin",
           "label": "IAAA Admin",
           "description": "Read-only memberships, genesis & audit",

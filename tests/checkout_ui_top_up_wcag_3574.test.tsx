@@ -662,14 +662,23 @@ describe("top-up journey contrast + target sizes (#3574)", () => {
     expect(minHeight(".ui-btn.size-md")).toBeGreaterThanOrEqual(24);
     expect(minHeight(".ui-btn.size-sm")).toBeGreaterThanOrEqual(24);
     // Inputs and tabs carry no min-height; their height comes from vertical
-    // padding + 14px text: input-md 0.5rem (8px) top/bottom, tab-md 0.85rem
-    // (13.6px) top/bottom — both clear 24px at any line-height ≥ 1.
+    // padding + 14px text: input-md --space-2 (8px) top/bottom, tab-md
+    // --space-3 (12px) top/bottom — both clear 24px at any line-height ≥ 1.
+    // (#3135 tokenized the raw rem paddings; vPad resolves var(--space-*)
+    // through the frozen scale in tokens.css instead of parsing a raw rem.)
+    const spacePx = (name: string): number => {
+      const m = cssText.match(new RegExp(`--${name}:\\s*([0-9.]+)rem`));
+      if (!m) throw new Error(`No space token --${name} in tokens.css`);
+      return parseFloat(m[1]) * 16;
+    };
     const vPad = (selector: string): number => {
       const m = primitives.match(
-        new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^}]*padding:\\s*([0-9.]+)rem`),
+        new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^}]*padding:\\s*(?:([0-9.]+)rem|var\\((--[\\w-]+)\\))`),
       );
       if (!m) throw new Error(`No padding found for ${selector}`);
-      return parseFloat(m[1]) * 16;
+      if (m[1] !== undefined) return parseFloat(m[1]) * 16;
+      if (m[2].startsWith("--space-")) return spacePx(m[2].slice(2));
+      throw new Error(`Unsupported padding token ${m[2]} for ${selector}`);
     };
     expect(2 * vPad(".ui-input.size-md") + 14).toBeGreaterThanOrEqual(24);
     expect(2 * vPad(".ui-tabs.size-md .ui-tab") + 14).toBeGreaterThanOrEqual(24);

@@ -362,6 +362,14 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
     return rows.map(toSubscription);
   }
 
+  async listAllSubscriptions(): Promise<SubscriptionRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(agentSubscriptions)
+      .orderBy(asc(agentSubscriptions.userId), asc(agentSubscriptions.id));
+    return rows.map(toSubscription);
+  }
+
   async findByProviderSubscriptionId(providerSubscriptionId: string): Promise<SubscriptionRecord | null> {
     if (!providerSubscriptionId) return null;
     const rows = await this.db

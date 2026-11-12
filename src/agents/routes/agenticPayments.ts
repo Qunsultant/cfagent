@@ -111,7 +111,7 @@ import { createBillingCheckoutPorts, type BillingCheckoutEnv } from "../../servi
 import { createBillingPorts, type BillingEnv } from "../../services/createBillingPorts";
 import { StripePaymentStrategy } from "../../patterns/paymentStrategies";
 
-import { PROPOSED_SEED_PRICES } from "../../data/priceCataloguePorts";
+import { PRICE_FAMILIES, PROPOSED_SEED_PRICES, assertPriceFamily, type PriceEntry } from "../../data/priceCataloguePorts";
 import {
   createPriceCatalogueAdapter,
   ensurePriceCatalogueSchema,
@@ -232,7 +232,7 @@ import {
 } from "../../data/createCfpayChannelPorts";
 import type { ChannelDraft } from "../../data/cfpayChannelPorts";
 import type { D1SubscriptionAdapter } from "../../data/d1SubscriptionAdapter";
-import { isPlanPriceApproved, resolveEffectiveTier, resolveTierTransition } from "../../data/subscriptionPorts";
+import { isPlanPriceApproved, resolveEffectiveTier, resolveTierTransition, type SubscriptionPlanRecord } from "../../data/subscriptionPorts";
 import {
   NO_ACCOUNT_PAID_MESSAGE,
   resolvePlatformIdentity,
@@ -250,8 +250,8 @@ import {
   ensureProductSchema,
 } from "../../data/createProductPorts";
 import type { D1ProductAdapter } from "../../data/d1ProductAdapter";
-import { resolveEffectiveVersion } from "../../data/productPorts";
-import { moveSubscriptionToVersion, setAccountSegment } from "../../services/versionMoves";
+import { FREE_PRODUCT_ID, perRunProductId, resolveEffectiveVersion } from "../../data/productPorts";
+import { moveSubscriptionToVersion, runBulkMove, setAccountSegment } from "../../services/versionMoves";
 import {
   createLifecycleAdapter,
   ensureLifecycleSchema,
@@ -4575,6 +4575,649 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           ? 400
           : 500;
       return Response.json({ error: message }, { status });
+    }
+  }
+
+  // Issue #3289 slice 2 — Products admin routes (operator only).
+  // The Products section's reads and writes: product identity,
+  // version chains, version approve/deactivate, catalogue
+  // version chains + creation, and the bulk-move job. All
+  // operator-only, all audited (commercial.product.* for the
+  // new actions; the approve/deactivate actions reuse the
+  // existing commercial.plan.* audit events — a version
+  // approve IS a plan approve, addressed by version id).
+  // Reads never ensure the schema (no writes on a read path);
+  // writes ensure first. Same-start version ties are allowed
+  // (design §13 deviation 20): no route rejects a duplicate
+  // effectiveFromMs — the resolver tiebreaks by version.
+  const familyForProductId = (productId: string): (typeof PRICE_FAMILIES)[number] | null =>
+    PRICE_FAMILIES.find((family) => perRunProductId(family) === productId) ?? null;
+  const loadProductVersions = async (
+    product: { id: string; kind: string },
+    subs: D1SubscriptionAdapter,
+    catalogue: ReturnType<typeof createPriceCatalogueAdapter>,
+    segment?: string,
+  ): Promise<SubscriptionPlanRecord[] | PriceEntry[]> => {
+    if (product.kind === "subscription") {
+      return subs.listVersions(product.id, segment);
+    }
+    const family = familyForProductId(product.id);
+    if (!family || !catalogue) return [];
+    return catalogue.listVersions(family, segment);
+  };
+
+  // GET /payments/agentic/commercial/products (operator only) —
+  // the Products section's data source: every product with its
+  // full version chain embedded (all segments; the UI groups
+  // by segment and marks the effective version per segment
+  // with the one resolver). Free (prod-free) rides along as
+  // the read-only baseline row with no versions.
+  if (path.endsWith("/payments/agentic/commercial/products") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
+      const listed = await products.listProducts();
+      const withVersions = [];
+      for (const product of listed) {
+        withVersions.push({
+          product,
+          versions: await loadProductVersions(product, subs, catalogue),
+        });
+      }
+      return Response.json({ products: withVersions });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to list products." }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/products (operator only) —
+  // create a product (identity only; versions are created
+  // separately). The id is server-generated unless the caller
+  // supplies one; the name + kind are operator data.
+  if (path.endsWith("/payments/agentic/commercial/products") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        id?: unknown;
+        name?: unknown;
+        kind?: unknown;
+        description?: unknown;
+      };
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      try {
+        await ensureProductSchema(products.db);
+      } catch (err: any) {
+        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const product = await products.createProduct(body);
+      ctx.audit("commercial.product.created", "payments", {
+        productId: product.id,
+        name: product.name,
+        kind: product.kind,
+        createdBy: login,
+      });
+      return Response.json({ product });
+    } catch (err: any) {
+      const message = err.message || "Failed to create product.";
+      const status = /required|Invalid|must be/.test(message) ? 400 : /already exists/.test(message) ? 409 : 500;
+      return Response.json({ error: message }, { status });
+    }
+  }
+
+  // GET /payments/agentic/commercial/products/:productId/versions
+  // (operator only) — the full version chain for one product,
+  // optionally narrowed to one segment (?segment=). The admin
+  // chain read; buyers never see it (GET /plans stays the
+  // effective-only per-segment buyer read).
+  if (
+    path.includes("/payments/agentic/commercial/products/") &&
+    path.endsWith("/versions") &&
+    request.method === "GET"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      let productId = parts[parts.indexOf("products") + 1] ?? "";
+      try {
+        productId = decodeURIComponent(productId);
+      } catch {
+        // Keep the raw segment; the lookup below 404s on it.
+      }
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
+      const product = await products.getProduct(productId);
+      if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      const segment = url.searchParams.get("segment") ?? undefined;
+      const versions = await loadProductVersions(product, subs, catalogue, segment);
+      return Response.json({ product, versions });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to read version chain." }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/products/:productId/versions
+  // (operator only) — create a version of a subscription
+  // product. The version lands PROPOSED with a server-assigned
+  // number (max + 1 for the product+segment); approval is the
+  // separate approve action. A price change is never an
+  // in-place edit: it is always a new version. The Free
+  // baseline (prod-free) carries no versions and refuses.
+  if (
+    path.includes("/payments/agentic/commercial/products/") &&
+    path.endsWith("/versions") &&
+    request.method === "POST"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      let productId = parts[parts.indexOf("products") + 1] ?? "";
+      try {
+        productId = decodeURIComponent(productId);
+      } catch {
+        // Keep the raw segment; the lookup below 404s on it.
+      }
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const priceUSD = body.priceUSD;
+      if (typeof priceUSD !== "number" || !Number.isFinite(priceUSD) || priceUSD < 0) {
+        return Response.json({ error: "priceUSD must be a finite non-negative number." }, { status: 400 });
+      }
+      const periodDays = body.periodDays;
+      if (typeof periodDays !== "number" || !Number.isInteger(periodDays) || periodDays <= 0) {
+        return Response.json({ error: "periodDays must be a positive integer." }, { status: 400 });
+      }
+      const includedRuns = body.includedRuns;
+      if (typeof includedRuns !== "number" || !Number.isInteger(includedRuns) || includedRuns < 0) {
+        return Response.json({ error: "includedRuns must be a non-negative integer." }, { status: 400 });
+      }
+      const trialDays = body.trialDays ?? null;
+      if (trialDays !== null && (typeof trialDays !== "number" || !Number.isInteger(trialDays) || trialDays < 0)) {
+        return Response.json({ error: "trialDays must be null or a non-negative integer." }, { status: 400 });
+      }
+      const segment = typeof body.segment === "string" && body.segment.trim() ? body.segment.trim() : "default";
+      const effectiveFromMs =
+        body.effectiveFromMs === undefined || body.effectiveFromMs === null ? Date.now() : body.effectiveFromMs;
+      if (typeof effectiveFromMs !== "number" || !Number.isFinite(effectiveFromMs) || effectiveFromMs < 0) {
+        return Response.json({ error: "effectiveFromMs must be a non-negative epoch-ms number." }, { status: 400 });
+      }
+      const effectiveToMs = body.effectiveToMs ?? null;
+      if (
+        effectiveToMs !== null &&
+        (typeof effectiveToMs !== "number" || !Number.isFinite(effectiveToMs) || effectiveToMs <= effectiveFromMs)
+      ) {
+        return Response.json(
+          { error: "effectiveToMs must be an epoch-ms number after effectiveFromMs when present." },
+          { status: 400 },
+        );
+      }
+      const billingPeriod = body.billingPeriod ?? null;
+      if (billingPeriod !== null && billingPeriod !== "monthly" && billingPeriod !== "annual") {
+        return Response.json({ error: 'billingPeriod must be "monthly" or "annual" when present.' }, { status: 400 });
+      }
+      let featuresJson: string | null = null;
+      if (body.features !== undefined && body.features !== null) {
+        if (!Array.isArray(body.features) || body.features.some((f) => typeof f !== "string")) {
+          return Response.json({ error: "features must be an array of strings when present." }, { status: 400 });
+        }
+        featuresJson = JSON.stringify(body.features);
+      }
+      const stripePriceId =
+        body.stripePriceId === undefined || body.stripePriceId === null
+          ? null
+          : typeof body.stripePriceId === "string" && body.stripePriceId.trim()
+            ? body.stripePriceId.trim()
+            : null;
+      if (body.stripePriceId !== undefined && body.stripePriceId !== null && typeof body.stripePriceId !== "string") {
+        return Response.json({ error: "stripePriceId must be a string when present." }, { status: 400 });
+      }
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      try {
+        await ensureProductSchema(products.db);
+      } catch (err: any) {
+        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const product = await products.getProduct(productId);
+      if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      if (product.id === FREE_PRODUCT_ID) {
+        return Response.json(
+          { error: "The Free baseline carries no versions: it is a read-only baseline, never purchasable." },
+          { status: 409 },
+        );
+      }
+      if (product.kind !== "subscription") {
+        return Response.json(
+          { error: "Per-run product versions are catalogue versions: create them via the catalogue versions route." },
+          { status: 400 },
+        );
+      }
+      const plan = await subs.createPlan({
+        name: product.name,
+        priceUSD,
+        periodDays,
+        includedRuns,
+        trialDays,
+        productId: product.id,
+        segment,
+        effectiveFromMs,
+        effectiveToMs,
+        billingPeriod,
+        featuresJson,
+        stripePriceId,
+      });
+      ctx.audit("commercial.product.version.created", "payments", {
+        productId: product.id,
+        versionId: plan.id,
+        version: plan.version,
+        segment: plan.segment,
+        priceUSD: plan.priceUSD,
+        createdBy: login,
+      });
+      return Response.json({ plan });
+    } catch (err: any) {
+      const message = err.message || "Failed to create version.";
+      const status = /required|must be|Invalid/.test(message) ? 400 : 500;
+      return Response.json({ error: message }, { status });
+    }
+  }
+
+  // POST /payments/agentic/commercial/products/:productId/versions/:versionId/approve
+  // (operator only) — approve a plan version: the FIRST UI for
+  // the existing approve action, addressed by version id. The
+  // audit event and outcome shape match POST /plans/approve
+  // exactly — one approval action, not a second one.
+  if (
+    path.includes("/payments/agentic/commercial/products/") &&
+    path.endsWith("/approve") &&
+    request.method === "POST"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      let productId = parts[parts.indexOf("products") + 1] ?? "";
+      let versionId = parts[parts.indexOf("versions") + 1] ?? "";
+      try {
+        productId = decodeURIComponent(productId);
+        versionId = decodeURIComponent(versionId);
+      } catch {
+        // Keep the raw segments; the lookups below 404 on them.
+      }
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const product = await products.getProduct(productId);
+      if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      const existing = await subs.getPlan(versionId);
+      if (!existing || existing.productId !== productId) {
+        return Response.json({ error: `No version ${versionId} for product ${productId}.` }, { status: 404 });
+      }
+      const plan = await subs.approvePlan(versionId, login);
+      const approved = resolveOutcome("SUCCESS_PLAN_APPROVED");
+      ctx.audit("commercial.plan.approved", "payments", {
+        code: approved.code,
+        message: approved.businessMessage,
+        login,
+        planId: plan.id,
+        approvedBy: login,
+      });
+      return Response.json({ plan, code: approved.code, message: approved.businessMessage, retryable: approved.entry?.retryable ?? false });
+    } catch (err: any) {
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      const message = err.message || "Failed to approve version.";
+      return Response.json({ error: message }, { status: /No plan/.test(message) ? 404 : 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/products/:productId/versions/:versionId/deactivate
+  // (operator only) — deactivate a version: blocks NEW
+  // purchases only; holders ride to period end or plan change.
+  // Mirrors POST /plans/deactivate exactly.
+  if (
+    path.includes("/payments/agentic/commercial/products/") &&
+    path.endsWith("/deactivate") &&
+    request.method === "POST"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      let productId = parts[parts.indexOf("products") + 1] ?? "";
+      let versionId = parts[parts.indexOf("versions") + 1] ?? "";
+      try {
+        productId = decodeURIComponent(productId);
+        versionId = decodeURIComponent(versionId);
+      } catch {
+        // Keep the raw segments; the lookups below 404 on them.
+      }
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const product = await products.getProduct(productId);
+      if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      const existing = await subs.getPlan(versionId);
+      if (!existing || existing.productId !== productId) {
+        return Response.json({ error: `No version ${versionId} for product ${productId}.` }, { status: 404 });
+      }
+      const plan = await subs.deactivatePlan(versionId);
+      ctx.audit("commercial.plan.deactivated", "payments", { planId: plan.id });
+      return Response.json({ plan });
+    } catch (err: any) {
+      const message = err.message || "Failed to deactivate version.";
+      return Response.json({ error: message }, { status: /No plan/.test(message) ? 404 : 500 });
+    }
+  }
+
+  // GET /payments/agentic/commercial/catalogue/versions?productId=
+  // (operator only) — the catalogue version chain for one
+  // per-run product, optionally narrowed to one segment
+  // (?segment=). Catalogue approval stays in #2739's UI: this
+  // read shows approval status, never approves.
+  if (path.endsWith("/payments/agentic/commercial/catalogue/versions") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const productId = url.searchParams.get("productId") ?? "";
+      if (!productId) return Response.json({ error: "productId is required." }, { status: 400 });
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (!catalogue) {
+        return Response.json({ error: "Price catalogue unavailable: AGENT_DB is not bound." }, { status: 503 });
+      }
+      const product = await products.getProduct(productId);
+      if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      if (product.kind !== "per_run") {
+        return Response.json({ error: "Catalogue versions exist for per-run products only." }, { status: 400 });
+      }
+      const family = familyForProductId(product.id);
+      const segment = url.searchParams.get("segment") ?? undefined;
+      const versions = family ? await catalogue.listVersions(family, segment) : [];
+      return Response.json({ product, versions });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to read catalogue versions." }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/catalogue/versions
+  // (operator only) — create a catalogue version for a
+  // family+segment. The version lands PROPOSED; approval is
+  // #2739's action on the POST /prices route. This is the
+  // versioned write path setPrice delegates to; the audit
+  // event matches setPrice (commercial.price.set) — one price
+  // vocabulary, not a second one.
+  if (path.endsWith("/payments/agentic/commercial/catalogue/versions") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      let family;
+      try {
+        family = assertPriceFamily(body.family);
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Invalid family." }, { status: 400 });
+      }
+      const priceUSD = body.priceUSD;
+      if (typeof priceUSD !== "number" || !Number.isFinite(priceUSD) || priceUSD < 0) {
+        return Response.json({ error: "priceUSD must be a finite non-negative number." }, { status: 400 });
+      }
+      const segment = typeof body.segment === "string" && body.segment.trim() ? body.segment.trim() : "default";
+      const effectiveFromMs =
+        body.effectiveFromMs === undefined || body.effectiveFromMs === null ? Date.now() : body.effectiveFromMs;
+      if (typeof effectiveFromMs !== "number" || !Number.isFinite(effectiveFromMs) || effectiveFromMs < 0) {
+        return Response.json({ error: "effectiveFromMs must be a non-negative epoch-ms number." }, { status: 400 });
+      }
+      const effectiveToMs = body.effectiveToMs ?? null;
+      if (
+        effectiveToMs !== null &&
+        (typeof effectiveToMs !== "number" || !Number.isFinite(effectiveToMs) || effectiveToMs <= effectiveFromMs)
+      ) {
+        return Response.json(
+          { error: "effectiveToMs must be an epoch-ms number after effectiveFromMs when present." },
+          { status: 400 },
+        );
+      }
+      const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (!catalogue) {
+        return Response.json({ error: "Price catalogue unavailable: AGENT_DB is not bound." }, { status: 503 });
+      }
+      try {
+        await ensurePriceCatalogueSchema(catalogue.db);
+      } catch (err: any) {
+        return Response.json({ error: `Price catalogue unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const entry = await catalogue.createVersion({ family, priceUSD, segment, effectiveFromMs, effectiveToMs });
+      ctx.audit("commercial.price.set", "payments", { family: entry.family, priceUSD: entry.priceUSD });
+      return Response.json({ entry });
+    } catch (err: any) {
+      const message = err.message || "Failed to create catalogue version.";
+      return Response.json({ error: message }, { status: /Invalid|must be/.test(message) ? 400 : 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/products/:productId/bulk-move
+  // (operator only) — "move all customers to current pricing":
+  // every live holder of a non-current version of the product
+  // moves to their own segment's current effective version.
+  // Body: { segmentScope?: string | null, reason, dryRun?,
+  // resumeBulkMoveId?, limit? }. A dry run resolves targets +
+  // counts the population and moves nobody (the confirmation
+  // screen's data); a resume continues a running bulk move.
+  // Runs synchronously with a row cap; per-customer failures
+  // are recorded and counted, never fatal. Audited
+  // commercial.product.bulk_move (real runs only — a dry run
+  // is a read and writes nothing).
+  if (
+    path.includes("/payments/agentic/commercial/products/") &&
+    path.endsWith("/bulk-move") &&
+    request.method === "POST"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      let productId = parts[parts.indexOf("products") + 1] ?? "";
+      try {
+        productId = decodeURIComponent(productId);
+      } catch {
+        // Keep the raw segment; the driver 404s on it.
+      }
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+      if (!reason) {
+        return Response.json({ error: "reason is required: a bulk move is an explicit operator action with an audit trail." }, { status: 400 });
+      }
+      const segmentScope =
+        body.segmentScope === undefined || body.segmentScope === null
+          ? null
+          : typeof body.segmentScope === "string" && body.segmentScope.trim()
+            ? body.segmentScope.trim()
+            : null;
+      if (body.segmentScope !== undefined && body.segmentScope !== null && typeof body.segmentScope !== "string") {
+        return Response.json({ error: "segmentScope must be a string or null." }, { status: 400 });
+      }
+      const dryRun = body.dryRun === true;
+      const resumeBulkMoveId =
+        typeof body.resumeBulkMoveId === "string" && body.resumeBulkMoveId.trim()
+          ? body.resumeBulkMoveId.trim()
+          : undefined;
+      const limit = body.limit === undefined || body.limit === null ? undefined : body.limit;
+      if (limit !== undefined && (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0)) {
+        return Response.json({ error: "limit must be a positive integer." }, { status: 400 });
+      }
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      try {
+        await ensureProductSchema(products.db);
+      } catch (err: any) {
+        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const result = await runBulkMove({
+        subs,
+        store,
+        products,
+        productId,
+        segmentScope,
+        movedBy: login,
+        reason,
+        ...(resumeBulkMoveId ? { resumeBulkMoveId } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+        dryRun,
+      });
+      if (!dryRun && result.bulkMove) {
+        ctx.audit("commercial.product.bulk_move", "payments", {
+          bulkMoveId: result.bulkMove.id,
+          productId,
+          segmentScope: result.bulkMove.segmentScope,
+          movedCount: result.bulkMove.movedCount,
+          skippedCount: result.bulkMove.skippedCount,
+          failedCount: result.bulkMove.failedCount,
+          status: result.bulkMove.status,
+          hasMore: result.hasMore,
+          movedBy: login,
+          reason,
+        });
+      }
+      return Response.json(result);
+    } catch (err: any) {
+      const message = err.message || "Failed to run bulk move.";
+      const status = /No product|No bulk move/.test(message)
+        ? 404
+        : /only a running bulk move|belongs to product/.test(message)
+          ? 409
+          : /required|must be|subscription products only/.test(message)
+            ? 400
+            : 500;
+      return Response.json({ error: message }, { status });
+    }
+  }
+
+  // GET /payments/agentic/commercial/products/:productId/bulk-moves
+  // (operator only) — the bulk-move summaries for one product,
+  // newest first.
+  if (
+    path.includes("/payments/agentic/commercial/products/") &&
+    path.endsWith("/bulk-moves") &&
+    request.method === "GET"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      let productId = parts[parts.indexOf("products") + 1] ?? "";
+      try {
+        productId = decodeURIComponent(productId);
+      } catch {
+        // Keep the raw segment; the lookup below 404s on it.
+      }
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const product = await products.getProduct(productId);
+      if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      const bulkMoves = await products.listBulkMoves(productId);
+      return Response.json({ bulkMoves });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to list bulk moves." }, { status: 500 });
+    }
+  }
+
+  // GET /payments/agentic/commercial/products/:productId/bulk-moves/:bulkMoveId
+  // (operator only) — one bulk-move summary plus its
+  // per-customer move rows (the audit that answers "who moved,
+  // from what, to what").
+  if (
+    path.includes("/payments/agentic/commercial/products/") &&
+    path.includes("/bulk-moves/") &&
+    request.method === "GET"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      let productId = parts[parts.indexOf("products") + 1] ?? "";
+      let bulkMoveId = parts[parts.indexOf("bulk-moves") + 1] ?? "";
+      try {
+        productId = decodeURIComponent(productId);
+        bulkMoveId = decodeURIComponent(bulkMoveId);
+      } catch {
+        // Keep the raw segments; the lookups below 404 on them.
+      }
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const bulkMove = await products.getBulkMove(bulkMoveId);
+      if (!bulkMove || bulkMove.productId !== productId) {
+        return Response.json({ error: `No bulk move ${bulkMoveId} for product ${productId}.` }, { status: 404 });
+      }
+      const moves = await products.listMovesForBulkMove(bulkMoveId);
+      return Response.json({ bulkMove, moves });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to read bulk move." }, { status: 500 });
     }
   }
 
