@@ -280,8 +280,13 @@ describe("feed job registry (#3530 S2)", () => {
     // the S2 jobs below are asserted unchanged within the composed list.
     expect(registry.list().map((j) => j.id).sort()).toEqual([
       "alpaca-nasdaq100-quotes",
+      // #4065: one options-chains job per optionsChains-serving
+      // source (one definition each, parameterized by universe).
+      "alpaca-options-chains",
       "etrade-nasdaq100-quotes",
+      "etrade-options-chains",
       "public-nasdaq100-quotes",
+      "public-options-chains",
       "yahoo-dow-quotes",
       "yahoo-nasdaq100-fundamentals",
       "yahoo-nasdaq100-quotes",

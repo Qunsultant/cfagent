@@ -1,6 +1,6 @@
 /**
  * Issue #3186 (step 3e) - the strategy leg's behavior pin: the panel
- * path through the one pipeline reproduces runPanelPipeline EXACTLY.
+ * path through the one pipeline reproduces runPanelPipelineRetired4068 EXACTLY.
  * Same fake agents + same request on both paths; the pipeline's
  * shapeReport artifact, mapped through runPanelWithAgents' own
  * mapping, deep-equals the direct PipelineResult.
@@ -110,7 +110,7 @@ function toPipelineResult(panel: Record<string, any>): Record<string, unknown> {
 }
 
 describe("strategy leg through the one pipeline (#3186 step 3e)", () => {
-  it("reproduces runPanelPipeline exactly", async () => {
+  it("reproduces runPanelPipelineRetired4068 exactly", async () => {
     const agents = fakeAgents();
     const request = {
       symbol: "AAPL",

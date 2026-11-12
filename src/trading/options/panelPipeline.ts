@@ -7,6 +7,9 @@
  * (RecommendationService.discoverPanel) and proved probe parity. The
  * #1256 remainder retires the class itself: its constructor + run()
  * move here VERBATIM as runPanelPipeline / runPanelWithAgents —
+ * (the former was retired by rename to runPanelPipelineRetired4068
+ * under #4068; its successor is runOptionsPanelViaEngine, the
+ * engine-routed panel).
  * same kernel call, same mapping back to PipelineResult (snapshot
  * reconstructed from the kernel snapshot; strategies IS the engine
  * build result the kernel wrapped, full built set with scoreWeights
@@ -119,8 +122,15 @@ export async function runPanelWithAgents(
  * Run the panel pipeline, constructing the agents exactly as the
  * retired class's constructor did (data agent over the given
  * screener, fresh risk + recommender agents).
+ *
+ * @deprecated Issue #4068 — retired by rename: the direct panel bypass.
+ * Superseded by src/workflows/optionsScreenEngine.ts (runOptionsPanelViaEngine),
+ * which runs the same panel through the one engine-routed workflow.
+ * This function is frozen: no production caller remains; tests that pin the
+ * panel decomposition keep calling it. Recorded in
+ * docs/architecture/transition/deprecations.md.
  */
-export async function runPanelPipeline(
+export async function runPanelPipelineRetired4068(
   screener: DynamicOptionsScreener,
   request: StrategyRequest,
   options: PipelineOptions = {},

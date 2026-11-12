@@ -16,9 +16,9 @@ export interface PageTemplateSlots {
   contextStrip?: React.ReactNode;
   /** Headline numbers as label/value rows — KpiRibbon (#3132). */
   kpiRibbon?: React.ReactNode;
-  /** The answer-before-detail bar — ActionBar (#3134). */
+  /** The closing actions bar — ActionBar (#3134). */
   actionBar?: React.ReactNode;
-  /** The side rail — QueueFeed (#3134). */
+  /** The closing queue/feed section — QueueFeed (#3134). */
   queueRail?: React.ReactNode;
 }
 

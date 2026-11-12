@@ -1,13 +1,14 @@
 /**
  * Issue #3186 step 3e - the per-symbol options shard scan runs
  * through the one scanner pipeline instead of the direct
- * UnifiedOptionsService.scanOpportunities call. Pin: executeShardJob
+ * UnifiedOptionsService.scanOpportunitiesRetired4068 call. Pin: executeShardJob
  * for one symbol returns exactly what the direct call returns (same
  * engine, same template, same chain-timestamp `now` override), and
  * the skipped-verdict retry contract is preserved (a symbol with no
  * chain throws so the acquisition bucket retries it).
  */
 import { describe, expect, it, vi } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { executeShardJob, type ShardExecutorDeps } from "../src/services/shardExecutors";
 import { DatabaseORM } from "../src/orm";
 import { UnifiedOptionsService } from "../src/trading";
@@ -64,10 +65,30 @@ function stripVolatile(value: unknown): unknown {
   return value;
 }
 
+/** Real in-memory SQLite for the shard executor's SQL handle (issue #4068):
+ * site 9 routes the engine run record over `deps.sql`, and the engine's
+ * SQL stores create their job-pipeline tables on first use
+ * (`CREATE TABLE IF NOT EXISTS`) then round-trip defineJob -> runJob
+ * through them. The old black-hole stub (`exec: () => []`) discarded the
+ * definition write, so runJob threw "No job defined". Production passes
+ * the OrchestratorAgent's real DO handle, so this is a test-double fix
+ * only — no production change. */
+class SqliteTestStorage {
+  readonly sqlite = new DatabaseSync(":memory:");
+  exec(query: string, ...params: unknown[]): unknown[] {
+    const stmt = this.sqlite.prepare(query);
+    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
+      return stmt.all(...(params as never[])) as unknown[];
+    }
+    stmt.run(...(params as never[]));
+    return [];
+  }
+}
+
 function makeDeps(client: unknown): ShardExecutorDeps {
   const mockOrm = new DatabaseORM({ exec: vi.fn(() => []) } as any);
   return {
-    sql: { exec: () => [] as unknown as Iterable<Record<string, unknown>> },
+    sql: new SqliteTestStorage() as any,
     env: {},
     orm: mockOrm,
     storage: {},
@@ -100,7 +121,7 @@ function makePayload(): ShardPayload {
 }
 
 describe("options shard scan through the pipeline (#3186 step 3e)", () => {
-  it("a per-symbol shard returns exactly the direct scanOpportunities result", async () => {
+  it("a per-symbol shard returns exactly the direct scanOpportunitiesRetired4068 result", async () => {
     const client = {
       getOptionExpireDates: async () => [expiryObj],
       getOptionChains: async (args: { symbol: string }) =>
@@ -111,7 +132,7 @@ describe("options shard scan through the pipeline (#3186 step 3e)", () => {
 
     const viaPipeline = (await executeShardJob(deps, payload)) as any;
 
-    const direct = await UnifiedOptionsService.scanOpportunities(
+    const direct = await UnifiedOptionsService.scanOpportunitiesRetired4068(
       client as never,
       ["AAPL"],
       {

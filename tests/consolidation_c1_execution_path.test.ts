@@ -836,10 +836,12 @@ describe("C1: production callers exist (source pins)", () => {
     // Old pin asserted the manual screen route ran through the Phase 0
     // ScreeningProvider; #3186 step 3d moved the route onto the one options
     // pipeline, and the provider now lives only on the
-    // strategy-recommendation path (next test). This pin proves the route
-    // runs the pipeline via its ports.
+    // strategy-recommendation path (next test). #4068 moved the route onto
+    // the engine-routed dispatch of the same pipeline (runOptionsScreenViaEngine
+    // drives the composer through the engine step), so this pin now proves
+    // the route runs the pipeline via its ports through the engine.
     const src = readSrc("agents/routes/etradeOptionsScreen.ts");
-    expect(src).toContain("runOptionsScreenWorkflow");
+    expect(src).toContain("runOptionsScreenViaEngine");
     expect(src).toContain("createOptionsScreenPorts");
   });
 

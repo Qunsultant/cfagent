@@ -232,7 +232,7 @@ export const DISCOVERY_RANKING_1730_PINS: readonly DiscoveryRankingPin[] = [
   {
     id: "S3",
     finding:
-      "Panel agents vs kernel: panelPipeline.runPanelPipeline / runPanelWithAgents delegate to RecommendationService.discoverPanel (kernel), then compute ranked/riskReports/bestTrade via the same three agents over the kernel-passed candidates. Defaults shared: balanced profile, 3 alternatives.",
+      "Panel agents vs kernel: runOptionsPanelViaEngine (the engine-routed panel; runPanelPipelineRetired4068 is its frozen decomposition) / runPanelWithAgents delegate to RecommendationService.discoverPanel (kernel), then compute ranked/riskReports/bestTrade via the same three agents over the kernel-passed candidates. Defaults shared: balanced profile, 3 alternatives.",
     resolution: "identical",
     reason:
       "Delegation, not duplication: the panel body is the kernel path plus agent computation over kernel-passed candidates. The agents remain directly constructible because the no-view scheduled path constructs them once and passes them to both runPanelWithAgents and agent methods — a live seam, not dead code.",

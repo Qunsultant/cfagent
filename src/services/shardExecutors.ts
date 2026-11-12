@@ -52,8 +52,8 @@ import {
 import {
   memoryStageClaims,
   memoryStageStorage,
-  runOptionsScreenWorkflow,
 } from "../workflows/optionsScreenWorkflow";
+import { optionsEngineStoresFromSql, runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 import type { StageQueueSend } from "../workflows/stageQueueTransport";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -499,7 +499,7 @@ async function executeOptionsSymbol(
   return withRetry(async () => {
     // Issue #3186 step 3e - the per-symbol shard scan goes through
     // the one scanner pipeline instead of the direct
-    // scanOpportunities call (same engine, staged). The template,
+    // scanOpportunitiesRetired4068 call (same engine, staged). The template,
     // scan options (incl. the chain-timestamp `now` override for
     // deterministic provenance) and the skipped-verdict retry
     // contract are unchanged; the shard result is read from the
@@ -512,10 +512,11 @@ async function executeOptionsSymbol(
     // per-symbol rows to mas_opportunity_scans either.
     const shardRunId = `shard-scan:${chain.chainId}:${symbol}`;
     const shardStorage = memoryStageStorage();
-    const shardOutcome = await runOptionsScreenWorkflow(
+    const shardOutcome = await runOptionsScreenViaEngine(
       {
         runId: shardRunId,
         userLogin: chain.userLogin,
+        trigger: chain.trigger ?? "scheduled",
         request: {
           assetClass: "options",
           runIdentity: { runId: shardRunId },
@@ -566,6 +567,9 @@ async function executeOptionsSymbol(
         }),
         claims: memoryStageClaims(),
         queue: (deps.env.SCREENER_EVENTS as unknown as StageQueueSend | null) ?? null,
+        // Issue #4068: the engine run record is durable in the
+        // shard executor's SQLite.
+        engineStores: optionsEngineStoresFromSql(deps.sql),
       },
     );
     if (shardOutcome.outcome !== "completed") {

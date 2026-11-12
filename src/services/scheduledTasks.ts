@@ -94,8 +94,8 @@ import {
 import {
   memoryStageClaims,
   memoryStageStorage,
-  runOptionsScreenWorkflow,
 } from "../workflows/optionsScreenWorkflow";
+import { runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook
@@ -2937,10 +2937,11 @@ export class ScheduledTasksService {
         eventCalendarBySymbol: Object.fromEntries(scanCalendarCoverage.bySymbol),
       };
       const scanStorage = memoryStageStorage();
-      const scanOutcome = await runOptionsScreenWorkflow(
+      const scanOutcome = await runOptionsScreenViaEngine(
         {
           runId: reportRunId,
           userLogin,
+          trigger: options.trigger === "manual" ? "manual" : "scheduled",
           request: {
             assetClass: "options",
             runIdentity: { runId: reportRunId },
@@ -3023,6 +3024,30 @@ export class ScheduledTasksService {
       );
       const scanData = response.data as any;
       auditRunId = scanData?.scanRunId || reportRunId;
+      // Issue #3314: stamp the arming schedule's §4 linkage onto the
+      // scan-store row once the run id is known — the persist stage
+      // inside the workflow cannot know it (the workflow command
+      // carries no scheduleId; threading it through is #4198's
+      // scope), so the stamp happens here, after the workflow
+      // returns, where both the scan id and the schedule id are
+      // known. Failures warn only — a row without its linkage is
+      // still a recorded run. A run with no arming schedule records
+      // the absence explicitly: the save already stamped nulls, so
+      // no backfill runs for it.
+      if (options.scheduleId && typeof scanData?.scanRunId === "string" && scanData.scanRunId && this.scanRunStore) {
+        try {
+          await this.scanRunStore.updateLedgerLinkage(
+            scanData.scanRunId,
+            { scheduleId: options.scheduleId, asyncJobId: null, workflowId: null },
+            { userLogin },
+          );
+        } catch (stampErr) {
+          structuredLog.warn("scheduledTasks.options_scan_row_linkage_stamp_failed", {
+            message: "[ScheduledTasksService] Options scan-row linkage stamp failed",
+            error: stampErr instanceof Error ? stampErr.message : String(stampErr),
+          });
+        }
+      }
       if (!response.success) throw new Error(response.summary || "Scheduled options scan failed");
       const scannedCount = Number(scanData?.scanned ?? 0);
       const coverageErrors = Number(scanData?.coverage?.errors ?? 0);

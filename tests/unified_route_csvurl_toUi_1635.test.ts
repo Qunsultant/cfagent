@@ -28,17 +28,19 @@ import { executeUnifiedOptions } from "../src/agents/routes/etradeOptionsScreen"
 
 // Issue #3186 step 3e - the opportunities action no longer calls
 // service.execute(); it runs the one scanner pipeline. These seam
-// tests pin the response shape, not the engine, so the pipeline
-// composer is stubbed to a completed outcome and the storage stub
+// tests pin the response shape, not the engine, so the engine dispatch is stubbed to a completed outcome and the storage stub
 // serves the fixture scan as the shapeReport artifact. The real
 // pipeline-through-handler path is pinned in
 // tests/unified_options_pipeline_3186.test.ts.
 const mockRunWorkflow = vi.hoisted(() =>
   vi.fn(async () => ({ outcome: "completed", runId: "mock-run", stages: [], published: [] })),
 );
-vi.mock("../src/workflows/optionsScreenWorkflow", async (importOriginal) => ({
+// Issue #4068: the route now dispatches through the engine
+// (runOptionsScreenViaEngine), so the stub rides the engine module —
+// the composer stub this mocked is no longer called by the route.
+vi.mock("../src/workflows/optionsScreenEngine", async (importOriginal) => ({
   ...(await importOriginal()),
-  runOptionsScreenWorkflow: mockRunWorkflow,
+  runOptionsScreenViaEngine: mockRunWorkflow,
 }));
 import { UnifiedOptionsService } from "../src/trading";
 import type { OpportunityScanResult } from "../src/trading/options/opportunityScanner";

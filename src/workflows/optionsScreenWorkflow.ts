@@ -20,7 +20,7 @@
  * never calls an engine directly.
  */
 import type { StageClaimStore } from "./stageReportConsumer";
-import { assertBlockConforms } from "./blocks/blockContract";
+import { assertBlockConforms, type BlockDefinition } from "./blocks/blockContract";
 import { OPTIONS_BLOCKS } from "./blocks/optionsBlocks";
 import { stageIdempotencyKey, type StageMessage } from "./stageMessage";
 import { OPTIONS_PIPELINE_STAGES } from "./stageRuntimeIds";
@@ -110,6 +110,17 @@ function readTerminal(output: unknown, allowed: Set<string>): string {
  * artifacts themselves live only for the run's duration. Durable
  * claims/storage remain a named follow-up for these legs (the goal
  * leg and the manual entry already wire the durable stores).
+ *
+ * Issue #4069 (Option B for options): the in-memory checkpoints
+ * are an accepted-absent, not a gap to fill here. Checkpoints are
+ * run-duration artifacts, not run records — no run history is lost
+ * when they evaporate, and making them durable would create a
+ * second unit store (ADR D-0 / #3027) that cannot work in workflow
+ * residency (no host DO to borrow storage from). Their durable home
+ * after onboarding is the engine's job-instance checkpoint
+ * (D1 stage_checkpoint_json) once #4068 routes the legs through
+ * the engine. The goal leg and the manual entry already wire the
+ * durable stores.
  */
 export function memoryStageStorage(): OptionsStageStorage {
   const map = new Map<string, unknown>();
@@ -129,6 +140,121 @@ export function memoryStageClaims(): StageClaimStore {
     add: (key) => {
       claimed.add(key);
     },
+    // Issue #4068: a failed stage's claim MUST be releasable — the
+    // composer releases it on failure (deps.claims.delete?.(key)),
+    // and the engine retries a failed step, so without delete the
+    // retry would see the still-held claim and skip the stage as
+    // already-claimed instead of re-executing it. The SQL claim
+    // store already deletes; the in-memory one must too.
+    delete: (key) => {
+      claimed.delete(key);
+    },
+  };
+}
+
+export interface OptionsStageRunResult {
+  record: OptionsStageRecord;
+  /** Artifact keys the NEXT stage reads (unchanged on a claim-skip or failure). */
+  nextArtifactKeys: string[];
+  /** True when the run must stop here (the stage failed or a risk violation fired). */
+  failed: boolean;
+  reason?: string;
+  publishedMessage?: StageMessage;
+}
+
+/**
+ * Issue #4068 — one stage of the options screen workflow, as a shared
+ * function the thin composer AND the engine-routed dispatch both call, so
+ * the two paths execute identical stage semantics (claim, execute, terminal
+ * read, violation, persist, publish). A stage failure is returned (not
+ * thrown) with failed:true so the caller decides how to stop the run: the
+ * composer returns the failed outcome; the engine step throws so the engine
+ * stops the run and marks it failed. Partial and no-contracts are
+ * legitimate non-failing outcomes (#2038).
+ */
+export async function runOptionsStageOnce(
+  input: OptionsStageInput,
+  deps: OptionsScreenWorkflowDeps,
+  block: BlockDefinition,
+): Promise<OptionsStageRunResult> {
+  const warn = deps.warn ?? ((message: string) => console.warn(message));
+  const stageId = input.stageId;
+  const key = stageIdempotencyKey(input.runId, stageId, "options");
+  if (deps.claims.has(key)) {
+    return {
+      record: { stageId, status: "skipped-claimed" },
+      nextArtifactKeys: [...input.artifactKeys],
+      failed: false,
+    };
+  }
+  deps.claims.add(key);
+  const port = deps.stages[stageId];
+  if (!port) {
+    throw new Error(`options workflow: no port for stage ${stageId}`);
+  }
+  assertBlockConforms(port as unknown as Record<string, unknown>, block);
+  const fail = (reason: string): OptionsStageRunResult => {
+    deps.claims.delete?.(key);
+    return {
+      record: { stageId, status: "failed", reason },
+      nextArtifactKeys: [...input.artifactKeys],
+      failed: true,
+      reason,
+    };
+  };
+  let output: unknown;
+  try {
+    output = await port.execute(input);
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+  let terminal: string;
+  try {
+    terminal = readTerminal(output, new Set(Object.keys(block.stageContract.terminalSemantics)));
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+  if (terminal === "violation") {
+    return fail("risk_violation: risk limits violated, failing closed");
+  }
+  let nextArtifactKeys: string[];
+  try {
+    nextArtifactKeys = await port.persist(input, output);
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+  let publishedMessage: StageMessage | undefined;
+  if (!input.userLogin) {
+    // No authenticated identity: stage messages require a real
+    // login (stageMessage refuses empty/default), so the run
+    // publishes nothing. The stages themselves still ran and
+    // their artifacts are the record; the skip is warned, never
+    // silent, and never fails the run (the scanner leg's pinned
+    // unscoped-run discipline).
+    warn(`[options-workflow] ${stageId}: publish skipped (no authenticated identity; the run's stage messages are not published)`);
+  } else {
+    const message = buildStageBoundaryMessage({
+      runId: input.runId,
+      family: "options",
+      userLogin: input.userLogin,
+      stageId,
+      artifactKeys: nextArtifactKeys,
+    });
+    const result = await publishStageBoundaryMessage({ queue: deps.queue ?? null, message });
+    if (result.published) {
+      publishedMessage = result.message;
+    } else {
+      warn(`[options-workflow] ${stageId}: publish missed (${result.reason})`);
+    }
+  }
+  const status = (
+    terminal === "partial" || terminal === "no_contracts" ? terminal : "completed"
+  ) as OptionsStageStatus;
+  return {
+    record: { stageId, status, artifactKeys: nextArtifactKeys },
+    nextArtifactKeys,
+    failed: false,
+    ...(publishedMessage ? { publishedMessage } : {}),
   };
 }
 
@@ -136,7 +262,6 @@ export async function runOptionsScreenWorkflow(
   params: { runId: string; userLogin?: string; request: unknown },
   deps: OptionsScreenWorkflowDeps,
 ): Promise<OptionsScreenWorkflowOutcome> {
-  const warn = deps.warn ?? ((message: string) => console.warn(message));
   const blocks = new Map(OPTIONS_BLOCKS.map((block) => [block.id, block]));
   for (const stageId of OPTIONS_PIPELINE_STAGES) {
     const port = deps.stages[stageId];
@@ -151,14 +276,6 @@ export async function runOptionsScreenWorkflow(
   let artifactKeys: string[] = [];
 
   for (const stageId of OPTIONS_PIPELINE_STAGES) {
-    const block = blocks.get(`options-${stageId}`)!;
-    const key = stageIdempotencyKey(params.runId, stageId, "options");
-    if (deps.claims.has(key)) {
-      stages.push({ stageId, status: "skipped-claimed" });
-      continue;
-    }
-    deps.claims.add(key);
-    const port = deps.stages[stageId]!;
     const stageInput: OptionsStageInput = {
       runId: params.runId,
       userLogin: params.userLogin,
@@ -166,95 +283,22 @@ export async function runOptionsScreenWorkflow(
       artifactKeys: [...artifactKeys],
       request: params.request,
     };
-    let output: unknown;
-    try {
-      output = await port.execute(stageInput);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      deps.claims.delete?.(key);
-      stages.push({ stageId, status: "failed", reason });
+    const result = await runOptionsStageOnce(stageInput, deps, blocks.get(`options-${stageId}`)!);
+    stages.push(result.record);
+    if (result.publishedMessage) {
+      published.push(result.publishedMessage);
+    }
+    if (result.failed) {
       return {
         outcome: "failed",
         runId: params.runId,
         stages,
         published,
         failedStage: stageId,
-        reason,
+        reason: result.reason,
       };
     }
-    let terminal: string;
-    try {
-      terminal = readTerminal(output, new Set(Object.keys(block.stageContract.terminalSemantics)));
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      deps.claims.delete?.(key);
-      stages.push({ stageId, status: "failed", reason });
-      return {
-        outcome: "failed",
-        runId: params.runId,
-        stages,
-        published,
-        failedStage: stageId,
-        reason,
-      };
-    }
-    if (terminal === "violation") {
-      const reason = "risk_violation: risk limits violated, failing closed";
-      deps.claims.delete?.(key);
-      stages.push({ stageId, status: "failed", reason });
-      return {
-        outcome: "failed",
-        runId: params.runId,
-        stages,
-        published,
-        failedStage: stageId,
-        reason,
-      };
-    }
-    let nextArtifactKeys: string[];
-    try {
-      nextArtifactKeys = await port.persist(stageInput, output);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      deps.claims.delete?.(key);
-      stages.push({ stageId, status: "failed", reason });
-      return {
-        outcome: "failed",
-        runId: params.runId,
-        stages,
-        published,
-        failedStage: stageId,
-        reason,
-      };
-    }
-    if (!params.userLogin) {
-      // No authenticated identity: stage messages require a real
-      // login (stageMessage refuses empty/default), so the run
-      // publishes nothing. The stages themselves still ran and
-      // their artifacts are the record; the skip is warned, never
-      // silent, and never fails the run (the scanner leg's pinned
-      // unscoped-run discipline).
-      warn(`[options-workflow] ${stageId}: publish skipped (no authenticated identity; the run's stage messages are not published)`);
-    } else {
-      const message = buildStageBoundaryMessage({
-        runId: params.runId,
-        family: "options",
-        userLogin: params.userLogin,
-        stageId,
-        artifactKeys: nextArtifactKeys,
-      });
-      const result = await publishStageBoundaryMessage({ queue: deps.queue ?? null, message });
-      if (result.published) {
-        published.push(result.message);
-      } else {
-        warn(`[options-workflow] ${stageId}: publish missed (${result.reason})`);
-      }
-    }
-    const status = (
-      terminal === "partial" || terminal === "no_contracts" ? terminal : "completed"
-    ) as OptionsStageStatus;
-    stages.push({ stageId, status, artifactKeys: nextArtifactKeys });
-    artifactKeys = nextArtifactKeys;
+    artifactKeys = result.nextArtifactKeys;
   }
 
   return { outcome: "completed", runId: params.runId, stages, published };

@@ -21,6 +21,7 @@
  * redacted, long values clipped) and the raw rows are never returned.
  */
 import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
+import type { ScanRunSummary } from "../../data/scanRunPorts";
 import { createShardJobAdapter } from "../../data/createShardJobPorts";
 import type { ShardJobReader, ShardJobRow } from "../../data/shardJobPorts";
 import { listD1JobRunRecords } from "../../services/jobRunRecordReads";
@@ -36,6 +37,7 @@ import {
   buildWorkflowRunsPage,
   runFromJobRunRecord,
   runFromSagaChain,
+  runFromScanRun,
   summarizeWorkflowRuns,
   type UnifiedWorkflowRunRecord,
   type WorkflowRun,
@@ -76,6 +78,14 @@ export interface WorkflowRunsRouteContext {
    * never hides the other runs.
    */
   jobRunRecordReader?: (limit: number) => Promise<JobRunRecord[]>;
+  /**
+   * Issue #4069 (Option B for options): the scanner's scan-run
+   * reader (mas_opportunity_scans). Production builds this from the
+   * DO store (createOptionsDiscoveryPorts, the same reader /api/runs
+   * uses); tests inject a mock list. A failing read is named in
+   * storeErrors and never hides the other runs.
+   */
+  scanRunReader?: (limit: number) => Promise<ScanRunSummary[]>;
 }
 
 const DEFAULT_LIMIT = 40;
@@ -712,6 +722,46 @@ export async function handleWorkflowRunsRoutes(
       "skipped: no environment available to read the D1 job run records";
   }
 
+  // Issue #4069 (Option B for options): the scanner's scan-run rows
+  // join the list as their own runs — scanner legs write no canonical
+  // mas_reports row, so without this the scan ledger is invisible
+  // here (ReportsPanel and detail already merge it). Owner-scoped
+  // like the canonical reads above: without a userLogin the store
+  // is skipped and named, never read unscoped. A failed scan read
+  // is named in storeErrors and never hides the other runs, exactly
+  // like the D1 read above. A scan row a canonical row already
+  // claims (its body scanRunId — the same exact join
+  // mergeRunSummaries uses) is dropped, so one run never shows
+  // twice if a leg ever writes both.
+  let scanRuns: WorkflowRun[] = [];
+  if (ctx.userLogin) {
+    try {
+      const reader =
+        ctx.scanRunReader ??
+        (async (readLimit: number) => {
+          const { createOptionsDiscoveryPorts } = await import("../../data/createOptionsDiscoveryPorts");
+          return createOptionsDiscoveryPorts({ sql: ctx.ensureTables() }).scanRuns.list({
+            limit: readLimit,
+            userLogin: ctx.userLogin,
+          });
+        });
+      const claimedScanIds = new Set(
+        reportDocs.map((entry) => entry.summary.scanRunId).filter((id): id is string => id !== null),
+      );
+      const scans = await reader(
+        Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2)),
+      );
+      scanRuns = scans
+        .filter((scan) => !claimedScanIds.has(scan.id))
+        .map(runFromScanRun);
+    } catch (err) {
+      storeErrors.scanRuns = err instanceof Error ? err.message : String(err);
+    }
+  } else {
+    storeErrors.scanRuns =
+      "skipped: no authenticated user identity available to scope the scan runs";
+  }
+
   // Saga chains (#2780) join BEFORE filter/slice (#2786 Part 2), and
   // Part 3 Docs attach + report-only minting happen inside the page
   // builder BEFORE filter/slice, so a saga run, a report run, a
@@ -733,7 +783,7 @@ export async function handleWorkflowRunsRoutes(
     nowMs: Date.now(),
     reportsOnly,
     reportDocs,
-    extraRuns: [...sagaRuns, ...scheduleRuns, ...jobRunRecordRuns],
+    extraRuns: [...sagaRuns, ...scheduleRuns, ...jobRunRecordRuns, ...scanRuns],
   });
   return Response.json({
     count: page.runs.length,

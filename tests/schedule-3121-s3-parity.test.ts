@@ -764,6 +764,8 @@ describe("S3-P08 the coverage map is seeded and its homeless rows are filed (#31
     expect(map).toContain("#3394 — landed");
     // Issue #3313: the B-L-02 outcome-stamping row reads landed.
     expect(map).toContain("#3313 — landed");
+    // Issue #3314: the B-L-03 scan-joinability row reads landed.
+    expect(map).toContain("#3314 — landed");
   });
 });
 

@@ -46,6 +46,11 @@
  *   right; #3133).
  * - WorkCard — input flow in one card with CardHeader (#3133).
  * - DetailCard — any content block with CardHeader (#3133).
+ * - WorkspaceGrid — the workspace grid (workspace/list-detail/feed
+ *   variants over the Grid primitive; #3134).
+ * - ActionBar — primary/secondary actions in one placement (#3134).
+ * - QueueFeed — the closing queue/feed surface (Card + items,
+ *   EmptyState when empty; #3134).
  * - Toast — the one global place for transient success/failure feedback
  *   (ToastProvider + useToast; auto-dismiss by tone, danger persists,
  *   hover/focus pause, Escape dismisses, role=status/alert announced).
@@ -90,6 +95,9 @@ export { SummaryCard, type SummaryCardProps, type SummaryCardRow, type SummaryVa
 export { CardHeader, type CardHeaderProps } from "./CardHeader";
 export { WorkCard, type WorkCardProps } from "./WorkCard";
 export { DetailCard, type DetailCardProps } from "./DetailCard";
+export { WorkspaceGrid, type WorkspaceGridProps, type WorkspaceGridVariant } from "./WorkspaceGrid";
+export { ActionBar, type ActionBarProps } from "./ActionBar";
+export { QueueFeed, type QueueFeedProps, type QueueFeedItem } from "./QueueFeed";
 export { ToastProvider, useToast, type ToastTone, type ToastInput, type ToastApi } from "./Toast";
 export { Menu, type MenuProps, type MenuItem } from "./Menu";
 export { Popover, type PopoverProps } from "./Popover";

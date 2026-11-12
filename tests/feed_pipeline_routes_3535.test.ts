@@ -231,7 +231,11 @@ describe("pipeline feed-jobs routes (#3535)", () => {
     ]);
     const alpaca = await callRoute(ctx, "GET", "/data-providers/alpaca/feed-jobs");
     const alpacaBody = (await alpaca.json()) as { jobs: FeedJobSurfaceView[] };
-    expect(alpacaBody.jobs.map((j) => j.jobId)).toEqual(["alpaca-nasdaq100-quotes"]);
+    // #4065: the Alpaca options-chains job joins the provider's jobs.
+    expect(alpacaBody.jobs.map((j) => j.jobId)).toEqual([
+      "alpaca-nasdaq100-quotes",
+      "alpaca-options-chains",
+    ]);
   });
 
   it("the provider list view carries the feedJobs array", async () => {

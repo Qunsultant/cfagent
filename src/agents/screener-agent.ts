@@ -32,9 +32,11 @@ import {
   buildFeedJobRegistry,
   readPersistedSentiment,
   readPersistedTechnicalsBars,
+  type PersistedSentimentRead,
   YAHOO_NASDAQ100_SENTIMENT_JOB_ID,
   YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
 } from "../services/feedJobs";
+import type { FeedSentimentRow } from "../data/feedDatasetPorts";
 import { createScreenRunLockPort } from "../data/createScreenRunLockPorts";
 import type { ScreenRunLockPort } from "../data/screenRunLockPorts";
 import { createUserRequestQuotaPort } from "../data/createUserRequestQuotaPorts";
@@ -57,7 +59,7 @@ import {
   type PortfolioContextMarker,
 } from "../services/portfolioContextRanking";
 import { DynamicMarketScreener } from "../trading";
-import { planStockScreenRun } from "../workflows/stockScreenPlanner";
+import { planStockScreenRun, type StockScreenPlan } from "../workflows/stockScreenPlanner";
 import { paretoFrontierForScreen } from "../workflows/paretoFrontier";
 import {
   classifyScreenFailure,
@@ -73,10 +75,16 @@ import {
   attachPersistedSentiment,
   attachTechnicals,
   toOpportunityStock,
+  type AcquiredUniverse,
+  type QuoteTrace,
   type ScannedStock,
   type OpportunityStock,
   type PartialQuoteQualification,
+  type YahooHistoryDeps,
+  type YahooScreenerDeps,
+  type YahooTechnicals,
 } from "../trading";
+import type { StockScreenResult } from "../types";
 import {
   UNIVERSES,
   shardableUniverses,
@@ -147,6 +155,7 @@ import {
 } from "../trading";
 import type { OptionScreenerFilter } from "../types";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
+import type { GoalScreenCommand } from "../workflows/workflowPorts";
 import type { GoalDrivenScreenResult } from "../services/goalDrivenScreen";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -240,6 +249,199 @@ export interface ScreenerRunRequest {
    * reason instead of failing.
    */
   portfolioContext?: boolean;
+}
+
+/**
+ * Issue #4190 ([One engine] #3550 S1) — the screener substrate's
+ * engine-stage surface: the per-stage extractions of
+ * runScreenInner's bodies as ScreenerAgent methods, one per
+ * catalog stage, driven by the engine's step handlers (the
+ * handlers resolve the live deps per invocation and pass them
+ * in — live objects never ride a persisted hand-off). The
+ * per-run setup lives in ScreenerEngineRunState, owned by the
+ * agent in its DO instance fields keyed by run id, rebuilt
+ * idempotently on miss; the stage outputs are JSON-only and
+ * accumulate through the hand-off (each stage's output carries
+ * the prior stages' outputs forward — the engine's hand-off
+ * rule gives a node only its parent's output).
+ *
+ * Placement notes (dependency-forced, not table-literal):
+ * - attachTechnicals / attachPersistedSentiment live in the
+ *   ANALYSIS stage: the joins need the graded rows, which
+ *   only exist after screenUniverse + factor grades. The
+ *   gather stage owns the fetch + persisted reads.
+ * - No stage boundaries are emitted here: the engine's stage
+ *   ledger is the run's stage truth; the #2869 boundaries stay
+ *   with the bespoke runScreenInner path until the S2 cutover.
+ * - The task ledger + learnings are attempted best-effort
+ *   exactly as runScreenInner attempts them (a ledger miss
+ *   never breaks a screen); heartbeats ride the same throttle.
+ */
+export interface ScreenerQuoteDepsBundle {
+  yahoo?: YahooScreenerDeps;
+  etrade?: ReturnType<typeof bindEtradeQuoteDeps>;
+  alpaca?: ReturnType<typeof bindAlpacaQuoteDeps>;
+  public?: ReturnType<typeof bindPublicQuoteDeps>;
+}
+
+/** Per-run live state, keyed by run id on the agent instance. */
+export interface ScreenerEngineRunState {
+  runId: string;
+  req: ScreenerRunRequest;
+  timestamp: string;
+  userLogin: string;
+  plan: StockScreenPlan;
+  quoteTrace: QuoteTrace;
+  platformRunId: string;
+  taskId: string | null;
+  appliedLearnings: string[];
+  lastHeartbeatMs: number;
+  etrade: ETradeService | null;
+  acquired?: AcquiredUniverse;
+  technicalsBySymbol?: Map<string, YahooTechnicals>;
+  persistedSentiment?: Awaited<ReturnType<typeof readPersistedSentiment>>;
+  screenResult?: StockScreenResult;
+  allStocks?: ScannedStock[];
+  opportunities?: OpportunityStock[];
+  result?: ScreenerRunResult;
+}
+
+export interface ScreenerFeedStageInput {
+  request: ScreenerRunRequest;
+  quoteDeps: ScreenerQuoteDepsBundle;
+  /** This unit's symbols (the shard's row, or the flat list under monolith). */
+  symbols: NasdaqStockListing[];
+  timestamp: string;
+  goalScreen?: GoalScreenCommand;
+}
+
+export interface ScreenerFeedStageOutput {
+  timestamp: string;
+  userLogin: string;
+  universe: string;
+  sector: string;
+  provider: StockScreenProvider;
+  providerFallback?: ScreenerRunRequest["providerFallback"];
+  symbols: NasdaqStockListing[];
+  expectedCount: number;
+  acquired: AcquiredUniverse;
+  platformRunId: string;
+  quoteTraceSummary: ReturnType<QuoteTrace["complete"]>;
+  taskId: string | null;
+  appliedLearnings: string[];
+  duplicate?: boolean;
+  dupResult?: ScreenerRunResult;
+  goalSymbols?: string[];
+}
+
+export interface ScreenerGatherStageInput {
+  request: ScreenerRunRequest;
+  historyDeps: YahooHistoryDeps;
+  feedOutput: ScreenerFeedStageOutput;
+  goalScreen?: GoalScreenCommand;
+}
+
+export interface ScreenerGatherStageOutput extends ScreenerFeedStageOutput {
+  technicalsBySymbol: Record<string, YahooTechnicals>;
+  technicalsCoverage: { symbols: number; withMacd: number; withGap: number; withAtr: number };
+  /** Serialized form of the persisted-sentiment Map (hand-offs are JSON). */
+  persistedSentiment: (
+    & { entries: [string, FeedSentimentRow][] }
+    & Omit<PersistedSentimentRead, "sentimentBySymbol">
+  ) | null;
+}
+
+export interface ScreenerGoalRunner {
+  (req: {
+    scenario: ScenarioDefinition;
+    trigger: "manual" | "scheduled";
+    idempotencyKey: string;
+    userLogin?: string;
+    environment?: "TEST" | "PROD";
+    assetClasses?: ("stocks" | "options")[];
+    symbols?: string[];
+    provider?: "yahoo";
+    providerFallback?: { from: "etrade"; reason: string };
+  }): Promise<{ task: unknown; executed: boolean; result?: GoalDrivenScreenResult }>;
+}
+
+export interface ScreenerAnalysisStageInput {
+  request: ScreenerRunRequest;
+  gatherOutput: ScreenerGatherStageOutput;
+  goalScreen?: GoalScreenCommand;
+  goalRunner?: ScreenerGoalRunner;
+}
+
+export interface ScreenerAnalysisStageOutput extends ScreenerGatherStageOutput {
+  screenResult: { totalScanned: number; matchedCount: number; filterSummary: unknown; rejections?: unknown };
+  allStocks: ScannedStock[];
+  opportunities: OpportunityStock[];
+  sentimentCoverage: { symbols: number; withSentiment: number };
+  portfolioContext?: PortfolioContextMarker;
+  goalTask?: unknown;
+  goalExecuted?: boolean;
+  goalResult?: GoalDrivenScreenResult;
+}
+
+export interface ScreenerStoreDoor {
+  (payload: unknown, userLogin: string, opts?: { goalScreen?: GoalScreenCommand }): Promise<unknown>;
+}
+
+export interface ScreenerStoreStageInput {
+  request: ScreenerRunRequest;
+  analysisOutput: ScreenerAnalysisStageOutput;
+  goalScreen?: GoalScreenCommand;
+  storeReport: ScreenerStoreDoor;
+}
+
+export interface ScreenerStoreStageOutput extends ScreenerAnalysisStageOutput {
+  result?: ScreenerRunResult;
+  goalEnvelope?: Record<string, unknown>;
+  payload: unknown;
+  stored: boolean;
+  reportId?: string;
+  storeError?: string;
+}
+
+export interface ScreenerServeStageInput {
+  storeOutput: ScreenerStoreStageOutput;
+}
+
+export interface ScreenerServeStageOutput extends ScreenerStoreStageOutput {
+  servedReport: {
+    reportId?: string;
+    formats: { format: "pdf" | "xlsx" | "csv"; key?: string; status?: string }[];
+    servedAt: string;
+  };
+}
+
+export interface ScreenerDeliverDoor {
+  (payload: unknown, userLogin: string, opts?: { goalScreen?: GoalScreenCommand; deliveryId?: string }): Promise<void>;
+}
+
+export interface ScreenerDeliverStageInput {
+  serveOutput: ScreenerServeStageOutput;
+  deliver: boolean;
+  deliveryId: string;
+  goalScreen?: GoalScreenCommand;
+  deliverOutcome: ScreenerDeliverDoor;
+}
+
+export interface ScreenerDeliverStageOutput extends ScreenerServeStageOutput {
+  delivered: boolean;
+  deliverSkipped?: boolean;
+  deliverError?: string;
+}
+
+/** The narrow agent surface the engine's screener steps call. */
+export interface ScreenerAgentPort {
+  screenFeedStage(runId: string, input: ScreenerFeedStageInput): Promise<ScreenerFeedStageOutput>;
+  screenGatherStage(runId: string, input: ScreenerGatherStageInput): Promise<ScreenerGatherStageOutput>;
+  screenAnalysisStage(runId: string, input: ScreenerAnalysisStageInput): Promise<ScreenerAnalysisStageOutput>;
+  screenStoreStage(runId: string, input: ScreenerStoreStageInput): Promise<ScreenerStoreStageOutput>;
+  screenServeStage(runId: string, input: ScreenerServeStageInput): Promise<ScreenerServeStageOutput>;
+  screenDeliverStage(runId: string, input: ScreenerDeliverStageInput): Promise<ScreenerDeliverStageOutput>;
+  runGoalScreen(req: Parameters<ScreenerAgent["runGoalScreen"]>[0]): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }>;
 }
 
 export interface ScreenerRunResult {
@@ -393,6 +595,15 @@ const OPTIONS_CSV_LATEST_KEY = "options:latest.csv";
 
 export class ScreenerAgent extends PortThink {
   private orm: DatabaseORM | null = null;
+
+  /**
+   * Issue #4190 — per-run engine state, keyed by engine run id.
+   * The live half of a run (QuoteTrace, E*TRADE service, task
+   * id, heartbeat clock) cannot ride a persisted artifact, so
+   * it lives here; the JSON half rides the hand-off. Rebuilt
+   * idempotently on miss from the step's own inputs.
+   */
+  private screenerEngineStates = new Map<string, ScreenerEngineRunState>();
 
   /**
    * #2303 (#1976 step 1): the data-provider platform ports,
@@ -1782,6 +1993,752 @@ export class ScreenerAgent extends PortThink {
       }
       return result;
     }
+  }
+
+  // ------------------------------------------------------------------
+  // Issue #4190 ([One engine] #3550 S1) — the engine-stage surface.
+  // The per-stage extractions of runScreenInner's bodies, one per
+  // catalog stage. runScreenInner itself is UNTOUCHED in this slice
+  // (the bespoke flow still runs production screens); these methods
+  // call the same service functions with the same arguments, in
+  // stage order (feed -> gather -> analysis -> store -> serve ->
+  // deliver). The S2 cutover repoints the live path at them.
+  // ------------------------------------------------------------------
+
+  /**
+   * The per-run state for an engine run id: built once, cached on
+   * the instance, rebuilt idempotently on miss (a DO restart
+   * mid-run re-bootstraps from the step's own inputs; the engine
+   * checkpoint says which stage to resume from).
+   */
+  private async ensureScreenerEngineState(
+    runId: string,
+    req: ScreenerRunRequest,
+    timestamp: string,
+    restore?: { platformRunId?: string; taskId?: string | null; appliedLearnings?: string[] },
+  ): Promise<ScreenerEngineRunState> {
+    const cached = this.screenerEngineStates.get(runId);
+    if (cached) return cached;
+    const { QuoteTrace } = await import("../trading");
+    const plan = planStockScreenRun(req, timestamp);
+    const userLogin = req.userLogin || (await this.userLogin());
+    const quoteTrace = new QuoteTrace();
+    const state: ScreenerEngineRunState = {
+      runId,
+      req,
+      timestamp,
+      userLogin,
+      plan,
+      quoteTrace,
+      // A rebuild after a DO restart restores the minted run id
+      // from the prior stage's hand-off — never a fresh one, so
+      // the run's captures keep one identity.
+      platformRunId: restore?.platformRunId ?? crypto.randomUUID(),
+      taskId: restore?.taskId ?? null,
+      appliedLearnings: restore?.appliedLearnings ?? [],
+      lastHeartbeatMs: Date.now(),
+      etrade: null,
+    };
+    if (restore?.platformRunId !== undefined || restore?.taskId !== undefined) {
+      // Restored state: the ledger + learnings already ran under
+      // the prior incarnation; do not re-create them.
+      this.screenerEngineStates.set(runId, state);
+      return state;
+    }
+    // Issue #706: read active learnings at run start; log which ones applied.
+    try {
+      const { getActiveLearnings } = await import("../services/learnings");
+      const learnings = getActiveLearnings(this.sql, "screener");
+      state.appliedLearnings = learnings.map((l) => `${l.id}: ${l.observation.slice(0, 80)}`);
+      if (learnings.length > 0) {
+        structuredLog.info("screenerAgent.engine_feed_learnings_applied", {
+          message: `[ScreenerAgent] Applied ${learnings.length} learnings:`,
+          learningsCount: learnings.length,
+          appliedLearnings: state.appliedLearnings,
+        });
+      }
+    } catch {}
+    // Issue #607: durable task record for this run — best-effort,
+    // exactly as runScreenInner treats it (a ledger miss never
+    // breaks a screen).
+    try {
+      const created = await this.createScreenerTask({
+        trigger: req.trigger,
+        universe: plan.universe,
+        sector: plan.sector,
+        userLogin,
+        idempotencyKey: plan.idempotencyKey,
+      });
+      state.taskId = created.task.id;
+      if (created.task.status === "queued") {
+        await this.beginScreenerTask(state.taskId);
+      }
+    } catch (err) {
+      structuredLog.warn("screenerAgent.engine_feed_task_ledger_create_unavailable", {
+        message: `[ScreenerAgent] Screener task ledger unavailable (create/begin): ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      state.taskId = null;
+    }
+    this.screenerEngineStates.set(runId, state);
+    return state;
+  }
+
+  /** Phase-checkpoint heartbeat for the run's task, throttled like runScreenInner's. */
+  private async beatScreenerEngineState(state: ScreenerEngineRunState): Promise<void> {
+    if (!state.taskId) return;
+    const nowMs = Date.now();
+    if (nowMs - state.lastHeartbeatMs < SCREENER_HEARTBEAT_MIN_MS) return;
+    state.lastHeartbeatMs = nowMs;
+    try {
+      await this.heartbeatScreenerTask(state.taskId);
+    } catch {
+      // Ledger is best-effort; a missed heartbeat never breaks a screen.
+    }
+  }
+
+  /**
+   * FEED stage (catalog: feed — quotes): plan + universe
+   * resolution + provider quote-deps binding + acquireUniverse.
+   * The same service calls runScreenInner makes today, in the
+   * same order; the quote deps arrive pre-bound from the step
+   * handler (the platform binding blocks stay in runScreenInner
+   * until the S2 cutover wires them into the handler's deps).
+   * A goal command resolves its symbols from the goal
+   * descriptor instead of the market universe.
+   */
+  async screenFeedStage(runId: string, input: ScreenerFeedStageInput): Promise<ScreenerFeedStageOutput> {
+    const req = input.request;
+    const timestamp = input.timestamp;
+    const state = await this.ensureScreenerEngineState(runId, req, timestamp);
+    const plan = state.plan;
+    const userLogin = state.userLogin;
+    const universe = plan.universe;
+    const provider = plan.provider;
+    const providerFallback = plan.providerFallback;
+    const sector = plan.sector;
+
+    // Issue #607 (scheduled): a duplicate scheduled delivery is
+    // suppressed before any fetch — the same claim
+    // runScreenInner makes, returning the same dup result.
+    if (req.trigger === "scheduled" && !(await this.claimScheduledExecution(plan.scheduledClaimKey, req.environment))) {
+      const dupResult: ScreenerRunResult = {
+        timestamp,
+        trigger: req.trigger,
+        provider,
+        ...(providerFallback ? { providerFallback } : {}),
+        universe,
+        sector,
+        success: false,
+        totalScanned: 0,
+        expectedCount: 0,
+        matchedCount: 0,
+        opportunities: [],
+        allStocks: [],
+        discoveryMessage: "Duplicate scheduled delivery suppressed for this account, environment, universe, and minute.",
+        skippedDuplicate: true,
+        ...(state.taskId ? { taskId: state.taskId } : {}),
+      };
+      if (state.taskId) {
+        try {
+          await this.cancelScreenerTask(state.taskId, "duplicate scheduled delivery suppressed");
+        } catch {
+          // Ledger is best-effort; the suppression result stands.
+        }
+      }
+      return {
+        timestamp,
+        userLogin,
+        universe,
+        sector,
+        provider,
+        ...(providerFallback ? { providerFallback } : {}),
+        symbols: input.symbols,
+        expectedCount: 0,
+        acquired: { quotes: [], discovery: { mode: "live_quotes", candidateCount: 0, listingCount: 0, message: dupResult.discoveryMessage } },
+        platformRunId: state.platformRunId,
+        quoteTraceSummary: state.quoteTrace.complete(),
+        taskId: state.taskId,
+        appliedLearnings: state.appliedLearnings,
+        duplicate: true,
+        dupResult,
+      };
+    }
+
+    // Issue #1007: the E*TRADE service is constructed only for
+    // E*TRADE-provider runs (a Yahoo-provider run never touches
+    // the broker). Kept on the state for the analysis stage's
+    // portfolio-context modifier.
+    if (provider === "etrade" && !state.etrade) {
+      state.etrade = new ETradeService(this.getOrm(), this.env, userLogin, req.environment);
+    }
+
+    // Issue #270: resolve the universe to symbols. Explicit
+    // symbols (the shard's row, or the goal descriptor's list)
+    // win; otherwise the listings directory resolves membership
+    // through the platform, exactly as runScreenInner does.
+    // A goal command stops here: its quotes are the goal
+    // runner's stock leg (analysis stage) — the feed stage
+    // only resolves the goal's symbols.
+    if (input.goalScreen) {
+      const goalSymbols = (input.goalScreen.symbols ?? []).map((symbol) => ({ symbol }) as NasdaqStockListing);
+      return {
+        timestamp,
+        userLogin,
+        universe,
+        sector,
+        provider,
+        ...(providerFallback ? { providerFallback } : {}),
+        symbols: goalSymbols,
+        expectedCount: goalSymbols.length,
+        acquired: { quotes: [], discovery: { mode: "live_quotes", candidateCount: 0, listingCount: 0, message: "Goal run — quotes are the goal runner's stock leg." } },
+        platformRunId: state.platformRunId,
+        quoteTraceSummary: state.quoteTrace.complete(),
+        taskId: state.taskId,
+        appliedLearnings: state.appliedLearnings,
+        goalSymbols: goalSymbols.map((s) => s.symbol),
+      };
+    }
+    let symbols = input.symbols;
+    if (!symbols?.length && universe !== "ALL") {
+      await this.platformBootstrap();
+      const nasdaqConfig = await this.platformConfig("nasdaq");
+      if (!nasdaqConfig || nasdaqConfig.lifecycleState !== "enabled" || !nasdaqConfig.enabled) {
+        await this.platformTransition("nasdaq", "verify", userLogin, {
+          verifier: async () => verifyNasdaqDataProvider(),
+        });
+        await this.platformTransition("nasdaq", "enable", userLogin, {});
+      }
+      const nasdaqRegistry = new DataProviderRegistry();
+      const nasdaqAdapter = createNasdaqDataProvider(undefined, {
+        capture: await this.platformCaptureDeps(),
+      });
+      nasdaqRegistry.register(nasdaqAdapter);
+      const nasdaqProvider = nasdaqUniverseProviderFromRoute(
+        nasdaqRegistry,
+        await this.platformConfigs(),
+        await this.platformRoutes(),
+      );
+      const nasdaqUniverseDeps = bindNasdaqUniverseDeps(nasdaqProvider, {
+        runId: state.platformRunId,
+        userLogin,
+      });
+      const listings = await nasdaqUniverseDeps.fetchListings();
+      symbols = resolveUniverse(universe, listings);
+    }
+    const universeDef = UNIVERSES[universe];
+    const requestedMaxSymbols = req.maxSymbols ?? universeDef.defaultMaxSymbols;
+    const selectedSymbols = symbols
+      ? (requestedMaxSymbols > 0 ? symbols.slice(0, requestedMaxSymbols) : symbols)
+      : [];
+    const expectedCount = selectedSymbols.length;
+    state.quoteTrace.setNasdaqSymbols(selectedSymbols.map((s) => (typeof s === "string" ? s : s.symbol)));
+
+    // Provider-scoped acquisition (#261, #1007). The deps arrive
+    // pre-bound from the step handler; a missing leg for the
+    // planned provider is a named refusal, never a fallback.
+    const bundle = input.quoteDeps;
+    const acquired =
+      provider === "yahoo"
+        ? await acquireUniverse({
+            mode: "yahoo",
+            symbols: selectedSymbols,
+            maxSymbols: selectedSymbols.length,
+            yahooDeps: req.yahooDeps ?? bundle.yahoo!,
+          })
+        : provider === "alpaca"
+          ? await acquireUniverse({
+              mode: "alpaca",
+              symbols: selectedSymbols,
+              maxSymbols: selectedSymbols.length,
+              quoteDeps: bundle.alpaca ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no Alpaca quote deps bound for this run — the S2 cutover wires the platform binding."); })(),
+            })
+          : provider === "public"
+            ? await acquireUniverse({
+                mode: "public",
+                symbols: selectedSymbols,
+                maxSymbols: selectedSymbols.length,
+                quoteDeps: bundle.public ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no Public quote deps bound for this run — the S2 cutover wires the platform binding."); })(),
+              })
+            : await acquireUniverse({
+                mode: "etrade-only",
+                symbols: selectedSymbols,
+                maxSymbols: selectedSymbols.length,
+                quoteDeps: bundle.etrade ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no E*TRADE quote deps bound for this run — the S2 cutover wires the platform binding."); })(),
+              });
+    state.acquired = acquired;
+    await this.beatScreenerEngineState(state);
+    return {
+      timestamp,
+      userLogin,
+      universe,
+      sector,
+      provider,
+      ...(providerFallback ? { providerFallback } : {}),
+      symbols: selectedSymbols,
+      expectedCount,
+      acquired,
+      platformRunId: state.platformRunId,
+      quoteTraceSummary: state.quoteTrace.complete(),
+      taskId: state.taskId,
+      appliedLearnings: state.appliedLearnings,
+      ...(input.goalScreen ? { goalSymbols: selectedSymbols.map((s) => (typeof s === "string" ? s : s.symbol)) } : {}),
+    };
+  }
+
+  /**
+   * GATHER stage (catalog: gather — enrichment): history deps +
+   * persisted technicals/sentiment reads + the technicals batch.
+   * The joins (attachTechnicals / attachPersistedSentiment) live
+   * in ANALYSIS: they need the graded rows, which only exist
+   * after screenUniverse + factor grades.
+   */
+  async screenGatherStage(runId: string, input: ScreenerGatherStageInput): Promise<ScreenerGatherStageOutput> {
+    const req = input.request;
+    const feedOutput = input.feedOutput;
+    const state = await this.ensureScreenerEngineState(runId, req, feedOutput.timestamp, {
+      platformRunId: feedOutput.platformRunId,
+      taskId: feedOutput.taskId,
+      appliedLearnings: feedOutput.appliedLearnings,
+    });
+    state.acquired = feedOutput.acquired;
+
+    // Issue #1331: bars come through the platform history deps.
+    // The handler supplies the bound deps; the persisted-first
+    // reads below are best-effort, exactly as in runScreenInner.
+    let historyDeps = input.historyDeps;
+    try {
+      const datasetStore = createFeedDatasetAdapter(this.env);
+      if (datasetStore) {
+        const envStrings: Record<string, string | undefined> = {};
+        for (const [key, value] of Object.entries(this.env as unknown as Record<string, unknown>)) {
+          if (typeof value === "string") envStrings[key] = value;
+        }
+        const technicalsDef = buildFeedJobRegistry(envStrings).get(YAHOO_NASDAQ100_TECHNICALS_JOB_ID);
+        const persisted = await readPersistedTechnicalsBars(datasetStore, {
+          ...(technicalsDef ? { maxAgeSeconds: technicalsDef.staleAfterMinutes * 60 } : {}),
+          nowMs: Date.now(),
+        });
+        if (persisted && !persisted.stale) {
+          historyDeps = withPersistedBarsFirst(historyDeps, persisted);
+        }
+      }
+    } catch {
+      // Persisted read unavailable — the live fallback stands.
+    }
+    let persistedSentiment = state.persistedSentiment;
+    try {
+      const datasetStore = createFeedDatasetAdapter(this.env);
+      if (datasetStore) {
+        const envStrings: Record<string, string | undefined> = {};
+        for (const [key, value] of Object.entries(this.env as unknown as Record<string, unknown>)) {
+          if (typeof value === "string") envStrings[key] = value;
+        }
+        const sentimentDef = buildFeedJobRegistry(envStrings).get(YAHOO_NASDAQ100_SENTIMENT_JOB_ID);
+        const read = await readPersistedSentiment(datasetStore, {
+          ...(sentimentDef ? { maxAgeSeconds: sentimentDef.staleAfterMinutes * 60 } : {}),
+          nowMs: Date.now(),
+        });
+        if (read && !read.stale) persistedSentiment = read;
+      }
+    } catch {
+      // Persisted read unavailable — the sentiment column gaps.
+    }
+    state.persistedSentiment = persistedSentiment;
+
+    // Issue #269: Yahoo history complement — real RSI/MACD/gaps.
+    const technicalsBySymbol = await fetchPlatformTechnicalsBatch(
+      historyDeps,
+      feedOutput.acquired.quotes.map((q) => q.symbol),
+      { onBatch: () => this.beatScreenerEngineState(state) },
+    );
+    state.technicalsBySymbol = technicalsBySymbol;
+    const technicalsCoverage = {
+      symbols: feedOutput.acquired.quotes.length,
+      withMacd: [...technicalsBySymbol.values()].filter((t) => t.macdLine != null).length,
+      withGap: [...technicalsBySymbol.values()].filter((t) => t.gapPercent != null).length,
+      withAtr: [...technicalsBySymbol.values()].filter((t) => t.atr14 != null).length,
+    };
+    return {
+      ...feedOutput,
+      technicalsBySymbol: Object.fromEntries(technicalsBySymbol),
+      technicalsCoverage,
+      persistedSentiment: persistedSentiment
+        ? {
+            entries: [...persistedSentiment.sentimentBySymbol.entries()],
+            label: persistedSentiment.label,
+            asOf: persistedSentiment.asOf,
+            universeIndex: persistedSentiment.universeIndex,
+            universeLabel: persistedSentiment.universeLabel,
+            ageSeconds: persistedSentiment.ageSeconds,
+            stale: persistedSentiment.stale,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * ANALYSIS stage (catalog: analysis — screen): screenUniverse
+   * + factor grades + the enrichment joins + selectStandouts +
+   * the portfolio-context modifier. A goal command runs the goal
+   * runner here instead of the market screen — never a market
+   * screen presented as a goal result (#1996).
+   */
+  async screenAnalysisStage(runId: string, input: ScreenerAnalysisStageInput): Promise<ScreenerAnalysisStageOutput> {
+    const req = input.request;
+    const gatherOutput = input.gatherOutput;
+    const state = await this.ensureScreenerEngineState(runId, req, gatherOutput.timestamp, {
+      platformRunId: gatherOutput.platformRunId,
+      taskId: gatherOutput.taskId,
+      appliedLearnings: gatherOutput.appliedLearnings,
+    });
+    state.acquired = gatherOutput.acquired;
+    state.technicalsBySymbol = new Map(Object.entries(gatherOutput.technicalsBySymbol));
+    state.persistedSentiment = gatherOutput.persistedSentiment
+      ? {
+          sentimentBySymbol: new Map(gatherOutput.persistedSentiment.entries),
+          label: gatherOutput.persistedSentiment.label,
+          asOf: gatherOutput.persistedSentiment.asOf,
+          universeIndex: gatherOutput.persistedSentiment.universeIndex,
+          universeLabel: gatherOutput.persistedSentiment.universeLabel,
+          ageSeconds: gatherOutput.persistedSentiment.ageSeconds,
+          stale: gatherOutput.persistedSentiment.stale,
+        }
+      : undefined;
+
+    if (input.goalScreen) {
+      const goalRunner = input.goalRunner ?? ((goalReq) => this.runGoalScreen(goalReq));
+      const out = await goalRunner({
+        scenario: input.goalScreen.scenario,
+        trigger: req.trigger,
+        idempotencyKey: runId,
+        userLogin: state.userLogin,
+        ...(req.environment ? { environment: req.environment } : {}),
+        ...(input.goalScreen.assetClasses ? { assetClasses: input.goalScreen.assetClasses } : {}),
+        ...(gatherOutput.goalSymbols?.length ? { symbols: gatherOutput.goalSymbols } : {}),
+        ...(input.goalScreen.provider ? { provider: input.goalScreen.provider } : {}),
+        ...(input.goalScreen.providerFallback ? { providerFallback: input.goalScreen.providerFallback } : {}),
+      });
+      return {
+        ...gatherOutput,
+        screenResult: {
+          totalScanned: out.result?.counts?.stocksScanned ?? 0,
+          matchedCount: out.result?.counts?.stocksMatched ?? 0,
+          filterSummary: undefined,
+        },
+        allStocks: [],
+        opportunities: [],
+        sentimentCoverage: { symbols: 0, withSentiment: 0 },
+        goalTask: out.task,
+        goalExecuted: out.executed,
+        ...(out.result ? { goalResult: out.result } : {}),
+      };
+    }
+
+    const screener = new DynamicMarketScreener();
+    const acquired = gatherOutput.acquired;
+    const screenResult = screenUniverse(screener, acquired, {
+      ...(req.filters ?? {}),
+      sector: gatherOutput.sector,
+    });
+    state.screenResult = screenResult;
+
+    // Issue #266: SA-style factor grades, computed
+    // percentile-relative across the full scanned universe,
+    // then joined onto opportunities — with the history
+    // technicals and persisted sentiment joined onto the same
+    // rows (the gather stage's fetch, joined here because the
+    // rows only exist after screening + grading).
+    const gradedStocks = attachFactorGrades(buildAllStocks(acquired.quotes, screenResult.stocks));
+    const technicalsAttached = attachTechnicals(gradedStocks, state.technicalsBySymbol!);
+    const allStocks = state.persistedSentiment
+      ? attachPersistedSentiment(
+          technicalsAttached,
+          state.persistedSentiment.sentimentBySymbol,
+          state.persistedSentiment.label,
+        )
+      : technicalsAttached;
+    state.allStocks = allStocks;
+    const sentimentCoverage = {
+      symbols: acquired.quotes.length,
+      withSentiment: allStocks.filter((s) => s.indicators.sentiment !== null).length,
+    };
+    const bySymbol = new Map(allStocks.map((s) => [s.symbol, s]));
+    let opportunities = selectStandouts(
+      screenResult.stocks,
+      req.maxItems ?? DEFAULT_SCREENER_CONFIG.acquisition.defaultMaxItems,
+    ).map((s) => {
+      const opp = toOpportunityStock(s);
+      const graded = bySymbol.get(s.symbol);
+      return graded
+        ? { ...opp, factorGrades: graded.factorGrades, technicals: graded.technicals, indicators: graded.indicators }
+        : opp;
+    });
+    state.opportunities = opportunities;
+
+    // Issue #17: portfolio context (opt-in). The modifier runs
+    // only on E*TRADE-provider runs with a broker in scope —
+    // Yahoo runs never touch the broker. Every failure degrades
+    // to the unmodified ranking plus a marker reason.
+    let portfolioContext: PortfolioContextMarker | undefined;
+    if (req.portfolioContext === true) {
+      if (gatherOutput.provider !== "etrade" || !state.etrade) {
+        portfolioContext = { applied: false, reason: "no-broker" };
+      } else {
+        try {
+          const { account, positions } = await state.etrade.fetchPortfolioRemote(undefined, true);
+          const outcome = applyPortfolioContextToOpportunities(opportunities, {
+            ok: true,
+            accountId: account.accountId,
+            positions: positions.map((p) => ({ symbol: p.symbol, marketValue: p.marketValue })),
+          });
+          opportunities = outcome.ranked;
+          portfolioContext = outcome.marker;
+        } catch {
+          portfolioContext = { applied: false, reason: "positions-unavailable" };
+        }
+      }
+    }
+    state.opportunities = opportunities;
+    return {
+      ...gatherOutput,
+      screenResult: {
+        totalScanned: screenResult.totalScanned,
+        matchedCount: screenResult.matchedCount,
+        filterSummary: screenResult.filterSummary,
+        ...(screenResult.ledger?.rejections?.length ? { rejections: screenResult.ledger.rejections } : {}),
+      },
+      allStocks,
+      opportunities,
+      sentimentCoverage,
+      ...(portfolioContext ? { portfolioContext } : {}),
+    };
+  }
+
+  /**
+   * STORE stage (catalog: store — canonical report): the agent-
+   * local persistRun + the canonical row via the orchestrator
+   * door (the flow's store-shard, moved here). A store refusal
+   * is recorded, never a failed run — the flow's rule.
+   */
+  async screenStoreStage(runId: string, input: ScreenerStoreStageInput): Promise<ScreenerStoreStageOutput> {
+    const req = input.request;
+    const analysisOutput = input.analysisOutput;
+    const state = await this.ensureScreenerEngineState(runId, req, analysisOutput.timestamp, {
+      platformRunId: analysisOutput.platformRunId,
+      taskId: analysisOutput.taskId,
+      appliedLearnings: analysisOutput.appliedLearnings,
+    });
+
+    if (input.goalScreen) {
+      const envelope: Record<string, unknown> = {
+        taskId: (analysisOutput.goalTask as { id?: string } | undefined)?.id,
+        scenarioSource: input.goalScreen.scenarioSource,
+        trigger: req.trigger,
+        result: analysisOutput.goalResult,
+        ...(runId ? { idempotencyKey: runId } : {}),
+        ...(input.goalScreen.provider ? { provider: input.goalScreen.provider } : {}),
+      };
+      let stored = false;
+      let reportId: string | undefined;
+      let storeError: string | undefined;
+      try {
+        const storedId = await input.storeReport(envelope, state.userLogin, { goalScreen: input.goalScreen });
+        stored = true;
+        if (typeof storedId === "string") reportId = storedId;
+      } catch (err) {
+        stored = false;
+        storeError = err instanceof Error ? err.message : String(err);
+      }
+      return {
+        ...analysisOutput,
+        goalEnvelope: envelope,
+        payload: envelope,
+        stored,
+        ...(reportId ? { reportId } : {}),
+        ...(storeError ? { storeError } : {}),
+      };
+    }
+
+    const acquired = analysisOutput.acquired;
+    const result: ScreenerRunResult = {
+      timestamp: analysisOutput.timestamp,
+      trigger: req.trigger,
+      provider: analysisOutput.provider,
+      ...(req.broker ? { broker: req.broker } : {}),
+      ...(req.environment ? { environment: req.environment } : {}),
+      ...(req.mode ? { mode: req.mode } : {}),
+      ...(req.modeSource ? { modeSource: req.modeSource } : {}),
+      ...(analysisOutput.providerFallback ? { providerFallback: analysisOutput.providerFallback } : {}),
+      universe: analysisOutput.universe as UniverseId,
+      sector: analysisOutput.sector,
+      success: true,
+      totalScanned: analysisOutput.screenResult.totalScanned,
+      expectedCount: analysisOutput.expectedCount,
+      matchedCount: analysisOutput.screenResult.matchedCount,
+      opportunities: analysisOutput.opportunities,
+      allStocks: analysisOutput.allStocks,
+      discoveryMessage: acquired.discovery.message,
+      technicalsCoverage: analysisOutput.technicalsCoverage,
+      sentimentCoverage: analysisOutput.sentimentCoverage,
+      filterSummary: analysisOutput.screenResult.filterSummary as string,
+      ...(acquired.partial ? { partial: acquired.partial } : {}),
+      ...(analysisOutput.screenResult.rejections
+        ? { rejections: analysisOutput.screenResult.rejections as ScreenerRunResult["rejections"] }
+        : {}),
+      ...(analysisOutput.portfolioContext ? { portfolioContext: analysisOutput.portfolioContext } : {}),
+    };
+    if (state.taskId) result.taskId = state.taskId;
+    if (state.platformRunId) result.runId = state.platformRunId;
+    if (state.appliedLearnings.length > 0) result.appliedLearnings = state.appliedLearnings;
+    const traceSummary = state.quoteTrace.complete();
+    result.quoteTrace = {
+      traceId: traceSummary.traceId,
+      symbolCount: traceSummary.uniqueSymbolCount,
+      batchCount: traceSummary.batchesTotal,
+      quotesReceived: traceSummary.quotesReceived,
+      quotesFailed: traceSummary.quotesFailed,
+      failuresByCategory: traceSummary.failuresByCategory as Record<string, number>,
+      batches: [],
+    };
+    result.pareto = paretoFrontierForScreen(result.allStocks);
+    state.result = result;
+
+    await this.beatScreenerEngineState(state);
+    await this.persistRun(result);
+    // Issue #607: complete the task with a deterministic honesty
+    // evaluation of the outcome. Best-effort — the run stands either way.
+    if (state.taskId) {
+      try {
+        const evaluation = evaluateScreenerOutcome(
+          {
+            success: result.success,
+            runTimestamp: result.timestamp,
+            totalScanned: result.totalScanned,
+            matchedCount: result.matchedCount,
+            opportunities: result.opportunities.length,
+            partial: !!result.partial,
+            qualificationPresent: !!result.partial,
+            error: result.error ?? null,
+          },
+          new Date().toISOString(),
+        );
+        await this.completeScreenerTask(state.taskId, {
+          runTimestamp: result.timestamp,
+          totalScanned: result.totalScanned,
+          matchedCount: result.matchedCount,
+          opportunitiesCount: result.opportunities.length,
+          partial: !!result.partial,
+          evaluation,
+        });
+      } catch (err) {
+        structuredLog.warn("screenerAgent.engine_store_task_ledger_complete_unavailable", {
+          message: `[ScreenerAgent] Screener task ledger unavailable (complete): ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const payload = {
+      ...result,
+      ...(result.xlsxKey ? { xlsxKey: result.xlsxKey } : {}),
+      ...(result.csvKey ? { csvKey: result.csvKey } : {}),
+      trigger: req.trigger,
+    };
+    let stored = false;
+    let reportId: string | undefined;
+    let storeError: string | undefined;
+    try {
+      const storedId = await input.storeReport(payload, state.userLogin);
+      stored = true;
+      if (typeof storedId === "string") reportId = storedId;
+    } catch (err) {
+      stored = false;
+      storeError = err instanceof Error ? err.message : String(err);
+    }
+    return {
+      ...analysisOutput,
+      result,
+      payload,
+      stored,
+      ...(reportId ? { reportId } : {}),
+      ...(storeError ? { storeError } : {}),
+    };
+  }
+
+  /**
+   * SERVE stage (catalog: serve — report availability): shape
+   * the served-report record from the store hand-off and verify
+   * every shaped artifact key resolves in this agent's storage
+   * — fail-closed, never claim a served report whose bytes are
+   * absent. (Generation stays inside persistRun in this slice;
+   * serve shapes + verifies the served record.)
+   */
+  async screenServeStage(runId: string, input: ScreenerServeStageInput): Promise<ScreenerServeStageOutput> {
+    const storeOutput = input.storeOutput;
+    const result = storeOutput.result;
+    const formats: { format: "pdf" | "xlsx" | "csv"; key?: string; status?: string }[] = [];
+    if (result) {
+      if (result.pdfKey || result.pdfStatus) {
+        formats.push({ format: "pdf", ...(result.pdfKey ? { key: result.pdfKey } : {}), ...(result.pdfStatus ? { status: result.pdfStatus } : {}) });
+      }
+      if (result.xlsxKey || result.xlsxStatus) {
+        formats.push({ format: "xlsx", ...(result.xlsxKey ? { key: result.xlsxKey } : {}), ...(result.xlsxStatus ? { status: result.xlsxStatus } : {}) });
+      }
+      if (result.csvKey || result.csvStatus) {
+        formats.push({ format: "csv", ...(result.csvKey ? { key: result.csvKey } : {}), ...(result.csvStatus ? { status: result.csvStatus } : {}) });
+      }
+      for (const entry of formats) {
+        if (!entry.key) continue;
+        const bytes = await this.ctx.storage.get(entry.key);
+        if (bytes === undefined || bytes === null) {
+          throw new Error(
+            `SCREENER_SERVE_ARTIFACT_MISSING: served ${entry.format} artifact "${entry.key}" is absent from agent storage for run ${runId} — refusing to claim it served.`,
+          );
+        }
+      }
+    }
+    return {
+      ...storeOutput,
+      servedReport: {
+        ...(storeOutput.reportId ? { reportId: storeOutput.reportId } : {}),
+        formats,
+        servedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  /**
+   * DELIVER stage (catalog: deliver — channels): handoff of the
+   * persisted result to the delivery door (the flow's
+   * deliver-shard, moved here). The delivery id
+   * `workflow:<jobId>` is the #3943 suppression key — a retried
+   * deliver converges in the outcome sink instead of forking a
+   * second tracked record. A deliver refusal is recorded, never
+   * a failed run — the flow's rule.
+   */
+  async screenDeliverStage(runId: string, input: ScreenerDeliverStageInput): Promise<ScreenerDeliverStageOutput> {
+    const serveOutput = input.serveOutput;
+    if (!input.deliver) {
+      return { ...serveOutput, delivered: false, deliverSkipped: true };
+    }
+    let delivered = false;
+    let deliverError: string | undefined;
+    try {
+      await input.deliverOutcome(serveOutput.payload, serveOutput.userLogin, {
+        ...(input.goalScreen ? { goalScreen: input.goalScreen } : {}),
+        deliveryId: input.deliveryId,
+      });
+      delivered = true;
+    } catch (err) {
+      delivered = false;
+      deliverError = err instanceof Error ? err.message : String(err);
+    }
+    return {
+      ...serveOutput,
+      delivered,
+      ...(deliverError ? { deliverError } : {}),
+    };
   }
 
   /** Latest run for the unified results UI. */

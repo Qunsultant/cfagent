@@ -221,6 +221,10 @@ describe("feed pipeline catalog + resolution (#3535)", () => {
       "alpaca-nasdaq100-quotes",
       "etrade-nasdaq100-quotes",
       "public-nasdaq100-quotes",
+      // #4065: one options-chains job per optionsChains-serving source.
+      "etrade-options-chains",
+      "alpaca-options-chains",
+      "public-options-chains",
       "nasdaq-nasdaq100-universe",
     ]);
   });
