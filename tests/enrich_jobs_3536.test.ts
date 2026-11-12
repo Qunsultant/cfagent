@@ -132,6 +132,7 @@ describe("the element vocabulary (#3536)", () => {
       "public-nasdaq100-quotes-enrich",
       "yahoo-dow-quotes-enrich",
       "yahoo-nasdaq100-quotes-enrich",
+"yahoo-sector-communication-services-quotes-enrich",
       "yahoo-sector-consumer-discretionary-quotes-enrich",
 "yahoo-sector-consumer-staples-quotes-enrich",
       "yahoo-sector-energy-quotes-enrich",
@@ -140,6 +141,8 @@ describe("the element vocabulary (#3536)", () => {
       "yahoo-sector-industrials-quotes-enrich",
 "yahoo-sector-information-technology-quotes-enrich",
       "yahoo-sector-materials-quotes-enrich",
+"yahoo-sector-real-estate-quotes-enrich",
+"yahoo-sector-utilities-quotes-enrich",
       "yahoo-sp100-quotes-enrich",
       "yahoo-sp400-quotes-enrich",
       "yahoo-sp500-quotes-enrich"
