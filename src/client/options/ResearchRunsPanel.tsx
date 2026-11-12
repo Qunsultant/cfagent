@@ -15,6 +15,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Button, Checkbox, PageSection, Table, TextInput, type TableColumn } from "../components/ui";
+import { navigateToTab } from "../router";
 import { csrfHeaders } from "../apiFetch";
 import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
 import { AutonomousOptionsRuns } from "./AutonomousOptionsRuns";
@@ -448,13 +449,21 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
             <div style={{ fontSize: 12, color: "var(--color-text-dim)" }}>…and {report.rejected.length - 10} more.</div>
           )}
 
-          <h4>Run history — manual + scheduled, one view</h4>
-          {history.map((h) => (
-            <div key={h.runId} style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4, display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-              <TriggerChip trigger={h.trigger} />
-              <span>{new Date(h.createdAt).toLocaleString()} — {h.summary}</span>
-            </div>
-          ))}
+          {/* Issue #4262 (S3): options runs are listed in the ONE run ledger —
+              this panel keeps its settings, controls and latest report, and
+              links to the ledger filtered to Options instead of keeping a
+              second run list. */}
+          <h4>Run history</h4>
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4, display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
+            <span>
+              {history.length > 0
+                ? `${history.length} recorded run${history.length === 1 ? "" : "s"} — listed in the one run ledger.`
+                : "No research run yet — the one run ledger lists every options run."}
+            </span>
+            <Button variant="secondary" onClick={() => navigateToTab("schedules", "runs", { kind: "options" })}>
+              Open the run ledger
+            </Button>
+          </div>
         </div>
       ) : (
         <div style={{ color: "var(--color-text-muted)" }}>
