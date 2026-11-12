@@ -284,6 +284,7 @@ export const YAHOO_NASDAQ100_SENTIMENT_JOB_ID = "yahoo-nasdaq100-sentiment";
 export const YAHOO_SP100_QUOTES_JOB_ID = "yahoo-sp100-quotes";
 export const YAHOO_SP500_QUOTES_JOB_ID = "yahoo-sp500-quotes";
 export const YAHOO_DOW_QUOTES_JOB_ID = "yahoo-dow-quotes";
+export const YAHOO_SP400_QUOTES_JOB_ID = "yahoo-sp400-quotes";
 export const ALPACA_NASDAQ100_QUOTES_JOB_ID = "alpaca-nasdaq100-quotes";
 export const ETRADE_NASDAQ100_QUOTES_JOB_ID = "etrade-nasdaq100-quotes";
 export const PUBLIC_NASDAQ100_QUOTES_JOB_ID = "public-nasdaq100-quotes";
@@ -337,6 +338,8 @@ function nasdaq100QuotesJob(
  * on the same contract, immediately after the S&P 100 job.
  * #3905 registers the Dow quotes universe on the same contract,
  * immediately after the S&P 500 job.
+ * #4193 registers the S&P 400 quotes universe on the same contract,
+ * immediately after the Dow job.
  *
  * The Nasdaq provider declares screenUniverse only — it has NO
  * quotes job here (S2 finding, #3530: its dataset is the US
@@ -485,6 +488,23 @@ export function buildFeedJobRegistry(
     staleAfterMinutes: resolveFeedJobStaleMinutes(
       env,
       YAHOO_DOW_QUOTES_JOB_ID,
+      FEED_JOB_DEFAULTS.staleAfterMinutes,
+    ),
+  });
+  registry.register({
+    id: YAHOO_SP400_QUOTES_JOB_ID,
+    sourceId: "yahoo",
+    dataset: "quotes",
+    elements: ["quotes"],
+    universe: { kind: "index", index: "sp400", label: "S&P MidCap 400" },
+    cadenceMinutes: resolveFeedJobCadenceMinutes(
+      env,
+      YAHOO_SP400_QUOTES_JOB_ID,
+      FEED_JOB_DEFAULTS.cadenceMinutes,
+    ),
+    staleAfterMinutes: resolveFeedJobStaleMinutes(
+      env,
+      YAHOO_SP400_QUOTES_JOB_ID,
       FEED_JOB_DEFAULTS.staleAfterMinutes,
     ),
   });
