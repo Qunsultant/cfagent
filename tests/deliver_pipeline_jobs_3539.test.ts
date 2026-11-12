@@ -286,6 +286,10 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
       "yahoo-sector-materials-quotes-enrich-analyze-generate-deliver",
       "yahoo-sector-industrials-quotes-enrich-analyze-generate-deliver",
       "yahoo-sector-consumer-discretionary-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-consumer-staples-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-health-care-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-financials-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-information-technology-quotes-enrich-analyze-generate-deliver",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "etrade-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "public-nasdaq100-quotes-enrich-analyze-generate-deliver",
@@ -305,7 +309,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
 
   it("every catalog definition resolves as a valid J1 job definition", () => {
     const raws = buildAllDeliverPipelineJobDefinitions({});
-    expect(raws).toHaveLength(12);
+    expect(raws).toHaveLength(16);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("deliver");
@@ -316,7 +320,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
     }
   });
 
-  it("registerSchedules registers the full plane incl. deliver (67 declarations)", async () => {
+  it("registerSchedules registers the full plane incl. deliver (87 declarations)", async () => {
     const h = await makeHarness();
     const specs: Array<{ jobId: string }> = [];
     const registrations = await h.control.registerSchedules({
@@ -326,7 +330,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
       },
     });
     // #4065 pin update: three options-chains jobs join the plane.
-    expect(registrations).toHaveLength(67);
+    expect(registrations).toHaveLength(87);
     expect(specs.map((s) => s.jobId)).toContain(DELIVER_ID);
   });
 });
