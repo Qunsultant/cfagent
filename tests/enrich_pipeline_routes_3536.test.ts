@@ -237,6 +237,10 @@ describe("pipeline enrich-jobs routes (#3536)", () => {
       "yahoo-sector-materials-quotes-enrich",
       "yahoo-sector-industrials-quotes-enrich",
       "yahoo-sector-consumer-discretionary-quotes-enrich",
+      "yahoo-sector-consumer-staples-quotes-enrich",
+      "yahoo-sector-health-care-quotes-enrich",
+      "yahoo-sector-financials-quotes-enrich",
+      "yahoo-sector-information-technology-quotes-enrich",
     ]);
     const alpaca = await callRoute(ctx, "GET", "/data-providers/alpaca/enrich-jobs");
     const alpacaBody = (await alpaca.json()) as { jobs: EnrichJobSurfaceView[] };
@@ -250,7 +254,7 @@ describe("pipeline enrich-jobs routes (#3536)", () => {
     const body = (await res.json()) as any;
     const yahoo = body.providers.find((p: any) => p.id === "yahoo");
     expect(Array.isArray(yahoo.enrichJobs)).toBe(true);
-    expect(yahoo.enrichJobs).toHaveLength(9);
+    expect(yahoo.enrichJobs).toHaveLength(13);
     expect(yahoo.enrichJobs[0]).toMatchObject({ jobId: ENRICH_ID, enrich: { state: "never-run" } });
   });
 
