@@ -476,6 +476,7 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/audit/history",
   "ANY /api/reports/list",
   "ANY /api/reports/seed-canonical",
+  "ANY /api/ops/run-ledger-reconcile",
   "ANY /api/retrieval/populate-market-graph",
   "ANY /api/iaaa/access-request",
   "ANY /api/iaaa/access-requests",
