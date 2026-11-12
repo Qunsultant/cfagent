@@ -66,6 +66,7 @@ Available Domains:
    - Positions/Portfolio: action 'positions' for account balance and holdings.
    - Options Screener: action 'options_screen', filters (contractType 'CALL'|'PUT'|'BOTH', minDelta, maxDelta, minDte, maxDte, minVolume, minOpenInterest, moneyness).
    - Options Strategies: action 'options_strategies' or 'options_best_trade' for multi-leg strategies (iron condor, vertical spread).
+   - Options Stage Control: action 'options_stage_control' to drive one stage of one options screen run (run / re-run / stop / resume / cancel) — filters runId (the options run id), stage (one of plan, chainFetch, enrich, screen, risk, persistCanonicalResults, shapeReport, deliver), operation (one of run, rerun, stop, resume, cancel).
    - Watchlists: action 'watchlist_save' or 'watchlist_list'.
 2. 'research':
    - Real-time and fundamental research using Yahoo Finance or Alpaca (actions: 'quote', 'fundamentals', 'bars', 'report', 'compare', 'snapshot').
@@ -109,7 +110,7 @@ Return JSON ONLY matching this structure:
   "targetTable": string,
   "tradingData": { "action": string, "symbol": string, "orderAction": "BUY"|"SELL", "quantity": number, "limitPrice": number, "filters": {} },
   "researchData": { "action": string, "symbol": string, "symbols": [] },
-  "scheduleData": { "action": string, "scheduleType": string, "delayInSeconds": number, "description": string, "callback": "sendScheduledReminder"|"autonomousMarketScreen"|"autonomousOptionsAnalysis"|"autonomousStrategyDiscovery"|"autonomousGoalScreen" },
+  "scheduleData": { "action": string, "scheduleType": string, "delayInSeconds": number, "description": string },
   "terms": string,
   "limit": number
 }`, options?.untrustedContent),

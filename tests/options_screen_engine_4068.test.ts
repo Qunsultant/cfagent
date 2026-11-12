@@ -19,6 +19,7 @@ import {
   optionsEngineStoresFromSql,
   optionsScreenJobDefinition,
   optionsScreenJobId,
+  OPTIONS_SCREEN_ROOT_STEP,
   OPTIONS_SCREEN_STEP,
   runOptionsPlainScreenViaEngine,
   runOptionsScanViaEngine,
@@ -161,12 +162,18 @@ describe("options screen on the J engine (#4068)", () => {
       jobId: string;
       root: {
         kind: string;
+        steps: Array<{ step: string }>;
         executionMode: { concurrency: string; pacing: string; delivery: string; shape: string };
         children: Array<{ kind: string; steps: Array<{ step: string; params: { stageId: string } }> }>;
       };
     };
     expect(definition.jobId).toBe(jobId);
     expect(definition.root.kind).toBe("options-screen");
+    // Issue #4066: the root carries the options.runRoot step, which
+    // produces the dispatch request as the run's hand-off — without
+    // it no stage has a persisted input and no stage operation can
+    // execute (stage_input_missing).
+    expect(definition.root.steps).toEqual([{ step: OPTIONS_SCREEN_ROOT_STEP }]);
     expect(definition.root.executionMode).toEqual({
       concurrency: "sequential",
       pacing: "batch",

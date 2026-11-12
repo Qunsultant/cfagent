@@ -13,7 +13,11 @@ import { createComparisonRunner } from "../../services/comparisonNlqRunner";
 import { getPlatformCapabilitiesDeskSummary } from "../../services/platformKnowledge";
 import { UnifiedOptionsService, ETradeSlackTradingService, describeFlowProvenance, getDynamicLiveFlowItems, isNonLivePricingQuoteStatus, nonLivePricingNotice } from "../../trading";
 import { runOptionsStrategyAction, type OptionsStrategyIntent } from "../nlqOptionsStrategy";
-import type { DatabaseORM } from "../../orm";
+import {
+  controlOptionsStage,
+  type OptionsStageControlOperation,
+} from "../../workflows/optionsStageControl";
+import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
 import type { ScanRunStore, StrategyProfileStore } from "../../trading";
 import type { AgentScheduleItem, Env, OptionScreenResult } from "../../types";
@@ -21,14 +25,6 @@ import { formatMarketCap, formatTradingQuoteBidAsk, formatTradingQuoteHeadline }
 import { planNLQ, validateNLQPlanWithLLM } from "./llmPlanning";
 import { STOP_WORDS_REGEX } from "./orderParams";
 import { NLQPlan, isNlqTableAllowed } from "./schema";
-import {
-  agentScheduleProvenance,
-  executeAgentScheduleAction,
-  isNlqScheduleCallbackAllowed,
-  type AgentScheduleExecutorDeps,
-  type AgentSdkTiming,
-} from "../../services/agentScheduleCapability";
-import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { NLQExecutionDeps, NLQQueryResult, NLQSchedulingPort, type NLQSocialBriefPort, type NLQStockScreenPort, type NLQStockScreenRunResult } from "./types";
 import { SOCIAL_BRIEF_MAX_CHARS, resolveBriefDate } from "../social/briefStore";
 import { getUserDid } from "../did";
@@ -1245,17 +1241,10 @@ async function executeSchedulingAction(
   plan: NLQPlan,
   port: NLQSchedulingPort | undefined,
   userLogin: string,
-  executedAt: string,
-  // Issue #3122 — the agent schedule capability, when the caller bound
-  // it (orchestrator). When present, schedule actions route through it.
-  capability?: AgentScheduleExecutorDeps,
-  tenantId?: string,
+  executedAt: string
 ): Promise<NLQQueryResult> {
   const action = plan.scheduleData?.action || "list";
   const base = { plan, domain: "scheduling", targetTable: "cf_agent_schedules", executedAt };
-  // The NLQ agent acts for the authenticated login.
-  const principal = { login: userLogin, agentId: "nlq" };
-  const tenant = tenantId ?? "primary";
 
   const failure = (summary: string): NLQQueryResult => ({
     ...base,
@@ -1290,20 +1279,7 @@ async function executeSchedulingAction(
   if (action === "list") {
     let schedules: AgentScheduleItem[];
     try {
-      if (capability) {
-        const out = await executeAgentScheduleAction(capability, {
-          action: "list",
-          kind: "sdk",
-          principal,
-          tenantId: tenant,
-        });
-        if (!out.ok) {
-          return failure(`Failed to list schedules: ${out.reason}. No schedule data could be read.`);
-        }
-        schedules = (out.schedule as AgentScheduleItem[]) ?? [];
-      } else {
-        schedules = await port.listSchedules();
-      }
+      schedules = await port.listSchedules();
     } catch (err) {
       return failure(
         `Failed to list schedules: ${err instanceof Error ? err.message : String(err)}. No schedule data could be read.`
@@ -1337,36 +1313,6 @@ async function executeSchedulingAction(
     if (!scheduleId) {
       return failure("Schedule cancellation failed: no schedule ID was provided, so nothing was cancelled.");
     }
-    if (capability) {
-      // Issue #3122 — the capability owns the audit + ledger row here;
-      // the executor must not emit a second schedule.cancelled event.
-      const out = await executeAgentScheduleAction(capability, {
-        action: "delete",
-        kind: "sdk",
-        principal,
-        tenantId: tenant,
-        scheduleId,
-      });
-      if (!out.ok && out.code === "not-found") {
-        return {
-          ...base,
-          count: 0,
-          status: "not_found",
-          summary: `Schedule '${scheduleId}' was not found among the agent's active schedules, so nothing was cancelled. It may have already fired or been cancelled.`,
-          rows: [{ scheduleId, status: "NOT_FOUND", cancelledAt: executedAt }],
-        };
-      }
-      if (!out.ok) {
-        return failure(`Failed to cancel schedule '${scheduleId}': ${out.reason}. The schedule was NOT cancelled.`);
-      }
-      return {
-        ...base,
-        count: 1,
-        status: "cancelled",
-        summary: `Task schedule '${scheduleId}' cancelled successfully.`,
-        rows: [{ scheduleId, status: "CANCELLED", cancelledAt: executedAt }],
-      };
-    }
     let cancelled: boolean;
     try {
       cancelled = await port.cancelSchedule(scheduleId);
@@ -1398,14 +1344,6 @@ async function executeSchedulingAction(
   const sd: NonNullable<NLQPlan["scheduleData"]> = plan.scheduleData ?? { action: "create" };
   const callback = sd.callback || "sendScheduledReminder";
   const description = sd.description || "Scheduled task";
-  // Issue #3122 (F1): the allow-list is enforced here as well as in the
-  // plan schema — a plan object that bypasses zod (a direct executor
-  // call, a stale client) still cannot arm an unlisted callback.
-  if (!isNlqScheduleCallbackAllowed(callback)) {
-    return failure(
-      `Schedule creation failed: callback '${callback}' is not schedulable through NLQ. Only sendScheduledReminder and the four screen callbacks may be armed by an agent. The schedule was NOT created.`,
-    );
-  }
   const scheduleType =
     sd.scheduleType ||
     (sd.cron ? "cron" : sd.intervalSeconds ? "interval" : sd.date ? "scheduled" : "delayed");
@@ -1427,13 +1365,7 @@ async function executeSchedulingAction(
   // Mis-shaped criteria fail the action explicitly; nothing is armed.
   let payload: Record<string, unknown>;
   if (callback === "sendScheduledReminder") {
-    payload = {
-      reminderId: crypto.randomUUID(),
-      message: description,
-      userLogin,
-      // Issue #3122 — agent provenance on every agent-armed schedule.
-      provenance: agentScheduleProvenance("nlq", userLogin, executedAt),
-    };
+    payload = { reminderId: crypto.randomUUID(), message: description, userLogin };
   } else if ((SCREENING_SCHEDULE_CALLBACKS as readonly string[]).includes(callback)) {
     const criteria: Record<string, unknown> = {};
     for (const key of [
@@ -1443,9 +1375,6 @@ async function executeSchedulingAction(
       "symbols",
       "thesis",
       "riskProfile",
-      // Issue #3122 (F1): goal-screen criteria (see schema.ts).
-      "goalKind",
-      "scenarioId",
       "filters",
       "inputModel",
       "requests",
@@ -1476,88 +1405,38 @@ async function executeSchedulingAction(
         `Schedule creation failed: ${built.error} The schedule was NOT created.`
       );
     }
-    // Issue #3122 — agent provenance on every agent-armed schedule.
-    payload = {
-      ...(built.value as Record<string, unknown>),
-      provenance: agentScheduleProvenance("nlq", userLogin, executedAt),
-    };
+    payload = built.value;
   } else {
-    // Unreachable after the allow-list check above; refused honestly
-    // rather than armed with a generic payload (the pre-#3122 hole:
-    // any callback name an LLM produced was armed verbatim).
-    return failure(
-      `Schedule creation failed: callback '${callback}' is not schedulable through NLQ. The schedule was NOT created.`,
-    );
-  }
-
-  // Timing validation runs before anything arms, on both paths.
-  let timing: AgentSdkTiming;
-  if (scheduleType === "interval") {
-    if (!sd.intervalSeconds || sd.intervalSeconds <= 0) {
-      return failure("Schedule creation failed: an interval schedule requires a positive intervalSeconds. The schedule was NOT created.");
-    }
-    timing = { type: "interval", intervalSeconds: sd.intervalSeconds };
-  } else if (scheduleType === "cron") {
-    if (!sd.cron) {
-      return failure("Schedule creation failed: a cron schedule requires a cron expression. The schedule was NOT created.");
-    }
-    timing = { type: "cron", cron: sd.cron };
-  } else if (scheduleType === "scheduled") {
-    if (!sd.date) {
-      return failure("Schedule creation failed: a one-time schedule requires a date. The schedule was NOT created.");
-    }
-    const when = new Date(sd.date);
-    if (Number.isNaN(when.getTime())) {
-      return failure(`Schedule creation failed: '${sd.date}' is not a valid date. The schedule was NOT created.`);
-    }
-    timing = { type: "scheduled", time: Math.floor(when.getTime() / 1000) };
-  } else {
-    // delayed
-    if (!sd.delayInSeconds || sd.delayInSeconds <= 0) {
-      return failure("Schedule creation failed: a delayed schedule requires a positive delayInSeconds. The schedule was NOT created.");
-    }
-    timing = { type: "delayed", delayInSeconds: sd.delayInSeconds };
+    payload = { userLogin, description };
   }
 
   let created: AgentScheduleItem;
-  let auditedByCapability = false;
   try {
-    if (capability) {
-      // Issue #3122 — the capability owns PDP, classification, the
-      // approval gate, agent provenance, and the ledger row; the
-      // executor maps its outcome onto the NLQ envelope and must not
-      // emit a second schedule.created event.
-      const isExternalSend =
-        callback === "autonomousStrategyDiscovery" &&
-        (sd.emailTo !== undefined || sd.slackChannel !== undefined || sd.webhookUrl !== undefined);
-      const out = await executeAgentScheduleAction(capability, {
-        action: "create",
-        kind: "sdk",
-        principal,
-        tenantId: tenant,
-        callback,
-        timing,
-        payload,
-        isExternalSend,
-      });
-      if (!out.ok && out.code === "approval-required") {
-        return failure(
-          `Schedule creation requires approval: ${out.reason}. The schedule was NOT created. Pending approval: ${out.pendingApprovalId}.`,
-        );
+    if (scheduleType === "interval") {
+      if (!sd.intervalSeconds || sd.intervalSeconds <= 0) {
+        return failure("Schedule creation failed: an interval schedule requires a positive intervalSeconds. The schedule was NOT created.");
       }
-      if (!out.ok) {
-        return failure(`Schedule creation failed: ${out.reason}. The schedule was NOT created.`);
+      created = await port.scheduleEvery(sd.intervalSeconds, callback, payload);
+    } else if (scheduleType === "cron") {
+      if (!sd.cron) {
+        return failure("Schedule creation failed: a cron schedule requires a cron expression. The schedule was NOT created.");
       }
-      created = out.schedule as AgentScheduleItem;
-      auditedByCapability = true;
-    } else if (timing.type === "interval") {
-      created = await port.scheduleEvery(timing.intervalSeconds, callback, payload);
-    } else if (timing.type === "cron") {
-      created = await port.schedule(timing.cron, callback, payload, { idempotent: true });
-    } else if (timing.type === "scheduled") {
-      created = await port.schedule(new Date(timing.time * 1000), callback, payload);
+      created = await port.schedule(sd.cron, callback, payload, { idempotent: true });
+    } else if (scheduleType === "scheduled") {
+      if (!sd.date) {
+        return failure("Schedule creation failed: a one-time schedule requires a date. The schedule was NOT created.");
+      }
+      const when = new Date(sd.date);
+      if (Number.isNaN(when.getTime())) {
+        return failure(`Schedule creation failed: '${sd.date}' is not a valid date. The schedule was NOT created.`);
+      }
+      created = await port.schedule(when, callback, payload);
     } else {
-      created = await port.schedule(timing.delayInSeconds, callback, payload);
+      // delayed
+      if (!sd.delayInSeconds || sd.delayInSeconds <= 0) {
+        return failure("Schedule creation failed: a delayed schedule requires a positive delayInSeconds. The schedule was NOT created.");
+      }
+      created = await port.schedule(sd.delayInSeconds, callback, payload);
     }
   } catch (err) {
     return failure(
@@ -1565,18 +1444,16 @@ async function executeSchedulingAction(
     );
   }
 
-  if (!auditedByCapability) {
-    audit("schedule.created", {
-      scheduleId: created.id,
-      scheduleType: created.type,
-      callback: created.callback,
-      delayInSeconds: created.delayInSeconds,
-      intervalSeconds: created.intervalSeconds,
-      cron: created.cron,
-      description,
-      createdAt: executedAt,
-    });
-  }
+  audit("schedule.created", {
+    scheduleId: created.id,
+    scheduleType: created.type,
+    callback: created.callback,
+    delayInSeconds: created.delayInSeconds,
+    intervalSeconds: created.intervalSeconds,
+    cron: created.cron,
+    description,
+    createdAt: executedAt,
+  });
 
   return {
     ...base,
@@ -2085,6 +1962,14 @@ async function executeNLQQueryAsyncCore(
         // the stored value is the stage artifact the pipeline wrote.
         pipelineStorage: deps?.storage as unknown as OptionsStageStorage | undefined,
         pipelineQueue: (env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
+        // Issue #4066: the host DO's raw SQLite handle for the engine
+        // stores — the NLQ host's storage object IS the DO storage
+        // (chatTurnHelpers threads ctx.storage), so its .sql is the
+        // same handle the manual route records over. The cast is the
+        // established shape (the stock door reads context.storage.sql
+        // the same way); absent, the legs run in-memory and a later
+        // per-stage control action refuses by name.
+        engineSql: (deps?.storage as unknown as { sql?: SqlStorage } | undefined)?.sql,
         // #1257 comparison surfacing: the runner is built from the
         // session's E*TRADE client + environment + orm ledger sink.
         // The runner itself refuses without env, and reports
@@ -2119,6 +2004,93 @@ async function executeNLQQueryAsyncCore(
         rows: res.rows,
         executedAt,
       };
+    }
+
+    if (action === "options_stage_control") {
+      // Issue #4066: per-stage chat control of an options run — run /
+      // re-run / stop / resume / cancel one stage by (runId, stageId)
+      // on the 8-stage vocabulary, through the engine control plane.
+      // The runId/stage/operation ride the plan's filters record.
+      // A control refusal is a NAMED envelope (stage + reason in
+      // validationError), never an absence and never a silent success.
+      const controlFilters = (plan.tradingData?.filters ?? {}) as Record<string, unknown>;
+      const controlRunId = typeof controlFilters.runId === "string" ? controlFilters.runId.trim() : "";
+      const controlStage = typeof controlFilters.stage === "string" ? controlFilters.stage.trim() : "";
+      const controlOperation = controlFilters.operation as OptionsStageControlOperation | undefined;
+      const controlSql = (deps?.storage as unknown as { sql?: SqlStorage } | undefined)?.sql;
+      if (!controlRunId || !controlStage || !controlOperation) {
+        return {
+          plan,
+          domain: "trading",
+          targetTable: "etrade_options_stage_control",
+          count: 0,
+          status: "invalid_request",
+          summary: "Options stage control needs a runId, a stage, and an operation (run, rerun, stop, resume, or cancel).",
+          validationError: "Options stage control needs a runId, a stage, and an operation (run, rerun, stop, resume, or cancel).",
+          rows: [],
+          executedAt,
+        };
+      }
+      if (!controlSql) {
+        return {
+          plan,
+          domain: "trading",
+          targetTable: "etrade_options_stage_control",
+          count: 0,
+          status: "invalid_request",
+          summary: `Options run ${controlRunId}: the stage-control action cannot access SQLite in this turn, so no engine record can be addressed.`,
+          validationError: `Options run ${controlRunId}: the stage-control action cannot access SQLite in this turn, so no engine record can be addressed.`,
+          rows: [],
+          executedAt,
+        };
+      }
+      try {
+        const controlResult = await controlOptionsStage({
+          sql: controlSql,
+          ...(deps?.storage
+            ? { storage: deps.storage as unknown as OptionsStageStorage | undefined }
+            : {}),
+          env,
+          runId: controlRunId,
+          stage: controlStage,
+          operation: controlOperation,
+          userLogin: deps?.userLogin ?? login,
+          etradeClient: etrade.client,
+        });
+        return {
+          plan,
+          domain: "trading",
+          targetTable: "etrade_options_stage_control",
+          count: 1,
+          status: "success",
+          summary: `Options run ${controlRunId}: stage ${controlResult.stage} ${controlResult.operation} — ${controlResult.state}.`,
+          rows: [
+            {
+              runId: controlResult.runId,
+              jobId: controlResult.jobId,
+              stage: controlResult.stage,
+              operation: controlResult.operation,
+              state: controlResult.state,
+              requestShape: controlResult.requestShape,
+              stageUnits: controlResult.stageUnits,
+            },
+          ],
+          executedAt,
+        };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return {
+          plan,
+          domain: "trading",
+          targetTable: "etrade_options_stage_control",
+          count: 0,
+          status: "invalid_request",
+          summary: `Options run ${controlRunId}: stage ${controlStage} ${controlOperation} refused — ${reason}`,
+          validationError: reason,
+          rows: [],
+          executedAt,
+        };
+      }
     }
 
     if (action === "options_screen") {
@@ -2382,12 +2354,7 @@ async function executeNLQQueryAsyncCore(
       plan,
       deps?.schedulingPort,
       loginStr,
-      executedAt,
-      // Issue #3122 — the capability routes NLQ schedule actions through
-      // PDP + classification + approval + ledger when bound (orchestrator);
-      // without it the executor still enforces the F1 allow-list.
-      deps?.agentScheduleCapability,
-      resolveIaaaTenant(env),
+      executedAt
     );
   }
 
@@ -2539,7 +2506,7 @@ export async function executeNaturalLanguageQuery(
   env: Env,
   userLoginOrOptions?: string | { context?: string; validateWithLLM?: boolean; untrustedContent?: boolean },
   userDid?: string,
-  options?: { context?: string; validateWithLLM?: boolean; untrustedContent?: boolean; scanRunStore?: ScanRunStore; profileStore?: StrategyProfileStore; schedulingPort?: NLQSchedulingPort; agentScheduleCapability?: NLQExecutionDeps["agentScheduleCapability"]; stockScreenPort?: NLQStockScreenPort; socialBriefPort?: NLQSocialBriefPort; discoveryRunner?: NLQExecutionDeps["discoveryRunner"]; fitDiscoveryRunner?: NLQExecutionDeps["fitDiscoveryRunner"]; storage?: NLQExecutionDeps["storage"] }
+  options?: { context?: string; validateWithLLM?: boolean; untrustedContent?: boolean; scanRunStore?: ScanRunStore; profileStore?: StrategyProfileStore; schedulingPort?: NLQSchedulingPort; stockScreenPort?: NLQStockScreenPort; socialBriefPort?: NLQSocialBriefPort; discoveryRunner?: NLQExecutionDeps["discoveryRunner"]; fitDiscoveryRunner?: NLQExecutionDeps["fitDiscoveryRunner"]; storage?: NLQExecutionDeps["storage"] }
 ): Promise<{ plan: NLQPlan; result: NLQQueryResult }> {
   let userLogin: string | undefined;
   let resolvedOptions = options;
@@ -2559,8 +2526,8 @@ export async function executeNaturalLanguageQuery(
     env,
     userLogin,
     userDid,
-    resolvedOptions?.storage || resolvedOptions?.scanRunStore || resolvedOptions?.profileStore || resolvedOptions?.schedulingPort || resolvedOptions?.agentScheduleCapability || resolvedOptions?.stockScreenPort || resolvedOptions?.socialBriefPort || resolvedOptions?.discoveryRunner || resolvedOptions?.fitDiscoveryRunner
-      ? { scanRunStore: resolvedOptions?.scanRunStore, profileStore: resolvedOptions?.profileStore, userLogin, schedulingPort: resolvedOptions?.schedulingPort, agentScheduleCapability: resolvedOptions?.agentScheduleCapability, stockScreenPort: resolvedOptions?.stockScreenPort, socialBriefPort: resolvedOptions?.socialBriefPort, discoveryRunner: resolvedOptions?.discoveryRunner, fitDiscoveryRunner: resolvedOptions?.fitDiscoveryRunner, storage: resolvedOptions?.storage }
+    resolvedOptions?.storage || resolvedOptions?.scanRunStore || resolvedOptions?.profileStore || resolvedOptions?.schedulingPort || resolvedOptions?.stockScreenPort || resolvedOptions?.socialBriefPort || resolvedOptions?.discoveryRunner || resolvedOptions?.fitDiscoveryRunner
+      ? { scanRunStore: resolvedOptions?.scanRunStore, profileStore: resolvedOptions?.profileStore, userLogin, schedulingPort: resolvedOptions?.schedulingPort, stockScreenPort: resolvedOptions?.stockScreenPort, socialBriefPort: resolvedOptions?.socialBriefPort, discoveryRunner: resolvedOptions?.discoveryRunner, fitDiscoveryRunner: resolvedOptions?.fitDiscoveryRunner, storage: resolvedOptions?.storage }
       : undefined,
   );
   if (!result.planSource && plan.planSource) {

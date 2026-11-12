@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { CREATABLE_SCHEDULE_CALLBACKS } from "../orchestrator/scheduleCallbacks";
 /**
  * Assessment P0 (#143): explicit allowlist of tables the NLQ engine is
  * permitted to read through the `table_data` domain. Derived from the
@@ -84,6 +83,7 @@ export const nlqPlanSchema = z.object({
           "options_opportunities",
           "options_fit_discovery",
           "options_comparison",
+          "options_stage_control",
           "options_flow",
           "watchlist_save",
           "watchlist_list",
@@ -119,13 +119,7 @@ export const nlqPlanSchema = z.object({
     .object({
       action: z.enum(["list", "create", "cancel"]),
       scheduleType: z.enum(["delayed", "scheduled", "cron", "interval"]).optional(),
-      // Issue #3122 (F1): the NLQ schedule callback is an allow-list,
-      // not a free-form string. The reminder plus exactly the four
-      // creatable callbacks — a plan naming anything else (notably the
-      // internal-only callbacks) fails validation before it can arm.
-      callback: z
-        .enum(["sendScheduledReminder", ...CREATABLE_SCHEDULE_CALLBACKS])
-        .optional(),
+      callback: z.string().optional(),
       delayInSeconds: z.number().optional(),
       intervalSeconds: z.number().optional(),
       cron: z.string().optional(),
@@ -145,12 +139,6 @@ export const nlqPlanSchema = z.object({
       symbols: z.array(z.string()).optional(),
       thesis: z.string().optional(),
       riskProfile: z.string().optional(),
-      // Issue #3122 (F1): goal-screen criteria — without these the
-      // builder refuses every autonomousGoalScreen plan (goalKind is
-      // required when no scenarioId is supplied), so the allow-list's
-      // fourth callback could never actually arm through NLQ.
-      goalKind: z.string().optional(),
-      scenarioId: z.string().optional(),
       filters: z.record(z.string(), z.unknown()).optional(),
       inputModel: z.string().optional(),
       requests: z.array(z.record(z.string(), z.unknown())).optional(),

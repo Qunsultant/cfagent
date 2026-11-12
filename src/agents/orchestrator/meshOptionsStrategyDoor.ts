@@ -76,7 +76,8 @@
  */
 
 import type { Env } from "../../types";
-import type { DatabaseORM } from "../../orm";
+import type { DatabaseORM, SqlStorage } from "../../orm";
+import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
 import {
   UNIVERSES,
   defaultRegistry,
@@ -334,6 +335,15 @@ export async function runOptionsStrategyScreenViaDoor(
   const run = ctx.runOptionsStrategy ?? runOptionsStrategyAction;
   const result = await run(etrade, "options_opportunities", filters, {
     userLogin: login,
+    // Issue #4066: the door's storage IS the host DO's storage (the
+    // MCP context carries the caller's OrchestratorAgent DO handle),
+    // so its .sql is the same handle the manual route records over:
+    // thread it as the stage storage (the scan leg's artifacts persist
+    // in the DO, not in memory) and as the engine stores, so the
+    // door's run is addressable by a later per-stage control action.
+    // Absent, the leg runs fully in-memory and control refuses by name.
+    pipelineStorage: ctx.storage as unknown as OptionsStageStorage | undefined,
+    engineSql: (ctx.storage as unknown as { sql?: SqlStorage } | undefined)?.sql,
   });
 
   const constraints: MeshOptionsStrategyConstraints = {

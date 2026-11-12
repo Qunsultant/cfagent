@@ -134,6 +134,7 @@ import {
   SlackDispatchTransactionSnapCommand,
   RunStockScreenCommand,
   RunOptionsStrategyScreenCommand,
+  OptionsCopilotStageControlCommand,
   StockCopilotStatusCommand,
   StockCopilotControlCommand,
   StockCopilotIntrospectCommand,
@@ -1984,6 +1985,11 @@ export class McpToolFactory {
     // engine's carriage has no workflow behind it). Same
     // identity discipline as batches A–E.
     this.registerTool(new RunOptionsStrategyScreenCommand());
+
+    // Issue #4066: Options Copilot per-stage chat control — drive one
+    // stage of one options run (run / re-run / stop / resume / cancel)
+    // through the engine control plane from the copilot turn.
+    this.registerTool(new OptionsCopilotStageControlCommand());
 
     // Issue #3513: Stock Copilot chat doors — inspect loop status,
     // open positions with exit plans, cycle activity, and execution controls.
