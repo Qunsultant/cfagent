@@ -69,6 +69,11 @@ import {
   FeedJobTimeoutError,
   withFeedDeadline,
 } from "./feedJobTimeouts";
+// Issue #4068: the coded errors live in the leaf ./feedJobCodes (re-exported
+// here, so every existing importer keeps its path) — jobPipelineEngine
+// imports the leaf directly so the engine never pulls in this module.
+import { FEED_JOB_CODES, type FeedJobCode } from "./feedJobCodes";
+export { FEED_JOB_CODES, type FeedJobCode };
 import type { IndexListFetchService } from "./indexListProducer";
 import type { BrokerOptionChain, Env } from "../types";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -79,30 +84,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/feedJobs",
 });
 
-/** Stable coded errors for feed-job outcomes (externalized vocabulary). */
-export const FEED_JOB_CODES = {
-  jobNotFound: "FEED_JOB_NOT_FOUND",
-  universeMissing: "FEED_UNIVERSE_MISSING",
-  universeRefreshFailed: "FEED_UNIVERSE_REFRESH_FAILED",
-  universeUnknown: "FEED_UNIVERSE_UNKNOWN",
-  batchUnsupported: "FEED_PROVIDER_BATCH_UNSUPPORTED",
-  providerMismatch: "FEED_PROVIDER_MISMATCH",
-  noQuotesReturned: "FEED_NO_QUOTES_RETURNED",
-  fetchFailed: "FEED_FETCH_FAILED",
-  fundamentalsUnsupported: "FEED_PROVIDER_FUNDAMENTALS_UNSUPPORTED",
-  noFundamentalsReturned: "FEED_NO_FUNDAMENTALS_RETURNED",
-  historicalBarsUnsupported: "FEED_PROVIDER_HISTORICAL_BARS_UNSUPPORTED",
-  noBarsReturned: "FEED_NO_BARS_RETURNED",
-  newsUnsupported: "FEED_PROVIDER_NEWS_UNSUPPORTED",
-  noNewsReturned: "FEED_NO_NEWS_RETURNED",
-  optionsChainsUnsupported: "FEED_PROVIDER_OPTIONS_CHAINS_UNSUPPORTED",
-  noChainsReturned: "FEED_NO_CHAINS_RETURNED",
-  refreshTimeout: "FEED_REFRESH_TIMEOUT",
-  fetchTimeout: "FEED_FETCH_TIMEOUT",
-  captureTimeout: "FEED_CAPTURE_TIMEOUT",
-  deadlineExceeded: "FEED_DEADLINE_EXCEEDED",
-} as const;
-export type FeedJobCode = (typeof FEED_JOB_CODES)[keyof typeof FEED_JOB_CODES];
+/** Stable coded errors for feed-job outcomes (externalized vocabulary) — see ./feedJobCodes (leaf); re-exported above. */
 
 /** Stable log event code for a failed feed run (codes + counts only, never payloads). */
 export const FEED_JOB_RUN_FAILED = "feed_job_run_failed";

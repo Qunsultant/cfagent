@@ -63,7 +63,7 @@ import {
   type OptionsShapeReportFn,
   type OptionsStageStorage,
 } from "../workflows/optionsScreenPorts";
-import { runOptionsScreenWorkflow } from "../workflows/optionsScreenWorkflow";
+import { runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
 import type { StageClaimStore } from "../workflows/stageReportConsumer";
 import type { StageQueueSend } from "../workflows/stageQueueTransport";
 
@@ -138,10 +138,11 @@ async function runGoalOptionsLegViaWorkflow(args: {
     shapeReport: workflow.shapeReport,
     deliver: workflow.deliver,
   });
-  const outcome = await runOptionsScreenWorkflow(
+  const outcome = await runOptionsScreenViaEngine(
     {
       runId: legRunId,
       userLogin: args.userLogin,
+      trigger: args.trigger,
       request: {
         assetClass: "options",
         runIdentity: { runId: legRunId },

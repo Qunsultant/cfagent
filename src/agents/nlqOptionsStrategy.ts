@@ -42,8 +42,8 @@ import {
 import {
   memoryStageClaims,
   memoryStageStorage,
-  runOptionsScreenWorkflow,
 } from "../workflows/optionsScreenWorkflow";
+import { runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
 import {
   optionsArtifactKey,
   type OptionsStageStorage,
@@ -799,7 +799,7 @@ export async function runOptionsStrategyAction(
   // the parsed question shape — never by silent fallback: a parsed
   // fit question (fitDiscovery spec) runs the kernel fit runner;
   // a scope-only discovery question runs the discovery runner
-  // (kernel discoverPanel via runPanelPipeline). A leg without its
+  // (kernel discoverPanel via runOptionsPanelViaEngine). A leg without its
   // runner fails explicitly inside its own runner function.
   if (action === "options_fit_discovery") {
     return filters?.fitDiscovery
@@ -876,10 +876,11 @@ export async function runOptionsStrategyAction(
   const panelUserLogin = deps?.userLogin;
   const panelRunId = `nlq-panel:${crypto.randomUUID()}`;
   const panelStorage = deps?.pipelineStorage ?? memoryStageStorage();
-  const panelOutcome = await runOptionsScreenWorkflow(
+  const panelOutcome = await runOptionsScreenViaEngine(
     {
       runId: panelRunId,
       userLogin: panelUserLogin,
+      trigger: "manual",
       request: {
         assetClass: "options",
         runIdentity: { runId: panelRunId },
@@ -1263,7 +1264,7 @@ async function runOpportunityScan(
   };
 
   // Issue #3186: the opportunity scan goes through the one strategy
-  // pipeline instead of the direct scanOpportunities call (same
+  // pipeline instead of the direct scanOpportunitiesRetired4068 call (same
   // engine, staged). The envelope below reads the shaped result
   // unchanged - only the execution path changes. Identity is NOT
   // failed closed here (unlike the panel leg): the scanner's pinned
@@ -1275,10 +1276,11 @@ async function runOpportunityScan(
   const scanUserLogin = deps?.userLogin;
   const scanPipelineRunId = `nlq-scan:${crypto.randomUUID()}`;
   const scanStorage = deps?.pipelineStorage ?? memoryStageStorage();
-  const scanOutcome = await runOptionsScreenWorkflow(
+  const scanOutcome = await runOptionsScreenViaEngine(
     {
       runId: scanPipelineRunId,
       userLogin: scanUserLogin,
+      trigger: "manual",
       request: {
         assetClass: "options",
         runIdentity: { runId: scanPipelineRunId },

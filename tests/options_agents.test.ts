@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { OptionScreenResult, ScreenedOptionContractItem } from "../src/types";
 import type { DynamicOptionsScreener } from "../src/trading/optionsScreener";
 import {
-  runPanelPipeline,
+  runPanelPipelineRetired4068,
   OptionsDataAgent,
   RecommendationAgent,
   StrategyRiskAgent,
@@ -123,7 +123,7 @@ describe("Strategy risk agent", () => {
 
 describe("Recommendation agent and pipeline", () => {
   it("picks a best trade with plan, rationale and alternatives", async () => {
-    const result = await runPanelPipeline(fakeScreener(makeContracts()), request(), { riskProfile: "balanced" });
+    const result = await runPanelPipelineRetired4068(fakeScreener(makeContracts()), request(), { riskProfile: "balanced" });
     const pick = result.bestTrade;
     expect(pick.status).toBe("recommended");
     expect(pick.best?.rank).toBe(1);
@@ -134,14 +134,14 @@ describe("Recommendation agent and pipeline", () => {
   });
 
   it("flags stale data as research-only with low confidence", async () => {
-    const { bestTrade } = await runPanelPipeline(fakeScreener(makeContracts({ fresh: false })), request());
+    const { bestTrade } = await runPanelPipelineRetired4068(fakeScreener(makeContracts({ fresh: false })), request());
     expect(bestTrade.status).toBe("research_only");
     expect(bestTrade.confidence).toBe("LOW");
     expect(bestTrade.blockers[0]).toContain("STALE");
   });
 
   it("returns no_trade when nothing qualifies", async () => {
-    const { bestTrade } = await runPanelPipeline(fakeScreener(makeContracts()), request({ maxPlannedLoss: 1 }));
+    const { bestTrade } = await runPanelPipelineRetired4068(fakeScreener(makeContracts()), request({ maxPlannedLoss: 1 }));
     expect(bestTrade.status).toBe("no_trade");
     expect(bestTrade.best).toBeUndefined();
   });

@@ -3,7 +3,7 @@
  *
  * Fixed probe set (names × outlooks) over fixture chains: the kernel
  * panel output (RecommendationService.discoverPanel) and the panel
- * pipeline function (runPanelPipeline, #1256 remainder: the
+ * pipeline function (runPanelPipelineRetired4068, #1256 remainder: the
  * OptionsAgentPipeline adapter retired, its run() mapping moved
  * verbatim into the function) must produce the SAME route-shape
  * output as the pre-migration pipeline — whose steps are replayed
@@ -19,7 +19,7 @@
  * output). Stale quotes exercise the research_only bestTrade path.
  * NLQ + scheduled paths are covered by construction: both resolve to
  * the same panel function (UnifiedOptionsService.runStrategyPipeline
- * and scheduled runDiscoveryRequest call runPanelPipeline /
+ * and scheduled runDiscoveryRequest call runPanelPipelineRetired4068 /
  * runPanelWithAgents), so function ≡ facade parity on these probes
  * is their parity too.
  */
@@ -27,7 +27,7 @@ import { describe, expect, it } from "vitest";
 import type { OptionScreenResult, ScreenedOptionContractItem } from "../src/types";
 import type { DynamicOptionsScreener } from "../src/trading/optionsScreener";
 import {
-  runPanelPipeline,
+  runPanelPipelineRetired4068,
   OptionsDataAgent,
   RecommendationAgent,
   StrategyRiskAgent,
@@ -151,7 +151,7 @@ describe("C4 kernel probe parity (#1329)", () => {
     it(`${probe.name}: kernel panel ≡ pre-migration pipeline ≡ panel function`, async () => {
       const base = await baselinePipeline(probe.req, probe.opts);
       const panel = await kernelPanel(probe.req, probe.opts);
-      const panelFn = await runPanelPipeline(fakeScreener(makeContracts()), probe.req, probe.opts as never);
+      const panelFn = await runPanelPipelineRetired4068(fakeScreener(makeContracts()), probe.req, probe.opts as never);
 
       const baseRanked = base.ranked.map((r) => r.candidate.id);
       const panelRanked = panel.ranked.map((r) => r.candidate.id);

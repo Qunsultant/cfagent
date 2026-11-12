@@ -93,8 +93,14 @@ export function platformChainSource(platform: ITradingPlatform | null | undefine
  * Added in #3272 so a route can screen without importing a trading-internal
  * module (#290 boundary, `tests/trading-boundary.test.ts`): the screener stays
  * behind the barrel, and the caller only ever holds a source.
+ *
+ * @deprecated Issue #4068 — retired by rename: the direct screen bypass.
+ * Superseded by src/workflows/optionsScreenEngine.ts (runOptionsPlainScreenViaEngine),
+ * which runs the same screen through the one engine-routed workflow.
+ * This function is frozen: no production caller remains. Recorded in
+ * docs/architecture/transition/deprecations.md.
  */
-export async function screenOptionsWithSource(
+export async function screenOptionsWithSourceRetired4068(
   source: OptionChainSource,
   filter: OptionScreenerFilter,
   config?: Partial<EtapiScreenerConfig>,
