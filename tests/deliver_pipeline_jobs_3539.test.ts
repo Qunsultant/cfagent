@@ -281,6 +281,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
       "yahoo-sp100-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp500-quotes-enrich-analyze-generate-deliver",
       "yahoo-dow-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sp400-quotes-enrich-analyze-generate-deliver",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "etrade-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "public-nasdaq100-quotes-enrich-analyze-generate-deliver",
@@ -300,7 +301,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
 
   it("every catalog definition resolves as a valid J1 job definition", () => {
     const raws = buildAllDeliverPipelineJobDefinitions({});
-    expect(raws).toHaveLength(7);
+    expect(raws).toHaveLength(8);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("deliver");
@@ -321,7 +322,7 @@ describe("deliver pipeline catalog + resolution (#3539)", () => {
       },
     });
     // #4065 pin update: three options-chains jobs join the plane.
-    expect(registrations).toHaveLength(42);
+    expect(registrations).toHaveLength(47);
     expect(specs.map((s) => s.jobId)).toContain(DELIVER_ID);
   });
 });
