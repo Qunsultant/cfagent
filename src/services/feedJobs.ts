@@ -299,8 +299,8 @@ export const ETRADE_OPTIONS_CHAINS_JOB_ID = "etrade-options-chains";
 export const ALPACA_OPTIONS_CHAINS_JOB_ID = "alpaca-options-chains";
 export const PUBLIC_OPTIONS_CHAINS_JOB_ID = "public-options-chains";
 export const FEED_JOB_DEFAULTS = {
-  cadenceMinutes: 60,
-  staleAfterMinutes: 180,
+  cadenceMinutes: 43200,
+  staleAfterMinutes: 44640,
 } as const;
 
 /**
