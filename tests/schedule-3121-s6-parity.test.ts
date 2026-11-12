@@ -22,7 +22,7 @@
  *   #2366). No row stays "planned" and no row has no home without a
  *   filed issue or a named owner.
  * - S6-P02 §9 carries the #3361 row (preview-trade prefill, filed
- *   in S2, never mapped).
+ *   in S2, never mapped — landed by #3361 after S6).
  * - S6-P03 U-07 corrected: the Queues tab (`?tab=queues`,
  *   QueuesPage) is the T4 surface with S4 linkage landed; the admin
  *   queue is `?tab=schedules&view=queue` (S2).
@@ -135,11 +135,11 @@ describe("S6-P01 §9 map completeness", () => {
 });
 
 describe("S6-P02 §9 carries the #3361 row", () => {
-  it("§9.2 names the preview-trade prefill loss as Filed #3361 (open)", () => {
+  it("§9.2 names the preview-trade prefill as #3361 landed (S6 mapped it as filed-open; #3361 landed it)", () => {
     const s92 = section91to97("### 9.2 Surfaces", "### 9.3");
     expect(s92).toContain("#3361");
     expect(s92).toContain("Preview-trade");
-    expect(s92).toContain("Filed #3361 (open)");
+    expect(s92).toContain("#3361 — landed");
   });
 });
 

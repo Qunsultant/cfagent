@@ -128,6 +128,16 @@ export interface ETradeTradingHubProps {
   onBrokerPropsChange?: (props: ETradeDynamicMenuProps) => void;
   /** Issue #69: unread broker-alert count, reported up for the nav badge. */
   onUnreadAlertsChange?: (count: number) => void;
+  /**
+   * Issue #3361 (#3121 S2 follow-up): the shell-level preview-trade
+   * handoff — the de-hubbed schedules home hands the converted
+   * candidate here via Chat's pendingOrderContext; the hub consumes it
+   * through handleTradeOrder when the order sub-tab becomes active,
+   * then clears it through onConsumePendingOrderContext. Absent, the
+   * hub behaves exactly as before.
+   */
+  pendingOrderContext?: TradeOrderContext | null;
+  onConsumePendingOrderContext?: () => void;
 }
 
 const NLQ_ROW_RENDER_LIMIT = 500;
@@ -203,6 +213,8 @@ export function ETradeTradingHub({
   activeSubTab,
   onSelectSubTab,
   onBrokerPropsChange, onUnreadAlertsChange,
+  pendingOrderContext,
+  onConsumePendingOrderContext,
 }: ETradeTradingHubProps) {
   const toast = useToast();
   // Navigation subtabs: synchronized directly with activeSubTab prop from Chat navigation
@@ -1496,6 +1508,21 @@ export function ETradeTradingHub({
     seedManualOptionsOrder();
     return subscribeToRouteChanges(seedManualOptionsOrder);
   }, [effectiveSubTab]);
+
+  // Issue #3361 (#3121 S2 follow-up): consume the shell's pending
+  // order context once the order sub-tab is active — the schedules
+  // home's preview hands the converted candidate to Chat, Chat sets
+  // pendingOrderContext and navigates here, and this effect seeds the
+  // ticket through the same handleTradeOrder every other preview
+  // uses, then clears the handoff. The active-sub-tab guard keeps a
+  // context set while another tab is active from seeding early; the
+  // consume-then-null makes the effect idempotent across re-renders.
+  useEffect(() => {
+    if (!pendingOrderContext) return;
+    if (effectiveSubTab !== "order") return;
+    handleTradeOrder(pendingOrderContext);
+    onConsumePendingOrderContext?.();
+  }, [pendingOrderContext, effectiveSubTab]);
 
   const updateOptionLeg = (index: number, patch: Partial<NonNullable<TradeOrderContext["optionLegs"]>[number]>) => {
     setOrderContext((current) => {
