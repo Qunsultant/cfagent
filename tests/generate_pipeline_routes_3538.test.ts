@@ -305,6 +305,7 @@ describe("pipeline generate-jobs routes (#3538)", () => {
       "yahoo-sp100-quotes-enrich-analyze-generate",
       "yahoo-sp500-quotes-enrich-analyze-generate",
       "yahoo-dow-quotes-enrich-analyze-generate",
+      "yahoo-sp400-quotes-enrich-analyze-generate",
     ]);
     const alpaca = await callRoute(ctx, "GET", "/data-providers/alpaca/generate-jobs");
     const alpacaBody = (await alpaca.json()) as { jobs: GenerateJobSurfaceView[] };
@@ -318,7 +319,7 @@ describe("pipeline generate-jobs routes (#3538)", () => {
     const body = (await res.json()) as any;
     const yahoo = body.providers.find((p: any) => p.id === "yahoo");
     expect(Array.isArray(yahoo.generateJobs)).toBe(true);
-    expect(yahoo.generateJobs).toHaveLength(4);
+    expect(yahoo.generateJobs).toHaveLength(5);
     expect(yahoo.generateJobs[0]).toMatchObject({ jobId: GENERATE_ID, generate: { state: "never-run" } });
   });
 
