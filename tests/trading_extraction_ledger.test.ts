@@ -179,10 +179,14 @@ const PINNED_NAMED_REEXPORTS = ["MAX_SCAN_SYMBOLS from ./options/opportunityScan
  * ETradeService for etrade-provider runs, mirroring runScreenInner's
  * construction (the stage methods duplicate the per-stage bodies in
  * S1; the live path is untouched): screener-agent 2 -> 3.
+ * #4066 — the mesh options stage-control door constructs its own
+ * ETradeService for the acting login, mirroring the mesh options-strategy
+ * door (#2581): +1 in a new file.
  */
 const CONSTRUCTION_LEDGER: Record<string, number> = {
   "agents/nlq/execution.ts": 2,
   "agents/orchestrator/asyncJobs.ts": 2,
+  "agents/orchestrator/meshOptionsStageControlDoor.ts": 1,
   "agents/orchestrator/meshOptionsStrategyDoor.ts": 1,
   "agents/routes/etradeBroker.ts": 21,
   "agents/routes/etradeOptions.ts": 6,
