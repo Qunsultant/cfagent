@@ -50,27 +50,36 @@ describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
     expect(autoUpdateYml).toContain("!prDetails.isInMergeQueue");
   });
 
-  it("correctly reads REST .auto_merge.merge_method and normalizes to uppercase in auto-merge-trusted.yml (#2629)", () => {
-    expect(autoMergeTrustedYml).toContain(".auto_merge.merge_method");
-    expect(autoMergeTrustedYml).toContain("tr '[:lower:]' '[:upper:]'");
-    expect(autoMergeTrustedYml).toContain('"$CURRENT_METHOD" != "REBASE"');
+  it("reads the enrollment back in auto-merge-trusted.yml (#2629, #4305)", () => {
+    // The read-back names the queue state and the recorded method, so a dead
+    // auto-merge request is visible in the run log instead of silent.
+    expect(autoMergeTrustedYml).toContain("isInMergeQueue");
+    expect(autoMergeTrustedYml).toContain("autoMergeRequest { mergeMethod }");
   });
 
-  it("enrolls with an explicit REBASE method and never falls back to a flagless gh pr merge --auto (#4281)", () => {
-    // A flagless `--auto` records the repository default, which on this repo is
-    // SQUASH while only REBASE is allowed: the PR then shows auto-merge on, all
-    // checks green, CLEAN, and never merges (#4267/#4219/#4244, #4281).
-    expect(autoMergeTrustedYml).toContain(
-      "enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: REBASE })",
-    );
-    // No command-position `gh pr merge ... --auto` may remain (comments may name it).
+  it("enrolls by queue entry and never relies on an auto-merge method (#4305/#4313)", () => {
+    // Verified 2026-11-12 on #4298: GitHub records an auto-merge request as the
+    // repository default (SQUASH here) even when REBASE is requested, so such a
+    // request can never merge under a rebase-only ruleset (#4267/#4219/#4244/
+    // #4283/#4285/#4297/#4303). The entry is the enrollment.
+    expect(autoMergeTrustedYml).toContain("enqueuePullRequest(input: { pullRequestId: $id })");
+    // No auto-merge mutation and no flagless `gh pr merge` may remain.
+    expect(autoMergeTrustedYml).not.toContain("enablePullRequestAutoMerge");
     expect(autoMergeTrustedYml).not.toMatch(/^\s+gh pr merge\b[^\n]*--auto/m);
-    // The node id comes from the event payload; the enrollment cannot depend on
-    // a REST round-trip that may fail and fall through.
+    // The node id comes from the event payload; a REST round-trip cannot fail
+    // and fall through to a method-based enrollment.
     expect(autoMergeTrustedYml).toContain(
       "PR_NODE_ID: ${{ github.event.pull_request.node_id }}",
     );
-    // The fallback is the queue itself, which takes no merge method at all.
-    expect(autoMergeTrustedYml).toContain("enqueuePullRequest(input: { pullRequestId: $id })");
+  });
+
+  it("no longer depends on pull_request_target (#4313)", () => {
+    // GitHub restricts `pull_request_target` on public repositories from
+    // 2026-12-02; this job never executes PR code, so `pull_request` with a
+    // same-repo guard is the safe equivalent.
+    expect(autoMergeTrustedYml).not.toContain("pull_request_target");
+    expect(autoMergeTrustedYml).toContain(
+      "head.repo.full_name == github.repository",
+    );
   });
 });
