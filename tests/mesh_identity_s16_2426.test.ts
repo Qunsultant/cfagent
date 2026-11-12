@@ -371,7 +371,11 @@ describe("synthetic identities — ScreenerAgent tenant + ScheduledAgent actor (
   it("the screener goal-gather paths thread the run owner's login as tenantId", () => {
     const src = read("src/agents/screener-agent.ts");
     expect(src).not.toContain('tenantId: "default"');
-    expect(src.split("tenantId: userLogin").length - 1).toBe(2);
+    // Issue #4279 (#3550 S4): the engine goal path adds a third site — the
+    // enrichment run context, which reads this run's captures back under the
+    // owner's login. The count is enumerated, not weakened: the two gather
+    // sites stay, and the new one is named here.
+    expect(src.split("tenantId: userLogin").length - 1).toBe(3);
   });
 
   it("the scheduled-agent reconcile audit actor is no longer the 'system' literal", () => {

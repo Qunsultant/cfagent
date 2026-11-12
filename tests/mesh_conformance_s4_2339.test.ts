@@ -773,7 +773,11 @@ describe("identity pins — round 1 (#2339)", () => {
       "ScreenerAgent has no owner identity recorded for this instance",
     );
     expect(src.split('tenantId: "default"').length - 1).toBe(0);
-    expect(src.split("tenantId: userLogin").length - 1).toBe(2);
+    // Issue #4279 (#3550 S4): the engine goal path adds a third site — the
+    // enrichment run context, which reads this run's captures back under the
+    // owner's login. The count is enumerated, not weakened: the two gather
+    // sites stay, and the new one is named here.
+    expect(src.split("tenantId: userLogin").length - 1).toBe(3);
     expect(read("src/agents/screenerAgentName.ts")).toContain(
       "resolveScreenerAgentName",
     );
