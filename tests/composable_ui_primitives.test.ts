@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ContextStrip, KpiRibbon, SummaryCard, CardHeader, WorkCard, DetailCard, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
+import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ContextStrip, KpiRibbon, SummaryCard, CardHeader, WorkCard, DetailCard, WorkspaceGrid, ActionBar, QueueFeed, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -158,6 +158,9 @@ describe("Primitive styles (primitives.css)", () => {
       ".ui-context-strip",
       ".ui-summary-card",
       ".ui-summary-total",
+      ".ui-workspace-grid",
+      ".ui-action-bar",
+      ".ui-queue-feed",
     ]) {
       expect(css, hook).toContain(hook);
     }
@@ -507,6 +510,56 @@ describe("Template organisms II (#3133)", () => {
     expect(element.type).toBe(DetailCard);
     expect(element.props.title).toBe("Strategy Equity vs S&P 500 Benchmark");
     expect(element.props.children).toBe("equity chart");
+  });
+});
+
+describe("Template organisms III (#3134)", () => {
+  it("WorkspaceGrid carries the variant/gap/floor contract", () => {
+    const element = React.createElement(
+      WorkspaceGrid,
+      { variant: "list-detail", gap: "5" },
+      "detail",
+      "list",
+    );
+    expect(element.type).toBe(WorkspaceGrid);
+    expect(element.props.variant).toBe("list-detail");
+    expect(element.props.gap).toBe("5");
+    const auto = React.createElement(
+      WorkspaceGrid,
+      { variant: "workspace", minColumnWidth: "lg" },
+      "sections",
+    );
+    expect(auto.props.variant).toBe("workspace");
+    expect(auto.props.minColumnWidth).toBe("lg");
+    const feed = React.createElement(WorkspaceGrid, { variant: "feed" }, "rows");
+    expect(feed.props.variant).toBe("feed");
+  });
+
+  it("ActionBar carries the primary/secondary contract", () => {
+    const element = React.createElement(ActionBar, {
+      primary: "Submit order",
+      secondary: "Save draft",
+    });
+    expect(element.type).toBe(ActionBar);
+    expect(element.props.primary).toBe("Submit order");
+    expect(element.props.secondary).toBe("Save draft");
+  });
+
+  it("QueueFeed carries the title/meta/items/empty-state contract", () => {
+    const element = React.createElement(QueueFeed, {
+      title: "Approvals",
+      meta: "3 pending",
+      items: [
+        { id: "a1", content: "Order A — $3,383.20" },
+        { id: "a2", content: "Order B — $1,204.00" },
+      ],
+      emptyTitle: "Nothing in the queue",
+    });
+    expect(element.type).toBe(QueueFeed);
+    expect(element.props.title).toBe("Approvals");
+    expect(element.props.meta).toBe("3 pending");
+    expect(element.props.items).toHaveLength(2);
+    expect(element.props.items[0].id).toBe("a1");
   });
 });
 
