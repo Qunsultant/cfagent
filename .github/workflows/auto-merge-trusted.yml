@@ -19,6 +19,11 @@
 #   status checks have not succeeded"), and no pull_request event fires when they
 #   finish — so the retry must hang off the CI run, as the old bot did.
 #
+# VERIFIED, NOT ASSUMED (#4317): after the enqueue the job reads the PR back and
+# FAILS when it is not in the merge queue. A green check used to prove only that
+# the job ran, while green PRs sat unenrolled (#4311, #4283, #4285, #4297, #4303).
+# A draft is skipped — auto-ready-drafts flips it, and the flip brings it back here.
+#
 # TRIGGER SAFETY: plain `pull_request`, not the privileged target variant, which
 # GitHub restricts on public repositories from 2026-12-02 (#4313). The labelling
 # job never checks out or executes PR code. The enqueue job runs on the default
@@ -103,27 +108,38 @@ jobs:
           set -euo pipefail
           # Only PRs that carry this workflow's label are enrolled; a fork branch
           # has no label and is skipped by construction.
-          PR_NODE_ID=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH" --state open \
-            --json number,id,labels \
-            --jq '[.[] | select(any(.labels[]?; .name == "auto-merge"))][0].id // empty')
-          if [ -z "$PR_NODE_ID" ]; then
+          PR_JSON=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH" --state open \
+            --json number,id,isDraft,labels \
+            --jq '[.[] | select(any(.labels[]?; .name == "auto-merge"))][0] // empty')
+          if [ -z "$PR_JSON" ]; then
             echo "No open auto-merge PR for branch '$HEAD_BRANCH'; nothing to enqueue."
+            exit 0
+          fi
+          PR_NODE_ID=$(echo "$PR_JSON" | jq -r '.id')
+          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+          # A draft cannot be enqueued; auto-ready-drafts flips it once the gates
+          # are green, and that flip brings the PR back here (#4317).
+          if [ "$(echo "$PR_JSON" | jq -r '.isDraft')" = "true" ]; then
+            echo "PR #$PR_NUMBER is a draft; auto-ready-drafts will flip it when the gates are green."
             exit 0
           fi
 
           # Enqueue. The entry IS the enrollment. An "already in the queue"
-          # response is success, not a failure.
-          gh api graphql -F id="$PR_NODE_ID" -f query='
+          # response is not a failure: the read-back below is the verdict.
+          ENQUEUE=$(gh api graphql -F id="$PR_NODE_ID" -f query='
             mutation($id: ID!) {
               enqueuePullRequest(input: { pullRequestId: $id }) {
                 mergeQueueEntry { position state }
               }
             }
-          ' || true
+          ' 2>&1 || true)
+          echo "$ENQUEUE"
 
-          # Read the enrollment back and say what it is: a queue entry merges,
-          # an auto-merge request does not (#4305).
-          gh api graphql -F id="$PR_NODE_ID" -f query='
+          # Verification (#4317): a green check proves the job ran, not that the
+          # PR is enrolled. Read the queue state back and fail loudly when the
+          # enrollment did not land — the silent version is what let green PRs
+          # sit unenrolled (#4311, #4283, #4285, #4297, #4303).
+          STATE_JSON=$(gh api graphql -F id="$PR_NODE_ID" -f query='
             query($id: ID!) {
               node(id: $id) {
                 ... on PullRequest {
@@ -133,4 +149,11 @@ jobs:
                 }
               }
             }
-          ' || true
+          ' 2>&1 || true)
+          echo "$STATE_JSON"
+          IN_QUEUE=$(echo "$STATE_JSON" | jq -r '.data.node.isInMergeQueue // false' 2>/dev/null || echo false)
+          if [ "$IN_QUEUE" != "true" ]; then
+            echo "::error::PR #$PR_NUMBER is not in the merge queue after the enrollment attempt. Enqueue response: $ENQUEUE"
+            exit 1
+          fi
+          echo "PR #$PR_NUMBER is enrolled in the merge queue."
