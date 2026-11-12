@@ -642,7 +642,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (678 rows / 6515 lines) ----
+  // ---- INTEGRATION (679 rows / 6522 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -666,6 +666,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/security/vendor-risk-1774.md", "alpaca", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "etrade", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "public.com", 1],
+  // #3135 INTEGRATION: the token-mapping doc names the layout file
+  // ETradeTradingHub.tsx by its registered name (a data-bearing
+  // identifier) in the scope list and Used-by columns; neutralizing
+  // the file name would break traceability to the file.
+  ["docs/architecture/UX/token-mapping-order-options-autopilot.md", "etrade", 7],
   ["docs/operations/data/data-provider-platform.md", "alpaca", 13],
   ["docs/operations/data/data-provider-platform.md", "etrade", 8],
   ["docs/operations/data/data-provider-platform.md", "nasdaq", 5],
