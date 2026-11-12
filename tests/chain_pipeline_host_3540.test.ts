@@ -85,7 +85,7 @@ async function pollRecords(
 }
 
 describe("the composed chains on the host (#3540)", () => {
-  it("the host manages the twelve chains, one per quotes lineage", () => {
+  it("the host manages the sixteen chains, one per quotes lineage", () => {
     expect(pipelineChainJobIds()).toEqual([
       "yahoo-nasdaq100-quotes-pipeline",
       "yahoo-sp100-quotes-pipeline",
@@ -96,6 +96,10 @@ describe("the composed chains on the host (#3540)", () => {
       "yahoo-sector-materials-quotes-pipeline",
       "yahoo-sector-industrials-quotes-pipeline",
       "yahoo-sector-consumer-discretionary-quotes-pipeline",
+      "yahoo-sector-consumer-staples-quotes-pipeline",
+      "yahoo-sector-health-care-quotes-pipeline",
+      "yahoo-sector-financials-quotes-pipeline",
+      "yahoo-sector-information-technology-quotes-pipeline",
       "alpaca-nasdaq100-quotes-pipeline",
       "etrade-nasdaq100-quotes-pipeline",
       "public-nasdaq100-quotes-pipeline",
