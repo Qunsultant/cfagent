@@ -88,12 +88,19 @@ import {
   pauseUnifiedSchedule,
   resumeUnifiedSchedule,
   screenScheduleToRecord,
+  tickerPushRecordToListItem,
   triggerUnifiedSchedule,
   unifiedRecordToListItem,
   updateUnifiedSchedule,
   type ScheduleAlarms,
   type ScheduleAlarmLike,
 } from "../../services/unifiedScheduleManagement";
+import {
+  TICKER_INSTANCE_NAME,
+  resolveTickerPushStaleAfterIntervals,
+} from "../ticker-agent";
+import { actorGateway } from "../../services/cloudflareActorGateway";
+import type { TickerPushRecordStub } from "../../services/actorGatewayPorts";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import { buildJobRunRecord, type JobRunRecordInput } from "../../services/jobRunRecords";
@@ -321,6 +328,40 @@ export function resolveTrustedScheduleIdentity(input: {
   };
 }
 
+/**
+ * Issue #3121 #4237 — the ticker-push row for the Schedules home
+ * list. The record lives in the TickerAgent's own store (ADR 0029
+ * D-0), so the list reads it through the typed RPC and appends its
+ * list item (interval + last push + derived health). Best-effort:
+ * an unbound namespace, a failed RPC, a null record, or a record of
+ * another kind omits the row and logs a warning — the list never
+ * fails because the live feed cannot be reached. The health
+ * threshold resolves from env here, never on the client.
+ */
+export async function readTickerPushListItem(
+  env: Env,
+): Promise<ReturnType<typeof tickerPushRecordToListItem> | null> {
+  try {
+    const stub = actorGateway.stub<TickerPushRecordStub>(
+      env.TICKER_AGENT,
+      TICKER_INSTANCE_NAME,
+    );
+    const record = await stub.getTickerPushRecord();
+    if (!record || record.kind !== "ticker-push") return null;
+    return tickerPushRecordToListItem(
+      record,
+      Date.now(),
+      resolveTickerPushStaleAfterIntervals(env),
+    );
+  } catch (err) {
+    structuredLog.warn("schedules.ticker_push_read_failed", {
+      message: "[Schedules] ticker-push list read failed; the row is omitted:",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
 export async function handleSchedulesRoutes(
   request: Request,
   url: URL,
@@ -522,6 +563,13 @@ export async function handleSchedulesRoutes(
           { store: unifiedStore(), alarms },
           typeParam ?? undefined,
         );
+        // Issue #3121 #4237 — the ticker-push row is not in this
+        // store (it lives in the TickerAgent); append it when the
+        // feed answers, under the same ?type= filter as the rest.
+        const tickerItem = await readTickerPushListItem(ctx.env);
+        if (tickerItem && (!typeParam || tickerItem.type === typeParam)) {
+          items.push(tickerItem);
+        }
         return Response.json({
           count: items.length,
           schedules: items,

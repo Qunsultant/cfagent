@@ -75,6 +75,15 @@ import {
 } from "../services/marketStream";
 import type { Env } from "../types";
 import { PortThink } from "../actors/thinkAdapter";
+import { createUnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
+import type {
+  SyncScheduleStore,
+  UnifiedScheduleRecord,
+} from "../data/unifiedSchedulePorts";
+import {
+  TICKER_PUSH_RECORD_ID,
+  tickerPushScheduleToRecord,
+} from "../services/unifiedScheduleManagement";
 import { createResourceUsagePort } from "../telemetry/createResourceUsagePorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -94,8 +103,33 @@ export interface TickerConnectionState {
 /** Tick push cadence default, in seconds (issue #2443). Owner-visible override: the TICKER_PUSH_INTERVAL_S wrangler var (seconds); an interval CHANGE is a product call and is out of #2443. */
 export const TICKER_PUSH_INTERVAL_SECONDS = 5;
 
+/**
+ * Stale threshold default, in missed intervals (issue #4237):
+ * the Schedules home shows a missed push once the last push is
+ * older than this many push cadences. Owner-visible override: the
+ * TICKER_PUSH_STALE_AFTER_INTERVALS wrangler var; a threshold
+ * CHANGE is a product call, like the interval.
+ */
+export const TICKER_PUSH_STALE_AFTER_INTERVALS = 2;
+
 /** Callback name of the tick schedule; must match the pushTicks method name. */
 export const TICKER_PUSH_CALLBACK = "pushTicks";
+
+/**
+ * Resolve the missed-push threshold from env (issue #4237, AOP):
+ * the TICKER_PUSH_STALE_AFTER_INTERVALS var wins when it parses
+ * to a positive integer; anything else (absent, non-numeric, zero,
+ * negative) falls back to the default. The health derivation never
+ * carries a literal.
+ */
+export function resolveTickerPushStaleAfterIntervals(env: Env | undefined): number {
+  const raw = env?.TICKER_PUSH_STALE_AFTER_INTERVALS;
+  if (raw !== undefined) {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return TICKER_PUSH_STALE_AFTER_INTERVALS;
+}
 
 /**
  * Resolve the tick push cadence from env (issue #2443, AOP): the
@@ -161,12 +195,92 @@ export class TickerAgent extends PortThink {
   /** Arm the tick schedule (idempotent per the SDK). Surfaces failures, never throws. */
   private async ensureTickerPushArmed(): Promise<void> {
     try {
-      await this.scheduleEvery(
+      const schedule = await this.scheduleEvery(
         resolveTickerPushIntervalSeconds(this.env as Env | undefined),
         TICKER_PUSH_CALLBACK,
       );
+      // Issue #4237 — the armed feed adopts its one schedule record.
+      await this.recordTickerPush({
+        armed: true,
+        alarmId:
+          schedule && typeof (schedule as { id?: unknown }).id === "string"
+            ? (schedule as { id: string }).id
+            : null,
+      });
     } catch (err) {
       this.reportTickerScheduleFailure("arm", err);
+    }
+  }
+
+  /**
+   * The ticker's own unified-store instance (ADR 0029 D-0 — the
+   * record lives in the same DO as the mechanism), or null when this
+   * host has no DO SQLite (test doubles, non-SQL hosts). Never throws.
+   */
+  private tickerScheduleStore(): SyncScheduleStore | null {
+    try {
+      const storage = (
+        this as unknown as { ctx?: { storage?: { sql?: unknown } } }
+      ).ctx?.storage;
+      const sql = storage?.sql;
+      if (!sql) return null;
+      return createUnifiedSchedulePorts({ sql: sql as never })
+        .unifiedSchedulesSync;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Upsert the ticker-push record (issue #4237): the one record for
+   * the live feed, updated in place on arm / push / idle-cancel.
+   * Best-effort — a store failure is reported, never thrown, so
+   * recording can never break the feed.
+   */
+  private async recordTickerPush(patch: {
+    armed: boolean;
+    alarmId?: string | null;
+    lastPushAt?: string;
+  }): Promise<void> {
+    try {
+      const store = this.tickerScheduleStore();
+      if (!store) return;
+      const nowIso = new Date().toISOString();
+      const existing = store.get(TICKER_PUSH_RECORD_ID);
+      store.save(
+        tickerPushScheduleToRecord(
+          {
+            intervalSeconds: resolveTickerPushIntervalSeconds(
+              this.env as Env | undefined,
+            ),
+            armed: patch.armed,
+            ...(patch.alarmId !== undefined ? { alarmId: patch.alarmId } : {}),
+            ...(patch.lastPushAt !== undefined
+              ? { lastPushAt: patch.lastPushAt }
+              : {}),
+          },
+          nowIso,
+          existing ?? null,
+        ),
+      );
+    } catch (err) {
+      this.reportTickerScheduleFailure("record", err);
+    }
+  }
+
+  /**
+   * The ticker-push record for the Schedules home list route's RPC
+   * read (issue #4237). Null when the feed was never armed or this
+   * host has no store — never throws, so the list degrades to
+   * omitting the row.
+   */
+  async getTickerPushRecord(): Promise<UnifiedScheduleRecord | null> {
+    try {
+      const store = this.tickerScheduleStore();
+      if (!store) return null;
+      return store.get(TICKER_PUSH_RECORD_ID) ?? null;
+    } catch {
+      return null;
     }
   }
 
@@ -191,6 +305,9 @@ export class TickerAgent extends PortThink {
         this.reportTickerScheduleFailure("cancel", err);
       }
     }
+    // Issue #4237 — the feed is off (no listeners): the record stays,
+    // disarmed, so the home shows Idle rather than a missed push.
+    await this.recordTickerPush({ armed: false });
   }
 
   override async onStart(): Promise<void> {
@@ -353,5 +470,12 @@ export class TickerAgent extends PortThink {
         // A failed provider refresh leaves the last known quote visible.
       }
     }
+    // Issue #4237 — the push completed: stamp the record so the
+    // Schedules home sees the feed as live. A loop that throws
+    // above reaches no stamp, and the home shows the miss.
+    await this.recordTickerPush({
+      armed: true,
+      lastPushAt: new Date().toISOString(),
+    });
   }
 }

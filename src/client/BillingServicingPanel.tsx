@@ -33,6 +33,7 @@ import { RefundFlowSection } from "./RefundFlowSection";
 import { ApprovedFreeQuotaSection } from "./ApprovedFreeQuotaSection";
 import { UsageBillingSection } from "./UsageBillingSection";
 import { TopUpLimitsSection } from "./TopUpLimitsSection";
+import { OfferRulesSection } from "./OfferRulesSection";
 import {
   buildBillingView,
   type BillingPlanInput,
@@ -174,6 +175,7 @@ export function BillingServicingPanel() {
           <UsageBillingSection />
           <ApprovedFreeQuotaSection />
           <TopUpLimitsSection />
+          <OfferRulesSection />
           <Card>
             <p>Support snapshot</p>
             <p>Account: {view.supportSnapshot.login}</p>

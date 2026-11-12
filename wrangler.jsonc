@@ -407,6 +407,11 @@
     // now sees one new tick per 50 minutes: the live ticker reads as a
     // snapshot taken at connect. Rollback is setting this back to "300".
     "TICKER_PUSH_INTERVAL_S": "3000",
+    // Issue #4237 — missed-push threshold, in missed intervals (default
+    // 2): the Schedules home shows a missed push once the last push is
+    // older than this many push cadences. Display only — it never
+    // changes the feed. Rollback is unsetting the var and redeploying.
+    "TICKER_PUSH_STALE_AFTER_INTERVALS": "2",
     // Issue #4213 — cost: 5 -> 2, the shortest loop the clamp allows. This
     // REVERSES #4131 (same direction: 2 -> 5, "the loop needs room to finish
     // a real goal"). #4213 is the later owner direction and wins; a complex

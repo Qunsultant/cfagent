@@ -70,9 +70,13 @@ export interface ScheduleItem {
   paused?: boolean;
   pausedAt?: string;
   /** Issue #3121 #3310 — the unified kind, and the workflow + stage a stage-schedule names. */
+  /** Issue #3121 #4237 — the ticker-push row's feed facts. */
   kind?: string;
   jobId?: string;
   stageId?: string;
+  lastPushAt?: string;
+  armed?: boolean;
+  health?: "healthy" | "idle" | "stale";
 }
 
 type ScheduleGroup = "all" | "stocks" | "options" | "system" | "queued";
@@ -204,17 +208,31 @@ const ACCOUNT_SCOPED = [
   "collectivhistory",
 ];
 
-/** The row name: a stage-schedule names its workflow + stage, not the firing callback. */
+/** The row name: a stage-schedule names its workflow + stage, a ticker-push row names the live feed, not the firing callback. */
 export function scheduleDisplayName(s: ScheduleItem): string {
   if (s.kind === "workflow-stage" && s.jobId) {
     return s.stageId ? `${s.jobId} · ${s.stageId}` : s.jobId;
   }
+  if (s.kind === "ticker-push") return "Ticker push";
   return s.callback;
+}
+
+/** Last-push rendering for a ticker-push row (never a fabricated time). */
+function formatLastPush(lastPushAt?: string): string {
+  if (!lastPushAt) return "never";
+  const ms = Date.parse(lastPushAt);
+  if (!Number.isFinite(ms)) return "never";
+  return new Date(ms).toLocaleString();
 }
 
 /** Cadence sentence for a generic row. */
 function genericCadence(s: ScheduleItem): string {
   if (s.cron) return cronToEnglish(s.cron);
+  // Issue #3121 #4237 — sub-minute intervals (the ticker default is
+  // 5s) read as seconds, not "Every 0 min".
+  if (s.type === "interval" && (s.intervalSeconds || 0) > 0 && (s.intervalSeconds || 0) < 60) {
+    return `Every ${s.intervalSeconds} sec`;
+  }
   if (s.type === "interval") return `Every ${Math.round((s.intervalSeconds || 0) / 60)} min`;
   if (s.type === "delayed") return "Delayed (queued)";
   return s.type;
@@ -403,6 +421,18 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             <Badge tone="neutral" size="xs">
               System
             </Badge>
+            {/* Issue #3121 #4237 — a ticker-push row carries its feed
+                health: a stopped push reads as a missed push, an
+                idle feed (no listeners) as Idle, never as missed. */}
+            {s.kind === "ticker-push" ? (
+              <Badge
+                tone={s.health === "stale" ? "warning" : s.health === "idle" ? "neutral" : "success"}
+                size="xs"
+                dot
+              >
+                {s.health === "stale" ? "Missed push" : s.health === "idle" ? "Idle" : "Healthy"}
+              </Badge>
+            ) : null}
             {/* Issue #3122 — agent-created schedules carry an Agent
                 badge (provenance origin agent on the payload); user-
                 and system-created rows show no badge. */}
@@ -445,7 +475,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         <div className="schedule-row-stack">
           <span className="schedule-row-value">{genericCadence(s)}</span>
           <span className="schedule-row-muted">
-            Next run: {s.paused ? "paused" : formatNextRun(s)}
+            {s.kind === "ticker-push"
+              ? `Last push: ${formatLastPush(s.lastPushAt)}`
+              : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
           </span>
         </div>
       ),
@@ -512,6 +544,22 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       align: "right",
       headerClassName: "schedule-row-actions-head",
       render: (s) => {
+        // Issue #3121 #4237 — a ticker-push row is a live feed, not a
+        // manageable schedule: pause/resume/trigger/delete/update are
+        // refused server-side, so the row offers no action buttons.
+        // A Badge (ui/ primitive) keeps the row at zero new bespoke
+        // classes — the interior ratchet counts className tokens.
+        if (s.kind === "ticker-push") {
+          return (
+            <Badge
+              tone="neutral"
+              size="xs"
+              title="Managed by listeners — the feed runs while clients are connected"
+            >
+              Live feed
+            </Badge>
+          );
+        }
         return (
           <div className="schedule-row-actions">
             <Button
