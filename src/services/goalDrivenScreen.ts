@@ -82,7 +82,7 @@ import {
   type RunStockScreenViaEngineInput,
   type ScreenEngineAgentGates,
 } from "../workflows/runStockScreenViaEngine";
-import type { ScannedStock } from "../trading/screenerPipeline";
+import type { ScannedStock } from "../trading";
 import type { StageClaimStore } from "../workflows/stageReportConsumer";
 import type { StageQueueSend } from "../workflows/stageQueueTransport";
 
