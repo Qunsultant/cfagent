@@ -40,6 +40,10 @@ import {
 } from "./optionsCanonicalLeg";
 import type { SagaTradeIntent } from "./sagaTradeLeg";
 import { assessSagaTradeRisk, type SagaRiskLimits } from "./sagaRiskStage";
+// Issue #4066: these values come from the trading barrel
+// (src/trading/index.ts), the sole public import surface under the
+// #290 boundary — leaf imports of trading internals trip the
+// boundary test.
 import {
   aggregateScreenResult,
   DynamicOptionsScreener,

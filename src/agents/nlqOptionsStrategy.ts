@@ -43,7 +43,12 @@ import {
   memoryStageClaims,
   memoryStageStorage,
 } from "../workflows/optionsScreenWorkflow";
-import { runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
+import {
+  optionsEngineStoresFromSql,
+  optionsEngineStoresInMemory,
+  runOptionsScreenViaEngine,
+} from "../workflows/optionsScreenEngine";
+import type { SqlStorage } from "../orm";
 import {
   optionsArtifactKey,
   type OptionsStageStorage,
@@ -643,6 +648,18 @@ export interface OptionsStrategyDeps {
   profileStore?: StrategyProfileStore;
   userLogin?: string;
   /**
+   * Issue #4066: the turn host's raw DO SQLite handle for the engine
+   * stores. When present, the panel/scan legs record the engine run
+   * durably in the host DO (definitions + instance + artifacts), so a
+   * later per-stage control action from the copilot turn can address
+   * the run by (runId, stageId). Absent, the legs run over in-memory
+   * engine stores — the #4069 accepted-absent discipline — and a later
+   * control action refuses by name (the run has no durable engine
+   * record in this DO). The handle is the host DO's own SQL; the NLQ
+   * execution and mesh door thread it from their storage object.
+   */
+  engineSql?: SqlStorage;
+  /**
    * Issue #3186: the one pipeline's stage storage + queue for the
    * panel leg. The NLQ execution host threads its blob handle +
    * SCREENER_EVENTS binding; absent (the mesh door), the leg runs on
@@ -900,6 +917,13 @@ export async function runOptionsStrategyAction(
       }),
       claims: memoryStageClaims(),
       queue: deps?.pipelineQueue ?? null,
+      // Issue #4066: a SQL handle records the engine run durably in
+      // the host DO, so a later per-stage control action from the
+      // copilot turn can address it; absent, in-memory stores
+      // (the #4069 accepted-absent discipline).
+      ...(deps?.engineSql
+        ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
+        : {}),
     },
   );
   if (panelOutcome.outcome !== "completed") {
@@ -1330,6 +1354,12 @@ async function runOpportunityScan(
       }),
       claims: memoryStageClaims(),
       queue: deps?.pipelineQueue ?? null,
+      // Issue #4066: as the panel leg — a SQL handle records the
+      // engine run durably in the host DO for later per-stage
+      // control; absent, in-memory stores.
+      ...(deps?.engineSql
+        ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
+        : {}),
     },
   );
   if (scanOutcome.outcome !== "completed") {

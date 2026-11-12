@@ -34,6 +34,10 @@ import {
   type PanelRiskAgent,
   type PanelSnapshotData,
 } from "../services/recommendationKernel";
+// Issue #4066: these values come from the trading barrel
+// (src/trading/index.ts), the sole public import surface under the
+// #290 boundary — leaf imports of trading internals trip the
+// boundary test.
 import {
   buildPanelFetchDteBands,
   DynamicOptionsScreener,
@@ -334,6 +338,10 @@ export function createStrategyScreenPorts(
 /* Scanner leg (step 3e): the opportunity scan over a symbol batch.   */
 /* ------------------------------------------------------------------ */
 
+// Issue #4066: these values come from the trading barrel
+// (src/trading/index.ts), the sole public import surface under the
+// #290 boundary — leaf imports of trading internals trip the
+// boundary test.
 import {
   assessScanRisk,
   collateScanResult,
