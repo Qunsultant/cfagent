@@ -35,6 +35,11 @@ import { apiFetch } from "./apiFetch";
 import { attachWorkflowRuns, type WorkflowLedgerEntry } from "../services/runLedgerWorkflowRuns";
 import type { WorkflowRun } from "../services/workflowRuns";
 import { RunDetail } from "./WorkflowRunsPanel";
+import { attachReportRuns, type ReportLedgerEntry } from "./runLedgerReportRuns";
+import { ArtifactLink } from "./DocsAndReportsPanel";
+import { RunDetailsModal } from "./components/RunDetailsModal";
+import type { RunDetail as DocsRunDetail } from "./runDetails";
+import type { DocumentRow } from "./docsAndReports";
 import {
   isMissingIdLiteral,
   normalizeJobRunRecord,
@@ -144,6 +149,7 @@ export interface ScheduleRunLedgerPanelProps {
 function ledgerColumns(
   onJobClick: (jobId: string) => void,
   onAsyncJobClick: (asyncJobId: string) => void,
+  getDocs: (jobId: string) => DocumentRow | null,
 ): TableColumn<JobRunRecord>[] {
   return [
   { key: "jobId", header: "Job", render: (r) => (
@@ -237,6 +243,25 @@ function ledgerColumns(
     ),
   },
   { key: "summary", header: "Summary", render: (r) => <>{runSummary(r)}</> },
+  {
+    // Issue #4262 (S4, option A) — what the run PRODUCED, in the same row as
+    // what ran. The three per-kind states are the Docs page's own component:
+    // a recorded key links, a missing one is an honest dash, a recorded leg
+    // failure shows its reason (#2088).
+    key: "documents",
+    header: "Documents",
+    render: (r) => {
+      const docs = getDocs(r.jobId);
+      if (!docs) return <span title="No document set recorded for this run">—</span>;
+      return (
+        <span>
+          <ArtifactLink url={docs.pdfUrl} kind="PDF" runId={docs.runId} status={docs.pdfStatus} error={docs.pdfError} />{" "}
+          <ArtifactLink url={docs.xlsxUrl} kind="XLSX" runId={docs.runId} status={docs.xlsxStatus} error={docs.xlsxError} />{" "}
+          <ArtifactLink url={docs.csvUrl} kind="CSV" runId={docs.runId} status={docs.csvStatus} error={docs.csvError} />
+        </span>
+      );
+    },
+  },
   ];
 }
 
@@ -253,6 +278,12 @@ export function ScheduleRunLedgerPanel({
   // never listed beside them: a run the ledger already carries is dropped by
   // linkage in `attachWorkflowRuns`.
   const [workflowEntries, setWorkflowEntries] = useState<WorkflowLedgerEntry[]>([]);
+  // Issue #4262 (S4, option A) — the reports read: what each run PRODUCED.
+  const [reportEntries, setReportEntries] = useState<ReportLedgerEntry[]>([]);
+  const [docsDetailsOpen, setDocsDetailsOpen] = useState(false);
+  const [docsDetail, setDocsDetail] = useState<DocsRunDetail | null>(null);
+  const [docsDetailsLoading, setDocsDetailsLoading] = useState(false);
+  const [docsDetailsError, setDocsDetailsError] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -270,8 +301,20 @@ export function ScheduleRunLedgerPanel({
         // the ledger (docs/agents/workflow-runs.md, honesty rules).
         attached = [];
       }
+      let reports: ReportLedgerEntry[] = [];
+      try {
+        const res = await apiFetch("/api/runs?kind=all&limit=100");
+        if (res.ok) {
+          const body = (await res.json()) as { runs?: unknown[] };
+          reports = attachReportRuns(runs, body.runs ?? []);
+        }
+      } catch {
+        // Additive: a failed reports read must not empty the ledger.
+        reports = [];
+      }
       setRuns(runs);
       setWorkflowEntries(attached);
+      setReportEntries(reports);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load run ledger");
     } finally {
@@ -288,10 +331,20 @@ export function ScheduleRunLedgerPanel({
     for (const entry of workflowEntries) map.set(entry.row.jobId, entry.run);
     return map;
   }, [workflowEntries]);
-  const mergedRuns = useMemo(
-    () => [...runs, ...workflowEntries.map((entry) => entry.row)],
-    [runs, workflowEntries],
-  );
+  const docsByRunId = useMemo(() => {
+    const map = new Map<string, ReportLedgerEntry>();
+    for (const entry of reportEntries) map.set(entry.row.jobId, entry);
+    return map;
+  }, [reportEntries]);
+  const mergedRuns = useMemo(() => {
+    // One row per run: the ledger is authoritative, then a folded workflow
+    // run, then a report run — a jobId seen once is never listed twice.
+    const byId = new Map<string, JobRunRecord>();
+    for (const row of runs) byId.set(row.jobId, row);
+    for (const entry of workflowEntries) if (!byId.has(entry.row.jobId)) byId.set(entry.row.jobId, entry.row);
+    for (const entry of reportEntries) if (!byId.has(entry.row.jobId)) byId.set(entry.row.jobId, entry.row);
+    return [...byId.values()];
+  }, [runs, workflowEntries, reportEntries]);
   const visible = filterLedgerRuns(mergedRuns, scheduleId, runId);
   // Issue #4262 (S1) — the one ledger's kind filters. The filter set and the
   // default come from config (src/config/runLedgerModes.ts), never literals.
@@ -305,17 +358,44 @@ export function ScheduleRunLedgerPanel({
   const [selectedAsyncJobId, setSelectedAsyncJobId] = useState<string | null>(null);
   // Issue #4262 (S2) — the folded workflow run whose detail is open.
   const [selectedRun, setSelectedRun] = useState<WorkflowRun | null>(null);
+  const openDocsDetails = useCallback(async (runId: string) => {
+    setDocsDetailsOpen(true);
+    setDocsDetailsLoading(true);
+    setDocsDetailsError(null);
+    setDocsDetail(null);
+    try {
+      const res = await apiFetch(`/api/runs/details?runId=${encodeURIComponent(runId)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { detail?: DocsRunDetail };
+      if (!data.detail) throw new Error("No run details returned");
+      setDocsDetail(data.detail);
+    } catch (err) {
+      setDocsDetailsError(err instanceof Error ? err.message : "Failed to load run details");
+    } finally {
+      setDocsDetailsLoading(false);
+    }
+  }, []);
+
   const columns = useMemo(
     () =>
       ledgerColumns(
         (jobId) => {
           const folded = workflowByJobId.get(jobId);
-          if (folded) setSelectedRun(folded);
-          else navigateToTab("schedules", "runs", { run: jobId });
+          if (folded) {
+            setSelectedRun(folded);
+            return;
+          }
+          const report = docsByRunId.get(jobId);
+          if (report) {
+            void openDocsDetails(report.docs.runId);
+            return;
+          }
+          navigateToTab("schedules", "runs", { run: jobId });
         },
         (asyncJobId) => setSelectedAsyncJobId(asyncJobId),
+        (jobId) => docsByRunId.get(jobId)?.docs ?? null,
       ),
-    [workflowByJobId],
+    [workflowByJobId, docsByRunId, openDocsDetails],
   );
 
   return (
@@ -406,6 +486,14 @@ export function ScheduleRunLedgerPanel({
           }
         />
       )}
+
+      <RunDetailsModal
+        open={docsDetailsOpen}
+        onClose={() => setDocsDetailsOpen(false)}
+        detail={docsDetail}
+        loading={docsDetailsLoading}
+        error={docsDetailsError}
+      />
 
       {selectedRun && (
         <Modal
