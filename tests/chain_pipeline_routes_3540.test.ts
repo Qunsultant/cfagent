@@ -466,6 +466,9 @@ describe("pipeline-chain routes (#3540)", () => {
       "yahoo-sector-health-care-quotes-pipeline",
       "yahoo-sector-financials-quotes-pipeline",
       "yahoo-sector-information-technology-quotes-pipeline",
+      "yahoo-sector-communication-services-quotes-pipeline",
+      "yahoo-sector-utilities-quotes-pipeline",
+      "yahoo-sector-real-estate-quotes-pipeline",
     ]);
     expect(body.jobs[0].frontier).toBe("feed");
     expect(body.jobs[0].stages).toHaveLength(5);
@@ -494,6 +497,9 @@ describe("pipeline-chain routes (#3540)", () => {
       "yahoo-sector-health-care-quotes-pipeline",
       "yahoo-sector-financials-quotes-pipeline",
       "yahoo-sector-information-technology-quotes-pipeline",
+      "yahoo-sector-communication-services-quotes-pipeline",
+      "yahoo-sector-utilities-quotes-pipeline",
+      "yahoo-sector-real-estate-quotes-pipeline",
     ]);
   });
 
