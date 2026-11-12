@@ -26,7 +26,8 @@
  *   retry                pipelinePolicy retry budgets.
  *   failure-classification NEW: classifyScreenFailure, wired in
  *                        runScreen's failure path (rethrow unchanged).
- *   partial-result-marking collateShards qualified rule (Slice 6)
+ *   partial-result-marking screenerCollation.collateShards
+ *                        qualified rule (Slice 6)
  *                        + ScreenerRunResult.partial (#462).
  *   delivery             Slice 3 persistThenDeliverAll +
  *                        Slice 7 (runId, destination) suppressor.
@@ -70,7 +71,7 @@ export const SCREEN_RUN_ASPECTS = {
   paidRun: { joinPoint: "Chat monetization budget gate (nlqPorts / meshScreenDoor paid paths)" },
   retry: { joinPoint: "pipelinePolicy retry budgets" },
   failureClassification: { joinPoint: "classifyScreenFailure (this module), wired in runScreen + chain submission (scheduledTasks autonomousMarketScreenSharded)" },
-  partialResultMarking: { joinPoint: "collateShards qualified rule + ScreenerRunResult.partial (#462)" },
+  partialResultMarking: { joinPoint: "screenerCollation.collateShards qualified rule + ScreenerRunResult.partial (#462)" },
   delivery: { joinPoint: "persistThenDeliverAll + deliverySuppressor (Slices 3 and 7)" },
   provenance: { joinPoint: "manualWorkflowJobId + workflow traceparent + canonical generation screener:<timestamp>; funnel trace_id is the workflow traceparent's trace-id (funnelTraceIdForRun, #2860 Factor 14)" },
   telemetry: { joinPoint: "screenRunStats accumulator, folded at logScreenRunEvent (this module, #2860 Factor 14)" },

@@ -66,7 +66,7 @@ import { newTraceContext, formatTraceparent } from "../src/observability/observa
 import type {
   ScreenerWorkflowDeps,
   ShardScreenResult,
-} from "../src/workflows/screenerWorkflowFlow";
+} from "../src/workflows/screenerCollation";
 import type {
   WorkflowJobCommand,
   WorkflowPort,

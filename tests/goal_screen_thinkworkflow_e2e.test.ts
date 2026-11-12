@@ -4,18 +4,32 @@
  * 2. Complete artifact generation and storage (PDF, XLSX, CSV) in blob storage.
  * 3. Persistence of canonical reports and job outcomes with report references.
  * 4. Serving all three artifact formats via /api/screening/goal-screen/report.{pdf,xlsx,csv}.
+ *
+ * #4192: the child-workflow shard flow (runShardFlow + fake
+ * ScreenerWorkflowStep + virtual clock) is retired — goal
+ * screens run through the one engine now. The orchestration
+ * test below drives the same journey through
+ * InMemoryWorkflowAdapter (the engine path with a canned goal
+ * runner) and reads the collation back from the parent
+ * canonical row, the way tests/screener_workflows.test.ts
+ * does. No child workflows, no poll loop, no virtual clock.
  */
 import { describe, expect, it, vi } from "vitest";
 import { ThinkWorkflow } from "@cloudflare/think/workflows";
 import * as XLSX from "@e965/xlsx";
 import { ScreenerScreenWorkflow } from "../src/workflows/screenerWorkflow";
+import { InMemoryWorkflowAdapter } from "../src/workflows/inMemoryWorkflowAdapter";
+import { InMemoryShardJobAdapter } from "../src/data/inMemoryShardJobAdapter";
 import {
-  runShardFlow,
   collateShards,
   goalResultToShardResult,
   type ScreenerWorkflowDeps,
-  type ScreenerWorkflowStep,
-} from "../src/workflows/screenerWorkflowFlow";
+  type ShardOutcome,
+} from "../src/workflows/screenerCollation";
+import type {
+  ParentScreenReportInput,
+  WorkflowCollation,
+} from "../src/workflows/workflowPorts";
 import { buildGoalScreenCommand } from "../src/services/goalScreenWorkflowSubmission";
 import { buildScenario } from "../src/services/goalScenarioEngine";
 import {
@@ -118,7 +132,7 @@ describe("Goal Screen ThinkWorkflow & Reports End-to-End (#2625)", () => {
     expect(csvLines[2]).toContain("MSFT");
   });
 
-  it("orchestrates goal screen via ThinkWorkflow shard flow and produces all reports", async () => {
+  it("orchestrates goal screen through the engine and produces all reports", async () => {
     const blobStorage = new InMemoryBlobStorage();
     const env = { REPORTS_BUCKET: undefined };
     const sql = new MockSqlStorage();
@@ -140,21 +154,13 @@ describe("Goal Screen ThinkWorkflow & Reports End-to-End (#2625)", () => {
       assetClasses: ["stocks", "options"],
     });
 
-    const shardCommand = {
-      ...command,
-      role: "shard" as const,
-      shard: { shardId: "goal" },
-    };
-
-    // Step mock recording execution order
+    // #4192: no fake step, no virtual clock — the engine
+    // owns pacing and fan-out. The trace hops record which
+    // engine steps executed, in place of the old step mock's
+    // execution-order list.
     const executedSteps: string[] = [];
-    const step: ScreenerWorkflowStep = {
-      do: async (name, fn) => {
-        executedSteps.push(name);
-        return fn();
-      },
-      sleep: async () => {},
-    };
+    const shardStore = new InMemoryShardJobAdapter();
+    const parentStored: ParentScreenReportInput[] = [];
 
     const runnerGoalScreen = vi.fn(async () => {
       const res = sampleGoalResult();
@@ -176,12 +182,16 @@ describe("Goal Screen ThinkWorkflow & Reports End-to-End (#2625)", () => {
     let storedReportId = "";
     const deps: ScreenerWorkflowDeps = {
       screenRunner: {
-        runScreen: vi.fn(),
+        // A goal command must never fall back to the market
+        // runner: the adapter fails closed without
+        // runGoalScreen, and this throw proves the market
+        // runner is never reached.
+        runScreen: vi.fn(async () => {
+          throw new Error("market runner must not run for a goal command");
+        }),
         runGoalScreen: runnerGoalScreen,
       },
-      shardStore: {
-        recordShardOutcome: vi.fn(async () => {}),
-      },
+      shardStore,
       storeReport: async (payload, userLogin) => {
         const id = await persistWorkflowGoalScreenReport(
           { env, getOrm: () => orm },
@@ -192,58 +202,109 @@ describe("Goal Screen ThinkWorkflow & Reports End-to-End (#2625)", () => {
         return id;
       },
       deliverOutcome: async () => {},
+      storeParentReport: async (input) => {
+        parentStored.push(input);
+        return { stored: true, reportId: "parent-1" };
+      },
+      traceHop: async (_cmd, event) => {
+        executedSteps.push(event.operation);
+      },
       nowMs: () => Date.now(),
     };
 
-    // 1. Execute shard flow
-    const shardResult = await runShardFlow(shardCommand, step, deps);
+    // 1. Execute the goal screen through the engine.
+    const adapter = new InMemoryWorkflowAdapter(deps);
+    const handle = await adapter.start(command);
+    expect(handle.status).toBe("complete");
+    expect(handle.existing).toBe(false);
+    expect(await adapter.status(handle.workflowId)).toMatchObject({
+      jobId: command.jobId,
+      status: "complete",
+    });
 
+    expect(runnerGoalScreen).toHaveBeenCalledTimes(1);
     expect(executedSteps).toContain("execute-goal-screen");
     expect(executedSteps).toContain("store-shard");
-    expect(shardResult.success).toBe(true);
-    expect(shardResult.pdfKey).toMatch(/^goal_screen:pdf:/);
-    expect(shardResult.xlsxKey).toMatch(/^goal_screen:xlsx:/);
-    expect(shardResult.csvKey).toMatch(/^goal_screen:csv:/);
+
+    // The collation is the parent row's read-back, the way
+    // the mesh door / NLQ port read it.
+    const parentRow = await shardStore.latestJob("tenant-alice", command.jobId, command.jobId);
+    expect(parentRow).not.toBeNull();
+    expect(parentRow?.status).toBe("completed");
+    const collation = JSON.parse(parentRow?.resultJson ?? "{}") as WorkflowCollation;
+    expect(collation.lifecycle).toBe("ReportGenerated");
+    expect(collation.shards).toHaveLength(1);
+    const shard = collation.shards[0]!;
+    expect(shard.status).toBe("completed");
+    expect(shard.shardId).toBe("goal");
+    expect(shard.pdfKey).toMatch(/^goal_screen:pdf:/);
+    expect(shard.xlsxKey).toMatch(/^goal_screen:xlsx:/);
+    expect(shard.csvKey).toMatch(/^goal_screen:csv:/);
+    expect(shard.stored).toBe(true);
+    // The goal door returned a report id: it surfaces on
+    // the shard outcome and links the parent row to the
+    // child's canonical report.
+    expect(shard.reportId).toBe(storedReportId);
+    expect(collation.reportKeys).toEqual([shard.pdfKey]);
+    expect(collation.xlsxKeys).toEqual([shard.xlsxKey]);
+    expect(collation.csvKeys).toEqual([shard.csvKey]);
+    expect(collation.childReportIds).toEqual([storedReportId]);
+    expect(collation.childRunIds).toEqual([]);
+
+    // The parent canonical row was stored once, carrying the
+    // collation (goal parents link by report id, never by
+    // screener:<timestamp>).
+    expect(parentStored).toHaveLength(1);
+    expect(parentStored[0]?.collation.lifecycle).toBe("ReportGenerated");
+    expect(parentStored[0]?.goalScreen).toBe(true);
+    expect(parentStored[0]?.jobId).toBe(command.jobId);
+
+    // The per-shard row was projected alongside the parent row.
+    const rows = await shardStore.listJobsForChain("tenant-alice", command.jobId);
+    expect(rows.map((r) => r.jobKey).sort()).toEqual(
+      [command.jobId, "shard:goal"].sort(),
+    );
+    expect(rows.find((r) => r.jobKey === "shard:goal")?.status).toBe("completed");
 
     // 2. Verify artifacts exist in blob storage
-    expect(blobStorage.has(shardResult.pdfKey!)).toBe(true);
-    expect(blobStorage.has(shardResult.xlsxKey!)).toBe(true);
-    expect(blobStorage.has(shardResult.csvKey!)).toBe(true);
+    expect(blobStorage.has(shard.pdfKey!)).toBe(true);
+    expect(blobStorage.has(shard.xlsxKey!)).toBe(true);
+    expect(blobStorage.has(shard.csvKey!)).toBe(true);
 
     // 3. Verify canonical report in ORM via getScheduledReportById
     const storedReport = getScheduledReportById(sql as any, storedReportId);
     expect(storedReport).not.toBeNull();
     const body = typeof storedReport!.body === "string" ? JSON.parse(storedReport!.body) : storedReport!.body;
-    expect(body.pdfKey).toBe(shardResult.pdfKey);
-    expect(body.xlsxKey).toBe(shardResult.xlsxKey);
-    expect(body.csvKey).toBe(shardResult.csvKey);
+    expect(body.pdfKey).toBe(shard.pdfKey);
+    expect(body.xlsxKey).toBe(shard.xlsxKey);
+    expect(body.csvKey).toBe(shard.csvKey);
 
-    // 4. Verify parent collation surfaces all three keys and lifecycle ReportGenerated
-    const shardOutcome = {
+    // 4. The pure collation helper agrees with the engine
+    // collation on the same shard outcome: lifecycle
+    // ReportGenerated with all three keys.
+    const shardOutcome: ShardOutcome = {
       shardId: "goal",
-      status: "completed" as const,
-      totalScanned: shardResult.totalScanned,
-      expectedCount: shardResult.expectedCount,
-      matchedCount: shardResult.matchedCount,
-      pdfKey: shardResult.pdfKey,
-      xlsxKey: shardResult.xlsxKey,
-      csvKey: shardResult.csvKey,
+      status: "completed",
+      totalScanned: shard.totalScanned ?? 0,
+      expectedCount: shard.expectedCount ?? 0,
+      matchedCount: shard.matchedCount ?? 0,
+      pdfKey: shard.pdfKey,
+      xlsxKey: shard.xlsxKey,
+      csvKey: shard.csvKey,
       stored: true,
       delivered: false,
     };
-
-    const collation = collateShards(
+    const pureCollation = collateShards(
       command.jobId,
-      "workflow-instance-123",
+      handle.workflowId,
       [shardOutcome],
       [{ lifecycle: "ReportGenerated", atMs: Date.now() }],
       [],
     );
-
-    expect(collation.lifecycle).toBe("ReportGenerated");
-    expect(collation.reportKeys).toEqual([shardResult.pdfKey]);
-    expect(collation.xlsxKeys).toEqual([shardResult.xlsxKey]);
-    expect(collation.csvKeys).toEqual([shardResult.csvKey]);
+    expect(pureCollation.lifecycle).toBe("ReportGenerated");
+    expect(pureCollation.reportKeys).toEqual([shard.pdfKey]);
+    expect(pureCollation.xlsxKeys).toEqual([shard.xlsxKey]);
+    expect(pureCollation.csvKeys).toEqual([shard.csvKey]);
   });
 
   it("serves PDF, XLSX, and CSV reports through /api/screening/goal-screen/report.* endpoints", async () => {

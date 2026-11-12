@@ -6,6 +6,28 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-12 — the one workflow engine supersedes the bespoke screener flow (#4192)
+
+- File: `src/workflows/screenerWorkflowFlow.ts` → `src/workflows/screenerWorkflowFlow.deprecated.ts`
+- Date: 2026-11-12
+- Reason: Issue #4192 (#3550 S2 cutover) moves production screens onto
+  the one workflow engine. The bespoke child-workflow fan-out
+  (`runParentFlow` / `runShardFlow`: fan-out, poll loop, child
+  workflows, `SHARD_DONE_EVENT`) is a parallel stage model, which
+  #3550's body forbids. The engine owns fan-out, retries, and stage
+  control now; the flow's pure collation helpers live on in
+  `src/workflows/screenerCollation.ts` (one home, no copy).
+- Replacement: `src/workflows/screenerWorkflow.ts` (engine dispatch)
+  + `src/workflows/screenerCollation.ts` (collation) +
+  `src/services/screenerPipelineJobs.ts` (definition, six nodes).
+- Consumers at deprecation: none — every importer was migrated to the
+  engine path or to `screenerCollation.ts` in the same slice
+  (`screenerWorkflow.ts`, `inMemoryWorkflowAdapter.ts`, and the
+  flow/mesh/goal/stage test suites).
+- Deletion condition: zero consumers (already met) plus an owner
+  decision plus a gate amendment; deletion is never part of a program
+  slice.
+
 ## 2026-10-29 — outcome catalog supersedes the error catalog (#2381)
 
 - File: `src/errors/errorAspects.ts` → `src/errors/errorAspects.deprecated.ts`

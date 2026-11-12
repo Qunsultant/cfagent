@@ -127,7 +127,7 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
     provider: "requested, else planner default (etrade); fallback forces yahoo with marker",
     persistence: "Canonical report store per shard",
     delivery: "Delivery bridge via chain",
-    canonical: ["screenExecutionBroker.startScheduledShardedChain", "stockScreenPlanner.planScheduledScreen", "screenerWorkflowFlow.collateShards (qualified partial rule)", "screenRunAspects"],
+    canonical: ["screenExecutionBroker.startScheduledShardedChain", "stockScreenPlanner.planScheduledScreen", "screenerCollation.collateShards (qualified partial rule)", "screenRunAspects"],
     status: "canonical",
   },
   {
