@@ -112,7 +112,7 @@ describe("Order ticket page (issue #3088)", () => {
     const hub = readFileSync(join(HERE, "..", "src", "client", "ETradeTradingHub.tsx"), "utf8");
     const panel = readFileSync(join(HERE, "..", "src", "client", "OrderTicketPanel.tsx"), "utf8");
     expect(hub).toContain("<OrderTicketPanel");
-    expect(panel).toContain("<PageShell");
+    expect(panel).toContain("<PageTemplate");
     expect(panel).toContain('param: "orderTab"');
     expect(panel).not.toContain("style={{");
     expect(panel).not.toContain("<button ");

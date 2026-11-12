@@ -32,7 +32,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch as fetch } from "./apiFetch";
-import { Badge, Button, Card, EmptyState, Modal, Notice, Spinner } from "./components/ui";
+import { Badge, Button, Modal, Notice, QueueFeed, Spinner } from "./components/ui";
 import { formatCountdown } from "./PendingReviewQueue";
 import { currentBrokerLabel } from "./tenantProviders";
 
@@ -187,14 +187,18 @@ export function TradingApprovalsQueue() {
     }
   };
 
+  // QueueFeed re-wrap (#3138): the header becomes title + meta, the rows
+  // move verbatim into items, the empty state maps verbatim. The
+  // description and the error/success notices are queue state, not feed
+  // rows — they stay above the feed. Loading keeps the Spinner as the
+  // feed's single item, so the header stays visible while loading.
+  const refreshButton = (
+    <Button variant="secondary" size="sm" onClick={() => void fetchOrders()} loading={loading} disabled={loading}>
+      ↻ Refresh
+    </Button>
+  );
   return (
-    <Card padding="md">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-2)", margin: "0 0 0.75rem" }}>
-        <h3 style={{ margin: 0 }}>Pending approvals</h3>
-        <Button variant="secondary" size="sm" onClick={() => void fetchOrders()} loading={loading} disabled={loading}>
-          ↻ Refresh
-        </Button>
-      </div>
+    <>
       <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 1rem" }}>
         Proposed orders awaiting human authorization. Approving places the order through the existing
         approval door; rejecting closes the proposal without placing it. Proposals expire 15 minutes
@@ -211,22 +215,32 @@ export function TradingApprovalsQueue() {
         </Notice>
       )}
       {loading ? (
-        <Spinner label="Loading pending approvals…" />
+        <QueueFeed
+          title="Pending approvals"
+          meta={refreshButton}
+          items={[{ id: "loading", content: <Spinner label="Loading pending approvals…" /> }]}
+        />
       ) : pending.length === 0 ? (
-        <EmptyState
-          title="No pending approvals"
-          description="No proposed orders are awaiting authorization right now."
+        <QueueFeed
+          title="Pending approvals"
+          meta={refreshButton}
+          emptyTitle="No pending approvals"
+          emptyDescription="No proposed orders are awaiting authorization right now."
         />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-          {pending.map((trade) => {
+        <QueueFeed
+          title="Pending approvals"
+          meta={refreshButton}
+          items={pending.map((trade) => {
             const expiresAt = proposalExpiresAt(trade);
             const countdown = formatCountdown(expiresAt, nowMs);
             const expired = countdown === "Expired";
             const strategy = parseApprovalStrategy(trade);
             const isLimit = trade.orderType.toUpperCase() === "LIMIT";
             const shortHash = trade.payloadHash ? trade.payloadHash.slice(0, 12) : null;
-            return (
+            return {
+              id: trade.id,
+              content: (
               <div
                 key={trade.id}
                 style={{
@@ -300,9 +314,10 @@ export function TradingApprovalsQueue() {
                   </Button>
                 </div>
               </div>
-            );
+              ),
+            };
           })}
-        </div>
+        />
       )}
       <Modal
         open={confirm !== null}
@@ -348,6 +363,6 @@ export function TradingApprovalsQueue() {
           </div>
         )}
       </Modal>
-    </Card>
+    </>
   );
 }

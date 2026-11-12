@@ -19,15 +19,14 @@ async function flush(ms = 50) {
   });
 }
 
-/** The quote peek Card: locate it from the company name it renders
- *  (the bespoke `.order-quote-peek` wrapper is gone after #3051). */
+/** The quote peek strip: locate it by the ContextStrip class (#3138 —
+ *  the peek moved out of its Card into the template's contextStrip
+ *  slot, so the `.ui-card` anchor is gone; the company name, the
+ *  price in a <strong>, and the bid/ask span are the new anchors). */
 function quotePeekCard(): Element {
-  const company = [...container.querySelectorAll("strong")].find(
-    (el) => el.textContent === "Apple Inc.",
-  );
-  const card = company?.closest(".ui-card");
-  if (!card) throw new Error("quote peek not rendered");
-  return card;
+  const strip = container.querySelector(".ui-context-strip");
+  if (!strip) throw new Error("quote peek not rendered");
+  return strip;
 }
 
 function makeTicketModel(overrides: Partial<OrderTicketModel> = {}): OrderTicketModel {
@@ -159,17 +158,17 @@ describe("Issue #3731: Order Ticket Crash & Broker Neutrality", () => {
       expect(text).not.toContain("LIVE TRADING");
 
       // Verify that quote peek displayed fallback "—" without throwing.
-      // The quote peek is a Card after the #3051 primitives migration —
-      // the bespoke `.order-quote-peek` / `.quote-price` / `.quote-bidask`
-      // classes are gone; the company name, the price in a <strong>, and
-      // the bid/ask in a ui-meta span are the new anchors.
+      // The quote peek is a ContextStrip in the template's contextStrip
+      // slot after #3138 — the company name, the price in a <strong>,
+      // and the bid/ask span are the anchors (the strip renders the
+      // bid/ask in a plain span, not a ui-meta one).
       const peek = quotePeekCard();
       const priceStrong = [...peek.querySelectorAll("strong")].find(
         (el) => el.textContent === "—",
       );
       expect(priceStrong?.textContent).toBe("—");
 
-      const bidAskElem = [...peek.querySelectorAll("span.ui-meta")].find((el) =>
+      const bidAskElem = [...peek.querySelectorAll("span")].find((el) =>
         (el.textContent || "").includes("Bid:"),
       );
       expect(bidAskElem?.textContent).toContain("Bid: —");
