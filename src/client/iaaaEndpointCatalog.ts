@@ -102,6 +102,16 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     source: "src/server.ts branch: POST /nlq/webhook",
   },
   {
+    id: "schedule-webhook-followup",
+    method: "POST",
+    path: "/api/schedules/webhook/followup",
+    aliases: [],
+    kind: "http",
+    auth: "webhook-signature",
+    authNote: "HMAC X-Signature-256 plus timestamp plus replay protection; INBOUND_SCHEDULE_WEBHOOK_SECRET required (503 when unconfigured). The DO route then PDP-authorizes task:create (#3122) and mints only the followup.report/deliver/notify capabilities (#3311).",
+    source: "src/server.ts branch: POST /api/schedules/webhook/followup",
+  },
+  {
     id: "login-page",
     method: "GET",
     path: "/login",
