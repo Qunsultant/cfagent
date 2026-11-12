@@ -249,6 +249,8 @@ describe("caller pins (#2914)", () => {
       ["src/workflows/screenerWorkflowFlow.ts", "workflow runner seam"],
     ]);
     const offenders: string[] = [];
+    /** Issue #4247 — allow-list keys use "/", the walk yields "\" on Windows. */
+    const posixPath = (p: string): string => p.split(/[\\/]/).join("/");
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = join(dir, entry.name);
@@ -258,7 +260,8 @@ describe("caller pins (#2914)", () => {
           if (/\.runScreen\(/.test(text) && !/runScreenInner/.test(text.split(".runScreen(")[0].slice(-40))) {
             // Count only genuine .runScreen( sites (runScreenInner excluded by name).
             const sites = (text.match(/(?<!Inner)\.runScreen\(/g) ?? []).length;
-            if (sites > 0 && !allowed.has(path)) offenders.push(`${path} (${sites})`);
+            const rel = posixPath(path);
+            if (sites > 0 && !allowed.has(rel)) offenders.push(`${rel} (${sites})`);
           }
         }
       }
