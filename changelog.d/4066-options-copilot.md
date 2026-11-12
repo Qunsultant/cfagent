@@ -1,0 +1,6 @@
+### Options Copilot onto the engine-routed workflow (#4066)
+
+- Options Copilot turn now drives the engine-routed options workflow: the NLQ panel/scan legs and the `run_options_strategy_screen` mesh door record durable engine runs (`options-screen:<runId>`) on the OrchestratorAgent host, so the same screen produces one pipeline record from any entry.
+- New per-stage chat control (`options_copilot_stage_control` MCP command, `options_stage_control` NLQ action): run / re-run / stop / resume / cancel one options stage by `(runId, stageId)` on the 8-stage vocabulary, with named refusals (unknown stage, unknown run, missing stored request, manual shapeReport/deliver) surfaced with stage + reason, never as an absence.
+- Paid surfaces stay gated through the move: `paid_options_screener` ($0.05 x402) and TradingAgent `screen_options` (E*TRADE-only) execute through the engine-routed workflow with their 402 challenge, `mcp:payments` scope, and E*TRADE-only refusal intact; queued-job receipts keep their meaning.
+- Identity decision (recorded on #4066): Options Copilot remains a client registration + NLQ/mesh-door routing on the OrchestratorAgent; no independent `OptionsCopilotAgent` class is created in this slice.

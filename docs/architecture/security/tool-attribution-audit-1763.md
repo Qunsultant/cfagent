@@ -154,6 +154,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `slack_dispatch_transaction_snap` | mcp:write | L via door 2 only — acting identity required (#2351); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_stock_screen` | mcp:write | L via door 2 only — acting identity required (#2488); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_options_strategy_screen` | mcp:write | L via door 2 only — acting identity required (#2581); refused on doors 1/3 (no acting-identity carrier there) |
+| `options_copilot_stage_control` | mcp:write | L via door 2 only — acting identity required (#4066); refused on doors 1/3 (no acting-identity carrier there). Drives one stage of one options run through the engine control plane; control-plane refusals surface as named errors, never as success |
 | `stock_copilot_control` | mcp:write | L via door 2 only — acting identity required (#3513); refused on doors 1/3 (no acting-identity carrier there). Updates loop pause/resume and enabled sessions |
 | `stock_copilot_remediate_gaps` | mcp:write | L via door 2 only — acting identity required (#3769); refused on doors 1/3 (no acting-identity carrier there). Autonomous platform gap diagnosis and auto-healing action |
 | `run_feed_job` | mcp:write | L via door 2 only — acting identity required (#3535); refused on doors 1/3 (no acting-identity carrier there) |

@@ -430,6 +430,21 @@ function measure(): Map<string, number> {
  * the only growth is the new jobs' own id/label/alias lines: 2 raises
  * (feedJobs.ts/yahoo 28->34, feedPipelineJobs.ts/yahoo 35->52).
  * Totals move 1175/9224 -> 1175/9247.
+ * Baseline update (#4066, 2026-11-12): per-stage chat control of
+ * options stages lands — the control module, its mesh door, and the
+ * extracted canonical-record-builder leaf. 3 new rows + 1 raise, all
+ * dispositioned INTEGRATION — the E*TRADE client is the control
+ * path's own provider (the stage ports are built over it), and the
+ * builder's fail-open provenance names the provider pair it
+ * resolves: meshOptionsStageControlDoor.ts etrade 8 /
+ * optionsStageControl.ts etrade 5 / manualOptionsRecordBuilder.ts
+ * etrade 1 / execution.ts etrade 77->82 (the NLQ dispatch branch
+ * naming the E*TRADE client it threads to the control). The prose
+ * brand mentions were neutralized instead: the control refusals
+ * name the stage + reason with no provider brand, and the leaf
+ * extraction keeps the builder's provider naming in the one leaf
+ * that owns it. The manualOptionsScreen.ts etrade row shrinks
+ * 4->3 (the builder moved out) and is left at its seed count.
  * Baseline update (#4225, 2026-11-12): the next four GICS sector universes join
  * the feed workflow as Yahoo quotes feed jobs (Consumer Staples,
  * Health Care, Financials, Information Technology) - one registry definition per
@@ -438,7 +453,7 @@ function measure(): Map<string, number> {
  * (INTEGRATION at seed: naming the provider is their job), and
  * the only growth is the new jobs' own id/label/alias lines: 2 raises
  * (feedJobs.ts/yahoo 34->40, feedPipelineJobs.ts/yahoo 52->71).
- * Totals move 1175/9247 -> 1175/9272.
+ * Totals move 1178/9266 -> 1178/9291.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -688,7 +703,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/judge.ts", "etrade", 1],
   ["src/agents/judge.ts", "yahoo", 1],
   ["src/agents/nlq/execution.ts", "alpaca", 1],
-  ["src/agents/nlq/execution.ts", "etrade", 77],
+  ["src/agents/nlq/execution.ts", "etrade", 82],
   ["src/agents/nlq/execution.ts", "yahoo", 1],
   ["src/agents/nlq/formatting.ts", "etrade", 4],
   ["src/agents/nlq/llmPlanning.ts", "alpaca", 1],
@@ -712,6 +727,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/orchestrator/meshDoors.ts", "nasdaq", 1],
   ["src/agents/orchestrator/meshDoors.ts", "yahoo", 12],
   ["src/agents/orchestrator/meshOptionsStrategyDoor.ts", "etrade", 15],
+  ["src/agents/orchestrator/meshOptionsStageControlDoor.ts", "etrade", 8],
   ["src/agents/orchestrator/nlqPorts.ts", "etrade", 1],
   ["src/agents/orchestrator/reportDispatch.ts", "etrade", 7],
   ["src/agents/orchestrator/reportDispatch.ts", "yahoo", 1],
@@ -1298,7 +1314,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/workflows/legalApplicability.ts", "alpaca", 1],
   ["src/workflows/legalApplicability.ts", "etrade", 1],
   ["src/workflows/manualOptionsScreen.ts", "etrade", 4],
+  ["src/workflows/manualOptionsRecordBuilder.ts", "etrade", 1],
   ["src/workflows/manualPanelScreen.ts", "etrade", 2],
+  ["src/workflows/optionsStageControl.ts", "etrade", 5],
   ["src/workflows/optionsScreenPorts.ts", "etrade", 3],
   ["src/workflows/researchSubtabDisposition.ts", "alpaca", 1],
   ["src/workflows/researchSubtabDisposition.ts", "yahoo", 1],

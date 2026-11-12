@@ -13,7 +13,11 @@ import { createComparisonRunner } from "../../services/comparisonNlqRunner";
 import { getPlatformCapabilitiesDeskSummary } from "../../services/platformKnowledge";
 import { UnifiedOptionsService, ETradeSlackTradingService, describeFlowProvenance, getDynamicLiveFlowItems, isNonLivePricingQuoteStatus, nonLivePricingNotice } from "../../trading";
 import { runOptionsStrategyAction, type OptionsStrategyIntent } from "../nlqOptionsStrategy";
-import type { DatabaseORM } from "../../orm";
+import {
+  controlOptionsStage,
+  type OptionsStageControlOperation,
+} from "../../workflows/optionsStageControl";
+import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
 import type { ScanRunStore, StrategyProfileStore } from "../../trading";
 import type { AgentScheduleItem, Env, OptionScreenResult } from "../../types";
@@ -2085,6 +2089,14 @@ async function executeNLQQueryAsyncCore(
         // the stored value is the stage artifact the pipeline wrote.
         pipelineStorage: deps?.storage as unknown as OptionsStageStorage | undefined,
         pipelineQueue: (env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
+        // Issue #4066: the host DO's raw SQLite handle for the engine
+        // stores — the NLQ host's storage object IS the DO storage
+        // (chatTurnHelpers threads ctx.storage), so its .sql is the
+        // same handle the manual route records over. The cast is the
+        // established shape (the stock door reads context.storage.sql
+        // the same way); absent, the legs run in-memory and a later
+        // per-stage control action refuses by name.
+        engineSql: (deps?.storage as unknown as { sql?: SqlStorage } | undefined)?.sql,
         // #1257 comparison surfacing: the runner is built from the
         // session's E*TRADE client + environment + orm ledger sink.
         // The runner itself refuses without env, and reports
@@ -2119,6 +2131,93 @@ async function executeNLQQueryAsyncCore(
         rows: res.rows,
         executedAt,
       };
+    }
+
+    if (action === "options_stage_control") {
+      // Issue #4066: per-stage chat control of an options run — run /
+      // re-run / stop / resume / cancel one stage by (runId, stageId)
+      // on the 8-stage vocabulary, through the engine control plane.
+      // The runId/stage/operation ride the plan's filters record.
+      // A control refusal is a NAMED envelope (stage + reason in
+      // validationError), never an absence and never a silent success.
+      const controlFilters = (plan.tradingData?.filters ?? {}) as Record<string, unknown>;
+      const controlRunId = typeof controlFilters.runId === "string" ? controlFilters.runId.trim() : "";
+      const controlStage = typeof controlFilters.stage === "string" ? controlFilters.stage.trim() : "";
+      const controlOperation = controlFilters.operation as OptionsStageControlOperation | undefined;
+      const controlSql = (deps?.storage as unknown as { sql?: SqlStorage } | undefined)?.sql;
+      if (!controlRunId || !controlStage || !controlOperation) {
+        return {
+          plan,
+          domain: "trading",
+          targetTable: "etrade_options_stage_control",
+          count: 0,
+          status: "invalid_request",
+          summary: "Options stage control needs a runId, a stage, and an operation (run, rerun, stop, resume, or cancel).",
+          validationError: "Options stage control needs a runId, a stage, and an operation (run, rerun, stop, resume, or cancel).",
+          rows: [],
+          executedAt,
+        };
+      }
+      if (!controlSql) {
+        return {
+          plan,
+          domain: "trading",
+          targetTable: "etrade_options_stage_control",
+          count: 0,
+          status: "invalid_request",
+          summary: `Options run ${controlRunId}: the stage-control action cannot access SQLite in this turn, so no engine record can be addressed.`,
+          validationError: `Options run ${controlRunId}: the stage-control action cannot access SQLite in this turn, so no engine record can be addressed.`,
+          rows: [],
+          executedAt,
+        };
+      }
+      try {
+        const controlResult = await controlOptionsStage({
+          sql: controlSql,
+          ...(deps?.storage
+            ? { storage: deps.storage as unknown as OptionsStageStorage | undefined }
+            : {}),
+          env,
+          runId: controlRunId,
+          stage: controlStage,
+          operation: controlOperation,
+          userLogin: deps?.userLogin ?? login,
+          etradeClient: etrade.client,
+        });
+        return {
+          plan,
+          domain: "trading",
+          targetTable: "etrade_options_stage_control",
+          count: 1,
+          status: "success",
+          summary: `Options run ${controlRunId}: stage ${controlResult.stage} ${controlResult.operation} — ${controlResult.state}.`,
+          rows: [
+            {
+              runId: controlResult.runId,
+              jobId: controlResult.jobId,
+              stage: controlResult.stage,
+              operation: controlResult.operation,
+              state: controlResult.state,
+              requestShape: controlResult.requestShape,
+              stageUnits: controlResult.stageUnits,
+            },
+          ],
+          executedAt,
+        };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return {
+          plan,
+          domain: "trading",
+          targetTable: "etrade_options_stage_control",
+          count: 0,
+          status: "invalid_request",
+          summary: `Options run ${controlRunId}: stage ${controlStage} ${controlOperation} refused — ${reason}`,
+          validationError: reason,
+          rows: [],
+          executedAt,
+        };
+      }
     }
 
     if (action === "options_screen") {

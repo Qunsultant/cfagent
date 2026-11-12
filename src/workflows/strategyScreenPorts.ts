@@ -34,12 +34,17 @@ import {
   type PanelRiskAgent,
   type PanelSnapshotData,
 } from "../services/recommendationKernel";
+// Issue #4066: leaf imports, not the trading barrel — the barrel's
+// `export *` forces Rollup to load every re-exported module (incl.
+// screenerReportXlsx -> screener-agent -> @cloudflare/think, whose
+// workerd-only imports break the client build) whenever any value
+// binding is imported from it. The leaf modules import no barrel.
+import { buildPanelFetchDteBands } from "../trading/options/panelFetchDteBands";
+import { DynamicOptionsScreener } from "../trading/optionsScreener";
+import { OptionsDataAgent } from "../trading/options/optionsDataAgent";
+import { RecommendationAgent } from "../trading/options/recommendationAgent";
+import { StrategyRiskAgent } from "../trading/options/strategyRiskAgent";
 import {
-  buildPanelFetchDteBands,
-  DynamicOptionsScreener,
-  OptionsDataAgent,
-  RecommendationAgent,
-  StrategyRiskAgent,
   type PipelineResult,
   type StrategyRequest,
 } from "../trading";
@@ -334,6 +339,11 @@ export function createStrategyScreenPorts(
 /* Scanner leg (step 3e): the opportunity scan over a symbol batch.   */
 /* ------------------------------------------------------------------ */
 
+// Issue #4066: leaf import, not the trading barrel — the barrel's
+// `export *` forces Rollup to load every re-exported module (incl.
+// screenerReportXlsx -> screener-agent -> @cloudflare/think, whose
+// workerd-only imports break the client build) whenever any value
+// binding is imported from it. The leaf module imports no barrel.
 import {
   assessScanRisk,
   collateScanResult,
@@ -341,6 +351,8 @@ import {
   fetchScanSnapshots,
   normalizeScanPlan,
   screenScanCandidates,
+} from "../trading/options/opportunityScanner";
+import {
   type OpportunityScanOptions,
   type OpportunityScanResult,
   type OptionsDataSnapshot,
