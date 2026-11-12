@@ -14,6 +14,7 @@ import { NavIcons } from "./components/NavigationMenu";
  *  - data-providers: Market-data provider provisioning lifecycle
  *  - accounts: Account administration — self-service setup, tier, credits, subscriptions & catalogue
  *  - free-runs: Free-run allowance per product, per month (#3315)
+ *  - products: Product + version configuration, bulk moves (#3289)
  *  - iaaa-admin: Read-only memberships, genesis, and audit
  *  - users: User profiles, tenant memberships & account linkage
  *  - data-lifecycle: Clean state, platform bootstrap, and tenant bootstrap (#3250)
@@ -62,6 +63,7 @@ import { DataLifecyclePanel } from "./DataLifecyclePanel";
 import { ChannelsAdminPanel } from "./ChannelsAdminPanel";
 import { AccountAdminPanel } from "./AccountAdminPanel";
 import { FreeRunAllowanceSection } from "./FreeRunAllowanceSection";
+import { ProductsSection } from "./ProductsSection";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
 import { EngineTuningPanel } from "./options/EtapiConfigModal";
@@ -100,6 +102,7 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
   { id: "accounts", label: "Accounts", icon: <NavIcons.Contracts /> },
   { id: "free-runs", label: "Free Runs", icon: <NavIcons.Runs /> },
+  { id: "products", label: "Products", icon: <NavIcons.Billing /> },
   { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
   { id: "users", label: "Users", icon: <NavIcons.Agents /> },
   { id: "data-lifecycle", label: "Data Lifecycle", icon: <NavIcons.Database /> },
@@ -311,6 +314,16 @@ export function PlatformAdminPage({
             <small>Free-run allowance per product, per month</small>
           </div>
           <FreeRunAllowanceSection />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="products" active={active === "products"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>Products</span>
+            <small>Product + version configuration, bulk moves</small>
+          </div>
+          <ProductsSection />
         </Card>
       </TabPanel>
 

@@ -391,6 +391,23 @@
  * endsWith literal for the suffix, in source order) — bringing
  * the pinned inventory to 424 entries; the delegation sequence
  * is unchanged (same handler, same position).
+ *
+ * Issue #3289 (slice 2) added eighteen — GET/POST
+ * /payments/agentic/commercial/products, GET/POST
+ * /payments/agentic/commercial/products/:productId/versions,
+ * POST .../versions/:versionId/approve, POST
+ * .../versions/:versionId/deactivate, GET/POST
+ * /payments/agentic/commercial/catalogue/versions, POST
+ * /payments/agentic/commercial/products/:productId/bulk-move,
+ * and GET .../bulk-moves + GET .../bulk-moves/:bulkMoveId (in
+ * handleAgenticPaymentsRoutes, after the set-segment route,
+ * before the operators routes). Each path-param route
+ * contributes two inventory entries (an includes literal for
+ * the prefix and an endsWith/includes literal for the suffix,
+ * in source order) — bringing the pinned inventory to 447
+ * entries (429 measured on main before this slice); the
+ * delegation sequence is unchanged (same handler, same
+ * position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -646,6 +663,24 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/move\")",
   "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/accounts/\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/segment\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/products\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/products\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/versions\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/versions\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/approve\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/deactivate\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/catalogue/versions\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/catalogue/versions\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/bulk-move\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/bulk-moves\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/bulk-moves/\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators/add\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/operators/remove\")",

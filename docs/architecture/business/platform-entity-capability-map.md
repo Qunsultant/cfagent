@@ -52,9 +52,26 @@ track not started — the target in §5, not current state).
   `PlatformAdminPage` hosting the admin slices; (2) the scope string
   `"platform"` in IAAA role bindings. A platform-admin membership is
   tenant-independent by design.
+- **Product.** The commercial identity layer (#3289). A product is a
+  row (`agent_products`: `id`, `name`, `kind` subscription |
+  per_run, `description`); a version is a plan row (subscription
+  products) or a catalogue row (per-run products) carrying
+  `productId`, `segment`, `version`, `effectiveFromMs` /
+  `effectiveToMs`. Products are global operator data (no tenant
+  column). A subscription holds exactly one version (`planId`);
+  a new version moves no holder by itself — movement is an
+  explicit per-customer or bulk move, audited in
+  `agent_version_moves` (+ `agent_bulk_moves` summaries).
+  Segments are free-form operator labels on the account row
+  (`segment`, default `default`); resolution is per segment.
+  The Free baseline (`prod-free`) is a read-only product row
+  with no versions. Product → versions = 1 : many; version →
+  subscriptions = 1 : many (holders grandfathered on the held
+  version until moved).
 - **Adjacent rows.** Subscriptions (`agent_subscriptions`: many per user,
   each carrying its own denormalized `tenantId`); subscription plans and
-  the price catalogue (global operator data, no tenant column); notification
+  the price catalogue (global operator data, no tenant column — since
+  #3289 these rows ARE product versions, see Product above); notification
   preferences (1 : 0..1 per login, plus denormalized `tenantId`); store
   operators (login list); audit policy (global) vs audit chain
   (tenant-scoped hashes).
@@ -66,6 +83,9 @@ erDiagram
     LOGIN ||--o{ MEMBERSHIP : "belongs via many"
     MEMBERSHIP }|--|| TENANT-ID : "names one"
     ACCOUNT ||--o{ SUBSCRIPTION : "holds many"
+    PRODUCT ||--o{ VERSION : "versions over time"
+    VERSION ||--o{ SUBSCRIPTION : "held by (planId)"
+    ACCOUNT ||--o{ VERSION-MOVE : "moved, audited"
     LOGIN ||--o| NOTIFICATION-PREFS : "has at most one"
     TENANT-ID ||--o| TENANT-SETTINGS : "has at most one row"
     PLATFORM-CONSOLE ||--o{ ADMIN-SLICE : "hosts"

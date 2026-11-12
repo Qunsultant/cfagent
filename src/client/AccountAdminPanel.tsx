@@ -46,6 +46,7 @@ import {
 import { apiFetch } from "./apiFetch";
 import { SubscriptionGrantSection } from "./SubscriptionGrantSection";
 import { UnlimitedFreeGrantSection } from "./UnlimitedFreeGrantSection";
+import { AccountVersionMoveSection } from "./AccountVersionMoveSection";
 
 export interface AccountIdentityView {
   userLogin: string;
@@ -451,6 +452,16 @@ export function AccountAdminPanel() {
                 looked-up account through the commercial account
                 route itself. */}
             <UnlimitedFreeGrantSection userId={lookup.identity.userLogin} />
+            {/* Issue #3289 slice 2: per-customer version move +
+                segment assignment, beside the grant section. The
+                section reads the looked-up account's segment and
+                the product chains through the commercial routes
+                itself; the panel passes the looked-up
+                subscriptions it already holds. */}
+            <AccountVersionMoveSection
+              userId={lookup.identity.userLogin}
+              subscriptions={lookup.subscriptions}
+            />
           </Stack>
         )}
       </div>

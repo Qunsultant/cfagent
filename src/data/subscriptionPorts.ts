@@ -480,6 +480,13 @@ export interface SubscriptionStore {
   updateProviderBilling(subscriptionId: string, patch: ProviderBillingPatch): Promise<SubscriptionRecord>;
   /** All rows for the user, oldest first. */
   listSubscriptions(userId: string): Promise<SubscriptionRecord[]>;
+  /**
+   * Issue #3289 slice 2 — every subscription row, ordered by
+   * user then id (deterministic). The bulk-move driver pages
+   * this list to find the holders of one product; no other
+   * reader enumerates all subscriptions. Single-statement read.
+   */
+  listAllSubscriptions(): Promise<SubscriptionRecord[]>;
   /** The subscription activated by this payment reference, if any — the replay guard. */
   findByPaymentRef(providerPaymentRef: string): Promise<SubscriptionRecord | null>;
   /** Cancel every unexpired row for the user (cancel-at-period-end: access continues to periodEnd). */

@@ -275,4 +275,41 @@ export interface ProductStore {
   listMovesForProduct(productId: string): Promise<VersionMoveRecord[]>;
   /** Move rows for one customer, oldest first — the audit that answers "what happened to customer X". */
   listMovesForUser(userId: string): Promise<VersionMoveRecord[]>;
+  /**
+   * Create a bulk-move summary row (slice 2, design §3.8). The
+   * row starts status "running" with zero counts; the bulk job
+   * driver finalizes it via updateBulkMove. The per-segment
+   * target version ids resolved at job start ride as JSON.
+   */
+  createBulkMove(input: {
+    id?: string;
+    productId: unknown;
+    segmentScope?: string | null;
+    targetVersionIdsJson: unknown;
+    movedBy: unknown;
+    reason?: string | null;
+    startedAtMs?: number;
+  }): Promise<BulkMoveRecord>;
+  /** One bulk-move summary row, or null. */
+  getBulkMove(bulkMoveId: string): Promise<BulkMoveRecord | null>;
+  /**
+   * Single-statement status/counts update for a bulk-move
+   * summary row. Refuses a missing row. Only the listed fields
+   * move — productId, scope, targets, operator, and reason are
+   * immutable after creation.
+   */
+  updateBulkMove(
+    bulkMoveId: string,
+    patch: {
+      status?: BulkMoveRecord["status"];
+      movedCount?: number;
+      skippedCount?: number;
+      failedCount?: number;
+      finishedAtMs?: number | null;
+    },
+  ): Promise<BulkMoveRecord>;
+  /** Bulk-move summaries for one product, newest first. */
+  listBulkMoves(productId: string): Promise<BulkMoveRecord[]>;
+  /** Move rows for one bulk move, oldest first. */
+  listMovesForBulkMove(bulkMoveId: string): Promise<VersionMoveRecord[]>;
 }

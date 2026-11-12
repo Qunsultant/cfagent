@@ -1552,7 +1552,7 @@ The CBO rows below were added 2026-11-11; their statuses are as of that date.
 | Referral / invite codes | Extra free runs on top of sign-up and grants, by code | Filed — discussion later, no build | #3307 |
 | Upgrade offers | At the limit the user is asked to upgrade or buy credits, with a plan comparison | Filed — no upgrade/upsell UI exists today; the client maps any 402 to one fixed checkout message | #3246 |
 | Monthly + annual subscriptions | Monthly + annual plans; annual discount 15% as a PROPOSED configurable value | Filed — no billing period in the plan shape; annual dollar prices (Basic $509.90 / Premium $611.90) NOT owner-approved | #3357 |
-| Product configuration UI | Versioned products, effective-dated launches, legacy vs new customers on different products/versions; operates grandfathering | Filed — decided as a requirement, unbuilt | #3289 |
+| Product configuration UI | Versioned products, effective-dated launches, legacy vs new customers on different products/versions; operates grandfathering | Shipped — slice 1 data + resolution (PR #4126), slice 2 Products UI + bulk moves | #3289 |
 | Free-for-lifetime | Access free forever; any activity requires payment | Filed — undecided option, distinct from the operator grant and the time-boxed trial | #3247 |
 
 Two open conformance points, live on main (recorded in entitlements-01.md §8;
