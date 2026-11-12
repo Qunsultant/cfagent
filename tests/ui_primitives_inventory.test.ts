@@ -51,6 +51,10 @@ const INVENTORY: Record<string, string[]> = {
   "CardHeader.tsx": ["CardHeader"],
   "WorkCard.tsx": ["WorkCard"],
   "DetailCard.tsx": ["DetailCard"],
+  // #3134 template organisms III: workspace grid, action bar, queue feed.
+  "WorkspaceGrid.tsx": ["WorkspaceGrid"],
+  "ActionBar.tsx": ["ActionBar"],
+  "QueueFeed.tsx": ["QueueFeed"],
   // #2283 global toast: the single home for transient feedback.
   "Toast.tsx": ["ToastProvider", "useToast"],
   // #2283 stream 5: anchored surfaces join as primitives.
