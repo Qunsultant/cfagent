@@ -17,10 +17,10 @@ describe("auto-update-prs-app.yml workflow configuration", () => {
     expect(existsSync(new URL("../.github/workflows/auto-update-prs.yml", import.meta.url))).toBe(false);
   });
 
-  it("triggers on push to main branch", () => {
-    expect(workflowContent).toMatch(/^\s*push:\s*$/m);
-    expect(workflowContent).toMatch(/^\s*branches:\s*$/m);
-    expect(workflowContent).toMatch(/-\s*main/);
+  it("no longer triggers on push to main — manual dispatch only (#4264)", () => {
+    expect(workflowContent).toContain("workflow_dispatch:");
+    expect(workflowContent).not.toMatch(/^\s*push:\s*$/m);
+    expect(workflowContent).not.toMatch(/^\s*branches:\s*$/m);
   });
 
   it("pins runner to ubuntu-24.04", () => {

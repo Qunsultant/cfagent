@@ -39,7 +39,8 @@ export const AUDIT_REPORT_TEXT_MAX = 8000;
 
 const TRUNCATION_MARKER = "[truncated]";
 
-function capText(text: string): string {
+/** Cap a projected body to the audit-report text max (shared with the seed). */
+export function capText(text: string): string {
   if (text.length <= AUDIT_REPORT_TEXT_MAX) return text;
   return text.slice(0, AUDIT_REPORT_TEXT_MAX) + TRUNCATION_MARKER;
 }
@@ -109,6 +110,10 @@ export interface CanonicalSeedInput {
   summary: string;
   body: string;
   createdAtMs: number;
+  /** Issue #4116 (migration 0060) — the owning login, when the source row carries one. */
+  userLogin?: string | null;
+  /** Issue #4116 (migration 0060) — the R2 body pointer, when the source row is a pointer row. */
+  bodyR2Key?: string | null;
 }
 
 export function canonicalReportRowFromSeed(
@@ -134,6 +139,9 @@ export function canonicalReportRowFromSeed(
     provenanceWriter: writer,
     provenanceSourceDo: "Orchestrator",
     provenanceSourceVersion: "1",
+    linkedJobRunId: null,
+    userLogin: input.userLogin ?? null,
+    bodyR2Key: input.bodyR2Key ?? null,
   };
 }
 

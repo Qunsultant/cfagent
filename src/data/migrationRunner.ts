@@ -2246,6 +2246,97 @@ CREATE TABLE IF NOT EXISTS agent_bulk_moves (
 );
 `,
 };
+
+/**
+ * Migration 0059 — run ledger projection (#4116, sub-issue of #3946).
+ * D1 becomes the system of record for run history: the DO run
+ * ledgers (mas_reports, mas_async_jobs) project here.
+ * - agent_async_jobs: the D1 mirror of mas_async_jobs (one row
+ *   per async job, natural key job_id), plus the owning tenant
+ *   and the twin link to the engine's job_run_records.
+ * - agent_tenant_projection_carriers: per-tenant carrier flags
+ *   (queues / ORM / sweep) + read mode. NO defaults on any
+ *   column: an absent row is unconfigured, never a default
+ *   carrier (the #1069 rule; contrast agent_tenant_settings,
+ *   whose broker_id carries a built-in default).
+ * - agent_reports.linked_job_run_id: the twin link for projected
+ *   canonical reports (nullable; the ALTER is idempotent — the
+ *   migration runner applies each version once, and the column
+ *   addition is guarded by the runner's applied-set).
+ * Prerequisites: 0004 (agent_reports) and 0047 (job_run_records).
+ */
+export const MIGRATION_0059_RUN_LEDGER: DataMigration = {
+  version: 59,
+  name: "0059_run_ledger",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_async_jobs (
+  job_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  capability TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  result_json TEXT,
+  response_status TEXT,
+  error TEXT,
+  error_code TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  parent_job_id TEXT,
+  job_kind TEXT,
+  channel TEXT,
+  not_before TEXT,
+  stage TEXT,
+  chain_id TEXT,
+  stuck_alerted_at TEXT,
+  trigger TEXT,
+  triggered_by TEXT,
+  schedule_id TEXT,
+  last_activity_at TEXT,
+  projected_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_async_jobs_tenant_idx
+  ON agent_async_jobs (tenant_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS agent_tenant_projection_carriers (
+  tenant_id TEXT PRIMARY KEY,
+  queues_enabled INTEGER NOT NULL,
+  orm_enabled INTEGER NOT NULL,
+  sweep_enabled INTEGER NOT NULL,
+  read_mode TEXT NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+ALTER TABLE agent_reports ADD COLUMN linked_job_run_id TEXT;
+`,
+};
+
+/**
+ * Migration 0060 — run ledger projection, owner scope + body
+ * pointer (#4116). agent_reports.user_login: the projected
+ * report's owning login (the DO row's user_login). The D1-only
+ * reads filter by it exactly like the DO read filters by
+ * userLogin, so the cutover preserves owner scoping. Nullable:
+ * rows projected before this column landed carry NULL (the
+ * sweep backfills them on its next pass — the projector
+ * upgrades a null owner to a known owner as a new version).
+ * agent_reports.body_r2_key: the R2 pointer for pointer rows
+ * (the DO row's body_r2_key). Without it a D1-only read of an
+ * R2-backed row would see an empty body — the pointer is what
+ * makes the projected row readable from D1 alone.
+ */
+export const MIGRATION_0060_RUN_LEDGER_OWNER: DataMigration = {
+  version: 60,
+  name: "0060_run_ledger_owner",
+  sql: `
+ALTER TABLE agent_reports ADD COLUMN user_login TEXT;
+ALTER TABLE agent_reports ADD COLUMN body_r2_key TEXT;
+CREATE INDEX IF NOT EXISTS agent_reports_tenant_user_idx
+  ON agent_reports (tenant_id, user_login, created_at_ms DESC);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -2303,6 +2394,8 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0056_JOB_GENERATED_DATASETS,
   MIGRATION_0057_JOB_DELIVERY_DATASETS,
   MIGRATION_0058_PRODUCT_VERSIONS,
+  MIGRATION_0059_RUN_LEDGER,
+  MIGRATION_0060_RUN_LEDGER_OWNER,
 ];
 
 function splitStatements(sqlText: string): string[] {

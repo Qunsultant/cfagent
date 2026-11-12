@@ -35,9 +35,11 @@ describe("CodeQL Tree Deduplication & Dual Workflow_Run Auto-Enqueue (#2632)", (
     expect(codeqlYml).toMatch(/Perform CodeQL Analysis[\s\S]*?tree_already_analyzed != 'true'/);
   });
 
-  it("monitors both CI and CodeQL workflow completions in auto-update-prs-app.yml (#2632)", () => {
-    expect(autoUpdateYml).toContain("Continuous Integration & Test Verification");
-    expect(autoUpdateYml).toContain("CodeQL");
-    expect(autoUpdateYml).toMatch(/workflow_run:\s*[\r\n]+\s*workflows:\s*[\r\n]+\s*-\s*["']Continuous Integration & Test Verification["']\s*[\r\n]+\s*-\s*["']CodeQL["']/);
+  it("no longer reacts to CI or CodeQL completions — manual dispatch only (#4264)", () => {
+    // #2632 wired workflow_run so the bot woke on CI/CodeQL completion. #4264
+    // removed every automatic trigger; the queue is the only rebuilder now.
+    expect(autoUpdateYml).not.toContain("workflow_run:");
+    expect(autoUpdateYml).toContain("workflow_dispatch:");
+    expect(autoUpdateYml).toContain("#4264");
   });
 });

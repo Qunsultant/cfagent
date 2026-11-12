@@ -572,6 +572,17 @@ export async function handleWorkflowRunsRoutes(
   // a 5-stage chain must not displace five single-job runs.
   const jobLimit = Math.min(MAX_LIMIT * 10, Math.max(120, (limit + offset) * 8));
   const storeErrors: Record<string, string> = {};
+  // Issue #4116 — the D1-only read mode: when the tenant's readMode
+  // is "d1-only", jobs / report docs / unified records read the
+  // projected ledgers from D1 alone (no DO read in the path);
+  // anything else keeps the Option B merged view. The resolved
+  // mode rides the response so it is visible, never silent.
+  const { resolveLedgerReadMode, listProjectedReportSummaries, listProjectedWorkflowRunJobs } =
+    await import("../../services/runLedgerReads");
+  const ledgerReadMode =
+    ctx.env !== undefined ? await resolveLedgerReadMode(ctx.env as never) : "merged";
+  const tenantId = ctx.env !== undefined ? resolveIaaaTenant(ctx.env as never) : "primary";
+  let linkedJobRunIds = new Set<string>();
 
   let jobs: WorkflowRunJobRow[] = [];
   let outcomes: WorkflowRunOutcomeRow[] = [];
@@ -579,17 +590,34 @@ export async function handleWorkflowRunsRoutes(
   let unifiedRecords: UnifiedWorkflowRunRecord[] = [];
 
   try {
-    const sql = ctx.ensureTables();
-    jobs = readWorkflowRunJobs(sql, sessionId, jobLimit);
+    if (ledgerReadMode === "d1-only") {
+      if (ctx.env === undefined) {
+        throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
+      }
+      jobs = await listProjectedWorkflowRunJobs(ctx.env as never, { tenantId, sessionId, limit: jobLimit });
+    } else {
+      const sql = ctx.ensureTables();
+      jobs = readWorkflowRunJobs(sql, sessionId, jobLimit);
+    }
   } catch (err) {
     storeErrors.jobs = err instanceof Error ? err.message : String(err);
   }
-  try {
-    outcomes = listJobOutcomes(ctx.ensureTables(), Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2))).map(outcomeRow);
-  } catch (err) {
-    storeErrors.outcomes = err instanceof Error ? err.message : String(err);
+  if (ledgerReadMode === "d1-only") {
+    // Issue #4116 — job outcomes are not projected: the list is
+    // empty in D1-only mode, named here, never silent.
+    storeErrors.outcomes = "not projected: job outcomes are not part of the #4116 D1 projection";
+  } else {
+    try {
+      outcomes = listJobOutcomes(ctx.ensureTables(), Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2))).map(outcomeRow);
+    } catch (err) {
+      storeErrors.outcomes = err instanceof Error ? err.message : String(err);
+    }
   }
-  if (ctx.userLogin) {
+  if (ledgerReadMode === "d1-only") {
+    // Issue #4116 — stage transitions are not projected: the list
+    // is empty in D1-only mode, named here, never silent.
+    storeErrors.stages = "not projected: stage transitions are not part of the #4116 D1 projection";
+  } else if (ctx.userLogin) {
     try {
       transitions = readWorkflowRunTransitions(ctx.ensureTables(), ctx.userLogin, 400);
     } catch (err) {
@@ -605,8 +633,25 @@ export async function handleWorkflowRunsRoutes(
   // outcome-only view, and a read failure never hides the others.
   if (ctx.userLogin) {
     try {
-      const hits = listScheduledReports(ctx.ensureTables(), { userLogin: ctx.userLogin, sourceFilter: "options_strategy", limit: 100 });
-      unifiedRecords = unifiedRecordsFromCanonicalReports(hits.map((h) => ({ id: h.id, runId: h.runId, title: h.title, body: h.body })));
+      if (ledgerReadMode === "d1-only") {
+        // Issue #4116 — the projected reports (newest 100 rows,
+        // strategy rows among them) feed the same overlay; bodies
+        // are R2-resolved, read-only, so pointer rows overlay
+        // fully here.
+        if (ctx.env === undefined) {
+          throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
+        }
+        const projected = await listProjectedReportSummaries(ctx.env as never, {
+          tenantId,
+          userLogin: ctx.userLogin,
+          limit: 100,
+        });
+        const strategy = projected.hits.filter((h) => h.source === "options_strategy");
+        unifiedRecords = unifiedRecordsFromCanonicalReports(strategy.map((h) => ({ id: h.id, runId: h.runId, title: h.title, body: h.body })));
+      } else {
+        const hits = listScheduledReports(ctx.ensureTables(), { userLogin: ctx.userLogin, sourceFilter: "options_strategy", limit: 100 });
+        unifiedRecords = unifiedRecordsFromCanonicalReports(hits.map((h) => ({ id: h.id, runId: h.runId, title: h.title, body: h.body })));
+      }
     } catch (err) {
       storeErrors.canonical = err instanceof Error ? err.message : String(err);
     }
@@ -628,15 +673,36 @@ export async function handleWorkflowRunsRoutes(
   }> = [];
   if (ctx.userLogin) {
     try {
-      const hits = listScheduledReports(ctx.ensureTables(), { userLogin: ctx.userLogin, limit: 100 });
-      const summaries = hits.map((h) => runSummaryFromReport(h));
-      const kept = new Set(dropAbsorbedReportSummaries(summaries));
-      hits.forEach((h, i) => {
-        if (!kept.has(summaries[i])) return;
-        const entry = reportDocumentsFromCanonicalHit(h);
-        if (!entry) return;
-        reportDocs.push({ ...entry, summary: summaries[i] });
-      });
+      if (ledgerReadMode === "d1-only") {
+        // Issue #4116 — the projected reports feed the same Docs
+        // attachment + report-only runs, from D1 alone.
+        if (ctx.env === undefined) {
+          throw new Error("run-ledger projection unavailable: no environment available to read the D1 ledgers");
+        }
+        const projected = await listProjectedReportSummaries(ctx.env as never, {
+          tenantId,
+          userLogin: ctx.userLogin,
+          limit: 100,
+        });
+        linkedJobRunIds = projected.linkedJobRunIds;
+        const kept = new Set(dropAbsorbedReportSummaries(projected.summaries));
+        projected.hits.forEach((h, i) => {
+          if (!kept.has(projected.summaries[i])) return;
+          const entry = reportDocumentsFromCanonicalHit(h);
+          if (!entry) return;
+          reportDocs.push({ ...entry, summary: projected.summaries[i] });
+        });
+      } else {
+        const hits = listScheduledReports(ctx.ensureTables(), { userLogin: ctx.userLogin, limit: 100 });
+        const summaries = hits.map((h) => runSummaryFromReport(h));
+        const kept = new Set(dropAbsorbedReportSummaries(summaries));
+        hits.forEach((h, i) => {
+          if (!kept.has(summaries[i])) return;
+          const entry = reportDocumentsFromCanonicalHit(h);
+          if (!entry) return;
+          reportDocs.push({ ...entry, summary: summaries[i] });
+        });
+      }
     } catch (err) {
       storeErrors.canonicalDocs = err instanceof Error ? err.message : String(err);
     }
@@ -713,7 +779,15 @@ export async function handleWorkflowRunsRoutes(
       const records = await reader(
         Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2)),
       );
-      jobRunRecordRuns = records.map(runFromJobRunRecord);
+      // Issue #4116 — in D1-only mode a job-run-record twin named
+      // by a projected report's link is absorbed into the canonical
+      // row (one run, one row); in merged mode both rows appear.
+      let keptRecords = records;
+      if (ledgerReadMode === "d1-only" && linkedJobRunIds.size > 0) {
+        const { d1JobRunRecordId } = await import("../../services/jobRunRecordReads");
+        keptRecords = records.filter((r) => !linkedJobRunIds.has(d1JobRunRecordId(r)));
+      }
+      jobRunRecordRuns = keptRecords.map(runFromJobRunRecord);
     } catch (err) {
       storeErrors.jobRunRecords = err instanceof Error ? err.message : String(err);
     }
@@ -793,6 +867,7 @@ export async function handleWorkflowRunsRoutes(
     totalMatched: page.totalMatched,
     offset,
     limit,
+    ledgerReadMode,
     ...(Object.keys(storeErrors).length > 0 ? { storeErrors } : {}),
     generatedAt: new Date().toISOString(),
   });

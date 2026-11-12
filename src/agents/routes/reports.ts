@@ -1115,27 +1115,47 @@ export async function handleReportsRoutes(
       const headerLogin = request.headers.get("x-user-login");
       const reportLogin = headerLogin && headerLogin.trim() ? headerLogin : undefined;
       const sql = ctx.ensureTables();
-      const { listScheduledReports, ensureScheduledReportsTable, resolveCanonicalReportBodyWithBackfill } = await import("../../services/scheduledReports");
-      const { runSummaryFromReport, runSummaryFromScanRun, runSummaryFromDiscoveryRun, mergeRunSummaries } = await import("../../services/runSummaries");
       const { buildRunDetail } = await import("../../services/runDetails");
-      ensureScheduledReportsTable(sql);
-      const hits = listScheduledReports(sql, { userLogin: reportLogin, limit: 100 });
-      const reportEnv = (ctx as any).env || {};
-      const resolved = await Promise.all(
-        hits.map(async (h) => ({ ...h, body: (await resolveCanonicalReportBodyWithBackfill(sql, reportEnv, h)) ?? "" })),
-      );
-      const lists: RunSummary[][] = [resolved.map(runSummaryFromReport)];
+      // Issue #4116 — in D1-only mode the detail lookup reads the
+      // projected ledgers from D1 alone (no DO read in the path);
+      // scan/discovery detail is absent there (not projected).
+      const { resolveLedgerReadMode, listProjectedReportSummaries, dropLinkedJobRunRecords } =
+        await import("../../services/runLedgerReads");
+      const ledgerReadMode = await resolveLedgerReadMode((ctx as any).env || {});
+      const lists: RunSummary[][] = [];
       const bodies = new Map<string, unknown>();
-      for (const h of resolved) bodies.set(h.id, h.body);
-      if (reportLogin) {
-        try {
-          const { createOptionsDiscoveryPorts } = await import("../../data/createOptionsDiscoveryPorts");
-          const ports = createOptionsDiscoveryPorts({ sql });
-          lists.push((await ports.scanRuns.list({ limit: 100, userLogin: reportLogin })).map(runSummaryFromScanRun));
-          lists.push((await ports.discoveryRuns.list({ limit: 100, userLogin: reportLogin })).map(runSummaryFromDiscoveryRun));
-        } catch {
-          // Scan/discovery detail is best-effort; the canonical row
-          // still yields a detail with those fields unknown.
+      let links: Array<{ reportId: string; jobRunId: string }> = [];
+      if (ledgerReadMode === "d1-only") {
+        const tenantId = resolveIaaaTenant((ctx as any).env as { IAAA_TENANT_ID?: string } | null | undefined);
+        const projected = await listProjectedReportSummaries((ctx as any).env || {}, {
+          tenantId,
+          userLogin: reportLogin,
+          limit: 100,
+        });
+        lists.push(projected.summaries);
+        for (const h of projected.hits) bodies.set(h.id, h.body);
+        links = projected.links;
+      } else {
+        const { listScheduledReports, ensureScheduledReportsTable, resolveCanonicalReportBodyWithBackfill } = await import("../../services/scheduledReports");
+        const { runSummaryFromReport, runSummaryFromScanRun, runSummaryFromDiscoveryRun, mergeRunSummaries } = await import("../../services/runSummaries");
+        ensureScheduledReportsTable(sql);
+        const hits = listScheduledReports(sql, { userLogin: reportLogin, limit: 100 });
+        const reportEnv = (ctx as any).env || {};
+        const resolved = await Promise.all(
+          hits.map(async (h) => ({ ...h, body: (await resolveCanonicalReportBodyWithBackfill(sql, reportEnv, h)) ?? "" })),
+        );
+        lists.push(resolved.map(runSummaryFromReport));
+        for (const h of resolved) bodies.set(h.id, h.body);
+        if (reportLogin) {
+          try {
+            const { createOptionsDiscoveryPorts } = await import("../../data/createOptionsDiscoveryPorts");
+            const ports = createOptionsDiscoveryPorts({ sql });
+            lists.push((await ports.scanRuns.list({ limit: 100, userLogin: reportLogin })).map(runSummaryFromScanRun));
+            lists.push((await ports.discoveryRuns.list({ limit: 100, userLogin: reportLogin })).map(runSummaryFromDiscoveryRun));
+          } catch {
+            // Scan/discovery detail is best-effort; the canonical row
+            // still yields a detail with those fields unknown.
+          }
         }
       }
       // Issue #3946 (Option B): the engine's D1 run records join the
@@ -1147,16 +1167,29 @@ export async function handleReportsRoutes(
         const records = ctx.jobRunRecordReader
           ? await ctx.jobRunRecordReader(100)
           : await listD1JobRunRecords(ctx.env, 100);
-        lists.push(records.map(runSummaryFromJobRunRecord));
+        const rows = records.map(runSummaryFromJobRunRecord);
+        lists.push(
+          ledgerReadMode === "d1-only"
+            ? dropLinkedJobRunRecords(rows, new Set(links.map((l) => l.jobRunId)))
+            : rows,
+        );
       } catch {
         // Unreadable D1 ledger: the row stays unfound here; the list
         // surface names the failure in storeErrors.
       }
+      const { mergeRunSummaries } = await import("../../services/runSummaries");
       const merged = mergeRunSummaries(lists, 100);
-      const summary = merged.find((r) => r.runId === wanted || r.id === wanted);
+      let summary = merged.find((r) => r.runId === wanted || r.id === wanted);
+      if (!summary && ledgerReadMode === "d1-only") {
+        // A twin job-run-record id resolves to the canonical
+        // report's detail — the twin is absorbed into it in
+        // D1-only mode, so the run is still found by its old id.
+        const link = links.find((l) => l.jobRunId === wanted);
+        if (link) summary = merged.find((r) => r.reportId === link.reportId || r.id === link.reportId);
+      }
       if (!summary) return Response.json({ error: "run not found" }, { status: 404 });
       const body = summary.reportId ? bodies.get(summary.reportId) : undefined;
-      return Response.json({ detail: buildRunDetail({ ...summary, body }) });
+      return Response.json({ detail: buildRunDetail({ ...summary, body }), ledgerReadMode });
     } catch (err: any) {
       return Response.json({ error: err?.message || "Failed to load run details" }, { status: 500 });
     }
@@ -1193,6 +1226,17 @@ export async function handleReportsRoutes(
       const sql = ctx.ensureTables();
       const lists: RunSummary[][] = [];
       const storeErrors: Record<string, string> = {};
+      // Issue #4116 — the D1-only read mode: when the tenant's
+      // readMode is "d1-only", the reports list reads the
+      // projected ledgers from D1 alone (no DO read in the
+      // path); anything else keeps the Option B merged view.
+      // The resolved mode rides the response so it is visible,
+      // never silent.
+      const { resolveLedgerReadMode, listProjectedReportSummaries, dropLinkedJobRunRecords } =
+        await import("../../services/runLedgerReads");
+      const ledgerReadMode = await resolveLedgerReadMode((ctx as any).env || {});
+      const tenantId = resolveIaaaTenant((ctx as any).env as { IAAA_TENANT_ID?: string } | null | undefined);
+      let linkedJobRunIds = new Set<string>();
       const readStore = async (name: string, read: () => Promise<RunSummary[]>) => {
         try {
           const rows = await read();
@@ -1203,6 +1247,15 @@ export async function handleReportsRoutes(
       };
       if (kind === "all" || kind === "screener" || kind === "options_scanner" || kind === "goal") {
         await readStore("reports", async () => {
+          if (ledgerReadMode === "d1-only") {
+            const projected = await listProjectedReportSummaries((ctx as any).env || {}, {
+              tenantId,
+              userLogin: reportLogin,
+              limit,
+            });
+            linkedJobRunIds = projected.linkedJobRunIds;
+            return projected.summaries;
+          }
           const { listScheduledReports, ensureScheduledReportsTable, resolveCanonicalReportBodyWithBackfill } = await import("../../services/scheduledReports");
           const { runSummaryFromReport } = await import("../../services/runSummaries");
           ensureScheduledReportsTable(sql);
@@ -1221,7 +1274,12 @@ export async function handleReportsRoutes(
         });
       }
       if (kind === "all" || kind === "options_scanner") {
-        if (!storeLogin) {
+        if (ledgerReadMode === "d1-only") {
+          // Issue #4116 — options scans are not projected (their
+          // locations map via #4069, not built here): the list is
+          // empty in D1-only mode, named here, never silent.
+          storeErrors["scans"] = "not projected: options scans are not part of the #4116 D1 projection (see #4069)";
+        } else if (!storeLogin) {
           storeErrors["scans"] = "skipped: no authenticated user identity available to scope the read";
         } else {
           await readStore("scans", async () => {
@@ -1233,7 +1291,11 @@ export async function handleReportsRoutes(
         }
       }
       if (kind === "all" || kind === "discovery") {
-        if (!storeLogin) {
+        if (ledgerReadMode === "d1-only") {
+          // Issue #4116 — discovery runs are not projected: the
+          // list is empty in D1-only mode, named here, never silent.
+          storeErrors["discovery"] = "not projected: discovery runs are not part of the #4116 D1 projection";
+        } else if (!storeLogin) {
           storeErrors["discovery"] = "skipped: no authenticated user identity available to scope the read";
         } else {
           await readStore("discovery", async () => {
@@ -1245,18 +1307,26 @@ export async function handleReportsRoutes(
         }
       }
       if (kind === "all" || kind === "screener") {
-        await readStore("screener", async () => {
-          const { runSummaryFromScreenerRun } = await import("../../services/runSummaries");
-          const context = await ctx.getScreenerExecutionContext();
-          const screenerLogin = headerLogin || context?.userLogin;
-          if (!screenerLogin) {
-            // Issue #1185: named skip — surfaced via storeErrors by readStore.
-            throw new Error("skipped: no authenticated user identity available to scope the read");
-          }
-          const agent = ctx.getScreenerAgent(screenerLogin);
-          const history = await agent.getHistory();
-          return history.map(runSummaryFromScreenerRun);
-        });
+        if (ledgerReadMode === "d1-only") {
+          // Issue #4116 — the screener feed is in-memory, not a DO
+          // ledger, so it is not projected: the list is empty in
+          // D1-only mode, named here, never silent. Canonical
+          // screener rows still arrive via the reports store above.
+          storeErrors["screener"] = "not projected: the screener feed is in-memory, not a DO ledger, so it has no D1 projection";
+        } else {
+          await readStore("screener", async () => {
+            const { runSummaryFromScreenerRun } = await import("../../services/runSummaries");
+            const context = await ctx.getScreenerExecutionContext();
+            const screenerLogin = headerLogin || context?.userLogin;
+            if (!screenerLogin) {
+              // Issue #1185: named skip — surfaced via storeErrors by readStore.
+              throw new Error("skipped: no authenticated user identity available to scope the read");
+            }
+            const agent = ctx.getScreenerAgent(screenerLogin);
+            const history = await agent.getHistory();
+            return history.map(runSummaryFromScreenerRun);
+          });
+        }
       }
       // Issue #3946 (Option B): the engine's D1 run records join the
       // merge under kind=all only — their kind is "report", which no
@@ -1268,11 +1338,21 @@ export async function handleReportsRoutes(
           const { listD1JobRunRecordSummaries, runSummaryFromJobRunRecord } = await import(
             "../../services/runSummaries"
           );
+          let rows: RunSummary[];
           if (ctx.jobRunRecordReader) {
             const records = await ctx.jobRunRecordReader(limit);
-            return records.map(runSummaryFromJobRunRecord);
+            rows = records.map(runSummaryFromJobRunRecord);
+          } else {
+            rows = await listD1JobRunRecordSummaries(ctx.env, limit);
           }
-          return listD1JobRunRecordSummaries(ctx.env, limit);
+          // Issue #4116 — in D1-only mode a job-run-record twin
+          // named by a projected report's link is absorbed into
+          // the canonical row (one run, one row); in merged mode
+          // both rows still appear (the twin-rows state the
+          // projection exists to retire at cutover).
+          return ledgerReadMode === "d1-only"
+            ? dropLinkedJobRunRecords(rows, linkedJobRunIds)
+            : rows;
         });
       }
       const { mergeRunSummaries } = await import("../../services/runSummaries");
@@ -1281,6 +1361,7 @@ export async function handleReportsRoutes(
         count: merged.length,
         kind,
         runs: merged,
+        ledgerReadMode,
         ...(Object.keys(storeErrors).length ? { storeErrors } : {}),
         timestamp: new Date().toISOString(),
       });

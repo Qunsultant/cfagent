@@ -25,6 +25,8 @@ import type {
 } from "./auditReportPorts";
 import {
   MIGRATION_0004_AGENT_AUDIT_REPORTS,
+  MIGRATION_0059_RUN_LEDGER,
+  MIGRATION_0060_RUN_LEDGER_OWNER,
   applyMigrations,
 } from "./migrationRunner";
 
@@ -36,7 +38,20 @@ export function createD1AuditReportDb(d1: unknown) {
 
 /** Create audit + report tables if absent (idempotent; safe to call per request). */
 export async function ensureAuditReportSchema(db: D1AuditReportDb): Promise<void> {
-  await applyMigrations(db, [MIGRATION_0004_AGENT_AUDIT_REPORTS]);
+  // Issue #4116 (migrations 0059–0060): the adapter's report
+  // reads select linked_job_run_id / user_login / body_r2_key,
+  // so the ensure provides those columns too — applyMigrations
+  // is _migrations-gated, so a later ensureRunLedgerTables pass
+  // skips them instead of re-applying. 0059 also creates the
+  // run-ledger tables (CREATE TABLE IF NOT EXISTS); 0060 only
+  // alters agent_reports (owned by 0004) and needs no 0059
+  // table. The registry still owns the versions; both ensure
+  // paths converge on the same gated runner.
+  await applyMigrations(db, [
+    MIGRATION_0004_AGENT_AUDIT_REPORTS,
+    MIGRATION_0059_RUN_LEDGER,
+    MIGRATION_0060_RUN_LEDGER_OWNER,
+  ]);
 }
 
 function toAuditRow(record: typeof agentChainAudit.$inferSelect): AuditEventRow {
@@ -77,6 +92,9 @@ function toReportRow(record: typeof agentReports.$inferSelect): CanonicalReportR
     provenanceWriter: record.provenanceWriter,
     provenanceSourceDo: record.provenanceSourceDo,
     provenanceSourceVersion: record.provenanceSourceVersion,
+    linkedJobRunId: record.linkedJobRunId ?? null,
+    userLogin: record.userLogin ?? null,
+    bodyR2Key: record.bodyR2Key ?? null,
   };
 }
 
@@ -173,6 +191,9 @@ export class D1AuditReportAdapter implements AuditReportStore {
         provenanceWriter: row.provenanceWriter,
         provenanceSourceDo: row.provenanceSourceDo,
         provenanceSourceVersion: row.provenanceSourceVersion,
+        linkedJobRunId: row.linkedJobRunId ?? null,
+        userLogin: row.userLogin ?? null,
+        bodyR2Key: row.bodyR2Key ?? null,
       })
       .onConflictDoNothing();
   }
@@ -195,11 +216,20 @@ export class D1AuditReportAdapter implements AuditReportStore {
     return rows.length === 0 ? null : toReportRow(rows[0]);
   }
 
-  async listReports(tenantId: string): Promise<CanonicalReportRow[]> {
+  async listReports(
+    tenantId: string,
+    opts?: { userLogin?: string; limit?: number },
+  ): Promise<CanonicalReportRow[]> {
+    const conditions = [eq(agentReports.tenantId, tenantId)];
+    if (opts?.userLogin) {
+      conditions.push(eq(agentReports.userLogin, opts.userLogin));
+    }
     const rows = await this.db
       .select()
       .from(agentReports)
-      .where(eq(agentReports.tenantId, tenantId));
+      .where(and(...conditions))
+      .orderBy(desc(agentReports.createdAtMs), desc(agentReports.reportId))
+      .limit(Math.max(1, opts?.limit ?? 100));
     return latestPerReport(rows.map(toReportRow));
   }
 
