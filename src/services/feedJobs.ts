@@ -270,6 +270,14 @@ export const YAHOO_SP100_QUOTES_JOB_ID = "yahoo-sp100-quotes";
 export const YAHOO_SP500_QUOTES_JOB_ID = "yahoo-sp500-quotes";
 export const YAHOO_DOW_QUOTES_JOB_ID = "yahoo-dow-quotes";
 export const YAHOO_SP400_QUOTES_JOB_ID = "yahoo-sp400-quotes";
+export const YAHOO_SECTOR_ENERGY_QUOTES_JOB_ID =
+  "yahoo-sector-energy-quotes";
+export const YAHOO_SECTOR_MATERIALS_QUOTES_JOB_ID =
+  "yahoo-sector-materials-quotes";
+export const YAHOO_SECTOR_INDUSTRIALS_QUOTES_JOB_ID =
+  "yahoo-sector-industrials-quotes";
+export const YAHOO_SECTOR_CONSUMER_DISCRETIONARY_QUOTES_JOB_ID =
+  "yahoo-sector-consumer-discretionary-quotes";
 export const ALPACA_NASDAQ100_QUOTES_JOB_ID = "alpaca-nasdaq100-quotes";
 export const ETRADE_NASDAQ100_QUOTES_JOB_ID = "etrade-nasdaq100-quotes";
 export const PUBLIC_NASDAQ100_QUOTES_JOB_ID = "public-nasdaq100-quotes";
@@ -328,6 +336,10 @@ function nasdaq100QuotesJob(
  * immediately after the S&P 500 job.
  * #4193 registers the S&P 400 quotes universe on the same contract,
  * immediately after the Dow job.
+ * #4216 registers the four GICS sector quotes universes (Energy,
+ * Materials, Industrials, Consumer Discretionary) on the same
+ * contract, immediately after the S&P 400 job — #3667 sectors
+ * slice 1, in the file's own SECTOR_IDS (GICS code) order.
  *
  * The Nasdaq provider declares screenUniverse only — it has NO
  * quotes job here (S2 finding, #3530: its dataset is the US
@@ -496,6 +508,42 @@ export function buildFeedJobRegistry(
       FEED_JOB_DEFAULTS.staleAfterMinutes,
     ),
   });
+  // #4216 — one Yahoo quotes job per S1 GICS sector, on the same
+  // contract as the S&P 400 job. Each universe is the sector's
+  // stored list (the S&P 500 table filtered by its GICS Sector
+  // column, #2962); the label is the GICS name.
+  for (const [jobId, index, label] of [
+    [YAHOO_SECTOR_ENERGY_QUOTES_JOB_ID, "sector-energy", "Energy"],
+    [YAHOO_SECTOR_MATERIALS_QUOTES_JOB_ID, "sector-materials", "Materials"],
+    [
+      YAHOO_SECTOR_INDUSTRIALS_QUOTES_JOB_ID,
+      "sector-industrials",
+      "Industrials",
+    ],
+    [
+      YAHOO_SECTOR_CONSUMER_DISCRETIONARY_QUOTES_JOB_ID,
+      "sector-consumer-discretionary",
+      "Consumer Discretionary",
+    ],
+  ] as const) {
+    registry.register({
+      id: jobId,
+      sourceId: "yahoo",
+      dataset: "quotes",
+      elements: ["quotes"],
+      universe: { kind: "index", index, label },
+      cadenceMinutes: resolveFeedJobCadenceMinutes(
+        env,
+        jobId,
+        FEED_JOB_DEFAULTS.cadenceMinutes,
+      ),
+      staleAfterMinutes: resolveFeedJobStaleMinutes(
+        env,
+        jobId,
+        FEED_JOB_DEFAULTS.staleAfterMinutes,
+      ),
+    });
+  }
   registry.register(
     nasdaq100QuotesJob(env, ALPACA_NASDAQ100_QUOTES_JOB_ID, "alpaca"),
   );
