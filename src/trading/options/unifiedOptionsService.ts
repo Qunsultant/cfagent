@@ -502,7 +502,7 @@ export class UnifiedOptionsService {
    */
   /**
    * @deprecated Issue #4068 — retired by rename: the direct screen bypass.
-   * Successor: runOptionsPlainScreenViaEngine (src/workflows/optionsScreenEngine.ts),
+   * Superseded by src/workflows/optionsScreenEngine.ts (runOptionsPlainScreenViaEngine),
    * which runs the same screen through the one engine-routed workflow.
    * This static is frozen: no production caller remains; tests that pin the
    * screen decomposition keep calling it. Recorded in
@@ -532,7 +532,7 @@ export class UnifiedOptionsService {
 
   /**
    * @deprecated Issue #4068 — retired by rename: the direct scan bypass.
-   * Successor: runOptionsScanViaEngine (src/workflows/optionsScreenEngine.ts),
+   * Superseded by src/workflows/optionsScreenEngine.ts (runOptionsScanViaEngine),
    * which runs the same scan through the one engine-routed workflow (the
    * scanner ports' persist stage attaches the requestRecord and saves via
    * the scanRunStore, and shapeReport returns the result + save receipt).

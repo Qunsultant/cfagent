@@ -124,7 +124,7 @@ export async function runPanelWithAgents(
  * screener, fresh risk + recommender agents).
  *
  * @deprecated Issue #4068 — retired by rename: the direct panel bypass.
- * Successor: runOptionsPanelViaEngine (src/workflows/optionsScreenEngine.ts),
+ * Superseded by src/workflows/optionsScreenEngine.ts (runOptionsPanelViaEngine),
  * which runs the same panel through the one engine-routed workflow.
  * This function is frozen: no production caller remains; tests that pin the
  * panel decomposition keep calling it. Recorded in
