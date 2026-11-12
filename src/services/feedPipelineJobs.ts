@@ -40,6 +40,7 @@ import {
   runFeedSentimentJob,
   runFeedTechnicalsJob,
   FEED_JOB_CODES,
+  FEED_JOB_DEFAULTS,
   type FeedJobDefinition,
   type FeedJobRegistry,
   type FeedRunResult,
@@ -386,7 +387,7 @@ export function buildAllFeedPipelineJobDefinitions(
   const definitions: unknown[] = FEED_PIPELINE_CATALOG.map((entry) => {
     if (entry.jobId === NASDAQ100_UNIVERSE_JOB_ID) {
       const yahoo = registry.get("yahoo-nasdaq100-quotes");
-      return buildNasdaqUniverseJobDefinition(yahoo?.cadenceMinutes ?? 60);
+      return buildNasdaqUniverseJobDefinition(yahoo?.cadenceMinutes ?? FEED_JOB_DEFAULTS.cadenceMinutes);
     }
     const def = registry.get(entry.jobId);
     if (!def) {
