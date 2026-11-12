@@ -265,6 +265,10 @@ interface FakeScanRow {
   mode: string;
   model_version: string;
   user_login: string | null;
+  // Issue #3314: the §4 linkage id columns (null on legacy rows).
+  schedule_id: string | null;
+  async_job_id: string | null;
+  workflow_id: string | null;
   summary_json: string;
   result_json: string;
 }
@@ -274,7 +278,7 @@ interface FakeScanRow {
  *  one in. Tests seed `tableExists`/`columns` to simulate a legacy
  *  table. */
 const LEGACY_SCAN_COLUMNS = ["id", "generated_at", "mode", "model_version", "summary_json", "result_json"];
-const FULL_SCAN_COLUMNS = ["id", "generated_at", "mode", "model_version", "user_login", "summary_json", "result_json"];
+const FULL_SCAN_COLUMNS = ["id", "generated_at", "mode", "model_version", "user_login", "schedule_id", "async_job_id", "workflow_id", "summary_json", "result_json"];
 
 class FakeScanSql implements ScanSqlExecutor {
   rows: FakeScanRow[] = [];
@@ -315,12 +319,21 @@ class FakeScanSql implements ScanSqlExecutor {
       for (const row of this.rows) row.user_login = null;
       return [];
     }
+    // Issue #3314: same probe per linkage column — a legacy table
+    // gains each one, existing rows reading NULL.
+    for (const col of ["schedule_id", "async_job_id", "workflow_id"] as const) {
+      if (q.startsWith(`ALTER TABLE mas_opportunity_scans ADD COLUMN ${col}`)) {
+        if (!this.columns.includes(col)) this.columns.push(col);
+        for (const row of this.rows) row[col] = null;
+        return [];
+      }
+    }
     if (q.startsWith("INSERT INTO mas_opportunity_scans")) {
-      const [id, generated_at, mode, model_version, user_login, summary_json, result_json] = params as [
-        string, string, string, string, string | null, string, string,
+      const [id, generated_at, mode, model_version, user_login, schedule_id, async_job_id, workflow_id, summary_json, result_json] = params as [
+        string, string, string, string, string | null, string | null, string | null, string | null, string, string,
       ];
       if (!this.rows.some((r) => r.id === id)) {
-        this.rows.push({ id, generated_at, mode, model_version, user_login, summary_json, result_json });
+        this.rows.push({ id, generated_at, mode, model_version, user_login, schedule_id, async_job_id, workflow_id, summary_json, result_json });
       }
       return [];
     }
@@ -335,6 +348,20 @@ class FakeScanSql implements ScanSqlExecutor {
       if (!row) return [];
       row.summary_json = summary_json;
       row.result_json = result_json;
+      return [];
+    }
+    // Issue #3314: the linkage backfill updates the three columns
+    // and the summary (the result JSON carries no linkage).
+    if (q.startsWith("UPDATE mas_opportunity_scans SET schedule_id = ?, async_job_id = ?, workflow_id = ?, summary_json = ? WHERE id = ?")) {
+      const [schedule_id, async_job_id, workflow_id, summary_json, id] = params as [
+        string | null, string | null, string | null, string, string,
+      ];
+      const row = this.rows.find((r) => r.id === id);
+      if (!row) return [];
+      row.schedule_id = schedule_id;
+      row.async_job_id = async_job_id;
+      row.workflow_id = workflow_id;
+      row.summary_json = summary_json;
       return [];
     }
     if (q.startsWith("SELECT summary_json FROM mas_opportunity_scans WHERE")) {
@@ -911,6 +938,9 @@ describe("scan history polish — per-user scoping (issue #103)", () => {
       mode: legacyResult.mode,
       model_version: legacyResult.modelVersion,
       user_login: null,
+      schedule_id: null,
+      async_job_id: null,
+      workflow_id: null,
       summary_json: JSON.stringify(legacySummary),
       result_json: JSON.stringify(legacyResult),
     });

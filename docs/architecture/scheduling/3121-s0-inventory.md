@@ -158,6 +158,20 @@
   id is returned only to the starter, unknowable inside the
   workflow — filed as an [Out-of-Scope] sub-issue under #3313
   (Qunsultant/cfagent#4198).
+- **#3314 amendment (Slice #3314, #3121):** `mas_opportunity_scans`
+  rows now carry the §4 linkage id columns (`schedule_id`,
+  `async_job_id`, `workflow_id`, probed ADD COLUMN, the issue #103
+  pattern) — the join decision is columns, mirroring
+  `job_run_records`' own column names, so a scheduled options run's
+  scan row joins its ledger row on `schedule_id` (plus the
+  generated_at window) and its originating schedule. The linkage is
+  stamped at save time where the caller knows it and backfilled
+  after the workflow returns on the scheduled path
+  (`updateLedgerLinkage`, the updatePdfKey pattern); a run with no
+  schedule records explicit nulls (S1 null-handling unchanged).
+  `trigger` still rides `summary_json` (the #3264 fix, unchanged).
+  The workflow command is not threaded — that stays #4198's scope.
+  The §9 B-L-03 row now reads landed.
 - **S6 amendment (Slice S6, #3121 — final parity):** the §9 map is
   proved complete against §1 (§9.7 traces every §1 item plus the §2
   drift items and the §7 open items to a landed slice, a preserved
@@ -169,7 +183,7 @@
   is `?tab=schedules&view=queue`, S2) and U-08 (the workflow-runs
   deep link `?run=` #2777/#3163 and the stamped `schedule_id`
   schedule column #3810 are landed; the #3264 read-path gap's
-  remainder is mas_opportunity_scans joinability, #3314 open). One
+  remainder is mas_opportunity_scans joinability, #3314 — landed). One
   §9 row S2 filed but never mapped is added: #3361 (preview-trade
   candidate prefill lost in the de-hub). One new finding from the S6
   comb is filed, not built: #4110 (the retired Platform Admin
@@ -438,14 +452,15 @@ it does not re-inventory it.
 - B-L-02 — `mas_async_jobs` carries NO `scheduleId`, `workflowId`, or
   `trigger` column (linkage is `parent_job_id` / `chain_id` /
   `job_kind` / `channel` / `stage` only). [S0-P24]
-- B-L-03 — `mas_opportunity_scans` carries NO `trigger`, `scheduleId`,
-  `asyncJobId`, or `workflowId` column (columns are `id, generated_at,
-  mode, model_version, user_login, summary_json, result_json`); any
-  trigger value lives inside the JSON payloads, if recorded at all —
-  this is the structural cause of the #3264 run `5fd079ec` being
-  unjoinable to any schedule, workflow, or async job (all artifact
-  keys/URLs/statuses/errors null, trigger null, no workflowId /
-  asyncJobId / scheduleId on the row). [S0-P24]
+- B-L-03 — `mas_opportunity_scans` now carries the §4 linkage id
+  columns (`schedule_id`, `async_job_id`, `workflow_id`; landed in
+  #3314, probed ADD COLUMN) alongside `id, generated_at, mode,
+  model_version, user_login, summary_json, result_json`; the
+  `trigger` value still lives inside the JSON payloads (#3264 fix,
+  unchanged). A scheduled options run's scan row joins its ledger
+  row on `schedule_id` (+ the generated_at window) and its
+  originating schedule — the #3264 run `5fd079ec` shape is joinable
+  now. [S0-P24]
 - B-L-04 — Provenance (#2366 item 3) is NOT implemented on any schedule
   path: zero `origin` / `provenance` (user | system, creator identity,
   reason, creation time) on schedule payloads, listings, or dumps.
@@ -475,7 +490,8 @@ a defect in the old inventory, not permission to drop the feature:
 - **D4 — The #3264 keyless-record fix landed** (`recordKeylessOptionsServe`,
   merged as `831bbcb3`): a keyless options run is now recorded instead of
   silently absent. The ledger gap itself (B-L-03) is NOT fixed by it —
-  the row still carries no trigger/scheduleId/asyncJobId/workflowId.
+  the row still carries no trigger/scheduleId/asyncJobId/workflowId
+  at that point; #3314 later adds the three id columns.
 - **D5 — `daily-social-post` is a shipped goal instance** (#1077 Phase 5b,
   disabled by default). It is an instance of T3, not a new type.
 - **D6 — #2366 seed item LOCATED in S1 (was UNVERIFIED in S0):** the
@@ -798,7 +814,7 @@ pins for inventories whose live home is config or another module) and
 `tests/research-schedule-guard.test.ts` (pure-function pins). Every test
 name carries its inventory item (B-Tx-yy / D-n). The harness asserts
 current behavior — including the preserved quirks (B-T3-02 NaN quirk,
-B-L-01–B-L-03 missing columns) — so that a migration slice which changes
+B-L-02's missing workflow column) — so that a migration slice which changes
 any of them fails loudly instead of silently.
 
 S1–S6 extend this harness per slice (same firing times, same payloads,
@@ -1124,7 +1140,7 @@ no home and no filed issue is a defect in the map.
 | Keyless options runs recorded (never silently absent) | B-T4-05 | `recordKeylessOptionsServe` | S1 — landed |
 | `job_run_records` carries the §4 columns on every new row | B-L-01 | `buildJobRunRecord` + `normalizeJobRunRecord` | S1 — landed |
 | `mas_async_jobs` linkage (no §4 columns; payload stamping) | B-L-02 | Follow-up payload linkage | S4 — landed (payload/result stamping); #3313 — landed (outcome stamping) |
-| `mas_opportunity_scans` joinability | B-L-03 | — join key undecided — | **Filed #3314 (open)** |
+| `mas_opportunity_scans` joinability | B-L-03 | `SqlScanRunStore` + `updateLedgerLinkage` | #3314 — landed |
 | Provenance on schedule payloads | B-L-04 | `buildScheduleProvenance` et al. | S1/S3 — landed |
 
 ### 9.6 URL inventory (§8)
@@ -1135,7 +1151,7 @@ no home and no filed issue is a defect in the map.
 | Retired duplicate addresses → home redirects | U-02/U-04/U-05/U-06 | `legacySchedulesRedirect` | S2 — landed |
 | `?tab=options&view=scheduled-screening` (U-03) | U-03 | Redirect to the home (owner-decided 2026-11-05) | U-03 redirect slice — landed (parallel, not S3) |
 | Queues tab (async jobs, DLQ, approvals) | U-07 | `?tab=queues` (`QueuesPage`) — the T4 surface; the admin queue is `?tab=schedules&view=queue` (`ScheduleQueueView`, S2) | S4 — landed (chain linkage; the tab itself never moved — the "until S4" phrasing is retired in S6) |
-| Workflow-runs deep link | U-08 | `WorkflowRunsPanel`: `?tab=workflow-runs&run=<id>` deep link (#2777/#3163) + schedule column/filter reading stamped `schedule_id` (#3810) | landed via #2777/#3163 + #3810 (outside #3121 slices; verified in S6 — the #3264 gap's remainder is mas_opportunity_scans joinability, #3314 open) |
+| Workflow-runs deep link | U-08 | `WorkflowRunsPanel`: `?tab=workflow-runs&run=<id>` deep link (#2777/#3163) + schedule column/filter reading stamped `schedule_id` (#3810) | landed via #2777/#3163 + #3810 (outside #3121 slices; verified in S6 — the #3264 gap's remainder is mas_opportunity_scans joinability, #3314 — landed) |
 | Per-run records API (the one merged read, `GET /api/ledger/runs?jobId=`; the orchestrator half stays at `/api/schedules/runs?scheduleId=`, the goal half at `/api/schedule/runs`) | U-09 | `GET /api/ledger/runs` (merged, newest-first, dedup) + home deep links in S2 | S2 — landed; #3123 — landed |
 | Chat Scheduler sub-view (#3122, planned) | U-10 | Third `ChatSubView` | Phase 3 #3122 (planned) |
 
@@ -1226,7 +1242,7 @@ evaluation, evaluation latency, ledger read latency.
 | Tick re-saves every goal on every tick (the dominant tick cost after the scan fix) not changed — writes, not scans; needs its own dirty-check slice | #3124 | — no home — | **Filed #4205 (open)** |
 
 What stays open after S6 (the program does not close with this
-slice): the filed sub-issues #3393, #3394, #3314, #3313, #3312 (live
+slice): the filed sub-issues #3393, #3394, #3313, #3312 (live
 proof only), #3361, #3640–#3645 (unbuilt per owner direction),
 #3652, #4110, #4124 (open); the Phase 3 item U-10 (Chat Scheduler
 sub-view → #3122). What S6
