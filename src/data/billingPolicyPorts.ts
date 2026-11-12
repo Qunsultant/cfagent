@@ -105,7 +105,71 @@ export interface BillingPolicy {
    * billing-policy route, and the next derivation uses the new value.
    */
   annualDiscountPct: number;
+  /**
+   * Issue #3246: upgrade-offer behavior rules, operator data
+   * edited in the Billing servicing surface beside the top-up
+   * bounds and annual discount. One JSON-valued policy key
+   * (`offer_rules`); the whole block is replaced on update, the
+   * same wholesale discipline as `stripePriceByPlan`.
+   */
+  offerRules: OfferRules;
 }
+
+/**
+ * Issue #3246 — the offer-rules block. Every offer behavior is
+ * operator-configurable with externalized defaults (Mars
+ * 2026-11-12): the master switch, per-trigger toggles, the
+ * dismissal cooldown, proposed/downgrade/pack visibility, and
+ * the mention toggles. Rank is NOT a rule — it lives on the
+ * product row (§3.3). `runsPacksEnabled` is read from slice 3
+ * and inert until then.
+ */
+export interface OfferRules {
+  /** Master switch; false => no offer is ever computed. */
+  enabled: boolean;
+  /** Per-trigger toggles; disabling a trigger suppresses that trigger's offer everywhere. */
+  triggersEnabled: {
+    manual402: boolean;
+    skipNotice: boolean;
+    trialEnd: boolean;
+    quotaExhausted: boolean;
+    /** The compare surface itself; false hides compare too. */
+    ambient: boolean;
+  };
+  /** Dismissal cooldown in whole days, 1..365; seed 7 (PROPOSED). */
+  dismissCooldownDays: number;
+  /** True => effective PROPOSED versions render as unavailable (never buyable). */
+  showProposed: boolean;
+  /** False => no downgrade targets, platform-wide. */
+  downgradesEnabled: boolean;
+  /** False => no runs-pack offers (slice 3; inert until then). */
+  runsPacksEnabled: boolean;
+  /** Per-mention visibility toggles. */
+  mentionsEnabled: {
+    referral: boolean;
+    freeAccess: boolean;
+  };
+}
+
+/** PROPOSED seed offer rules, NOT owner-approved. All offers on, 7-day cooldown. */
+export const PROPOSED_SEED_OFFER_RULES: OfferRules = {
+  enabled: true,
+  triggersEnabled: {
+    manual402: true,
+    skipNotice: true,
+    trialEnd: true,
+    quotaExhausted: true,
+    ambient: true,
+  },
+  dismissCooldownDays: 7,
+  showProposed: true,
+  downgradesEnabled: true,
+  runsPacksEnabled: true,
+  mentionsEnabled: {
+    referral: true,
+    freeAccess: true,
+  },
+};
 
 /**
  * PROPOSED seed policy, NOT owner-approved and NOT an
@@ -130,6 +194,7 @@ export const PROPOSED_SEED_BILLING_POLICY: BillingPolicy = {
   topUpMinUSD: 1,
   topUpMaxUSD: 500,
   annualDiscountPct: 15,
+  offerRules: PROPOSED_SEED_OFFER_RULES,
 };
 
 /** Storage keys for the policy table (one row per key). */
@@ -146,6 +211,7 @@ export const BILLING_POLICY_KEYS = {
   topUpMinUSD: "top_up_min_usd",
   topUpMaxUSD: "top_up_max_usd",
   annualDiscountPct: "annual_discount_pct",
+  offerRules: "offer_rules",
 } as const;
 
 export function assertBillingPeriod(value: unknown, field: string): BillingPeriod {
@@ -240,6 +306,87 @@ export function annualPriceUSD(monthlyPriceUSD: number, discountPct: number): nu
   return annualCents / 100;
 }
 
+/**
+ * Issue #3246: validate the whole offer-rules block. The block is
+ * replaced wholesale on update (the stripePriceByPlan discipline),
+ * so a partial block is malformed — every field must be present,
+ * booleans must be booleans, the cooldown must be a whole number
+ * of days in 1..365, and unknown keys are rejected at every level.
+ * A rejected value throws a catalog-coded BusinessError, never a
+ * raw Error, so the billing-policy route renders the catalog 400.
+ * A zero or negative cooldown is rejected — a zero cooldown would
+ * make the dismiss button a lie.
+ */
+export function assertOfferRules(value: unknown): OfferRules {
+  const invalid = (): BusinessError => new BusinessError("FAILURE_OFFER_RULES_INVALID");
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw invalid();
+  const v = value as Record<string, unknown>;
+  const allowed = new Set([
+    "enabled",
+    "triggersEnabled",
+    "dismissCooldownDays",
+    "showProposed",
+    "downgradesEnabled",
+    "runsPacksEnabled",
+    "mentionsEnabled",
+  ]);
+  for (const k of Object.keys(v)) {
+    if (!allowed.has(k)) throw invalid();
+  }
+  const isBool = (x: unknown): x is boolean => typeof x === "boolean";
+  if (!isBool(v.enabled)) throw invalid();
+  if (typeof v.triggersEnabled !== "object" || v.triggersEnabled === null || Array.isArray(v.triggersEnabled)) {
+    throw invalid();
+  }
+  const triggers = v.triggersEnabled as Record<string, unknown>;
+  const triggerKeys = ["manual402", "skipNotice", "trialEnd", "quotaExhausted", "ambient"];
+  for (const k of Object.keys(triggers)) {
+    if (!triggerKeys.includes(k)) throw invalid();
+  }
+  for (const k of triggerKeys) {
+    if (!isBool(triggers[k])) throw invalid();
+  }
+  const cooldown = v.dismissCooldownDays;
+  if (
+    typeof cooldown !== "number" ||
+    !Number.isFinite(cooldown) ||
+    Math.floor(cooldown) !== cooldown ||
+    cooldown < 1 ||
+    cooldown > 365
+  ) {
+    throw invalid();
+  }
+  if (!isBool(v.showProposed) || !isBool(v.downgradesEnabled) || !isBool(v.runsPacksEnabled)) {
+    throw invalid();
+  }
+  if (typeof v.mentionsEnabled !== "object" || v.mentionsEnabled === null || Array.isArray(v.mentionsEnabled)) {
+    throw invalid();
+  }
+  const mentions = v.mentionsEnabled as Record<string, unknown>;
+  for (const k of Object.keys(mentions)) {
+    if (k !== "referral" && k !== "freeAccess") throw invalid();
+  }
+  if (!isBool(mentions.referral) || !isBool(mentions.freeAccess)) throw invalid();
+  return {
+    enabled: v.enabled,
+    triggersEnabled: {
+      manual402: triggers.manual402 as boolean,
+      skipNotice: triggers.skipNotice as boolean,
+      trialEnd: triggers.trialEnd as boolean,
+      quotaExhausted: triggers.quotaExhausted as boolean,
+      ambient: triggers.ambient as boolean,
+    },
+    dismissCooldownDays: cooldown,
+    showProposed: v.showProposed,
+    downgradesEnabled: v.downgradesEnabled,
+    runsPacksEnabled: v.runsPacksEnabled,
+    mentionsEnabled: {
+      referral: mentions.referral as boolean,
+      freeAccess: mentions.freeAccess as boolean,
+    },
+  };
+}
+
 /** Issue #2945: null (channel unconfigured) or a finite positive USD amount. */
 export function assertCfpayChannelFixedPriceUSD(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -299,6 +446,7 @@ export function assertBillingPolicy(value: unknown): BillingPolicy {
     topUpMinUSD: assertTopUpMinUSD(v.topUpMinUSD),
     topUpMaxUSD: assertTopUpMaxUSD(v.topUpMaxUSD),
     annualDiscountPct: assertAnnualDiscountPct(v.annualDiscountPct),
+    offerRules: assertOfferRules(v.offerRules),
   };
   // Issue #3262: the bounds must order — a min above the max is not a policy.
   if (policy.topUpMinUSD > policy.topUpMaxUSD) {
@@ -324,6 +472,7 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
     "topUpMinUSD",
     "topUpMaxUSD",
     "annualDiscountPct",
+    "offerRules",
   ]);
   for (const k of Object.keys(v)) {
     if (!allowed.has(k)) throw new Error(`Unknown billing policy field: ${k}.`);
@@ -341,6 +490,7 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
   if (v.topUpMinUSD !== undefined) out.topUpMinUSD = assertTopUpMinUSD(v.topUpMinUSD);
   if (v.topUpMaxUSD !== undefined) out.topUpMaxUSD = assertTopUpMaxUSD(v.topUpMaxUSD);
   if (v.annualDiscountPct !== undefined) out.annualDiscountPct = assertAnnualDiscountPct(v.annualDiscountPct);
+  if (v.offerRules !== undefined) out.offerRules = assertOfferRules(v.offerRules);
   return out;
 }
 

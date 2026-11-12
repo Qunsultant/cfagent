@@ -111,7 +111,7 @@ import { createBillingCheckoutPorts, type BillingCheckoutEnv } from "../../servi
 import { createBillingPorts, type BillingEnv } from "../../services/createBillingPorts";
 import { StripePaymentStrategy } from "../../patterns/paymentStrategies";
 
-import { PRICE_FAMILIES, PROPOSED_SEED_PRICES, assertPriceFamily, type PriceEntry } from "../../data/priceCataloguePorts";
+import { PRICE_FAMILIES, PROPOSED_SEED_PRICES, assertPriceFamily, type PriceEntry, type PriceFamily } from "../../data/priceCataloguePorts";
 import {
   createPriceCatalogueAdapter,
   ensurePriceCatalogueSchema,
@@ -250,8 +250,14 @@ import {
   ensureProductSchema,
 } from "../../data/createProductPorts";
 import type { D1ProductAdapter } from "../../data/d1ProductAdapter";
-import { FREE_PRODUCT_ID, perRunProductId, resolveEffectiveVersion } from "../../data/productPorts";
+import { FREE_PRODUCT_ID, assertProductRank, perRunProductId, resolveEffectiveVersion } from "../../data/productPorts";
 import { moveSubscriptionToVersion, runBulkMove, setAccountSegment } from "../../services/versionMoves";
+import {
+  createOfferSuppressionAdapter,
+  ensureOfferSuppressionSchema,
+} from "../../data/createOfferSuppressionPorts";
+import { assertOfferTrigger, type OfferTrigger } from "../../data/offerSuppressionPorts";
+import { parseOfferContext, resolveOffer } from "../../services/upgradeOffers";
 import {
   createLifecycleAdapter,
   ensureLifecycleSchema,
@@ -2289,7 +2295,7 @@ export async function handleAgenticPaymentsRoutes(
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
       const flag = await requireMonetization();
       if (flag) return flag;
-      const body = (await request.json().catch(() => ({}))) as { planId?: unknown; tenantId?: unknown; email?: unknown };
+      const body = (await request.json().catch(() => ({}))) as { planId?: unknown; tenantId?: unknown; email?: unknown; offerContext?: unknown };
       const planId = typeof body.planId === "string" ? body.planId : "";
       const email = typeof body.email === "string" ? body.email.trim() : "";
       if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
@@ -2371,6 +2377,22 @@ export async function handleAgenticPaymentsRoutes(
         return Response.json({ error: "Stripe checkout could not be created." }, { status: 503 });
       }
       ctx.audit("commercial.subscription.checkout_created", "payments", { userId: login, tenantId, planId: plan.id, checkoutRequestId, checkoutSessionId: created.checkoutId });
+      // Issue #3246: an offer acceptance is audit-only metadata on
+      // the existing mint — ignored when absent, audited when the
+      // client passes a well-formed offerContext. It authorizes
+      // nothing and changes no price.
+      const offerContext = parseOfferContext(body.offerContext);
+      if (offerContext) {
+        ctx.audit("commercial.offer.accepted", "payments", {
+          login,
+          tenantId,
+          trigger: offerContext.trigger,
+          targetPlanId: plan.id,
+          action: "subscribe",
+          checkoutId: created.checkoutId,
+          ...(offerContext.shownAtMs !== undefined ? { shownAtMs: offerContext.shownAtMs } : {}),
+        });
+      }
       return Response.json({
         checkoutRequestId,
         checkoutUrl: created.checkoutUrl,
@@ -2626,6 +2648,7 @@ export async function handleAgenticPaymentsRoutes(
         amountUSD?: unknown;
         rail?: unknown;
         email?: unknown;
+        offerContext?: unknown;
       };
       const email = typeof body.email === "string" ? body.email.trim() : "";
       if (!email) return Response.json({ error: "email (checkout contact) is required." }, { status: 400 });
@@ -2721,6 +2744,19 @@ export async function handleAgenticPaymentsRoutes(
         rail,
         amountUSD,
       });
+      // Issue #3246: offer acceptance, audit-only — see the
+      // subscription checkout mint above.
+      const offerContext = parseOfferContext(body.offerContext);
+      if (offerContext) {
+        ctx.audit("commercial.offer.accepted", "payments", {
+          login,
+          tenantId,
+          trigger: offerContext.trigger,
+          action: "topup",
+          checkoutId: created.checkoutId,
+          ...(offerContext.shownAtMs !== undefined ? { shownAtMs: offerContext.shownAtMs } : {}),
+        });
+      }
       if (rail === "card") {
         return Response.json({
           topUpRequestId,
@@ -3574,6 +3610,17 @@ export async function handleAgenticPaymentsRoutes(
           login,
           userId: login,
           annualDiscountPct: updated.annualDiscountPct,
+          policy: updated,
+        });
+      } else if (partial.offerRules !== undefined) {
+        // Issue #3246: the offer-rules change is audited the same way.
+        const rulesUpdated = resolveOutcome("SUCCESS_OFFER_RULES_UPDATED");
+        ctx.audit("commercial.billing.policy_set", "payments", {
+          code: rulesUpdated.code,
+          message: rulesUpdated.businessMessage,
+          login,
+          userId: login,
+          offerRules: updated.offerRules,
           policy: updated,
         });
       } else {
@@ -4654,6 +4701,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         name?: unknown;
         kind?: unknown;
         description?: unknown;
+        rank?: unknown;
       };
       const products = requireProducts();
       if (products instanceof Response) return products;
@@ -4674,6 +4722,305 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const message = err.message || "Failed to create product.";
       const status = /required|Invalid|must be/.test(message) ? 400 : /already exists/.test(message) ? 409 : 500;
       return Response.json({ error: message }, { status });
+    }
+  }
+
+  // ================================================================
+  // Upgrade offers (#3246, sub-issue of #3241) — the server-computed
+  // offer derivation (§5.1): one pure service (resolveOffer), three
+  // thin offer routes, and the set-rank route. The routes bind
+  // ports, validate the thin HTTP contract, and audit; all
+  // eligibility, ladder, and payload logic lives in the service.
+  // ================================================================
+
+  // Bind every port the offer derivation reads. Required ports read
+  // as null when AGENT_DB is unbound — resolveOffer fails closed
+  // with FAILURE_OFFER_UNAVAILABLE rather than deriving on a
+  // partial store. Optional ports (counter, quota, referral) read
+  // as null and the derivation treats them as unconfigured. Schema
+  // ensures run for every bound adapter, so a fresh DB derives
+  // instead of throwing on missing tables.
+  const bindOfferPorts = async () => {
+    const env = ctx.env as { AGENT_DB?: unknown };
+    const store = createCommercialAdapter(env);
+    const subs = createSubscriptionAdapter(env);
+    const products = createProductAdapter(env);
+    const catalogue = createPriceCatalogueAdapter(env);
+    const policy = createBillingPolicyAdapter(env);
+    const suppressions = createOfferSuppressionAdapter(env);
+    const freeRunCounter = createFreeRunCounterAdapter(env);
+    const quota = createApprovedFreeQuotaAdapter(env);
+    const referral = createLifecycleAdapter(env);
+    if (store) await ensureCommercialSchema(store.db);
+    if (subs) await ensureSubscriptionSchema(subs.db);
+    if (catalogue) await ensurePriceCatalogueSchema(catalogue.db);
+    if (products) await ensureProductSchema(products.db);
+    if (policy) await ensureBillingPolicySchema(policy.db);
+    if (freeRunCounter) await ensureFreeRunCounterSchema(freeRunCounter.db);
+    if (quota) await quota.ensureSchema();
+    if (referral) await ensureLifecycleSchema(referral.db);
+    return { store, subs, products, catalogue, policy, suppressions, freeRunCounter, quota, referral };
+  };
+
+  // POST /payments/agentic/commercial/offer — the triggered offer
+  // endpoint. Body: { trigger, family?, runRequestId? }. Self-only:
+  // the caller reads only their own offer; there is no userId
+  // parameter. Client-supplied tenantId/segment/price are IGNORED
+  // (never read — the segment and tenant come from the account
+  // row, prices from the stores). A 400 answers an unknown
+  // trigger, the ambient trigger (served by GET compare), a
+  // missing family on an interruptive trigger, or an unknown
+  // family. Every eligible response is audited
+  // commercial.offer.shown BEFORE returning — an audit failure is
+  // a 503, never a silent unaudited offer. Ineligible responses
+  // are HTTP 200 with the reason code in the payload (the client
+  // renders the fixed copy only). Unbound or failing stores are a
+  // catalog-coded 503 (FAILURE_OFFER_UNAVAILABLE).
+  if (path.endsWith("/payments/agentic/commercial/offer") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const body = (await request.json().catch(() => ({}))) as {
+        trigger?: unknown;
+        family?: unknown;
+        runRequestId?: unknown;
+      };
+      let trigger: OfferTrigger;
+      try {
+        trigger = assertOfferTrigger(body.trigger);
+      } catch {
+        return Response.json({ error: "Unknown offer trigger." }, { status: 400 });
+      }
+      if (trigger === "ambient") {
+        return Response.json(
+          { error: "The ambient trigger is served by GET /payments/agentic/commercial/offer/compare." },
+          { status: 400 },
+        );
+      }
+      if (typeof body.family !== "string" || !body.family) {
+        return Response.json({ error: `family is required for trigger ${trigger}.` }, { status: 400 });
+      }
+      let family: PriceFamily;
+      try {
+        family = assertPriceFamily(body.family);
+      } catch {
+        return Response.json({ error: `Invalid price family: ${String(body.family)}.` }, { status: 400 });
+      }
+      const runRequestId =
+        typeof body.runRequestId === "string" && body.runRequestId ? body.runRequestId : undefined;
+      const ports = await bindOfferPorts();
+      const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
+      const checkoutPorts = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
+      const topUpAvailable =
+        checkoutPorts !== null && (checkoutPorts.card !== null || checkoutPorts.x402 !== null);
+      const payload = await resolveOffer({
+        login,
+        trigger,
+        family,
+        nowMs: Date.now(),
+        monetizationEnabled: flagOn,
+        topUpAvailable,
+        ports,
+      });
+      if (payload.eligible) {
+        const account = ports.store ? await ports.store.getAccount(login) : null;
+        const shown = resolveOutcome("SUCCESS_OFFER_RESOLVED");
+        ctx.audit("commercial.offer.shown", "payments", {
+          login,
+          tenantId: account?.tenantId ?? login,
+          trigger,
+          family,
+          targetPlanIds: payload.targets.map((t) => t.versionId),
+          segment: payload.current.segment,
+          ...(runRequestId ? { runRequestId } : {}),
+          code: shown.code,
+          message: shown.businessMessage,
+        });
+      }
+      return Response.json(payload);
+    } catch (err: any) {
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      return codedOutcomeResponse("FAILURE_OFFER_UNAVAILABLE");
+    }
+  }
+
+  // GET /payments/agentic/commercial/offer/compare — the ambient
+  // compare surface. Query: ?family= optional. Same payload shape,
+  // trigger "ambient": populates downgradeTargets, ignores
+  // suppressions, renders regardless of coverage. A pure read: NO
+  // shown audit — ambient views are not offers, and auditing
+  // every compare view would flood the log with non-decision reads.
+  if (path.endsWith("/payments/agentic/commercial/offer/compare") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const familyParam = url.searchParams.get("family") ?? undefined;
+      let family: PriceFamily | undefined;
+      if (familyParam !== undefined) {
+        try {
+          family = assertPriceFamily(familyParam);
+        } catch {
+          return Response.json({ error: `Invalid price family: ${familyParam}.` }, { status: 400 });
+        }
+      }
+      const ports = await bindOfferPorts();
+      const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
+      const checkoutPorts = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
+      const topUpAvailable =
+        checkoutPorts !== null && (checkoutPorts.card !== null || checkoutPorts.x402 !== null);
+      const payload = await resolveOffer({
+        login,
+        trigger: "ambient",
+        family,
+        nowMs: Date.now(),
+        monetizationEnabled: flagOn,
+        topUpAvailable,
+        ports,
+      });
+      return Response.json(payload);
+    } catch (err: any) {
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      return codedOutcomeResponse("FAILURE_OFFER_UNAVAILABLE");
+    }
+  }
+
+  // POST /payments/agentic/commercial/offer/dismiss — record a
+  // dismissal (§4.4). Body: { trigger, family? }. Dismissing
+  // suppresses THAT trigger for THAT login until the operator
+  // cooldown expires; re-dismissing re-arms from now. The ambient
+  // trigger is never dismissible (400, catalog-coded, as is any
+  // other validation failure on this route). The route audits
+  // commercial.offer.dismissed BEFORE writing the suppression row:
+  // an audit failure is a 503 and nothing is written, so a
+  // dismissal is never silently unrecorded. Response 200 carries
+  // { suppressedUntilMs }.
+  if (path.endsWith("/payments/agentic/commercial/offer/dismiss") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const body = (await request.json().catch(() => ({}))) as { trigger?: unknown; family?: unknown };
+      let trigger: OfferTrigger;
+      try {
+        trigger = assertOfferTrigger(body.trigger);
+      } catch {
+        return codedOutcomeResponse("FAILURE_OFFER_DISMISS_INVALID");
+      }
+      if (trigger === "ambient") {
+        return codedOutcomeResponse("FAILURE_OFFER_DISMISS_INVALID");
+      }
+      let family: PriceFamily | undefined;
+      if (body.family !== undefined) {
+        try {
+          family = assertPriceFamily(body.family);
+        } catch {
+          return codedOutcomeResponse("FAILURE_OFFER_DISMISS_INVALID");
+        }
+      }
+      const env = ctx.env as { AGENT_DB?: unknown };
+      const store = createCommercialAdapter(env);
+      const policy = createBillingPolicyAdapter(env);
+      const suppressions = createOfferSuppressionAdapter(env);
+      if (!store || !policy || !suppressions) {
+        return codedOutcomeResponse("FAILURE_OFFER_UNAVAILABLE");
+      }
+      await ensureCommercialSchema(store.db);
+      await ensureBillingPolicySchema(policy.db);
+      await ensureOfferSuppressionSchema(suppressions.db);
+      const rules = (await policy.getPolicy()).offerRules;
+      const nowMs = Date.now();
+      const suppressedUntilMs = nowMs + rules.dismissCooldownDays * 86400000;
+      const account = await store.getAccount(login);
+      const dismissed = resolveOutcome("SUCCESS_OFFER_DISMISSED");
+      ctx.audit("commercial.offer.dismissed", "payments", {
+        login,
+        tenantId: account?.tenantId ?? login,
+        trigger,
+        ...(family ? { family } : {}),
+        suppressedUntilMs,
+        cooldownDays: rules.dismissCooldownDays,
+        code: dismissed.code,
+        message: dismissed.businessMessage,
+      });
+      await suppressions.setSuppression({ login, trigger, suppressedUntilMs, dismissedAtMs: nowMs });
+      return Response.json({ suppressedUntilMs });
+    } catch (err: any) {
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      return codedOutcomeResponse("FAILURE_OFFER_UNAVAILABLE");
+    }
+  }
+
+  // POST /payments/agentic/commercial/products/:productId/rank
+  // (operator only) — set (or clear, with explicit null) a
+  // product's ladder rank. Rank is a positive whole number or
+  // null; anything else is a catalog-coded 400. The Free baseline
+  // (prod-free) carries the definitional ladder floor, rank 1,
+  // and refuses with the same code at 409. Audited
+  // commercial.product.rank.set with the old and new rank.
+  if (
+    path.includes("/payments/agentic/commercial/products/") &&
+    path.endsWith("/rank") &&
+    request.method === "POST"
+  ) {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const parts = path.split("/");
+      let productId = parts[parts.indexOf("products") + 1] ?? "";
+      try {
+        productId = decodeURIComponent(productId);
+      } catch {
+        // Keep the raw segment; the lookup below 404s on it.
+      }
+      const rawBody: unknown = await request.json().catch(() => ({}));
+      const body = (
+        typeof rawBody === "object" && rawBody !== null && !Array.isArray(rawBody) ? rawBody : {}
+      ) as { rank?: unknown };
+      if (body.rank === undefined) {
+        return codedOutcomeResponse("FAILURE_PRODUCT_RANK_INVALID");
+      }
+      let rank: number | null;
+      try {
+        rank = assertProductRank(body.rank);
+      } catch {
+        return codedOutcomeResponse("FAILURE_PRODUCT_RANK_INVALID");
+      }
+      if (productId === FREE_PRODUCT_ID) {
+        const resolved = resolveOutcome("FAILURE_PRODUCT_RANK_INVALID");
+        return Response.json(
+          {
+            code: resolved.code,
+            message: resolved.businessMessage,
+            retryable: resolved.entry?.retryable ?? false,
+          },
+          { status: 409 },
+        );
+      }
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      try {
+        await ensureProductSchema(products.db);
+      } catch (err: any) {
+        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const existing = await products.getProduct(productId);
+      if (!existing) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      const oldRank = existing.rank;
+      const updated = await products.setProductRank(productId, rank);
+      const ranked = resolveOutcome("SUCCESS_PRODUCT_RANK_UPDATED");
+      ctx.audit("commercial.product.rank.set", "payments", {
+        productId,
+        oldRank,
+        newRank: rank,
+        operator: login,
+        code: ranked.code,
+        message: ranked.businessMessage,
+      });
+      return Response.json({ product: updated });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to set product rank." }, { status: 500 });
     }
   }
 

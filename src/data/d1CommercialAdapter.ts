@@ -34,6 +34,7 @@ import {
   MIGRATION_0028_TENANT_PROVIDERS,
   MIGRATION_0040_UNLIMITED_FREE_GRANT,
   MIGRATION_0058_PRODUCT_VERSIONS,
+  MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   type MigrationDb,
 } from "./migrationRunner";
 import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
@@ -103,6 +104,7 @@ export async function ensureCommercialSchema(db: CommercialDb): Promise<number[]
     MIGRATION_0009_JOURNAL,
     MIGRATION_0012_NATIVE_LEDGER,
     MIGRATION_0058_PRODUCT_VERSIONS,
+    MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   ]);
 }
 

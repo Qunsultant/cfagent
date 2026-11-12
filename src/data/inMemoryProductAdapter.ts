@@ -13,6 +13,7 @@
 import {
   assertBulkMoveStatus,
   assertProduct,
+  assertProductRank,
   assertSegment,
   type BulkMoveRecord,
   type ProductKind,
@@ -31,6 +32,7 @@ export class InMemoryProductAdapter implements ProductStore {
     name?: unknown;
     kind?: unknown;
     description?: unknown;
+    rank?: unknown;
   }): Promise<ProductRecord> {
     const product = assertProduct(input);
     const id = product.id || `prod-${crypto.randomUUID().slice(0, 8)}`;
@@ -56,11 +58,21 @@ export class InMemoryProductAdapter implements ProductStore {
     name?: unknown;
     kind?: unknown;
     description?: unknown;
+    rank?: unknown;
   }): Promise<ProductRecord> {
     const product = assertProduct(input);
     const existing = await this.findProductByName(product.name, product.kind);
     if (existing) return existing;
     return this.createProduct(input);
+  }
+
+  async setProductRank(productId: string, rank: number | null): Promise<ProductRecord> {
+    const validated = assertProductRank(rank);
+    const existing = this.products.get(productId);
+    if (!existing) throw new Error(`No product ${productId}.`);
+    const updated: ProductRecord = { ...existing, rank: validated, updatedAtMs: Date.now() };
+    this.products.set(productId, updated);
+    return updated;
   }
 
   async listProducts(): Promise<ProductRecord[]> {
