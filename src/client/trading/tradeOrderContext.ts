@@ -1,8 +1,4 @@
-import type { TradeAssetClass } from "../../trading";
-import type {
-  OptionThesis,
-  StrategyCandidate,
-} from "../../trading/options/strategyEngine";
+import type { OptionThesis, StrategyCandidate, TradeAssetClass } from "../../trading";
 
 /** Asset-aware handoff from research and portfolio tools to the shared order ticket.
  * Add a new asset class here together with its ticket fields and broker adapter;
