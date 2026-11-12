@@ -40,12 +40,17 @@ import {
 } from "./optionsCanonicalLeg";
 import type { SagaTradeIntent } from "./sagaTradeLeg";
 import { assessSagaTradeRisk, type SagaRiskLimits } from "./sagaRiskStage";
+// Issue #4066: leaf imports, not the trading barrel — the barrel's
+// `export *` forces Rollup to load every re-exported module (incl.
+// screenerReportXlsx -> screener-agent -> @cloudflare/think, whose
+// workerd-only imports break the client build) whenever any value
+// binding is imported from it. The leaf modules import no barrel.
 import {
   aggregateScreenResult,
   DynamicOptionsScreener,
   evaluateContracts,
-  parseOptionsScreenRequest,
-} from "../trading";
+} from "../trading/optionsScreener";
+import { parseOptionsScreenRequest } from "../trading/screeningSchemas";
 import {
   createPlannerPort,
   optionsPlanBlock,
