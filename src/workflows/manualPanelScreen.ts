@@ -22,8 +22,8 @@ import { optionsArtifactKey, type OptionsStageStorage } from "./optionsScreenPor
 import {
   memoryStageClaims,
   memoryStageStorage,
-  runOptionsScreenWorkflow,
 } from "./optionsScreenWorkflow";
+import { optionsEngineStoresFromSql, runOptionsScreenViaEngine } from "./optionsScreenEngine";
 import {
   createStrategyScreenPorts,
   panelResultToPipelineResult,
@@ -63,10 +63,11 @@ export async function runManualPanelViaPipeline(
   const claims = input.getSql
     ? createSqlStageClaimStore(input.getSql)
     : memoryStageClaims();
-  const outcome = await runOptionsScreenWorkflow(
+  const outcome = await runOptionsScreenViaEngine(
     {
       runId,
       userLogin: input.userLogin,
+      trigger: "manual",
       request: {
         assetClass: "options",
         runIdentity: { runId },
@@ -102,6 +103,10 @@ export async function runManualPanelViaPipeline(
       }),
       claims,
       queue: input.queue ?? null,
+      // Issue #4068: the engine run record is durable in the route's
+      // SQLite when it passes getSql; in-memory otherwise (the leg's
+      // own stage storage is in-memory in that case too).
+      engineStores: input.getSql ? optionsEngineStoresFromSql(input.getSql()) : null,
     },
   );
   if (outcome.outcome !== "completed") {

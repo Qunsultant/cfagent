@@ -72,7 +72,7 @@
  *   /unified runs action-dispatched UnifiedOptionsService.execute
  *   (executeUnifiedOptions); /recommend is the single-owner
  *   handleOptionsStrategyRecommend; /compare runs the panel
- *   pipeline (runPanelPipeline + rankOptionsCompareCandidates);
+ *   pipeline (runPanelPipelineRetired4068 + rankOptionsCompareCandidates);
  *   /catalog lists the strategy registry. Different request/
  *   response contracts by design — pinned, no switch (a switch
  *   selecting between them would be a phantom: they are different

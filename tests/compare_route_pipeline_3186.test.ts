@@ -1,7 +1,7 @@
 /**
  * Issue #3186 step 3e - the compare route
  * (POST /trading/options/compare) runs through the one panel
- * pipeline instead of calling runPanelPipeline directly. Pin: a
+ * pipeline instead of calling runPanelPipelineRetired4068 directly. Pin: a
  * live route invocation with fixture chains returns the same
  * response shape the UI reads (same_candidate_ranking mode, quant
  * ranked + scoreWeights + candidateCount, quantStrategyPool,

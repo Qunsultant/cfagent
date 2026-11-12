@@ -15,7 +15,7 @@ import type { StoredDiscoverySetupRun } from "../src/trading";
  * entries via src/services/fitDiscoveryRunner.ts). The discovery
  * phrase family ("discover setups", "find setups") routes to the
  * SAME action, served by its scope leg (the discovery runner,
- * kernel discoverPanel via runPanelPipeline) — one action name,
+ * kernel discoverPanel via runPanelPipelineRetired4068) — one action name,
  * one dispatch branch, both families still producing results.
  * No phrase family goes dead, no silent fallback is introduced:
  * a leg without its runner fails explicitly.

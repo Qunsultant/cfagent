@@ -1,7 +1,7 @@
 /**
  * Issue #3186 (step 3e) - the NLQ panel leg's swap pin: the
  * options_strategies action runs through the one pipeline (not the
- * direct runPanelPipeline call) and returns the same envelope shape.
+ * direct runPanelPipelineRetired4068 call) and returns the same envelope shape.
  * The engine equivalence itself is pinned by
  * strategy_screen_workflow_3186.test.ts; this file pins the SWAP
  * wiring: the action executes end to end over fixture chains, the

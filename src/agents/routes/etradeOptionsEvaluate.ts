@@ -14,12 +14,11 @@
 
 import { recordStrategyCandidates } from "../../services/strategyReviews";
 import {
-  DynamicOptionsScreener,
-  runPanelPipeline,
   generateSyntheticOptionChains,
   rankCandidatesWithLlm,
   type StrategyRequest,
 } from "../../trading";
+import { runOptionsPanelViaEngine } from "../../workflows/optionsScreenEngine";
 import { DEFAULT_AI_MODEL } from "../model";
 import type { ETradeService } from "../../services/etrade";
 import type { DatabaseORM } from "../../orm";
@@ -177,7 +176,11 @@ export async function executeLlmIdeasEvaluation(args: {
     minRewardRisk: 0,
     allowedStrategies: ["all"],
   };
-  const pipelineResult = await runPanelPipeline(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)), strategyRequest, { riskProfile: "balanced" });
+  // Issue #4068: the evaluation runs through the one engine-routed panel
+  // (runOptionsPanelViaEngine) instead of the direct runPanelPipelineRetired4068 call.
+  // The universe deps ride the helper's fifth parameter, exactly as the
+  // direct call passed them to the screener's constructor.
+  const pipelineResult = await runOptionsPanelViaEngine(etrade.client, strategyRequest, { riskProfile: "balanced" }, userLogin, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage));
   const topRanked = pipelineResult.ranked.slice(0, 10);
   const candidates = topRanked.map((r) => r.candidate);
   let llmJudgment: Awaited<ReturnType<typeof rankCandidatesWithLlm>> | null = null;
@@ -330,7 +333,7 @@ export async function executeLlmIdeasEvaluation(args: {
   });
 }
 
-type ComparePipelineResult = Awaited<ReturnType<typeof runPanelPipeline>>;
+type ComparePipelineResult = Awaited<ReturnType<typeof runOptionsPanelViaEngine>>;
 
 export async function rankOptionsCompareCandidates(ctx: EtradeOptionsRouteContext, strategyRequest: StrategyRequest, body: any, result: ComparePipelineResult, common: { llmInput: unknown; quantStrategyPool: unknown; screen: unknown; contracts: unknown; contractRejections: unknown }): Promise<Response> {
   const candidates = result.ranked.slice(0, 20);
