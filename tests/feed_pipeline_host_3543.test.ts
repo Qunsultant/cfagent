@@ -153,12 +153,14 @@ describe("pipeline host wiring (#3543)", () => {
     // the plane — one per optionsChains-serving source.
     // #4193 pin update (§7): the S&P 400 Yahoo quotes job joins
     // the plane - every stage family gains its sp400 member.
-    expect(pipelineJobIds()).toHaveLength(15);
-    expect(pipelineEnrichJobIds()).toHaveLength(8);
-    expect(pipelineAnalyzeJobIds()).toHaveLength(8);
-    expect(pipelineGenerateJobIds()).toHaveLength(8);
-    expect(pipelineDeliverJobIds()).toHaveLength(8);
-    expect(pipelineChainJobIds()).toHaveLength(8);
+    // #4216 pin update (§7): the four GICS sector Yahoo quotes jobs
+    // join the plane - every stage family gains its four sector members.
+    expect(pipelineJobIds()).toHaveLength(19);
+    expect(pipelineEnrichJobIds()).toHaveLength(12);
+    expect(pipelineAnalyzeJobIds()).toHaveLength(12);
+    expect(pipelineGenerateJobIds()).toHaveLength(12);
+    expect(pipelineDeliverJobIds()).toHaveLength(12);
+    expect(pipelineChainJobIds()).toHaveLength(12);
     const ids = [
       ...pipelineJobIds(),
       ...pipelineEnrichJobIds(),
