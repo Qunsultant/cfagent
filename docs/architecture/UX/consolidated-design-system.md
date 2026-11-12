@@ -280,8 +280,8 @@ changes to itself.
 | 2 | Context strip | Live context: symbol, spot, strategy | `ContextStrip` (#3132); until then, the page's own primitive-built strip |
 | 3 | KPI ribbon | Headline numbers as label/value rows | `KpiRibbon` (#3132); until then, `SummaryCard` content in a `Card` |
 | 4 | Workspace | The page's sections — the work itself | `children` (the workspace slot); `WorkspaceGrid` (#3134) for the grid |
-| 5 | Action bar | The primary actions for the page | `ActionBar` (#3134); until then, `Button`s in a `Flex` row |
-| 6 | Queue rail | The side rail: queue, feed, approvals | `QueueFeed` (#3134); until then, the page's own `Card` rail |
+| 5 | Action bar | The closing actions for the page, after the workspace | `ActionBar` (#3134) — primary right, secondary left |
+| 6 | Queue rail | The closing section below the workspace: queue, feed, approvals | `QueueFeed` (#3134) — a `Card` with `CardHeader` + items, `EmptyState` when empty |
 | 7 | States | Loading / error / empty, in precedence order | `PageShell` (§1.5) — states win over every slot |
 
 Composition rules for slots:
@@ -297,7 +297,21 @@ Composition rules for slots:
   `Stack` at the order-workspace gap. A slot never sets its own
   outer margin.
 - A slot that has nothing to show renders nothing — no empty card,
-  no placeholder strip. The workspace alone is a complete page.
+  no placeholder strip. The workspace alone is a complete page. (A
+  queue with no rows is the exception: `QueueFeed` shows its
+  `EmptyState` — an empty queue is information, not an absent slot.)
+
+Template organisms III (#3134): `WorkspaceGrid`, `ActionBar`,
+`QueueFeed` fill slots 4–6. Breakpoints (Material 3
+window-size-class idea, web values): compact <900px, medium
+900–1440px, expanded >1440px. `WorkspaceGrid` variants are
+workspace (auto-fit grid), list-detail (the order ticket's 1.4fr/1fr,
+collapsing to one column below 900px), and feed (single column) —
+exactly three, no fourth. `ActionBar` closes the page's work after
+the workspace (the earlier "answer-before-detail" wording was
+wrong); `QueueFeed` is the closing section below the workspace,
+not a side rail — a true side rail would need a two-column template
+variant, which is a new slot arrangement, not an organism.
 
 First consumer: the risk page (`RiskAnalysisPanel`), already
 template-shaped, renders through `PageTemplate` with no visual
