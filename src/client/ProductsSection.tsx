@@ -494,7 +494,7 @@ function ProductDetail({
         <BulkMovePanel product={product} versions={versions} onChanged={onChanged} />
       )}
       <div>
-        Referral codes for this product are configured with issue #3307: rules are keyed by this product id and
+        Referral codes for this product are configured with issue 3307: rules are keyed by this product id and
         survive version changes. No referral mechanics live in this section.
       </div>
     </Stack>
