@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { startPolling } from "../src/client/polling";
+import { MAX_TIMER_DELAY_MS, startPolling } from "../src/client/polling";
 
 /**
  * Issue #329 (P1) — the 4 s `/api/jobs` poll made an idle dashboard tab cost
@@ -120,6 +120,35 @@ describe("visibility-aware polling (#329 P1)", () => {
     doc.setVisibility("visible");
     await vi.advanceTimersByTimeAsync(0);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  // Issue #4213 — the DO-usage slice parks the options-flow and goal-tracking
+  // cadences at 3000000000000 ms ("effectively never"). That value sits outside
+  // the timer contract: `setTimeout` takes a signed 32-bit delay, so an
+  // out-of-range value either wraps (3e12 wraps to ~24.5 days today) or is
+  // clamped by the engine — behaviour that differs per engine and per job, and
+  // where a future value could wrap to something small enough to become a poll
+  // storm, the exact opposite of the cost cut. The scheduler therefore clamps
+  // at the one place it arms a timer.
+  it("clamps a cadence above the 32-bit timer ceiling instead of letting it wrap (#4213)", async () => {
+    expect(MAX_TIMER_DELAY_MS).toBe(2_147_483_647);
+
+    const run = vi.fn();
+    const stop = startPolling(run, {
+      fastMs: 3_000_000_000_000,
+      idleMs: 3_000_000_000_000,
+      doc: makeDoc(),
+    });
+
+    // Not truncated to a short delay: nothing fires across a ~23-day window.
+    await vi.advanceTimersByTimeAsync(2_000_000_000);
+    expect(run).not.toHaveBeenCalled();
+
+    // Clamped, not dropped: the tick still runs once the ceiling is reached.
+    await vi.advanceTimersByTimeAsync(MAX_TIMER_DELAY_MS - 2_000_000_000);
+    expect(run).toHaveBeenCalledTimes(1);
+
+    stop();
   });
 
   it("keeps polling when a refresh throws", async () => {

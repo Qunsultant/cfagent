@@ -86,7 +86,7 @@ describe("COO readiness gate — #2000 Phase 5 deployment surface (#2665)", () =
     expect(SCREENER_EVENTS_CONSUMER_CONFIG.deadLetterQueue).toBe(
       "screener-events-dlq",
     );
-    expect(SCREENER_EVENTS_CONSUMER_CONFIG.maxRetries).toBe(3);
+    expect(SCREENER_EVENTS_CONSUMER_CONFIG.maxRetries).toBe(2);
     expect(typeof createScreenerEventsWorkHandler).toBe("function");
   });
 

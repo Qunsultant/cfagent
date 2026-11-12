@@ -1835,7 +1835,10 @@ owner's word, not on this document.
 
 - **Current:** the generic engine Live in pipeline use; six
   bespoke families unadopted; 0% code reuse between the engine
-  and the bespoke workflows (§7.2).
+  and the bespoke workflows (§7.2). Cost posture (#4213): every
+  workflow binding is capped at `concurrency.limit: 1`, so a
+  second run of the same workflow queues behind the first
+  instead of running beside it.
 - **Future:** one engine executing both composition modes over
   one spec format (§4.2); every family onboarded (§4.4).
 - **Roadmap:** #3700 product definition → #3842's J-stages-onto-
@@ -1862,7 +1865,11 @@ owner's word, not on this document.
 
 - **Current:** the table-backed ledger queue Live; shard chains
   Live; two real queue substrates carrying narrow traffic
-  (§6.3); the stage transport at slice 1 of 3.
+  (§6.3); the stage transport at slice 1 of 3. Cost posture
+  (#4213): all three consumers run one invocation at a time
+  (`max_concurrency: 1`), in 5-message batches flushed after
+  10s, with 2 retries before the DLQ — the backlog drains
+  serially, deliberately.
 - **Future:** one message per stage boundary on the transport;
   the ledger remaining the truth in all cases (§6.4).
 - **Roadmap:** the transport's remaining slices are scoped on
