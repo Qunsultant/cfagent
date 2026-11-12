@@ -66,11 +66,13 @@ describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
     // No auto-merge mutation and no flagless `gh pr merge` may remain.
     expect(autoMergeTrustedYml).not.toContain("enablePullRequestAutoMerge");
     expect(autoMergeTrustedYml).not.toMatch(/^\s+gh pr merge\b[^\n]*--auto/m);
-    // The node id comes from the event payload; a REST round-trip cannot fail
-    // and fall through to a method-based enrollment.
+    // The enqueue runs on CI completion (workflow_run has no pull_request
+    // payload), so the PR is resolved by head branch and only when it carries
+    // the auto-merge label.
     expect(autoMergeTrustedYml).toContain(
-      "PR_NODE_ID: ${{ github.event.pull_request.node_id }}",
+      'gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH"',
     );
+    expect(autoMergeTrustedYml).toContain('select(any(.labels[]?; .name == "auto-merge"))');
   });
 
   it("no longer depends on pull_request_target (#4313)", () => {
