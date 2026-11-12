@@ -2258,7 +2258,7 @@ CREATE TABLE IF NOT EXISTS agent_bulk_moves (
  *   (queues / ORM / sweep) + read mode. NO defaults on any
  *   column: an absent row is unconfigured, never a default
  *   carrier (the #1069 rule; contrast agent_tenant_settings,
- *   whose broker_id defaults to etrade).
+ *   whose broker_id carries a built-in default).
  * - agent_reports.linked_job_run_id: the twin link for projected
  *   canonical reports (nullable; the ALTER is idempotent — the
  *   migration runner applies each version once, and the column
