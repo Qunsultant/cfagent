@@ -19,8 +19,10 @@
  */
 import type { Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
-import { TradingPlatformRegistry, brokerSupports, platformChainSource, screenOptionsWithSource } from "../../trading";
+import { TradingPlatformRegistry, brokerSupports, platformChainSource } from "../../trading";
 import { getScreenerConfig } from "../../config/etapiConfig";
+import { runOptionsPlainScreenViaEngine } from "../../workflows/optionsScreenEngine";
+import { unauthenticatedResponse } from "./routeIdentity";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import { resolveBrokerEnvironmentFromSettings } from "./brokerEnvironment";
 
@@ -78,17 +80,27 @@ export async function handleBrokerOptionsRoutes(
     if (!brokerSupports(screenBroker, "optionChains")) {
       return unsupportedResponse(screenBroker, "Option screening");
     }
+    // Issue #4068: a screen that now writes a run record needs an owner —
+    // fail closed with a 401 when the login header is absent, matching the
+    // manual route's discipline (routeIdentity.ts: no fallback identity).
+    const screenUserLogin = request.headers.get("x-user-login") || "";
+    if (!screenUserLogin) {
+      return unauthenticatedResponse();
+    }
     const screenPlatform = TradingPlatformRegistry.getPlatform(
       screenBroker,
       ctx.env,
       ctx.getOrm(),
-      request.headers.get("x-user-login") || "",
+      screenUserLogin,
       screenEnvironment,
     );
     const source = platformChainSource(screenPlatform);
     if (!source) return unsupportedResponse(screenBroker, "Option screening");
 
-    const result = await screenOptionsWithSource(source, screenBody.filter ?? screenBody, getScreenerConfig(ctx.env));
+    // Issue #4068: the broker screen runs through the one engine-routed
+    // plain screen (runOptionsPlainScreenViaEngine) instead of the direct
+    // screenOptionsWithSourceRetired4068 call — same screen computation, same result.
+    const result = await runOptionsPlainScreenViaEngine(source, screenBody.filter ?? screenBody, screenUserLogin, getScreenerConfig(ctx.env));
     return Response.json({ broker: screenBroker, environment: screenEnvironment, result });
   }
 

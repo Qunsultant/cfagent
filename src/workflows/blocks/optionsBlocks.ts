@@ -125,7 +125,17 @@ const STAGE_SPECS: StageSpec[] = [
       { name: "report", type: "object", required: true },
       { name: "artifactKeys", type: "array", required: true },
     ],
-    terminals: { completed: COMPLETED, partial: PARTIAL, failed: FAILED },
+    terminals: {
+      completed: COMPLETED,
+      partial: PARTIAL,
+      // Issue #4068 (fix): the shapeReport stage returns the screen
+      // artifact's terminal, and a zero-hit screen is "no_contracts" —
+      // a legitimate complete per #2038, as the screen and risk blocks
+      // already declare. Without it the shared stage runner rejected
+      // the shapeReport output of an empty screen ("unknown terminal").
+      no_contracts: "FAILURE_SCREEN_NO_CONTRACTS_EVALUATED",
+      failed: FAILED,
+    },
   },
   {
     stageId: "deliver",

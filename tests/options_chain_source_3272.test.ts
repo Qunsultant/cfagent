@@ -146,7 +146,11 @@ describe("the neutral screen route serves the selected broker (#3272)", () => {
     const url = new URL("https://example.test/api/broker/options/screen");
     const request = new Request(url.toString(), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      // Issue #4068: the broker screen now runs through the engine-routed
+      // plain screen, whose ports are owner-scoped — the route fails closed
+      // with a 401 when the login header is absent, so these requests carry
+      // one; what the suite pins (selected broker, 501 refusal) is unchanged.
+      headers: { "content-type": "application/json", "x-user-login": "test-login" },
       body: JSON.stringify(body),
     });
     return { request, url };

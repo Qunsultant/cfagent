@@ -368,6 +368,13 @@ export interface ScannerPipelineRequest extends PlannerInput {
      *  the saved run by the persist stage. Absent, the run records
      *  E*TRADE (the pre-provenance default) — never a guess. */
     broker?: "etrade" | "alpaca" | "public"; // Issue #3990
+    /** Issue #3264: the producing run's trigger, stamped on the saved
+     *  run by the persist stage so the history row can say how the run
+     *  started. Absent, the row records none — never a guess. Carried
+     *  for UnifiedOptionsService.execute()'s opportunities case, which
+     *  stamped it on its direct save; the scanner legs that never had
+     *  one (unified route, NLQ scan) omit it, unchanged. */
+    trigger?: "manual" | "scheduled";
   };
 }
 
@@ -527,11 +534,15 @@ export function createScannerScreenPorts(
         result.requestSnapshot.request = classInput.requestRecord;
       }
       if (!scanRunStore) {
+        // Issue #4068 (fix): a run with no store bound carries NO
+        // persistence fields at all — the field is absent, not false.
+        // (A store whose save throws is the pinned persisted:false
+        // case below; a run that never had a store has no receipt to
+        // report, and the execute() test pins the field absent.)
         return {
           terminal: "completed",
           saved: false,
           reason: "no scan run store bound; the stage artifact is the record",
-          persisted: false,
           result,
         };
       }
@@ -547,6 +558,10 @@ export function createScannerScreenPorts(
           // (threaded in classInput by the NLQ scanner leg); absent,
           // the store normalizes to E*TRADE, the pre-provenance default.
           ...(classInput?.broker ? { broker: classInput.broker } : {}),
+          // Issue #3264: stamp the producing run's trigger when the
+          // caller threaded one (execute()'s opportunities case);
+          // absent, the row records none.
+          ...(classInput?.trigger ? { trigger: classInput.trigger } : {}),
         });
         return { terminal: "completed", saved: true, scanRunId: saved.id, persisted: true, result };
       } catch (err) {
@@ -568,18 +583,21 @@ export function createScannerScreenPorts(
       const persistArtifact = await loadArtifact<{
         saved: boolean;
         scanRunId?: string;
-        persisted: boolean;
+        persisted?: boolean;
         result: OpportunityScanResult;
       }>(storage, input.runId, "persistCanonicalResults");
       // The execute() executionData shape: the result plus its save
       // receipt, so callers read one object either way. No terminal
       // field: the composer defaults an absent terminal to
       // "completed", and a terminal here would leak into the shaped
-      // result the deliver stage hands on.
+      // result the deliver stage hands on. The receipt fields ride
+      // only when the persist stage set them: a run with no store
+      // bound carries no persisted field (#27), a failed save carries
+      // persisted:false, a saved run carries scanRunId + persisted:true.
       return {
         ...persistArtifact.result,
         ...(persistArtifact.scanRunId ? { scanRunId: persistArtifact.scanRunId } : {}),
-        persisted: persistArtifact.persisted,
+        ...(persistArtifact.persisted !== undefined ? { persisted: persistArtifact.persisted } : {}),
       };
     },
     persist,

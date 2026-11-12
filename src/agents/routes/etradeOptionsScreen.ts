@@ -43,7 +43,11 @@ import { getEventCalendarCoverage, toEventCalendarInfo } from "../../services/ev
 import type { EtradeOptionsRouteContext } from "./etradeOptions";
 import { createOptionsScreenPorts, optionsArtifactKey } from "../../workflows/optionsScreenPorts";
 import { createManualOptionsCanonicalLeg } from "../../workflows/optionsCanonicalLeg";
-import { runOptionsScreenWorkflow } from "../../workflows/optionsScreenWorkflow";
+import {
+  optionsEngineStoresFromSql,
+  optionsEngineStoresInMemory,
+  runOptionsScreenViaEngine,
+} from "../../workflows/optionsScreenEngine";
 import {
   createManualOptionsRecordBuilder,
   createManualOptionsScreenDelivery,
@@ -120,10 +124,11 @@ export async function executeOptionsScreen(args: {
     record: createManualOptionsRecordBuilder(ctx as never),
     demoFallback: isDemoCalibratedChainsEnabled(),
   });
-  const outcome = await runOptionsScreenWorkflow(
+  const outcome = await runOptionsScreenViaEngine(
     {
       runId: generationId,
       userLogin,
+      trigger: "manual",
       request: {
         assetClass: "options",
         runIdentity: { runId: generationId },
@@ -143,6 +148,10 @@ export async function executeOptionsScreen(args: {
       stages: ports,
       claims,
       queue: (ctx.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
+      // Issue #4068: the engine run record is durable in this DO's
+      // SQLite (the same handle the stage claims + delivery
+      // suppressor already use).
+      engineStores: optionsEngineStoresFromSql(ctx.agentCtx.storage.sql),
     },
   );
   if (outcome.outcome === "failed") {
@@ -213,10 +222,11 @@ async function runUnifiedOpportunitiesViaPipeline(args: {
   }
   const { engineClient, platformRunId } = await service.resolveEngineClient();
   const runId = `options_scanner:unified:${new Date().toISOString()}:${reqData.thesis || "mixed"}`;
-  const outcome = await runOptionsScreenWorkflow(
+  const outcome = await runOptionsScreenViaEngine(
     {
       runId,
       userLogin,
+      trigger: "manual",
       request: {
         assetClass: "options",
         runIdentity: { runId },
@@ -301,6 +311,17 @@ async function runUnifiedOpportunitiesViaPipeline(args: {
       }),
       claims: createSqlStageClaimStore(() => ctx.agentCtx.storage.sql),
       queue: (ctx.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
+      // Issue #4068 (fix): the engine's SQL stores run DDL (sql.exec) at
+      // defineJob time, and SqlStorage declares exec — a handle without it
+      // (a test double, or a host that bound no SQL) cannot host the
+      // engine's tables, so the run rides in-memory engine stores (the
+      // #4069 accepted-absent discipline: the durable record is the
+      // canonical write + downstream record). A real DO handle always
+      // takes the SQL path, so production behavior is unchanged.
+      engineStores:
+        typeof ctx.agentCtx.storage.sql?.exec === "function"
+          ? optionsEngineStoresFromSql(ctx.agentCtx.storage.sql)
+          : optionsEngineStoresInMemory(),
     },
   );
   if (outcome.outcome !== "completed") {

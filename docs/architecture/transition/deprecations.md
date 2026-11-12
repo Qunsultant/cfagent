@@ -94,3 +94,40 @@ slice.
   gate amendment; deletion is never part of a program slice. The
   legacy `paused_schedules` table itself is deleted only with the
   frozen adapter, under the same conditions.
+
+## 2026-11-12 — engine-routed options screens supersede the direct entry points (#4068)
+
+- Function: `runPanelPipeline` → `runPanelPipelineRetired4068` (`src/trading/options/panelPipeline.ts`)
+- Function: `screenOptionsWithSource` → `screenOptionsWithSourceRetired4068` (`src/trading/optionChainSource.ts`)
+- Function: `UnifiedOptionsService.screenContracts` → `screenContractsRetired4068` (`src/trading/options/unifiedOptionsService.ts`)
+- Function: `UnifiedOptionsService.scanOpportunities` → `scanOpportunitiesRetired4068` (`src/trading/options/unifiedOptionsService.ts`)
+- Date: 2026-11-12
+- Reason: Issue #4068 (sub-issue of #3551) routes every options screen
+  through the one engine-routed workflow (`runOptionsScreenViaEngine`,
+  `src/workflows/optionsScreenEngine.ts`) — the 9 direct
+  `runOptionsScreenWorkflow` call sites and the four bypasses above. No
+  options screen executes outside the workflow after this slice. The four
+  functions are the bypasses: the direct panel pipeline, the direct plain
+  screen, and the service's direct screen/scan statics. They are frozen,
+  not deleted, and keep their `@deprecated` marker naming the successor.
+- Replacement: `runOptionsPanelViaEngine` (panel),
+  `runOptionsPlainScreenViaEngine` (plain screen),
+  `runOptionsScanViaEngine` (scan) — all in
+  `src/workflows/optionsScreenEngine.ts`, all executing the same
+  decomposition through the engine's `options.runStage` step.
+- Consumers at deprecation: no production callers remain. Tests that pin
+  the workflow decomposition keep calling the retired names:
+  `runPanelPipelineRetired4068` (panel/strategy/kernel-parity suites),
+  `scanOpportunitiesRetired4068` (the per-symbol shard parity test).
+  `tests/options_stage_vocabulary_4067.test.ts` still asserts the OLD
+  name `runPanelPipeline` is absent from `src/workflows/stageRuntimeIds.ts`
+  — that assertion is about the catalog file, not the renamed function.
+- Known remaining direct panel call (NOT retired here, follow-up):
+  `runPanelWithAgents` at `src/services/scheduledTasks.ts:4183` (the
+  scheduled firer) — it constructs shared `PanelAgents` once from the
+  scheduled universe deps and passes them to both `runPanelWithAgents` and
+  agent methods; routing it needs the engine panel helper to accept
+  pre-built agents or universe deps. Recorded in the #4068 PR body and
+  §15 draft.
+- Deletion condition: zero consumers plus an owner decision plus a gate
+  amendment; deletion is never part of a program slice.

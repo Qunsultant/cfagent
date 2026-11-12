@@ -487,7 +487,7 @@ describe("D2 / DF / S3 identical paths", () => {
   });
 
   it("the panel path is delegation to the kernel, not a second engine", () => {
-    expect(typeof panelPipeline.runPanelPipeline).toBe("function");
+    expect(typeof panelPipeline.runPanelPipelineRetired4068).toBe("function");
     expect(typeof panelPipeline.runPanelWithAgents).toBe("function");
     expect(typeof RecommendationService.prototype.discoverPanel).toBe("function");
   });
