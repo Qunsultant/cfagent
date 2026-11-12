@@ -1,0 +1,3 @@
+### Added
+
+- **Yahoo S&P 400 quotes feed job (#4193, #3667 universe integration slice 3):** the feed-job registry gains `yahoo-sp400-quotes` — Yahoo quotes over the stored S&P MidCap 400 index list, on the same contract as the existing Dow job (cadence/staleness resolved through the same `FEED_JOB_*` config knobs). The pipeline catalog resolves "sp400" / "s&p 400" to the new job (bare "yahoo" still resolves to the Nasdaq-100 job), and the enrich, analyze, generate, deliver, and chain families derive their sp400 lineage from it automatically. A run with no stored S&P 400 index list fails honestly with the existing universe-missing error rather than substituting another universe. #CDO-mha7
