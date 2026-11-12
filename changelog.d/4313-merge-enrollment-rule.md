@@ -1,0 +1,3 @@
+### Changed
+
+- **gitops §11 states the enrollment rule that actually works (#4313):** enrollment is the queue entry — gh pr merge <n> with no flags, or enqueuePullRequest. GitHub records an auto-merge request as the repository's default method (SQUASH here) even when REBASE is requested, and a rebase-only ruleset can never merge that, so the PR sits green, CLEAN and unmerged; a strategy flag on gh pr merge --auto additionally makes the CLI exit without enqueuing. The paragraph now names both traps, records the live verification, and points at the trusted workflow that labels on pull_request and enqueues on CI completion. #autoclaw-001

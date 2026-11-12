@@ -1024,7 +1024,16 @@ Do not change merge strategy unilaterally.
 
 If a merge queue is required, enqueue the PR. Ensure GitHub Actions workflows handle `merge_group` events so queue-created integration commits receive their required checks. [docs.github](https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
 
-**Merge-queue auto-merge enrollment (moved from repo AGENTS.md, #3816).** When a merge queue is configured, never pass strategy flags (`--rebase`, `--squash`, or `--merge`) to `gh pr merge --auto`. Use `gh pr merge --auto` directly — the merge-queue ruleset manages the merge method (REBASE). Passing strategy flags causes the CLI to exit without enqueuing.
+**Merge-queue auto-merge enrollment (moved from repo AGENTS.md, #3816; corrected by #4305/#4313).**
+
+Enrollment is the **queue entry**. Put the PR in the queue (`gh pr merge <n>` with no flags, or the `enqueuePullRequest` GraphQL mutation); the queue owns the strategy and validates the group on current `main`.
+
+Do **not** rely on GitHub's auto-merge request to merge here, and never pass strategy flags to `gh pr merge --auto`:
+
+- The flags make the CLI exit without enqueuing.
+- Worse, an auto-merge request records the repository's **default** merge method — SQUASH on this repo — even when the mutation asks for `mergeMethod: REBASE` (verified 2026-11-12 on a live PR: the mutation returned SQUASH). Under a rebase-only ruleset that request can never merge, so the PR sits green, `CLEAN` and unmerged (#4267, #4219, #4244, #4283, #4285, #4297, #4303).
+
+The trusted workflow (`auto-merge-trusted.yml`) therefore labels on `pull_request` and enqueues on CI completion; it creates no auto-merge request at all. A flagless `gh pr merge --auto` is the trap that produced the stall and is not a substitute for a queue entry.
 
 Queue grouping (issue #4088): the queue groups at most 5 entries per group with ALLGREEN. The grouping value is an owner setting, recorded here when changed; a larger group size is tried and observed on a busy window, and reverted if a red entry blocks groups more than it helps. ALLGREEN and the required checks are unchanged by grouping.
 
