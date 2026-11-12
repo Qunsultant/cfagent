@@ -1,3 +1,5 @@
+import type { TradeOrderContext } from "../trading/tradeOrderContext";
+
 export interface ScheduledTaskItem {
   id: string;
   type: "interval" | "cron" | "delayed" | "scheduled";
@@ -23,7 +25,8 @@ export interface ScheduledOptionsManagerProps {
   /** Issue #1185: required — the authenticated user's login. There is
    *  no default identity to scope schedules/profiles to. */
   userLogin: string;
-  onPreviewTrade?: (candidate: any) => void;
+  /** Issue #3361: the preview hands the converted TradeOrderContext up, not the raw candidate. */
+  onPreviewTrade?: (ctx: TradeOrderContext) => void;
   onSendPrompt?: (prompt: string, sourceTab?: string) => void;
   /** S7 (one schedule UI): the hosting SchedulesPanel's tab filter —
    *  "stocks" shows only market screens, "options" shows options

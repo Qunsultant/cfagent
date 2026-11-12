@@ -22,9 +22,13 @@
  *
  * Preview-trade note (#3361, filed as a #3121 sub-issue during S2):
  * the hub owned the order-ticket prefill (hub-local order state), so
- * the de-hubbed home's preview navigates to the order tab without the
- * candidate. The button still works as navigation; restoring the
- * prefill without re-hosting the home in the hub is #3361's slice.
+ * the de-hubbed home's preview navigated to the order tab without the
+ * candidate. Restored by #3361: the preview converts the candidate to
+ * a TradeOrderContext (candidateToTradeContext, the research panel's
+ * mapping) and hands it to the shell via the onPreviewTrade prop; the
+ * shell owns the pending context (Chat pendingOrderContext, the
+ * pendingPrompt idiom) and the hub consumes it through its own order
+ * handler. The home stays broker-neutral and de-hubbed.
  */
 import { useEffect, useState } from "react";
 import { Card, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
@@ -34,6 +38,7 @@ import { ScheduleRunLedgerPanel } from "./ScheduleRunLedgerPanel";
 import { ScheduleQueueView } from "./ScheduleQueueView";
 import { useBrokerEnvironment } from "./brokerEnvironment";
 import { navigateToTab, subscribeToRouteChanges } from "./router";
+import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import {
   SCHEDULES_HOME_VIEW_LABELS,
   SCHEDULES_HOME_VIEWS,
@@ -48,9 +53,16 @@ const SCHEDULES_HOME_TABS: TabOption<SchedulesHomeView>[] = SCHEDULES_HOME_VIEWS
 
 export interface SchedulesHomeProps {
   userLogin?: string;
+  /**
+   * Issue #3361: the shell's preview-trade handoff — the converted
+   * TradeOrderContext is handed to the shell, which seeds the order
+   * ticket (pendingOrderContext) and navigates to the order tab.
+   * Absent, the preview navigates bare (the pre-S2-de-hub behavior).
+   */
+  onPreviewTrade?: (ctx: TradeOrderContext) => void;
 }
 
-export function SchedulesHome({ userLogin }: SchedulesHomeProps = {}) {
+export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps = {}) {
   const activeEnv = useBrokerEnvironment();
   const [deepLink, setDeepLink] = useState<SchedulesDeepLink>(() =>
     typeof window !== "undefined"
@@ -90,7 +102,9 @@ export function SchedulesHome({ userLogin }: SchedulesHomeProps = {}) {
           <SchedulesPanel
             activeEnv={activeEnv}
             userLogin={userLogin}
-            onPreviewTrade={() => navigateToTab("order")}
+            onPreviewTrade={
+              onPreviewTrade ?? (() => navigateToTab("order"))
+            }
             focusScheduleId={deepLink.scheduleId}
           />
         </Card>

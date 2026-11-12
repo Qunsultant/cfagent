@@ -1091,7 +1091,7 @@ no home and no filed issue is a defect in the map.
 | Admin Queue tab (dump/cancel-all/wipe/export/Track 1 recreate) | S4 (§1.3) | `?tab=schedules&view=queue` (`ScheduleQueueView`) | S2 — landed |
 | Unified Jobs UI (goals + schedules + crons, read-only merge) | §1.3 | `JobsPanel` over `listGoals` + `listAllRuns` (the one merged ledger read) | S0 — preserved (reads the one merged ledger, GET `/api/ledger/runs`) |
 | Read-only run history (`JobsPanel`, Autopilot, `WorkflowRunsPanel`) | §1.3 | The one merged read (`GET /api/ledger/runs`) | S1/S2 — landed; #3123 — landed |
-| Preview-trade candidate prefill from the schedules home | S2 (§8.3) | — lost in the S2 de-hub; no home — | **Filed #3361 (open)** |
+| Preview-trade candidate prefill from the schedules home | S2 (§8.3) | Shell handoff — `candidateToTradeContext` + Chat `pendingOrderContext`, consumed by the hub's order handler | **#3361 — landed** |
 
 ### 9.3 Tick-polled goal behaviors (B-T3)
 
@@ -1242,9 +1242,9 @@ evaluation, evaluation latency, ledger read latency.
 | Tick re-saves every goal on every tick (the dominant tick cost after the scan fix) not changed — writes, not scans; needs its own dirty-check slice | #3124 | — no home — | **Filed #4205 (open)** |
 
 What stays open after S6 (the program does not close with this
-slice): the filed sub-issues #3393, #3394, #3313, #3312 (live
-proof only), #3361, #3640–#3645 (unbuilt per owner direction),
-#3652 (#4110 landed after S6 — see §9.7), #4124 (open); the Phase 2 item
+slice): the filed sub-issues #3393, #3394, #3314, #3313, #3312 (live
+proof only), #3640–#3645 (unbuilt per owner direction),
+#3652 (#4110 landed after S6 — see §9.7), #4124 (open), #3361 (landed — see §9.2); the Phase 2 item
 B-T3-07 (goal store → #3123) and the Phase 3 item U-10 (Chat Scheduler
 sub-view → #3122). What S6
 deliberately does NOT do: no deprecation rename (zero modules

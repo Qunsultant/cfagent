@@ -30,6 +30,7 @@ import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_
 import { navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
 import { legacySchedulesRedirect } from "./schedulesHomeView";
 import { SchedulesHome } from "./SchedulesHome";
+import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import { getCrumb } from "./routes";
 import { StockSearchBar } from "./components/StockSearchBar";
 import { MarketTickerTape } from "./components/MarketTickerTape";
@@ -104,6 +105,16 @@ export function Chat({ user }: { user: User }) {
       navigateToTab(typeof next === "function" ? next(readTabFromLocation()) : next);
     },
     [],
+  );
+  // Issue #3361: the schedules home's preview-trade handoff — seed the
+  // shell's pending order context, then navigate to the order tab; the
+  // hub consumes the context on arrival (see ETradeTradingHub).
+  const handleSchedulesPreviewTrade = useCallback(
+    (ctx: TradeOrderContext) => {
+      setPendingOrderContext(ctx);
+      handleSelectTab("order");
+    },
+    [handleSelectTab],
   );
   const [brokerProps, setBrokerProps] = useState<ETradeDynamicMenuProps | null>(null);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
@@ -437,6 +448,13 @@ export function Chat({ user }: { user: User }) {
   const [chatResetNotice, setChatResetNotice] = useState<string | null>(null);
   const [authExpired, setAuthExpired] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState<{ prompt: string; sourceTab: string } | null>(null);
+  // Issue #3361 (#3121 S2 follow-up): the shell-level order-context
+  // handoff (the pendingPrompt idiom). The de-hubbed schedules home
+  // hands the converted preview candidate here; the trading hub
+  // consumes it through its own handleTradeOrder when the order
+  // sub-tab becomes active, then clears it. Nothing travels in the
+  // URL and the home stays out of the hub.
+  const [pendingOrderContext, setPendingOrderContext] = useState<TradeOrderContext | null>(null);
 
   const isBusy = chatStatus === "streaming" || chatStatus === "submitted";
   const statusLabel = isBusy ? "Thinking…" : chatStatus === "error" ? "Error" : "Ready";
@@ -1420,7 +1438,7 @@ export function Chat({ user }: { user: User }) {
     // not through the retained ETradeTradingHub (a broker-neutral home
     // cannot live inside a broker hub, #3216).
     schedules: (
-      <SchedulesHome userLogin={user.login} />
+      <SchedulesHome userLogin={user.login} onPreviewTrade={handleSchedulesPreviewTrade} />
     ),
     products: (
       <ErrorBoundary label="Products">
@@ -1925,6 +1943,8 @@ export function Chat({ user }: { user: User }) {
           <ETradeTradingHub
             user={user}
             activeSubTab={mapTabToTradingSubTab(tab)}
+            pendingOrderContext={pendingOrderContext}
+            onConsumePendingOrderContext={() => setPendingOrderContext(null)}
             onSelectSubTab={(newSubTab) => {
               handleSelectTab(newSubTab);
             }}

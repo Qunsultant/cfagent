@@ -1,9 +1,15 @@
 import React from "react";
 import { Badge, Button } from "../components/ui";
+import {
+  candidateToTradeContext,
+  type TradeOrderContext,
+} from "../trading/tradeOrderContext";
 
 export interface LiveResultPreviewProps {
   liveResult: any;
-  onPreviewTrade?: (candidate: any) => void;
+  /** The run's thesis: the preview action follows it (bearish → SELL_SHORT). */
+  thesis?: "bullish" | "bearish" | "neutral" | "directional";
+  onPreviewTrade?: (ctx: TradeOrderContext) => void;
 }
 
 /**
@@ -12,7 +18,7 @@ export interface LiveResultPreviewProps {
  * and never upgrades "not reported" to a success. Styles are token
  * classes (scheduledOptions.css); no inline style objects (#2329).
  */
-export function LiveResultPreview({ liveResult, onPreviewTrade }: LiveResultPreviewProps) {
+export function LiveResultPreview({ liveResult, thesis = "bullish", onPreviewTrade }: LiveResultPreviewProps) {
   if (!liveResult) return null;
 
   const channel = (value: unknown): { tone: "success" | "danger" | "neutral"; label: string } => {
@@ -75,7 +81,24 @@ export function LiveResultPreview({ liveResult, onPreviewTrade }: LiveResultPrev
                     tone="subtle"
                     size="sm"
                     className="live-preview-action"
-                    onClick={() => onPreviewTrade(candidate)}
+                    onClick={() => {
+                      // Issue #3361: the ticket takes a TradeOrderContext,
+                      // not the raw candidate — convert with the canonical
+                      // mapping (same as OptionsResearchPanel). The spot
+                      // price is the row's when known, else the
+                      // candidate's; unknown stays unknown, never invented.
+                      const underlyingPrice =
+                        typeof opportunity.underlyingPrice === "number" &&
+                        Number.isFinite(opportunity.underlyingPrice)
+                          ? opportunity.underlyingPrice
+                          : typeof candidate.underlyingPrice === "number" &&
+                              Number.isFinite(candidate.underlyingPrice)
+                            ? candidate.underlyingPrice
+                            : undefined;
+                      onPreviewTrade(
+                        candidateToTradeContext(candidate, thesis, underlyingPrice),
+                      );
+                    }}
                   >
                     Preview in Order Ticket
                   </Button>

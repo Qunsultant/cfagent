@@ -78,6 +78,7 @@ type ScheduleGroup = "all" | "stocks" | "options" | "system" | "queued";
  *  existing importers. */
 export { FREQUENCY_PRESETS } from "./scheduledOptionsManager/format";
 import { ScheduledOptionsManager } from "./ScheduledOptionsManager";
+import type { TradeOrderContext } from "./trading/tradeOrderContext";
 
 /**
  * Translate a cron expression to human-readable English.
@@ -175,7 +176,7 @@ interface SchedulesPanelProps {
   activeEnv?: string;
   userLogin?: string;
   /** S7: forwarded to the screening section's live-result preview. */
-  onPreviewTrade?: (candidate: any) => void;
+  onPreviewTrade?: (ctx: TradeOrderContext) => void;
   /**
    * Issue #3121 S2: `schedule=<id>` deep link — once the list loads,
    * open the detail dialog for this schedule (the panel's per-schedule

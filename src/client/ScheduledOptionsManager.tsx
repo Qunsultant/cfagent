@@ -845,7 +845,7 @@ export function ScheduledOptionsManager({
       )}
 
       {/* Live Result Preview Banner */}
-      <LiveResultPreview liveResult={liveResult} onPreviewTrade={onPreviewTrade} />
+      <LiveResultPreview liveResult={liveResult} thesis={thesis} onPreviewTrade={onPreviewTrade} />
 
       {/* Latest autonomous options runs (#223): persisted analysis runs, newest first. */}
       <LatestRunsSection
