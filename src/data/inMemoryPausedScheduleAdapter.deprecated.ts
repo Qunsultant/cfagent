@@ -1,4 +1,12 @@
 /**
+ * @deprecated Issue #3121 Phase 2 (#3123) — retired by deprecation
+ * rename only (gitops §22: never deleted). Superseded by
+ * `src/data/inMemoryUnifiedScheduleAdapter.ts`. Successor:
+ * `src/data/inMemoryUnifiedScheduleAdapter.ts`. This file is FROZEN:
+ * no new features, no new consumers; delete only when it has zero
+ * consumers and the owner decides (see
+ * `docs/architecture/transition/deprecations.md`).
+ *
  * Issue #2337 (#1976 step 2) — the in-memory implementation of
  * the paused-schedule port, with semantics identical to the
  * DO-SQLite adapter (upsert by id, list paused_at ascending).
@@ -7,7 +15,7 @@
 import type {
   PausedScheduleRecord,
   PausedScheduleStore,
-} from "./pausedSchedulePorts";
+} from "./pausedSchedulePorts.deprecated";
 
 export class InMemoryPausedScheduleStore implements PausedScheduleStore {
   private records = new Map<string, PausedScheduleRecord>();

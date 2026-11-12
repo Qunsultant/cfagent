@@ -52,24 +52,31 @@ vi.mock("../src/client/socialPostingApi", () => ({
   }),
 }));
 
-vi.mock("../src/client/scheduleApi", () => ({
-  listGoals: async () => ({
-    goals: [
-      {
-        id: "daily-social-post",
-        name: "Daily social post",
-        cron: "0 9 * * *",
-        operation: "social-post",
-        budgetCents: 500,
-        lastRun: null,
-        enabled: false,
-      },
-    ],
-  }),
-  triggerGoal: async () => ({
-    tick: { timestamp: 1761600000000, goalsEvaluated: 1, jobsCreated: 0, jobsSkipped: 0, errors: [] },
-  }),
-}));
+// Issue #3121 Phase 2 (#3123) — the goal wrappers moved from
+// scheduleApi to jobsApi; the mock replaces only the two the panel
+// calls and keeps every other jobsApi export real.
+vi.mock("../src/client/jobsApi", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/client/jobsApi")>();
+  return {
+    ...original,
+    listGoals: async () => ({
+      goals: [
+        {
+          id: "daily-social-post",
+          name: "Daily social post",
+          cron: "0 9 * * *",
+          operation: "social-post",
+          budgetCents: 500,
+          lastRun: null,
+          enabled: false,
+        },
+      ],
+    }),
+    triggerGoal: async () => ({
+      tick: { timestamp: 1761600000000, goalsEvaluated: 1, jobsCreated: 0, jobsSkipped: 0, errors: [] },
+    }),
+  };
+});
 
 function tabButtons(container: HTMLElement): HTMLButtonElement[] {
   return [...container.querySelectorAll('[role="tab"]')] as HTMLButtonElement[];

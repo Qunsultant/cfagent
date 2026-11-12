@@ -17,7 +17,8 @@
  * The suite also pins the two bypass closures this slice owns
  * outside the family table: the job-outcome port's maintenance
  * surface (countRows / clearRows with the prune watermark
- * preserved EXACTLY) and the paused-schedule port's clear().
+ * preserved EXACTLY) and the unified schedule store's
+ * clearPaused() (#3123: paused rows only, never active ones).
  */
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
@@ -31,8 +32,9 @@ import {
   createEvidenceSatellitePorts,
   createInMemoryEvidenceSatellitePorts,
 } from "../src/data/createEvidenceSatellitePorts";
-import { createOptionsDiscoveryPorts } from "../src/data/createOptionsDiscoveryPorts";
-import { InMemoryPausedScheduleStore } from "../src/data/inMemoryPausedScheduleAdapter";
+import { createUnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
+import type { UnifiedScheduleRecord } from "../src/data/unifiedSchedulePorts";
 
 /** SqlStorage-shaped executor over node:sqlite (real semantics).
  *  Write results carry rowsWritten, mirroring the DO cursor. */
@@ -413,40 +415,49 @@ describe("conformance 4a: job-outcome maintenance surface (the watermark pin)", 
   });
 });
 
-describe("conformance 4a: paused-schedule clear through its port", () => {
-  const record = (id: string) => ({
+describe("conformance 4a: unified-schedule clearPaused through its port (#3123)", () => {
+  const record = (id: string, state: "paused" | "active" = "paused"): UnifiedScheduleRecord => ({
     id,
+    kind: "screen",
+    state,
     callback: "runScheduledScan",
-    payload: { userLogin: "alice" },
-    type: "interval" as const,
-    intervalSeconds: 300,
-    pausedAt: T0,
+    definition: {
+      type: "interval",
+      callback: "runScheduledScan",
+      payload: { userLogin: "alice" },
+      intervalSeconds: 300,
+    },
+    alarmId: id,
+    pausedAt: state === "paused" ? T0 : undefined,
+    createdAt: T0,
+    updatedAt: T0,
   });
 
-  it("DO-SQLite stores (sync + async): clear() empties the table", async () => {
+  it("DO-SQLite stores (sync + async): clearPaused() deletes paused rows only", async () => {
     const storage = new SqliteTestStorage();
-    const ports = createOptionsDiscoveryPorts({
+    const ports = createUnifiedSchedulePorts({
       sql: storage as never,
-      scheduleSql: storage as never,
     });
-    const store = ports.pausedSchedulesSync;
+    const store = ports.unifiedSchedulesSync;
     store.save(record("p1"));
     store.save(record("p2"));
-    expect(store.list()).toHaveLength(2);
-    store.clear();
-    expect(store.list()).toEqual([]);
-    await expect(ports.pausedSchedules.list()).resolves.toEqual([]);
-    // The async facade's clear() too.
-    await ports.pausedSchedules.save(record("p3"));
-    await ports.pausedSchedules.clear();
-    await expect(ports.pausedSchedules.list()).resolves.toEqual([]);
+    store.save(record("a1", "active"));
+    expect(store.list()).toHaveLength(3);
+    expect(store.clearPaused()).toBe(2);
+    expect(store.list().map((r) => r.id)).toEqual(["a1"]);
+    expect((await ports.unifiedSchedules.list()).map((r) => r.id)).toEqual(["a1"]);
+    // The async facade's clearPaused() too.
+    await ports.unifiedSchedules.save(record("p3"));
+    expect(await ports.unifiedSchedules.clearPaused()).toBe(1);
+    expect(await ports.unifiedSchedules.list()).toHaveLength(1);
   });
 
-  it("in-memory store: clear() empties the store", async () => {
-    const store = new InMemoryPausedScheduleStore();
+  it("in-memory store: clearPaused() deletes paused rows only", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
     await store.save(record("p1"));
-    expect(await store.list()).toHaveLength(1);
-    await store.clear();
-    expect(await store.list()).toEqual([]);
+    await store.save(record("a1", "active"));
+    expect(await store.list()).toHaveLength(2);
+    expect(await store.clearPaused()).toBe(1);
+    expect((await store.list()).map((r) => r.id)).toEqual(["a1"]);
   });
 });

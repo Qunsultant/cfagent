@@ -450,6 +450,7 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/health",
   "POST /api/qa/investigate",
   "POST /api/memory/search",
+  "GET /api/ledger/runs",
   "ANY PREFIX /api/schedule/",
   "ANY /api/social/brief",
   "ANY /api/social/approval",

@@ -9,7 +9,7 @@
 
 import type { AgentContext, Schedule, ScheduleOptions } from "agents";
 import type { AgentName } from "../../types";
-import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
+import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { buildSchedulePayload } from "../../trading";
 import {
   isLoginShaped,
@@ -148,7 +148,7 @@ export async function removeUnownedBaselineSchedules(ctx: ScheduleMaintenanceCon
  * published through the same audit + Slack path as the equity
  * screens. Follows the ensureStaleSweepSchedule pattern, with one
  * addition: a scan the user paused in the Schedules tab (#273's
- * paused store) is never silently re-armed.
+ * unified store, state paused) is never silently re-armed.
  */
 export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext, context: ScreenerExecutionContext): Promise<void> {
   const userLogin = context.userLogin;
@@ -160,11 +160,11 @@ export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext
   });
   if (already) return;
   try {
-    const paused = createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).pausedSchedulesSync.list();
+    const paused = createUnifiedSchedulePorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).unifiedSchedulesSync.listByState("paused");
     const pausedForUser = paused.some(
       (r) =>
         r.callback === "autonomousOptionsAnalysis" &&
-        (r.payload as { userLogin?: string } | undefined)?.userLogin === userLogin
+        (r.definition.payload as { userLogin?: string } | undefined)?.userLogin === userLogin
     );
     if (pausedForUser) return;
   } catch {

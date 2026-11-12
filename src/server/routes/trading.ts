@@ -24,6 +24,9 @@ import { actorGateway } from "../../services/cloudflareActorGateway";
 import {
   buildScheduleProvenance,
 } from "../../services/consolidatedScheduling";
+import { mergeLedgerRuns } from "../../services/unifiedLedger";
+import { workerDutiesFromInventory } from "../../services/unifiedScheduleManagement";
+import type { JobRunRecord } from "../../services/jobRunRecords";
 import { requireAuth } from "../auth";
 import { confirmSlackLink, INBOUND_EMAIL_ORCHESTRATOR_INSTANCE, verifyApprovalLinkForPrincipal, DEFAULT_SAVED_PRESETS, getDynamicLiveFlowItems, getDynamicFlowSummary, summarizeFlowProvenance, fetchRealMarketNews, fetchRealSecInsiderFilings, fetchRealCongressDisclosures, MarketCapCategory, AssetClassCategory } from "../../trading";
 import { handleMarketQuotesHttp } from "../../services/marketStream";
@@ -39,6 +42,55 @@ import { levelsForQuoteSwitch, resolveQuoteExpiryMode, resolveQuoteHttpProviderM
  * chain did.
  */
 export async function handleTradingScheduleRoutes(request: Request, env: Env, url: URL, path: string): Promise<Response | null> {
+    // Issue #3121 Phase 2 (#3123) — the one merged ledger read.
+    // Session-gated like every /api/schedule/* route below:
+    // unauthenticated → 401, before any DO stub. Fans out to the
+    // per-login orchestrator (/api/schedules/runs, the DO-SQLite
+    // half) and the ScheduledAgent (listJobRuns, the KV half) and
+    // merges newest-first with dedup on jobId+started+operation; a
+    // failed half answers partial:true with the half that
+    // succeeded, never a bare failure. A jobId filter applies to
+    // the merged list (both halves carry it as jobId).
+    if (path === "/api/ledger/runs" && request.method === "GET") {
+      const session = await requireAuth(request, env);
+      if (!session) return Response.json({ error: "Unauthorized: Please log in." }, { status: 401 });
+      const params = new URL(request.url).searchParams;
+      const jobId = params.get("jobId") || undefined;
+      const limit = Number(params.get("limit") || 50);
+      const userLogin = session.githubLogin;
+      let orchRuns: JobRunRecord[] = [];
+      let goalRuns: JobRunRecord[] = [];
+      let partial = false;
+      try {
+        const targetUrl = new URL(
+          `/schedules/runs?limit=${limit}${jobId ? `&scheduleId=${encodeURIComponent(jobId)}` : ""}`,
+          "https://agent.internal",
+        );
+        const forwardReq = new Request(targetUrl, request);
+        forwardReq.headers.set("x-user-login", userLogin);
+        const res = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
+        const data = (await res.json().catch(() => null)) as { ok?: unknown; runs?: unknown } | null;
+        if (res.ok && data && Array.isArray(data.runs)) {
+          orchRuns = data.runs as JobRunRecord[];
+        } else {
+          partial = true;
+        }
+      } catch {
+        partial = true;
+      }
+      try {
+        const sched = actorGateway.stub<{
+          listJobRuns(jobId?: string, limit?: number): Promise<unknown[]>;
+        }>((env as any).SCHEDULED_AGENT, "default");
+        goalRuns = (await sched.listJobRuns(jobId, limit)) as JobRunRecord[];
+      } catch {
+        partial = true;
+      }
+      let runs = mergeLedgerRuns(orchRuns, goalRuns);
+      if (jobId) runs = runs.filter((run) => run.jobId === jobId);
+      return Response.json({ ok: true, runs: runs.slice(0, limit), partial });
+    }
+
     // Issue #159 — ScheduledAgent dashboard API.
     // Issue #1156: session-gated, like the social brief/approval routes
     // below — unauthenticated → 401. Any signed-in user may use the
@@ -146,6 +198,10 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
           ok: true,
           systems: SCHEDULE_SYSTEMS,
           cronTriggers: WORKER_CRON_TRIGGERS_INVENTORY,
+          // Issue #3121 Phase 2 (#3123) — worker duties as unified
+          // records (kind worker-duty, state disabled): the same
+          // inventory, in the same shape as every other schedule.
+          workerDuties: workerDutiesFromInventory(new Date().toISOString()),
         });
       }
       const goalMatch = path.match(/^\/api\/schedule\/goals\/([^/]+)\/(enabled|trigger)$/);

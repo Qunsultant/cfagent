@@ -25,7 +25,7 @@
  * - All | Stocks | Options | System | Queued
  *
  * Paused jobs stay listed with a Paused badge (the backend keeps their
- * definition in the paused store; see services/scheduleManagement.ts).
+ * definition in the unified store; see services/unifiedScheduleManagement.ts).
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -38,7 +38,15 @@ import {
   useToast,
   type TableColumn,
 } from "./components/ui";
-import { apiFetch as fetch } from "./apiFetch";
+import {
+  deleteSchedule,
+  getSchedule,
+  listSchedules,
+  pauseSchedule,
+  resumeSchedule,
+  triggerSchedule,
+  updateSchedule,
+} from "./jobsApi";
 import { CadenceModal } from "./scheduledOptionsManager/CadenceModal";
 import { ConfirmModal } from "./scheduledOptionsManager/ConfirmModal";
 import { ScheduleDetailModal } from "./scheduledOptionsManager/ScheduleDetailModal";
@@ -225,18 +233,17 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/schedules", {
-        headers: envHeaders,
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as any;
-      setSchedules(data.schedules || data || []);
+      // Issue #3121 Phase 2 (#3123) — the one client module; the
+      // list item is the server shape (ScheduleItem is the panel's
+      // wider local view of the same rows).
+      setSchedules(
+        (await listSchedules(envHeaders)) as unknown as ScheduleItem[],
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load schedules");
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeEnv]);
 
   useEffect(() => {
@@ -244,14 +251,10 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   }, [fetchSchedules]);
 
   /** Shared mutating-action helper: run, surface errors, refresh. */
-  const runAction = async (fn: () => Promise<Response>) => {
+  const runAction = async (fn: () => Promise<unknown>) => {
     setActionError(null);
     try {
-      const res = await fn();
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as any;
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
+      await fn();
       await fetchSchedules();
       return true;
     } catch (err) {
@@ -272,9 +275,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   };
 
   const handleTriggerNow = async (s: ScheduleItem) => {
-    const ok = await runAction(() =>
-      fetch(`/api/schedules/${s.id}/trigger`, { method: "POST", headers: envHeaders })
-    );
+    const ok = await runAction(() => triggerSchedule(s.id, envHeaders));
     if (ok) {
       toast.success(`Triggered ${s.callback}`);
       setRefreshSignal((n) => n + 1);
@@ -283,10 +284,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
 
   const handlePauseResume = async (s: ScheduleItem) => {
     const ok = await runAction(() =>
-      fetch(`/api/schedules/${s.id}/${s.paused ? "resume" : "pause"}`, {
-        method: "POST",
-        headers: envHeaders,
-      })
+      s.paused
+        ? resumeSchedule(s.id, envHeaders)
+        : pauseSchedule(s.id, envHeaders),
     );
     if (ok) setRefreshSignal((n) => n + 1);
   };
@@ -298,15 +298,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     setCadenceBusy(true);
     setCadenceError(null);
     try {
-      const res = await fetch(`/api/schedules/${s.id}`, {
-        method: "PUT",
-        headers: { ...envHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json().catch(() => ({}))) as any;
-      if (!res.ok || data.success === false) {
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
+      await updateSchedule(s.id, body, envHeaders);
       setCadenceTarget(null);
       toast.success(`Cadence updated for ${s.id}`);
       await fetchSchedules();
@@ -323,13 +315,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     setDetailError(null);
     setDetailLoading(true);
     try {
-      const res = await fetch(`/api/schedules/${encodeURIComponent(s.id)}`, { headers: envHeaders });
-      const data = (await res.json().catch(() => ({}))) as any;
-      if (res.ok && data && typeof data === "object" && typeof data.id === "string") {
-        setDetail(data);
-      } else {
-        setDetailError(data?.error || "Schedule details unavailable.");
-      }
+      setDetail(await getSchedule(s.id, envHeaders));
     } catch (err) {
       setDetailError(err instanceof Error ? err.message : "Schedule details unavailable.");
     } finally {
@@ -355,7 +341,6 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     } else {
       setFocusMissing(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusScheduleId, loading, schedules]);
 
   // The screening kinds render in the screening section (kind rows);
@@ -607,9 +592,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           if (!target) return;
           setDeleting(true);
           try {
-            const ok = await runAction(() =>
-              fetch(`/api/schedules/${target.id}`, { method: "DELETE", headers: envHeaders })
-            );
+            const ok = await runAction(() => deleteSchedule(target.id, envHeaders));
             if (ok) setRefreshSignal((n) => n + 1);
           } finally {
             setDeleting(false);

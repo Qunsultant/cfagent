@@ -184,14 +184,14 @@ function fetchStub(
 
 function ledgerStub() {
   fetchStub((url) => {
-    if (url.includes("/api/schedules/runs")) {
+    // The one merged read (#3123): the server merges both halves,
+    // so the stub serves all five rows on the one endpoint, in
+    // newest-first order (the panel renders them as received).
+    if (url.includes("/api/ledger/runs")) {
       return {
         status: 200,
-        body: { runs: [REAL_RUN, POISONED_RUN, NULL_RUN, EMPTY_RUN] },
+        body: { runs: [REAL_RUN, POISONED_RUN, NULL_RUN, EMPTY_RUN, MISSING_RUN] },
       };
-    }
-    if (url.includes("/api/schedule/runs")) {
-      return { status: 200, body: { runs: [MISSING_RUN] } };
     }
     return null;
   });

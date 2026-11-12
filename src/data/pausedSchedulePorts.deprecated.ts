@@ -1,4 +1,16 @@
 /**
+ * @deprecated Issue #3121 Phase 2 (#3123) — retired by deprecation
+ * rename only (gitops §22: never deleted). Superseded by
+ * `src/data/unifiedSchedulePorts.ts`. Pause is now a record
+ * state in the unified store: successor
+ * `src/data/unifiedSchedulePorts.ts` (+
+ * `src/data/doSqliteUnifiedScheduleAdapter.ts` /
+ * `src/data/inMemoryUnifiedScheduleAdapter.ts`), management in
+ * `src/services/unifiedScheduleManagement.ts`. This file is FROZEN:
+ * no new features, no new consumers; delete only when it has zero
+ * consumers and the owner decides (see
+ * `docs/architecture/transition/deprecations.md`).
+ *
  * Issue #2337 (#1976 step 2, ADR 0022 D-I step 2) — paused-
  * schedule port: pause/resume state for durable schedules
  * (issue #273).

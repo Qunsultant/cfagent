@@ -46,6 +46,7 @@ PR.
 | [0026](0026-cfpay-acceptance-decision.md) | cfpay acceptance decision — contract, options, and recommendation | Proposed |
 | [0027](0027-one-stage-runner-contract.md) | One stage-runner contract for every screen invocation mode: plan + checkpoint + three drivers, `mas_async_jobs` as the single unit store, retry budgets from `pipelinePolicy`, fan-out cap named not truncated (#2601, #2621) | Proposed |
 | [0028](0028-data-provider-broker-taxonomy.md) | Data-provider/broker taxonomy split, alpaca/alpaca defaults, Public.com as a live broker: declared == servable, kind map, no-paper-mode refusal, preview-first copilot tools (#3990) | Accepted |
+| [0029](0029-unified-schedule-store.md) | One unified schedule store, one run ledger, one management path: ScheduleStore port, pause as record state, KV ledger half → DO SQLite, jobsApi convergence, five modules retired by deprecation rename (#3123) | Accepted |
 
 **Note on ADR 0004:** the number 0004 was assigned twice — to the UX token
 architecture decision and to the screener decoupling decision. Both records

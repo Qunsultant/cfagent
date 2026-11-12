@@ -65,7 +65,14 @@ import {
   zonedDateParts,
   type GoalScheduleAuditEvent,
 } from "../services/consolidatedScheduling";
-import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
+import { SHARED_ORCHESTRATOR_INSTANCE, getServiceUserLogin } from "../security/serviceIdentity";
+import { SqlUnifiedScheduleStore } from "../data/doSqliteUnifiedScheduleAdapter";
+import { goalToRecord, recordToGoal } from "../services/unifiedScheduleManagement";
+import {
+  fetchLedgerRuns,
+  mergeLedgerRuns,
+  postLedgerRun,
+} from "../services/unifiedLedger";
 import { createSocialStoresFromNamespace } from "./social/durableStores";
 // Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535): the
 // job pipeline's host wiring — declarations, control-plane
@@ -411,17 +418,130 @@ export class ScheduledAgent extends PortThink {
    */
   private goalFiringClaims = new Map<string, GoalFiringMarker>();
 
-  private async getGoals(): Promise<ScheduledGoal[]> {
-    const stored = await this.ctx.storage.get<ScheduledGoal[]>("goals");
-    if (!stored) {
-      await this.ctx.storage.put("goals", DEFAULT_SCHEDULES);
-      return DEFAULT_SCHEDULES;
+  /**
+   * Issue #3121 Phase 2 (#3123) — the unified schedule store for
+   * this DO (DO SQLite `unified_schedules`), or null when the host
+   * has no SQL storage (tests / legacy hosts). A null store keeps
+   * the legacy KV behavior below — the store is never a new
+   * failure mode for a tick.
+   */
+  private unifiedScheduleStore(): SqlUnifiedScheduleStore | null {
+    const storage = this.ctx.storage as unknown as { sql?: unknown };
+    const sql = storage?.sql;
+    if (!sql) return null;
+    try {
+      return new SqlUnifiedScheduleStore(sql as never);
+    } catch {
+      return null;
     }
-    return stored;
+  }
+
+  /**
+   * Issue #3121 Phase 2 (#3123) — the ledger post function for the
+   * shared orchestrator instance (the same stub channel as the
+   * goal-lifecycle audit sink), or null when the host binds no
+   * ORCHESTRATOR_AGENT. A null post keeps the legacy KV ledger.
+   */
+  private ledgerPost(): ((req: Request) => Promise<Response>) | null {
+    try {
+      const stub = actorGateway.stub<DoStubLike>(
+        this.env.ORCHESTRATOR_AGENT,
+        SHARED_ORCHESTRATOR_INSTANCE,
+      );
+      return (req: Request) => stub.fetch(req);
+    } catch {
+      return null;
+    }
+  }
+
+  private async getGoals(): Promise<ScheduledGoal[]> {
+    const store = this.unifiedScheduleStore();
+    if (!store) {
+      // No SQL storage: the `"goals"` KV key, unchanged.
+      const stored = await this.ctx.storage.get<ScheduledGoal[]>("goals");
+      if (!stored) {
+        await this.ctx.storage.put("goals", DEFAULT_SCHEDULES);
+        return DEFAULT_SCHEDULES;
+      }
+      return stored;
+    }
+    // One-way KV → store import: goals that only exist under the
+    // legacy key move into the unified store once, keyed by id; the
+    // store wins on conflict, and the key is never written again.
+    const stored = store.listByKind("goal");
+    const goals = stored
+      .map((record) => recordToGoal(record))
+      .filter((goal): goal is ScheduledGoal => goal !== undefined);
+    const kvGoals = await this.ctx.storage
+      .get<ScheduledGoal[]>("goals")
+      .catch(() => undefined);
+    if (kvGoals && kvGoals.length > 0) {
+      const known = new Set(goals.map((goal) => goal.id));
+      for (const goal of kvGoals) {
+        if (!goal || typeof goal.id !== "string" || known.has(goal.id)) continue;
+        try {
+          store.save(goalToRecord(goal));
+          goals.push(goal);
+          known.add(goal.id);
+        } catch {
+          // The KV key stays the read for this goal.
+        }
+      }
+    }
+    if (goals.length === 0) {
+      // Seed rule, new home: DEFAULT_SCHEDULES only when empty.
+      // Distinct created_at values (one second apart) preserve the
+      // seed order under the store's created_at ordering.
+      const baseMs = Date.now();
+      for (let i = 0; i < DEFAULT_SCHEDULES.length; i++) {
+        const goal = DEFAULT_SCHEDULES[i];
+        try {
+          const record = goalToRecord(goal);
+          record.createdAt = new Date(baseMs + i * 1000).toISOString();
+          record.updatedAt = record.createdAt;
+          store.save(record);
+        } catch {
+          // Seed best-effort; the return below still serves the goals.
+        }
+      }
+      return [...DEFAULT_SCHEDULES];
+    }
+    return goals;
   }
 
   private async saveGoals(goals: ScheduledGoal[]): Promise<void> {
-    await this.ctx.storage.put("goals", goals);
+    const store = this.unifiedScheduleStore();
+    if (!store) {
+      await this.ctx.storage.put("goals", goals);
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const existing = store.listByKind("goal");
+    const existingById = new Map(existing.map((record) => [record.id, record]));
+    const wanted = new Set(goals.map((goal) => goal.id));
+    for (const record of existing) {
+      if (wanted.has(record.id)) continue;
+      try {
+        store.remove(record.id);
+      } catch {
+        // A failed remove leaves a stale row the next read still serves;
+        // the goal is gone from the wanted set, so it is not re-added.
+      }
+    }
+    for (const goal of goals) {
+      const record = goalToRecord(goal);
+      // Preserve the stored created_at: re-saving every goal must
+      // not reshuffle the list order under created_at ordering.
+      const prev = existingById.get(goal.id);
+      if (prev) record.createdAt = prev.createdAt;
+      record.updatedAt = nowIso;
+      try {
+        store.save(record);
+      } catch {
+        // A failed store write leaves the goal in the KV key, where
+        // the next read's one-way import picks it up.
+      }
+    }
   }
 
   /** Recent cron ticks, newest first (capped). */
@@ -437,18 +557,29 @@ export class ScheduledAgent extends PortThink {
   }
 
   /**
-   * Issue #2964 — per-run result records. Same DO key-value pattern
-   * as goals/tickHistory, under the "jobRunRecords" key, newest
-   * first, capped. The aggregate tick history stays as the aggregate
-   * view; these records are the per-run view. Recording never
-   * breaks a tick: a storage failure is swallowed, so a run that
-   * happened but left no record is still visible via the tick.
+   * Issue #2964 — per-run result records. The legacy home is the
+   * DO key-value `"jobRunRecords"` key (newest first, capped);
+   * issue #3121 Phase 2 (#3123) moves new rows to the one physical
+   * ledger (OrchestratorAgent DO SQLite, shared instance) and this
+   * read merges both homes, so history is never dropped silently.
+   * Recording never breaks a tick: a storage failure is swallowed,
+   * so a run that happened but left no record is still visible via
+   * the tick.
    */
-  private async getJobRuns(): Promise<JobRunRecord[]> {
+  private async getKvJobRuns(): Promise<JobRunRecord[]> {
     const stored = await this.ctx.storage.get<JobRunRecord[]>("jobRunRecords");
     // Issue #3121 S1 — rows stored before the §4 columns read back
     // normalized (trigger "unknown", ids null); no silent backfill.
     return (stored ?? []).map((record) => normalizeJobRunRecord(record));
+  }
+
+  private async getJobRuns(): Promise<JobRunRecord[]> {
+    const legacy = await this.getKvJobRuns().catch(() => [] as JobRunRecord[]);
+    const post = this.ledgerPost();
+    if (!post) return legacy;
+    const shared = await fetchLedgerRuns(post, { limit: SCHEDULED_AGENT_JOB_RUN_CAP });
+    if (!shared) return legacy;
+    return mergeLedgerRuns(shared, legacy).slice(0, SCHEDULED_AGENT_JOB_RUN_CAP);
   }
 
   private async recordJobRun(
@@ -456,7 +587,16 @@ export class ScheduledAgent extends PortThink {
   ): Promise<void> {
     try {
       const built = buildJobRunRecord({ system: "scheduled-agent-goal", ...record });
-      const runs = await this.getJobRuns();
+      const post = this.ledgerPost();
+      if (post) {
+        // The one physical ledger, best-effort: a 401 (no service
+        // user configured) or a failed post falls through to the
+        // legacy KV key below — the row is never lost, and the
+        // merged read covers both homes.
+        const serviceLogin = getServiceUserLogin(this.env);
+        if (await postLedgerRun(post, built, serviceLogin)) return;
+      }
+      const runs = await this.getKvJobRuns();
       runs.unshift(built);
       await this.ctx.storage.put("jobRunRecords", runs.slice(0, SCHEDULED_AGENT_JOB_RUN_CAP));
     } catch {

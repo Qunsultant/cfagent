@@ -513,8 +513,9 @@ const OVERVIEW = {
 describe("S2-P09 ledger panel — legacy and linked rows both render, nulls as dashes (#3121)", () => {
   it("renders the four linkage columns with nulls as '—' and trigger 'unknown'", async () => {
     fetchStub((url) => {
-      if (url.includes("/api/schedules/runs")) return { status: 200, body: { runs: [LINKED_RUN] } };
-      if (url.includes("/api/schedule/runs")) return { status: 200, body: { runs: [LEGACY_RUN] } };
+      // The one merged read (#3123): the server merges both halves,
+      // so the stub serves both rows on the one endpoint.
+      if (url.includes("/api/ledger/runs")) return { status: 200, body: { runs: [LINKED_RUN, LEGACY_RUN] } };
       return null;
     });
     await render(<ScheduleRunLedgerPanel />);
@@ -535,8 +536,9 @@ describe("S2-P09 ledger panel — legacy and linked rows both render, nulls as d
 
   it("a run filter shows only that job's history", async () => {
     fetchStub((url) => {
-      if (url.includes("/api/schedules/runs")) return { status: 200, body: { runs: [LINKED_RUN] } };
-      if (url.includes("/api/schedule/runs")) return { status: 200, body: { runs: [LEGACY_RUN] } };
+      // The one merged read (#3123), filtered by jobId server-side;
+      // the stub emulates the filter by returning only the matching row.
+      if (url.includes("/api/ledger/runs")) return { status: 200, body: { runs: [LEGACY_RUN] } };
       return null;
     });
     await render(<ScheduleRunLedgerPanel runId="daily-qa-sweep" />);
@@ -601,8 +603,8 @@ describe("S2-P11 home — four tabs, list default, ledger view loads (#3121)", (
   it("switching to Run ledger loads the consolidated ledger", async () => {
     fetchStub((url) => {
       if (url === "/api/schedules") return { status: 200, body: { schedules: [] } };
-      if (url.includes("/api/schedules/runs")) return { status: 200, body: { runs: [LINKED_RUN] } };
-      if (url.includes("/api/schedule/runs")) return { status: 200, body: { runs: [] } };
+      // The one merged read (#3123): both halves on the one endpoint.
+      if (url.includes("/api/ledger/runs")) return { status: 200, body: { runs: [LINKED_RUN] } };
       return null;
     });
     await render(
@@ -674,8 +676,10 @@ describe("S2-P13 one of everything — one UX, one ledger read path, pure core (
   it("the ledger view reuses the JobsPanel reads instead of a second read path", () => {
     const ledger = read("src/client/ScheduleRunLedgerPanel.tsx");
     expect(ledger).toContain('from "./jobsApi"');
-    expect(ledger).toContain("listScheduleRuns");
-    expect(ledger).toContain("listGoalRuns");
+    // Issue #3121 Phase 2 (#3123) — the one merged ledger read.
+    expect(ledger).toContain("listAllRuns");
+    expect(ledger).not.toContain("listScheduleRuns");
+    expect(ledger).not.toContain("listGoalRuns");
     expect(ledger).not.toContain("fetch(`/api/schedules/runs");
     expect(ledger).not.toContain("fetch(`/api/schedule/runs");
   });

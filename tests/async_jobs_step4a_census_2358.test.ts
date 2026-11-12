@@ -22,7 +22,7 @@
  *  - In-layer: doSqliteAsyncJobAdapter.ts 34 (new);
  *    doSqliteJobOutcomeAdapter.ts 12 -> 13 (+1: clearRows;
  *    countRows delegates to the existing count);
- *    doSqlitePausedScheduleAdapter.ts 6 -> 7 (+1: clearSync);
+ *    doSqlitePausedScheduleAdapter.deprecated.ts 6 -> 7 (+1: clearSync);
  *    the in-memory adapter, ports and composition root hold 0.
  *  - By-table: mas_async_jobs' writer set becomes exactly
  *    [src/data/doSqliteAsyncJobAdapter.ts]; the maintenance
@@ -59,7 +59,7 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // migrations and the guarded heartbeat UPDATE).
   ["src/data/doSqliteAsyncJobAdapter.ts", 43],
   ["src/data/doSqliteJobOutcomeAdapter.ts", 13],
-  ["src/data/doSqlitePausedScheduleAdapter.ts", 7],
+  ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts", 7],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],
   ["src/data/asyncJobPorts.ts", 0],
   ["src/data/createAsyncJobPorts.ts", 0],
@@ -125,6 +125,9 @@ describe("step-4a family census (#2358)", () => {
     expect(maintenance).toContain("createAsyncJobPorts");
     expect(maintenance).toContain("countRows()");
     expect(maintenance).toContain("clearRows()");
-    expect(maintenance).toContain("store.clear()");
+    // The paused delete lives in its adapter: the unified table also
+    // holds live rows, so the wipe goes through `clearPaused()`
+    // (paused rows only), not a full clear (#3123).
+    expect(maintenance).toContain("store.clearPaused()");
   });
 });

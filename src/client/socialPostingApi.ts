@@ -2,7 +2,7 @@
  * Issue #1382: client API for the social posting panel.
  *
  * Reuses the existing session-gated routes only — no new backend routes.
- * Same-origin fetch carries the session cookie, exactly as in scheduleApi.
+ * Same-origin fetch carries the session cookie, exactly as in jobsApi.
  * The brief editor stores only what the user types; this module never
  * invents content.
  */

@@ -7,8 +7,9 @@
  * endpoint covers the remaining clearable state: the app async-job queue
  * (`mas_async_jobs`), the job-outcome history (`mas_job_outcomes`), the
  * outcome prune watermark (`mas_job_outcomes_meta`), the audit history
- * (`mas_events`, gated — see below), and the paused-schedule store
- * (`paused_schedules`).
+ * (`mas_events`, gated — see below), and the paused schedule records
+ * in the unified store (`unified_schedules` — paused rows only; an
+ * active record is never wiped here, issue #3121 Phase 2 #3123).
  *
  * Every clear follows the same contract as cancel-all:
  * - Preview without `{ confirm: true }`: counts what WOULD be deleted,
@@ -41,7 +42,7 @@
 import type { AgentContext } from "agents";
 import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
 import { createEvidenceSatellitePorts } from "../../data/createEvidenceSatellitePorts";
-import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
+import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 
 export interface MaintenanceRouteContext {
   /** Durable Object agent context (owner: OrchestratorAgent). */
@@ -59,7 +60,7 @@ const CLEARABLE_TABLES = [
   "mas_job_outcomes",
   "mas_job_outcomes_meta",
   "mas_events",
-  "paused_schedules",
+  "unified_schedules",
 ] as const;
 
 type ClearableTable = (typeof CLEARABLE_TABLES)[number];
@@ -282,13 +283,13 @@ export async function handleMaintenanceRoutes(
       };
     } else {
       scope = "instance";
-      const store = createOptionsDiscoveryPorts({ sql: sql as never, scheduleSql: sql as never }).pausedSchedulesSync;
-      wouldDelete = store.list().length;
+      const store = createUnifiedSchedulePorts({ sql: sql as never }).unifiedSchedulesSync;
+      wouldDelete = store.listByState("paused").length;
       runDelete = () => {
-        // #2358: the bulk clear flows through the paused-schedule
-        // port's clear() (added with this slice) instead of a raw
-        // delete against the table.
-        store.clear();
+        // #3123: the wipe clears paused records only — the unified
+        // store's clearPaused() deletes state='paused' rows and
+        // never touches active records.
+        store.clearPaused();
       };
     }
 

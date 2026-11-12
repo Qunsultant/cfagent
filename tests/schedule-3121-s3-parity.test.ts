@@ -108,10 +108,16 @@ function makeAuditCapture(
     get: (_id: unknown) => ({
       fetch: async (req: Request) => {
         if (opts.throws) throw new Error("audit down");
-        posted.push({
-          url: req.url,
-          body: await req.clone().json().catch(() => null),
-        });
+        // The ORCHESTRATOR_AGENT namespace carries TWO channels
+        // (#3123): the audit sink AND the ledger post/read channel
+        // (POST /schedules/runs/record, GET /schedules/runs). This
+        // capture is the audit sink's — only the audit URL counts.
+        if (req.url === "https://agent.internal/audit/event") {
+          posted.push({
+            url: req.url,
+            body: await req.clone().json().catch(() => null),
+          });
+        }
         return { status: opts.status ?? 200 };
       },
     }),
@@ -710,9 +716,10 @@ describe("S3-P05 #3312 — the DO-side audit sink covers every entry path (#3121
 });
 
 describe("S3-P06 the goals view reads the one consolidated ledger (#3121)", () => {
-  it("the goals panel reads runs from listGoalRuns, normalized, with the ledger's null rule", () => {
+  it("the goals panel reads runs from listAllRuns, normalized, with the ledger's null rule", () => {
     const panel = source("src/client/ScheduledGoalsPanel.tsx");
-    expect(panel).toContain("listGoalRuns");
+    expect(panel).toContain("listAllRuns");
+    expect(panel).not.toContain("listGoalRuns");
     expect(panel).toContain("normalizeJobRunRecord");
     expect(panel).toContain("ledgerLinkageCell");
     expect(panel).toContain("Recent goal runs");

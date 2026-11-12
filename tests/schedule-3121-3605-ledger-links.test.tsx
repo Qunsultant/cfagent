@@ -110,8 +110,9 @@ function fetchStub(
 
 function ledgerStub() {
   fetchStub((url) => {
-    if (url.includes("/api/schedules/runs")) return { status: 200, body: { runs: [LINKED_RUN] } };
-    if (url.includes("/api/schedule/runs")) return { status: 200, body: { runs: [LEGACY_RUN] } };
+    // The one merged read (#3123): the server merges both halves,
+    // so the stub serves both rows on the one endpoint.
+    if (url.includes("/api/ledger/runs")) return { status: 200, body: { runs: [LINKED_RUN, LEGACY_RUN] } };
     return null;
   });
 }
@@ -148,8 +149,8 @@ describe("3605-P01 Job cell — clicking the id opens that job's run history (#3
 describe("3605-P02 Async job cell — clicking the id opens the job detail (#3605)", () => {
   it("fetches GET /api/jobs/<id> and renders the job result", async () => {
     fetchStub((url) => {
-      if (url.includes("/api/schedules/runs")) return { status: 200, body: { runs: [LINKED_RUN] } };
-      if (url.includes("/api/schedule/runs")) return { status: 200, body: { runs: [LEGACY_RUN] } };
+      // The one merged read (#3123): both halves on the one endpoint.
+      if (url.includes("/api/ledger/runs")) return { status: 200, body: { runs: [LINKED_RUN, LEGACY_RUN] } };
       if (url === "/api/jobs/job-1") {
         return { status: 200, body: { jobId: "job-1", status: "completed", result: { matchedCount: 3 } } };
       }

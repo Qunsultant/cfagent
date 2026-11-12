@@ -1,4 +1,13 @@
 /**
+ * @deprecated Issue #3121 Phase 2 (#3123) — retired by deprecation
+ * rename only (gitops §22: never deleted). Superseded by
+ * `src/services/unifiedScheduleManagement.ts`. Pause/resume/trigger/
+ * update/detail now live in `src/services/unifiedScheduleManagement.ts`
+ * (`resolveScheduleUpdate` moved there verbatim); the pure list
+ * projections live there too. This file is FROZEN: no new features,
+ * no new consumers; delete only when it has zero consumers and the
+ * owner decides (see `docs/architecture/transition/deprecations.md`).
+ *
  * Issue #273 — schedule management core behind the Schedules tab:
  * pause/resume and frequency/payload updates for durable schedules.
  *
@@ -28,15 +37,15 @@ import { buildSchedulePayload, SCREENING_SCHEDULE_CALLBACKS } from "../trading";
 import type {
   PausedScheduleRecord,
   ScheduleDefinitionLike,
-} from "../data/pausedSchedulePorts";
+} from "../data/pausedSchedulePorts.deprecated";
 
 export {
   PAUSED_SCHEDULES_TABLE,
   type PausedScheduleRecord,
   type PausedScheduleStore,
   type ScheduleDefinitionLike,
-} from "../data/pausedSchedulePorts";
-export { SqlPausedScheduleStore } from "../data/doSqlitePausedScheduleAdapter";
+} from "../data/pausedSchedulePorts.deprecated";
+export { SqlPausedScheduleStore } from "../data/doSqlitePausedScheduleAdapter.deprecated";
 
 export function scheduleToPausedRecord(
   schedule: Schedule<unknown>,

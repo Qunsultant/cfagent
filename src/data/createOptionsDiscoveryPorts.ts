@@ -54,10 +54,6 @@ import { SqlDiscoveryRunStore } from "./doSqliteDiscoveryRunAdapter";
 import { SqlDiscoverySetupStore } from "./doSqliteDiscoverySetupAdapter";
 import { SqlFeedSnapshotStore } from "./doSqliteFeedSnapshotAdapter";
 import { SqlIvHistoryStore } from "./doSqliteIvHistoryAdapter";
-import {
-  DoSqlitePausedScheduleStore,
-  SqlPausedScheduleStore,
-} from "./doSqlitePausedScheduleAdapter";
 import { SqlScanRunStore } from "./doSqliteScanRunAdapter";
 import { SqlStrategyProfileStore } from "./doSqliteStrategyProfileAdapter";
 import type { DiscoveryAlertStore } from "./discoveryAlertPorts";
@@ -65,10 +61,8 @@ import type { DiscoveryRunStore } from "./discoveryRunPorts";
 import type { DiscoverySetupStore } from "./discoverySetupPorts";
 import type { FeedSnapshotStore } from "./feedSnapshotPorts";
 import type { IvHistoryStore } from "./ivHistoryPorts";
-import type { PausedScheduleStore } from "./pausedSchedulePorts";
 import type { ScanRunStore, ScanSqlExecutor } from "./scanRunPorts";
 import type { StrategyProfileStore } from "./strategyProfilePorts";
-import type { SqlStorage } from "../orm";
 
 export interface OptionsDiscoveryPorts {
   scanRuns: ScanRunStore;
@@ -78,25 +72,13 @@ export interface OptionsDiscoveryPorts {
   ivHistory: IvHistoryStore;
   strategyProfiles: StrategyProfileStore;
   feedSnapshots: FeedSnapshotStore;
-  pausedSchedules: PausedScheduleStore;
-  /** The legacy synchronous paused-schedule surface (the same
-   *  table through the sync class) for the pre-port call sites
-   *  in scheduleManagement's consumers. */
-  pausedSchedulesSync: SqlPausedScheduleStore;
 }
 
 export interface OptionsDiscoveryPortInputs {
   /** The DO sql executor (ctx.storage.sql-shaped). Every
-   *  family adapter except paused schedules executes through
-   *  this handle; the family's executor interfaces are all the
-   *  same structural shape. */
+   *  family adapter executes through this handle; the family's
+   *  executor interfaces are all the same structural shape. */
   sql: ScanSqlExecutor;
-  /** The Agents-SDK SqlStorage handle for the paused-schedule
-   *  store (ctx.storage.sql IS this handle on the orchestrator
-   *  host; typed separately because that store's legacy surface
-   *  takes the SqlStorage shape). Defaults to `sql` when the
-   *  host's executor is the SqlStorage object itself. */
-  scheduleSql?: SqlStorage;
   /** The transaction-capable storage object (ctx.storage) and the process registered the transaction runner (src/server.ts; see transactionRunnerProvider.ts).
    *  When present, the adapters' multi-statement units run
    *  through withTransaction; when absent they apply
@@ -117,7 +99,6 @@ export function createOptionsDiscoveryPorts(
 ): OptionsDiscoveryPorts {
   const { sql } = inputs;
   const storage = inputs.storage as DoTransactionStorage | undefined;
-  const scheduleSql = inputs.scheduleSql ?? (sql as unknown as SqlStorage);
   return {
     scanRuns: new SqlScanRunStore(sql, {}, storage),
     discoveryRuns: new SqlDiscoveryRunStore(sql, {}, storage),
@@ -126,8 +107,6 @@ export function createOptionsDiscoveryPorts(
     ivHistory: new SqlIvHistoryStore(sql),
     strategyProfiles: new SqlStrategyProfileStore(sql, {}, storage),
     feedSnapshots: new SqlFeedSnapshotStore(sql, undefined, storage),
-    pausedSchedules: new DoSqlitePausedScheduleStore(scheduleSql, storage),
-    pausedSchedulesSync: new SqlPausedScheduleStore(scheduleSql),
   };
 }
 
