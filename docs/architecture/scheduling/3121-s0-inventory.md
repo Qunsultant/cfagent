@@ -1196,6 +1196,35 @@ SDK scheduler's `cf_agents_jobs` stays the alarm substrate
 | D1 pipeline run records stay in D1 (workflow residency has no DO sql handle) | #3123 | — no home — | **Filed #4124 (open)** |
 | `mas_async_jobs` stays the async-job execution record; `mas_job_outcomes` stays the outcome sink (recorded scoping decision, not a merge) | #3123 | Scoping decision in the #3123 PR body + this row | #3123 — landed |
 
+### 9.9 Phase 2 #3124 optimization — single scan, single ledger read, index coverage
+
+#3124 removes the split-era cost that survived consolidation: every
+goal evaluation re-listed the store (a tick cost two
+`listByKind("goal")` scans, a manual trigger up to five), and the two
+unfiltered reads — the management `list()` and the ledger
+`listRecent` — walked their whole tables and sorted them on every
+call, because no index served their ORDER BY. The fix threads the
+loaded snapshot through each evaluation (load once, save from the
+snapshot) and adds the two missing ordering indexes. No timing,
+firing-time, cron-expression, or payload change; no surface change;
+the merged ledger read's two halves stay two homes by design
+(per-login orchestrator DO-SQLite + ScheduledAgent KV + shared
+instance), and Autopilot / Workflow Runs keep their own row types
+(outcomes; workflow jobs/transitions/reports) under the #3123 and
+#3946-Option-B scoping decisions — they never were ledger rows.
+Measured before/after in the #3124 PR body: rows scanned per
+evaluation, evaluation latency, ledger read latency.
+
+| Capability | S0 id | Consolidated home | Status |
+|------------|-------|-------------------|--------|
+| Single evaluation scan: one `listByKind("goal")` per tick, trigger, add, remove, setEnabled, materialize; the save step reuses the loaded snapshot (removal sync + createdAt preservation unchanged) | #3124 | `ScheduledAgent` `loadGoalRecords` / `saveGoals(goals, existing)` / `onCron` `preloadedGoals` | #3124 — landed |
+| Single ledger read path: `listAllRuns` is the only client ledger read (JobsPanel, ScheduleRunLedgerPanel, ScheduledGoalsPanel); the merged read's halves each do one store read | #3124 | `GET /api/ledger/runs` + `src/client/jobsApi.ts` `listAllRuns` | #3124 — landed |
+| Index coverage: unfiltered-list ordering index on `unified_schedules`; recent-read ordering index on `job_run_records` (ordering/seek, not covering — both queries are `SELECT *` over wide rows) | #3124 | `src/data/unifiedScheduleIndexSchema.ts` + `src/data/jobRunRecordIndexSchema.ts` (#2280 pattern) | #3124 — landed |
+| Measured before/after (rows scanned, evaluation latency, ledger read latency) | #3124 | PR body measurement table | #3124 — landed |
+| Direct `GET /api/schedule/runs` parallel ledger path stays live (no client caller; redirecting it would change its response) | #3124 | — no home — | **Filed #4203 (open)** |
+| D1 `job_run_records` recent-read index not added (needs a new migration, never an edit to 0047) | #3124 | — no home — | **Filed #4204 (open)** |
+| Tick re-saves every goal on every tick (the dominant tick cost after the scan fix) not changed — writes, not scans; needs its own dirty-check slice | #3124 | — no home — | **Filed #4205 (open)** |
+
 What stays open after S6 (the program does not close with this
 slice): the filed sub-issues #3393, #3394, #3314, #3313, #3312 (live
 proof only), #3361, #3640–#3645 (unbuilt per owner direction),
