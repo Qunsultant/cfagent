@@ -87,4 +87,14 @@ describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
       "head.repo.full_name == github.repository",
     );
   });
+
+  it("enqueues with the App token — the workflow token is FORBIDDEN there (#4305)", () => {
+    // Observed on #4320: enqueuePullRequest answered FORBIDDEN, "Resource not
+    // accessible by integration", with the workflow token. The App token is
+    // scoped to this repository and used only for that call.
+    expect(autoMergeTrustedYml).toContain("create-github-app-token");
+    expect(autoMergeTrustedYml).toContain(
+      "GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}",
+    );
+  });
 });

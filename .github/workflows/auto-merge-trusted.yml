@@ -24,9 +24,14 @@
 # job never checks out or executes PR code. The enqueue job runs on the default
 # branch (workflow_run semantics) and only calls the queue API.
 #
-# SAFETY: no checkout, no PR code execution, no repository secrets beyond the
-# workflow's own token scoped to labels + pull requests. The required checks and
-# the queue's merge-group validation remain the gate.
+# TOKEN: the labelling job uses the workflow's own token. The enqueue job needs
+# the GitHub App token: `enqueuePullRequest` answers FORBIDDEN to the workflow
+# token ("Resource not accessible by integration", observed on #4320), and the
+# App's pull-requests + contents scopes are what the queue API accepts.
+#
+# SAFETY: no checkout, no PR code execution. The App token is short-lived,
+# scoped to this one repository, and used only for the queue call. The required
+# checks and the queue's merge-group validation remain the gate.
 
 name: Auto-merge trusted PRs
 
@@ -78,9 +83,21 @@ jobs:
     if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     steps:
+      - name: Create short-lived GitHub App token (queue API scope)
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUTO_UPDATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTO_UPDATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: cfagent
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Enqueue the open PR for this branch
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
