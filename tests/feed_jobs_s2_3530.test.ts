@@ -295,6 +295,7 @@ describe("feed job registry (#3530 S2)", () => {
       "yahoo-nasdaq100-sentiment",
       "yahoo-nasdaq100-technicals",
       "yahoo-sp100-quotes",
+      "yahoo-sp400-quotes",
       "yahoo-sp500-quotes",
     ]);
     for (const [id, sourceId] of [

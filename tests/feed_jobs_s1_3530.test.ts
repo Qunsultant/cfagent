@@ -366,6 +366,7 @@ describe("feed job contract + registry (#3530 S1)", () => {
       "yahoo-sp100-quotes",
       "yahoo-sp500-quotes",
       "yahoo-dow-quotes",
+      "yahoo-sp400-quotes",
       "alpaca-nasdaq100-quotes",
       "etrade-nasdaq100-quotes",
       "public-nasdaq100-quotes",
