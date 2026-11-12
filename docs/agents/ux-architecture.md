@@ -666,6 +666,36 @@ Define typed contracts before implementation:
 
 The interface must not conceal backend failures with polished success states.
 
+### Conformance gates
+
+Two gates bind the template program (#2150), both green on day one
+and ratcheting forward — a gate that ships red is a wish, not a gate.
+
+- **Route→template gate (#3136).** Every nav route has a template
+  state in the `template` key of
+  `tests/ux_shell_exceptions_3047.json`, verified against the source
+  by `tests/template_conformance_3136.test.ts`: `template` (renders
+  `<PageTemplate`), `shell` (renders `<PageShell`, migrates later),
+  `hub` (renders inside the trading hub's PageShell wrapper),
+  `chat-inline` (inline `TAB_CONTENT` entry in `Chat.tsx`, inside
+  Chat's PageShell), `exception` (not a page — only `chat`). A route
+  flips to `template` only in the PR that renders `<PageTemplate` in
+  its panel file, which also extends `CONFORMING_TEMPLATE_ROUTES` in
+  the test. One conforming route exists today (risk-analysis).
+- **Bespoke-layout freeze (#3136).** A bespoke layout class is a
+  non-primitive class rule whose declarations include a layout
+  property (`display` grid/flex, `grid-template-*`,
+  `flex-direction`, `grid-column`/`grid-row`, `position`
+  absolute/fixed). The complete set at freeze time (1,185 classes)
+  lives in `tests/ux_layout_freeze_3136.json`, each entry carrying
+  its defining file and the slice that burns it down (Wave 1
+  #3138–#3140, S-U4–S-U9). Enforced by the `#3136` section of
+  `tests/ux_conformance_gates_3047.test.ts`: any class outside the
+  list fails CI, and any entry whose class no longer exists is stale.
+  Burn-down removes the rule and its entry in the same PR. The full
+  definition, measurement, wave map, and borderline calls live in
+  `docs/architecture/UX/template-gate-layout-freeze-3136.md`.
+
 ## 18. UX metrics
 
 Measure outcomes, not just interaction volume:

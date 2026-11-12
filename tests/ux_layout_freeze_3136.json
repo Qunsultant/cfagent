@@ -1,0 +1,4948 @@
+{
+  "account-metric-strip": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "account-stat-cell": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "account-stat-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "action-row-icon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "action-row-info": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "action-toggle-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "actions-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "actions-filter-pills": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "actions-header-left": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "actions-header-right": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "active": {
+    "file": "src/client/styles.css",
+    "files": [
+      "src/client/options/flows/optionsFlows.css",
+      "src/client/styles.css"
+    ],
+    "wave": "S-U7"
+  },
+  "active-pill-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "active-ticker-display": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "active-ticker-dual-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agent-header-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agent-header-avatar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agent-header-brand": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agent-header-titles": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agent-icon-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agent-main-title": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agent-online-dot": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agent-status-badge": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agent-typing-dots": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "agents-panel-cards": {
+    "file": "src/client/agentsPanel.css",
+    "wave": "S-U5"
+  },
+  "agents-panel-detail": {
+    "file": "src/client/agentsPanel.css",
+    "wave": "S-U5"
+  },
+  "agents-panel-page": {
+    "file": "src/client/agentsPanel.css",
+    "wave": "S-U5"
+  },
+  "agents-panel-stack": {
+    "file": "src/client/agentsPanel.css",
+    "wave": "S-U5"
+  },
+  "akp-item": {
+    "file": "src/client/apiKeysPanel.css",
+    "wave": "S-U5"
+  },
+  "akp-item-actions": {
+    "file": "src/client/apiKeysPanel.css",
+    "wave": "S-U5"
+  },
+  "akp-item-meta": {
+    "file": "src/client/apiKeysPanel.css",
+    "wave": "S-U5"
+  },
+  "akp-list": {
+    "file": "src/client/apiKeysPanel.css",
+    "wave": "S-U5"
+  },
+  "akp-loading": {
+    "file": "src/client/apiKeysPanel.css",
+    "wave": "S-U5"
+  },
+  "akp-mint-row": {
+    "file": "src/client/apiKeysPanel.css",
+    "wave": "S-U5"
+  },
+  "akp-panel": {
+    "file": "src/client/apiKeysPanel.css",
+    "wave": "S-U5"
+  },
+  "akp-secret": {
+    "file": "src/client/apiKeysPanel.css",
+    "wave": "S-U5"
+  },
+  "akp-secret-actions": {
+    "file": "src/client/apiKeysPanel.css",
+    "wave": "S-U5"
+  },
+  "analyst-rating-box": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ap-form": {
+    "file": "src/client/accountPanels.css",
+    "wave": "S-U5"
+  },
+  "ap-header": {
+    "file": "src/client/accountPanels.css",
+    "wave": "S-U5"
+  },
+  "ap-row": {
+    "file": "src/client/accountPanels.css",
+    "wave": "S-U5"
+  },
+  "ap-row-main": {
+    "file": "src/client/accountPanels.css",
+    "wave": "S-U5"
+  },
+  "app-container": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "app-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "app-main-layout": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "app-sidebar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "app-sub-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "app-top-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "app-top-layout": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "app-top-nav-container": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "args-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "arguments-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-floating-dock": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-footer-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-icon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-input-form": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-messages-container": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-minimize-trigger": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-minimized-wrap": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-msg-bubble": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-pill-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-pill-wrap": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-quick-prompts": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-restore-pill-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-send-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ask-agent-status-dot": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "async-jobs-children": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "async-jobs-content": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "async-jobs-heading": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "async-jobs-list": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "async-jobs-subhead": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "async-result-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "async-status-pill-badge": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "attest-col": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "audit-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "audit-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "audit-panel": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "audit-view": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "autonomous-run-head": {
+    "file": "src/client/options/optionsResearch.css",
+    "wave": "wave-1"
+  },
+  "autonomous-run-opps": {
+    "file": "src/client/options/optionsResearch.css",
+    "wave": "wave-1"
+  },
+  "autonomous-runs-head": {
+    "file": "src/client/options/optionsResearch.css",
+    "wave": "wave-1"
+  },
+  "autonomous-runs-list": {
+    "file": "src/client/options/optionsResearch.css",
+    "wave": "wave-1"
+  },
+  "autopilot-actions-card": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "autopilot-executive-ribbon": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "autopilot-limits-card": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "autopilot-limits-grid": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "autopilot-status-card": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "autopilot-top-grid": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "awp-balance-row": {
+    "file": "src/client/agenticWalletPanel.css",
+    "wave": "S-U5"
+  },
+  "awp-card": {
+    "file": "src/client/agenticWalletPanel.css",
+    "wave": "S-U5"
+  },
+  "awp-entry-row": {
+    "file": "src/client/agenticWalletPanel.css",
+    "wave": "S-U5"
+  },
+  "awp-grid": {
+    "file": "src/client/agenticWalletPanel.css",
+    "wave": "S-U5"
+  },
+  "awp-header": {
+    "file": "src/client/agenticWalletPanel.css",
+    "wave": "S-U5"
+  },
+  "awp-ledger-list": {
+    "file": "src/client/agenticWalletPanel.css",
+    "wave": "S-U5"
+  },
+  "bars-controls-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "bars-filters": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "bars-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "bot-avatar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "brand": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "brand-logo": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "brand-status-text": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "brand-text-block": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "broker-brand-cluster": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "broker-logo-box": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "broker-status-chips": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "browsed-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "browsed-title": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "btn-etapi-config-pill": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "btn-mask-mini": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "btn-open-deals-showcase": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "btn-open-etrade": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "btn-options-autorefresh": {
+    "file": "src/client/optionsResearch.css",
+    "wave": "wave-1"
+  },
+  "btn-options-refresh": {
+    "file": "src/client/optionsResearch.css",
+    "files": [
+      "src/client/optionsResearch.css",
+      "src/client/styles.css"
+    ],
+    "wave": "wave-1"
+  },
+  "btn-settings-signout": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "btn-sync-diagnostics": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "btn-voice-toggle": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "bullet-icon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "bullet-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "calc-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "capability-nav-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "capability-nav-right": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "capability-tab-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "capability-tab-icon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "capability-tab-wrapper": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "capability-tabs-strip": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "card-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "card-technicals": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "card-top": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "channel-check-card": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "channel-check-top": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "channels-checkbox-grid": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "chart-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chart-legend-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chart-legend-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chart-tf-selector": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chart-title-wrap": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chat-action-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chat-error-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chat-error-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chat-input-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chat-notice-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chat-view": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "chip-provider": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "client-config-container": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "code-box-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "compact": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "company-description-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "company-heading": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "compare-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "compare-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "config-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "config-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "config-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "control-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "curl-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "curl-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "deal-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "decisioning-example-box": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "decisioning-example-header": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "decisioning-example-step": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "decisioning-param-item": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "decisioning-param-list": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "decisioning-rule-card": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "decisioning-rule-title": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "decisioning-rules-grid": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "detail-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "diagnostics-content": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "did-attest-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "did-box": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "did-modal-overlay": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "discovery-best": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-downloads": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-outcome": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-outcome-head": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-ranked-list": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-ranked-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-request-card-head": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "discovery-request-grid": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "discovery-run-detail": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-run-detail-head": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-run-item": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-run-list": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-runs": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-runs-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discovery-runs-loading": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "discrepancy-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "dispatch-status-pills": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "docs-header": {
+    "file": "src/client/docsAndReports.css",
+    "wave": "S-U5"
+  },
+  "docs-loading": {
+    "file": "src/client/docsAndReports.css",
+    "wave": "S-U5"
+  },
+  "docs-report-page": {
+    "file": "src/client/docsAndReports.css",
+    "wave": "S-U5"
+  },
+  "docs-toolbar": {
+    "file": "src/client/docsAndReports.css",
+    "wave": "S-U5"
+  },
+  "dpp-col-actions": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-col-health": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-col-provider": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-col-routes": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-col-session": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-col-state": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-configure-actions": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-configure-form": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-feed-actions": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-feed-head": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-feed-job": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-feed-jobs": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-feed-meta": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-feed-nojob": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-feed-status": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-health": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-health-caps": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-health-head": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-health-meta": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-item-actions": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-item-meta": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-loading": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-panel": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-register-row": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-route": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-routes": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dpp-session-info": {
+    "file": "src/client/dataProvidersPanel.css",
+    "wave": "S-U5"
+  },
+  "dual-card-live-tag": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "dual-card-status-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "dual-card-title-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "dual-card-top-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "dual-feed-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "dual-feed-columns-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "dual-feed-price-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "dual-feed-stats-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "endpoints-explorer-container": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "endpoints-list-pane": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "endpoints-runner-pane": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "endpoints-split-view": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "endpoints-stats-ribbon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "endpoints-subnav": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "endpoints-view": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "env-switch-toggles": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "env-trust-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "env-trust-left": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "env-trust-right": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "env-trust-switch-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ep-stat": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "error-action-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "error-badge-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "error-banner-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "error-card-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "error-title-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-account-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-actions-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-banner-account": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-banner-controls": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-banner-identity": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-banner-message": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-brand-text-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-controls-single-line": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-dynamic-dropdown-panel": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-dynamic-menu-trigger": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-env-switch-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-environment-controls": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-menu-msg-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-oauth-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-panel-account-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-panel-brand": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-panel-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-panel-header-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-panel-message": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-panel-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-provenance-content": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-provenance-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-provenance-summary": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-tools-cluster": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "etrade-trading-hub": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "event-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "events-stream": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "example-link": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "execution-result-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ext-ad-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ext-ad-badge-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ext-ad-content": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "external-ad-banner-strip": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "faq-card-body": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-card-header": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-method-card": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-method-header": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-method-steps": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-methods-grid": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-param-badge": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-param-badges": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-quick-takeaway": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-quick-takeaway-label": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-theory-box": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-theory-inner": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-theory-summary": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "faq-theory-title": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "flow-action-btns-row": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-active-preset-chip": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-bar-content": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-bar-fill": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-bar-row": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-btn-group-2": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-btn-group-3": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-btn-group-4": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-checkboxes-block": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-col-title-bearish": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-col-title-bullish": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-comp-input-wrap": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-comparison-row": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-current-filter-form": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-dir-btn": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-direction-icons-row": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-drilldown-actions": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-drilldown-banner": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-drilldown-info": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-dual-leaderboard-container": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-filters-sidebar": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-form-group": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-leaderboard-col": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-leaderboard-col-header": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-leaderboard-rows-list": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-metric-sub": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-action-row": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-backdrop": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-btns": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-card": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-dialog": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-header": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-header-right": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-metric-card": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-metrics-grid": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-overlay": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-modal-title-wrap": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-numeric-comparison-block": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-perf-item": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-performance-metrics-row": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-preset-cards-list": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-preset-header": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-sidebar-bottom-stat": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-sidebar-header": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-sidebar-tabs": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-ticker-tag-chip": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-tickers-chip-row": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-toggle-filters-btn": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-your-filters-footer": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flow-your-filters-panel": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-delay-banner": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-delay-banner-right": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-filter-active-pill-header": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-gauge-badge-wrap": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-header-bar": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-main-layout": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-subtab-btn": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-subtabs-nav": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-summary-view": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "flows-table-area": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "font-size-controls-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "font-style-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "footer-keyboard-hints": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "form-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "form-group-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "form-row-2": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "fund-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "fund-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "fund-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "fundamentals-layout": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "google-ad-badge-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "google-ad-body": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "google-ad-footer": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "google-ad-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "google-ad-url-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "google-adchoices-link": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "greeks": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "grid-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "group-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "group-items": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "group-title-with-badge": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hero-badge-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hitl-action-buttons": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hitl-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hitl-attestation-box": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hitl-badge-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hitl-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hitl-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hitl-floating-preview-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hitl-order-details-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "hitl-stat": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "iaaa-admin-panel": {
+    "file": "src/client/iaaaAdminPanel.css",
+    "wave": "S-U5"
+  },
+  "iaaa-admin-summary": {
+    "file": "src/client/iaaaAdminPanel.css",
+    "wave": "S-U5"
+  },
+  "icon-only-logout": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "icon-only-settings-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "improvement-block": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "improvement-card": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "improvement-header": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "improvement-title": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "info-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "item-icon-wrapper": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "job-item-main": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "job-item-tags": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "key-metrics-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "layout-sidebar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "layout-switch-badge-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "layout-top": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "leaderboard-row": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "ledger-candidate": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "ledger-candidates": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "ledger-header-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ledger-sort": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "limits-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "limits-sync-badge": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "live-execution-preview": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "live-feed-badge": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "live-preview-card": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "live-preview-card-head": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "live-preview-grid": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "live-preview-metrics": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "live-stream-badge": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-action-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-export-buttons": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-export-strip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-export-title": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-form": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-group-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-group-contracts": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-group-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-groups-grid": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-label": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-meta-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-modal-backdrop": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-modal-body": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-modal-content": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-modal-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-rank-body": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-ranking-item": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-rankings-list": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-results-container": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-strategy-strip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-synthesis-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-eval-title-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-export-btn": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "llm-ideas-ranking": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "llm-ideas-samples": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "llm-options-ideas-form": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "llm-options-question": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "lup-item": {
+    "file": "src/client/loggedInUsersPanel.css",
+    "wave": "S-U5"
+  },
+  "lup-item-meta": {
+    "file": "src/client/loggedInUsersPanel.css",
+    "wave": "S-U5"
+  },
+  "lup-list": {
+    "file": "src/client/loggedInUsersPanel.css",
+    "wave": "S-U5"
+  },
+  "lup-loading": {
+    "file": "src/client/loggedInUsersPanel.css",
+    "wave": "S-U5"
+  },
+  "lup-panel": {
+    "file": "src/client/loggedInUsersPanel.css",
+    "wave": "S-U5"
+  },
+  "lup-session": {
+    "file": "src/client/loggedInUsersPanel.css",
+    "wave": "S-U5"
+  },
+  "lup-session-actions": {
+    "file": "src/client/loggedInUsersPanel.css",
+    "wave": "S-U5"
+  },
+  "lup-sessions": {
+    "file": "src/client/loggedInUsersPanel.css",
+    "wave": "S-U5"
+  },
+  "market-data-metrics-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "market-data-report-preview": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "market-data-research-hub": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "market-data-snapshot-preview": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "market-ticker-tape": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "mem-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "memory-list": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "menu-data-download-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "menu-download-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "menu-item-text": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "menu-settings-icon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "menu-status-dot": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "message-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "message-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "messages-stream": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "metric-box": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "metric-pill-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "mini": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "mini-social-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "modal-actions-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "modal-actions-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "modal-backdrop": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "modal-body": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "modal-btn-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "modal-clear-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "modal-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "modal-right-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "modal-search-icon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "mode-badge": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "mode-toggle-pill": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "msg-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nav-font-size-ctrl": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nav-refresh-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nav-row-icon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nav-row-info": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nav-tab-toggle-pill": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nav-tabs-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nav-tabs-preset-buttons": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nav-tabs-preset-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nav-trade-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "networks-list": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nextgentp-sidebar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nextgentp-top-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nextgentp-top-nav-container": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-bar-input-wrap": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-chips-carousel": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-example-links": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-orm-toolbar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-plan-pill-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-presets": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-query-recap": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-quick-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-response-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-results-wrapper": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-screener-cards-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-stock-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "nlq-view": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "oauth-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "oauth-status-info": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "omnichannel-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "omnichannel-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "omnichannel-card-title": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "omnichannel-chip-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "omnichannel-form-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "omnichannel-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "omnichannel-header-top": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "omnichannel-result-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "omnichannel-slack-user-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-autorefresh-group": {
+    "file": "src/client/optionsResearch.css",
+    "wave": "wave-1"
+  },
+  "options-candidate-badges": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-candidate-header": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-card-actions": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-card-badge-row": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-card-header": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-card-title-group": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-comparison": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-copilot-banner": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-copilot-info": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-criteria-row": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-detail-content": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-download-main-btn": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "options-download-menu": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "options-download-menu-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "options-download-menu-item": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "options-error": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-eval-llm-btn": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/options/strategyDiscovery.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-example-chat": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-example-row": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-field": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-flows-container": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "options-form-footer": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-greeks": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-greeks-strip": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-leg-edit": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-leg-editor": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css",
+      "src/client/styles.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-leg-editor-heading": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-leg-reset": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-leg-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-leg-title": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-llm-answer": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-metric-tile": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-metrics-grid": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-net-order-control": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-nlq-examples": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-nlq-form": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-nlq-result": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-order-context": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-payoff-header": {
+    "file": "src/client/chat/optionsCard.css",
+    "wave": "S-U8"
+  },
+  "options-preview-error": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-range-control": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-request-form": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-research-heading": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-research-section": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-results": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-results-header": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-risk-grid": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-run-btn": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-score-grid": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-strategy-options": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-strategy-picker": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-subnav-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-subnav-links": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-subnav-tools": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "options-summary-strip": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "options-workflow": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "order-auth-notice": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "order-calc-card": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "order-form-card": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "order-quote-peek": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "order-side-info": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "order-ticket-form": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "order-ticket-layout": {
+    "file": "src/client/styles.css",
+    "wave": "wave-1"
+  },
+  "pane-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "panel-title": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "partner-deal-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "partner-deals-category-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "partner-deals-footer": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "partner-deals-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "partner-deals-modal-backdrop": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "partner-deals-modal-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "partner-deals-networks-strip": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "partner-deals-title-area": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "pending-review-actions": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "pending-review-header": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "pending-review-item-header": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "pending-review-list": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "pending-review-queue": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "pill-market-status": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "pill-mode": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "pill-pro": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "pill-region": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "plan-badge-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "platform-admin-backdrop": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "platform-admin-body": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "platform-admin-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "platform-admin-menu": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "platform-admin-menu-icon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "platform-admin-menu-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "platform-admin-menu-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "platform-admin-panel": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "platform-admin-title-block": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "port-summary-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "portfolio-summary-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "preset-chips-row": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "preset-item-actions": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "preset-item-meta": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "preset-list-container": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "preset-list-item": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "preset-save-bar": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "preview-top-bar": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "price-big-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "prop-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "provenance-strip": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "provider-brand-cluster": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "provider-callout-inner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "provider-callout-link": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "provider-foot": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "provider-logo-box": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "provider-name-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "provider-quote-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "provider-status-chips": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "prp-card": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-card-title-row": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-form-grid": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-form-row": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-grid": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-header": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-hedge-card": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-hedge-main": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-sector": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-sectors": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "prp-subhead": {
+    "file": "src/client/portfolioRiskPanel.css",
+    "wave": "S-U6"
+  },
+  "qty-preset-chips": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "quantity-stepper-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "quick-chips": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "quote-card-body": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "quote-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "quote-detail-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "quote-grid-3": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "quote-modal-backdrop": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "quote-price-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "quoting-comparison-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "reasoning-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "reconciliation-alert-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "reconciliation-alert-content": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "reconciliation-tag": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "report-actions": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "report-ai-narrative": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "report-attestation-footer": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "report-card-top": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "report-header": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "report-main-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "report-price-block": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "report-side-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "reports-list": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "reports-search": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-browse": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-browse-controls": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-detail": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-detail-dl": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-detail-dl-row": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-detail-list": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-detail-loading": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-detail-meta": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-detail-topbar": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-did-cluster": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "research-header-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "research-loading-state": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "research-report-actions": {
+    "file": "src/client/researchReports.css",
+    "wave": "S-U8"
+  },
+  "research-report-controls": {
+    "file": "src/client/researchReports.css",
+    "wave": "S-U8"
+  },
+  "research-report-layout": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "research-report-query": {
+    "file": "src/client/researchReports.css",
+    "wave": "S-U8"
+  },
+  "research-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "research-trade-card": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-trade-head": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "research-view": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "result-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "rgp-grant-form": {
+    "file": "src/client/roleGrantsPanel.css",
+    "wave": "S-U5"
+  },
+  "rgp-grant-row": {
+    "file": "src/client/roleGrantsPanel.css",
+    "wave": "S-U5"
+  },
+  "rgp-item": {
+    "file": "src/client/roleGrantsPanel.css",
+    "wave": "S-U5"
+  },
+  "rgp-item-actions": {
+    "file": "src/client/roleGrantsPanel.css",
+    "wave": "S-U5"
+  },
+  "rgp-item-meta": {
+    "file": "src/client/roleGrantsPanel.css",
+    "wave": "S-U5"
+  },
+  "rgp-list": {
+    "file": "src/client/roleGrantsPanel.css",
+    "wave": "S-U5"
+  },
+  "rgp-loading": {
+    "file": "src/client/roleGrantsPanel.css",
+    "wave": "S-U5"
+  },
+  "rgp-panel": {
+    "file": "src/client/roleGrantsPanel.css",
+    "wave": "S-U5"
+  },
+  "risk-adj-name": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-adj-row": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-adjustment-card": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-adjustments-list": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-ai-actions": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-ai-card": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-ai-header": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-ai-title": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-breakeven-pill": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-breakevens-list": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-btn-ask-ai": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-chips-carousel": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-greek-top": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-greeks-grid": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-level-badge": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-modal-body": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-modal-close-btn": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-modal-container": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-modal-h2": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-modal-header": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-modal-header-actions": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-modal-overlay": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-modal-title-group": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-modal-titles": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-playbook-cards": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-rule-card": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-rule-header": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-section-header": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-section-title": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-sizing-calculator": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-sizing-input-row": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-sizing-input-wrap": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-sizing-result": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-stat-card": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-stat-cards-grid": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "risk-warning-title": {
+    "file": "src/client/options/riskAnalysis.css",
+    "wave": "S-U9"
+  },
+  "rsi-cell": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "runner-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "runner-result-box": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "runner-title-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "safety-bullets": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sched-audit-event": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-cadence-custom": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-cadence-presets": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-detail-list": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-detail-row": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-detail-section": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-detail-status": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-dialog-header": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-dialog-heading": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-form-group": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-form-label": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-hero-actions": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-hero-banner": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-modal-footer": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-modal-header": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "sched-section-header": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "schedule-row-actions": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "schedule-row-badges": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "schedule-row-job": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "schedule-row-stack": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "scheduled-options-manager": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
+  "schedules-panel": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "schedules-toolbar": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "schema-card-top": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "schema-cols-preview": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "schema-props-list": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "schema-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "scp-actions": {
+    "file": "src/client/stockCopilotPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-compare-bar": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-diff-change": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-diff-chips": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-diff-line": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-feed": {
+    "file": "src/client/stockCopilotPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-feed-row": {
+    "file": "src/client/stockCopilotPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-field": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-form": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-form-actions": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-form-grid": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-header": {
+    "file": "src/client/scannerPanel.css",
+    "files": [
+      "src/client/scannerPanel.css",
+      "src/client/stockCopilotPanel.css"
+    ],
+    "wave": "S-U6"
+  },
+  "scp-mode-switch": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-panel": {
+    "file": "src/client/stockCopilotPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-results-head": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-rollup": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-row": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-row-main": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-subhead": {
+    "file": "src/client/scannerPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-title-group": {
+    "file": "src/client/stockCopilotPanel.css",
+    "wave": "S-U6"
+  },
+  "scp-voice-input": {
+    "file": "src/client/stockCopilotPanel.css",
+    "wave": "S-U6"
+  },
+  "screener-controls-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "screener-criteria-presets-deck": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "screener-feed-callout": {
+    "file": "src/client/optionsResearch.css",
+    "wave": "wave-1"
+  },
+  "screener-results-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "screeners-asset-tabs": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "screeners-filter-form": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "search-result-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "search-results-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "section-label-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-ads-external-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-ads-suboptions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-async-job-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-async-jobs-box": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-async-jobs-list": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-async-result-container": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-async-tasks-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-pref-btn-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-pref-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-prefs-stack": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-user-avatar-placeholder": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-user-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-user-details": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "settings-user-meta": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "side-by-side": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "sidebar-brand": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-brand-wrapper": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-collapse-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-footer-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-icon-action-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-items-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-layout-toggle-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-logout-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-mode-strip": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-nav-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-nav-item-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-nav-item-wrapper": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-nav-scroll": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-settings-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-submenu": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-submenu-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-theme-toggle-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-user-dock": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sidebar-user-info": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "single-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "slack-actions-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "slack-block-fields": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "snap-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "snap-title": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "snapshot-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "snapshot-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "snapshot-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "snapshot-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "social-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "social-buttons": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "source-filters": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "sponsor-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sponsor-spotlight-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sponsor-tag-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "spread-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stat-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "status-actions-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "status-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "status-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "status-state-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "step-instruction": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "step-number": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stock-criteria-row": {
+    "file": "src/client/options/optionsResearch.css",
+    "files": [
+      "src/client/options/optionsResearch.css",
+      "src/client/optionsResearch.css"
+    ],
+    "wave": "wave-1"
+  },
+  "stock-search-filter-pills": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stock-search-icon": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stock-search-modal-dialog": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stock-search-modal-footer": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stock-search-modal-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stock-search-results-list": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stock-search-trigger-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stock-search-trigger-container": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "stp-item": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-item-actions": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-item-meta": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-list": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-loading": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-mint-form": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-mint-row": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-panel": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-roles-list": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-secret": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "stp-secret-actions": {
+    "file": "src/client/serviceTokensPanel.css",
+    "wave": "S-U5"
+  },
+  "strat-action-chip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-add-leg-btns": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-autorefresh-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-bottom-metric-btns": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-bottom-mode-btns": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-bottom-toggles-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-btn-action": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-builder-action-btns": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-builder-exp-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-builder-header-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-builder-title-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-builder-view": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-actions-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-factors-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-header-left": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-icon-btn": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-metrics-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-stat-left": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-stat-right": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-stats-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-theses": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-card-title-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-cards-grid": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-chart-unified-footer-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-compare-actions": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-compare-banner": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-compare-label": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-cost-display-btn": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-custom-cost-badge": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-delayed-badge": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-discovery-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-discovery-container": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-discovery-controls-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-discovery-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-discovery-message": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-discovery-top-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-discovery-view": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-drawer-content": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-drawer-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-dropdown-item": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-dropdown-list": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-dropdown-price-col": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-dropdown-sym-col": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-exp-chip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-exp-chips-scroll": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-exp-chips-scroll-wrap": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-expiration-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-factor-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-factor-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-factors-grid": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-flow-alert-banner": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "strat-flow-alert-content": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "strat-footer-date-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-footer-iv-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-footer-mode-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-footer-tools-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-greek-chip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-history-modal": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-history-stats-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-hstat-cell": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-icon": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-icon-tooltip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-inline-edit-cost": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-input-pill": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-iv-label-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-iv-presets": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-actions-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-body-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-btn-pair": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-cost-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-greeks-strip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-header-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-side-qty": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-slider-controls": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-slider-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-strike-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-strike-slider-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-strike-sliders-title": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-strike-sliders-wrap": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-leg-warnings-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-legs-grid": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-legs-title-text": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-lib-card-top": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-lib-footer": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-library-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-library-categories": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-library-directions": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-library-grid": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-library-toolbar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-matrix-toolbar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-metric-cell": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-metric-label": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-metrics-strip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-mini-refresh-btn": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-modal-backdrop": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-modal-footer": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-modal-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-adjacent-deck": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-adjacent-factors": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-adjacent-meta": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-adjacent-slider-wrap": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-deck-bottom": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-deck-top": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-factors-col": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-factors-panel": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-regime-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-opt-slider-wrap": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-pos-item": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-position-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-positions-drawer": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-positions-panel": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-positions-title": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-qty-btn": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-quote-change": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-quote-search-inline": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-roll-body": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-roll-exp-chips": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-roll-modal": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-roll-strikes-grid": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-badge": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-call-zone": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-center-zone": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-legend": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-nav-arrow": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-put-zone": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-quick-tools": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-tick": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-ticks": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-ruler-title-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-save-actions": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-save-form": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-save-modal": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-saved-card-btns": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-saved-legs-chips": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-saved-trade-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-saved-trade-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-saved-trades-list": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-saved-trades-modal": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-schedule-capture": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-schedule-confirm": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-schedule-confirm-actions": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-schedule-confirm-controls": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-scroll-arrow": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-sentiment-btn-wrap": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-sentiment-card": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-sentiment-circle": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-sentiment-grid": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-sentiment-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-sentiment-selector": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-stat-rr-badge": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-stats-card-container": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-stats-header-tabs": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-stats-panel-col": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-stats-side-by-side-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-strategy-name-badge-wrap": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-strategy-picker-modal": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-strike-ruler": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-strike-ruler-container": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-strike-ruler-header": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-strike-ruler-wrap": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-sym-quick-btn": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-symbol-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-symbol-dropdown": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-symbol-dropdown-backdrop": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-symbol-input-wrap": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-symbol-quote-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-target-bar": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-th-content": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-timeline-chip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-timeline-row": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-timeline-strip": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-top-controls-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-view-tab-btn": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-view-tab-buttons": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-view-tabs": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "strat-zoom-btn-group": {
+    "file": "src/client/options/strategyDiscovery.css",
+    "wave": "S-U7"
+  },
+  "sub-header-brand-crumbs": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sub-header-crumbs": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sub-header-left": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sub-header-market-pill": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sub-header-right": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "sub-header-user": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "submenu-item-bullet": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "submenu-toggle-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "submenu-toggle-chevron": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "subnav-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "summary-card": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "summary-cards-grid": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "summary-cell": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "summary-leaderboard-grid": {
+    "file": "src/client/options/flows/optionsFlows.css",
+    "wave": "S-U8"
+  },
+  "symbol-input-group": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "symbol-input-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "symbol-selector-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tab-hero-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tab-hover-popover": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tab-hover-wrapper": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tab-menu-items": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tab-nav": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tab-pill-check": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tab-viewport": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "table-actions-cell": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "table-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "table-schema-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tables-meta-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tables-schema-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "target-spread-info": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tech-stat-card": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "technical-overview-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-badge-col": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-company": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-controls-single-line": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-ctrl-item": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-name-col": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-price-col": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-tape-chip": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-tape-feed-badge": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-tape-marquee": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ticker-tape-sequence": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tool-card-header": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tool-card-top": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tool-results-list": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "tools-cards-scroll": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-brand": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-icon-action-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-icon-actions-cluster": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-layout-switcher-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-menu-item-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-menu-strip-inner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-nav-brand-section": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-nav-control": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-nav-logout-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-nav-menu-strip": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-nav-right-controls": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-nav-utility-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-status-pills": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-theme-toggle-btn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "top-user-pill": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "track-record": {
+    "file": "src/client/reports.css",
+    "wave": "S-U6"
+  },
+  "trading-header-banner": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "trading-subnav-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "trading-subnav-bar": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "trading-subnav-links": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "trading-view": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "typing-indicator": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "ui-modal-body": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "user": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "user-meta": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "user-profile": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-chips-row": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-control-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-feed-scroll": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-feed-title": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-header-title": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-header-top": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-input-form": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-main-grid": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-order-preview-actions": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-order-preview-details": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-status-pill": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-turn": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-turn-meta": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "voice-visualizer-bars": {
+    "file": "src/client/styles.css",
+    "wave": "S-U7"
+  },
+  "workflow-action-footer": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-card-body": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-card-header": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-cta-btn": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-details-grid": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-faq-box": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-feature-list": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-header-left": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-header-right": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-header-titles": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-number-badge": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-rule-link": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-runs-artifacts": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-controls": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-detail": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-detail-actions": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-detail-header": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-detail-subtitle": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-fact": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-facts": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-filter": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-io-grid": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-page": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-result": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-stage-io": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-stages-cell": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-stat": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-stats": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-trigger": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-what": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-when": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-runs-workflow": {
+    "file": "src/client/workflowRuns.css",
+    "wave": "S-U4"
+  },
+  "workflow-step-node": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-subpanel": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-subpanel-title": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-timeline": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-title": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-track-btn": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflow-track-tabs": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-cat-chip": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-category-chips": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-filter-strip": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-grid": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-hero": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-hero-title-group": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-hero-top": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-hub-container": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-nav-tab": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-search-icon": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-stat-card": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-stats-bar": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  },
+  "workflows-subnav-bar": {
+    "file": "src/client/workflowsHub.css",
+    "wave": "S-U7"
+  }
+}
