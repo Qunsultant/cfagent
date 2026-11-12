@@ -171,6 +171,35 @@ describe("guardScheduledETradeAuth", () => {
     expect(bridge).toHaveBeenCalledTimes(1);
   });
 
+  it("3313-P06 blocked run: bridged outcome carries the trace's scheduleId", async () => {
+    const store = mapStore();
+    const bridge = vi.fn(async () => {});
+    const res = await guardScheduledETradeAuth({
+      env: {} as any,
+      userLogin: "venus",
+      store,
+      bridge,
+      kind: "stock",
+      label: "SP100 stock screen",
+      trace: {
+        scheduleId: "sched-3313-blocked",
+        runId: "stock_scanner:2026-11-11T12:00:00.000Z:NASDAQ100",
+        workflow: "autonomousMarketScreen",
+        trigger: "scheduled",
+        stage: "auth guard",
+        firedAt: "2026-11-11T12:00:00.000Z",
+        runAs: "venus",
+        universe: "NASDAQ100",
+      },
+      deps: blockedDeps(),
+      sendSlackAlert: async () => {},
+    });
+    expect(res.blocked).toBe(true);
+    expect(bridge).toHaveBeenCalledTimes(1);
+    const outcome = (bridge.mock.calls[0] as any[])[0];
+    expect(outcome.scheduleId).toBe("sched-3313-blocked");
+  });
+
   it("fresh token → not blocked, no alert machinery touched", async () => {
     const sendSlackAlert = vi.fn(async () => {});
     const res = await guardScheduledETradeAuth({

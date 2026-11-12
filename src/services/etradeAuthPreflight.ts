@@ -311,6 +311,13 @@ export async function guardScheduledETradeAuth(
           pdfKeys: [],
           error: blockedMessage(true),
           trace: opts.trace,
+          // Issue #3313: the blocked run joins its schedule through
+          // the trace's scheduleId. workflowId is NOT stamped here:
+          // trace.workflow is the wrapper NAME (e.g.
+          // "autonomousMarketScreen"), not a workflow run id, and
+          // a blocked run has no workflow instance — the bridge
+          // stamps an explicit null.
+          scheduleId: opts.trace?.scheduleId,
         };
         sends.push(opts.bridge(outcome, opts.userLogin, false));
       }

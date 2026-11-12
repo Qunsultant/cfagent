@@ -335,6 +335,13 @@ export interface DiscoveryDeliveryOutcomeInput {
    *  off the chain. */
   chainMode: boolean;
   stageChain?: ScreenerRunOutcome["stageChain"];
+  /**
+   * Issue #3313: the originating schedule / workflow run, when the
+   * caller knows it — stamped onto the delivery outcome so the
+   * bridge record joins the run to its schedule/workflow.
+   */
+  scheduleId?: string;
+  workflowId?: string;
   emailTo?: string;
   slackChannel?: string;
   webhookUrl?: string;
@@ -374,6 +381,10 @@ export function buildDiscoveryDeliveryOutcome(
     slackChannel: input.slackChannel,
     webhookUrl: input.webhookUrl,
     deliverViaChain: input.chainMode,
+    // Issue #3313: the originating ids ride the outcome so the
+    // bridge record joins the discovery run to its schedule.
+    scheduleId: input.scheduleId,
+    workflowId: input.workflowId,
   };
   if (input.chainMode) {
     outcome.deliveryChannels = channels;
@@ -1667,6 +1678,9 @@ export class ScheduledTasksService {
         opportunities: result.opportunities,
         filterSummary: result.filterSummary,
         stageChain: options.stageChain,
+        // Issue #3313: the arming schedule rides the event so the
+        // outcome joins the bridge record to its schedule.
+        scheduleId: options.scheduleId,
         emailTo: options.emailTo,
         slackChannel: options.slackChannel,
         webhookUrl: options.webhookUrl,
@@ -1763,6 +1777,9 @@ export class ScheduledTasksService {
         sector: options.sector || "ALL",
         error: err.message || "Market screener execution error",
         stageChain: options.stageChain,
+        // Issue #3313: as on the completed event — a failed run
+        // joins its schedule too.
+        scheduleId: options.scheduleId,
         emailTo: options.emailTo,
         slackChannel: options.slackChannel,
         webhookUrl: options.webhookUrl,
@@ -2238,6 +2255,9 @@ export class ScheduledTasksService {
                   totalScanned: (out.result?.counts.stocksScanned ?? 0)
                     + (out.result?.counts.optionsUnderlyingsScanned ?? 0),
                   stageChain: options.stageChain,
+                  // Issue #3313: the arming schedule rides the bridge
+                  // outcome so the goal run joins its schedule.
+                  scheduleId: options.scheduleId,
                   // Issue #1571: the bridge outcome names the fallback.
                   ...(providerFallback ? { providerFallback } : {}),
                 },
@@ -3498,6 +3518,9 @@ export class ScheduledTasksService {
         csvKey: optionsCsvKey,
         csvStatus: optionsCsvKey ? "generated" : undefined,
         stageChain: options.stageChain,
+        // Issue #3313: the arming schedule rides the event (see the
+        // stock completed event).
+        scheduleId: options.scheduleId,
         // Issue #1718: the qualification rides the event so the
         // lifecycle completed notice can apply the broadcast floor.
         partial: scanData?.partial,
@@ -3593,6 +3616,9 @@ export class ScheduledTasksService {
         thesis: targetThesis,
         error: err.message || "Scheduled options analysis failed",
         stageChain: options.stageChain,
+        // Issue #3313: as on the completed event — a failed run
+        // joins its schedule too.
+        scheduleId: options.scheduleId,
       });
 
       return {
@@ -4025,6 +4051,9 @@ export class ScheduledTasksService {
         reportId,
         chainMode: Boolean(args.options.stageChain),
         stageChain: args.options.stageChain,
+        // Issue #3313: the arming schedule rides the outcome (see
+        // the builder).
+        scheduleId: args.options.scheduleId,
         emailTo: args.options.emailTo,
         slackChannel: args.options.slackChannel,
         webhookUrl: args.options.webhookUrl,
