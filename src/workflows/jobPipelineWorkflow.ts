@@ -39,6 +39,7 @@ import {
 } from "../data/d1JobRunRecordAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
 import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
+import { screenerStepDepsForWorkflow } from "../services/screenerPipelineJobs";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import { buildEnrichJobRegistry } from "../services/enrichJobs";
 import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
@@ -237,7 +238,10 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // exactly as on the host, so a deliver run dispatched here
     // also executes fully; a transport this deployment does not
     // configure records its channel not_configured per report
-    // (deliverJobs.ts carries the rule).
+    // (deliverJobs.ts carries the rule). The screener steps
+    // compose here too (#4190): registration only in this slice
+    // — the quote/history deps refuse by name until the S2
+    // cutover wires the platform binding.
     steps: createPipelineStepRegistry(
       feedStepDepsForWorkflow(env, stores),
       {
@@ -274,6 +278,11 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],
       },
+      // Issue #4190 (#3550 S1): the screener steps compose here
+      // too — registration only; no job names them until the S2
+      // cutover, and the quote/history deps refuse by name until
+      // then, so production behavior is unchanged.
+      screenerStepDepsForWorkflow(env),
     ),
     invocation: "workflow-shard",
   };
