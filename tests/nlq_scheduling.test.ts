@@ -192,7 +192,16 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
     // A criteria-less plan now arms only the shared builder's identity
     // stamps (buildSchedulePayload in src/trading/screeningSchemas.ts);
     // the market-screen service's own defaults apply at run time.
-    expect(port.calls[0].args[2]).toEqual({ userLogin: sessionId, trigger: "scheduled" });
+    // Issue #3122 — agent provenance rides every agent-armed schedule.
+    const screenPayload = port.calls[0].args[2] as Record<string, unknown>;
+    expect(screenPayload.userLogin).toBe(sessionId);
+    expect(screenPayload.trigger).toBe("scheduled");
+    expect(screenPayload.provenance).toMatchObject({
+      origin: "agent",
+      createdBy: sessionId,
+      agentId: "nlq",
+    });
+    expect(typeof (screenPayload.provenance as Record<string, unknown>).createdAt).toBe("string");
     expect(result.status).toBe("scheduled");
     expect(result.rows[0].id).toBe("fake-port-id-1");
     expect(result.rows[0].type).toBe("interval");
@@ -394,5 +403,118 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
     expect(port.calls[0].method).toBe("schedule");
     expect(result.rows[0].id).toBe("fake-port-id-1");
     expect(result.summary).toContain("fake-port-id-1");
+  });
+});
+
+describe("NLQ scheduling F1 allow-list (issue #3122)", () => {
+  let orm: DatabaseORM;
+  let env: Env;
+  const sessionId = "scheduler_test_trader";
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    const sql = new MockSqlStorage();
+    orm = new DatabaseORM(sql);
+    orm.initializeSchema(sessionId);
+    env = {
+      APP_ENV: "TEST",
+      APP_BASE_URL: "https://agent.openaimp.com",
+      AI_SEARCH_ENDPOINT: "https://ai-search.internal",
+      ETRADE_ENVIRONMENT: "sandbox",
+      ET_API_KEY: "sandbox_consumer_key_123",
+      ET_API_SECRET: "sandbox_consumer_secret_456",
+      ET_BASE_URL: "https://apisb.etrade.com/v1",
+    } as Env;
+  });
+
+  function createPlan(callback: string): NLQPlan {
+    // Discovery needs a saved strategy request; goal screens need a
+    // goalKind — the builder refuses criteria-less plans for those two
+    // (pre-existing validation, not the F1 allow-list).
+    const extra: Record<string, unknown> =
+      callback === "autonomousStrategyDiscovery"
+        ? {
+            requests: [
+              {
+                symbol: "SPY",
+                thesis: "bullish",
+                targetPrice: 600,
+                targetDate: "2026-12-18",
+                expectedIvDirection: "rise",
+                maxPlannedLoss: 500,
+                minRewardRisk: 1.5,
+                allowedStrategies: ["long_call"],
+              },
+            ],
+          }
+        : callback === "autonomousGoalScreen"
+          ? { goalKind: "income" }
+          : {};
+    return {
+      domain: "scheduling",
+      operation: "create",
+      scheduleData: {
+        action: "create",
+        scheduleType: "delayed",
+        delayInSeconds: 60,
+        callback,
+        description: "F1 probe",
+        ...extra,
+      },
+      terms: "",
+      role: "any",
+      since: null,
+      limit: 1,
+    };
+  }
+
+  it("3122-F1a refuses an internal-only callback honestly: nothing armed, no success claim", async () => {
+    const port = new FakeSchedulingPort();
+    for (const callback of ["executeAsyncJob", "autoRenewETradeTokens", "expireStaleOrderDraft", "collectIvHistory"]) {
+      const result = await executeNLQQueryAsync(orm, sessionId, createPlan(callback), env, sessionId, undefined, {
+        schedulingPort: port,
+      });
+      expect(result.status).toBe("error");
+      expect(result.summary).toMatch(/not schedulable through NLQ/i);
+      expect(result.summary).toMatch(/NOT created/);
+    }
+    expect(port.calls).toHaveLength(0);
+    expect(port.items).toHaveLength(0);
+    expect(orm.events.findMany({ where: { type: "schedule.created" } })).toHaveLength(0);
+  });
+
+  it("3122-F1b still arms the reminder and each creatable callback", async () => {
+    const port = new FakeSchedulingPort();
+    for (const callback of [
+      "sendScheduledReminder",
+      "autonomousMarketScreen",
+      "autonomousOptionsAnalysis",
+      "autonomousStrategyDiscovery",
+      "autonomousGoalScreen",
+    ]) {
+      const result = await executeNLQQueryAsync(orm, sessionId, createPlan(callback), env, sessionId, undefined, {
+        schedulingPort: port,
+      });
+      expect(result.status).toBe("scheduled");
+    }
+    expect(port.items).toHaveLength(5);
+  });
+
+  it("3122-F1c the plan schema rejects an unlisted callback at parse time", async () => {
+    const { nlqPlanSchema } = await import("../src/agents/nlq/schema");
+    const parsed = nlqPlanSchema.safeParse({
+      domain: "scheduling",
+      operation: "create",
+      scheduleData: { action: "create", callback: "executeAsyncJob" },
+      terms: "",
+    });
+    expect(parsed.success).toBe(false);
+    const allowed = nlqPlanSchema.safeParse({
+      domain: "scheduling",
+      operation: "create",
+      scheduleData: { action: "create", callback: "autonomousMarketScreen" },
+      terms: "",
+    });
+    expect(allowed.success).toBe(true);
   });
 });

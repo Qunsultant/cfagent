@@ -752,7 +752,12 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     expect(result.status).toBe("scheduled");
     expect(port.calls).toHaveLength(1);
     expect(port.calls[0].method).toBe("scheduleEvery");
-    expect(port.calls[0].args[2]).toEqual({ userLogin: sessionId, trigger: "scheduled" });
+    // #3122: the NLQ executor stamps agent provenance on the armed
+    // payload; the rest is exactly the schema-built identity stamps.
+    const { provenance, ...identity } = port.calls[0].args[2] as Record<string, unknown>;
+    expect(identity).toEqual({ userLogin: sessionId, trigger: "scheduled" });
+    expect(provenance).toMatchObject({ agentId: "nlq", createdBy: sessionId, origin: "agent" });
+    expect(typeof (provenance as Record<string, unknown>).createdAt).toBe("string");
   });
 
   it("NLQ options analysis WITH criteria arms the builder's payload (parity with the builder arm)", async () => {
@@ -781,7 +786,12 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;
-    expect(port.calls[0].args[2]).toEqual(built.value);
+    // #3122: the NLQ executor stamps agent provenance on the armed
+    // payload; the rest is exactly the builder's payload.
+    const { provenance, ...armed } = port.calls[0].args[2] as Record<string, unknown>;
+    expect(armed).toEqual(built.value);
+    expect(provenance).toMatchObject({ agentId: "nlq", createdBy: sessionId, origin: "agent" });
+    expect(typeof (provenance as Record<string, unknown>).createdAt).toBe("string");
   });
 
   it("NLQ schedule creation with mis-shaped criteria fails explicitly and arms nothing", async () => {

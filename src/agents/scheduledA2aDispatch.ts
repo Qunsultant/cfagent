@@ -33,6 +33,7 @@
 import { AGENT_ERROR_CATALOG, AgentErrorCode } from "../aspects/errorCodes";
 import type { Env } from "../types";
 import type { ScheduledGoal, ScheduleTick } from "../schedule";
+import { classifyAgentScheduleRequest } from "../services/agentScheduleCapability";
 
 /**
  * The operations this dispatch serves. This constant is the
@@ -207,6 +208,22 @@ async function executeOperation(
         operation: stringArg(args, "op", operation),
         budgetCents: positiveNumberArg(args, "budgetCents", operation, true)!,
       };
+      // Issue #3122 (F2): descriptor-only goal operations are excluded
+      // from agent scheduling — their firings mint a pending
+      // descriptor and execute nothing, so arming one would report
+      // success and do no work. This check is principal-free
+      // (classification only); PDP + approval + ownership for goal
+      // A2A wait on the principal-carrying envelope (#4143).
+      const classification = classifyAgentScheduleRequest({
+        kind: "goal-operation",
+        operation: goal.operation,
+        budgetCents: goal.budgetCents,
+      });
+      if (!classification.schedulable) {
+        throw new ScheduledA2AInputError(
+          `Operation "scheduled.add_goal" refused: ${classification.denialReason}`,
+        );
+      }
       if (args.enabled !== undefined) {
         if (typeof args.enabled !== "boolean") {
           throw new ScheduledA2AInputError(`Operation "${operation}" requires "enabled" to be a boolean when present.`);

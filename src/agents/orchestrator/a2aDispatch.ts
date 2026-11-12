@@ -28,6 +28,13 @@
 import { createMAS, type MASOptions } from "../mas";
 import { AGENT_ERROR_CATALOG, AgentErrorCode } from "../../aspects/errorCodes";
 import type { Env } from "../../types";
+import {
+  type AgentScheduleActionRequest,
+  type AgentScheduleActionResult,
+  type AgentSchedulePrincipal,
+  type AgentSdkTiming,
+} from "../../services/agentScheduleCapability";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 
 /**
  * The operations this dispatch serves. This constant is the
@@ -43,6 +50,17 @@ export const ORCHESTRATOR_A2A_OPERATIONS = [
   "memory.remember",
   "memory.recall",
   "nlq.execute",
+  // Issue #3122 — the agent schedule-management capability, served
+  // through the one capability (PDP, classification, approval gate,
+  // ledger audit). The ops are registered here and on the orchestrator
+  // card; they refuse without a principal (#4143 envelope).
+  "schedule.create",
+  "schedule.list",
+  "schedule.update",
+  "schedule.pause",
+  "schedule.resume",
+  "schedule.trigger",
+  "schedule.delete",
 ] as const;
 
 export type OrchestratorA2AOperation = (typeof ORCHESTRATOR_A2A_OPERATIONS)[number];
@@ -106,6 +124,25 @@ export interface OrchestratorA2ADeps {
    * executor and nlq.execute fails honestly when it is absent.
    */
   nlqExecute?: (query: string) => Promise<unknown>;
+  /**
+   * Issue #3122 — the agent schedule capability executor, bound by
+   * the orchestrator class (env + DO sql + audit + SDK adapter).
+   * The schedule.* ops delegate to it; without it they fail honestly.
+   * The executor is invoked with a request built here, never with
+   * the raw A2A body.
+   */
+  agentScheduleExecute?: (
+    request: AgentScheduleActionRequest,
+  ) => Promise<AgentScheduleActionResult>;
+  /**
+   * Issue #3122 — the principal the agent acts for (login + agent
+   * id). A2A actions carry no principal login today, so the
+   * orchestrator does NOT supply one; the schedule.* ops refuse
+   * without it (fail-closed). The principal-carrying envelope is
+   * #4143 — when it lands, the class passes the envelope principal
+   * here and the ops light up with no dispatch change.
+   */
+  schedulePrincipal?: AgentSchedulePrincipal;
 }
 
 const defaultMasFactory: OrchestratorMasFactory = (env, ctx) =>
@@ -189,12 +226,138 @@ function stringArg(args: Record<string, unknown>, key: string): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+/** Parse an A2A schedule timing object into the capability's timing shape. */
+function scheduleTimingArg(args: Record<string, unknown>): AgentSdkTiming {
+  const timing = args.timing;
+  if (!timing || typeof timing !== "object" || Array.isArray(timing)) {
+    throw new OrchestratorA2AInputError(
+      'Schedule operations require a "timing" object: { type: "cron", cron } | { type: "interval", intervalSeconds } | { type: "scheduled", time } | { type: "delayed", delayInSeconds }.',
+    );
+  }
+  const t = timing as Record<string, unknown>;
+  if (t.type === "cron" && typeof t.cron === "string" && t.cron.trim().length > 0) {
+    return { type: "cron", cron: t.cron };
+  }
+  if (t.type === "interval" && typeof t.intervalSeconds === "number" && t.intervalSeconds > 0) {
+    return { type: "interval", intervalSeconds: t.intervalSeconds };
+  }
+  if (t.type === "scheduled" && typeof t.time === "number" && Number.isFinite(t.time)) {
+    return { type: "scheduled", time: t.time };
+  }
+  if (t.type === "delayed" && typeof t.delayInSeconds === "number" && t.delayInSeconds > 0) {
+    return { type: "delayed", delayInSeconds: t.delayInSeconds };
+  }
+  throw new OrchestratorA2AInputError(
+    'Schedule "timing" must be { type: "cron", cron } | { type: "interval", intervalSeconds } | { type: "scheduled", time } | { type: "delayed", delayInSeconds }.',
+  );
+}
+
+function scheduleTimingArgOptional(args: Record<string, unknown>): AgentSdkTiming | undefined {
+  return args.timing === undefined ? undefined : scheduleTimingArg(args);
+}
+
+/**
+ * Issue #3122 — one schedule.* operation through the agent schedule
+ * capability. The capability owns PDP, classification, the approval
+ * gate, provenance, and the ledger row; this function only translates
+ * the A2A args into a capability request. A capability refusal
+ * surfaces as the operation's failure with the capability's reason —
+ * never as a fabricated success.
+ */
+async function executeScheduleOperation(
+  env: Env,
+  operation: OrchestratorA2AOperation,
+  args: Record<string, unknown>,
+  deps: OrchestratorA2ADeps,
+): Promise<unknown> {
+  if (!deps.agentScheduleExecute) {
+    throw new Error("Agent schedule capability is not configured for this dispatch context.");
+  }
+  const principal = deps.schedulePrincipal;
+  if (!principal) {
+    throw new OrchestratorA2AInputError(
+      "Schedule operations require a principal login carried by the A2A envelope (issue #4143); this envelope carries none, so the action was refused, not executed.",
+    );
+  }
+  const tenantId = resolveIaaaTenant(env);
+  const scheduleId = (op: string): string => {
+    const id = stringArg(args, "scheduleId");
+    if (id === null) {
+      throw new OrchestratorA2AInputError(
+        `Operation "${op}" requires a non-empty string "scheduleId" argument.`,
+      );
+    }
+    return id;
+  };
+
+  let request: AgentScheduleActionRequest;
+  switch (operation) {
+    case "schedule.create": {
+      const callback = stringArg(args, "callback");
+      if (callback === null) {
+        throw new OrchestratorA2AInputError(
+          'Operation "schedule.create" requires a non-empty string "callback" argument.',
+        );
+      }
+      request = {
+        action: "create",
+        kind: "sdk",
+        principal,
+        tenantId,
+        callback,
+        timing: scheduleTimingArg(args),
+        ...(args.payload !== undefined ? { payload: args.payload } : {}),
+        ...(typeof args.budgetCents === "number" ? { budgetCents: args.budgetCents } : {}),
+        ...(args.isExternalSend === true ? { isExternalSend: true } : {}),
+      };
+      break;
+    }
+    case "schedule.list":
+      request = { action: "list", kind: "sdk", principal, tenantId };
+      break;
+    case "schedule.update":
+      request = {
+        action: "update",
+        kind: "sdk",
+        principal,
+        tenantId,
+        scheduleId: scheduleId(operation),
+        ...(scheduleTimingArgOptional(args) !== undefined
+          ? { timing: scheduleTimingArgOptional(args)! }
+          : {}),
+        ...(args.payload !== undefined ? { payload: args.payload } : {}),
+      };
+      break;
+    case "schedule.pause":
+      request = { action: "pause", kind: "sdk", principal, tenantId, scheduleId: scheduleId(operation) };
+      break;
+    case "schedule.resume":
+      request = { action: "resume", kind: "sdk", principal, tenantId, scheduleId: scheduleId(operation) };
+      break;
+    case "schedule.trigger":
+      request = { action: "trigger", kind: "sdk", principal, tenantId, scheduleId: scheduleId(operation) };
+      break;
+    case "schedule.delete":
+      request = { action: "delete", kind: "sdk", principal, tenantId, scheduleId: scheduleId(operation) };
+      break;
+    default:
+      throw new OrchestratorA2AInputError(`Unknown schedule operation: "${operation}".`);
+  }
+  const out = await deps.agentScheduleExecute(request);
+  if (!out.ok) throw new Error(out.reason);
+  return out;
+}
+
 async function executeOperation(
   env: Env,
   operation: OrchestratorA2AOperation,
   args: Record<string, unknown>,
   deps: OrchestratorA2ADeps,
 ): Promise<unknown> {
+  if (operation.startsWith("schedule.")) {
+    return executeScheduleOperation(env, operation, args, deps);
+  }
+
   if (operation === "nlq.execute") {
     const query = stringArg(args, "query");
     if (query === null) {
@@ -324,6 +487,20 @@ function successText(data: OrchestratorA2ADataResult): string {
       return `memory.recall completed: ${typeof result.count === "number" ? result.count : 0} fact(s) recalled.`;
     case "nlq.execute":
       return "nlq.execute completed: the natural-language query was planned and executed.";
+    case "schedule.create":
+      return `schedule.create completed: schedule "${String(result.scheduleId ?? "")}" armed with agent provenance.`;
+    case "schedule.list":
+      return `schedule.list completed: ${Array.isArray(result.schedule) ? result.schedule.length : 0} schedule(s).`;
+    case "schedule.update":
+      return `schedule.update completed: schedule "${String(result.scheduleId ?? "")}" updated.`;
+    case "schedule.pause":
+      return `schedule.pause completed: schedule "${String(result.scheduleId ?? "")}" paused.`;
+    case "schedule.resume":
+      return `schedule.resume completed: schedule "${String(result.scheduleId ?? "")}" resumed.`;
+    case "schedule.trigger":
+      return `schedule.trigger completed: schedule "${String(result.scheduleId ?? "")}" triggered.`;
+    case "schedule.delete":
+      return `schedule.delete completed: schedule "${String(result.scheduleId ?? "")}" deleted.`;
     default:
       return `${data.operation ?? "orchestrator operation"} completed.`;
   }

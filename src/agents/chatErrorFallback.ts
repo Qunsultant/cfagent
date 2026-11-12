@@ -18,6 +18,7 @@ import type { StrategyProfileStore } from "../data/strategyProfilePorts";
 import type { Env } from "../types";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import type { NLQExecutionDeps } from "./nlq/types";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -33,6 +34,12 @@ export interface ChatErrorFallbackContext {
   scanRunStore: ScanRunStore;
   profileStore: StrategyProfileStore;
   schedulingPort: NLQSchedulingPort;
+  /**
+   * Issue #3122 — the agent schedule capability, bound by the
+   * orchestrator. When present, NLQ schedule actions in the fallback
+   * route through it; when absent the executor still enforces F1.
+   */
+  agentScheduleCapability?: NLQExecutionDeps["agentScheduleCapability"];
   stockScreenPort: NLQStockScreenPort;
 }
 
@@ -70,7 +77,7 @@ export async function buildChatErrorFallback(
         ctx.env,
         userLogin,
         undefined,
-        { scanRunStore: ctx.scanRunStore, profileStore: ctx.profileStore, schedulingPort: ctx.schedulingPort, stockScreenPort: ctx.stockScreenPort }
+        { scanRunStore: ctx.scanRunStore, profileStore: ctx.profileStore, schedulingPort: ctx.schedulingPort, agentScheduleCapability: ctx.agentScheduleCapability, stockScreenPort: ctx.stockScreenPort }
       );
       if (result && result.status !== "error") {
         if (Array.isArray(result.rows) && result.rows.length > 0) {

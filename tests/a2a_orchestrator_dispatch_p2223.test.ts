@@ -294,3 +294,118 @@ describe("orchestrator A2A dispatch (#2223 slice 1)", () => {
     );
   });
 });
+
+describe("orchestrator A2A schedule.* operations (issue #3122)", () => {
+  const principal = { login: "OpenAIMP", agentId: "a2a-test" };
+
+  function makeScheduleDeps(outcome?: (request: Record<string, unknown>) => Record<string, unknown>) {
+    const requests: Array<Record<string, unknown>> = [];
+    const deps: Record<string, unknown> = {
+      sessionId: "sess-a2a-schedule",
+      sql: { exec: (_q: string, ..._a: unknown[]) => [] as unknown[] },
+      audit: () => {},
+      agentScheduleExecute: async (request: Record<string, unknown>) => {
+        requests.push(request);
+        if (outcome) return outcome(request);
+        return { ok: true, scheduleId: "sdk-1", schedule: { id: "sdk-1", callback: request.callback } };
+      },
+      schedulePrincipal: principal,
+    };
+    return { deps, requests };
+  }
+
+  it("3122-A2A1 schedule.create delegates to the capability with callback, timing, principal, tenant", async () => {
+    const { deps, requests } = makeScheduleDeps();
+    const data = await dispatchOrchestratorA2A(
+      ENV,
+      {
+        operation: "schedule.create",
+        callback: "autonomousMarketScreen",
+        timing: { type: "interval", intervalSeconds: 3600 },
+      },
+      deps as never,
+    );
+    expect(data.ok).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      action: "create",
+      kind: "sdk",
+      callback: "autonomousMarketScreen",
+      timing: { type: "interval", intervalSeconds: 3600 },
+      principal,
+      tenantId: "primary",
+    });
+    expect(orchestratorA2AOutcome(data).text).toContain("sdk-1");
+  });
+
+  it("3122-A2A2 schedule.* without a principal refuses fail-closed and never calls the capability (#4143)", async () => {
+    const { deps, requests } = makeScheduleDeps();
+    delete (deps as Record<string, unknown>).schedulePrincipal;
+    const data = await dispatchOrchestratorA2A(
+      ENV,
+      { operation: "schedule.create", callback: "autonomousMarketScreen", timing: { type: "interval", intervalSeconds: 3600 } },
+      deps as never,
+    );
+    expect(data.ok).toBe(false);
+    expect(data.code).toBe("invalid_input");
+    expect(data.error).toMatch(/#4143/);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("3122-A2A3 schedule.* without a bound capability fails honestly", async () => {
+    const { deps } = makeDeps();
+    const data = await dispatchOrchestratorA2A(
+      ENV,
+      { operation: "schedule.list" },
+      deps as never,
+    );
+    expect(data.ok).toBe(false);
+    expect(data.error).toMatch(/not configured/);
+  });
+
+  it("3122-A2A4 a capability refusal surfaces as the operation failure with the capability reason", async () => {
+    const { deps } = makeScheduleDeps(() => ({
+      ok: false,
+      code: "denied",
+      reason: "Callback 'executeAsyncJob' is not agent-schedulable.",
+    }));
+    const data = await dispatchOrchestratorA2A(
+      ENV,
+      { operation: "schedule.create", callback: "executeAsyncJob", timing: { type: "interval", intervalSeconds: 3600 } },
+      deps as never,
+    );
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("not agent-schedulable");
+  });
+
+  it("3122-A2A5 schedule.list / pause / resume / trigger / delete translate to capability actions", async () => {
+    const { deps, requests } = makeScheduleDeps((request) => {
+      if (request.action === "list") return { ok: true, schedule: [{ id: "sdk-1" }, { id: "sdk-2" }] };
+      return { ok: true, scheduleId: "sdk-1" };
+    });
+    for (const [operation, args, action] of [
+      ["schedule.list", {}, "list"],
+      ["schedule.pause", { scheduleId: "sdk-1" }, "pause"],
+      ["schedule.resume", { scheduleId: "sdk-1" }, "resume"],
+      ["schedule.trigger", { scheduleId: "sdk-1" }, "trigger"],
+      ["schedule.delete", { scheduleId: "sdk-1" }, "delete"],
+    ] as const) {
+      const data = await dispatchOrchestratorA2A(ENV, { operation, ...args }, deps as never);
+      expect(data.ok).toBe(true);
+    }
+    expect(requests.map((r) => r.action)).toEqual(["list", "pause", "resume", "trigger", "delete"]);
+    expect(requests.every((r) => r.kind === "sdk" && r.principal === principal)).toBe(true);
+  });
+
+  it("3122-A2A6 schedule.create rejects a malformed timing object as invalid input", async () => {
+    const { deps, requests } = makeScheduleDeps();
+    const data = await dispatchOrchestratorA2A(
+      ENV,
+      { operation: "schedule.create", callback: "autonomousMarketScreen", timing: { type: "interval" } },
+      deps as never,
+    );
+    expect(data.ok).toBe(false);
+    expect(data.code).toBe("invalid_input");
+    expect(requests).toHaveLength(0);
+  });
+});
