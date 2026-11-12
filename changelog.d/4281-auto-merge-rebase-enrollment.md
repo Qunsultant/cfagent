@@ -1,0 +1,3 @@
+### Added
+
+- **Auto-merge enrollment is explicit about its method (#4281):** the trusted auto-merge workflow takes the PR node id from the event payload and enrolls with `mergeMethod: REBASE`; if the ruleset refuses the request it enqueues via `enqueuePullRequest` instead. The flagless `gh pr merge --auto` fallback is gone — on this repository it records the repository default (SQUASH while only REBASE is allowed), leaving PRs that show auto-merge enabled, all checks green, and never merge. The `protectmain` ruleset now lists `rebase` as its only allowed merge method, so the documented rebase-only strategy (gitops §11) and the live configuration agree. #autoclaw-001

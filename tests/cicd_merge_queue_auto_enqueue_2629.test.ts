@@ -56,9 +56,21 @@ describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
     expect(autoMergeTrustedYml).toContain('"$CURRENT_METHOD" != "REBASE"');
   });
 
-  it("omits strategy flags from gh pr merge --auto to comply with Merge Queue rules (#2629)", () => {
-    expect(autoMergeTrustedYml).not.toContain("gh pr merge --auto --rebase");
-    expect(autoMergeTrustedYml).not.toContain("gh pr merge --auto --squash");
-    expect(autoMergeTrustedYml).toMatch(/gh pr merge ["']?\$PR_NUMBER["']? --auto/);
+  it("enrolls with an explicit REBASE method and never falls back to a flagless gh pr merge --auto (#4281)", () => {
+    // A flagless `--auto` records the repository default, which on this repo is
+    // SQUASH while only REBASE is allowed: the PR then shows auto-merge on, all
+    // checks green, CLEAN, and never merges (#4267/#4219/#4244, #4281).
+    expect(autoMergeTrustedYml).toContain(
+      "enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: REBASE })",
+    );
+    // No command-position `gh pr merge ... --auto` may remain (comments may name it).
+    expect(autoMergeTrustedYml).not.toMatch(/^\s+gh pr merge\b[^\n]*--auto/m);
+    // The node id comes from the event payload; the enrollment cannot depend on
+    // a REST round-trip that may fail and fall through.
+    expect(autoMergeTrustedYml).toContain(
+      "PR_NODE_ID: ${{ github.event.pull_request.node_id }}",
+    );
+    // The fallback is the queue itself, which takes no merge method at all.
+    expect(autoMergeTrustedYml).toContain("enqueuePullRequest(input: { pullRequestId: $id })");
   });
 });
