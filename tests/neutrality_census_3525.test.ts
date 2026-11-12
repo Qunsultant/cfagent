@@ -384,6 +384,15 @@ function measure(): Map<string, number> {
  * the id rewritten). One new row, dispositioned INTEGRATION:
  * feed-run-residency-and-scheduled-silence-3992.md yahoo 1. The rest
  * of the doc and its companion fragment name no provider brand.
+ * Baseline update (#4190, 2026-11-12): the screener substrate (#3550 S1)
+ * adds six ScreenerAgent stage methods that duplicate runScreenInner's
+ * per-stage provider branches (the live path is untouched in S1; the
+ * stage methods name the provider their branch serves, exactly as the
+ * bodies they mirror do) — dispositioned INTEGRATION, the provider
+ * branches' own names: 4 raises (screener-agent.ts etrade 71->85 /
+ * alpaca 18->22 / yahoo 58->66 / nasdaq 7->10). The counts fall back
+ * when S2 repoints the live path at the engine and the duplicated
+ * branches are retired. Totals move 1161/9142 -> 1161/9171.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -757,9 +766,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/scheduledTasksPipeline.ts", "alpaca", 1],
   ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "yahoo", 1],
-  ["src/agents/screener-agent.ts", "alpaca", 18],
-  ["src/agents/screener-agent.ts", "etrade", 71],
-  ["src/agents/screener-agent.ts", "yahoo", 58],
+  ["src/agents/screener-agent.ts", "alpaca", 22],
+  ["src/agents/screener-agent.ts", "etrade", 85],
+  ["src/agents/screener-agent.ts", "yahoo", 66],
   ["src/agents/screenerA2aDispatch.ts", "etrade", 2],
   ["src/agents/screenerA2aDispatch.ts", "yahoo", 5],
   ["src/agents/slackA2aDispatch.ts", "etrade", 11],
@@ -1480,7 +1489,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/etradeBroker.ts", "nasdaq", 1],
   ["src/agents/routes/optionsProviderGate.ts", "nasdaq", 1],
   ["src/agents/routes/premium.ts", "nasdaq", 1],
-  ["src/agents/screener-agent.ts", "nasdaq", 7],
+  ["src/agents/screener-agent.ts", "nasdaq", 10],
   ["src/agents/trading-agent.ts", "nasdaq", 1],
   ["src/aspects/errorCodes.ts", "nasdaq", 1],
   ["src/breakers/breakerPorts.ts", "nasdaq", 1],
