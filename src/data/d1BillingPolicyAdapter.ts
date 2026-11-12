@@ -64,6 +64,7 @@ export async function ensureBillingPolicySchema(db: BillingPolicyDb): Promise<nu
     [BILLING_POLICY_KEYS.topUpMinUSD, PROPOSED_SEED_BILLING_POLICY.topUpMinUSD],
     [BILLING_POLICY_KEYS.topUpMaxUSD, PROPOSED_SEED_BILLING_POLICY.topUpMaxUSD],
     [BILLING_POLICY_KEYS.annualDiscountPct, PROPOSED_SEED_BILLING_POLICY.annualDiscountPct],
+    [BILLING_POLICY_KEYS.offerRules, PROPOSED_SEED_BILLING_POLICY.offerRules],
   ];
   for (const [key, value] of seedRows) {
     await db
@@ -100,6 +101,7 @@ export class D1BillingPolicyAdapter implements BillingPolicyStore {
       [BILLING_POLICY_KEYS.topUpMinUSD]: "topUpMinUSD",
       [BILLING_POLICY_KEYS.topUpMaxUSD]: "topUpMaxUSD",
       [BILLING_POLICY_KEYS.annualDiscountPct]: "annualDiscountPct",
+      [BILLING_POLICY_KEYS.offerRules]: "offerRules",
     };
     for (const [key, field] of Object.entries(fieldByKey)) {
       const raw = byKey[key];

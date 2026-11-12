@@ -78,7 +78,12 @@ function RunTypeCell({ row }: { row: DocumentRow }) {
   );
 }
 
-function ArtifactLink({
+/**
+ * Issue #4262 (S4) — exported so the one run ledger renders the same
+ * per-kind artifact states (link / honest dash / recorded leg failure)
+ * from the same component, never a re-implementation.
+ */
+export function ArtifactLink({
   url,
   kind,
   runId,

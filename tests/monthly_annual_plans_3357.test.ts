@@ -71,7 +71,9 @@ import {
   assertAnnualDiscountPct,
   assertBillingPolicy,
   assertBillingPolicyPartial,
+  assertOfferRules,
   PROPOSED_SEED_BILLING_POLICY,
+  PROPOSED_SEED_OFFER_RULES,
   type BillingPolicy,
 } from "../src/data/billingPolicyPorts";
 import {
@@ -213,6 +215,94 @@ describe("billing policy annualDiscountPct (#3357)", () => {
     }
   });
 });
+
+describe("billing policy offerRules (#3246 §4.2)", () => {
+  it("seeds the PROPOSED defaults: enabled, all triggers on, 7-day cooldown, all visibility on", () => {
+    expect(PROPOSED_SEED_OFFER_RULES).toEqual({
+      enabled: true,
+      triggersEnabled: { manual402: true, skipNotice: true, trialEnd: true, quotaExhausted: true, ambient: true },
+      dismissCooldownDays: 7,
+      showProposed: true,
+      downgradesEnabled: true,
+      runsPacksEnabled: true,
+      mentionsEnabled: { referral: true, freeAccess: true },
+    });
+    expect(PROPOSED_SEED_BILLING_POLICY.offerRules).toEqual(PROPOSED_SEED_OFFER_RULES);
+    expect(assertOfferRules({ ...PROPOSED_SEED_OFFER_RULES })).toEqual(PROPOSED_SEED_OFFER_RULES);
+  });
+
+  it("rejects non-boolean toggles, out-of-range cooldowns, and unknown keys with the catalog code", () => {
+    const bad = (mutate: (r: Record<string, unknown>) => void) => {
+      const rules = JSON.parse(JSON.stringify(PROPOSED_SEED_OFFER_RULES)) as Record<string, unknown>;
+      mutate(rules);
+      return rules;
+    };
+    const cases = [
+      bad((r) => { r.enabled = "yes"; }),
+      bad((r) => { (r.triggersEnabled as Record<string, unknown>).manual402 = 1; }),
+      bad((r) => { (r.triggersEnabled as Record<string, unknown>).bogus = true; }),
+      bad((r) => { r.dismissCooldownDays = 0; }),
+      bad((r) => { r.dismissCooldownDays = 366; }),
+      bad((r) => { r.dismissCooldownDays = 7.5; }),
+      bad((r) => { r.dismissCooldownDays = "7"; }),
+      bad((r) => { r.mentionsEnabled = { referral: true }; }),
+      bad((r) => { r.surprise = true; }),
+      null,
+      "on",
+      [PROPOSED_SEED_OFFER_RULES],
+    ];
+    for (const value of cases) {
+      expectBusinessError(() => assertOfferRules(value), "FAILURE_OFFER_RULES_INVALID");
+    }
+    expect(assertOfferRules(bad((r) => { r.dismissCooldownDays = 1; })).dismissCooldownDays).toBe(1);
+    expect(assertOfferRules(bad((r) => { r.dismissCooldownDays = 365; })).dismissCooldownDays).toBe(365);
+  });
+
+  it("policy validation accepts the block and rejects a malformed one with the catalog code", () => {
+    const rules = { ...PROPOSED_SEED_OFFER_RULES, dismissCooldownDays: 30 };
+    expect(assertBillingPolicyPartial({ offerRules: rules })).toEqual({ offerRules: rules });
+    const err = (() => {
+      try {
+        assertBillingPolicyPartial({ offerRules: { ...PROPOSED_SEED_OFFER_RULES, dismissCooldownDays: 0 } });
+      } catch (e) {
+        return e as BusinessError;
+      }
+      return null;
+    })();
+    expect(err).toBeInstanceOf(BusinessError);
+    expect(err?.code).toBe("FAILURE_OFFER_RULES_INVALID");
+    expect(assertBillingPolicy({ ...PROPOSED_SEED_BILLING_POLICY }).offerRules).toEqual(PROPOSED_SEED_OFFER_RULES);
+  });
+
+  it("persists operator edits on both adapters and survives re-ensure when edited", async () => {
+    for (const { policy } of await policyAdapters()) {
+      expect((await policy.getPolicy()).offerRules).toEqual(PROPOSED_SEED_OFFER_RULES);
+      const updated = await policy.updatePolicy({
+        offerRules: { ...PROPOSED_SEED_OFFER_RULES, enabled: false, dismissCooldownDays: 30 },
+      });
+      expect(updated.offerRules).toMatchObject({ enabled: false, dismissCooldownDays: 30 });
+      expect((await policy.getPolicy()).offerRules).toMatchObject({ enabled: false, dismissCooldownDays: 30 });
+      const refused = await policy
+        .updatePolicy({ offerRules: { ...PROPOSED_SEED_OFFER_RULES, dismissCooldownDays: 0 } })
+        .catch((e) => e);
+      expect(refused).toBeInstanceOf(BusinessError);
+      expect(refused.code).toBe("FAILURE_OFFER_RULES_INVALID");
+    }
+    // D1 only: re-ensure (INSERT OR IGNORE seeding) must not overwrite the operator edit.
+    const mock = new MockD1Database();
+    const commercialDb = createD1CommercialDb(mock as unknown as D1Database);
+    await ensureCommercialSchema(commercialDb);
+    const subsDb = createD1SubscriptionDb(mock as unknown as D1Database);
+    await ensureSubscriptionSchema(subsDb);
+    const policyDb = createD1BillingPolicyDb(mock as unknown as D1Database);
+    await ensureBillingPolicySchema(policyDb);
+    const adapter = new D1BillingPolicyAdapter(policyDb);
+    await adapter.updatePolicy({ offerRules: { ...PROPOSED_SEED_OFFER_RULES, dismissCooldownDays: 21 } });
+    await ensureBillingPolicySchema(policyDb);
+    expect((await adapter.getPolicy()).offerRules.dismissCooldownDays).toBe(21);
+  });
+});
+
 
 describe("migration 0049 — plan price approval (#3357)", () => {
   it("is registered in ALL_MIGRATIONS (position-independent containment, never 'latest')", () => {

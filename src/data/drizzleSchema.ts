@@ -992,9 +992,33 @@ export const agentProducts = sqliteTable("agent_products", {
   name: text("name").notNull(),
   kind: text("kind").notNull(),
   description: text("description"),
+  /**
+   * Issue #3246 (migration 0062) — the explicit ladder position:
+   * 1 = the lowest rung, larger = higher; NULL = unranked (the
+   * derived order applies). prod-free is seeded to rank 1.
+   */
+  rank: integer("rank"),
   createdAtMs: integer("created_at_ms").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
+
+/**
+ * Offer-dismissal suppressions (#3246 §4.4, migration 0062):
+ * one row per (login, trigger) — a dismissed trigger stays
+ * suppressed until suppressed_until_ms. Expired rows are inert
+ * (read as absent). This schema MAPS the table; DDL authority
+ * lives in migration 0062.
+ */
+export const agentOfferSuppressions = sqliteTable(
+  "agent_offer_suppressions",
+  {
+    login: text("login").notNull(),
+    trigger: text("trigger").notNull(),
+    suppressedUntilMs: integer("suppressed_until_ms").notNull(),
+    dismissedAtMs: integer("dismissed_at_ms").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.login, t.trigger] })],
+);
 
 /**
  * Per-customer version moves (#3289 §3.8, migration 0058): one

@@ -412,6 +412,20 @@
  * /api/schedules/workflow-stages (in handleSchedulesRoutes,
  * immediately before the generic create route) — bringing the
  * pinned inventory to 448 entries.
+ *
+ * Issue #3246 (slice 1) added five — POST
+ * /payments/agentic/commercial/offer, GET
+ * /payments/agentic/commercial/offer/compare, POST
+ * /payments/agentic/commercial/offer/dismiss, and POST
+ * /payments/agentic/commercial/products/:productId/rank (in
+ * handleAgenticPaymentsRoutes, after the products routes,
+ * before the versions routes). The path-param rank route
+ * contributes two inventory entries (an includes literal for
+ * the prefix and an endsWith literal for the suffix, in
+ * source order) — bringing the pinned inventory to 456
+ * entries (451 measured on main before this slice); the
+ * delegation sequence is unchanged (same handler, same
+ * position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -669,6 +683,16 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/segment\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/products\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/products\")",
+  // Issue #3246 (slice 1): POST /payments/agentic/commercial/offer,
+  // GET .../offer/compare, POST .../offer/dismiss (in
+  // handleAgenticPaymentsRoutes, after the products routes, before
+  // the versions routes), and POST .../products/:productId/rank
+  // (two entries: includes prefix + endsWith suffix, in source order).
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/offer\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/offer/compare\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/offer/dismiss\")",
+  "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/rank\")",
   "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/versions\")",
   "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/commercial/products/\")",

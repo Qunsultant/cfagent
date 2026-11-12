@@ -29,6 +29,7 @@ import {
   MIGRATION_0011_PRICE_CATALOGUE,
   MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
   MIGRATION_0058_PRODUCT_VERSIONS,
+  MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -83,6 +84,7 @@ export async function ensurePriceCatalogueSchema(db: PriceCatalogueDb): Promise<
     MIGRATION_0009_JOURNAL,
     MIGRATION_0012_NATIVE_LEDGER,
     MIGRATION_0058_PRODUCT_VERSIONS,
+    MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   ]);
   const now = Date.now();
   for (const [family, priceUSD] of Object.entries(PROPOSED_SEED_PRICES)) {

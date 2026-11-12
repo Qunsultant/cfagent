@@ -99,6 +99,13 @@ export interface ProductRecord {
   name: string;
   kind: ProductKind;
   description: string | null;
+  /**
+   * Issue #3246 — the explicit ladder position: 1 = the lowest
+   * rung, larger = higher; null = unranked (the derived order
+   * applies). prod-free is fixed at rank 1 (migration 0062
+   * seed); the set-rank route refuses to change it.
+   */
+  rank: number | null;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -227,7 +234,8 @@ export function assertProduct(input: {
   name?: unknown;
   kind?: unknown;
   description?: unknown;
-}): { id: string; name: string; kind: ProductKind; description: string | null } {
+  rank?: unknown;
+}): { id: string; name: string; kind: ProductKind; description: string | null; rank: number | null } {
   const id = typeof input.id === "string" && input.id.trim() ? input.id.trim() : "";
   const name = typeof input.name === "string" ? input.name.trim() : "";
   if (!name) throw new Error("Product name is required.");
@@ -240,7 +248,23 @@ export function assertProduct(input: {
         : (() => {
             throw new Error("Product description must be a string when present.");
           })();
-  return { id, name, kind, description };
+  return { id, name, kind, description, rank: assertProductRank(input.rank) };
+}
+
+/**
+ * Issue #3246 — validate an explicit ladder rank: a positive
+ * whole number, or null (unranked). Absent reads as null. A
+ * plain Error: the set-rank route maps validation failures to
+ * the catalog-coded FAILURE_PRODUCT_RANK_INVALID response, and
+ * the create-product route maps them through its existing 400
+ * message matching ("must be").
+ */
+export function assertProductRank(value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || Math.floor(value) !== value || value < 1) {
+    throw new Error("Product rank must be a positive whole number or null.");
+  }
+  return value;
 }
 
 /**
@@ -251,13 +275,21 @@ export function assertProduct(input: {
  * store. This store owns product identity and the move audit.
  */
 export interface ProductStore {
-  createProduct(input: { id?: unknown; name?: unknown; kind?: unknown; description?: unknown }): Promise<ProductRecord>;
+  createProduct(input: { id?: unknown; name?: unknown; kind?: unknown; description?: unknown; rank?: unknown }): Promise<ProductRecord>;
   getProduct(productId: string): Promise<ProductRecord | null>;
   /** Find a product by name + kind (the POST /plans route resolves the name-derived product before creating a version). */
   findProductByName(name: string, kind: ProductKind): Promise<ProductRecord | null>;
   /** Find by name + kind, else create it — the product row for a name-derived version always exists after this. */
-  getOrCreateProduct(input: { name?: unknown; kind?: unknown; description?: unknown }): Promise<ProductRecord>;
+  getOrCreateProduct(input: { name?: unknown; kind?: unknown; description?: unknown; rank?: unknown }): Promise<ProductRecord>;
   listProducts(): Promise<ProductRecord[]>;
+  /**
+   * Issue #3246 — set (or clear, with explicit null) a product's
+   * ladder rank. Returns the updated record. Throws when the
+   * product does not exist; the prod-free refusal lives in the
+   * route (the store holds no product-identity policy beyond
+   * the row itself).
+   */
+  setProductRank(productId: string, rank: number | null): Promise<ProductRecord>;
   /** Write one per-customer move audit row. The (bulkMoveId, userId) unique index is the bulk-job idempotency backstop. */
   recordMove(move: {
     id?: string;
