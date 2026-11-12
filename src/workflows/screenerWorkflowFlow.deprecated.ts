@@ -1,4 +1,19 @@
 /**
+ * DEPRECATED — frozen 2026-11-12 (#4192, #3550 S2 cutover).
+ *
+ * Production screens no longer dispatch through these flows:
+ * `ScreenerScreenWorkflow.run()` dispatches through the one
+ * workflow engine (`src/services/screenerPipelineJobs.ts` +
+ * `src/agents/screener-agent.ts` stage methods) and reads the
+ * collation back from `src/workflows/screenerCollation.ts`.
+ * Nothing imports this file anymore; it is kept frozen as the
+ * reference implementation of the retired child-workflow
+ * fan-out, and per the no-deletion rule it is renamed, not
+ * deleted. Superseded by `src/workflows/screenerWorkflow.ts`
+ * (dispatch) + `src/workflows/screenerCollation.ts`
+ * (collation) + `src/services/screenerPipelineJobs.ts`
+ * (definition). Do not extend this file; do not re-enable it.
+ *
  * Issue #1737 — the screener workflow flows: the unit-testable
  * execution behind the workflow class. The class itself is a
  * thin adapter (it builds these deps from the environment and
@@ -118,6 +133,23 @@ import {
 import type { LegOutcome, ShardJobStore } from "../data/shardJobPorts";
 import type { GoalDrivenScreenResult } from "../services/goalDrivenScreen";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
+// The pure collation helpers moved to screenerCollation.ts in
+// #4192; this frozen file imports them back (one home, no copy).
+import {
+  SCREENER_WORKFLOW_CAPABILITY,
+  WORKFLOW_PROVENANCE_WRITER,
+  WORKFLOW_WORKSPACE_ID,
+  asShardScreenResult,
+  collateShards,
+  collationDetail,
+  goalShardRequest,
+  shardCommandFor,
+  shardScreenRequest,
+  shardSummaryFromResult,
+  stageTransitionsForShard,
+  type ScreenerWorkflowDeps,
+  type ShardScreenResult,
+} from "./screenerCollation";
 
 /** Minimal step surface the flows need (fakeable in tests). */
 export interface ScreenerWorkflowStep {
@@ -153,27 +185,6 @@ export interface ChildWorkflowOps {
   } | null>;
 }
 
-/** The screen request one shard executes (structural subset of the agent's request). */
-export interface ShardScreenRequest {
-  trigger: "manual" | "scheduled";
-  universe?: string;
-  symbols?: unknown[];
-  provider?: string;
-  filters?: Record<string, unknown>;
-  userLogin: string;
-  environment?: "TEST" | "PROD";
-  portfolioContext?: boolean;
-  maxItems?: number;
-  maxSymbols?: number;
-  /**
-   * Issue #2860 (Factor 14): the workflow run's W3C traceparent,
-   * carried from the WorkflowJobCommand so the funnel trace_id is
-   * the workflow trace-id (funnelTraceIdForRun). Absent on runs
-   * that did not arrive through the workflow (manual/scheduled
-   * direct runs keep a fresh UUID funnel id).
-   */
-  traceparent?: string;
-}
 
 /**
  * The screen result one shard returns (structural subset of
@@ -185,157 +196,8 @@ export interface ShardScreenRequest {
  * collation never carry bulk data (claim-check: outputs
  * carry ids + summaries + flags only).
  */
-export interface ShardScreenResult {
-  success: boolean;
-  timestamp: string;
-  universe?: string;
-  totalScanned: number;
-  expectedCount: number;
-  matchedCount: number;
-  pdfKey?: string;
-  /** Issue #2080: the workbook/CSV keys the child recorded. */
-  xlsxKey?: string;
-  csvKey?: string;
-  /** Issue #2080: the run's trigger, so the canonical body records it. */
-  trigger?: "manual" | "scheduled";
-  error?: string;
-  full?: unknown;
-  stored?: boolean;
-  delivered?: boolean;
-  storeError?: string;
-  deliverError?: string;
-  /**
-   * Issue #2910 (G3): the child's canonical report id, when
-   * the child's store door returned one (the goal door
-   * does; the market door returns void). Surfaced on the
-   * child output so the parent can link its row to the
-   * child's; never used for re-delivery.
-   */
-  reportId?: string;
-}
 
-/**
- * Issue #1996 (#1972 slice 1) — the goal-screen request one
- * shard executes. Mirrors the agent's runGoalScreen inputs;
- * the idempotency key is the RUN's key (the parent job id),
- * so a retried child step re-adopts the agent ledger record
- * instead of screening twice.
- */
-export interface GoalShardRequest {
-  scenario: ScenarioDefinition;
-  scenarioSource: "built" | "stored";
-  trigger: "manual" | "scheduled";
-  idempotencyKey: string;
-  userLogin: string;
-  environment?: "TEST" | "PROD";
-  assetClasses?: ("stocks" | "options")[];
-  symbols?: string[];
-  provider?: "yahoo";
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
-}
 
-/** Executes one shard's screen (the agent stub, adapted, in production). */
-export interface ScreenRunner {
-  runScreen(req: ShardScreenRequest): Promise<ShardScreenResult>;
-  /**
-   * Issue #1996 — goal-screen execution. Optional so existing
-   * market runners keep compiling; a goal command reaching a
-   * runner without it FAILS CLOSED (runShardFlow throws) —
-   * a goal run must never silently execute as a market screen.
-   */
-  runGoalScreen?(req: GoalShardRequest): Promise<ShardScreenResult>;
-}
-
-/** Dependencies the flows receive (all injected; no bindings here). */
-export interface ScreenerWorkflowDeps {
-  screenRunner: ScreenRunner;
-  /** Projection store, or null when unbound (projection skipped, run continues). */
-  shardStore: ShardJobStore | null;
-  /**
-   * Canonical-report persist (the route's persist, via the
-   * owner's door). Payload is the OPAQUE full agent result
-   * (the child's `full`, falling back to the summary when a
-   * runner provides none) — the flow never inspects it.
-   * Keyed by screener:<timestamp>, so a retried store step
-   * overwrites the same canonical row (idempotent).
-   * Issue #1997: a door MAY return the canonical report id
-   * (the goal door does); the flow surfaces it on the shard
-   * row so the panel can fetch the stored run by id. The
-   * market door returns void (no id to surface).
-   */
-  storeReport: (payload: unknown, userLogin: string) => Promise<string | void>;
-  /**
-   * Issue #2910 (G3): the PARENT canonical row's persist
-   * (the orchestrator's parent door in production). The
-   * payload is the collation + linkage, never bulk data:
-   * the children already stored their full rows. Optional
-   * so older fakes keep compiling: when absent the parent
-   * flow skips the store step and the collation simply
-   * carries no parentReport outcome. A throwing store is
-   * caught by the flow and recorded as a storeError — the
-   * screen outcome stands, exactly like a child store
-   * error. The parent store NEVER delivers.
-   */
-  storeParentReport?: (
-    input: ParentScreenReportInput,
-    userLogin: string,
-  ) => Promise<ParentScreenReportOutcome>;
-  /**
-   * Tracked-pipeline delivery (the route's deliver decision,
-   * via the owner's door). Same opaque payload. The door
-   * stamps a deterministic deliveryId
-   * (workflow:<jobId>:<shardId>) so re-delivery converges
-   * in the outcome sink.
-   */
-  deliverOutcome: (payload: unknown, userLogin: string) => Promise<void>;
-  nowMs: () => number;
-  /**
-   * Issue #2428 (Agent Mesh S17): trace hop recorder for this
-   * run's steps. Optional and purely observational: called
-   * AFTER a step's journaled result returns (never inside a
-   * step callback, so durable replay cannot re-run it as a
-   * side effect — and the recorder's deterministic spans make
-   * a re-record converge in the store regardless). Absent →
-   * no step hops: the trace break the registry records for
-   * unwired runners. A throwing recorder must never fail a
-   * step; call sites go through traceStep(), which swallows.
-   */
-  traceHop?: (
-    command: WorkflowJobCommand,
-    event: { kind: "workflow-step" | "projection"; operation: string },
-  ) => Promise<void>;
-  /**
-   * Issue #2530 — whether the SCREENER_ND_MODE gate is open
-   * in this run's environment (the workflow class resolves
-   * it from env via src/config/screenerModes.ts). Consulted
-   * ONLY for non-deterministic commands: absent/false refuses
-   * them in the parent flow, so a direct workflow start
-   * cannot bypass the flag. Deterministic runs never read it.
-   */
-  ndModeEnabled?: boolean;
-  /**
-   * Issue #2530 — the interpretation port for ND runs
-   * (production: the gateway-backed interpreter the workflow
-   * class builds from env; absent when no model seam is
-   * configured). An ND command reaching a flow without one
-   * FAILS CLOSED — the parent never invents criteria and
-   * never falls back to a deterministic execution the caller
-   * did not ask for.
-   */
-  intentInterpreter?: ScreenIntentInterpreter;
-  /**
-   * Issue #2530 — the mas_events audit sink for ND runs
-   * (production: the orchestrator's workflow-door audit
-   * method). Required for ND runs: the interpretation record
-   * is a journaled step, and a run whose audit cannot be
-   * recorded fails before any shard executes — no audit, no
-   * execution.
-   */
-  auditInterpretation?: (record: ScreenInterpretationAuditRecord) => Promise<void>;
-}
 
 /** Issue #2428: record one trace hop for a completed step, best-effort (never throws into the flow). */
 async function traceStep(
@@ -351,98 +213,7 @@ async function traceStep(
   }
 }
 
-/** Capability id carried on every workflow projection row. */
-export const SCREENER_WORKFLOW_CAPABILITY = "screener-workflow";
 
-/** Workspace id convention for workflow rows (matches the scheduled-agent caller). */
-export const WORKFLOW_WORKSPACE_ID = "primary";
-
-/** Provenance writer for workflow projection rows. */
-export const WORKFLOW_PROVENANCE_WRITER = "screener-workflow:project";
-
-/** Shard row summary: what a child's row (and the parent's collation) carries. */
-export interface ShardRowSummary {
-  shardId: string;
-  status: "completed" | "failed" | "timed_out";
-  totalScanned: number;
-  expectedCount: number;
-  matchedCount: number;
-  pdfKey?: string;
-  xlsxKey?: string;
-  csvKey?: string;
-  error?: string;
-  timestamp: string;
-}
-
-/** Build a shard row summary from a screen result. */
-export function shardSummaryFromResult(
-  shardId: string,
-  result: ShardScreenResult,
-): ShardRowSummary {
-  return {
-    shardId,
-    status: result.success ? "completed" : "failed",
-    totalScanned: result.totalScanned,
-    expectedCount: result.expectedCount,
-    matchedCount: result.matchedCount,
-    ...(result.pdfKey ? { pdfKey: result.pdfKey } : {}),
-    ...(result.xlsxKey ? { xlsxKey: result.xlsxKey } : {}),
-    ...(result.csvKey ? { csvKey: result.csvKey } : {}),
-    ...(result.error ? { error: result.error } : {}),
-    timestamp: result.timestamp,
-  };
-}
-
-/**
- * Validate a child output as a screen result (garbage output
- * → failed shard, never a crash). Picks up the child's
- * store/deliver flags; NEVER picks up `full` — bulk data
- * must not cross the child→parent boundary even if a child
- * mistakenly includes it.
- */
-export function asShardScreenResult(value: unknown): ShardScreenResult | null {
-  if (!value || typeof value !== "object") return null;
-  const v = value as Record<string, unknown>;
-  if (
-    typeof v.success !== "boolean" ||
-    typeof v.timestamp !== "string" ||
-    typeof v.totalScanned !== "number" ||
-    typeof v.expectedCount !== "number" ||
-    typeof v.matchedCount !== "number"
-  ) {
-    return null;
-  }
-  return {
-    success: v.success,
-    timestamp: v.timestamp,
-    ...(typeof v.universe === "string" ? { universe: v.universe } : {}),
-    totalScanned: v.totalScanned,
-    expectedCount: v.expectedCount,
-    matchedCount: v.matchedCount,
-    ...(typeof v.pdfKey === "string" ? { pdfKey: v.pdfKey } : {}),
-    ...(typeof v.xlsxKey === "string" ? { xlsxKey: v.xlsxKey } : {}),
-    ...(typeof v.csvKey === "string" ? { csvKey: v.csvKey } : {}),
-    ...(v.trigger === "manual" || v.trigger === "scheduled" ? { trigger: v.trigger } : {}),
-    ...(typeof v.error === "string" ? { error: v.error } : {}),
-    ...(typeof v.stored === "boolean" ? { stored: v.stored } : {}),
-    ...(typeof v.delivered === "boolean" ? { delivered: v.delivered } : {}),
-    ...(typeof v.storeError === "string" ? { storeError: v.storeError } : {}),
-    ...(typeof v.deliverError === "string" ? { deliverError: v.deliverError } : {}),
-    ...(typeof v.reportId === "string" ? { reportId: v.reportId } : {}),
-  };
-}
-
-/** One-line human summary for a parent row's detail (visible in jobs/history). */
-export function collationDetail(collation: WorkflowCollation): string {
-  const done = collation.shards.filter((s) => s.status === "completed").length;
-  const total = collation.shards.length;
-  const coverage =
-    collation.coverage.ratio === null
-      ? "no coverage"
-      : `${Math.round(collation.coverage.ratio * 100)}% coverage`;
-  const qualified = collation.qualified ? ", qualified partial" : "";
-  return `Workflow ${collation.lifecycle}: ${done}/${total} shards, ${coverage}${qualified}.`;
-}
 
 /**
  * Pure collation: shard outcomes → the parent summary.
@@ -455,85 +226,6 @@ export function collationDetail(collation: WorkflowCollation): string {
  * runParentFlow's store-parent step from this collation
  * (issue #2910), and the parent never delivers.
  */
-export function collateShards(
-  jobId: string,
-  workflowId: string,
-  outcomes: ShardOutcome[],
-  lifecycleTransitions: Array<{ lifecycle: WorkflowRunLifecycle; atMs: number }>,
-  stageTransitions: StageTransition[],
-): WorkflowCollation {
-  const completed = outcomes.filter((o) => o.status === "completed");
-  const qualified = outcomes.some((o) => o.status !== "completed");
-  const evaluated = outcomes.reduce((n, o) => n + (o.totalScanned ?? 0), 0);
-  const considered = outcomes.reduce((n, o) => n + (o.expectedCount ?? 0), 0);
-  const storedShards = completed.filter((o) => o.stored).map((o) => o.shardId);
-  const deliveredShards = completed.filter((o) => o.delivered).map((o) => o.shardId);
-  const storeErrors: Record<string, string> = {};
-  const deliverErrors: Record<string, string> = {};
-  for (const o of outcomes) {
-    if (o.storeError) storeErrors[o.shardId] = o.storeError;
-    if (o.deliverError) deliverErrors[o.shardId] = o.deliverError;
-  }
-  const lifecycle =
-    completed.length === 0
-      ? "Failed"
-      : completed.every((o) => o.stored)
-        ? "ReportGenerated"
-        : "Completed";
-  const reportKeys = outcomes
-    .map((o) => o.pdfKey)
-    .filter((k): k is string => typeof k === "string" && k.length > 0);
-  const xlsxKeys = outcomes
-    .map((o) => o.xlsxKey)
-    .filter((k): k is string => typeof k === "string" && k.length > 0);
-  const csvKeys = outcomes
-    .map((o) => o.csvKey)
-    .filter((k): k is string => typeof k === "string" && k.length > 0);
-  return {
-    jobId,
-    workflowId,
-    lifecycle,
-    qualified,
-    coverage: {
-      evaluated,
-      considered,
-      ratio: considered > 0 ? evaluated / considered : null,
-    },
-    shards: outcomes,
-    lifecycleTransitions,
-    stageTransitions,
-    reportKeys,
-    ...(xlsxKeys.length > 0 ? { xlsxKeys } : {}),
-    ...(csvKeys.length > 0 ? { csvKeys } : {}),
-    storedShards,
-    deliveredShards,
-    ...(Object.keys(storeErrors).length > 0 ? { storeErrors } : {}),
-    ...(Object.keys(deliverErrors).length > 0 ? { deliverErrors } : {}),
-    ...(lifecycle === "Failed"
-      ? {
-          error:
-            outcomes.map((o) => o.error).find((e) => typeof e === "string") ??
-            "All shards failed.",
-        }
-      : {}),
-  };
-}
-
-/** Stage transitions for one shard outcome (see the honesty note in the header). */
-export function stageTransitionsForShard(
-  outcome: ShardOutcome,
-  atMs: number,
-): StageTransition[] {
-  if (outcome.status === "completed") {
-    return [
-      { stage: "feed", outcome: "completed", atMs },
-      { stage: "gather", outcome: "completed", atMs },
-      { stage: "analysis", outcome: "completed", atMs },
-    ];
-  }
-  return [{ stage: "analysis", outcome: "failed", atMs }];
-}
-
 /** Cap a JSON summary the way the projector does (never over the row cap). */
 function capSummaryJson(value: unknown): string {
   try {
@@ -588,116 +280,6 @@ async function projectBestEffort(
   }
 }
 
-/** Build a shard command from a parent command + shard descriptor. */
-export function shardCommandFor(
-  parent: WorkflowJobCommand,
-  shard: WorkflowJobCommand["shards"][number],
-): WorkflowJobCommand {
-  return {
-    ...parent,
-    role: "shard",
-    parentJobId: parent.jobId,
-    shard,
-    shards: [shard],
-    jobId: `${parent.jobId}:shard:${shard.shardId}`,
-  };
-}
-
-/** Issue #1996 — the goal-screen request one shard executes. */
-export function goalShardRequest(
-  command: WorkflowJobCommand,
-): GoalShardRequest {
-  const g = command.goalScreen;
-  if (!g) {
-    throw new Error("goalShardRequest called for a command without a goalScreen descriptor.");
-  }
-  return {
-    scenario: g.scenario,
-    scenarioSource: g.scenarioSource,
-    trigger: command.trigger,
-    idempotencyKey: command.parentJobId ?? command.jobId,
-    userLogin: command.userLogin,
-    ...(command.environment ? { environment: command.environment } : {}),
-    ...(g.assetClasses ? { assetClasses: g.assetClasses } : {}),
-    ...(g.symbols ? { symbols: g.symbols } : {}),
-    ...(g.provider ? { provider: g.provider } : {}),
-    ...(g.providerFallback ? { providerFallback: g.providerFallback } : {}),
-  };
-}
-
-/**
- * Issue #1996 — map a goal-driven screen result onto the
- * shard result shape the parent collates. Counts: a goal run
- * scans stocks + option underlyings; hits are the matches.
- * `full` is the OPAQUE envelope the child's store/deliver
- * steps consume (task id + scenario source + trigger +
- * result); it is STRIPPED from the child output before
- * return, exactly like market results. A "partial" goal run
- * is success with qualification (the #462 vocabulary), never
- * a failure; only "failed" fails the shard, loudly.
- */
-export function goalResultToShardResult(input: {
-  taskId: string;
-  scenarioSource: "built" | "stored";
-  trigger: "manual" | "scheduled";
-  result: GoalDrivenScreenResult;
-  /** Issue #1998: caller run id (D2) the run's captures are keyed by. */
-  idempotencyKey?: string;
-  /** Issue #1571: carried so the store door can stamp it when the result lacks it. */
-  provider?: "yahoo";
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
-}): ShardScreenResult {
-  const { result } = input;
-  const totalScanned =
-    result.counts.stocksScanned + result.counts.optionsUnderlyingsScanned;
-  return {
-    success: result.status !== "failed",
-    timestamp: result.completedAt,
-    totalScanned,
-    expectedCount: totalScanned,
-    matchedCount: result.counts.hits,
-    ...(result.pdfKey ? { pdfKey: result.pdfKey } : {}),
-    ...(result.xlsxKey ? { xlsxKey: result.xlsxKey } : {}),
-    ...(result.csvKey ? { csvKey: result.csvKey } : {}),
-    ...(result.status === "failed"
-      ? { error: `Goal screen failed (${result.goalKind}/${result.outlook}).` }
-      : {}),
-    full: {
-      taskId: input.taskId,
-      scenarioSource: input.scenarioSource,
-      trigger: input.trigger,
-      result,
-      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
-      ...(input.provider ? { provider: input.provider } : {}),
-      ...(input.providerFallback ? { providerFallback: input.providerFallback } : {}),
-    },
-  };
-}
-
-/** The screen request one shard executes. */
-export function shardScreenRequest(
-  command: WorkflowJobCommand,
-): ShardScreenRequest {
-  const shard = command.shard;
-  return {
-    trigger: command.trigger,
-    ...(shard?.universe ? { universe: shard.universe } : {}),
-    ...(shard?.symbols ? { symbols: shard.symbols } : {}),
-    ...(command.provider ? { provider: command.provider } : {}),
-    ...(command.filters ? { filters: command.filters } : {}),
-    userLogin: command.userLogin,
-    ...(command.environment ? { environment: command.environment } : {}),
-    ...(command.portfolioContext !== undefined
-      ? { portfolioContext: command.portfolioContext }
-      : {}),
-    ...(command.maxItems !== undefined ? { maxItems: command.maxItems } : {}),
-    ...(command.maxSymbols !== undefined ? { maxSymbols: command.maxSymbols } : {}),
-    ...(command.traceparent ? { traceparent: command.traceparent } : {}),
-  };
-}
 
 /**
  * Run one shard: execute, store, deliver, project, return

@@ -244,9 +244,11 @@ describe("caller pins (#2914)", () => {
       // Port calls, not agent calls: NLQ executor binds the port; A2A dispatches through an injected executor.
       ["src/agents/nlq/execution.ts", "port call (stockScreenPort)"],
       ["src/agents/screenerA2aDispatch.ts", "port call (injected executor)"],
-      // Workflow execution seams: the workflow's runner port wraps the agent; children run through it, never around it.
-      ["src/workflows/screenerWorkflow.ts", "workflow runner seam"],
-      ["src/workflows/screenerWorkflowFlow.ts", "workflow runner seam"],
+      // Workflow execution seams: the adapter's canned steps
+      // drive the injected runner (the test-only seam); the
+      // retired flow stays listed while frozen.
+      ["src/workflows/inMemoryWorkflowAdapter.ts", "workflow runner seam"],
+      ["src/workflows/screenerWorkflowFlow.deprecated.ts", "workflow runner seam"],
     ]);
     const offenders: string[] = [];
     /** Issue #4247 — allow-list keys use "/", the walk yields "\" on Windows. */

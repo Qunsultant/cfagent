@@ -24,7 +24,7 @@ import {
   funnelTraceIdForRun,
   logScreenRunEvent,
 } from "../src/workflows/screenRunAspects";
-import { shardScreenRequest } from "../src/workflows/screenerWorkflowFlow";
+import { shardScreenRequest } from "../src/workflows/screenerCollation";
 import {
   ingestScreenRunEvent,
   screenRunStatsSnapshot,
@@ -89,12 +89,23 @@ describe("traceparent threading (#2860 Factor 14)", () => {
   });
 
   it("the adapter maps the shard request's traceparent onto the agent request", () => {
-    // toAgentRequest is module-private; the wiring is pinned by
-    // source inspection, the repo's established pattern for a
-    // hop with no exported seam (cf. screen_run_lock_1993.test.ts).
-    const src = readFileSync("src/workflows/screenerWorkflow.ts", "utf8");
-    const fn = src.slice(src.indexOf("function toAgentRequest"));
-    expect(fn).toContain("...(req.traceparent ? { traceparent: req.traceparent } : {})");
+    // screenRequestFromParams is module-private; the wiring is
+    // pinned by source inspection, the repo's established
+    // pattern for a hop with no exported seam (cf.
+    // screen_run_lock_1993.test.ts).
+    // #4192: the cutover retired toAgentRequest with the child
+    // flow — the traceparent now threads in two hops inside
+    // the engine's job builder: the definition carries the
+    // command's traceparent into the step params, and the
+    // analyze step's request builder carries the params'
+    // traceparent onto the agent request.
+    const src = readFileSync("src/services/screenerPipelineJobs.ts", "utf8");
+    const definition = src.slice(src.indexOf("export function buildScreenerJobDefinition"));
+    expect(definition).toContain(
+      "...(command.traceparent ? { traceparent: command.traceparent } : {})",
+    );
+    const fn = src.slice(src.indexOf("function screenRequestFromParams"));
+    expect(fn).toContain("...(params.traceparent ? { traceparent: params.traceparent as string } : {})");
   });
 
   it("runScreen derives one funnel trace_id from the request traceparent", () => {

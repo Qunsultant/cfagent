@@ -1042,10 +1042,16 @@ async function assembleChatScreenResult(
     .filter((b): b is StoredScreenBody => b !== undefined);
 
   if (matched.length === 0) {
+    // #4192: a Failed run projects no collation on the parent
+    // row (the final leg lands under leg:parent with only its
+    // detail), so the shard outcome's error — the specific
+    // cause on the failed leg — comes before the parent's
+    // generic detail. The order below is the doc comment's:
+    // collation's, shard outcome's, projection detail's.
     const error =
       collation?.error ??
-      detailFor("leg:parent") ??
       shards.map((s) => shardError(s.shardId)).find((e) => typeof e === "string") ??
+      detailFor("leg:parent") ??
       `Screen workflow run ${jobId} ${args.terminalNote}; it remains tracked at ${workflowStatusUrl(jobId)}.`;
     return {
       timestamp: args.startedAtIso,

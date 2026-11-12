@@ -41,8 +41,8 @@
  *   proven by an import) — except `src/services/scheduleManagement.ts`,
  *   retired by #3123 (its pair is replaced by the unified successor
  *   pair below); the deprecated set is exactly the three known AOP
- *   files plus the five #3123 renames, and the deprecation ledger
- *   carries the five #3123 entries.
+ *   files plus the five #3123 renames plus the #4192 screener-flow
+ *   rename, and the deprecation ledger carries the five #3123 entries.
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -333,7 +333,7 @@ describe("S6-P07 retired-module determination: the #3123 renames", () => {
     }
   });
 
-  it("the deprecated set is exactly the three known AOP files plus the five #3123 renames", () => {
+  it("the deprecated set is exactly the three known AOP files plus the five #3123 renames plus the #4192 screener-flow rename", () => {
     const found: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(join(dir), { withFileTypes: true })) {
@@ -356,6 +356,7 @@ describe("S6-P07 retired-module determination: the #3123 renames", () => {
       "src/errors/errorAspects.deprecated.ts",
       "src/errors/errorCatalog.deprecated.json",
       "src/services/scheduleManagement.deprecated.ts",
+      "src/workflows/screenerWorkflowFlow.deprecated.ts",
     ]);
   });
 
