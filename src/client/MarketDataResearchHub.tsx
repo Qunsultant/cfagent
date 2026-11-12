@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { apiFetch as fetch } from "./apiFetch";
 import { mapScreenError } from "./paidScreenSubmit";
+import { UpgradeOffer } from "./UpgradeOffer";
 import { Badge, Card, EmptyState, Spinner, Button, Notice, Select, Table, TextInput, PageShell, PageSection, FieldShell, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { ResearchReportActions } from "./ResearchReportActions";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
@@ -189,6 +190,12 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
   const [screenerSummary, setScreenerSummary] = useState("All Equities (Yahoo Finance Feed)");
   const [screenerLastScanned, setScreenerLastScanned] = useState<string>("");
   const [screenerError, setScreenerError] = useState("");
+  // Issue #3246: the at-limit offer, set only when the screener
+  // answers 402. The offer component fetches the server-computed
+  // offer (a read, never a paid submission — this hub auto-fires
+  // on mount and must never auto-send a paid submission) and
+  // renders the fixed error string as its fallback.
+  const [screenerOffer402, setScreenerOffer402] = useState<{ runRequestId?: string } | null>(null);
   const [showAlpacaDrawerOnScreener, setShowAlpacaDrawerOnScreener] = useState(false);
 
   const researchAgentDid = "did:agent:openaimp:research";
@@ -210,6 +217,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
   }) => {
     setScreenerLoading(true);
     setScreenerError("");
+    setScreenerOffer402(null);
     try {
       const search = override?.search !== undefined ? override.search : screenerSearch;
       const sector = override?.sector !== undefined ? override.sector : screenerSector;
@@ -234,7 +242,17 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
       // so it must never auto-send a paid submission) is a named
       // follow-up in the #3239 PR body.
       const data = (await resp.json().catch(() => ({}))) as any;
-      if (!resp.ok) throw new Error(mapScreenError(resp.status, data.error));
+      if (!resp.ok) {
+        // Issue #3246: a 402 surfaces the upgrade offer (with the
+        // run request id when the body carries one) instead of the
+        // bare fixed string; every other error keeps the string.
+        if (resp.status === 402) {
+          setScreenerOffer402({
+            runRequestId: typeof data.runRequestId === "string" ? data.runRequestId : undefined,
+          });
+        }
+        throw new Error(mapScreenError(resp.status, data.error));
+      }
       setScreenerStocks(data.stocks || data.results || []);
       if (data.filterSummary) setScreenerSummary(data.filterSummary);
       setScreenerLastScanned(new Date().toLocaleTimeString());
@@ -945,7 +963,15 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               Data Source: <strong>Yahoo Finance Engine</strong> {screenerLastScanned ? `• ${screenerLastScanned}` : ""}
             </span>
           </Flex>
-          {screenerError && <Notice tone="danger">{screenerError}</Notice>}
+          {screenerError && !screenerOffer402 && <Notice tone="danger">{screenerError}</Notice>}
+          {screenerError && screenerOffer402 && (
+            <UpgradeOffer
+              trigger="manual_402"
+              family="stock"
+              runRequestId={screenerOffer402.runRequestId}
+              fallback={screenerError}
+            />
+          )}
 
           {/* Table */}
           {screenerLoading ? (

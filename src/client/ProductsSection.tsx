@@ -21,6 +21,9 @@
  * status read-only and links there. Referral-code rules are
  * keyed by product id and land with #3307; this section
  * carries only the placement note, no referral mechanics.
+ * The per-product ladder position (issue #3246) is edited
+ * in each row: 1 = lowest, empty = unranked, the Free
+ * baseline fixed at 1.
  *
  * Operator-only: every route returns 403 for a non-operator.
  * All data is operator data — no hardcoded prices, dates, or
@@ -29,6 +32,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Notice, Select, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
+import { codedMessage } from "../outcomes/outcomeAspects";
 import {
   DEFAULT_SEGMENT,
   FREE_PRODUCT_ID,
@@ -166,6 +170,85 @@ async function apiJson<T = unknown>(path: string, init?: RequestInit): Promise<T
   return data as T;
 }
 
+/**
+ * Issue #3246 (sub-issue of #3241), slice 2 — the per-product
+ * ladder-position editor. Rank is the explicit operator order the
+ * upgrade-offer ladder reads first (1 = lowest; null = unranked,
+ * the derived order applies). The Free baseline product is fixed
+ * at rank 1 server-side and shows no edit control. An empty input
+ * clears the rank to null. Client-side validation mirrors the
+ * server rule (a positive whole number) and renders the catalog
+ * message on invalid input; the server remains authoritative.
+ */
+function ProductRankEditor({
+  product,
+  onChanged,
+}: {
+  product: ProductRecord;
+  onChanged: () => Promise<void>;
+}) {
+  const isFree = product.id === FREE_PRODUCT_ID;
+  const [input, setInput] = useState(product.rank === null ? "" : String(product.rank));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  if (isFree) {
+    return (
+      <div>
+        Ladder position: {product.rank === null ? "Unranked" : product.rank} (fixed — the Free baseline is
+        always the lowest rung)
+      </div>
+    );
+  }
+
+  const save = async () => {
+    const trimmed = input.trim();
+    let rank: number | null = null;
+    if (trimmed !== "") {
+      const parsed = Number(trimmed);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        setError(codedMessage("FAILURE_PRODUCT_RANK_INVALID"));
+        return;
+      }
+      rank = parsed;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await apiJson(
+        `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/rank`,
+        {
+          method: "POST",
+          body: JSON.stringify({ rank }),
+        },
+      );
+      await onChanged();
+    } catch (err: any) {
+      setError(err.message || "Failed to save ladder position.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <div>
+        Ladder position: {product.rank === null ? "Unranked" : product.rank} (1 = lowest; empty clears the rank)
+      </div>
+      <TextInput
+        label="Ladder position"
+        type="number"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+      />
+      <Button size="sm" loading={saving} onClick={() => void save()}>
+        Save ladder position
+      </Button>
+      {error && <Notice tone="danger">{error}</Notice>}
+    </div>
+  );
+}
+
 export function ProductsSection() {
   const [entries, setEntries] = useState<ProductEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -176,6 +259,7 @@ export function ProductsSection() {
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState<"subscription" | "per_run">("subscription");
   const [newDescription, setNewDescription] = useState("");
+  const [newRank, setNewRank] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
 
@@ -203,6 +287,19 @@ export function ProductsSection() {
       setCreateError("A product name is required.");
       return;
     }
+    // Ladder position is optional on create: empty means unranked
+    // (omitted from the body; the route reads an absent rank as
+    // null). A provided value must be a positive whole number.
+    let rank: number | undefined;
+    const rankTrimmed = newRank.trim();
+    if (rankTrimmed !== "") {
+      const parsed = Number(rankTrimmed);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        setCreateError(codedMessage("FAILURE_PRODUCT_RANK_INVALID"));
+        return;
+      }
+      rank = parsed;
+    }
     setCreating(true);
     setCreateError("");
     try {
@@ -212,10 +309,12 @@ export function ProductsSection() {
           name: newName.trim(),
           kind: newKind,
           description: newDescription.trim() ? newDescription.trim() : null,
+          ...(rank === undefined ? {} : { rank }),
         }),
       });
       setNewName("");
       setNewDescription("");
+      setNewRank("");
       setShowNewProduct(false);
       setNote(`Product "${newName.trim()}" created. Add a version to make it sellable.`);
       await load();
@@ -265,6 +364,7 @@ export function ProductsSection() {
                         {versions.length} version{versions.length === 1 ? "" : "s"}
                         {currentSummary ? ` — current: ${currentSummary}` : ""}
                       </div>
+                      <ProductRankEditor product={product} onChanged={load} />
                     </div>
                     <div>
                       <Button
@@ -304,6 +404,12 @@ export function ProductsSection() {
                 label="Description (optional)"
                 value={newDescription}
                 onChange={(e) => setNewDescription(e.target.value)}
+              />
+              <TextInput
+                label="Ladder position (optional)"
+                type="number"
+                value={newRank}
+                onChange={(e) => setNewRank(e.target.value)}
               />
               {createError && <Notice tone="danger">{createError}</Notice>}
               <div>
