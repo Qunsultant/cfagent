@@ -9,7 +9,7 @@
  * Nothing imports this file anymore; it is kept frozen as the
  * reference implementation of the retired child-workflow
  * fan-out, and per the no-deletion rule it is renamed, not
- * deleted. Successor: `src/workflows/screenerWorkflow.ts`
+ * deleted. Superseded by `src/workflows/screenerWorkflow.ts`
  * (dispatch) + `src/workflows/screenerCollation.ts`
  * (collation) + `src/services/screenerPipelineJobs.ts`
  * (definition). Do not extend this file; do not re-enable it.
