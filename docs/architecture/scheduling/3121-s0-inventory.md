@@ -233,6 +233,27 @@
   #3310 (Qunsultant/cfagent#4229, #4230, #4231, #4232, #4233). The §9 rows (§9.2 surfaces, §9.4 firing, §9.5 ledger) now
   read landed; #3310 itself stays open until live proof.
 
+- **#4237 amendment (Slice #4237, #3121):** the TickerAgent
+  pushTicks live feed is now a record in the single schedule — a
+  sixth unified-store kind (`ticker-push`, record id = the kind,
+  the SDK alarm id riding as `alarmId`, the #3123 screen
+  precedent) that is RECORD-ONLY: one record, updated in place
+  with intervalSeconds + lastPushAt + armed, and NO per-push ledger
+  rows (a 5s feed would flood `job_run_records`, cap 100/job, for
+  a feed with no per-push outcome). The record lives in the
+  TickerAgent's own store (ADR 0029 D-0) and the Schedules home
+  list reads it by typed RPC (`actorGateway.stub`, the
+  `budgetCheck`/`getPdfByKey` precedent), best-effort — an
+  unreachable ticker omits the row, never breaks the list. The
+  home shows interval + last push + health (Healthy / Idle /
+  Missed push, derived server-side from lastPushAt vs interval x
+  `TICKER_PUSH_STALE_AFTER_INTERVALS`, default 2); a stopped push
+  is visible as a missed run, an idle feed (no listeners) as Idle,
+  never as missed. Pause/resume/trigger/delete/update are refused
+  with coded 400s — the feed is listener-driven and its alarm
+  lives on the TickerAgent, not the OrchestratorAgent. #4237
+  itself stays open until live proof.
+
 ## 1. Re-verified inventory (fresh main)
 
 Counting rule (unchanged): a *type* is a distinct mechanism, not each
@@ -1122,6 +1143,7 @@ no home and no filed issue is a defect in the map.
 | Read-only run history (`JobsPanel`, Autopilot, `WorkflowRunsPanel`) | §1.3 | The one merged read (`GET /api/ledger/runs`) | S1/S2 — landed; #3123 — landed |
 | Preview-trade candidate prefill from the schedules home | S2 (§8.3) | Shell handoff — `candidateToTradeContext` + Chat `pendingOrderContext`, consumed by the hub's order handler | **#3361 — landed** |
 | Stage-schedules listed on the Schedules home (workflow + stage named; pause/resume/trigger/delete/detail) | S1 (§1.3) | `?tab=schedules&view=list` (`SchedulesPanel` generic rows) | #3310 — landed |
+| Ticker push listed on the Schedules home (interval + last push + health; no action buttons — the feed is listener-driven) | S1 (§1.3) | `?tab=schedules&view=list` (`SchedulesPanel` generic rows) | #4237 — landed |
 
 ### 9.3 Tick-polled goal behaviors (B-T3)
 
@@ -1156,6 +1178,7 @@ no home and no filed issue is a defect in the map.
 | Per-run records for creatable callbacks + manual triggers | B-T2-07 | `recordScheduleCallbackRun` → `job_run_records` | S1 — landed |
 | Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | `recordScheduleCallbackRun` → `job_run_records` | #3394 — landed (recording via #3788 wrappers; joinability proven per callback, SDK + no-schedule explicit nulls + route exactly-once) |
 | Per-stage workflow firing: SDK alarm → `runWorkflowStage` → `runPipelineStage` → `runJob` scoped to the stage | B-T2-07 | `runWorkflowStage` (`INTERNAL_RECORDED_SCHEDULE_CALLBACKS`, recorded via #3788 wrapper) + `runPipelineStage` door | #3310 — landed |
+| Ticker-push live feed as a unified record (kind ticker-push, record-only — NO per-push ledger rows; health from lastPushAt) | B-T2-07 | `tickerPushScheduleToRecord` + `tickerPushHealth` in the TickerAgent's own store; list read by typed RPC | #4237 — landed |
 | Baseline reconciliation on agent start | B-T2-08 | `removeUnownedBaselineSchedules` | S2 — landed |
 | Renewal (`0 3`), tick (`*/30`), retention (`0 4`) incl. #2331 gate + #2037 trace | B-T1-01..03 | `scheduled()` dispatch → named entry points (`src/services/consolidatedCronEntries.ts`) | S5 — landed |
 | Piggyback research guard (#354) + retention constants | B-T1-04..05 | `researchScheduleGuard.ts` + `storageRetention.ts` | S5 — landed (preserved verbatim, guards unchanged) |

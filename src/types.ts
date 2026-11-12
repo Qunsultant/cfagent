@@ -237,6 +237,13 @@ export interface Env {
   // applies. Changing this value changes live tick cadence and is a
   // product call. Rollback is unsetting the var and redeploying.
   TICKER_PUSH_INTERVAL_S?: string;
+  // Issue #4237 — TickerAgent missed-push threshold, in missed
+  // intervals. Optional; absence means the
+  // TICKER_PUSH_STALE_AFTER_INTERVALS default (2) applies. Changing
+  // this value changes when the Schedules home shows a missed push,
+  // never the feed itself. Rollback is unsetting the var and
+  // redeploying.
+  TICKER_PUSH_STALE_AFTER_INTERVALS?: string;
   // #1169 S2 — flag-gated corpus serving. Same idiom as IAAA above:
   // "1"/"true"/"on" (case-insensitive) = on; absence = OFF. S2 shipped
   // default-off (the var was deliberately not in wrangler.jsonc);

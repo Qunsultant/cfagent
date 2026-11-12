@@ -38,9 +38,13 @@ export interface ScheduleListItem {
   pausedAt?: string;
   nextRun?: number;
   /** Issue #3121 #3310 — the unified kind, and the workflow + stage a stage-schedule names. */
+  /** Issue #3121 #4237 — the ticker-push row's feed facts. */
   kind?: string;
   jobId?: string;
   stageId?: string;
+  lastPushAt?: string;
+  armed?: boolean;
+  health?: "healthy" | "idle" | "stale";
 }
 
 /** A schedule detail: the raw SDK schedule, or a paused list item. */
