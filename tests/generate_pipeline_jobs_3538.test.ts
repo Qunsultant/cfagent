@@ -256,6 +256,7 @@ describe("generate pipeline catalog + resolution (#3538)", () => {
       "yahoo-sp100-quotes-enrich-analyze-generate",
       "yahoo-sp500-quotes-enrich-analyze-generate",
       "yahoo-dow-quotes-enrich-analyze-generate",
+      "yahoo-sp400-quotes-enrich-analyze-generate",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate",
       "etrade-nasdaq100-quotes-enrich-analyze-generate",
       "public-nasdaq100-quotes-enrich-analyze-generate",
@@ -275,7 +276,7 @@ describe("generate pipeline catalog + resolution (#3538)", () => {
 
   it("every catalog definition resolves as a valid J1 job definition", () => {
     const raws = buildAllGeneratePipelineJobDefinitions({});
-    expect(raws).toHaveLength(7);
+    expect(raws).toHaveLength(8);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("generate");
@@ -299,7 +300,7 @@ describe("generate pipeline catalog + resolution (#3538)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(32);
+    expect(registrations).toHaveLength(36);
     expect(specs.map((s) => s.jobId)).toContain(GENERATE_ID);
   });
 });
