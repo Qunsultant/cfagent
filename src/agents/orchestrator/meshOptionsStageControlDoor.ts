@@ -4,10 +4,15 @@
  * The mesh door for `options_copilot_stage_control`: given (runId,
  * stageId, operation) it drives ONE stage of one options run through
  * the engine's control plane (src/workflows/optionsStageControl.ts)
- * from the copilot turn. The run must have a durable engine record
- * in THIS host DO (dispatched from the copilot turn with a SQL
- * handle); runs on other DOs, and in-memory paid-screen runs, refuse
- * by name (`job_not_found`), never by pretending they ran here.
+ * from the copilot turn. Issue #4272 (#3552 S2): the same door drives
+ * ONE stage of one strategy run — the strategy vocabulary is the same
+ * 8 stages by design, and the control plane resolves the strategy job
+ * (strategy-screen:<runId>) for a strategy run — so a strategy run
+ * supports the same per-stage operations as an options run, with the
+ * same gates. The run must have a durable engine record in THIS host
+ * DO (dispatched from the copilot turn with a SQL handle); runs on
+ * other DOs, and in-memory paid-screen runs, refuse by name
+ * (`job_not_found`), never by pretending they ran here.
  *
  * Errors: door-level refusals throw MeshDoorError (identity_required,
  * door_unavailable, bad input). Control-plane refusals propagate as
@@ -82,7 +87,7 @@ function defaultCreateEtradeService(
 }
 
 /**
- * Drive one stage of one options run from the copilot turn.
+ * Drive one stage of one options or strategy run from the copilot turn.
  * The acting login rides the turn, never the arguments.
  */
 export async function controlOptionsStageViaDoor(
@@ -95,14 +100,14 @@ export async function controlOptionsStageViaDoor(
   if (!runId) {
     throw new MeshDoorError(
       "door_unavailable",
-      "options_copilot_stage_control requires a runId — the options run to control; no run was named.",
+      "options_copilot_stage_control requires a runId — the options or strategy run to control; no run was named.",
     );
   }
   const stage = typeof input.stage === "string" ? input.stage.trim() : "";
   if (!stage) {
     throw new MeshDoorError(
       "door_unavailable",
-      `options run ${runId}: options_copilot_stage_control requires a stage — one of the 8 addressable options stages; no stage was named.`,
+      `options run ${runId}: options_copilot_stage_control requires a stage — one of the 8 addressable options/strategy stages; no stage was named.`,
     );
   }
   if (

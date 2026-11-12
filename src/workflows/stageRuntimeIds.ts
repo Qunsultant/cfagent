@@ -122,6 +122,25 @@ export type OptionsPipelineStage = (typeof OPTIONS_PIPELINE_STAGES)[number];
 export const OPTIONS_ADDRESSABLE_STAGES = OPTIONS_PIPELINE_STAGES;
 
 /**
+ * Issue #4272 (#3552 S2) - the strategy pipeline's stages, in
+ * pipeline order. The strategy pipeline IS the eight-stage options
+ * pipeline run over strategy ports (#4271), so the strategy
+ * vocabulary is the same 8 stage ids as the options vocabulary BY
+ * DESIGN — one list, not two: this is the #4067 pin under the
+ * strategy family's name, so the pin stays the single source of
+ * truth. A strategy job's children carry these kinds (see
+ * strategyScreenJobDefinition), and the control plane addresses a
+ * strategy run's stages by (runId, stageId) under this vocabulary
+ * (see tests/strategy_stage_vocabulary_4272.test.ts).
+ */
+export const STRATEGY_PIPELINE_STAGES = OPTIONS_PIPELINE_STAGES;
+
+export type StrategyPipelineStage = (typeof STRATEGY_PIPELINE_STAGES)[number];
+
+/** Issue #4272 - the strategy addressable vocabulary (the 8 execution stages). */
+export const STRATEGY_ADDRESSABLE_STAGES = STRATEGY_PIPELINE_STAGES;
+
+/**
  * Issue #4067 - the 4 display stages the catalog partitions the 8
  * execution stages under (workflowCatalog.ts, options-screener
  * entry: feed covers plan/chainFetch/enrich/screen/risk; store

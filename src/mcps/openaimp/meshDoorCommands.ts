@@ -1404,18 +1404,19 @@ export class RunOptionsStrategyScreenCommand implements IMcpToolCommand<MeshOpti
 export class OptionsCopilotStageControlCommand implements IMcpToolCommand<OptionsStageControlDoorInput> {
   readonly name = "options_copilot_stage_control";
   readonly description =
-    "Drive one stage of one options screen run from the Options Copilot turn: run, re-run, stop, resume, or cancel a stage by (runId, stageId) on the 8-stage options vocabulary (plan, chainFetch, enrich, screen, risk, persistCanonicalResults, shapeReport, deliver). The run must have been dispatched from the copilot turn through the engine-routed workflow, so its engine record is durable in this host; runs on other hosts, in-memory paid-screen runs, and runs dispatched before #4066 persisted requests refuse by name with the stage + reason, never as an absence. The manual route's shapeReport/deliver cannot be rebuilt in a chat turn and refuse by name. Research only — places no orders. Requires the chat turn's acting identity.";
+    "Drive one stage of one options or strategy screen run from the Options Copilot turn: run, re-run, stop, resume, or cancel a stage by (runId, stageId) on the 8-stage options/strategy vocabulary (plan, chainFetch, enrich, screen, risk, persistCanonicalResults, shapeReport, deliver). The strategy vocabulary (#4272) is the same 8 stages by design — the strategy pipeline is the eight-stage options pipeline over strategy ports — so a strategy run (engine job strategy-screen:<runId>) supports the same per-stage operations as an options run (engine job options-screen:<runId>), with the same gates. The run must have been dispatched from the copilot turn through the engine-routed workflow, so its engine record is durable in this host; runs on other hosts, in-memory paid-screen runs, and runs dispatched before #4066 persisted requests refuse by name with the stage + reason, never as an absence. The manual route's shapeReport/deliver cannot be rebuilt in a chat turn and refuse by name. Research only — places no orders. Requires the chat turn's acting identity.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
       runId: {
         type: "string",
-        description: "The options run id to control (the engine job is options-screen:<runId>).",
+        description:
+          "The options or strategy run id to control (the engine job is options-screen:<runId> for an options run, strategy-screen:<runId> for a strategy run).",
       },
       stage: {
         type: "string",
         enum: [...OPTIONS_PIPELINE_STAGES],
-        description: "One of the 8 addressable options stages.",
+        description: "One of the 8 addressable options/strategy stages.",
       },
       operation: {
         type: "string",
@@ -1425,10 +1426,10 @@ export class OptionsCopilotStageControlCommand implements IMcpToolCommand<Option
     },
   };
   readonly zodSchema = z.object({
-    runId: z.string().min(1).describe("The options run id to control"),
+    runId: z.string().min(1).describe("The options or strategy run id to control"),
     stage: z
       .enum([...OPTIONS_PIPELINE_STAGES] as [OptionsPipelineStage, ...OptionsPipelineStage[]])
-      .describe("One of the 8 addressable options stages"),
+      .describe("One of the 8 addressable options/strategy stages"),
     operation: z
       .enum(["run", "rerun", "stop", "resume", "cancel"])
       .describe("The stage operation"),

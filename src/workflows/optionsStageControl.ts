@@ -23,6 +23,13 @@
  *   under its new job.
  * - The stage must be one of the 8 addressable stages (#4067 pin);
  *   display ids (feed/store/serve) refuse `stage_vocabulary_unknown`.
+ *   Issue #4272 (#3552 S2): the strategy job's stages are addressed
+ *   under the strategy vocabulary (STRATEGY_ADDRESSABLE_STAGES — the
+ *   same 8 ids by design, the strategy pipeline being the eight-stage
+ *   options pipeline over strategy ports), so a strategy run's stage
+ *   is validated against the union of the two vocabularies — one set,
+ *   two names — and the job resolution below already picks the
+ *   strategy job for a strategy run.
  * - The dispatch request rides the job definition's rawConfig
  *   (persisted by defineJob, #4066). A run dispatched before #4066
  *   carries no request, so run / re-run / resume refuse
@@ -61,6 +68,7 @@ import { DynamicOptionsScreener } from "../trading";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import {
   OPTIONS_ADDRESSABLE_STAGES,
+  STRATEGY_ADDRESSABLE_STAGES,
   type OptionsPipelineStage,
 } from "./stageRuntimeIds";
 import {
@@ -313,12 +321,17 @@ export async function controlOptionsStage(
   input: OptionsStageControlInput,
 ): Promise<OptionsStageControlResult> {
   const { runId, stage, operation } = input;
+  // Issue #4272: the stage is validated against the union of the
+  // options and strategy vocabularies — one set, two names — so a
+  // strategy run's stage is addressable under the strategy
+  // vocabulary exactly as an options run's is under the options one.
   if (
-    !(OPTIONS_ADDRESSABLE_STAGES as readonly string[]).includes(stage)
+    !(OPTIONS_ADDRESSABLE_STAGES as readonly string[]).includes(stage) &&
+    !(STRATEGY_ADDRESSABLE_STAGES as readonly string[]).includes(stage)
   ) {
     throw new OptionsStageControlError(
       "stage_vocabulary_unknown",
-      `options stage ${JSON.stringify(stage)} is not addressable — the addressable stages are ${OPTIONS_ADDRESSABLE_STAGES.join(", ")}; display stages (feed/store/serve) are presentation only and never control addresses`,
+      `options stage ${JSON.stringify(stage)} is not addressable — the addressable stages are ${OPTIONS_ADDRESSABLE_STAGES.join(", ")} (the options vocabulary, #4067; the strategy vocabulary, #4272, is the same 8 by design); display stages (feed/store/serve) are presentation only and never control addresses`,
     );
   }
   const optionsStage = stage as OptionsPipelineStage;
