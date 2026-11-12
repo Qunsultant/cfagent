@@ -1,21 +1,28 @@
 # Auto-merge eligible PRs — issue #1509; enrollment fixed in #4305 / #4313.
 #
-# WHAT: labels an eligible PR and ENQUEUES it. The merge queue owns the
-# strategy (REBASE) and rebuilds the group on current main, so nothing here
-# depends on an auto-merge request.
+# WHAT: labels an eligible PR, and ENQUEUES it once CI finishes. The merge queue
+# owns the strategy (REBASE) and rebuilds the group on current main, so nothing
+# here depends on an auto-merge request.
 #
-# WHY NOT auto-merge (verified 2026-11-12 on #4298): GitHub records an
-# auto-merge request's method as the repository default — SQUASH on this repo —
-# even when the mutation asks for `mergeMethod: REBASE`, and a SQUASH request
-# cannot merge under a rebase-only ruleset. The PR then sits green, CLEAN and
-# unmerged (#4267, #4219, #4244, #4283, #4285, #4297, #4303). Enrollment is
-# therefore the queue entry, not an auto-merge request.
+# WHY NOT auto-merge (verified 2026-11-12 on #4298): GitHub records an auto-merge
+# request's method as the repository default — SQUASH on this repo — even when the
+# mutation asks for `mergeMethod: REBASE`, and a SQUASH request cannot merge under
+# a rebase-only ruleset. The PR then sits green, CLEAN and unmerged (#4267,
+# #4219, #4244, #4283, #4285, #4297, #4303). Enrollment is the queue entry.
 #
-# TRIGGER: plain `pull_request`. GitHub restricts the privileged target-variant
-# trigger on public repositories from 2026-12-02 (#4313), and this job never
-# checks out or executes PR code — it labels and calls the queue API. The only
-# behavioural difference is that a fork PR has a read-only token, so the job is
-# skipped for forks (every agent PR is same-repo).
+# WHY TWO TRIGGERS (#4299: two runs 14s apart; #4313):
+# - `pull_request` labels the PR. It does NOT rely on a later `labeled` run: the
+#   label this job adds would re-trigger it, which is the duplicate run the old
+#   version produced on every PR. `labeled` is therefore not in the types list.
+# - `workflow_run` on CI completion does the enqueue. An enqueue attempted at
+#   `opened` is rejected while required checks are still running ("required
+#   status checks have not succeeded"), and no pull_request event fires when they
+#   finish — so the retry must hang off the CI run, as the old bot did.
+#
+# TRIGGER SAFETY: plain `pull_request`, not the privileged target variant, which
+# GitHub restricts on public repositories from 2026-12-02 (#4313). The labelling
+# job never checks out or executes PR code. The enqueue job runs on the default
+# branch (workflow_run semantics) and only calls the queue API.
 #
 # SAFETY: no checkout, no PR code execution, no repository secrets beyond the
 # workflow's own token scoped to labels + pull requests. The required checks and
@@ -25,8 +32,11 @@ name: Auto-merge trusted PRs
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
+  workflow_run:
+    workflows: ["Continuous Integration & Test Verification"]
+    types: [completed]
 
 permissions:
   pull-requests: write
@@ -34,22 +44,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: auto-merge-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # One run per subject; an idempotent enqueue must not cancel an in-flight one.
+  group: auto-merge-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
 
 jobs:
-  enqueue:
+  label:
     name: Label PRs and enable auto-merge when mergeable
-    # A fork PR runs with a read-only token; nothing to enroll there.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
-      - name: Label eligible PR and enqueue it
+      - name: Label the PR (lane from the body hashtag)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
-          PR_IS_DRAFT: ${{ github.event.pull_request.draft }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
@@ -59,21 +67,35 @@ jobs:
             AGENT_ID=$(echo "$AGENT_TAG" | sed 's/^#//' | tr '[:upper:]' '[:lower:]')
             LANE_LABEL="lane:$AGENT_ID"
           fi
-
           gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "auto-merge" || true
           if [ -n "$LANE_LABEL" ]; then
             gh label create "$LANE_LABEL" --repo "$GITHUB_REPOSITORY" --color "ededed" --description "Agent ownership lane" --force 2>/dev/null || true
             gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$LANE_LABEL" || true
           fi
 
-          if [ "$PR_IS_DRAFT" = "true" ]; then
-            echo "Draft PR labeled. The queue accepts it once it is ready for review."
+  enqueue:
+    name: Enqueue the PR once CI finishes
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Enqueue the open PR for this branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          # Only PRs that carry this workflow's label are enrolled; a fork branch
+          # has no label and is skipped by construction.
+          PR_NODE_ID=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH" --state open \
+            --json number,nodeId,labels \
+            --jq '[.[] | select(any(.labels[]?; .name == "auto-merge"))][0].nodeId // empty')
+          if [ -z "$PR_NODE_ID" ]; then
+            echo "No open auto-merge PR for branch '$HEAD_BRANCH'; nothing to enqueue."
             exit 0
           fi
 
-          # Enqueue. The entry is the enrollment: the queue picks the strategy
-          # and validates the group on current main. An "already in the queue"
-          # response is success, not a failure (the labeled event re-runs this).
+          # Enqueue. The entry IS the enrollment. An "already in the queue"
+          # response is success, not a failure.
           gh api graphql -F id="$PR_NODE_ID" -f query='
             mutation($id: ID!) {
               enqueuePullRequest(input: { pullRequestId: $id }) {
