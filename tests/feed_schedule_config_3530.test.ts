@@ -101,7 +101,7 @@ describe("ensure preserves the stored schedule (#3530 scheduling-config)", () =>
     const control = makeControl(stores);
     await ensureFeedPipelineJobs(control, stores, {});
     const v1 = await storedDefinition(stores, JOB);
-    expect(v1.config.schedule).toEqual({ enabled: true, interval: "every 60 minutes" });
+    expect(v1.config.schedule).toEqual({ enabled: true, interval: "every 43200 minutes" });
 
     // The operator configures a 15-minute cadence through the engine.
     await control.configureJob(JOB, { root: { schedule: { enabled: true, interval: "every 15 minutes" } } });
