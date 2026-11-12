@@ -110,6 +110,17 @@ function readTerminal(output: unknown, allowed: Set<string>): string {
  * artifacts themselves live only for the run's duration. Durable
  * claims/storage remain a named follow-up for these legs (the goal
  * leg and the manual entry already wire the durable stores).
+ *
+ * Issue #4069 (Option B for options): the in-memory checkpoints
+ * are an accepted-absent, not a gap to fill here. Checkpoints are
+ * run-duration artifacts, not run records — no run history is lost
+ * when they evaporate, and making them durable would create a
+ * second unit store (ADR D-0 / #3027) that cannot work in workflow
+ * residency (no host DO to borrow storage from). Their durable home
+ * after onboarding is the engine's job-instance checkpoint
+ * (D1 stage_checkpoint_json) once #4068 routes the legs through
+ * the engine. The goal leg and the manual entry already wire the
+ * durable stores.
  */
 export function memoryStageStorage(): OptionsStageStorage {
   const map = new Map<string, unknown>();

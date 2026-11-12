@@ -60,9 +60,12 @@ import { codedMessage } from "../outcomes/outcomeAspects";
 import { buildFeedJobRegistry } from "./feedJobs";
 import { FEED_PIPELINE_CATALOG } from "./feedPipelineJobs";
 import type { DataProviderId } from "../trading";
+import type { ScanRunSummary } from "../trading";
 // Issue #3946 (Option B): the engine's D1 run records merge onto the
 // Workflow Runs page through runFromJobRunRecord, beside the DO
 // ledgers — never re-homed, never projected here (that is #4116).
+// Issue #4069 (Option B for options): the scanner's scan-run rows
+// (mas_opportunity_scans) merge the same way through runFromScanRun.
 import { d1JobRunRecordId } from "./jobRunRecordReads";
 import type { JobRunRecord } from "./jobRunRecords";
 
@@ -230,7 +233,11 @@ export interface WorkflowRun {
  * as the Docs tab labels it.
  */
 export interface WorkflowRunDocuments {
-  /** The mas_reports row id backing these documents. */
+  /**
+   * The mas_reports row id backing these documents — or, for a
+   * scan-run row (#4069), the scan run id, resolved as a scan row
+   * by /api/runs/details.
+   */
   reportId: string;
   family: "stock" | "options" | "goal" | "strategy";
   pdfUrl: string | null;
@@ -1592,6 +1599,86 @@ export function runFromJobRunRecord(record: JobRunRecord): WorkflowRun {
     deliveryStates: {},
     error: record.outcome === "failure" ? record.error ?? null : null,
     documents: null,
+    fanoutCapReason: null,
+    resumedSkippedUnits: [],
+  };
+}
+
+/**
+ * Issue #4069 (Option B for options): a scan-run row
+ * (mas_opportunity_scans) → a WorkflowRun. Scanner legs write no
+ * canonical mas_reports row, so without this the scan ledger is
+ * invisible on Workflow Runs — ReportsPanel and detail already merge
+ * it (runSummaryFromScanRun). The row is its own run (family
+ * "options", source "report") with an honest empty stage list — the
+ * scan row carries no per-stage rows, so none are invented. Status
+ * is "completed": a saved scan row means the scan ran to its persist
+ * stage, which never fails the run (#27/#103); partial coverage
+ * rides the gate summary in outputs, never a second status.
+ * Documents come from the row's own pdf/xlsx/csv keys (the same
+ * /api/options/report.* urls runSummaryFromScanRun builds), so the
+ * Docs columns and the RunDetail fetch (by scan id, resolved as a
+ * scan row) work exactly as in the Docs tab. Broker provenance comes
+ * from the row's broker (#3327); absent stays absent, never
+ * backfilled (#3655). The row is owner-scoped by the route (the
+ * store's visibility rule); the mapper itself stamps no identity.
+ */
+export function runFromScanRun(scan: ScanRunSummary): WorkflowRun {
+  const gate = scan.gate;
+  const evaluated = scan.coverage?.evaluated ?? null;
+  const trigger = reportTrigger(scan.trigger ?? null);
+  const title = scan.profileRef?.name
+    ? `Options scan — ${scan.mode} (${scan.profileRef.name})`
+    : `Options scan — ${scan.mode}`;
+  return {
+    id: scan.id,
+    runId: scan.id,
+    workflow: FAMILY_WORKFLOW["options"],
+    family: "options",
+    title,
+    source: "report",
+    trigger,
+    triggerDetail:
+      trigger === "manual"
+        ? "Manual — recorded on the scan run"
+        : trigger === "scheduled"
+          ? "Scheduled — recorded on the scan run"
+          : "Not recorded by the source",
+    triggeredBy: scan.userLogin ?? null,
+    status: "completed",
+    lifecycle: lifecycleStateForRun({ status: "completed", stages: [] }),
+    schedule: scheduleProvenanceForTrigger(trigger),
+    startedAt: scan.generatedAt,
+    finishedAt: scan.generatedAt,
+    durationMs: null,
+    stageCount: 0,
+    completedStages: 0,
+    failedStages: 0,
+    stages: [],
+    inputs: {},
+    outputs: {
+      status: "completed",
+      gate: { fit: gate?.fit ?? 0, borderline: gate?.borderline ?? 0, noFit: gate?.noFit ?? 0 },
+      ...(evaluated !== null ? { evaluated } : {}),
+      ...(scan.partial ? { partial: scan.partial } : {}),
+    },
+    artifacts: [],
+    deliveryStates: {},
+    error: null,
+    documents: {
+      reportId: scan.id,
+      family: "options",
+      pdfUrl: scan.pdfKey ? `/api/options/report.pdf?key=${encodeURIComponent(scan.pdfKey)}` : null,
+      pdfStatus: scan.pdfKey ? "generated" : null,
+      pdfError: null,
+      xlsxUrl: scan.xlsxKey ? `/api/options/report.xlsx?key=${encodeURIComponent(scan.xlsxKey)}` : null,
+      xlsxStatus: scan.xlsxKey ? "generated" : null,
+      xlsxError: null,
+      csvUrl: scan.csvKey ? `/api/options/report.csv?key=${encodeURIComponent(scan.csvKey)}` : null,
+      csvStatus: scan.csvKey ? "generated" : null,
+      csvError: null,
+    },
+    ...(scan.broker ? { brokerId: scan.broker } : {}),
     fanoutCapReason: null,
     resumedSkippedUnits: [],
   };
