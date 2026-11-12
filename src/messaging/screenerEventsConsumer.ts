@@ -54,10 +54,14 @@ import { isLoginShaped } from "../security/serviceIdentity";
  * against wrangler.jsonc by test (gitops §7, the pin rule).
  */
 export const SCREENER_EVENTS_CONSUMER_CONFIG: QueueConsumerConfig = {
-  maxBatchSize: 10,
-  maxBatchTimeoutSeconds: 30,
-  maxRetries: 3,
-  maxConcurrency: 4,
+  // Issue #4213 (owner direction) — DO usage: one invocation at a time,
+  // smaller batches, two retries (was 10 / 30s / 3 / 4). Mirrored in
+  // wrangler.jsonc and held equal to it by
+  // tests/cloudflare_migration_step1_queue_consumer_2544.test.ts.
+  maxBatchSize: 5,
+  maxBatchTimeoutSeconds: 10,
+  maxRetries: 2,
+  maxConcurrency: 1,
   deadLetterQueue: "screener-events-dlq",
 };
 
@@ -67,9 +71,13 @@ export const SCREENER_EVENTS_CONSUMER_CONFIG: QueueConsumerConfig = {
  * against wrangler.jsonc by the same test.
  */
 export const SCREENER_EVENTS_DELIVERY_CONSUMER_CONFIG: QueueConsumerConfig = {
-  maxBatchSize: 10,
-  maxRetries: 3,
-  maxConcurrency: 2,
+  // Issue #4213 — same DO-usage caps as the work consumer. The batch timeout
+  // becomes explicit here (10s) because the manifest now sets it on this queue
+  // too; the two are pinned equal, so an omitted field on either side fails.
+  maxBatchSize: 5,
+  maxBatchTimeoutSeconds: 10,
+  maxRetries: 2,
+  maxConcurrency: 1,
   deadLetterQueue: "screener-events-delivery-dlq",
 };
 

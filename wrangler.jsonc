@@ -24,19 +24,25 @@
   // through to it. The `serveStaticAsset` bypass in src/server.ts remains as
   // the safety net for anything that does land here.
   "assets": { "directory": "./dist/", "binding": "ASSETS", "run_worker_first": ["/", "/index.html"] },
+  // Issue #4213 (owner direction) — DO usage: every workflow is capped to ONE
+  // concurrent instance. Overlapping instances of the same workflow are what
+  // multiplied DO activity (each instance is its own durable run), so a second
+  // run now queues behind the first instead of running beside it.
+  // `concurrency` needs Wrangler >= 4.127.0; package.json pins 4.156.0.
   "workflows": [
-    { "name": "trading-trade-workflow", "binding": "TRADE_WORKFLOW", "class_name": "TradingTradeWorkflow" },
+    { "name": "trading-trade-workflow", "binding": "TRADE_WORKFLOW", "class_name": "TradingTradeWorkflow", "concurrency": { "limit": 1 } },
     {
       "name": "screener-screen-workflow",
       "binding": "SCREENER_WORKFLOW",
-      "class_name": "ScreenerScreenWorkflow"
+      "class_name": "ScreenerScreenWorkflow",
+      "concurrency": { "limit": 1 }
       // Issue #4112 (owner direction): NO schedule. The workflow binding
       // stays so an on-demand run still resolves; to schedule it again,
       // add: "schedules": ["*/30 * * * *"]
     },
-    { "name": "payment-workflow", "binding": "PAYMENT_WORKFLOW", "class_name": "PaymentWorkflow" },
-    { "name": "saga-workflow", "binding": "SAGA_WORKFLOW", "class_name": "CrossDomainSagaWorkflow" },
-    { "name": "job-pipeline-workflow", "binding": "JOB_PIPELINE_WORKFLOW", "class_name": "JobPipelineWorkflow" }
+    { "name": "payment-workflow", "binding": "PAYMENT_WORKFLOW", "class_name": "PaymentWorkflow", "concurrency": { "limit": 1 } },
+    { "name": "saga-workflow", "binding": "SAGA_WORKFLOW", "class_name": "CrossDomainSagaWorkflow", "concurrency": { "limit": 1 } },
+    { "name": "job-pipeline-workflow", "binding": "JOB_PIPELINE_WORKFLOW", "class_name": "JobPipelineWorkflow", "concurrency": { "limit": 1 } }
   ],
   // Issue #605 — report PDF blobs live in R2 (bucket provisioned by the
   // owner; reportBlobStore maps screener:*/options:* keys to stocks/*,
@@ -86,19 +92,24 @@
       { "binding": "SCREENER_DELIVERY_DLQ", "queue": "screener-events-delivery-dlq" }
     ],
     "consumers": [
+      // Issue #4213 (owner direction) — DO usage: one consumer invocation at a
+      // time per queue (`max_concurrency: 1`), smaller batches (5 messages,
+      // 10s flush, 2 retries). Every message that lands drives DO work, so
+      // uncapped concurrency stacked DO requests. Throughput is deliberately
+      // lower: the backlog drains one batch at a time.
       // Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535):
       // the job-pipeline-events consumer arrives with its first
       // handler (the #1739 sequencing) — completions route to the
       // ScheduledAgent host. Its settings are the
       // JOB_PIPELINE_EVENTS_CONSUMER_CONFIG pin in
       // src/messaging/jobPipelineEventsConsumer.ts.
-      { "queue": "job-pipeline-events", "max_batch_size": 10, "max_batch_timeout": 30, "max_retries": 3, "dead_letter_queue": "job-pipeline-events-dlq", "max_concurrency": 2 },
+      { "queue": "job-pipeline-events", "max_batch_size": 5, "max_batch_timeout": 10, "max_retries": 2, "dead_letter_queue": "job-pipeline-events-dlq", "max_concurrency": 1 },
       // Issue #2544 (Cloudflare migration step 1, report §3.2): the
       // work queue finally has a consumer, and both consumers have
       // dead-letter queues. The delivery consumer keeps its
       // max_batch_size/max_retries and gains a DLQ + concurrency cap.
-      { "queue": "screener-events", "max_batch_size": 10, "max_batch_timeout": 30, "max_retries": 3, "dead_letter_queue": "screener-events-dlq", "max_concurrency": 4 },
-      { "queue": "screener-events-delivery", "max_batch_size": 10, "max_retries": 3, "dead_letter_queue": "screener-events-delivery-dlq", "max_concurrency": 2 }
+      { "queue": "screener-events", "max_batch_size": 5, "max_batch_timeout": 10, "max_retries": 2, "dead_letter_queue": "screener-events-dlq", "max_concurrency": 1 },
+      { "queue": "screener-events-delivery", "max_batch_size": 5, "max_batch_timeout": 10, "max_retries": 2, "dead_letter_queue": "screener-events-delivery-dlq", "max_concurrency": 1 }
     ]
   },
   "durable_objects": {
@@ -369,18 +380,36 @@
     "QUOTES_WS_RECONNECT_BASE_MS": "5000",
     "QUOTES_WS_RECONNECT_CAP_MS": "120000",
     // Issue #4122 — cost: 30s -> 300s between options-flow polls.
-    "OPTIONS_FLOWS_POLL_MS": "600000",
+    // Issue #4213 — cost: effectively off (3e12 ms, ~95 years). The
+    // options-flow panel no longer re-polls on its own; the filter-change
+    // fetch still loads it. src/client/polling.ts clamps the delay to the
+    // 32-bit timer ceiling (MAX_TIMER_DELAY_MS), so the value means "not in
+    // this session" on every engine instead of relying on integer wrap.
+    "OPTIONS_FLOWS_POLL_MS": "3000000000000",
     // Issue #4122 — cost: 60s -> 300s between latest-options polls.
     "OPTIONS_LATEST_POLL_MS": "600000",
     "CHAT_AUTO_REFRESH_FLOOR_S": "30",
-    "GOAL_TRACK_POLL_MS": "60000",
+    // Issue #4213 — cost: effectively off (3e12 ms, ~95 years), same clamp
+    // as the line above. A staged goal run no longer refreshes itself: the
+    // submit-time state stays on screen until the user reloads or opens the
+    // run from Screening -> Reports. GOAL_TRACK_DEADLINE_MS is unchanged.
+    "GOAL_TRACK_POLL_MS": "3000000000000",
     "GOAL_TRACK_DEADLINE_MS": "3600000",
     // Issue #2443 — TickerAgent push cadence, seconds. Default 5s;
     // changing it changes live tick cadence (product call). Rollback
     // is unsetting the var and redeploying.
     // Issue #4122 — cost: 5s -> 60s cuts ticker DO activity (variants: 92%).
-    "TICKER_PUSH_INTERVAL_S": "300",
-    "MAS_MAX_STEPS": "5",
+    // Issue #4213 — cost: 300s -> 3000s (50 minutes) between tick pushes.
+    // pushTicks is the only push on the ticker socket, so a connected client
+    // now sees one new tick per 50 minutes: the live ticker reads as a
+    // snapshot taken at connect. Rollback is setting this back to "300".
+    "TICKER_PUSH_INTERVAL_S": "3000",
+    // Issue #4213 — cost: 5 -> 2, the shortest loop the clamp allows. This
+    // REVERSES #4131 (same direction: 2 -> 5, "the loop needs room to finish
+    // a real goal"). #4213 is the later owner direction and wins; a complex
+    // goal may still stop before it converges. Clamp stays 1-10 in
+    // src/agents/chatPrompt.ts.
+    "MAS_MAX_STEPS": "2",
     "AI_MODEL": "@cf/zai-org/glm-4.7-flash",
     "CF_WALLET_NETWORK": "base-sepolia",
     "CF_WALLET_FACILITATOR": "https://x402.org/facilitator",
@@ -402,7 +431,13 @@
     // "0" (gating disabled) and redeploying — no code change. NOTE:
     // removing the var does NOT disable gating (the code default is
     // 30s); only "0" disables it.
-    "IAAA_WIRED_FRESHNESS_MS": "120000",
+    // Issue #4213 — DO usage: effectively no fresh SessionStore read for a
+    // wired session (3e12 ms). Local absolute + idle expiry still apply, so
+    // an expired copy never serves; what IS delayed to the session expiry is
+    // revocation and step-up propagation. That trade-off is the owner
+    // direction in #4213 and stays a CISO sign-off item under #2444
+    // (rollback: "0" disables gating entirely; a smaller value bounds it).
+    "IAAA_WIRED_FRESHNESS_MS": "3000000000000",
     // Issue #3155 (Q9) — default grant lifetime in days for
     // non-platform-scope bindings without an explicit expiry.
     // Adopted initial value 90; "0" resolves to 90, never to
