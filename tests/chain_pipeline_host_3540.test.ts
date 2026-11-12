@@ -2,7 +2,7 @@
 /**
  * Issue #3540 (Pipeline J7) — the composed chains' host wiring
  * on the ScheduledAgent:
- * - the host manages the eight chains (one per quotes lineage)
+ * - the host manages the twelve chains (one per quotes lineage)
  *   alongside the 38 stage jobs — 45 Think declarations (the
  *   declaration pin itself lives in feed_pipeline_host_3543);
  * - the end-to-end surface view composes over the host plane:
@@ -85,13 +85,17 @@ async function pollRecords(
 }
 
 describe("the composed chains on the host (#3540)", () => {
-  it("the host manages the seven chains, one per quotes lineage", () => {
+  it("the host manages the twelve chains, one per quotes lineage", () => {
     expect(pipelineChainJobIds()).toEqual([
       "yahoo-nasdaq100-quotes-pipeline",
       "yahoo-sp100-quotes-pipeline",
       "yahoo-sp500-quotes-pipeline",
       "yahoo-dow-quotes-pipeline",
       "yahoo-sp400-quotes-pipeline",
+      "yahoo-sector-energy-quotes-pipeline",
+      "yahoo-sector-materials-quotes-pipeline",
+      "yahoo-sector-industrials-quotes-pipeline",
+      "yahoo-sector-consumer-discretionary-quotes-pipeline",
       "alpaca-nasdaq100-quotes-pipeline",
       "etrade-nasdaq100-quotes-pipeline",
       "public-nasdaq100-quotes-pipeline",
