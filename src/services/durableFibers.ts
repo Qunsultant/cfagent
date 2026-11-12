@@ -111,8 +111,6 @@ export class DurableFiberContext {
 
 export class ETradeDurableFiberService {
   private activeFibers = new Map<string, FiberExecutionRecord>();
-  private heartbeatInterval?: any;
-  private keepAliveCount = 0;
 
   constructor(
     private orm?: DatabaseORM,
@@ -121,25 +119,20 @@ export class ETradeDurableFiberService {
   ) {}
 
   /**
-   * Keep the Durable Object alive during long-running operations
+   * Issue #4202 — the keep-alive disposer contract, without the timer.
+   *
+   * This used to arm a 30-second `setInterval` whose callback did nothing
+   * ("Alarms / heartbeat ping"). A no-op timer cannot extend a Durable Object's
+   * life in any useful sense — a pending request already keeps the isolate
+   * running — and a live timer is exactly what makes an object ineligible for
+   * hibernation, which is the state DO duration bills for. Callers keep the
+   * same shape (await a disposer, call it once); nothing about their work
+   * depends on the timer that used to be here.
    */
   async keepAlive(): Promise<() => void> {
-    this.keepAliveCount++;
-    if (!this.heartbeatInterval && typeof setInterval !== "undefined") {
-      this.heartbeatInterval = setInterval(() => {
-        // Alarms / heartbeat ping
-      }, 30_000);
-    }
-
     let disposed = false;
     return () => {
-      if (disposed) return;
       disposed = true;
-      this.keepAliveCount = Math.max(0, this.keepAliveCount - 1);
-      if (this.keepAliveCount === 0 && this.heartbeatInterval) {
-        clearInterval(this.heartbeatInterval);
-        this.heartbeatInterval = undefined;
-      }
     };
   }
 
