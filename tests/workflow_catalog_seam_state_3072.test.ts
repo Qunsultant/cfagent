@@ -90,10 +90,13 @@ describe("the flows behind the declarations still emit (#3072/#3073)", () => {
     // Old pin asserted the manual handler published once, at the end,
     // through emitOptionsStageBoundaries; #3186 step 3d retired that
     // end-of-run emitter in favour of per-stage messages published by the
-    // pipeline composer after each stage persists. This pin proves the
-    // route runs the pipeline and the composer publishes after persist.
+    // pipeline composer after each stage persists. #4068 moved the route
+    // onto the engine-routed dispatch (runOptionsScreenViaEngine), which
+    // drives the same composer — the shared runOptionsStageOnce still
+    // publishes after persist. This pin proves the route runs the pipeline
+    // through the engine and the composer publishes after persist.
     const route = read("src/agents/routes/etradeOptionsScreen.ts");
-    expect(route).toContain("runOptionsScreenWorkflow");
+    expect(route).toContain("runOptionsScreenViaEngine");
     const composer = read("src/workflows/optionsScreenWorkflow.ts");
     expect(composer).toContain("publishStageBoundaryMessage");
     expect(composer.indexOf("await port.persist(")).toBeGreaterThan(0);

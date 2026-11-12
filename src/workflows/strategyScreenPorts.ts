@@ -534,11 +534,15 @@ export function createScannerScreenPorts(
         result.requestSnapshot.request = classInput.requestRecord;
       }
       if (!scanRunStore) {
+        // Issue #4068 (fix): a run with no store bound carries NO
+        // persistence fields at all — the field is absent, not false.
+        // (A store whose save throws is the pinned persisted:false
+        // case below; a run that never had a store has no receipt to
+        // report, and the execute() test pins the field absent.)
         return {
           terminal: "completed",
           saved: false,
           reason: "no scan run store bound; the stage artifact is the record",
-          persisted: false,
           result,
         };
       }
@@ -579,18 +583,21 @@ export function createScannerScreenPorts(
       const persistArtifact = await loadArtifact<{
         saved: boolean;
         scanRunId?: string;
-        persisted: boolean;
+        persisted?: boolean;
         result: OpportunityScanResult;
       }>(storage, input.runId, "persistCanonicalResults");
       // The execute() executionData shape: the result plus its save
       // receipt, so callers read one object either way. No terminal
       // field: the composer defaults an absent terminal to
       // "completed", and a terminal here would leak into the shaped
-      // result the deliver stage hands on.
+      // result the deliver stage hands on. The receipt fields ride
+      // only when the persist stage set them: a run with no store
+      // bound carries no persisted field (#27), a failed save carries
+      // persisted:false, a saved run carries scanRunId + persisted:true.
       return {
         ...persistArtifact.result,
         ...(persistArtifact.scanRunId ? { scanRunId: persistArtifact.scanRunId } : {}),
-        persisted: persistArtifact.persisted,
+        ...(persistArtifact.persisted !== undefined ? { persisted: persistArtifact.persisted } : {}),
       };
     },
     persist,

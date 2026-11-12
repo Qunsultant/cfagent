@@ -108,7 +108,7 @@ import {
   FEED_JOB_TIMEOUTS,
   withFeedDeadline,
 } from "./feedJobTimeouts";
-import { FEED_JOB_CODES } from "./feedJobs";
+import { FEED_JOB_CODES } from "./feedJobCodes";
 
 /**
  * The step name of the feed pull, as registered by

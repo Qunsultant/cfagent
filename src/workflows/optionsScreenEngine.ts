@@ -77,12 +77,13 @@ import { OPTIONS_PIPELINE_STAGES, type OptionsPipelineStage } from "./stageRunti
 import type { PanelDiscoveryResult } from "../services/recommendationKernel";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import type { EtapiScreenerConfig } from "../config/etapiConfig";
-import type { OptionScreenResult, OptionScreenerFilter } from "../types";
+import type { OptionScreenFetchError, OptionScreenResult, OptionScreenerFilter } from "../types";
 import {
   DynamicOptionsScreener,
   OptionsDataAgent,
   RecommendationAgent,
   StrategyRiskAgent,
+  sanitizeOptionScreenerFilter,
   type OptionChainSource,
   type NasdaqUniverseDeps,
   type OpportunityScanOptions,
@@ -336,6 +337,38 @@ export async function runOptionsPlainScreenViaEngine(
   if (!userLogin) {
     throw new Error("options plain screen: a real userLogin is required (the plain ports are owner-scoped)");
   }
+  const screener = new DynamicOptionsScreener(source, config);
+  // Issue #4068 (fix): the direct screen (DynamicOptionsScreener.screenOptions)
+  // answers a fetch/validation failure with an ERROR RESULT, never a throw —
+  // and the paid/premium callers (PaidOptionsScreenerCommand,
+  // /premium/options-scan) depend on that shape (they read
+  // result.status === "error" and answer 200). The engine path fails the
+  // run instead, so this helper translates the two failure shapes
+  // screenOptions converts: the fetchChains validation gate (checked here,
+  // before dispatch, with the same conditions and verbatim messages
+  // fetchChains throws) and the no-chains screen failure (translated from
+  // the persisted chainFetch artifact below). Any other engine failure
+  // still throws, as before.
+  const { filter: saneFilter, warnings } = sanitizeOptionScreenerFilter(filter, screener.config);
+  if (saneFilter.sector && !["all", "any"].includes(saneFilter.sector.toLowerCase())) {
+    return {
+      ...screener.evaluateChains([], saneFilter, 0, { warnings }),
+      status: "error",
+      validationError:
+        "The dynamic all-listings feed does not include sector classifications; remove the sector filter or specify underlying symbols.",
+    };
+  }
+  if (
+    (!saneFilter.underlyingSymbols || saneFilter.underlyingSymbols.length === 0) &&
+    saneFilter.maxUnderlyings === undefined
+  ) {
+    return {
+      ...screener.evaluateChains([], saneFilter, 0, { warnings }),
+      status: "error",
+      validationError:
+        "Specify underlying symbols or set the visible maximum-underlyings limit before scanning option chains.",
+    };
+  }
   const runId = `options-screen:plain:${new Date().toISOString()}`;
   const storage = memoryStageStorage();
   const outcome = await runOptionsScreenViaEngine(
@@ -352,7 +385,7 @@ export async function runOptionsPlainScreenViaEngine(
     },
     {
       stages: createOptionsScreenPorts({
-        screener: new DynamicOptionsScreener(source, config),
+        screener,
         storage,
         // The bare screen's report IS the screen result; delivery is
         // deferred to the caller (no Slack/email from a raw screen).
@@ -364,6 +397,27 @@ export async function runOptionsPlainScreenViaEngine(
     },
   );
   if (outcome.outcome !== "completed") {
+    // Issue #4068 (fix): screenOptions answers "fetch errors, zero chains"
+    // with an error result, not a throw — translate the engine's
+    // screen-stage failure back into that shape from the persisted
+    // chainFetch artifact (filter + fetchErrors + warnings as fetched).
+    if (outcome.failedStage === "screen") {
+      const fetched = await storage.get<{
+        filter: OptionScreenerFilter;
+        warnings: string[];
+        symbols: string[];
+        chains: unknown[];
+        fetchErrors: OptionScreenFetchError[];
+      }>(optionsArtifactKey(runId, "chainFetch"));
+      if (fetched && fetched.fetchErrors.length > 0 && fetched.chains.length === 0) {
+        const result = screener.evaluateChains([], fetched.filter, fetched.symbols.length, {
+          fetchErrors: fetched.fetchErrors,
+          warnings: fetched.warnings,
+        });
+        result.status = "error";
+        return result;
+      }
+    }
     throw new Error(`Options screen failed at ${outcome.failedStage}: ${outcome.reason}`);
   }
   const screened = await storage.get<{ terminal: string; result: OptionScreenResult }>(
