@@ -478,6 +478,22 @@ function measure(): Map<string, number> {
  * after the first count (92->94). The counts fall back when the
  * duplicated runScreenInner branches are retired.
  * Totals move 1178/9310 -> 1178/9323.
+ * Baseline update (#4279, 2026-11-12): the goal stock leg's engine
+ * runner (#3550 S4) shares the options-leg deps builder with the
+ * direct runGoalScreen — the builder takes the trade client as a
+ * parameter, so the threading names the provider at the builder's
+ * signature: 1 raise (screener-agent.ts etrade 94->95),
+ * dispositioned INTEGRATION — the binding names the provider its
+ * leg serves, which is its job (the #4193 precedent: etradeService
+ * parameter threading). The two goal runners share ONE trade-client
+ * construction (tradeService), so the trading-extraction ledger
+ * stays at 3. The Yahoo rows this slice first added were
+ * neutralized instead of baselined (the leg's provider literal is
+ * reused from the goal command's type, and the engine runner's doc
+ * comment no longer names the provider). The counts fall back when
+ * the direct runGoalScreen (chain-mode only after S4) is retired
+ * by S5 #4280.
+ * Totals move 1178/9323 -> 1178/9324.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -858,7 +874,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "yahoo", 1],
   ["src/agents/screener-agent.ts", "alpaca", 24],
-  ["src/agents/screener-agent.ts", "etrade", 94],
+  ["src/agents/screener-agent.ts", "etrade", 95],
   ["src/agents/screener-agent.ts", "yahoo", 68],
   ["src/agents/screenerA2aDispatch.ts", "etrade", 2],
   ["src/agents/screenerA2aDispatch.ts", "yahoo", 5],

@@ -152,10 +152,6 @@ function makeScreenerExecutor(
     chargeScreenQuota: async (input) => {
       calls.push({ method: "chargeScreenQuota", args: input });
     },
-    runGoalScreen: async (req) => {
-      calls.push({ method: "runGoalScreen", args: req });
-      return { task: { id: "task-1" } as any, executed: true };
-    },
     getLatest: async () => {
       calls.push({ method: "getLatest", args: undefined });
       return null;
@@ -170,7 +166,15 @@ function makeScreenerExecutor(
     },
     ...overrides,
   };
-  return { executor, calls, seam, seamCalls };
+  // Issue #4279: the goal seam fake — captures its input and returns
+  // the ledger-shaped outcome the dispatch hands back.
+  const goalSeamCalls: unknown[] = [];
+  const goalSeam = async (input: any) => {
+    goalSeamCalls.push(input);
+    return { task: { id: "task-1", idempotencyKey: input.submission.jobId } as any, executed: true, result: { status: "complete" } };
+  };
+  const getSql = () => ({}) as never;
+  return { executor, calls, seam, seamCalls, goalSeam, goalSeamCalls, getSql };
 }
 
 describe("dispatchScreenerA2A (#2223 final slice)", () => {
@@ -233,22 +237,60 @@ describe("dispatchScreenerA2A (#2223 final slice)", () => {
   });
 
   it("screener.run_goal_screen requires scenario + idempotencyKey and threads the service identity", async () => {
-    const { executor, calls } = makeScreenerExecutor();
+    const { executor, goalSeam, goalSeamCalls, getSql } = makeScreenerExecutor();
     const bad = await dispatchScreenerA2A(
       ENV_SVC,
       { operation: "screener.run_goal_screen", scenario: { id: "s1" } },
-      { executor },
+      { executor, runGoalScreenViaEngine: goalSeam as never, getSql },
     );
     expect(bad.ok).toBe(false);
     expect(bad.code).toBe("invalid_input");
     const data = await dispatchScreenerA2A(
       ENV_SVC,
       envelope({ operation: "screener.run_goal_screen", scenario: { id: "s1" }, idempotencyKey: "k-1" }),
-      { executor },
+      { executor, runGoalScreenViaEngine: goalSeam as never, getSql },
     );
     expect(data.ok).toBe(true);
-    expect((calls[0].args as any).userLogin).toBe("svc-user");
-    expect((calls[0].args as any).idempotencyKey).toBe("k-1");
+    const submitted = (goalSeamCalls[0] as any).submission;
+    expect(submitted.userLogin).toBe("svc-user");
+    expect(submitted.jobId).toBe("k-1");
+    expect(submitted.source).toBe("a2a");
+    expect(submitted.scenarioSource).toBe("built");
+    expect(submitted.scenario).toEqual({ id: "s1" });
+    expect((data.result as any).task.id).toBe("task-1");
+    expect((data.result as any).executed).toBe(true);
+  });
+
+  it("screener.run_goal_screen carries the caller's base filters onto the submission (#4279)", async () => {
+    const { executor, goalSeam, goalSeamCalls, getSql } = makeScreenerExecutor();
+    const data = await dispatchScreenerA2A(
+      ENV_SVC,
+      envelope({
+        operation: "screener.run_goal_screen",
+        scenario: { id: "s1" },
+        idempotencyKey: "k-2",
+        baseStockFilter: { momentum: "bullish_breakout" },
+        baseOptionsFilter: { minVolume: 100 },
+        provider: "yahoo",
+      }),
+      { executor, runGoalScreenViaEngine: goalSeam as never, getSql },
+    );
+    expect(data.ok).toBe(true);
+    const submitted = (goalSeamCalls[0] as any).submission;
+    expect(submitted.baseStockFilter).toEqual({ momentum: "bullish_breakout" });
+    expect(submitted.baseOptionsFilter).toEqual({ minVolume: 100 });
+    expect(submitted.provider).toBe("yahoo");
+  });
+
+  it("screener.run_goal_screen without the getSql binding fails closed as not configured (#4279)", async () => {
+    const { executor, goalSeam } = makeScreenerExecutor();
+    const data = await dispatchScreenerA2A(
+      ENV_SVC,
+      envelope({ operation: "screener.run_goal_screen", scenario: { id: "s1" }, idempotencyKey: "k-3" }),
+      { executor, runGoalScreenViaEngine: goalSeam as never },
+    );
+    expect(data.ok).toBe(false);
+    expect(data.code).toBe("not_configured");
   });
 
   it("screener.latest serves an honest empty (null) as a successful result", async () => {

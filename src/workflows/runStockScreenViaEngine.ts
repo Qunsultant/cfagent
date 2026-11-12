@@ -194,8 +194,10 @@ export function aggregateShardResults(
  * door's + the NLQ port's private copies; those stay untouched in
  * this slice — consolidating them onto one helper is a follow-up,
  * not a silent second seam: this copy serves the routed sites only.)
+ * Exported for the goal A2A seam (#4279), which awaits a goal
+ * parent's collation the same way.
  */
-function collationFromRows(rows: ShardJobRow[] | null, jobId: string): WorkflowCollation | null {
+export function collationFromRows(rows: ShardJobRow[] | null, jobId: string): WorkflowCollation | null {
   const parent = rows?.find((r) => r.jobKey === jobId);
   if (!parent) return null;
   try {

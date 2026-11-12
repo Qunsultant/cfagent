@@ -2174,10 +2174,14 @@ export class ScheduledTasksService {
           },
         };
       }
-      const goalWorkflowOn = await (
-        await import("../features/createFeatureFlagPort")
-      ).createFeatureFlagPort(this.env).isEnabled("goal_workflow");
-      if (!chainMode && goalWorkflowOn) {
+      // Issue #4279 (#3550 S4): the workflow path is now THE path
+      // for non-chain scheduled goal screens — the goal_workflow
+      // flag gate is retired and the direct fallthrough below it is
+      // gone. A failed start throws (never a silent direct
+      // fallback). Chain mode keeps the direct path until S5
+      // #4280 routes it — it is the ONE remaining live direct
+      // path, and the chain bridge below still reads its outcome.
+      if (!chainMode) {
         const { buildGoalScreenCommand, startGoalScreenWorkflow } =
           await import("./goalScreenWorkflowSubmission");
         const { createObservabilitySink } =
@@ -2202,26 +2206,29 @@ export class ScheduledTasksService {
           }),
           createObservabilitySink(this.env),
         );
-        if (handle) {
-          this.audit("goal_screen.workflow_submitted", {
-            goalKind: scenario.goalKind,
-            jobId: idempotencyKey,
-            workflowId: handle.workflowId,
-            trigger,
-          });
-          return {
-            success: true,
-            taskType: "goal_screen",
-            timestamp,
-            data: {
-              taskId: idempotencyKey,
-              status: "queued",
-              workflowId: handle.workflowId,
-              goalKind: scenario.goalKind,
-              ...(providerFallback ? { providerFallback } : {}),
-            },
-          };
+        if (!handle) {
+          throw new Error(
+            `Goal screen workflow start returned no handle for job ${idempotencyKey}; refusing to fall back to the direct path.`,
+          );
         }
+        this.audit("goal_screen.workflow_submitted", {
+          goalKind: scenario.goalKind,
+          jobId: idempotencyKey,
+          workflowId: handle.workflowId,
+          trigger,
+        });
+        return {
+          success: true,
+          taskType: "goal_screen",
+          timestamp,
+          data: {
+            taskId: idempotencyKey,
+            status: "queued",
+            workflowId: handle.workflowId,
+            goalKind: scenario.goalKind,
+            ...(providerFallback ? { providerFallback } : {}),
+          },
+        };
       }
       const out = await runtime.executeGoalScreenRun({
         agent: this.getScreenerAgent(userLogin),

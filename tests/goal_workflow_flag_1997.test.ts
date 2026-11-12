@@ -4,16 +4,22 @@
  * submission paths, and the goal door surfaces the
  * canonical report id for the panel's fetch.
  *
- * Flag rule (both entries): flag OFF → direct, exactly as
- * before #1996's opt-in; flag ON → the workflow is
- * REQUIRED, and a null start fails loudly (route: coded
+ * Flag rule (both entries, before #4279): flag OFF → direct,
+ * exactly as before #1996's opt-in; flag ON → the workflow
+ * is REQUIRED, and a null start fails loudly (route: coded
  * 500; scheduled tick: thrown failure + run_failed audit),
  * never a silent fallback to direct.
  *
+ * Issue #4279 (#3550 S4) RETIRES the flag as an entry gate:
+ * the workflow is now THE path for both entries whatever
+ * the flag says — flag OFF behaves exactly like flag ON.
+ * These tests pin that: the flag env is still passed (the
+ * port itself is REAL and env-driven) but the outcome no
+ * longer depends on it.
+ *
  * The submission module is mocked here (as in the #1996
  * routes test) so these tests pin the BRANCHING, not the
- * port itself. The flag port itself is REAL (env-driven),
- * so the gate is exercised, not stubbed.
+ * port itself.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
@@ -141,7 +147,7 @@ describe("goal door report id (#1997)", () => {
 /* Manual route flag gate                                              */
 /* ------------------------------------------------------------------ */
 
-describe("POST /screening/goal-screen flag gate (#1997)", () => {
+describe("POST /screening/goal-screen flag gate (#1997, retired by #4279)", () => {
   const req = (method: string, path: string, body?: unknown, headers?: Record<string, string>) =>
     new Request(`https://agent.internal${path}`, {
       method,
@@ -180,7 +186,7 @@ describe("POST /screening/goal-screen flag gate (#1997)", () => {
     };
   }
 
-  it("flag ON + start success → 202, screen never runs inline", async () => {
+  it("start success → 202, screen never runs inline", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const agent = { runGoalScreen: vi.fn() };
     const { ctx } = routeCtx(agent, FLAG_ON_ENV as unknown as Record<string, unknown>);
@@ -197,7 +203,7 @@ describe("POST /screening/goal-screen flag gate (#1997)", () => {
     expect(mockedStart).toHaveBeenCalledTimes(1);
   });
 
-  it("flag ON + start throws → coded 500 with code + reason, screen never runs (no silent fallback)", async () => {
+  it("start throws → coded 500 with code + reason, screen never runs (no silent fallback)", async () => {
     mockedStart.mockRejectedValue(new WorkflowError("start_failed", "binding boom"));
     const agent = { runGoalScreen: vi.fn() };
     const { ctx } = routeCtx(agent, FLAG_ON_ENV as unknown as Record<string, unknown>);
@@ -219,7 +225,7 @@ describe("POST /screening/goal-screen flag gate (#1997)", () => {
     expect(agent.runGoalScreen).not.toHaveBeenCalled();
   });
 
-  it("flag OFF + async:true → direct runs, workflow never attempted", async () => {
+  it("flag OFF + async:true → 202, workflow attempted, direct never runs (#4279: the flag is retired as an entry gate)", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const agent = directAgent();
     const { ctx } = routeCtx(agent, FLAG_OFF_ENV as unknown as Record<string, unknown>);
@@ -231,11 +237,26 @@ describe("POST /screening/goal-screen flag gate (#1997)", () => {
       ctx,
     );
     expect(res).not.toBeNull();
-    expect(res!.status).toBe(200);
-    const body = (await res!.json()) as Record<string, unknown>;
-    expect(body.success).toBe(true);
-    expect(mockedStart).not.toHaveBeenCalled();
-    expect(agent.runGoalScreen).toHaveBeenCalledTimes(1);
+    expect(res!.status).toBe(202);
+    expect(mockedStart).toHaveBeenCalledTimes(1);
+    expect(agent.runGoalScreen).not.toHaveBeenCalled();
+  });
+
+  it("flag OFF + async:false → 202, workflow attempted, direct never runs (#4279: async is no longer the gate)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
+    const agent = directAgent();
+    const { ctx } = routeCtx(agent, FLAG_OFF_ENV as unknown as Record<string, unknown>);
+    const res = await handleScreenerResearchRoutes(
+      req("POST", "/screening/goal-screen", { goalKind: "income" }, { "x-user-login": "alice" }),
+      urlOf("/screening/goal-screen"),
+      "/screening/goal-screen",
+      "s1",
+      ctx,
+    );
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(202);
+    expect(mockedStart).toHaveBeenCalledTimes(1);
+    expect(agent.runGoalScreen).not.toHaveBeenCalled();
   });
 });
 
@@ -243,7 +264,7 @@ describe("POST /screening/goal-screen flag gate (#1997)", () => {
 /* Scheduled service flag gate                                         */
 /* ------------------------------------------------------------------ */
 
-describe("autonomousGoalScreen flag gate (#1997)", () => {
+describe("autonomousGoalScreen flag gate (#1997, retired by #4279)", () => {
   function goalService(env: Record<string, unknown>) {
     const mockEnv = { ETRADE_ENVIRONMENT: "sandbox", ...env } as unknown as Env;
     const mockOrm = new DatabaseORM(new MockSqlStorage() as any);
@@ -261,7 +282,7 @@ describe("autonomousGoalScreen flag gate (#1997)", () => {
     return { service, audit, runGoalScreen };
   }
 
-  it("flag ON + start failure → failure result + run_failed audit carrying the code, screen never runs", async () => {
+  it("start failure → failure result + run_failed audit carrying the code, screen never runs", async () => {
     mockedStart.mockRejectedValue(new WorkflowError("start_failed", "binding boom"));
     const { service, audit, runGoalScreen } = goalService(
       FLAG_ON_ENV as unknown as Record<string, unknown>,
@@ -274,17 +295,17 @@ describe("autonomousGoalScreen flag gate (#1997)", () => {
     expect((failed[1] as Record<string, unknown>).errorCode).toBe("start_failed");
   });
 
-  it("flag OFF + start would succeed → direct runs, workflow never attempted", async () => {
+  it("flag OFF → queued, workflow attempted, direct never runs (#4279: the flag is retired as an entry gate)", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const { service, runGoalScreen } = goalService(FLAG_OFF_ENV as unknown as Record<string, unknown>);
     const result = await service.autonomousGoalScreen({ goalKind: "income" });
     expect(result.success).toBe(true);
-    expect((result as { data: Record<string, unknown> }).data.status).toBe("complete");
-    expect(mockedStart).not.toHaveBeenCalled();
-    expect(runGoalScreen).toHaveBeenCalledTimes(1);
+    expect((result as { data: Record<string, unknown> }).data.status).toBe("queued");
+    expect(mockedStart).toHaveBeenCalledTimes(1);
+    expect(runGoalScreen).not.toHaveBeenCalled();
   });
 
-  it("flag ON + start success → queued, screen never runs inline", async () => {
+  it("start success → queued, screen never runs inline", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const { service, runGoalScreen } = goalService(
       FLAG_ON_ENV as unknown as Record<string, unknown>,

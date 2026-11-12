@@ -156,7 +156,10 @@ import {
 import type { OptionScreenerFilter } from "../types";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
 import type { GoalScreenCommand } from "../workflows/workflowPorts";
-import type { GoalDrivenScreenResult } from "../services/goalDrivenScreen";
+import type {
+  GoalDrivenScreenResult,
+  OptionsWorkflowDeps,
+} from "../services/goalDrivenScreen";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -364,6 +367,9 @@ export interface ScreenerGoalRunner {
     symbols?: string[];
     provider?: "yahoo";
     providerFallback?: { from: "etrade"; reason: string };
+    /** Issue #4279: caller base filters, carried from the goal command (see GoalScreenCommand). */
+    baseStockFilter?: StockScreenerFilter;
+    baseOptionsFilter?: OptionScreenerFilter;
   }): Promise<{ task: unknown; executed: boolean; result?: GoalDrivenScreenResult }>;
 }
 
@@ -1124,11 +1130,14 @@ export class ScreenerAgent extends PortThink {
         // gone with the executor's runScreen field).
         isScreenRunning: (universe, userLogin) => this.isScreenRunning(universe, userLogin),
         chargeScreenQuota: (input) => this.chargeScreenQuota(input),
-        runGoalScreen: (req) => this.runGoalScreen(req),
         getLatest: () => this.getLatest(),
         getHistory: () => this.getHistory(),
         listScreenerTasks: (limit) => this.listScreenerTasks(limit),
       },
+      // Issue #4279: the DO SQL store the one goal seam reads the
+      // canonical row back from (the direct runGoalScreen binding
+      // is gone with the executor's runGoalScreen field).
+      getSql: () => this.ctx.storage.sql,
     });
     return screenerA2AOutcome(data);
   }
@@ -2522,7 +2531,13 @@ export class ScreenerAgent extends PortThink {
       : undefined;
 
     if (input.goalScreen) {
-      const goalRunner = input.goalRunner ?? ((goalReq) => this.runGoalScreen(goalReq));
+      // Issue #4279 ([One engine] #3550 S4): the goal runner is the
+      // engine method — both legs run on the engine (stock leg via
+      // the S3 seam, options leg via the one options pipeline). The
+      // direct runGoalScreen is no longer the default on any live
+      // path; the injection point stays so tests can substitute a
+      // fake runner.
+      const goalRunner = input.goalRunner ?? ((goalReq) => this.runGoalScreenOnEngine(goalReq));
       const out = await goalRunner({
         scenario: input.goalScreen.scenario,
         trigger: req.trigger,
@@ -2533,6 +2548,8 @@ export class ScreenerAgent extends PortThink {
         ...(gatherOutput.goalSymbols?.length ? { symbols: gatherOutput.goalSymbols } : {}),
         ...(input.goalScreen.provider ? { provider: input.goalScreen.provider } : {}),
         ...(input.goalScreen.providerFallback ? { providerFallback: input.goalScreen.providerFallback } : {}),
+        ...(input.goalScreen.baseStockFilter ? { baseStockFilter: input.goalScreen.baseStockFilter } : {}),
+        ...(input.goalScreen.baseOptionsFilter ? { baseOptionsFilter: input.goalScreen.baseOptionsFilter } : {}),
       });
       return {
         ...gatherOutput,
@@ -2858,6 +2875,209 @@ export class ScreenerAgent extends PortThink {
 
   /** Latest run for the unified results UI. */
   /**
+   * Issue #4279 ([One engine] #3550 S4) — the goal run's routed
+   * universe seam for options discovery (the #1378 block, moved
+   * here so the direct and engine goal runners share it). A bundle
+   * failure degrades to undefined, and discovery then throws naming
+   * the seam rather than fetching directly. The goal screen's
+   * idempotency key is the caller run id (decision D2).
+   */
+  private async buildGoalUniverseDeps(args: {
+    userLogin: string;
+    idempotencyKey: string;
+  }): Promise<{
+    goalUniverseDeps?: import("../trading").NasdaqUniverseDeps;
+    goalBundle?: Awaited<ReturnType<typeof nasdaqUniverseRouteBundle>>;
+  }> {
+    const { userLogin } = args;
+    let goalUniverseDeps: import("../trading").NasdaqUniverseDeps | undefined;
+    let goalBundle: Awaited<ReturnType<typeof nasdaqUniverseRouteBundle>> | undefined;
+    try {
+      const goalPorts = await this.dataProviderPorts();
+      goalBundle = await nasdaqUniverseRouteBundle({
+        sql: this.ctx.storage.sql,
+        storage: this.ctx.storage,
+        env: this.env,
+        userLogin,
+        runId: args.idempotencyKey,
+        ...(goalPorts.config ? { configPort: goalPorts.config } : {}),
+        ...(goalPorts.captures ? { capturePort: goalPorts.captures } : {}),
+      });
+      const goalNasdaqProvider = nasdaqUniverseProviderFromRoute(
+        goalBundle.registry,
+        goalBundle.configs,
+        goalBundle.routes
+      );
+      goalUniverseDeps = bindNasdaqUniverseDeps(goalNasdaqProvider, goalBundle.runContext);
+    } catch (err) {
+      structuredLog.warn("screenerAgent.run_goal_screen_universe_deps_unavailable", {
+        message: `[screener-agent] universe deps unavailable for goal screen, discovery degrades to the missing-seam throw: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return { goalUniverseDeps, goalBundle };
+  }
+
+  /**
+   * Issue #4279 ([One engine] #3550 S4) — the goal run's options-leg
+   * deps (the #3272/#3460/#3186 block, moved here so the direct and
+   * engine goal runners share it). The broker is read through the
+   * presence-aware seam — no default. Unconfigured or store failure
+   * refuses with the named reason instead of screening E*TRADE data.
+   * A non-E*TRADE tenant whose platform has no options chain source
+   * gets a refusing screener, never an E*TRADE one. The returned
+   * optionsWorkflow omits the screener (runProductionGoalScreen adds
+   * it from the returned optionsScreener); neutralStockScreener +
+   * stockProviderId serve the registry stock leg only.
+   */
+  /**
+   * Issue #4279 ([One engine] #3550 S4) — the one trade-client
+   * construction the goal runners share: the direct runGoalScreen
+   * and the engine runGoalScreenOnEngine both need the client
+   * behind the options leg. One site, so the trading-extraction
+   * ledger's construction count does not grow per runner.
+   */
+  private tradeService(userLogin: string, environment?: "TEST" | "PROD"): ETradeService {
+    return new ETradeService(this.getOrm(), this.env, userLogin, environment);
+  }
+
+  private async buildGoalOptionsLegDeps(args: {
+    tradeClient: ETradeService;
+    goalUniverseDeps?: import("../trading").NasdaqUniverseDeps;
+    userLogin: string;
+    environment?: "TEST" | "PROD";
+    idempotencyKey: string;
+  }): Promise<{
+    optionsScreener: Pick<DynamicOptionsScreener, "screenOptions">;
+    optionsWorkflow: Omit<OptionsWorkflowDeps, "screener">;
+    neutralStockScreener?: import("../trading").NeutralMarketScreener;
+    stockProviderId?: string;
+  }> {
+    const { goalUniverseDeps, userLogin } = args;
+    const { readTenantBrokerSelection } = await import("../services/providerConnections");
+    const {
+      TradingPlatformRegistry,
+      platformChainSource,
+      platformQuoteSource,
+      NeutralMarketScreener,
+      NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
+      createRefusingOptionsScreener,
+    } = await import("../trading");
+    const brokerRead = await readTenantBrokerSelection(this.env);
+    if (brokerRead.status !== "ok") {
+      throw new Error(brokerRead.error);
+    }
+    const selectedBroker = brokerRead.brokerId;
+    const goalPlatform =
+      selectedBroker === "etrade"
+        ? null
+        : TradingPlatformRegistry.getPlatform(selectedBroker, this.env, this.getOrm?.(), userLogin, args.environment);
+    const neutralChainSource = goalPlatform ? platformChainSource(goalPlatform) : null;
+    const neutralQuoteSource = goalPlatform ? platformQuoteSource(goalPlatform) : null;
+    const optionsScreener =
+      selectedBroker === "etrade"
+        ? new DynamicOptionsScreener(args.tradeClient.client, undefined, goalUniverseDeps)
+        : neutralChainSource
+          ? new DynamicOptionsScreener(neutralChainSource, undefined, goalUniverseDeps)
+          : createRefusingOptionsScreener(selectedBroker);
+    const { createGoalOptionsLegDelivery } = await import("../workflows/goalOptionsLeg");
+    const { createSqlStageClaimStore } = await import("../data/stageClaimsStore");
+    const optionsWorkflow = {
+      storage: this.ctx.storage,
+      ...createGoalOptionsLegDelivery({ goalRunId: `goal-screen:${args.idempotencyKey}` }),
+      claims: createSqlStageClaimStore(() => this.ctx.storage.sql),
+      queue: (this.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
+    };
+    return {
+      optionsScreener,
+      optionsWorkflow,
+      ...(neutralQuoteSource
+        ? {
+            neutralStockScreener: new NeutralMarketScreener({ quoteSource: neutralQuoteSource }),
+            stockProviderId: NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * Issue #4279 ([One engine] #3550 S4) — run a goal-driven screen
+   * with BOTH legs on the engine: the stock leg dispatches a
+   * stock-engine job through the S3 seam and the options leg runs
+   * the one options pipeline. This is the analysis stage's default
+   * goal runner; the direct runGoalScreen below stays as the
+   * registry-leg implementation (unreachable on live paths after
+   * S4 — every goal entry submits through the workflow). The
+   * goalScreen-kind quota charge is the same call runGoalScreen
+   * made (same run id, same tenant partition), and the artifact
+   * tail is the same (failure recorded on the result, never
+   * thrown). NOT built here: the provider stock-screener bootstrap,
+   * the #1998 gather enrichment, and the live/neutral stock
+   * screener — the registry stock leg they served is gone on this
+   * path; the leg's provider rides the seam override instead.
+   */
+  async runGoalScreenOnEngine(
+    req: Parameters<ScreenerGoalRunner>[0],
+  ): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }> {
+    const userLogin = req.userLogin || (await this.userLogin());
+    checkAndChargeUserRequestQuota({
+      port: this.userRequestQuota(),
+      policy: this.userRequestQuotaPolicy(),
+      tenantId: userLogin,
+      userLogin,
+      kind: "goalScreen",
+      runId: `goalScreen:${req.idempotencyKey}`,
+    });
+    const tradeClient = this.tradeService(userLogin, req.environment);
+    const { goalUniverseDeps } = await this.buildGoalUniverseDeps({
+      userLogin,
+      idempotencyKey: req.idempotencyKey,
+    });
+    const { optionsScreener, optionsWorkflow } = await this.buildGoalOptionsLegDeps({
+      tradeClient,
+      goalUniverseDeps,
+      userLogin,
+      environment: req.environment,
+      idempotencyKey: req.idempotencyKey,
+    });
+    const { runProductionGoalScreen } = await import("../services/screeningRuntime");
+    const out = await runProductionGoalScreen({
+      ledger: this.taskLedger(),
+      optionsScreener,
+      scenario: req.scenario,
+      trigger: req.trigger,
+      idempotencyKey: req.idempotencyKey,
+      userLogin,
+      assetClasses: req.assetClasses,
+      symbols: req.symbols,
+      optionsWorkflow,
+      stockWorkflow: { env: this.env, agent: this },
+      ...(req.environment ? { environment: req.environment } : {}),
+      ...(req.provider ? { provider: req.provider } : {}),
+      ...(req.baseStockFilter ? { baseStockFilter: req.baseStockFilter } : {}),
+      ...(req.baseOptionsFilter ? { baseOptionsFilter: req.baseOptionsFilter } : {}),
+    });
+    if (out.executed && out.result) {
+      if (req.providerFallback && !out.result.providerFallback) {
+        out.result.providerFallback = req.providerFallback;
+      }
+      if (req.provider && !out.result.provider) {
+        out.result.provider = req.provider;
+      }
+      const { generateAndStoreGoalScreenArtifacts } = await import(
+        "../services/goalScreenReports"
+      );
+      const artifacts = await generateAndStoreGoalScreenArtifacts(
+        this.env,
+        this.ctx.storage as any,
+        out.result
+      );
+      Object.assign(out.result, artifacts);
+    }
+    return out;
+  }
+
+  /**
    * Consolidation C1 (issue #1201, epic #1151 R1): run a goal-driven
    * screen (epic #1096 Phase 3 semantics) as a production citizen of
    * this agent — the Phase 0 registry over production engines,
@@ -2867,6 +3087,13 @@ export class ScreenerAgent extends PortThink {
    * method only binds the DO-owned pieces: the ledger and the
    * E*TRADE client behind the options leg. A duplicate delivery
    * returns the existing ledger record without re-executing.
+   *
+   * Issue #4279 ([One engine] #3550 S4): no live path calls this
+   * method anymore — every goal entry submits through the workflow
+   * and the analysis stage's default goal runner is
+   * runGoalScreenOnEngine. This method stays as the registry-leg
+   * implementation (its tests keep pinning it); deleting it is
+   * forbidden by the no-deletion rule.
    */
   async runGoalScreen(req: {
     scenario: ScenarioDefinition;
@@ -2912,26 +3139,20 @@ export class ScreenerAgent extends PortThink {
       kind: "goalScreen",
       runId: `goalScreen:${req.idempotencyKey}`,
     });
-    const etrade = new ETradeService(
-      this.getOrm(),
-      this.env,
-      userLogin,
-      req.environment
-    );
+    const tradeClient = this.tradeService(userLogin, req.environment);
     const { runProductionGoalScreen, createYahooStockScreener, createLiveStockScreener } = await import("../services/screeningRuntime");
     // Issue #3186 (step 3c): the goal options leg runs the one
-    // options pipeline. The agent supplies the pipeline's deps: the
-    // same screener instance, this DO's storage (checkpoint
-    // artifacts), the goal leg's shapeReport/deliver (report section +
-    // handoff to the goal run's delivery), the durable stage claims,
-    // and the shared screener-events queue. NO canonical store: the
-    // leg builds its canonical record in-memory and writes no
-    // canonical row — the goal run's row (written by the caller via
-    // its own ORM) is the single canonical home (#783); this DO's
-    // store is a different SQLite, so writing there would be a
-    // second home.
-    const { createGoalOptionsLegDelivery } = await import("../workflows/goalOptionsLeg");
-    const { createSqlStageClaimStore } = await import("../data/stageClaimsStore");
+    // options pipeline. The agent supplies the pipeline's deps via
+    // buildGoalOptionsLegDeps below (shared with the engine goal
+    // runner): the same screener instance, this DO's storage
+    // (checkpoint artifacts), the goal leg's shapeReport/deliver
+    // (report section + handoff to the goal run's delivery), the
+    // durable stage claims, and the shared screener-events queue.
+    // NO canonical store: the leg builds its canonical record
+    // in-memory and writes no canonical row — the goal run's row
+    // (written by the caller via its own ORM) is the single
+    // canonical home (#783); this DO's store is a different
+    // SQLite, so writing there would be a second home.
     // Issue #1571: a Yahoo goal run binds the platform Yahoo provider
     // exactly like runScreen's #1317 block — bootstrap, verify→enable,
     // and bind the pipeline deps over the quotes route. The options
@@ -2973,33 +3194,11 @@ export class ScreenerAgent extends PortThink {
     // Issue #1378: thread the routed universe seam into options
     // discovery (full capture via the agent's DO storage; the goal
     // screen's idempotency key is the caller run id — decision D2).
-    // A bundle failure degrades to undefined, and discovery then
-    // throws naming the seam rather than fetching directly.
-    let goalUniverseDeps: import("../trading").NasdaqUniverseDeps | undefined;
-    let goalBundle: Awaited<ReturnType<typeof nasdaqUniverseRouteBundle>> | undefined;
-    try {
-      const goalPorts = await this.dataProviderPorts();
-      goalBundle = await nasdaqUniverseRouteBundle({
-        sql: this.ctx.storage.sql,
-        storage: this.ctx.storage,
-        env: this.env,
-        userLogin,
-        runId: req.idempotencyKey,
-        ...(goalPorts.config ? { configPort: goalPorts.config } : {}),
-        ...(goalPorts.captures ? { capturePort: goalPorts.captures } : {}),
-      });
-      const goalNasdaqProvider = nasdaqUniverseProviderFromRoute(
-        goalBundle.registry,
-        goalBundle.configs,
-        goalBundle.routes
-      );
-      goalUniverseDeps = bindNasdaqUniverseDeps(goalNasdaqProvider, goalBundle.runContext);
-    } catch (err) {
-      structuredLog.warn("screenerAgent.run_goal_screen_universe_deps_unavailable", {
-        message: `[screener-agent] universe deps unavailable for goal screen, discovery degrades to the missing-seam throw: ${err instanceof Error ? err.message : String(err)}`,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    // Shared with the engine goal runner (buildGoalUniverseDeps).
+    const { goalUniverseDeps, goalBundle } = await this.buildGoalUniverseDeps({
+      userLogin,
+      idempotencyKey: req.idempotencyKey,
+    });
     // Issue #1998 (Phase 3): persisted gather for the goal stock
     // leg. The agent resolves the flag itself from its env, so both
     // direct and workflow-child goal runs gather when ON, and none
@@ -3041,7 +3240,7 @@ export class ScreenerAgent extends PortThink {
           const gatherCaptureDeps = await this.platformCaptureDeps();
           const gatherRegistry = new GatherRegistry();
           gatherRegistry.register(
-            gatherEtradeAdapter(etrade, {
+            gatherEtradeAdapter(tradeClient, {
               capture: gatherCaptureDeps,
             })
           );
@@ -3147,49 +3346,25 @@ export class ScreenerAgent extends PortThink {
     // client regardless of the selection, so an Alpaca tenant's scheduled run
     // would have screened E*TRADE data and labelled it etrade-yahoo-stocks.
     // Non-E*TRADE selections run on the neutral engines and keep their own id.
-    const { readTenantBrokerSelection } = await import("../services/providerConnections");
+    // Shared with the engine goal runner (buildGoalOptionsLegDeps).
     const {
-      TradingPlatformRegistry,
-      platformChainSource,
-      platformQuoteSource,
-      NeutralMarketScreener,
-      NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
-      createRefusingOptionsScreener,
-    } = await import("../trading");
-    // Issue #3460 slice 3: the goal leg reads the broker through the
-    // presence-aware seam — no default. Unconfigured or store failure
-    // refuses with the named reason instead of screening E*TRADE data.
-    const brokerRead = await readTenantBrokerSelection(this.env);
-    if (brokerRead.status !== "ok") {
-      throw new Error(brokerRead.error);
-    }
-    const selectedBroker = brokerRead.brokerId;
-    const goalPlatform =
-      selectedBroker === "etrade"
-        ? null
-        : TradingPlatformRegistry.getPlatform(selectedBroker, this.env, this.getOrm?.(), userLogin, req.environment);
-    const neutralChainSource = goalPlatform ? platformChainSource(goalPlatform) : null;
-    const neutralQuoteSource = goalPlatform ? platformQuoteSource(goalPlatform) : null;
-    // Issue #3186 step 3c: this same instance is the goal leg's
-    // screener (runProductionGoalScreen hands it to the leg as the
-    // workflow screener), so the neutral chain source reaches the
-    // leg too — not just the registry path.
-    // Issue #3460: a non-E*TRADE tenant whose platform has no
-    // options chain source gets a refusing screener, never an
-    // E*TRADE one. Stocks-only goals never call it, so they proceed;
-    // any options leg throws provider_unsupported naming the broker.
-    const optionsScreener =
-      selectedBroker === "etrade"
-        ? new DynamicOptionsScreener(etrade.client, undefined, goalUniverseDeps)
-        : neutralChainSource
-          ? new DynamicOptionsScreener(neutralChainSource, undefined, goalUniverseDeps)
-          : createRefusingOptionsScreener(selectedBroker);
+      optionsScreener,
+      optionsWorkflow,
+      neutralStockScreener: helperNeutralStockScreener,
+      stockProviderId: helperStockProviderId,
+    } = await this.buildGoalOptionsLegDeps({
+      tradeClient,
+      goalUniverseDeps,
+      userLogin,
+      environment: req.environment,
+      idempotencyKey: req.idempotencyKey,
+    });
     const out = await runProductionGoalScreen({
       ledger: this.taskLedger(),
-      ...(neutralQuoteSource
+      ...(helperNeutralStockScreener
         ? {
-            neutralStockScreener: new NeutralMarketScreener({ quoteSource: neutralQuoteSource }),
-            stockProviderId: NEUTRAL_STOCK_SCREENING_PROVIDER_ID,
+            neutralStockScreener: helperNeutralStockScreener,
+            stockProviderId: helperStockProviderId,
           }
         : stockScreener
           ? { stockScreener }
@@ -3203,12 +3378,7 @@ export class ScreenerAgent extends PortThink {
       symbols: req.symbols,
       baseStockFilter: req.baseStockFilter,
       baseOptionsFilter: req.baseOptionsFilter,
-      optionsWorkflow: {
-        storage: this.ctx.storage,
-        ...createGoalOptionsLegDelivery({ goalRunId: `goal-screen:${req.idempotencyKey}` }),
-        claims: createSqlStageClaimStore(() => this.ctx.storage.sql),
-        queue: (this.env as { SCREENER_EVENTS?: { send: (body: unknown) => Promise<unknown> } }).SCREENER_EVENTS ?? null,
-      },
+      optionsWorkflow,
     });
     // Issue #1335: every completed goal-screen run — 0 hits included —
     // leaves PDF + XLSX + CSV artifacts in the blob store, mirroring

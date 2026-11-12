@@ -65,11 +65,12 @@ describe("stock screen capability inventory #2880", () => {
     }
   });
 
-  it("the goal stock leg is honestly a target, not claimed built", () => {
+  it("the goal stock leg is built on the one engine (#4279 migrates it off the registry leg)", () => {
     const goal = stockScreenCapabilityById("goal-stock-leg");
-    expect(goal?.status).toBe("target");
-    expect(goal?.current).toMatch(/goalDrivenScreen/);
-    expect(unbuiltStockScreenCapabilities().map((c) => c.id)).toContain("goal-stock-leg");
+    expect(goal?.status).toBe("canonical");
+    expect(goal?.engine).toMatch(/runStockScreenViaEngine/);
+    expect(goal?.current).toMatch(/runGoalStockLegViaWorkflow/);
+    expect(unbuiltStockScreenCapabilities().map((c) => c.id)).not.toContain("goal-stock-leg");
   });
 
   it("pattern application is canonical once the patterns slice lands (#2884 updates this pin in the same PR)", () => {

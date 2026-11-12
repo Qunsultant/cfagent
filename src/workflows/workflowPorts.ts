@@ -99,6 +99,7 @@
 
 import type { StageName } from "../messaging/messagingPorts";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
+import type { OptionScreenerFilter, StockScreenerFilter } from "../types";
 import type { BrokerId } from "../trading";
 
 /** Re-exported for workflow callers (single import surface). */
@@ -209,6 +210,15 @@ export interface GoalScreenCommand {
     from: "etrade";
     reason: string;
   };
+  /**
+   * Issue #4279 ([One engine] #3550 S4): caller base filters, merged
+   * per-field over the plan defaults (the A2A entry's
+   * baseStockFilter/baseOptionsFilter). The direct path honored them
+   * through runGoalScreen; the workflow path carries them here so the
+   * migration does not silently drop them. Absent = plan defaults.
+   */
+  baseStockFilter?: StockScreenerFilter;
+  baseOptionsFilter?: OptionScreenerFilter;
 }
 
 /**

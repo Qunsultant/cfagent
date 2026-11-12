@@ -12,10 +12,36 @@
  *    no hand-mirrored second registry.
  *
  * These tests were written red first (gitops §7).
+ *
+ * Issue #4279 (#3550 S4): the route no longer runs the screen inline —
+ * it submits the goal command to the one engine and answers 202 with
+ * the run handle. The registry-leg execution the first bullet describes
+ * now happens inside the engine job's analysis stage (the stock leg as
+ * a stock-engine job, the options leg on the one options pipeline);
+ * the route tests below pin the submission, not the inline run.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+vi.mock("../src/services/goalScreenWorkflowSubmission", () => ({
+  buildGoalScreenCommand: vi.fn(() => ({ __cannedGoalCommand: true })),
+  startGoalScreenWorkflow: vi.fn(),
+}));
+
+import {
+  startGoalScreenWorkflow,
+} from "../src/services/goalScreenWorkflowSubmission";
+
+const mockedStart = vi.mocked(startGoalScreenWorkflow);
+
+const HANDLE = {
+  workflowId: "screen-goal-screen-manual-alice-income-2026-11-12T00-00-00-000Z",
+  jobId: "goal-screen:manual:alice:income:2026-11-12T00:00:00.000Z",
+  status: "queued" as const,
+  existing: false,
+  statusUrl: "/api/jobs/history?chainId=goal-screen%3Amanual%3Aalice%3Aincome%3A2026-11-12T00%3A00%3A00.000Z",
+};
 
 import {
   createDefaultScreeningRegistry,
@@ -572,7 +598,8 @@ describe("C1 R1: screening routes (goal-screen + backtest)", () => {
     return { ctx, orm, sql };
   }
 
-  it("POST /screening/goal-screen runs the screen and returns the unified result", async () => {
+  it("POST /screening/goal-screen submits the screen to the workflow and answers 202 with the run handle (#4279: the direct path is retired)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const agent = {
       runGoalScreen: vi.fn(async () => ({
         task: { id: "task-9", status: "completed" },
@@ -589,15 +616,13 @@ describe("C1 R1: screening routes (goal-screen + backtest)", () => {
       ctx
     );
     expect(res).not.toBeNull();
-    expect(res!.status).toBe(200);
-    const body = (await res!.json()) as any;
-    expect(body.success).toBe(true);
-    expect(body.executed).toBe(true);
-    expect(body.result.status).toBe("complete");
-    expect(body.result.counts.hits).toBe(2);
-    expect(agent.runGoalScreen).toHaveBeenCalledTimes(1);
+    expect(res!.status).toBe(202);
+    expect(mockedStart).toHaveBeenCalledTimes(1);
+    expect(agent.runGoalScreen).not.toHaveBeenCalled();
+    // The canonical row is written by the engine job's store stage,
+    // never by the route: no row exists at submission time.
     const rows = [...orm.exec("SELECT source FROM mas_reports WHERE source = 'goal_screen'")] as any[];
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(0);
   });
 
   it("POST /screening/goal-screen rejects an unknown goal kind with 400 and runs nothing", async () => {
@@ -628,7 +653,8 @@ describe("C1 R1: screening routes (goal-screen + backtest)", () => {
     expect(agent.runGoalScreen).not.toHaveBeenCalled();
   });
 
-  it("POST /screening/goal-screen answers a failed run with 502 + the labeled result", async () => {
+  it("POST /screening/goal-screen never answers a failed run with 502 + the labeled result (#4279: a run failure lives on the engine job, not the route)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const agent = {
       runGoalScreen: vi.fn(async () => ({
         task: { id: "task-f", status: "escalated" },
@@ -649,10 +675,12 @@ describe("C1 R1: screening routes (goal-screen + backtest)", () => {
       "s1",
       ctx
     );
-    expect(res!.status).toBe(502);
+    expect(res!.status).toBe(202);
+    // The failed-result agent is never consulted: the route submits
+    // and the engine job owns the outcome.
+    expect(agent.runGoalScreen).not.toHaveBeenCalled();
     const body = (await res!.json()) as any;
-    expect(body.result.status).toBe("failed");
-    expect(body.result.partial.failedClasses).toEqual(["stocks", "options"]);
+    expect(body.result).toBeUndefined();
   });
 
   describe("POST /screening/backtest (Yahoo chart fetch stubbed)", () => {
