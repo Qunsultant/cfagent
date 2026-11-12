@@ -65,7 +65,7 @@ import {
 import type { IndexListStore } from "../data/indexListPorts";
 import { executeIndexListRefreshJob } from "./indexListJob";
 import {
-  FEED_JOB_TIMEOUTS,
+  resolveFeedJobTimeouts,
   FeedJobTimeoutError,
   withFeedDeadline,
 } from "./feedJobTimeouts";
@@ -832,6 +832,10 @@ async function resolveUniverseListWithHydration(
   refreshError?: string;
   refreshTimedOut?: boolean;
 }> {
+  // #4312 — the refresh bound resolves from env (defaults when
+  // no knob is set); every runner shares this helper, so the
+  // bound is resolved once per hydration, never per leg.
+  const timeouts = resolveFeedJobTimeouts((deps.env ?? {}) as Record<string, unknown>);
   const list = await deps.universeStore.latest(universeIndex);
   if (list && symbolsOfList(list).length > 0) return { list };
   if (!deps.indexRefresh) return { list };
@@ -842,7 +846,7 @@ async function resolveUniverseListWithHydration(
         service: deps.indexRefresh.service,
         indices: [universeIndex],
       }),
-      FEED_JOB_TIMEOUTS.refreshMs,
+      timeouts.refreshMs,
       FEED_JOB_CODES.refreshTimeout,
     );
   } catch (err) {
@@ -875,7 +879,7 @@ function quoteSymbol(quote: QuoteResult): string {
 
 /**
  * #3992 PR-3 — the capture-leg bound: one store attempt for a
- * run artifact, raced against FEED_JOB_TIMEOUTS.captureMs via
+ * run artifact, raced against the resolved capture bound via
  * the PR-1 substrate. The outcome is a VALUE, never a rejection,
  * so the caller decides the failure semantics: a timeout is a
  * named outcome the record() closures answer with one degraded
@@ -893,11 +897,12 @@ type StoreRunArtifactOutcome =
 async function storeRunArtifact(
   store: FeedDatasetStore,
   input: FeedDatasetStoreInput,
+  captureMs: number,
 ): Promise<StoreRunArtifactOutcome> {
   try {
     const artifact = await withFeedDeadline(
       store.store(input),
-      FEED_JOB_TIMEOUTS.captureMs,
+      captureMs,
       FEED_JOB_CODES.captureTimeout,
     );
     return { ok: true, artifact };
@@ -915,8 +920,8 @@ async function storeRunArtifact(
  * whole-loop budget, so a run that fetched nothing fails with
  * its no*Returned code AND an errorMessage that says why.
  */
-function fetchTimeoutMessage(): string {
-  return `Provider fetch leg did not settle within ${FEED_JOB_TIMEOUTS.fetchMs}ms (${FEED_JOB_CODES.fetchTimeout}).`;
+function fetchTimeoutMessage(fetchMs: number): string {
+  return `Provider fetch leg did not settle within ${fetchMs}ms (${FEED_JOB_CODES.fetchTimeout}).`;
 }
 
 export async function runFeedJob(
@@ -932,6 +937,9 @@ export async function runFeedJob(
       `No feed job is registered with id "${jobId}".`,
     );
   }
+  // #4312 — the leg bounds resolve from env once per run;
+  // absent knobs fall back to the recorded defaults.
+  const timeouts = resolveFeedJobTimeouts((deps.env ?? {}) as Record<string, unknown>);
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
@@ -978,7 +986,7 @@ export async function runFeedJob(
     // #3992 PR-3: the store write is bound by the capture leg.
     // A store error rethrows exactly as before; a capture
     // timeout degrades honestly (degradedRun below).
-    const outcome = await storeRunArtifact(deps.datasetStore, storeInput);
+    const outcome = await storeRunArtifact(deps.datasetStore, storeInput, timeouts.captureMs);
     if (!outcome.ok && outcome.reason === "error") throw outcome.error;
     let artifactId: string;
     let settledRun = run;
@@ -998,13 +1006,13 @@ export async function runFeedJob(
         failed: args.requested,
         missingSymbols: symbols,
         codedError: FEED_JOB_CODES.captureTimeout,
-        errorMessage: `Run-record store write did not settle within ${FEED_JOB_TIMEOUTS.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
+        errorMessage: `Run-record store write did not settle within ${timeouts.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
       };
       const fallback = await storeRunArtifact(deps.datasetStore, {
         ...storeInput,
         quotes: [],
         run: degradedRun,
-      });
+      }, timeouts.captureMs);
       settledRun = degradedRun;
       artifactId = fallback.ok ? fallback.artifact.id : "";
     }
@@ -1067,7 +1075,7 @@ export async function runFeedJob(
         requested: 0,
         missingSymbols: [],
         codedError: FEED_JOB_CODES.refreshTimeout,
-        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${timeouts.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
         universe,
       });
     }
@@ -1120,7 +1128,7 @@ export async function runFeedJob(
         tenantId: opts.tenantId ?? "default",
         ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
       }),
-      FEED_JOB_TIMEOUTS.fetchMs,
+      timeouts.fetchMs,
       FEED_JOB_CODES.fetchTimeout,
     );
   } catch (err) {
@@ -1131,7 +1139,7 @@ export async function runFeedJob(
         requested: symbols.length,
         missingSymbols: symbols,
         codedError: FEED_JOB_CODES.fetchTimeout,
-        errorMessage: `Provider batch quote fetch for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.fetchMs}ms (${FEED_JOB_CODES.fetchTimeout}).`,
+        errorMessage: `Provider batch quote fetch for the ${universeLabel} universe did not settle within ${timeouts.fetchMs}ms (${FEED_JOB_CODES.fetchTimeout}).`,
         universe,
       });
     }
@@ -1223,6 +1231,9 @@ export async function runFeedFundamentalsJob(
       `No feed job is registered with id "${jobId}".`,
     );
   }
+  // #4312 — the leg bounds resolve from env once per run;
+  // absent knobs fall back to the recorded defaults.
+  const timeouts = resolveFeedJobTimeouts((deps.env ?? {}) as Record<string, unknown>);
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
@@ -1270,7 +1281,7 @@ export async function runFeedFundamentalsJob(
     // #3992 PR-3: the store write is bound by the capture leg.
     // A store error rethrows exactly as before; a capture
     // timeout degrades honestly (degradedRun below).
-    const outcome = await storeRunArtifact(deps.datasetStore, storeInput);
+    const outcome = await storeRunArtifact(deps.datasetStore, storeInput, timeouts.captureMs);
     if (!outcome.ok && outcome.reason === "error") throw outcome.error;
     let artifactId: string;
     let settledRun = run;
@@ -1290,13 +1301,13 @@ export async function runFeedFundamentalsJob(
         failed: args.requested,
         missingSymbols: args.allSymbols,
         codedError: FEED_JOB_CODES.captureTimeout,
-        errorMessage: `Run-record store write did not settle within ${FEED_JOB_TIMEOUTS.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
+        errorMessage: `Run-record store write did not settle within ${timeouts.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
       };
       const fallback = await storeRunArtifact(deps.datasetStore, {
         ...storeInput,
         fundamentals: [],
         run: degradedRun,
-      });
+      }, timeouts.captureMs);
       settledRun = degradedRun;
       artifactId = fallback.ok ? fallback.artifact.id : "";
     }
@@ -1357,7 +1368,7 @@ export async function runFeedFundamentalsJob(
         missingSymbols: [],
         allSymbols: symbols,
         codedError: FEED_JOB_CODES.refreshTimeout,
-        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${timeouts.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
         universe,
       });
     }
@@ -1416,7 +1427,7 @@ export async function runFeedFundamentalsJob(
   const rows: FeedFundamentalsRow[] = [];
   const missingSymbols: string[] = [];
   let firstError: string | null = null;
-  const fetchDeadlineMs = Date.now() + FEED_JOB_TIMEOUTS.fetchMs;
+  const fetchDeadlineMs = Date.now() + timeouts.fetchMs;
   for (let i = 0; i < symbols.length; i++) {
     const symbol = symbols[i];
     const remainingMs = fetchDeadlineMs - Date.now();
@@ -1424,7 +1435,7 @@ export async function runFeedFundamentalsJob(
       for (let j = i; j < symbols.length; j++) {
         missingSymbols.push(symbols[j]);
       }
-      firstError ??= fetchTimeoutMessage();
+      firstError ??= fetchTimeoutMessage(timeouts.fetchMs);
       break;
     }
     try {
@@ -1451,7 +1462,7 @@ export async function runFeedFundamentalsJob(
       missingSymbols.push(symbol);
       firstError ??=
         err instanceof FeedJobTimeoutError
-          ? fetchTimeoutMessage()
+          ? fetchTimeoutMessage(timeouts.fetchMs)
           : scrubFailureMessage(
               err instanceof Error ? err.message : String(err),
             );
@@ -1511,6 +1522,9 @@ export async function runFeedTechnicalsJob(
       `No feed job is registered with id "${jobId}".`,
     );
   }
+  // #4312 — the leg bounds resolve from env once per run;
+  // absent knobs fall back to the recorded defaults.
+  const timeouts = resolveFeedJobTimeouts((deps.env ?? {}) as Record<string, unknown>);
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
@@ -1558,7 +1572,7 @@ export async function runFeedTechnicalsJob(
     // #3992 PR-3: the store write is bound by the capture leg.
     // A store error rethrows exactly as before; a capture
     // timeout degrades honestly (degradedRun below).
-    const outcome = await storeRunArtifact(deps.datasetStore, storeInput);
+    const outcome = await storeRunArtifact(deps.datasetStore, storeInput, timeouts.captureMs);
     if (!outcome.ok && outcome.reason === "error") throw outcome.error;
     let artifactId: string;
     let settledRun = run;
@@ -1578,13 +1592,13 @@ export async function runFeedTechnicalsJob(
         failed: args.requested,
         missingSymbols: args.allSymbols,
         codedError: FEED_JOB_CODES.captureTimeout,
-        errorMessage: `Run-record store write did not settle within ${FEED_JOB_TIMEOUTS.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
+        errorMessage: `Run-record store write did not settle within ${timeouts.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
       };
       const fallback = await storeRunArtifact(deps.datasetStore, {
         ...storeInput,
         bars: [],
         run: degradedRun,
-      });
+      }, timeouts.captureMs);
       settledRun = degradedRun;
       artifactId = fallback.ok ? fallback.artifact.id : "";
     }
@@ -1647,7 +1661,7 @@ export async function runFeedTechnicalsJob(
         missingSymbols: [],
         allSymbols: symbols,
         codedError: FEED_JOB_CODES.refreshTimeout,
-        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${timeouts.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
         universe,
       });
     }
@@ -1705,7 +1719,7 @@ export async function runFeedTechnicalsJob(
   const rows: FeedDailyBarRow[] = [];
   const missingSymbols: string[] = [];
   let firstError: string | null = null;
-  const fetchDeadlineMs = Date.now() + FEED_JOB_TIMEOUTS.fetchMs;
+  const fetchDeadlineMs = Date.now() + timeouts.fetchMs;
   for (let i = 0; i < symbols.length; i++) {
     const symbol = symbols[i];
     const remainingMs = fetchDeadlineMs - Date.now();
@@ -1713,7 +1727,7 @@ export async function runFeedTechnicalsJob(
       for (let j = i; j < symbols.length; j++) {
         missingSymbols.push(symbols[j]);
       }
-      firstError ??= fetchTimeoutMessage();
+      firstError ??= fetchTimeoutMessage(timeouts.fetchMs);
       break;
     }
     try {
@@ -1745,7 +1759,7 @@ export async function runFeedTechnicalsJob(
       missingSymbols.push(symbol);
       firstError ??=
         err instanceof FeedJobTimeoutError
-          ? fetchTimeoutMessage()
+          ? fetchTimeoutMessage(timeouts.fetchMs)
           : scrubFailureMessage(
               err instanceof Error ? err.message : String(err),
             );
@@ -1849,6 +1863,9 @@ export async function runFeedSentimentJob(
       `No feed job is registered with id "${jobId}".`,
     );
   }
+  // #4312 — the leg bounds resolve from env once per run;
+  // absent knobs fall back to the recorded defaults.
+  const timeouts = resolveFeedJobTimeouts((deps.env ?? {}) as Record<string, unknown>);
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
@@ -1896,7 +1913,7 @@ export async function runFeedSentimentJob(
     // #3992 PR-3: the store write is bound by the capture leg.
     // A store error rethrows exactly as before; a capture
     // timeout degrades honestly (degradedRun below).
-    const outcome = await storeRunArtifact(deps.datasetStore, storeInput);
+    const outcome = await storeRunArtifact(deps.datasetStore, storeInput, timeouts.captureMs);
     if (!outcome.ok && outcome.reason === "error") throw outcome.error;
     let artifactId: string;
     let settledRun = run;
@@ -1916,13 +1933,13 @@ export async function runFeedSentimentJob(
         failed: args.requested,
         missingSymbols: args.allSymbols,
         codedError: FEED_JOB_CODES.captureTimeout,
-        errorMessage: `Run-record store write did not settle within ${FEED_JOB_TIMEOUTS.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
+        errorMessage: `Run-record store write did not settle within ${timeouts.captureMs}ms (${FEED_JOB_CODES.captureTimeout}); the run's data was not persisted.`,
       };
       const fallback = await storeRunArtifact(deps.datasetStore, {
         ...storeInput,
         sentiment: [],
         run: degradedRun,
-      });
+      }, timeouts.captureMs);
       settledRun = degradedRun;
       artifactId = fallback.ok ? fallback.artifact.id : "";
     }
@@ -1986,7 +2003,7 @@ export async function runFeedSentimentJob(
         missingSymbols: [],
         allSymbols: symbols,
         codedError: FEED_JOB_CODES.refreshTimeout,
-        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${timeouts.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
         universe,
       });
     }
@@ -2048,7 +2065,7 @@ export async function runFeedSentimentJob(
   >();
   const missingSymbols: string[] = [];
   let firstError: string | null = null;
-  const fetchDeadlineMs = Date.now() + FEED_JOB_TIMEOUTS.fetchMs;
+  const fetchDeadlineMs = Date.now() + timeouts.fetchMs;
   for (let i = 0; i < symbols.length; i++) {
     const symbol = symbols[i];
     const remainingMs = fetchDeadlineMs - Date.now();
@@ -2056,7 +2073,7 @@ export async function runFeedSentimentJob(
       for (let j = i; j < symbols.length; j++) {
         missingSymbols.push(symbols[j]);
       }
-      firstError ??= fetchTimeoutMessage();
+      firstError ??= fetchTimeoutMessage(timeouts.fetchMs);
       break;
     }
     try {
@@ -2092,7 +2109,7 @@ export async function runFeedSentimentJob(
       missingSymbols.push(symbol);
       firstError ??=
         err instanceof FeedJobTimeoutError
-          ? fetchTimeoutMessage()
+          ? fetchTimeoutMessage(timeouts.fetchMs)
           : scrubFailureMessage(
               err instanceof Error ? err.message : String(err),
             );
@@ -2283,6 +2300,9 @@ export async function runFeedOptionsChainsJob(
       `No feed job is registered with id "${jobId}".`,
     );
   }
+  // #4312 — the leg bounds resolve from env once per run;
+  // absent knobs fall back to the recorded defaults.
+  const timeouts = resolveFeedJobTimeouts((deps.env ?? {}) as Record<string, unknown>);
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
@@ -2433,7 +2453,7 @@ export async function runFeedOptionsChainsJob(
           requested: 0,
           missingSymbols: [],
           codedError: FEED_JOB_CODES.refreshTimeout,
-          errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${FEED_JOB_TIMEOUTS.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+          errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${timeouts.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
           universe,
         });
       }
