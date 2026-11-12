@@ -176,9 +176,19 @@ describe("pipeline host wiring (#3543)", () => {
     expect(Object.keys(tasks).sort()).toEqual(
       ids.map((id) => `${PIPELINE_TASK_ID_PREFIX}${id}`).sort(),
     );
+    // #4306 S1 pin update: the feed jobs and the chains (whose
+    // cadence derives from the head feed job's cadence) declare the
+    // monthly interval; the enrich/analyze/generate/deliver families
+    // keep their own 60-minute defaults, untouched by S1.
+    const monthlyIds = new Set([
+      ...pipelineJobIds(),
+      ...pipelineChainJobIds(),
+    ]);
     for (const id of ids) {
       const task = tasks[`${PIPELINE_TASK_ID_PREFIX}${id}`];
-      expect(task.schedule).toBe("every 60 minutes");
+      expect(task.schedule).toBe(
+        monthlyIds.has(id) ? "every 43200 minutes" : "every 60 minutes",
+      );
       expect(typeof task.handler).toBe("function");
     }
   });
