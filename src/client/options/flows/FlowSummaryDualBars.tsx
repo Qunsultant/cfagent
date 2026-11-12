@@ -1,5 +1,5 @@
 import React from "react";
-import { FlowLeaderboardItem } from "../../../trading/options/flows/types";
+import { FlowLeaderboardItem } from "../../../trading";
 
 interface FlowSummaryDualBarsProps {
   bullishItems: FlowLeaderboardItem[];

@@ -1,7 +1,7 @@
 import { Badge, Button, Card, CardHeader, Flex, Notice, PageSection, PageShell, Stack, TextInput } from "./components/ui";
 import { TradeExecutionPreview } from "./TradeExecutionPreview";
 import { safePriceFormat } from "./formatters";
-import type { BrokerPresentation } from "../trading/brokerPresentation";
+import type { BrokerPresentation } from "../trading";
 import type { BrokerOrderDraft } from "../types";
 
 /**

@@ -156,8 +156,11 @@ const PINNED_STAR_REEXPORTS = [
   "./quotePolicies",
 ];
 
-/** Pinned named re-exports (the #290 MAX_SCAN_SYMBOLS disambiguation). */
-const PINNED_NAMED_REEXPORTS = ["MAX_SCAN_SYMBOLS from ./options/opportunityScanner"];
+/** Pinned named re-exports (the #290 MAX_SCAN_SYMBOLS disambiguation; #4270 adds toLeg — a star export of legs would make contractKey ambiguous). */
+const PINNED_NAMED_REEXPORTS = [
+  "MAX_SCAN_SYMBOLS from ./options/opportunityScanner",
+  "toLeg from ./options/strategies/legs",
+];
 
 /**
  * The construction ledger: `new ETradeService(` counts per file outside

@@ -1,6 +1,6 @@
 import React from "react";
 import { Button, Modal, Table, type TableColumn } from "../../components/ui";
-import { LiveFlowItem } from "../../../trading/options/flows/types";
+import { LiveFlowItem } from "../../../trading";
 
 interface FlowTradeDetailModalProps {
   trade: LiveFlowItem;

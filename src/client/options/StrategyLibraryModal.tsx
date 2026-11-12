@@ -17,7 +17,7 @@ import {
   DIRECTION_TAGS,
   DIRECTION_TAG_LABELS,
   isDirectionTag,
-} from "../../trading/options/strategies/directionTags";
+} from "../../trading";
 import "./strategyDiscovery.css";
 
 export interface StrategyInfo {
@@ -74,7 +74,6 @@ export function StrategyLibraryModal({
       setLocalSelected(selectedIds);
       setDirectionFilter("All");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const normalize = (t: string) => t.toLowerCase().replace(/_/g, " ");

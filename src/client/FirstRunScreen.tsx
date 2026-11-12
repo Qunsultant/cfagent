@@ -65,7 +65,7 @@ import {
 } from "./firstRunApi";
 import { labelForBroker, readTenantProvidersState } from "./tenantProviders";
 import { firstRunBrokerStep } from "./firstRunBrokerStep";
-import { brokerCredentialGuidance, isBrokerId } from "../trading/brokerCatalog";
+import { brokerCredentialGuidance, isBrokerId } from "../trading";
 import { listPlans, subscriptionTrial, type PlanView } from "./commercialApi";
 import {
   getApprovedFreeQuota,

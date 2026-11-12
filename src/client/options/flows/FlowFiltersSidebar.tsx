@@ -9,7 +9,7 @@ import {
   AssetClassCategory,
   MarketCapCategory,
   FlowOptionType,
-} from "../../../trading/options/flows/types";
+} from "../../../trading";
 
 interface FlowFiltersSidebarProps {
   currentTab: "summary" | "live" | "historical" | "news" | "congress" | "insider";

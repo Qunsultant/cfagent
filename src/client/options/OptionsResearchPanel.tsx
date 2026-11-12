@@ -10,14 +10,12 @@ import type {
   StrategyCandidate,
   StrategyLeg,
   StrategyRecommendationResult,
-} from "../../trading/options/strategyEngine";
-import { contractKey, reviseCandidate } from "../../trading/options/strategyEngine";
-import { toLeg } from "../../trading/options/strategies/legs";
+  StrategyEvaluation,
+} from "../../trading";
+import { contractKey, defaultRegistry, reviseCandidate, toLeg } from "../../trading";
 import type { ScreenedOptionContractItem } from "../../types";
-import type { StrategyEvaluation } from "../../trading/options/strategies/types";
 import { ResearchReportActions } from "../ResearchReportActions";
 import { stageBundleCandidate } from "../portfolioRiskApi";
-import { defaultRegistry } from "../../trading/options/strategies/catalog";
 import { StrategyDiscoveryPanel } from "./StrategyDiscoveryPanel";
 import { ConfidenceMethodBreakdown } from "./ConfidenceMethodBreakdown";
 import { DiscoveryRunsPanel } from "./DiscoveryRunsPanel";

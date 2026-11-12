@@ -90,15 +90,15 @@ import type {
   ScanMatrixRow,
   ScanTargetSource,
   ScanTypeRollup,
-} from "../trading/options/opportunityScanner";
+} from "../trading";
 import {
   downloadScanExport,
   scanExportRunFromResult,
   scanExportRunFromStored,
 } from "./runExport";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
-import type { ExpectedIvDirection, OptionThesis } from "../trading/options/strategyEngine";
-import type { UnifiedOptionsRequest } from "../trading/options/unifiedOptionsService";
+import type { ExpectedIvDirection, OptionThesis } from "../trading";
+import type { UnifiedOptionsRequest } from "../trading";
 
 // Mode switch (surface 1) -----------------------------------------------
 

@@ -5,7 +5,9 @@
  * boundary in-repo instead. src/trading/index.ts is the SOLE public import
  * surface of src/trading/. This test fails the suite if any module outside
  * src/trading/ imports a trading-internal path directly (static `from`,
- * `export ... from`, or dynamic `import()`).
+ * `export ... from`, or dynamic `import()`). Issue #4270: the scan covers
+ * `.tsx` files as well as `.ts` — a `.tsx` file importing a trading-internal
+ * path is the same violation, and the pin must see it.
  */
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
@@ -27,13 +29,16 @@ function isTradingInternal(spec: string, importerFile: string): string | null {
   return path.relative(SRC, resolved);
 }
 
-function* tsFiles(dir: string): Generator<string> {
+function* sourceFiles(dir: string): Generator<string> {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules") continue;
-      yield* tsFiles(full);
-    } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
+      yield* sourceFiles(full);
+    } else if (
+      (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) &&
+      !entry.name.endsWith(".d.ts")
+    ) {
       yield full;
     }
   }
@@ -42,7 +47,7 @@ function* tsFiles(dir: string): Generator<string> {
 describe("trading boundary (issue #290)", () => {
   it("no module outside src/trading imports a trading-internal path", () => {
     const violations: string[] = [];
-    for (const file of tsFiles(SRC)) {
+    for (const file of sourceFiles(SRC)) {
       if (file.startsWith(TRADING_DIR + path.sep)) continue; // trading-internal files may use relative paths
       const text = fs.readFileSync(file, "utf8");
       let m: RegExpExecArray | null;

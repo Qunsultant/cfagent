@@ -1,5 +1,5 @@
 import { Badge, Button, Card, CardHeader, Flex, Grid, Notice, PageSection, PageShell, Stack, TextInput } from "./components/ui";
-import type { BrokerPresentation } from "../trading/brokerPresentation";
+import type { BrokerPresentation } from "../trading";
 import type { BrokerOrderDraft } from "../types";
 
 /**
