@@ -26,8 +26,10 @@
  * #1639 (D3, retained with stated reason): this service is a
  * universe-scan / characterization / inference / persistence
  * pre-stage, not a parallel recommendation engine — every name it
- * expresses goes through runPanelPipeline, i.e. the kernel's
- * discoverPanel. It is therefore retained alongside the kernel,
+ * expresses goes through runOptionsPanelViaEngine (the engine-routed
+ * panel; the direct runPanelPipelineRetired4068 call was retired by #4068), i.e.
+ * the kernel's discoverPanel. It is therefore retained alongside the
+ * kernel,
  * not removed as a duplicate path.
  */
 
@@ -76,7 +78,7 @@ import {
   type DiscoveryRiskCaps,
 } from "../trading";
 import { estimateExpectedMove } from "../trading";
-import { runPanelPipeline } from "../trading";
+import { runOptionsPanelViaEngine } from "../workflows/optionsScreenEngine";
 import { OptionsDataAgent, type OptionsDataSnapshot } from "../trading";
 import { DynamicOptionsScreener } from "../trading";
 import {
@@ -480,7 +482,10 @@ export function createDiscoveryService(args: {
     },
     calendarFor: (symbol) => getSymbolEventCalendar(symbol),
     flowFor: (symbol) => fetchRealMarketFlowsForSymbol(symbol),
-    runPipeline: (request) => runPanelPipeline(screener, request),
+    // Issue #4068: the discovery panel runs through the one engine-routed
+    // panel (runOptionsPanelViaEngine) over the same chainSource the
+    // screener above was built from — no direct runPanelPipelineRetired4068 call.
+    runPipeline: (request) => runOptionsPanelViaEngine(chainSource, request, {}, args.userLogin),
     store: ports.discoverySetupRuns,
     ...(args.alerts
       ? {

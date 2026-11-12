@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ScreenedOptionContractItem } from "../src/types";
-import { runPanelPipeline } from "../src/trading/options/index";
+import { runPanelPipelineRetired4068 } from "../src/trading/options/index";
 import type { StrategyRequest } from "../src/trading/options/strategyEngine";
 import { defaultRegistry } from "../src/trading/options/strategies/catalog";
 import type { ChainView, StrategyContext } from "../src/trading/options/strategies/types";
@@ -91,8 +91,8 @@ const REQUEST: StrategyRequest = {
 
 describe("cross-surface consistency (issue #29)", () => {
   it("same input through the shared pipeline yields the same winner and ranking", async () => {
-    const first = await runPanelPipeline(fakeScreener(makeContracts()), REQUEST);
-    const second = await runPanelPipeline(fakeScreener(makeContracts()), REQUEST);
+    const first = await runPanelPipelineRetired4068(fakeScreener(makeContracts()), REQUEST);
+    const second = await runPanelPipelineRetired4068(fakeScreener(makeContracts()), REQUEST);
     expect(first.bestTrade.status).toBe("recommended");
     expect(first.bestTrade.best?.candidate.id).toBeTruthy();
     expect(second.bestTrade.best?.candidate.id).toBe(first.bestTrade.best?.candidate.id);
@@ -100,8 +100,8 @@ describe("cross-surface consistency (issue #29)", () => {
   });
 
   it("surface default options (balanced profile, 3 alternatives) do not change the winner", async () => {
-    const bare = await runPanelPipeline(fakeScreener(makeContracts()), REQUEST);
-    const unifiedStyle = await runPanelPipeline(fakeScreener(makeContracts()), REQUEST, { riskProfile: "balanced", alternatives: 3 });
+    const bare = await runPanelPipelineRetired4068(fakeScreener(makeContracts()), REQUEST);
+    const unifiedStyle = await runPanelPipelineRetired4068(fakeScreener(makeContracts()), REQUEST, { riskProfile: "balanced", alternatives: 3 });
     expect(unifiedStyle.bestTrade.best?.candidate.id).toBe(bare.bestTrade.best?.candidate.id);
   });
 

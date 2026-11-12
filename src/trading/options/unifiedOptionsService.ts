@@ -56,16 +56,10 @@ import {
   type StrategyCandidate,
 } from "./index";
 import {
-  memoryStageClaims,
-  memoryStageStorage,
-  runOptionsScreenWorkflow,
-} from "../../workflows/optionsScreenWorkflow";
-import {
-  createStrategyScreenPorts,
-  panelResultToPipelineResult,
-} from "../../workflows/strategyScreenPorts";
-import { optionsArtifactKey } from "../../workflows/optionsScreenPorts";
-import type { PanelDiscoveryResult } from "../../services/recommendationKernel";
+  runOptionsPanelViaEngine,
+  runOptionsPlainScreenViaEngine,
+  runOptionsScanViaEngine,
+} from "../../workflows/optionsScreenEngine";
 import { OpportunityScanner, type OpportunityScanResult, type ScanMode, type ScanRequestRecord, type ScanRequestTemplate, type ScanSymbolOverride } from "./opportunityScanner";
 import type { ScanRunStore } from "./scanRunStore";
 import { applyProfileFields, toProfileRef, type StrategyProfile } from "./strategyProfile";
@@ -506,7 +500,15 @@ export class UnifiedOptionsService {
    * exactly one layer while their result assembly stays their own.
    * `client` is the E*TRADE REST data plane (ETradeService's `.client`).
    */
-  static async screenContracts(
+  /**
+   * @deprecated Issue #4068 — retired by rename: the direct screen bypass.
+   * Successor: runOptionsPlainScreenViaEngine (src/workflows/optionsScreenEngine.ts),
+   * which runs the same screen through the one engine-routed workflow.
+   * This static is frozen: no production caller remains; tests that pin the
+   * screen decomposition keep calling it. Recorded in
+   * docs/architecture/transition/deprecations.md.
+   */
+  static async screenContractsRetired4068(
     client: OptionChainSource | undefined,
     filter: OptionScreenerFilter
   ): Promise<OptionScreenResult> {
@@ -519,69 +521,26 @@ export class UnifiedOptionsService {
     options: PipelineOptions = {},
     userLogin?: string,
   ): Promise<PipelineResult> {
-    // Issue #3186 step 3e: the service's panel runs go through the one
-    // panel pipeline instead of runPanelPipeline directly - this static
-    // is the seam all three execute() panel cases (strategies /
-    // best_trade, compare, llm_ideas) ride, so one change migrates
-    // them all for every caller (unified handler, NLQ screen path).
-    // The agents are constructed exactly as runPanelPipeline built
-    // them (data agent over the given screener - no universeDeps -
-    // fresh risk + recommender). All four PipelineOptions fields ride
-    // the classInput (the feed seam's snapshotOverride included), so
-    // the static's contract is preserved for callers that pass a
-    // stored snapshot. The service holds no DO storage/queue handle,
-    // so stage storage/claims are the shared in-memory helpers and
-    // publishing is skipped (queue null); the durable record for
-    // these runs is the caller's downstream record, unchanged.
-    const runId = `options-panel:service:${request.symbol}:${new Date().toISOString()}`;
-    const storage = memoryStageStorage();
-    const outcome = await runOptionsScreenWorkflow(
-      {
-        runId,
-        userLogin,
-        request: {
-          assetClass: "options",
-          runIdentity: { runId },
-          trigger: "manual",
-          classInput: {
-            strategyRequest: request,
-            strategyFilter: options.strategyFilter,
-            riskProfile: options.riskProfile,
-            alternatives: options.alternatives,
-            snapshotOverride: options.snapshotOverride,
-          },
-        },
-      },
-      {
-        stages: createStrategyScreenPorts({
-          agents: {
-            data: new OptionsDataAgent(new DynamicOptionsScreener(source)),
-            risk: new StrategyRiskAgent(),
-            recommender: new RecommendationAgent(),
-          },
-          storage,
-        }),
-        claims: memoryStageClaims(),
-        queue: null,
-      },
-    );
-    if (outcome.outcome !== "completed") {
-      throw new Error(
-        `Options strategy screen failed at ${outcome.failedStage}: ${outcome.reason}`,
-      );
-    }
-    const panelResult = await storage.get<PanelDiscoveryResult>(
-      optionsArtifactKey(runId, "shapeReport"),
-    );
-    if (!panelResult) {
-      throw new Error(
-        "Options strategy screen completed without a report artifact; refusing to answer from nothing.",
-      );
-    }
-    return panelResultToPipelineResult(panelResult);
+    // Issue #4068: the service's panel runs go through the one
+    // engine-routed panel pipeline (runOptionsPanelViaEngine) instead
+    // of the direct composer — this static is the seam all three
+    // execute() panel cases (strategies / best_trade, compare,
+    // llm_ideas) ride, so one change migrates them all for every
+    // caller (unified handler, NLQ screen path).
+    return runOptionsPanelViaEngine(source, request, options, userLogin);
   }
 
-  static async scanOpportunities(
+  /**
+   * @deprecated Issue #4068 — retired by rename: the direct scan bypass.
+   * Successor: runOptionsScanViaEngine (src/workflows/optionsScreenEngine.ts),
+   * which runs the same scan through the one engine-routed workflow (the
+   * scanner ports' persist stage attaches the requestRecord and saves via
+   * the scanRunStore, and shapeReport returns the result + save receipt).
+   * This static is frozen: no production caller remains; tests that pin the
+   * scan decomposition keep calling it. Recorded in
+   * docs/architecture/transition/deprecations.md.
+   */
+  static async scanOpportunitiesRetired4068(
     source: OptionChainSource | undefined,
     symbols: string[],
     template: ScanRequestTemplate,
@@ -857,7 +816,7 @@ export class UnifiedOptionsService {
             underlyingSymbols: req.symbols || (req.symbol ? [req.symbol.toUpperCase()] : undefined),
             limit: req.limit || this.config.screener.maxReturnedContracts,
           };
-          const screenResult = await UnifiedOptionsService.screenContracts(engineClient, filter);
+          const screenResult = await runOptionsPlainScreenViaEngine(engineClient, filter, this.userLogin);
           executionData = screenResult;
           summary = `Screened ${screenResult.matchedCount} options contracts across ${screenResult.totalUnderlyingsScanned} symbols.`;
           break;
@@ -871,7 +830,8 @@ export class UnifiedOptionsService {
           // the same scope (here: this caller's universe).
           // #1639 (D3, retained with stated reason): this is NOT a
           // parallel recommendation path bypassing the kernel — the
-          // service's per-name expression runs runPanelPipeline, i.e.
+          // service's per-name expression runs runOptionsPanelViaEngine
+          // (the engine-routed panel), i.e.
           // RecommendationService.discoverPanel. What stays outside
           // the kernel is only the universe-scan / inference / run
           // persistence pre-stage, which no kernel stage owns.
@@ -1014,7 +974,7 @@ export class UnifiedOptionsService {
             throw new Error("Provide explicit symbols or a live universe for options screening; no static symbols are substituted.");
           }
           const targetDate = req.targetDate || new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-          const scanResult = await UnifiedOptionsService.scanOpportunities(engineClient, symbols, {
+          const template: ScanRequestTemplate = {
             thesis: req.thesis || "bullish",
             targetDate,
             expectedIvDirection: req.expectedIvDirection || "unchanged",
@@ -1040,7 +1000,8 @@ export class UnifiedOptionsService {
             strategyMode: resolveStrategyMode(req),
             ...(resolveStrategyMode(req) === "all" ? { evaluateAllStrategies: true } : {}),
             ...(req.farDated !== undefined ? { farDated: req.farDated } : {}),
-          }, {
+          };
+          const scanOptions = {
             riskProfile: req.riskProfile || "balanced",
             ...(req.mode ? { mode: req.mode } : {}),
             // Issue #84 slice 1: the request declares `limit` (the
@@ -1073,15 +1034,7 @@ export class UnifiedOptionsService {
             ...(strategyProfile
               ? { profile: strategyProfile, explicitFields: bodyPresentFields(req, true) }
               : {}),
-          });
-          // Issue #103: record the caller's original request on the
-          // result BEFORE it is returned or persisted, so a stored run
-          // can be replayed verbatim (the snapshot's template alone is
-          // the EFFECTIVE, post-profile view — it cannot reconstruct
-          // the symbol list as asked, the pagination, or which fields
-          // the caller actually expressed). Only fields the caller
-          // sent are recorded; symbols/targetDate are the resolved
-          // values the scan actually ran under.
+          };
           const requestRecord: ScanRequestRecord = {
             symbols,
             targetDate,
@@ -1108,35 +1061,21 @@ export class UnifiedOptionsService {
             ...(req.farDated !== undefined ? { farDated: req.farDated } : {}),
             ...(req.candidateLimit !== undefined ? { candidateLimit: req.candidateLimit } : {}),
           };
-          scanResult.requestSnapshot.request = requestRecord;
+          // Issue #4068: the scan runs through the one engine-routed
+          // scan (runOptionsScanViaEngine) instead of the direct
+          // scanOpportunitiesRetired4068 call. The scanner ports' persist stage
+          // attaches this requestRecord and saves via the scanRunStore
+          // (never failing the scan), and the shapeReport stage returns
+          // the result + save receipt, which is the executionData.
+          const scanResult = await runOptionsScanViaEngine(engineClient, symbols, template, {
+            scanOptions,
+            requestRecord,
+            platformRunId,
+            trigger: req.trigger,
+            scanRunStore: this.scanRunStore,
+            userLogin: this.userLogin,
+          });
           executionData = scanResult;
-          // Issue #27: persist the run when a store was injected (the
-          // orchestrator's unified route supplies one over the Durable
-          // Object's storage). Persistence must never fail a scan: on a
-          // store error the result still returns, flagged persisted:
-          // false with the failure logged and swallowed. Issue #103:
-          // the save is stamped with this service's userLogin so the
-          // history routes can scope the run to its owner.
-          if (this.scanRunStore) {
-            try {
-              // Issue #1157 (E2): platform-wired runs persist under
-              // the id minted before the fetch — the id every
-              // capture from this scan already carries — so the run
-              // and its captures share one identity.
-              const saved = await this.scanRunStore.save(scanResult, {
-                userLogin: this.userLogin,
-                ...(platformRunId ? { id: platformRunId } : {}),
-                // Issue #3264: stamp the run's trigger on the history
-                // row so Docs can say how it started; absent, the row
-                // records none (never a guessed trigger).
-                ...(req.trigger ? { trigger: req.trigger } : {}),
-              });
-              executionData = { ...scanResult, scanRunId: saved.id, persisted: true };
-            } catch (err) {
-              console.error("Failed to persist opportunity scan run", err);
-              executionData = { ...scanResult, persisted: false };
-            }
-          }
           summary = buildOpportunityScanSummary(scanResult);
           break;
         }

@@ -2,7 +2,7 @@
  * Server-backed strategy discovery (issue #29).
  *
  * The Discovery view is a thin client of the server options pipeline
- * (POST /api/trading/options/strategies -> runPanelPipeline). The server
+ * (POST /api/trading/options/strategies -> runOptionsPanelViaEngine). The server
  * evaluates the live E*TRADE chain against the registry, enforces the
  * acceptance rules, and ranks deterministically — the browser no longer
  * ranks strategies over a synthetic chain. The local engine
