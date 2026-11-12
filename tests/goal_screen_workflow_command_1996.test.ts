@@ -1,30 +1,38 @@
 /**
  * Issue #1996 (#1972 slice 1) — goal-screen commands on the
- * existing ScreenerScreenWorkflow machinery. TDD: written
- * against the slice-1 contract before the implementation.
+ * ScreenerScreenWorkflow machinery.
+ *
+ * #4192: the child-workflow flows (runShardFlow /
+ * runParentFlow, ChildWorkflowOps, the fake step + virtual
+ * clock) are retired — goal screens run through the one
+ * engine now, via InMemoryWorkflowAdapter with a
+ * runGoalScreen fake. The pure helpers moved to
+ * src/workflows/screenerCollation.ts; the flow describes
+ * below drive the adapter instead, asserting the same
+ * intents (goal runner executed, envelope stored, deliver
+ * per channels, fail-closed without goal support, parent
+ * collation) on the collation + projected rows.
  *
  * Covers: port validation for goal-screen commands, the
- * shard flow's goal branch (including the fail-closed rule:
- * a goal command NEVER falls back to a market screen), the
- * goal result → shard result mapping, and parent collation
- * for a single-goal-shard run.
+ * goal result → shard result mapping, the goal branch of
+ * the engine path (including the fail-closed rule: a goal
+ * command NEVER falls back to a market screen), and parent
+ * collation for a single-goal-shard run.
  */
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryShardJobAdapter } from "../src/data/inMemoryShardJobAdapter";
+import type { ShardJobStore } from "../src/data/shardJobPorts";
+import { InMemoryWorkflowAdapter } from "../src/workflows/inMemoryWorkflowAdapter";
 import {
   goalResultToShardResult,
   goalShardRequest,
-  runParentFlow,
-  runShardFlow,
-  type ChildWorkflowOps,
   type ScreenerWorkflowDeps,
-  type ScreenerWorkflowStep,
   type ShardScreenResult,
-} from "../src/workflows/screenerWorkflowFlow";
+} from "../src/workflows/screenerCollation";
 import {
   assertWorkflowJobCommand,
   WorkflowError,
-  workflowIdForJob,
+  type ParentScreenReportInput,
   type WorkflowJobCommand,
 } from "../src/workflows/workflowPorts";
 import { buildScenario } from "../src/services/goalScenarioEngine";
@@ -34,17 +42,6 @@ import { STOCK_SCREENING_PROVIDER_ID } from "../src/trading/screeningProvider";
 /* ------------------------------------------------------------------ */
 /* Fakes                                                               */
 /* ------------------------------------------------------------------ */
-
-function makeClock(startMs = 1_000_000) {
-  let now = startMs;
-  const step: ScreenerWorkflowStep = {
-    do: async (_name, fn) => fn(),
-    sleep: async (_name, ms) => {
-      now += ms;
-    },
-  };
-  return { nowMs: () => now, step };
-}
 
 function fakeGoalResult(overrides: Partial<GoalDrivenScreenResult> = {}): GoalDrivenScreenResult {
   return {
@@ -94,17 +91,6 @@ function goalParentCommand(overrides: Partial<WorkflowJobCommand> = {}): Workflo
   };
 }
 
-function goalShardCommand(parent: WorkflowJobCommand): WorkflowJobCommand {
-  return {
-    ...parent,
-    role: "shard",
-    parentJobId: parent.jobId,
-    shard: { shardId: "goal" },
-    shards: [{ shardId: "goal" }],
-    jobId: `${parent.jobId}:shard:goal`,
-  };
-}
-
 function okGoalShardResult(result: GoalDrivenScreenResult): ShardScreenResult {
   return goalResultToShardResult({
     taskId: "task-1",
@@ -115,26 +101,33 @@ function okGoalShardResult(result: GoalDrivenScreenResult): ShardScreenResult {
 }
 
 interface GoalDepsBundle {
+  store: InMemoryShardJobAdapter;
   stored: unknown[];
   delivered: unknown[];
-  clock: ReturnType<typeof makeClock>;
+  /** Parent canonical rows the finalize stored (the parent door). */
+  parentStored: ParentScreenReportInput[];
   deps: ScreenerWorkflowDeps;
   runScreen: ReturnType<typeof vi.fn>;
   runGoalScreen: ReturnType<typeof vi.fn>;
 }
 
-function makeGoalDeps(opts: { withGoalRunner: boolean; deliver?: boolean }): GoalDepsBundle {
+function makeGoalDeps(opts: {
+  withGoalRunner: boolean;
+  /** Canned goal result the fake returns (default: the complete fake above). */
+  goalResult?: GoalDrivenScreenResult;
+  /** When set, the store door returns this as the canonical report id. */
+  reportId?: string;
+}): GoalDepsBundle {
   const store = new InMemoryShardJobAdapter();
   const stored: unknown[] = [];
   const delivered: unknown[] = [];
-  const clock = makeClock();
+  const parentStored: ParentScreenReportInput[] = [];
   const runScreen = vi.fn(async () => {
     throw new Error("market runner must never run for a goal command");
   });
-  const runGoalScreen = vi.fn(async (req: Parameters<NonNullable<ScreenerWorkflowDeps["screenRunner"]["runGoalScreen"]>>[0]) => {
-    const result = fakeGoalResult();
-    return okGoalShardResult(result);
-  });
+  const runGoalScreen = vi.fn(async () =>
+    okGoalShardResult(opts.goalResult ?? fakeGoalResult()),
+  );
   const deps: ScreenerWorkflowDeps = {
     screenRunner: opts.withGoalRunner
       ? { runScreen, runGoalScreen }
@@ -142,13 +135,35 @@ function makeGoalDeps(opts: { withGoalRunner: boolean; deliver?: boolean }): Goa
     shardStore: store,
     storeReport: async (payload) => {
       stored.push(payload);
+      if (opts.reportId) return opts.reportId;
     },
     deliverOutcome: async (payload) => {
       delivered.push(payload);
     },
-    nowMs: clock.nowMs,
+    storeParentReport: async (input) => {
+      parentStored.push(input);
+      return { stored: true, reportId: "parent-1" };
+    },
+    // No virtual clock on the engine path: the engine owns
+    // pacing; the deps clock is a fixed instant.
+    nowMs: () => 1_000_000,
   };
-  return { stored, delivered, clock, deps, runScreen, runGoalScreen };
+  return { store, stored, delivered, parentStored, deps, runScreen, runGoalScreen };
+}
+
+/** The parent canonical row (the door's read-back). */
+async function latestParentRow(store: ShardJobStore, jobId: string) {
+  return store.latestJob("tenant-1", jobId, jobId);
+}
+
+/** The collation the parent row carries (the door's read-back). */
+async function collationFor(store: ShardJobStore, jobId: string) {
+  const row = await latestParentRow(store, jobId);
+  return JSON.parse(row?.resultJson ?? "{}") as Record<string, unknown>;
+}
+
+function collationShards(collation: Record<string, unknown>) {
+  return (collation.shards ?? []) as Array<Record<string, unknown>>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -266,84 +281,232 @@ describe("goalResultToShardResult (#1996)", () => {
     expect(shard.success).toBe(true);
     expect(shard.error).toBeUndefined();
   });
+
+  it("goalShardRequest builds the goal request from the parent command (idempotency key is the run id)", () => {
+    const parent = goalParentCommand();
+    const req = goalShardRequest(parent);
+    expect(req.scenario.goalKind).toBe("income");
+    expect(req.scenarioSource).toBe("built");
+    expect(req.trigger).toBe("manual");
+    expect(req.idempotencyKey).toBe(parent.jobId);
+    expect(req.userLogin).toBe("alice");
+  });
 });
 
 /* ------------------------------------------------------------------ */
-/* Flow: goal shard                                                    */
+/* Engine path: goal shard (adapter runs, not runShardFlow)            */
 /* ------------------------------------------------------------------ */
 
-describe("runShardFlow for goal commands (#1996)", () => {
+describe("adapter: goal shard (#1996)", () => {
   it("executes the goal runner, stores the envelope, and never touches the market runner", async () => {
     const parent = goalParentCommand();
-    const { stored, delivered, clock, deps, runScreen, runGoalScreen } = makeGoalDeps({
-      withGoalRunner: true,
-    });
-    const out = await runShardFlow(goalShardCommand(parent), clock.step, deps);
+    const { store, stored, delivered, parentStored, deps, runScreen, runGoalScreen } =
+      makeGoalDeps({ withGoalRunner: true });
+    const adapter = new InMemoryWorkflowAdapter(deps);
+    const h = await adapter.start(parent);
+    expect(h.status).toBe("complete");
     expect(runScreen).not.toHaveBeenCalled();
     expect(runGoalScreen).toHaveBeenCalledTimes(1);
     const req = runGoalScreen.mock.calls[0][0];
     expect(req.scenario.goalKind).toBe("income");
     expect(req.idempotencyKey).toBe(parent.jobId);
     expect(req.userLogin).toBe("alice");
-    expect(out.success).toBe(true);
-    expect(out.stored).toBe(true);
-    expect(out.delivered).toBe(false);
-    expect((out as Record<string, unknown>).full).toBeUndefined();
+    // The unit stores the full envelope and (no deliver
+    // channels on this command) does not deliver.
     expect(stored).toHaveLength(1);
     const envelope = stored[0] as { taskId: string; scenarioSource: string; result: GoalDrivenScreenResult };
     expect(envelope.taskId).toBe("task-1");
     expect(envelope.scenarioSource).toBe("built");
     expect(envelope.result.goalKind).toBe("income");
     expect(delivered).toHaveLength(0);
+    // Claim-check: bulk data never leaves the run — the
+    // collation carries summaries + flags only.
+    const collation = await collationFor(store, parent.jobId);
+    expect(collation.lifecycle).toBe("ReportGenerated");
+    expect("full" in collation).toBe(false);
+    expect(collationShards(collation)[0]).toMatchObject({
+      shardId: "goal",
+      status: "completed",
+      totalScanned: 150,
+      expectedCount: 150,
+      matchedCount: 1,
+      stored: true,
+      delivered: false,
+    });
+    expect(parentStored).toHaveLength(1);
+    expect(parentStored[0]?.collation.lifecycle).toBe("ReportGenerated");
+    expect(parentStored[0]?.goalScreen).toBe(true);
+    const rows = await store.listJobsForChain("tenant-1", parent.jobId);
+    expect(rows.find((r) => r.jobKey === "shard:goal")?.status).toBe("completed");
   });
 
   it("runs the deliver step for goal commands that carry deliver channels", async () => {
     const parent = goalParentCommand({ deliver: true });
-    const { stored, delivered, clock, deps } = makeGoalDeps({ withGoalRunner: true });
-    const out = await runShardFlow(goalShardCommand(parent), clock.step, deps);
-    expect(out.delivered).toBe(true);
+    const { store, stored, delivered, parentStored, deps } = makeGoalDeps({
+      withGoalRunner: true,
+    });
+    const adapter = new InMemoryWorkflowAdapter(deps);
+    const h = await adapter.start(parent);
+    expect(h.status).toBe("complete");
     expect(delivered).toHaveLength(1);
     expect(stored).toHaveLength(1);
+    const collation = await collationFor(store, parent.jobId);
+    expect(collation.lifecycle).toBe("ReportGenerated");
+    expect(collation.storedShards).toEqual(["goal"]);
+    expect(collation.deliveredShards).toEqual(["goal"]);
+    expect(parentStored).toHaveLength(1);
+    expect(parentStored[0]?.collation.lifecycle).toBe("ReportGenerated");
   });
 
   it("fails closed when the runner has no goal support — never a market-screen fallback", async () => {
     const parent = goalParentCommand();
-    const { clock, deps, runScreen } = makeGoalDeps({ withGoalRunner: false });
-    await expect(runShardFlow(goalShardCommand(parent), clock.step, deps)).rejects.toThrow(/goal/i);
+    const { store, stored, delivered, parentStored, deps, runScreen } = makeGoalDeps({
+      withGoalRunner: false,
+    });
+    const adapter = new InMemoryWorkflowAdapter(deps);
+    const h = await adapter.start(parent);
+    // A unit failure settles as a Failed collation with
+    // adapter status "complete" — only an infra/dispatch
+    // failure records "errored".
+    expect(h.status).toBe("complete");
     expect(runScreen).not.toHaveBeenCalled();
+    expect(stored).toHaveLength(0);
+    expect(delivered).toHaveLength(0);
+    expect(parentStored).toHaveLength(1);
+    expect(parentStored[0]?.collation.lifecycle).toBe("Failed");
+    expect(parentStored[0]?.collation.error).toMatch(/refusing a market-screen fallback/);
+    const rows = await store.listJobsForChain("tenant-1", parent.jobId);
+    expect(rows.find((r) => r.jobKey === "leg:goal")?.status).toBe("failed");
+    const failedParent = await store.latestJob("tenant-1", parent.jobId, "leg:parent");
+    expect(failedParent?.status).toBe("failed");
+    expect(JSON.parse(failedParent?.resultJson ?? "{}").detail).toMatch(/Workflow Failed: 0\/1 shards/);
+  });
+
+  it("a failed goal result rides as data — the unit still stores/delivers, then the composer fails the shard", async () => {
+    // Unlike a market failure (which throws at analysis),
+    // a goal failure is a failed goalResult carried through
+    // store/deliver; the composer fails the shard on the
+    // goal verdict, loudly.
+    const parent = goalParentCommand({ deliver: true });
+    const failed = fakeGoalResult({
+      status: "failed",
+      hits: [],
+      counts: {
+        stocksScanned: 0,
+        stocksMatched: 0,
+        optionsUnderlyingsScanned: 0,
+        optionsContractsMatched: 0,
+        hits: 0,
+      },
+    });
+    const { store, stored, delivered, parentStored, deps } = makeGoalDeps({
+      withGoalRunner: true,
+      goalResult: failed,
+    });
+    const adapter = new InMemoryWorkflowAdapter(deps);
+    const h = await adapter.start(parent);
+    expect(h.status).toBe("complete");
+    expect(stored).toHaveLength(1);
+    expect(delivered).toHaveLength(1);
+    expect(parentStored).toHaveLength(1);
+    const collation = parentStored[0]?.collation;
+    expect(collation?.lifecycle).toBe("Failed");
+    expect(collation?.shards).toHaveLength(1);
+    expect(collation?.shards[0]?.status).toBe("failed");
+    expect(collation?.shards[0]?.error).toMatch(/Goal screen failed \(income\/bullish\)/);
+    const rows = await store.listJobsForChain("tenant-1", parent.jobId);
+    expect(rows.find((r) => r.jobKey === "leg:goal")?.status).toBe("failed");
+    const failedParent = await store.latestJob("tenant-1", parent.jobId, "leg:parent");
+    expect(JSON.parse(failedParent?.resultJson ?? "{}").detail).toMatch(/Workflow Failed: 0\/1 shards/);
+  });
+
+  it("a shard-role goal command is refused — no child workflows exist on the engine path", async () => {
+    const parent = goalParentCommand();
+    const shardCommand: WorkflowJobCommand = {
+      ...parent,
+      role: "shard",
+      parentJobId: parent.jobId,
+      shard: { shardId: "goal" },
+      shards: [{ shardId: "goal" }],
+      jobId: `${parent.jobId}:shard:goal`,
+    };
+    const { stored, delivered, parentStored, deps, runScreen, runGoalScreen } = makeGoalDeps({
+      withGoalRunner: true,
+    });
+    const adapter = new InMemoryWorkflowAdapter(deps);
+    const h = await adapter.start(shardCommand);
+    // The dispatch refuses by name; the adapter records the
+    // dispatch failure as "errored" and runs nothing.
+    expect(h.status).toBe("errored");
+    expect(await adapter.status(h.workflowId)).toMatchObject({ status: "errored" });
+    expect(runScreen).not.toHaveBeenCalled();
+    expect(runGoalScreen).not.toHaveBeenCalled();
+    expect(stored).toHaveLength(0);
+    expect(delivered).toHaveLength(0);
+    expect(parentStored).toHaveLength(0);
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* Flow: goal parent collation                                         */
+/* Engine path: goal parent collation (adapter runs, not runParentFlow) */
 /* ------------------------------------------------------------------ */
 
-describe("runParentFlow for goal commands (#1996)", () => {
+describe("adapter: goal parent collation (#1996)", () => {
   it("collates a single stored goal shard to ReportGenerated", async () => {
     const parent = goalParentCommand({ deliver: true });
-    const { stored, delivered, clock, deps } = makeGoalDeps({ withGoalRunner: true });
-    const outputs = new Map<string, ShardScreenResult>();
-    const ops: ChildWorkflowOps = {
-      createChild: async (cmd) => {
-        const out = await runShardFlow(cmd, clock.step, deps);
-        outputs.set(workflowIdForJob(cmd.jobId), out);
-        return { workflowId: workflowIdForJob(cmd.jobId) };
-      },
-      getChildStatus: async (workflowId) => {
-        const out = outputs.get(workflowId);
-        return out ? { status: "complete", output: out } : { status: "running" };
-      },
-    };
-    const collation = await runParentFlow(parent, clock.step, deps, ops);
+    const { store, stored, delivered, parentStored, deps } = makeGoalDeps({
+      withGoalRunner: true,
+    });
+    const adapter = new InMemoryWorkflowAdapter(deps);
+    const h = await adapter.start(parent);
+    expect(h.status).toBe("complete");
+    const collation = await collationFor(store, parent.jobId);
     expect(collation.lifecycle).toBe("ReportGenerated");
     expect(collation.qualified).toBe(false);
-    expect(collation.shards).toHaveLength(1);
-    expect(collation.shards[0].shardId).toBe("goal");
-    expect(collation.shards[0].status).toBe("completed");
-    expect(collation.shards[0].matchedCount).toBe(1);
+    expect(collation.coverage).toEqual({ evaluated: 150, considered: 150, ratio: 1 });
+    expect(collationShards(collation)).toHaveLength(1);
+    expect(collationShards(collation)[0]).toMatchObject({
+      shardId: "goal",
+      status: "completed",
+      matchedCount: 1,
+    });
     expect(collation.storedShards).toEqual(["goal"]);
     expect(collation.deliveredShards).toEqual(["goal"]);
+    // Goal parents link by report id, never by
+    // screener:<timestamp>.
+    expect(collation.childRunIds).toEqual([]);
     expect(stored).toHaveLength(1);
     expect(delivered).toHaveLength(1);
+    expect(parentStored).toHaveLength(1);
+    expect(parentStored[0]?.jobId).toBe(parent.jobId);
+    expect(parentStored[0]?.goalScreen).toBe(true);
+    expect(parentStored[0]?.collation.lifecycle).toBe("ReportGenerated");
+    const parentRow = await latestParentRow(store, parent.jobId);
+    expect(parentRow?.status).toBe("completed");
+    expect(JSON.parse(parentRow?.resultJson ?? "{}").lifecycle).toBe("ReportGenerated");
+    const rows = await store.listJobsForChain("tenant-1", parent.jobId);
+    expect(rows.map((r) => r.jobKey).sort()).toEqual(
+      [parent.jobId, "shard:goal"].sort(),
+    );
+  });
+
+  it("a goal door report id surfaces on the shard outcome and the parent row", async () => {
+    const parent = goalParentCommand({ deliver: true });
+    const { store, parentStored, deps } = makeGoalDeps({
+      withGoalRunner: true,
+      reportId: "goal-report-1",
+    });
+    const adapter = new InMemoryWorkflowAdapter(deps);
+    const h = await adapter.start(parent);
+    expect(h.status).toBe("complete");
+    const collation = await collationFor(store, parent.jobId);
+    expect(collation.lifecycle).toBe("ReportGenerated");
+    expect(collationShards(collation)[0]?.reportId).toBe("goal-report-1");
+    expect(collation.childReportIds).toEqual(["goal-report-1"]);
+    expect(parentStored[0]?.childReportIds).toEqual(["goal-report-1"]);
+    const parentRow = await latestParentRow(store, parent.jobId);
+    expect(JSON.parse(parentRow?.resultJson ?? "{}").childReportIds).toEqual([
+      "goal-report-1",
+    ]);
   });
 });

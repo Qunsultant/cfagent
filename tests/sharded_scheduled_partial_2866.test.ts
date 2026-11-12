@@ -3,12 +3,12 @@
  * adopted shard-failure rule on the sharded scheduled path:
  * partial/marked, never silent, never whole-run failure while
  * any shard completed. The rule itself lives in
- * collateShards (src/workflows/screenerWorkflowFlow.ts),
+ * collateShards (src/workflows/screenerCollation.ts),
  * reused as-is — these pins tie the decision to this slice
  * so a future collation change cannot silently drop it.
  */
 import { describe, expect, it } from "vitest";
-import { collateShards } from "../src/workflows/screenerWorkflowFlow";
+import { collateShards } from "../src/workflows/screenerCollation";
 import type { ShardOutcome } from "../src/workflows/workflowPorts";
 
 function outcome(

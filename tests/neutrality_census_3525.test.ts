@@ -448,6 +448,21 @@ function measure(): Map<string, number> {
  * the only growth is the new jobs' own id/label/alias lines: 2 raises
  * (feedJobs.ts/yahoo 40->45, feedPipelineJobs.ts/yahoo 71->85).
  * Totals move 1175/9272 -> 1175/9291.
+ * Baseline update (#4192, 2026-11-12): the screener cutover
+ * (#3550 S2) moves runScreenInner's platform quote/history
+ * binding into shared agent methods (bindScreenerQuoteDeps /
+ * bindScreenerHistoryDeps) so the stage methods bind the deps
+ * themselves when the step handler omits them — the blocks move
+ * verbatim, and the only growth is the binding's own names:
+ * the method signature + guard + return legs + call sites:
+ * 3 raises (screener-agent.ts etrade 85->94 / alpaca 22->24 /
+ * yahoo 66->68), dispositioned INTEGRATION — the binding names
+ * the provider its leg serves, which is its job (the #4190
+ * precedent). Recounted at ship: the etradeService parameter
+ * threading at the stage call sites added two more named lines
+ * after the first count (92->94). The counts fall back when the
+ * duplicated runScreenInner branches are retired.
+ * Totals move 1175/9291 -> 1175/9304.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -826,9 +841,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/scheduledTasksPipeline.ts", "alpaca", 1],
   ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "yahoo", 1],
-  ["src/agents/screener-agent.ts", "alpaca", 22],
-  ["src/agents/screener-agent.ts", "etrade", 85],
-  ["src/agents/screener-agent.ts", "yahoo", 66],
+  ["src/agents/screener-agent.ts", "alpaca", 24],
+  ["src/agents/screener-agent.ts", "etrade", 94],
+  ["src/agents/screener-agent.ts", "yahoo", 68],
   ["src/agents/screenerA2aDispatch.ts", "etrade", 2],
   ["src/agents/screenerA2aDispatch.ts", "yahoo", 5],
   ["src/agents/slackA2aDispatch.ts", "etrade", 11],
@@ -1321,8 +1336,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/workflows/sagaWorkflowFlow.ts", "etrade", 4],
   ["src/workflows/screenExecutionBroker.ts", "etrade", 5],
   ["src/workflows/screenRunFinalize.ts", "etrade", 3],
-  ["src/workflows/screenerWorkflowFlow.ts", "etrade", 2],
-  ["src/workflows/screenerWorkflowFlow.ts", "yahoo", 2],
+  ["src/workflows/screenerCollation.ts", "etrade", 2],
+  ["src/workflows/screenerCollation.ts", "yahoo", 2],
   ["src/workflows/stageRuntimeIds.ts", "etrade", 4],
   ["src/workflows/stockCleanupRegister.ts", "etrade", 1],
   ["src/workflows/stockScreenCapability.ts", "etrade", 9],

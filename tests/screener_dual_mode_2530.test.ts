@@ -9,12 +9,25 @@
  * replay stay deterministic in both modes (§8 doctrine:
  * prompt interprets, deterministic code decides).
  *
+ * #4192: the retired child-workflow flow (runParentFlow +
+ * ChildWorkflowOps + fake ScreenerWorkflowStep + virtual
+ * clock) is gone. The parent-flow suites below drive the
+ * engine path instead: the InMemoryWorkflowAdapter over
+ * ScreenerWorkflowDeps (the same adapter the anchor file
+ * tests/screener_workflows.test.ts proves), with the ND deps
+ * (ndModeEnabled / intentInterpreter / auditInterpretation)
+ * in deps. Pure-helper suites just re-point their imports
+ * at screenerCollation.ts. The door, routes-helper, and
+ * golden-pair suites are unchanged in intent — the door and
+ * routes seams survive, and the golden pair already drove
+ * the adapter.
+ *
  * Suites:
  *  - the SCREENER_ND_MODE gate (flag, default OFF, fail-closed);
  *  - the command contract (mode + intent validation);
  *  - the criteria-artifact validator (the deterministic gate);
- *  - the parent flow (ND happy path / refusal / gate refusals;
- *    deterministic parity);
+ *  - the parent flow on the adapter (ND happy path / refusal /
+ *    gate refusals; deterministic parity);
  *  - the mesh screen door (mode selection at the seam);
  *  - the API selection helper (routes share it);
  *  - the golden-task pair (same request, both modes).
@@ -29,17 +42,17 @@ import {
   type ScreenIntentInterpreter,
   type ScreenInterpretationAuditRecord,
 } from "../src/workflows/screenCriteriaArtifact";
-import {
-  runParentFlow,
-  type ChildWorkflowOps,
-  type ScreenerWorkflowDeps,
-  type ScreenerWorkflowStep,
-} from "../src/workflows/screenerWorkflowFlow";
 import { InMemoryShardJobAdapter } from "../src/data/inMemoryShardJobAdapter";
+import { InMemoryWorkflowAdapter } from "../src/workflows/inMemoryWorkflowAdapter";
+import {
+  type ScreenerWorkflowDeps,
+  type ShardScreenRequest,
+  type ShardScreenResult,
+} from "../src/workflows/screenerCollation";
 import {
   assertWorkflowJobCommand,
-  workflowIdForJob,
   WorkflowError,
+  type ParentScreenReportInput,
   type WorkflowJobCommand,
 } from "../src/workflows/workflowPorts";
 
@@ -57,6 +70,7 @@ function parentCommand(overrides: Partial<WorkflowJobCommand> = {}): WorkflowJob
     role: "parent",
     tenantId: "tenant-1",
     shards: [{ shardId: "NASDAQ100", universe: "NASDAQ100" }],
+    deliver: true,
     ...overrides,
   };
 }
@@ -232,33 +246,50 @@ describe("validateScreenCriteriaArtifact (#2530)", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* The parent flow: interpretation → validation → audit → fan-out      */
+/* The parent flow on the adapter: ND head → engine dispatch           */
+/*                                                                     */
+/* #4192: runParentFlow + ChildWorkflowOps + the fake step + the       */
+/* virtual clock are retired. The same intents now drive the           */
+/* InMemoryWorkflowAdapter: the ND head (interpret → validate →        */
+/* audit) runs as the dispatch's adapter gate, and the screen          */
+/* itself executes through the engine's six canned steps. The          */
+/* runner is the observation seam now: what the retired flow           */
+/* asserted on the fanned-out child commands (merged filters,          */
+/* universe, mode) is asserted on the screen request the engine        */
+/* hands the runner, and what it asserted on the returned              */
+/* collation is asserted on the parent canonical row the               */
+/* finalize tail stores (parentStored[0].collation) plus the           */
+/* projected rows. A refused dispatch never throws from the            */
+/* adapter: infra refusals (gate closed, no interpreter, a             */
+/* throwing interpreter) settle as adapter status "errored"; a        */
+/* refused ARTIFACT settles as a Failed collation with adapter         */
+/* status "complete" and zero shards started.                          */
 /* ------------------------------------------------------------------ */
 
-interface ParentHarness {
+interface AdapterParentHarness {
   audits: ScreenInterpretationAuditRecord[];
-  childCommands: WorkflowJobCommand[];
+  /** The screen requests the engine handed the runner (one per shard that ran). */
+  runRequests: ShardScreenRequest[];
   interpretCalls: Array<{ intent: string }>;
-  step: ScreenerWorkflowStep;
-  deps: ScreenerWorkflowDeps;
-  childOps: ChildWorkflowOps;
+  stored: unknown[];
+  delivered: unknown[];
+  parentStored: ParentScreenReportInput[];
+  store: InMemoryShardJobAdapter;
+  adapter: InMemoryWorkflowAdapter;
 }
 
-function makeParentHarness(opts: {
+function makeAdapterParentHarness(opts: {
   ndModeEnabled?: boolean;
   artifact?: unknown;
   interpreter?: ScreenIntentInterpreter;
-} = {}): ParentHarness {
+} = {}): AdapterParentHarness {
   const audits: ScreenInterpretationAuditRecord[] = [];
-  const childCommands: WorkflowJobCommand[] = [];
+  const runRequests: ShardScreenRequest[] = [];
   const interpretCalls: Array<{ intent: string }> = [];
-  let now = 1_000_000;
-  const step: ScreenerWorkflowStep = {
-    do: async (_name, fn) => fn(),
-    sleep: async (_name, ms) => {
-      now += ms;
-    },
-  };
+  const stored: unknown[] = [];
+  const delivered: unknown[] = [];
+  const parentStored: ParentScreenReportInput[] = [];
+  const store = new InMemoryShardJobAdapter();
   const interpreter: ScreenIntentInterpreter | undefined =
     opts.interpreter ??
     (opts.artifact !== undefined
@@ -271,73 +302,95 @@ function makeParentHarness(opts: {
       : undefined);
   const deps: ScreenerWorkflowDeps = {
     screenRunner: {
-      runScreen: async () => {
-        throw new Error("the parent flow must never call the screen runner directly");
+      runScreen: async (req) => {
+        runRequests.push(req);
+        const full = {
+          marker: "full-result",
+          universe: req.universe ?? "NASDAQ100",
+        };
+        const summary: ShardScreenResult = {
+          success: true,
+          timestamp: "2026-10-31T12:00:00.000Z",
+          universe: req.universe,
+          totalScanned: 10,
+          expectedCount: 10,
+          matchedCount: 2,
+          pdfKey: `screener/${req.universe ?? "NASDAQ100"}/report.pdf`,
+          trigger: "manual",
+          full,
+        };
+        return summary;
       },
     },
-    shardStore: new InMemoryShardJobAdapter(),
-    storeReport: async () => {},
-    deliverOutcome: async () => {},
-    nowMs: () => now,
+    shardStore: store,
+    storeReport: async (payload) => {
+      stored.push(payload);
+    },
+    deliverOutcome: async (payload) => {
+      delivered.push(payload);
+    },
+    storeParentReport: async (input) => {
+      parentStored.push(input);
+      return { stored: true, reportId: "parent-1" };
+    },
+    nowMs: () => 1_000_000,
     // The harness models an environment where the flag is ON
     // unless a test closes it explicitly.
     ndModeEnabled: opts.ndModeEnabled ?? true,
-    intentInterpreter: interpreter,
+    ...(interpreter ? { intentInterpreter: interpreter } : {}),
     auditInterpretation: async (record) => {
       audits.push(record);
     },
   };
-  const childOps: ChildWorkflowOps = {
-    createChild: async (cmd) => {
-      childCommands.push(cmd);
-      return { workflowId: workflowIdForJob(cmd.jobId) };
-    },
-    getChildStatus: async () => ({
-      status: "complete",
-      output: {
-        success: true,
-        timestamp: "2026-10-31T12:00:00.000Z",
-        totalScanned: 10,
-        expectedCount: 10,
-        matchedCount: 2,
-        stored: true,
-        delivered: false,
-      },
-    }),
-  };
-  return { audits, childCommands, interpretCalls, step, deps, childOps };
+  const adapter = new InMemoryWorkflowAdapter(deps);
+  return { audits, runRequests, interpretCalls, stored, delivered, parentStored, store, adapter };
+}
+
+/** The collation the parent canonical row carries (the door's read-back). */
+async function collationFor(store: InMemoryShardJobAdapter, jobId: string) {
+  const row = await store.latestJob("tenant-1", jobId, jobId);
+  return JSON.parse(row?.resultJson ?? "{}") as Record<string, unknown>;
 }
 
 const ND_INTENT = "large-cap tech names with strong momentum and reasonable valuations";
 
-describe("runParentFlow dual-mode (#2530)", () => {
-  it("ND happy path: interprets once, validates, audits, and fans out with the merged filters", async () => {
-    const h = makeParentHarness({
+describe("adapter: runParentFlow dual-mode (#2530)", () => {
+  it("ND happy path: interprets once, validates, audits, and runs the screen with the merged filters", async () => {
+    const h = makeAdapterParentHarness({
       artifact: { filters: { minPrice: 25, sector: "Technology" }, rationale: "tech momentum" },
     });
-    const collation = await runParentFlow(
+    const handle = await h.adapter.start(
       parentCommand({
         screenMode: "non-deterministic",
         screenIntent: ND_INTENT,
         filters: { minVolume: 1000 },
       }),
-      h.step,
-      h.deps,
-      h.childOps,
     );
+    expect(handle.status).toBe("complete");
     expect(h.interpretCalls).toEqual([{ intent: ND_INTENT }]);
-    expect(collation.lifecycle).toBe("ReportGenerated");
-    expect(collation.screenMode).toBe("non-deterministic");
+    // The collation is the parent canonical row's payload.
+    expect(h.parentStored).toHaveLength(1);
+    expect(h.parentStored[0].collation.lifecycle).toBe("ReportGenerated");
+    expect(h.parentStored[0].collation.screenMode).toBe("non-deterministic");
+    expect((await collationFor(h.store, "job-2530")).lifecycle).toBe("ReportGenerated");
     // The artifact refines the caller's structured filters per field;
-    // shards/universe never change.
-    expect(h.childCommands).toHaveLength(1);
-    expect(h.childCommands[0].filters).toEqual({
+    // shards/universe never change. The merged filters reach the
+    // screen the engine runs: the adapter's canned analyze step
+    // reads them from the job-definition params (ctx.params.filters,
+    // merged by the ND head before defineJob), exactly as the
+    // production steps do via screenRequestFromParams.
+    expect(h.runRequests).toHaveLength(1);
+    expect(h.runRequests[0].universe).toBe("NASDAQ100");
+    expect(h.runRequests[0].filters).toEqual({
       minVolume: 1000,
       minPrice: 25,
       sector: "Technology",
     });
-    expect(h.childCommands[0].screenMode).toBe("non-deterministic");
-    expect(h.childCommands[0].shards[0].universe).toBe("NASDAQ100");
+    // The shard really ran: its full result was stored + delivered.
+    expect(h.stored).toHaveLength(1);
+    expect(h.delivered).toHaveLength(1);
+    const rows = await h.store.listJobsForChain("tenant-1", "job-2530");
+    expect(rows.map((r) => r.jobKey)).toContain("shard:NASDAQ100");
     // Audit: prompt + artifact + verdict, recorded before execution.
     expect(h.audits).toHaveLength(1);
     expect(h.audits[0].intent).toBe(ND_INTENT);
@@ -354,85 +407,96 @@ describe("runParentFlow dual-mode (#2530)", () => {
   });
 
   it("ND refusal path: invalid artifact → Failed collation, zero shards started, audit carries the reasons", async () => {
-    const h = makeParentHarness({ artifact: { filters: { dropTable: true } } });
-    const collation = await runParentFlow(
+    const h = makeAdapterParentHarness({ artifact: { filters: { dropTable: true } } });
+    const handle = await h.adapter.start(
       parentCommand({ screenMode: "non-deterministic", screenIntent: ND_INTENT }),
-      h.step,
-      h.deps,
-      h.childOps,
     );
-    expect(collation.lifecycle).toBe("Failed");
-    expect(collation.screenMode).toBe("non-deterministic");
-    expect(collation.error).toMatch(/filter/i);
-    expect(h.childCommands).toHaveLength(0);
+    // A refused artifact is a business refusal, not an infra
+    // error: the adapter settles "complete" with a Failed
+    // collation, exactly like the anchor's failed-run tests.
+    expect(handle.status).toBe("complete");
+    expect(h.parentStored).toHaveLength(1);
+    expect(h.parentStored[0].collation.lifecycle).toBe("Failed");
+    expect(h.parentStored[0].collation.screenMode).toBe("non-deterministic");
+    expect(h.parentStored[0].collation.error).toMatch(/filter/i);
+    expect(h.runRequests).toHaveLength(0);
+    expect(h.stored).toHaveLength(0);
+    expect(h.delivered).toHaveLength(0);
     expect(h.audits).toHaveLength(1);
     expect(h.audits[0].validation.ok).toBe(false);
     expect(h.audits[0].validation.reasons?.join(" ")).toMatch(/filter/i);
+    // The refusal still lands visible rows: the announce row
+    // (submitted, keyed by job id) and the failed parent leg
+    // (never a shard row — zero shards started).
+    const announceRow = await h.store.latestJob("tenant-1", "job-2530", "job-2530");
+    expect(announceRow?.status).toBe("submitted");
+    expect(JSON.parse(announceRow?.resultJson ?? "{}").jobId).toBe("job-2530");
+    const failedParent = await h.store.latestJob("tenant-1", "job-2530", "leg:parent");
+    expect(failedParent?.status).toBe("failed");
+    expect(JSON.parse(failedParent?.resultJson ?? "{}").detail).toMatch(/Workflow Failed: 0\/1 shards/);
+    const rows = await h.store.listJobsForChain("tenant-1", "job-2530");
+    expect(rows.map((r) => r.jobKey)).not.toContain("shard:NASDAQ100");
   });
 
   it("ND with the gate closed refuses before interpreting (direct workflow starts cannot bypass the flag)", async () => {
-    const h = makeParentHarness({ ndModeEnabled: false, artifact: { filters: {} } });
-    await expect(
-      runParentFlow(
-        parentCommand({ screenMode: "non-deterministic", screenIntent: ND_INTENT }),
-        h.step,
-        h.deps,
-        h.childOps,
-      ),
-    ).rejects.toThrow(/SCREENER_ND_MODE/);
+    const h = makeAdapterParentHarness({ ndModeEnabled: false, artifact: { filters: {} } });
+    const handle = await h.adapter.start(
+      parentCommand({ screenMode: "non-deterministic", screenIntent: ND_INTENT }),
+    );
+    // #4192: the dispatch throws before announce, and the
+    // adapter records that as "errored" (start never throws
+    // for a run failure) — the engine equivalent of the
+    // retired flow's /SCREENER_ND_MODE/ rejection.
+    expect(handle.status).toBe("errored");
+    expect((await h.adapter.status(handle.workflowId))?.status).toBe("errored");
     expect(h.interpretCalls).toHaveLength(0);
-    expect(h.childCommands).toHaveLength(0);
+    expect(h.runRequests).toHaveLength(0);
     expect(h.audits).toHaveLength(0);
+    expect(h.parentStored).toHaveLength(0);
+    expect(await h.store.listJobsForChain("tenant-1", "job-2530")).toHaveLength(0);
   });
 
   it("ND without an interpreter fails closed (no model seam, no run)", async () => {
-    const h = makeParentHarness({ ndModeEnabled: true });
-    await expect(
-      runParentFlow(
-        parentCommand({ screenMode: "non-deterministic", screenIntent: ND_INTENT }),
-        h.step,
-        h.deps,
-        h.childOps,
-      ),
-    ).rejects.toThrow(/interpreter/i);
-    expect(h.childCommands).toHaveLength(0);
+    const h = makeAdapterParentHarness({ ndModeEnabled: true });
+    const handle = await h.adapter.start(
+      parentCommand({ screenMode: "non-deterministic", screenIntent: ND_INTENT }),
+    );
+    expect(handle.status).toBe("errored");
+    expect((await h.adapter.status(handle.workflowId))?.status).toBe("errored");
+    expect(h.runRequests).toHaveLength(0);
+    expect(h.parentStored).toHaveLength(0);
   });
 
   it("an interpreter that throws is an infrastructure failure (the run errors; nothing executes)", async () => {
-    const h = makeParentHarness({
+    const h = makeAdapterParentHarness({
       interpreter: {
         interpret: async () => {
           throw new Error("model unavailable");
         },
       },
     });
-    await expect(
-      runParentFlow(
-        parentCommand({ screenMode: "non-deterministic", screenIntent: ND_INTENT }),
-        h.step,
-        h.deps,
-        h.childOps,
-      ),
-    ).rejects.toThrow(/model unavailable/);
-    expect(h.childCommands).toHaveLength(0);
+    const handle = await h.adapter.start(
+      parentCommand({ screenMode: "non-deterministic", screenIntent: ND_INTENT }),
+    );
+    expect(handle.status).toBe("errored");
+    expect((await h.adapter.status(handle.workflowId))?.status).toBe("errored");
+    expect(h.runRequests).toHaveLength(0);
     expect(h.audits).toHaveLength(0);
+    expect(h.parentStored).toHaveLength(0);
   });
 
   it("deterministic parity: no interpretation, no audit, command filters flow verbatim, mode recorded", async () => {
-    const h = makeParentHarness({ artifact: { filters: { minPrice: 999 } } });
-    const collation = await runParentFlow(
-      parentCommand({ filters: { sector: "Energy" } }),
-      h.step,
-      h.deps,
-      h.childOps,
-    );
-    expect(collation.lifecycle).toBe("ReportGenerated");
-    expect(collation.screenMode).toBe("deterministic");
+    const h = makeAdapterParentHarness({ artifact: { filters: { minPrice: 999 } } });
+    const handle = await h.adapter.start(parentCommand({ filters: { sector: "Energy" } }));
+    expect(handle.status).toBe("complete");
+    expect(h.parentStored).toHaveLength(1);
+    expect(h.parentStored[0].collation.lifecycle).toBe("ReportGenerated");
+    expect(h.parentStored[0].collation.screenMode).toBe("deterministic");
     expect(h.interpretCalls).toHaveLength(0);
     expect(h.audits).toHaveLength(0);
-    expect(h.childCommands).toHaveLength(1);
-    expect(h.childCommands[0].filters).toEqual({ sector: "Energy" });
-    expect(h.childCommands[0].screenMode).toBeUndefined();
+    expect(h.runRequests).toHaveLength(1);
+    expect(h.runRequests[0].filters).toEqual({ sector: "Energy" });
+    expect(h.runRequests[0].universe).toBe("NASDAQ100");
   });
 });
 
@@ -638,10 +702,10 @@ describe("tryStartScreenerWorkflow ND backstop (#2530)", () => {
 /* The golden-task pair: the same request through both modes           */
 /*                                                                     */
 /* The drives run the REAL door path into the REAL flows               */
-/* (InMemoryWorkflowAdapter over flow deps), with fakes only at        */
+/* (InMemoryWorkflowAdapter over engine deps), with fakes only at      */
 /* binding seams — the S18 acceptance rule. The fake interpreter       */
-/* sits at the flow-deps seam, exactly where production wires the      */
-/* gateway-backed one.                                                 */
+/* sits at the adapter-deps seam, exactly where production wires      */
+/* the gateway-backed one.                                             */
 /* ------------------------------------------------------------------ */
 
 import {
@@ -650,14 +714,12 @@ import {
   type GoldenTaskExecution,
 } from "../src/services/meshGoldenTasks";
 import { InMemoryMeshEvalStore } from "../src/data/inMemoryMeshEvalAdapter";
-import { InMemoryWorkflowAdapter } from "../src/workflows/inMemoryWorkflowAdapter";
 import { InMemoryMeshTraceStore } from "../src/data/inMemoryMeshTraceAdapter";
 import { recordWorkflowTraceHop } from "../src/observability/meshTrace";
 import {
   persistScreenerReportCanonical,
   type ReportDispatchContext,
 } from "../src/agents/orchestrator/reportDispatch";
-import type { ShardScreenResult } from "../src/workflows/screenerWorkflowFlow";
 
 function goldenScreenFullResult(universe: string) {
   return {

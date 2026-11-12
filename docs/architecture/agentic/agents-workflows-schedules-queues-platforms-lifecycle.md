@@ -648,7 +648,7 @@ path; the two converge only at #3550.
 
 | Family | Bespoke implementation today | Adoption | Status |
 |---|---|---|---|
-| Stock screens | the screener workflow family | #3550 | **Filed** — open, unstarted |
+| Stock screens | the screener workflow family (child-workflow flow retired 2026-11-12, #4192) | #3550 | **In progress** — S1 substrate merged (#4190); S2 cutover building (#4192, production screens dispatch through the engine) |
 | Options screens | the options screen workflows | #3551 | **Filed** — open, unstarted |
 | Goal + strategy screens | the goal/strategy screen paths | #3552 | **Filed** — open, unstarted |
 | Trading | the trading workflow family | #3553 | **Filed** — open, unstarted |
@@ -659,7 +659,12 @@ The adoption tracker is #3549 (one engine: re-base on the stage
 runner + uniform stage control). Until a family's row moves, that
 family's workflows do not have stages in the §4.1 sense at all:
 each runs its own workflow substrate with its own step code —
-exactly the duplication the adoptions retire.
+exactly the duplication the adoptions retire. The stock row has
+moved: its stages now execute on the engine under §4.3's reading
+(the six screener nodes, collation composed from persisted stage
+outputs), and the bespoke child-workflow flow is deprecated
+(`src/workflows/screenerWorkflowFlow.deprecated.ts`, successor
+the engine path via `ScreenerScreenWorkflow.run()`).
 
 ### 4.5 What this changes for the pipeline J-sequence (J1–J7)
 
