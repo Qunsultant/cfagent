@@ -823,11 +823,16 @@ describe("trading sub-tab interiors (#3047)", () => {
     const violations: string[] = [];
     const seen = new Set<string>();
     for (const [id, file] of Object.entries(CONFORMING_SUB_TABS)) {
-      const shell = clean(readFileSync(join(HERE, file), "utf8")).includes(
-        "<PageShell",
-      );
+      // A conforming file renders <PageShell or <PageTemplate (which
+      // renders PageShell — #3131; the template carries the shell).
+      const src = clean(readFileSync(join(HERE, file), "utf8"));
+      const shell =
+        src.includes("<PageShell") || src.includes("<PageTemplate");
       seen.add(id);
-      if (!shell) violations.push(`${id}: conforming map, no <PageShell in ${file}`);
+      if (!shell)
+        violations.push(
+          `${id}: conforming map, no <PageShell or <PageTemplate in ${file}`,
+        );
     }
     for (const [id, entry] of Object.entries(register.subTabs)) {
       seen.add(id);

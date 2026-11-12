@@ -26,7 +26,7 @@ const HUB_FILE = "src/client/ETradeTradingHub.tsx";
 const CHAT_FILE = "src/client/Chat.tsx";
 
 /** Routes whose panel file renders <PageTemplate> today. Wave 1 extends. */
-const CONFORMING_TEMPLATE_ROUTES = ["risk-analysis"];
+const CONFORMING_TEMPLATE_ROUTES = ["risk-analysis", "order"];
 
 type TemplateState =
   | "template"
@@ -205,6 +205,36 @@ describe("route template gate (#3136)", () => {
     }
     // No layout CSS: no className at all, no stylesheet import.
     expect(countOccurrences(src, "className")).toBe(0);
+    expect(src).not.toMatch(/\.css["']/);
+    // No bespoke card/header classes: Card + CardHeader come from the
+    // ui/ primitives, never from a local class.
+    expect(src).toContain('from "./components/ui"');
+    expect(src).toContain("<CardHeader");
+    expect(src).not.toContain("<PageShell");
+  });
+
+  it("OrderTicketPanel is conforming: slots used, one sanctioned className, no layout CSS", () => {
+    const src = readFileSync(
+      join(CLIENT_DIR, "OrderTicketPanel.tsx"),
+      "utf8",
+    );
+    // Slots used: title + scopeNote + contextStrip + queueRail —
+    // no kpiRibbon / actionBar props yet.
+    expect(src).toContain("<PageTemplate");
+    expect(countOccurrences(src, "<PageTemplate")).toBe(1);
+    expect(src).toContain('title="Order Ticket"');
+    expect(src).toContain("scopeNote=");
+    expect(src).toContain("contextStrip=");
+    expect(src).toContain("queueRail=");
+    for (const slot of ["kpiRibbon=", "actionBar="]) {
+      expect(src).not.toContain(slot);
+    }
+    // One className only: the sanctioned ui-footnote text utility on
+    // the "1. Edit the contracts…" footnote. The quote peek's ui-meta
+    // uses left with the peek (ContextStrip renders them).
+    expect(countOccurrences(src, "className")).toBe(1);
+    expect(src).toContain('className="ui-footnote"');
+    // No layout CSS: no stylesheet import.
     expect(src).not.toMatch(/\.css["']/);
     // No bespoke card/header classes: Card + CardHeader come from the
     // ui/ primitives, never from a local class.

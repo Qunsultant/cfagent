@@ -4,18 +4,20 @@ import {
   Button,
   Card,
   CardHeader,
+  ContextStrip,
   FieldShell,
   Flex,
   Grid,
   Notice,
   PageSection,
-  PageShell,
+  PageTemplate,
   Select,
   Stack,
   SummaryCard,
   TabPanel,
   Tabs,
   TextInput,
+  WorkCard,
 } from "./components/ui";
 import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
@@ -348,7 +350,34 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
   };
 
   return (
-    <PageShell title="Order Ticket">
+    <PageTemplate
+      title="Order Ticket"
+      scopeNote="Preview an order with the broker — nothing is submitted until you approve it"
+      contextStrip={
+        activeTab !== "risk" && orderQuote ? (
+          <ContextStrip
+            company={orderQuote.companyName}
+            price={safePriceFormat(orderQuote.lastPrice)}
+            change={
+              orderQuote.change !== undefined && orderQuote.change !== null
+                ? `${Number(orderQuote.change) >= 0 ? "+" : ""}${safeNumberFormat(orderQuote.change)} (${safeNumberFormat(orderQuote.changePercent)}%)`
+                : undefined
+            }
+            changeTone={
+              orderQuote.change !== undefined && orderQuote.change !== null
+                ? Number(orderQuote.change) >= 0
+                  ? "positive"
+                  : "negative"
+                : undefined
+            }
+            bidAsk={`Bid: ${safePriceFormat(orderQuote.bid)} / Ask: ${safePriceFormat(orderQuote.ask)}`}
+            status={orderQuote.quoteStatus}
+            source={orderQuote.source}
+          />
+        ) : undefined
+      }
+      queueRail={<TradingApprovalsQueue />}
+    >
       <Tabs
         idBase="order-ticket"
         ariaLabel="Order type"
@@ -370,15 +399,13 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
           <PageSection>
             <Grid columns={2} gap="2">
               {/* Left: Interactive Order Ticket Form */}
-              <Card padding="md">
-                <Stack gap="2">
-                {/* Issue #3669: broker + mode badges, as the portfolio
+              {/* Issue #3669: broker + mode badges, as the portfolio
                     branch has — the ticket used to show neither, so a
                     tenant could not tell which broker or mode an order
                     would use. The mode comes from the TEST/PROD
                     selection the hub passes in, not from a broker
                     status read (see hub orderTradingType). */}
-                <CardHeader
+                <WorkCard
                   title={`⚡ ${orderAssetClass === "options" ? "Options Order Ticket" : "Equity / ETF Order Ticket"}`}
                   subtitle={
                     orderAssetClass === "options"
@@ -407,7 +434,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                       </Button>
                     ) : undefined
                   }
-                />
+                >
 
                 {orderError && (orderAssetClass === "options" ? (
                   <Notice tone="danger" title="Options preview failed. No order was created or submitted.">
@@ -566,30 +593,6 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                       <Notice tone="info">
                         <span>🔒 Connect your {brokerLabel} account to fetch authenticated live market quotes.</span>
                       </Notice>
-                    )}
-                    {orderQuote && (
-                      <Card padding="sm">
-                        <Flex gap="2" align="center" wrap>
-                          <strong>{orderQuote.companyName}</strong>
-                          {orderQuote.quoteStatus && (
-                            <Badge tone={orderQuote.quoteStatus === "REALTIME" ? "success" : "neutral"} size="sm" dot>
-                              ● {orderQuote.quoteStatus}
-                            </Badge>
-                          )}
-                          <strong>{safePriceFormat(orderQuote.lastPrice)}</strong>
-                          {orderQuote.change !== undefined && orderQuote.change !== null ? (
-                            <Badge tone={Number(orderQuote.change) >= 0 ? "success" : "danger"} size="sm">
-                              {Number(orderQuote.change) >= 0 ? "+" : ""}{safeNumberFormat(orderQuote.change)} ({safeNumberFormat(orderQuote.changePercent)}%)
-                            </Badge>
-                          ) : (
-                            <span className="ui-meta">—</span>
-                          )}
-                          <span className="ui-meta">Bid: {safePriceFormat(orderQuote.bid)} / Ask: {safePriceFormat(orderQuote.ask)}</span>
-                          {orderQuote.source && (
-                            <Badge tone="accent">✓ {orderQuote.source}</Badge>
-                          )}
-                        </Flex>
-                      </Card>
                     )}
                   </Stack>
 
@@ -872,7 +875,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                   </Flex>
                   </Stack>
                 </form>
-              </Stack></Card>
+              </WorkCard>
 
               {/* Right: Security & Architecture Specs */}
               <Stack gap="2">
@@ -962,8 +965,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
             />
           </PageChromeContext.Provider>
         </TabPanel>
-        <TradingApprovalsQueue />
       </Stack>
-    </PageShell>
+    </PageTemplate>
   );
 }
