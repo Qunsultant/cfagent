@@ -149,12 +149,14 @@ describe("pipeline host wiring (#3543)", () => {
     // #3931 pin update (§7): the parameterized Yahoo technicals
     // job joins the plane — one job per data type, parameterized
     // by universe, never per-universe copies.
-    expect(pipelineJobIds()).toHaveLength(11);
-    expect(pipelineEnrichJobIds()).toHaveLength(7);
-    expect(pipelineAnalyzeJobIds()).toHaveLength(7);
-    expect(pipelineGenerateJobIds()).toHaveLength(7);
-    expect(pipelineDeliverJobIds()).toHaveLength(7);
-    expect(pipelineChainJobIds()).toHaveLength(7);
+    // #4193 pin update (§7): the S&P 400 Yahoo quotes job joins
+    // the plane - every stage family gains its sp400 member.
+    expect(pipelineJobIds()).toHaveLength(12);
+    expect(pipelineEnrichJobIds()).toHaveLength(8);
+    expect(pipelineAnalyzeJobIds()).toHaveLength(8);
+    expect(pipelineGenerateJobIds()).toHaveLength(8);
+    expect(pipelineDeliverJobIds()).toHaveLength(8);
+    expect(pipelineChainJobIds()).toHaveLength(8);
     const ids = [
       ...pipelineJobIds(),
       ...pipelineEnrichJobIds(),
