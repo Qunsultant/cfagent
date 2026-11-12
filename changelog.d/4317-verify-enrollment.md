@@ -1,0 +1,3 @@
+### Fixed
+
+- **Enrollment is verified, not assumed (#4317):** the CI-completion enqueue now reads the PR back after the mutation and **fails the job** when the PR is not in the merge queue. A green check used to prove only that the job ran — which is how green, labelled, `CLEAN` PRs sat unenrolled until someone nudged them (#4311, #4283, #4285, #4297, #4303). A draft is skipped rather than failed: `auto-ready-drafts` flips it once the gates are green, and that flip brings it back through the same enqueue. The enqueue response is printed either way, so a refusal is visible in the run log instead of swallowed. #autoclaw-001

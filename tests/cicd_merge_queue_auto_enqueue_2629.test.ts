@@ -70,7 +70,7 @@ describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
     // payload), so the PR is resolved by head branch and only when it carries
     // the auto-merge label. `gh pr list --json` exposes `id` (the node id) and
     // has no `nodeId` field — asking for one fails the job (observed on #4316).
-    expect(autoMergeTrustedYml).toContain("--json number,id,labels");
+    expect(autoMergeTrustedYml).toContain("--json number,id,isDraft,labels");
     expect(autoMergeTrustedYml).not.toContain("nodeId");
     expect(autoMergeTrustedYml).toContain(
       'gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH"',
@@ -96,5 +96,18 @@ describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
     expect(autoMergeTrustedYml).toContain(
       "GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}",
     );
+  });
+
+  it("verifies the enrollment and fails loudly when it did not land (#4317)", () => {
+    // A green job used to prove nothing; the read-back is the verdict.
+    expect(autoMergeTrustedYml).toContain("isInMergeQueue");
+    expect(autoMergeTrustedYml).toContain('if [ "$IN_QUEUE" != "true" ]');
+    expect(autoMergeTrustedYml).toContain("::error::");
+    expect(autoMergeTrustedYml).toContain("exit 1");
+  });
+
+  it("skips a draft instead of failing it — auto-ready flips drafts (#4317)", () => {
+    expect(autoMergeTrustedYml).toContain("isDraft");
+    expect(autoMergeTrustedYml).toContain("is a draft; auto-ready-drafts will flip it");
   });
 });
