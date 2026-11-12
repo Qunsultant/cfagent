@@ -581,7 +581,7 @@ describe("the enrich join computes rsi / macd / atr from persisted bars (#3931)"
         expect(def.elements).toContain(element);
       }
     }
-    expect(registry.list()).toHaveLength(12);
+    expect(registry.list()).toHaveLength(16);
   });
 
   it("the technicals join knob opts one job out of the history elements", () => {
@@ -869,7 +869,7 @@ describe("every chain folds the technicals node in (#3931)", () => {
         chain.deliverJobId,
       ]);
     }
-    expect(registry.list()).toHaveLength(12);
+    expect(registry.list()).toHaveLength(16);
   });
 
   it("the chain's technicals node runs with the chain's universe", () => {
@@ -881,7 +881,7 @@ describe("every chain folds the technicals node in (#3931)", () => {
         children?: Array<unknown>;
       };
     }>;
-    expect(raws).toHaveLength(12);
+    expect(raws).toHaveLength(16);
     const walk = (raw: (typeof raws)[number]) => {
       const nodes: Array<{ step?: string; params?: Record<string, unknown> }> = [];
       let node: (typeof raw)["root"] | undefined = raw.root;
