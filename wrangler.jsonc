@@ -386,8 +386,11 @@
     // 32-bit timer ceiling (MAX_TIMER_DELAY_MS), so the value means "not in
     // this session" on every engine instead of relying on integer wrap.
     "OPTIONS_FLOWS_POLL_MS": "3000000000000",
-    // Issue #4122 — cost: 60s -> 300s between latest-options polls.
-    "OPTIONS_LATEST_POLL_MS": "600000",
+    // Issue #4213 (owner direction: match it to the others) — cost:
+    // effectively off (3e12 ms, ~95 years), the same clamp as the
+    // options-flow cadence above. /api/options/latest still loads on first
+    // subscribe and on a manual refresh; only its periodic poll stops.
+    "OPTIONS_LATEST_POLL_MS": "3000000000000",
     "CHAT_AUTO_REFRESH_FLOOR_S": "30",
     // Issue #4213 — cost: effectively off (3e12 ms, ~95 years), same clamp
     // as the line above. A staged goal run no longer refreshes itself: the
