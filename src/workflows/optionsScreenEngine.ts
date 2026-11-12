@@ -127,6 +127,58 @@ export function optionsScreenJobId(runId: string): string {
   return `${OPTIONS_SCREEN_JOB_ID_PREFIX}:${runId}`;
 }
 
+/** The engine job id prefix: one job per strategy run (see the module doc). */
+export const STRATEGY_SCREEN_JOB_ID_PREFIX = "strategy-screen";
+
+/**
+ * The strategy screen job definition, as raw configuration for
+ * JobPipelineControl.defineJob: the SAME eight-node tree as the options
+ * job (one child per options stage, each one `options.runStage` step
+ * carrying its stageId, the root carrying the `options.runRoot` step),
+ * with a strategy identity — root kind "strategy-screen", name
+ * "Strategy screen <jobId>", job id `strategy-screen:<runId>`.
+ *
+ * Issue #4271 (#3552 S1): the strategy screen executes on the engine
+ * today only by riding the options job (its dispatch defined the
+ * options job with a strategyRequest shape). A dedicated definition
+ * makes the strategy screener a first-class J-engine workflow with its
+ * own job identity, pipeline record, and run history — visible as its
+ * own job in Workflow Runs. The stages, steps, and execution mode are
+ * identical to the options job by design: the strategy pipeline IS the
+ * eight-stage options pipeline run over strategy ports, and the
+ * dispatch request rides the raw config exactly as the options job's
+ * does (so a later per-stage control action can rebuild the run's step
+ * ports from it — S2's vocabulary/control work). No semantics change:
+ * the same stages run over the same ports; only the job identity
+ * changes.
+ */
+export function strategyScreenJobDefinition(jobId: string, request?: unknown): Record<string, unknown> {
+  return {
+    jobId,
+    name: `Strategy screen ${jobId}`,
+    ...(request !== undefined ? { request } : {}),
+    root: {
+      kind: "strategy-screen",
+      steps: [{ step: OPTIONS_SCREEN_ROOT_STEP }],
+      executionMode: {
+        concurrency: "sequential",
+        pacing: "batch",
+        delivery: "sync",
+        shape: "monolith",
+      },
+      children: OPTIONS_PIPELINE_STAGES.map((stageId) => ({
+        kind: stageId,
+        steps: [{ step: OPTIONS_SCREEN_STEP, params: { stageId } }],
+      })),
+    },
+  };
+}
+
+/** The engine job id for one strategy run. */
+export function strategyScreenJobId(runId: string): string {
+  return `${STRATEGY_SCREEN_JOB_ID_PREFIX}:${runId}`;
+}
+
 /**
  * The options screen job definition, as raw configuration for
  * JobPipelineControl.defineJob: a root with one child per options stage,
@@ -317,7 +369,9 @@ export async function runOptionsPanelViaEngine(
 ): Promise<PipelineResult> {
   const runId = `options-panel:service:${request.symbol}:${new Date().toISOString()}`;
   const storage = memoryStageStorage();
-  const outcome = await runOptionsScreenViaEngine(
+  // Issue #4271: the panel is a strategy screen — it defines the
+  // strategy job (strategy-screen:<runId>), not the options job.
+  const outcome = await runStrategyScreenViaEngine(
     {
       runId,
       userLogin,
@@ -495,7 +549,10 @@ export async function runOptionsPlainScreenViaEngine(
  * caller's requestRecord and saves via the scanRunStore when one is
  * bound (never failing the scan); the shapeReport stage returns the
  * result + save receipt, which is what this helper returns. The engine
- * stores are in-memory (no SQL handle on the caller).
+ * stores are in-memory (no SQL handle on the caller) unless the caller
+ * passes engineStores (Issue #4271: mirrors runOptionsPanelViaEngine —
+ * a SQL handle records the engine run durably in the host DO, so a
+ * later per-stage control action can address it).
  */
 export async function runOptionsScanViaEngine(
   source: OptionChainSource | undefined,
@@ -508,11 +565,20 @@ export async function runOptionsScanViaEngine(
     trigger?: "manual" | "scheduled";
     scanRunStore?: ScanRunStore;
     userLogin?: string;
+    /**
+     * Issue #4271: the engine stores the scan run records over. Absent,
+     * in-memory stores are built explicitly (the #4069 accepted-absent
+     * discipline) — a leg that has a SQL handle passes
+     * optionsEngineStoresFromSql(sql) instead.
+     */
+    engineStores?: OptionsEngineStores | null;
   } = {},
 ): Promise<OpportunityScanResult & { scanRunId?: string; persisted?: boolean }> {
   const runId = `options-scan:service:${new Date().toISOString()}`;
   const storage = memoryStageStorage();
-  const outcome = await runOptionsScreenViaEngine(
+  // Issue #4271: the scan is a strategy screen — it defines the
+  // strategy job (strategy-screen:<runId>), not the options job.
+  const outcome = await runStrategyScreenViaEngine(
     {
       runId,
       userLogin: options.userLogin,
@@ -541,6 +607,7 @@ export async function runOptionsScanViaEngine(
       }),
       claims: memoryStageClaims(),
       queue: null,
+      ...(options.engineStores ? { engineStores: options.engineStores } : {}),
     },
   );
   if (outcome.outcome !== "completed") {
@@ -570,14 +637,20 @@ export interface OptionsScreenEngineDeps {
 }
 
 /**
- * Route one options screen through the J engine: define the per-run job,
+ * Route one screen through the J engine: define the per-run job,
  * dispatch it synchronously, and map the settled run onto the outcome the
  * call sites already consume. The engine runId (generated by the engine)
- * and the options runId (the caller's, carried on the canonical row and
- * the stage artifacts) are distinct by design; the options runId is the
+ * and the screen runId (the caller's, carried on the canonical row and
+ * the stage artifacts) are distinct by design; the screen runId is the
  * identity the outcome and the downstream records carry.
+ *
+ * The job is the caller's: an options dispatch defines the options job
+ * (runOptionsScreenViaEngine), a strategy dispatch defines the strategy
+ * job (runStrategyScreenViaEngine, #4271). The dispatch body is shared —
+ * the two jobs differ only in identity, never in stages, steps, or
+ * execution.
  */
-export async function runOptionsScreenViaEngine(
+async function dispatchScreenViaEngine(
   params: {
     runId: string;
     userLogin?: string;
@@ -585,6 +658,8 @@ export async function runOptionsScreenViaEngine(
     trigger?: "manual" | "scheduled";
   },
   deps: OptionsScreenEngineDeps,
+  jobId: string,
+  definition: Record<string, unknown>,
 ): Promise<OptionsScreenWorkflowOutcome> {
   const engineStores = deps.engineStores ?? optionsEngineStoresInMemory();
   const stageRecords: OptionsStageRecord[] = [];
@@ -610,11 +685,10 @@ export async function runOptionsScreenViaEngine(
     steps: registry,
     invocation: "sync",
   });
-  const jobId = optionsScreenJobId(params.runId);
   // Issue #4066: the dispatch request rides the job definition's
   // rawConfig (persisted by defineJob) so a later per-stage control
   // action can rebuild this run's step ports from it.
-  await control.defineJob(optionsScreenJobDefinition(jobId, params.request));
+  await control.defineJob(definition);
   const dispatch = await control.runJob(jobId, { trigger: params.trigger ?? "manual" });
   if (dispatch.state === "completed") {
     return { outcome: "completed", runId: params.runId, stages: stageRecords, published };
@@ -665,4 +739,55 @@ export async function runOptionsScreenViaEngine(
       reason,
     };
   }
+}
+
+/**
+ * Route one options screen through the J engine: define the per-run
+ * options job, dispatch it synchronously, and map the settled run onto
+ * the outcome the call sites already consume.
+ */
+export async function runOptionsScreenViaEngine(
+  params: {
+    runId: string;
+    userLogin?: string;
+    request: unknown;
+    trigger?: "manual" | "scheduled";
+  },
+  deps: OptionsScreenEngineDeps,
+): Promise<OptionsScreenWorkflowOutcome> {
+  const jobId = optionsScreenJobId(params.runId);
+  return dispatchScreenViaEngine(
+    params,
+    deps,
+    jobId,
+    optionsScreenJobDefinition(jobId, params.request),
+  );
+}
+
+/**
+ * Issue #4271 — route one strategy screen through the J engine: define
+ * the per-run STRATEGY job (strategyScreenJobDefinition, job id
+ * `strategy-screen:<runId>`), dispatch it synchronously, and map the
+ * settled run onto the outcome the call sites already consume. The
+ * dispatch is identical to the options dispatch — the same eight
+ * stages, the same steps, the same ports — only the job identity
+ * differs, so a strategy screen is visible as its own job in Workflow
+ * Runs with its own pipeline record and run history.
+ */
+export async function runStrategyScreenViaEngine(
+  params: {
+    runId: string;
+    userLogin?: string;
+    request: unknown;
+    trigger?: "manual" | "scheduled";
+  },
+  deps: OptionsScreenEngineDeps,
+): Promise<OptionsScreenWorkflowOutcome> {
+  const jobId = strategyScreenJobId(params.runId);
+  return dispatchScreenViaEngine(
+    params,
+    deps,
+    jobId,
+    strategyScreenJobDefinition(jobId, params.request),
+  );
 }

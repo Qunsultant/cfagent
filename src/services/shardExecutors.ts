@@ -53,7 +53,7 @@ import {
   memoryStageClaims,
   memoryStageStorage,
 } from "../workflows/optionsScreenWorkflow";
-import { optionsEngineStoresFromSql, runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
+import { optionsEngineStoresFromSql, runStrategyScreenViaEngine } from "../workflows/optionsScreenEngine";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 import type { StageQueueSend } from "../workflows/stageQueueTransport";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -512,7 +512,9 @@ async function executeOptionsSymbol(
     // per-symbol rows to mas_opportunity_scans either.
     const shardRunId = `shard-scan:${chain.chainId}:${symbol}`;
     const shardStorage = memoryStageStorage();
-    const shardOutcome = await runOptionsScreenViaEngine(
+    // Issue #4271: a shard is a strategy screen — it defines the
+    // strategy job (strategy-screen:<runId>), not the options job.
+    const shardOutcome = await runStrategyScreenViaEngine(
       {
         runId: shardRunId,
         userLogin: chain.userLogin,
