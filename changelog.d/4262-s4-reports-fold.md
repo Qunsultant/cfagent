@@ -1,0 +1,3 @@
+### Changed
+
+- **What ran and what it produced, in one row (#4262 S4, option A):** the one run ledger now carries the reports read, so a report run's PDF / XLSX / CSV sit in the same row as its trigger, outcome and linkage. The three per-kind states are the Docs page's own component, unchanged: a recorded key links, a missing one is an honest "—", and a recorded leg failure keeps its reason (#2088). `?tab=docs` folds into the ledger as `?tab=schedules&view=runs&kind=reports` — the last separate run list is gone, and the run's details dialog is reachable from its ledger row. A report run the ledger already carries is attached by runId, never listed twice. #autoclaw-001

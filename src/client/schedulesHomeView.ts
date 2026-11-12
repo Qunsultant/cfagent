@@ -179,6 +179,13 @@ export function legacySchedulesRedirect(search: string): LegacySchedulesRedirect
   if (tab === "workflow-runs") {
     return { tab: SCHEDULES_HOME_TAB, view: "runs", params: { kind: "workflow" } };
   }
+  // Issue #4262 (S4): Docs & Reports was one row per run with its artifacts.
+  // The one ledger now carries both — the run and what it produced — so the
+  // address folds into it with the reports filter (existing links keep
+  // working, the issue's change-management rule).
+  if (tab === "docs") {
+    return { tab: SCHEDULES_HOME_TAB, view: "runs", params: { kind: "reports" } };
+  }
   if (
     tab === "platform-admin" &&
     view === "iaaa-admin" &&
