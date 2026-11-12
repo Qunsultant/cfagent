@@ -1177,7 +1177,7 @@ another program) — that rule is pinned in
 | Goal lifecycle audit events on every entry path (DO-side sink) | §7 O2 | DO-side sink in the mutation methods | S3 — landed (#3312 fixed; issue open until live proof) |
 | Per-tick budget accounting matches `onCron` exactly | §7 O3 | The consolidated tick IS `onCron` | S3 — landed |
 | `trigger` sits ALONGSIDE `triggeredBy` (O4 decision) | §7 O4 | `resolveLedgerTrigger` in `src/services/consolidatedScheduling.ts` | S1 — landed |
-| Retired Platform Admin scheduled-goals/jobs mounts removed (S2 half-done: tab list clean, render blocks remain) | §8.1 U-04/U-05 | — unreachable render blocks in `PlatformAdminPanel.tsx`; no live home — | **Filed #4110 (open)** |
+| Retired Platform Admin scheduled-goals/jobs mounts removed (S2 half-done: tab list clean, render blocks remain) | §8.1 U-04/U-05 | — blocks removed from `PlatformAdminPanel.tsx`; the schedules home is the only surface — | **#4110 — landed** |
 | Ledger / jobs / workflows / stages gaps from the operations doc | §9 / jobs-workflows-stages-01.md | — | **Filed #3640 (open)** + #3641–#3645 (open, unbuilt per owner direction) |
 | Seeded `opportunity-hunt` goal fails every firing (operation not registered) | §1.4 B-T3-07 | — no home — | **Filed #3652 (open)** |
 
@@ -1244,7 +1244,8 @@ evaluation, evaluation latency, ledger read latency.
 What stays open after S6 (the program does not close with this
 slice): the filed sub-issues #3393, #3394, #3313, #3312 (live
 proof only), #3361, #3640–#3645 (unbuilt per owner direction),
-#3652, #4110, #4124 (open); the Phase 3 item U-10 (Chat Scheduler
+#3652 (#4110 landed after S6 — see §9.7), #4124 (open); the Phase 2 item
+B-T3-07 (goal store → #3123) and the Phase 3 item U-10 (Chat Scheduler
 sub-view → #3122). What S6
 deliberately does NOT do: no deprecation rename (zero modules
 proven retired — see the S6 amendment), no firing-time, cron, or

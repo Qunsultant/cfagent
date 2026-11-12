@@ -29,8 +29,6 @@ import {
   type AdBannerConfig,
 } from "./adBannerConfig";
 import { AsyncJobsPanel } from "./AsyncJobsPanel";
-import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
-import { JobsPanel } from "./JobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
@@ -429,24 +427,12 @@ export function PlatformAdminPanel({
                 <AsyncJobsPanel embedded />
               </div>
             )}
-            {active === "scheduled-goals" && (
-              <div className="etrade-panel-section settings-scheduled-goals-section">
-                <div className="section-label-row">
-                  <span>Scheduled goals</span>
-                  <small>ScheduledAgent goals, ticks &amp; add-goal form</small>
-                </div>
-                <ScheduledGoalsPanel embedded />
-              </div>
-            )}
-            {active === "jobs" && (
-              <div className="etrade-panel-section">
-                <div className="section-label-row">
-                  <span>Jobs</span>
-                  <small>All scheduled jobs &amp; per-run results</small>
-                </div>
-                <JobsPanel embedded />
-              </div>
-            )}
+            {/* Issue #4110 (#3121 S6 comb): the scheduled-goals / jobs
+                outposts were folded into the schedules home in S2, so
+                this drawer mounts no panels for them — the left-nav
+                entries link straight to the home (nav-config.json
+                deep-link overrides) and the retired addresses redirect
+                there (legacySchedulesRedirect). */}
             {active === "provenance" && <ProvenanceSection />}
             {active === "api-keys" && (
               <div className="etrade-panel-section settings-api-keys-section">

@@ -1298,7 +1298,6 @@
       "values": [
         "ads",
         "background-tasks",
-        "scheduled-goals",
         "provenance",
         "api-keys",
         "tenants",
