@@ -2138,6 +2138,13 @@ export const MIGRATION_0057_JOB_DELIVERY_DATASETS: DataMigration = {
  * carry those prerequisites (applyMigrations sorts by version,
  * so list order does not matter).
  */
+/** D1 migration 0061 (#3310) — the dispatching schedule id on the pipeline instance. */
+export const MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID: DataMigration = {
+  version: 61,
+  name: "0061_job_pipeline_run_schedule_id",
+  sql: `ALTER TABLE job_pipeline_instances ADD COLUMN run_schedule_id TEXT;`,
+};
+
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -2396,6 +2403,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0058_PRODUCT_VERSIONS,
   MIGRATION_0059_RUN_LEDGER,
   MIGRATION_0060_RUN_LEDGER_OWNER,
+  MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
 ];
 
 function splitStatements(sqlText: string): string[] {

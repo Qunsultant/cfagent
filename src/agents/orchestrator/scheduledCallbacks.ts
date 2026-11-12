@@ -19,6 +19,8 @@ import {
   createOptionsDiscoveryPorts,
 } from "../../data/createOptionsDiscoveryPorts";
 import { resolveScheduledLogin, type ScreenerExecutionContext } from "./scheduleMaintenance";
+import { getScheduledAgentDoor } from "./meshDoors";
+import { workflowStageId } from "../../services/workflowStageSchedule";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { recordBlockingAudit } from "../../security/auditChain";
 import {
@@ -1029,5 +1031,82 @@ export async function sendScheduledReminder(ctx: ScheduledCallbacksContext, payl
     } catch {
       // Non-critical broadcast error
     }
+  }
+}
+
+/**
+ * Issue #3121 #3310 — the per-stage workflow firing callback
+ * (internal-only, recorded). An SDK alarm on a stage-schedule
+ * carries the stage address (jobId + nodePath + stageId) and the
+ * schedule id; the delegate dispatches the scoped run through
+ * the ScheduledAgent door (`runPipelineStage`) and reports the
+ * run id as the descriptor, so the wrapper's per-run row and the
+ * engine's terminal record join on the same run. Dispatch
+ * enforcement runs first (#2331 slice 2): a firing with no
+ * identity is skipped, never run. A retired or missing stage
+ * fails the firing with the named refusal (the engine's
+ * assertScopeNotRetired) — returned as a failure outcome, never
+ * thrown, so the alarm does not retry a stage that can never run.
+ * The callback never throws for a failed or skipped run (the
+ * #2964 contract: platform callback retry is not used for
+ * scheduled jobs).
+ */
+export async function runWorkflowStage(
+  ctx: ScheduledCallbacksContext,
+  payload?: {
+    jobId?: string;
+    nodePath?: string;
+    stageId?: string;
+    scheduleId?: string;
+    trigger?: "manual" | "scheduled";
+    userLogin?: string;
+  },
+  schedule?: { id?: unknown },
+): Promise<ScheduledCallbackOutcome> {
+  const jobId = typeof payload?.jobId === "string" ? payload.jobId.trim() : "";
+  const nodePath = typeof payload?.nodePath === "string" ? payload.nodePath : "";
+  if (!jobId) {
+    return { outcome: "failure", error: "A stage firing requires a jobId naming its workflow." };
+  }
+  if (!nodePath) {
+    return { outcome: "failure", error: "A stage firing requires a nodePath naming its stage." };
+  }
+  const trigger = payload?.trigger === "manual" ? "manual" : "scheduled";
+  const savedContext = await ctx.getScreenerExecutionContext();
+  const userLogin = resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin);
+  const dispatch = await resolveCallbackDispatch(ctx, userLogin, false);
+  if ("denied" in dispatch) {
+    auditCallbackDenial(ctx, "runWorkflowStage", dispatch);
+    return { outcome: "skipped", detail: `dispatch denied (${dispatch.reason})` };
+  }
+  const scheduleId =
+    (typeof payload?.scheduleId === "string" && payload.scheduleId) ||
+    (typeof schedule?.id === "string" ? schedule.id : undefined);
+  const stageId =
+    typeof payload?.stageId === "string" && payload.stageId
+      ? payload.stageId
+      : workflowStageId(nodePath);
+  try {
+    const door = getScheduledAgentDoor(ctx.env);
+    const result = await door.runPipelineStage(jobId, {
+      nodePath,
+      userLogin: dispatch.login,
+      ...(scheduleId ? { scheduleId } : {}),
+      trigger,
+    });
+    if (result.state === "failed" || result.error) {
+      return {
+        outcome: "failure",
+        descriptor: result.runId,
+        error: result.error ?? `Stage run ${result.runId} failed.`,
+      };
+    }
+    return {
+      outcome: "success",
+      descriptor: result.runId,
+      detail: `stage ${stageId} of job ${jobId} ran as ${result.runId}`,
+    };
+  } catch (err) {
+    return { outcome: "failure", error: err instanceof Error ? err.message : String(err) };
   }
 }

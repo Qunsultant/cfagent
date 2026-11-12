@@ -37,6 +37,10 @@ export interface ScheduleListItem {
   paused?: boolean;
   pausedAt?: string;
   nextRun?: number;
+  /** Issue #3121 #3310 — the unified kind, and the workflow + stage a stage-schedule names. */
+  kind?: string;
+  jobId?: string;
+  stageId?: string;
 }
 
 /** A schedule detail: the raw SDK schedule, or a paused list item. */
@@ -412,6 +416,21 @@ export async function createSchedule(
 ): Promise<{ success?: boolean; schedule?: ScheduleListItem; error?: string }> {
   return api<{ success?: boolean; schedule?: ScheduleListItem; error?: string }>(
     "/api/schedules/create",
+    {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+/** Create a stage-schedule (POST /api/schedules/workflow-stages, #3310). No create form exists on the Schedules home (#2329) — creation is API + agent channels. */
+export async function createStageSchedule(
+  body: { jobId: string; nodePath: string; scheduleType: "cron" | "interval"; cron?: string; intervalSeconds?: number; reason?: string },
+  headers?: Record<string, string>,
+): Promise<{ success?: boolean; schedule?: ScheduleListItem; error?: string }> {
+  return api<{ success?: boolean; schedule?: ScheduleListItem; error?: string }>(
+    "/api/schedules/workflow-stages",
     {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },

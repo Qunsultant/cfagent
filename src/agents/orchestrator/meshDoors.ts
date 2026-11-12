@@ -119,6 +119,7 @@ import type {
   JobInstanceRecord,
   JobScheduleConfig,
 } from "../../data/jobPipelinePorts";
+import type { JobStatusView } from "../../services/jobPipelineEngine";
 import {
   resolveFeedJob,
   type FeedJobSurfaceView,
@@ -238,9 +239,19 @@ export interface ScheduledAgentDoorStub {
     opts?: { userLogin?: string },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
   pausePipelineJob(jobId: string): Promise<JobInstanceRecord>;
+  /** Issue #3121 #3310 — the stage registry read for the stages adapter: one job's status view (carries its definition). */
+  getPipelineJobStatus(jobId: string): Promise<JobStatusView>;
   resumePipelineJob(
     jobId: string,
     opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
+  // Issue #3121 #3310 — run one pipeline job stage on its own
+  // schedule: the scoped dispatch (scopePath = the stage's node
+  // path) with the dispatching schedule id threaded for the
+  // terminal run record's linkage.
+  runPipelineStage(
+    jobId: string,
+    opts?: { nodePath?: string; userLogin?: string; scheduleId?: string; trigger?: "manual" | "scheduled" },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
   cancelPipelineJob(jobId: string): Promise<JobInstanceRecord>;
   retryPipelineJob(

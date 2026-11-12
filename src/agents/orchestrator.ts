@@ -76,6 +76,12 @@ import {
   executeAgentScheduleAction,
   nlqPortToAgentSdkAdapter,
 } from "../services/agentScheduleCapability";
+import {
+  createWorkflowStageScheduleAdapter,
+  type WorkflowStageRegistry,
+} from "../services/workflowStageSchedule";
+import { getScheduledAgentDoor } from "./orchestrator/meshDoors";
+import { makeRunScheduleCallback, makeScheduleAlarmsPort } from "./routes/schedules";
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
 import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
 import { handleSettingsWebhook } from "./orchestrator/settingsWebhook";
@@ -83,7 +89,7 @@ import { createStockCopilotActivityPort } from "../data/createStockCopilotStoreP
 import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } from "./orchestrator/scheduledTasksObserve";
 import { declareStockCopilotTasks, type ScheduledTasksCopilotContext } from "./orchestrator/scheduledTasksCopilot";
 import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
-import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, sendScheduledReminder, type ScheduledCallbackOutcome, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
+import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, runWorkflowStage, sendScheduledReminder, type ScheduledCallbackOutcome, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
 import { recordScheduleCallbackRun } from "./orchestrator/scheduleCallbackRunRecords";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
 import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
@@ -1095,6 +1101,25 @@ export class OrchestratorAgent extends PortThink {
     // paths). No principal is passed to the A2A ops: A2A actions
     // carry no principal login today (#4143), so they refuse
     // fail-closed until the envelope carries one.
+    // Issue #3121 #3310 — the stages adapter joins the same
+    // capability instance: the schedule.* ops accept kind
+    // "workflow-stage" (with jobId + nodePath) on the same PDP /
+    // approval / ledger path as the sdk ops, never a second one.
+    const stageRegistry: WorkflowStageRegistry = {
+      getDefinition: async (jobId) => {
+        try {
+          const door = getScheduledAgentDoor(this.env);
+          const view = await door.getPipelineJobStatus(jobId);
+          return view.definition ?? null;
+        } catch {
+          return null;
+        }
+      },
+    };
+    const unifiedStore = createUnifiedSchedulePorts({
+      sql: this.ctx.storage.sql,
+      storage: this.ctx.storage,
+    });
     const agentScheduleCapability = createAgentScheduleExecutorDepsForDo(
       this.env,
       this.ctx.storage.sql,
@@ -1104,8 +1129,17 @@ export class OrchestratorAgent extends PortThink {
           this.nlqSchedulingPort(),
           // Issue #3122 (store integration, #3123): the armed alarm is
           // adopted into the unified store (record id = alarm id).
-          createUnifiedSchedulePorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).unifiedSchedules,
+          unifiedStore.unifiedSchedules,
         ),
+        stages: createWorkflowStageScheduleAdapter({
+          // The management service's store (the sync one, as the
+          // routes use) — the same table the sdk adoptions write.
+          store: unifiedStore.unifiedSchedulesSync,
+          alarms: makeScheduleAlarmsPort(this),
+          registry: stageRegistry,
+          runCallback: makeRunScheduleCallback(this),
+          nowIso: () => new Date().toISOString(),
+        }),
       },
     );
     const data = await dispatchOrchestratorA2A(this.env, body, {
@@ -1509,6 +1543,30 @@ export class OrchestratorAgent extends PortThink {
         await autoRenewETradeTokens(this.scheduledCallbacksContext(), payload);
         return { outcome: "success", descriptor: "token renewal complete" };
       },
+    );
+  }
+
+  // Issue #3121 #3310: extracted to ./orchestrator/scheduledCallbacks.ts (runWorkflowStage);
+  // the method records its own run (recordScheduleCallbackRun,
+  // mirroring the four creatable callbacks) — the per-stage
+  // workflow firing callback, internal-only. The delegate reports
+  // the run id as its descriptor; a throw records failure and
+  // rethrows (the delegate itself never throws for a failed or
+  // skipped run — see the #2964 contract in scheduledCallbacks).
+  async runWorkflowStage(payload?: {
+    jobId?: string;
+    nodePath?: string;
+    stageId?: string;
+    scheduleId?: string;
+    trigger?: "manual" | "scheduled";
+    userLogin?: string;
+  }, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "runWorkflowStage",
+      payload,
+      schedule,
+      () => runWorkflowStage(this.scheduledCallbacksContext(), payload, schedule),
     );
   }
 

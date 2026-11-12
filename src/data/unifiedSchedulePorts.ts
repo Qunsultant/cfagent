@@ -49,7 +49,7 @@
 export const UNIFIED_SCHEDULES_TABLE = "unified_schedules";
 
 /**
- * The four schedule kinds, each declared exactly once (3123-P01).
+ * The five schedule kinds, each declared exactly once (3123-P01).
  * - screen: an Agents SDK alarm schedule (creatable callbacks).
  * - goal: a tick-polled ScheduledAgent goal (DEFAULT_SCHEDULES + user goals).
  * - followup: an async-job follow-up chain step. Followup rows are
@@ -57,12 +57,17 @@ export const UNIFIED_SCHEDULES_TABLE = "unified_schedules";
  *   (S4 design); the kind exists so the management service can
  *   name the kind explicitly instead of falling through silently.
  * - worker-duty: a Worker cron duty from WORKER_CRON_TRIGGERS_INVENTORY.
+ * - workflow-stage: one pipeline job stage on its own schedule
+ *   (#3310) — armed through the SDK alarm substrate with the
+ *   internal-only `runWorkflowStage` callback, managed through the
+ *   one management service like a screen.
  */
 export const UNIFIED_SCHEDULE_KINDS = [
   "screen",
   "goal",
   "followup",
   "worker-duty",
+  "workflow-stage",
 ] as const;
 
 export type UnifiedScheduleKind = (typeof UNIFIED_SCHEDULE_KINDS)[number];

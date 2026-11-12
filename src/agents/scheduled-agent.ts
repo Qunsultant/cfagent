@@ -935,6 +935,38 @@ export class ScheduledAgent extends PortThink {
   }
 
   /**
+   * Issue #3121 #3310 — run one pipeline job stage now and settle
+   * it; the scoped dispatch (scopePath = the stage's node path)
+   * with the dispatching schedule id threaded, so the terminal run
+   * record joins to the schedule and to the workflow instance.
+   * Same door idiom as runPipelineJob: build control, ensure,
+   * dispatch. The engine refuses a retired scope (fail-closed).
+   */
+  async runPipelineStage(
+    jobId: string,
+    opts?: { nodePath?: string; userLogin?: string; scheduleId?: string; trigger?: "manual" | "scheduled" },
+  ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    await ensureScheduledAgentPipelineJobs(ctx, control);
+    const dispatch = await control.runJob(jobId, {
+      trigger: opts?.trigger ?? "scheduled",
+      scopePath: opts?.nodePath ?? "",
+      ...(opts?.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+    });
+    if (!dispatch.completion) {
+      return { jobId, runId: dispatch.runId, state: dispatch.state };
+    }
+    const outcome = await dispatch.completion;
+    return {
+      jobId,
+      runId: outcome.runId,
+      state: outcome.state,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    };
+  }
+
+  /**
    * Reconfigure one pipeline job (#3530 scheduling-config): the
    * patch merges into the stored raw config through the engine's
    * configureJob — the schedule route's write path. Same door

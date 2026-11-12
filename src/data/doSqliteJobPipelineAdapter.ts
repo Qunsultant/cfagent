@@ -53,6 +53,7 @@ export const JOB_PIPELINE_INSTANCE_COLUMNS: Record<keyof JobInstanceRow & string
   currentRunId: "current_run_id",
   runStartedAt: "run_started_at",
   runTrigger: "run_trigger",
+  runScheduleId: "run_schedule_id",
   checkpointJson: "checkpoint_json",
   stageCheckpointJson: "stage_checkpoint_json",
   stageDesiredJson: "stage_desired_json",
@@ -89,6 +90,7 @@ export const JOB_PIPELINE_INSTANCES_DDL = `CREATE TABLE IF NOT EXISTS ${JOB_PIPE
       current_run_id TEXT,
       run_started_at TEXT,
       run_trigger TEXT,
+      run_schedule_id TEXT,
       checkpoint_json TEXT,
       stage_checkpoint_json TEXT,
       stage_desired_json TEXT,
@@ -110,15 +112,45 @@ export const JOB_PIPELINE_ARTIFACTS_INDEX_DDL = `CREATE INDEX IF NOT EXISTS idx_
  * The pipeline store's first framework migration: v1 is the
  * tables exactly as migration 0046 declares them — IF NOT
  * EXISTS, so an instance converges on first managed ensure.
- * A future pipeline-schema change rides as v2, never as an
- * edit to this migration's `up`.
+ * v1's `up` is FROZEN at the 0046 shape (inline, never the
+ * live DDL consts above): the consts are the CURRENT shape
+ * and change with the schema, while a migration's `up` is
+ * history and must never change.
+ *
+ * Later columns do NOT ride as a v2 framework migration:
+ * the framework's `up` is raw SQL only, and SQLite has no
+ * `ADD COLUMN IF NOT EXISTS` — a v2 ALTER would fail on any
+ * table the live const (or a legacy ensure) already created
+ * with the column. Columns arrive via the probed
+ * additive-column pattern in ensureSchema below (the
+ * doSqliteJobRunRecordAdapter §4 precedent): PRAGMA
+ * table_info, ALTER only when missing, in BOTH modes, so
+ * every residency and every legacy→managed switch converges.
  */
 export const JOB_PIPELINE_SCHEMA_MIGRATION: DoSchemaMigration = {
   version: 1,
   name: "0001_job_pipeline",
   up: [
-    JOB_PIPELINE_DEFINITIONS_DDL,
-    JOB_PIPELINE_INSTANCES_DDL,
+    `CREATE TABLE IF NOT EXISTS ${JOB_PIPELINE_DEFINITIONS_TABLE} (
+      job_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      definition_json TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS ${JOB_PIPELINE_INSTANCES_TABLE} (
+      job_id TEXT PRIMARY KEY,
+      state TEXT NOT NULL,
+      desired_state TEXT NOT NULL,
+      current_run_id TEXT,
+      run_started_at TEXT,
+      run_trigger TEXT,
+      checkpoint_json TEXT,
+      stage_checkpoint_json TEXT,
+      stage_desired_json TEXT,
+      last_error TEXT,
+      updated_at TEXT NOT NULL
+    )`,
     JOB_PIPELINE_ARTIFACTS_DDL,
     JOB_PIPELINE_ARTIFACTS_INDEX_DDL,
   ],
@@ -176,6 +208,7 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     currentRunId: record.currentRunId,
     runStartedAt: record.runStartedAt,
     runTrigger: record.runTrigger,
+    runScheduleId: record.runScheduleId,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -192,6 +225,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     currentRunId: row.currentRunId,
     runStartedAt: row.runStartedAt,
     runTrigger: row.runTrigger as JobInstanceRecord["runTrigger"],
+    runScheduleId: row.runScheduleId ?? null,
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,
@@ -224,12 +258,28 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
   private ensureSchema(): void {
     if (this.options.schemaMigrationMode === "managed") {
       applyDoSchemaMigrations(this.sql, "job_pipeline", [JOB_PIPELINE_SCHEMA_MIGRATION]);
-      return;
+    } else {
+      this.sql.exec(JOB_PIPELINE_DEFINITIONS_DDL);
+      this.sql.exec(JOB_PIPELINE_INSTANCES_DDL);
+      this.sql.exec(JOB_PIPELINE_ARTIFACTS_DDL);
+      this.sql.exec(JOB_PIPELINE_ARTIFACTS_INDEX_DDL);
     }
-    this.sql.exec(JOB_PIPELINE_DEFINITIONS_DDL);
-    this.sql.exec(JOB_PIPELINE_INSTANCES_DDL);
-    this.sql.exec(JOB_PIPELINE_ARTIFACTS_DDL);
-    this.sql.exec(JOB_PIPELINE_ARTIFACTS_INDEX_DDL);
+    // Issue #3310 — `run_schedule_id`, added when missing so
+    // existing tables upgrade in place (the probed
+    // additive-column pattern from doSqliteJobRunRecordAdapter).
+    // Runs in BOTH modes, after the migration / CREATE branch:
+    // managed v1 is frozen at the 0046 shape (no column), legacy
+    // CREATE is a no-op on existing tables, and the production
+    // default is legacy (callers pass no options) — without this
+    // probe an existing DO table would never gain the column and
+    // instance saves would fail.
+    const cols = Array.from(
+      this.sql.exec(`PRAGMA table_info(${JOB_PIPELINE_INSTANCES_TABLE})`),
+    ) as Array<{ name?: unknown }>;
+    const names = new Set(cols.map((c) => String(c?.name ?? "")));
+    if (!names.has("run_schedule_id")) {
+      this.sql.exec(`ALTER TABLE ${JOB_PIPELINE_INSTANCES_TABLE} ADD COLUMN run_schedule_id TEXT`);
+    }
   }
 
   readonly definitions = {

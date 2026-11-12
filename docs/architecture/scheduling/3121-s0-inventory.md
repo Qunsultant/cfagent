@@ -203,6 +203,35 @@
   file is deleted in S6; no firing time, cron expression, or payload
   changes. #3121 itself stays open: deploy verification, live proof,
   and the §15 completion report are still owed after S6 merges.
+- **#3310 amendment (Slice #3310, #3121):** one workflow stage can
+  now be scheduled on its own — a fifth unified-store kind
+  (`workflow-stage`, record id = alarm id, the #3123 screen
+  precedent) whose firing is the internal-only callback
+  `runWorkflowStage` (recorded via the #2964/#3788 wrapper, never
+  agent-creatable): SDK alarm → OrchestratorAgent host method →
+  ScheduledAgent door `runPipelineStage` → `runJob` scoped to the
+  stage, with the dispatching schedule id threaded through the
+  engine and stamped on the terminal record (`run_schedule_id`,
+  probed ADD COLUMN — the DO migration framework cannot express a
+  conditional ADD COLUMN, so the column rides `ensureSchema` in
+  both modes; D1 keeps versioned v59) alongside `workflowId` (the
+  pipeline run id) and explicit-null `asyncJobId`. Creation is one
+  route (`POST /api/schedules/workflow-stages`) plus the #3122
+  capability (`workflow-stage` kind, PDP + approval gate +
+  provenance + ledger) plus the `schedule.*` A2A ops (optional
+  `kind` arg, no new ops); pause/resume/trigger/delete/update flow
+  through the existing `/:id/*` routes, and the Schedules home
+  lists stage-schedules (workflow + stage named). The config-declared
+  node schedules keep firing through the Think declarations
+  (unchanged); their runs now stamp the Think task id as
+  `scheduleId`. What #3310 does NOT do: no create form on the home
+  (#2329 — creation is API + agent channels), no unification of
+  Think declarations into the unified store, no whole-workflow
+  schedules in the unified store, no stage-scheduling for a
+  workflow with no stage registry, no NLQ planner support for
+  stage-schedules — each filed as an [Out-of-Scope] sub-issue under
+  #3310 (Qunsultant/cfagent#4229, #4230, #4231, #4232, #4233). The §9 rows (§9.2 surfaces, §9.4 firing, §9.5 ledger) now
+  read landed; #3310 itself stays open until live proof.
 
 ## 1. Re-verified inventory (fresh main)
 
@@ -1092,6 +1121,7 @@ no home and no filed issue is a defect in the map.
 | Unified Jobs UI (goals + schedules + crons, read-only merge) | §1.3 | `JobsPanel` over `listGoals` + `listAllRuns` (the one merged ledger read) | S0 — preserved (reads the one merged ledger, GET `/api/ledger/runs`) |
 | Read-only run history (`JobsPanel`, Autopilot, `WorkflowRunsPanel`) | §1.3 | The one merged read (`GET /api/ledger/runs`) | S1/S2 — landed; #3123 — landed |
 | Preview-trade candidate prefill from the schedules home | S2 (§8.3) | Shell handoff — `candidateToTradeContext` + Chat `pendingOrderContext`, consumed by the hub's order handler | **#3361 — landed** |
+| Stage-schedules listed on the Schedules home (workflow + stage named; pause/resume/trigger/delete/detail) | S1 (§1.3) | `?tab=schedules&view=list` (`SchedulesPanel` generic rows) | #3310 — landed |
 
 ### 9.3 Tick-polled goal behaviors (B-T3)
 
@@ -1125,6 +1155,7 @@ no home and no filed issue is a defect in the map.
 | Per-schedule audit events (8, B-T2-06 funnel) | B-T2-06 | `SCHEDULE_LIFECYCLE_AUDIT_EVENTS` + `ctx.audit` | S1 (map); S2 — landed |
 | Per-run records for creatable callbacks + manual triggers | B-T2-07 | `recordScheduleCallbackRun` → `job_run_records` | S1 — landed |
 | Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | `recordScheduleCallbackRun` → `job_run_records` | #3394 — landed (recording via #3788 wrappers; joinability proven per callback, SDK + no-schedule explicit nulls + route exactly-once) |
+| Per-stage workflow firing: SDK alarm → `runWorkflowStage` → `runPipelineStage` → `runJob` scoped to the stage | B-T2-07 | `runWorkflowStage` (`INTERNAL_RECORDED_SCHEDULE_CALLBACKS`, recorded via #3788 wrapper) + `runPipelineStage` door | #3310 — landed |
 | Baseline reconciliation on agent start | B-T2-08 | `removeUnownedBaselineSchedules` | S2 — landed |
 | Renewal (`0 3`), tick (`*/30`), retention (`0 4`) incl. #2331 gate + #2037 trace | B-T1-01..03 | `scheduled()` dispatch → named entry points (`src/services/consolidatedCronEntries.ts`) | S5 — landed |
 | Piggyback research guard (#354) + retention constants | B-T1-04..05 | `researchScheduleGuard.ts` + `storageRetention.ts` | S5 — landed (preserved verbatim, guards unchanged) |
@@ -1141,6 +1172,7 @@ no home and no filed issue is a defect in the map.
 | `job_run_records` carries the §4 columns on every new row | B-L-01 | `buildJobRunRecord` + `normalizeJobRunRecord` | S1 — landed |
 | `mas_async_jobs` linkage (no §4 columns; payload stamping) | B-L-02 | Follow-up payload linkage | S4 — landed (payload/result stamping); #3313 — landed (outcome stamping) |
 | `mas_opportunity_scans` joinability | B-L-03 | `SqlScanRunStore` + `updateLedgerLinkage` | #3314 — landed |
+| Pipeline terminal records stamp the dispatching schedule id (`run_schedule_id`) + workflow id | B-L-01 | `runJob({scheduleId})` → `recordTerminal` (probed ADD COLUMN; D1 v59) | #3310 — landed |
 | Provenance on schedule payloads | B-L-04 | `buildScheduleProvenance` et al. | S1/S3 — landed |
 
 ### 9.6 URL inventory (§8)
@@ -1243,7 +1275,7 @@ evaluation, evaluation latency, ledger read latency.
 
 What stays open after S6 (the program does not close with this
 slice): the filed sub-issues #3393, #3394, #3314, #3313, #3312 (live
-proof only), #3640–#3645 (unbuilt per owner direction),
+proof only), #3310 (live proof only), #3640–#3645 (unbuilt per owner direction),
 #3652 (#4110 landed after S6 — see §9.7), #4124 (open), #3361 (landed — see §9.2); the Phase 2 item
 B-T3-07 (goal store → #3123) and the Phase 3 item U-10 (Chat Scheduler
 sub-view → #3122). What S6

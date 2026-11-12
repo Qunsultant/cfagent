@@ -646,6 +646,7 @@ export async function dispatchScheduledPipelineJob(
   ctx: ScheduledTasksPipelineContext,
   jobId: string,
   scopePath: string,
+  scheduleId?: string,
 ): Promise<JobDispatchResult | null> {
   const serviceLogin = getServiceUserLogin(ctx.env) ?? undefined;
   const control = createScheduledAgentPipelineControl(ctx, serviceLogin);
@@ -653,6 +654,10 @@ export async function dispatchScheduledPipelineJob(
   const dispatch = await control.runJob(jobId, {
     trigger: "scheduled",
     ...(scopePath ? { scopePath } : {}),
+    // Issue #3310 — the dispatching schedule's id, threaded so the
+    // terminal run record joins to it. On the Think path the
+    // registration identity is the Think task id.
+    ...(scheduleId ? { scheduleId } : {}),
   });
   // Async delivery is the feed jobs' default: the run proceeds on
   // the host's behalf; settle it in the background of the firing
@@ -799,7 +804,7 @@ export async function declarePipelineTasks(
     tasks[taskId] = {
       schedule,
       handler: async (_taskCtx: ThinkScheduledTaskContext): Promise<void> => {
-        await dispatchScheduledPipelineJob(ctx, spec.jobId, spec.nodePath).catch(
+        await dispatchScheduledPipelineJob(ctx, spec.jobId, spec.nodePath, taskId).catch(
           () => {
             // Best-effort at the declaration boundary (see
             // dispatchScheduledPipelineJob): the run's records

@@ -408,6 +408,10 @@
  * entries (429 measured on main before this slice); the
  * delegation sequence is unchanged (same handler, same
  * position).
+ * Issue #3121 #3310 added one more — POST
+ * /api/schedules/workflow-stages (in handleSchedulesRoutes,
+ * immediately before the generic create route) — bringing the
+ * pinned inventory to 448 entries.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -984,6 +988,9 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
   "handleSchedulesRoutes :: endsWith(\"/trigger\")",
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
+  // Issue #3121 #3310 — the stage-schedule create route, placed
+  // immediately before the generic create route it sits next to.
+  "handleSchedulesRoutes :: endsWith(\"/schedules/workflow-stages\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/create\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/trigger-screen\")",

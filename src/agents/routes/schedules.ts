@@ -102,6 +102,7 @@ import type { DatabaseORM } from "../../orm";
 import type { AgentName, AgentScheduleItem, Env } from "../../types";
 import {
   adoptAgentSdkScheduleRecord,
+  agentScheduleProvenance,
   createAgentScheduleExecutorDepsForDo,
   createAgentSchedulePdpDeps,
   decidePendingScheduleApproval,
@@ -112,7 +113,14 @@ import {
   type AgentScheduleActionResult,
   type AgentSdkScheduleAdapter,
   type AgentSdkTiming,
+  type AgentWorkflowStageScheduleAdapter,
 } from "../../services/agentScheduleCapability";
+import {
+  createWorkflowStageScheduleAdapter,
+  validateWorkflowStageScheduleInput,
+  type WorkflowStageRegistry,
+} from "../../services/workflowStageSchedule";
+import { getScheduledAgentDoor } from "../orchestrator/meshDoors";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { scheduleWebhookFollowupBodySchema } from "../../api/ingressSchemas";
 import {
@@ -240,6 +248,45 @@ export function makeRunScheduleCallback(
 }
 
 /**
+ * Issue #3121 #3310 — the one alarms-port construction for the
+ * unified management service: the SDK scheduler surface
+ * (list/get/cancel/arm) over the class's Agent methods. The routes
+ * and the A2A capability instance share it, so the two never drift
+ * into different arming behavior.
+ */
+export function makeScheduleAlarmsPort(
+  scheduling: Pick<
+    SchedulesRouteContext,
+    "listSchedules" | "getScheduleById" | "cancelSchedule" | "schedule" | "scheduleEvery"
+  >,
+): ScheduleAlarms {
+  return {
+    list: () =>
+      scheduling
+        .listSchedules()
+        .then((s) => s as unknown as ScheduleAlarmLike[]),
+    get: (id) =>
+      scheduling
+        .getScheduleById(id)
+        .then((s) => (s ? (s as unknown as ScheduleAlarmLike) : undefined)),
+    cancel: (id) => scheduling.cancelSchedule(id),
+    arm: (timing, callback, payload) => {
+      if (timing.type === "cron")
+        return scheduling
+          .schedule(timing.cron, callback, payload, { idempotent: true })
+          .then((s) => s as unknown as ScheduleAlarmLike);
+      if (timing.type === "interval")
+        return scheduling
+          .scheduleEvery(timing.intervalSeconds, callback, payload)
+          .then((s) => s as unknown as ScheduleAlarmLike);
+      return scheduling
+        .schedule(new Date(timing.time * 1000), callback, payload)
+        .then((s) => s as unknown as ScheduleAlarmLike);
+    },
+  };
+}
+
+/**
  * Task schedule management routes. Invoked from routeRequest at the exact
  * position the original block occupied (after the
  * handleScreenerResearchRoutes delegation, before the Not-found
@@ -291,30 +338,7 @@ export async function handleSchedulesRoutes(
         sql: ctx.agentCtx.storage.sql,
         storage: ctx.agentCtx.storage,
       }).unifiedSchedulesSync;
-    const alarms: ScheduleAlarms = {
-      list: () =>
-        ctx
-          .listSchedules()
-          .then((s) => s as unknown as ScheduleAlarmLike[]),
-      get: (id) =>
-        ctx
-          .getScheduleById(id)
-          .then((s) => (s ? (s as unknown as ScheduleAlarmLike) : undefined)),
-      cancel: (id) => ctx.cancelSchedule(id),
-      arm: (timing, callback, payload) => {
-        if (timing.type === "cron")
-          return ctx
-            .schedule(timing.cron, callback, payload, { idempotent: true })
-            .then((s) => s as unknown as ScheduleAlarmLike);
-        if (timing.type === "interval")
-          return ctx
-            .scheduleEvery(timing.intervalSeconds, callback, payload)
-            .then((s) => s as unknown as ScheduleAlarmLike);
-        return ctx
-          .schedule(new Date(timing.time * 1000), callback, payload)
-          .then((s) => s as unknown as ScheduleAlarmLike);
-      },
-    };
+    const alarms: ScheduleAlarms = makeScheduleAlarmsPort(ctx);
     const subpathId = (p: string): string => {
       const m = p.match(/\/schedules\/([^/]+)\//);
       if (!m) return "";
@@ -458,6 +482,32 @@ export async function handleSchedulesRoutes(
         return Response.json({ error: err.message || "Failed to mint schedule webhook follow-up" }, { status: 500 });
       }
     }
+    // Issue #3121 #3310 — the stages adapter over the one
+    // management service: the registry read goes through the
+    // ScheduledAgent door (a job with no definition reads null —
+    // the adapter names the refusal); the trigger firing dispatches
+    // through the class's runScheduleCallback, whose runWorkflowStage
+    // method records its own run, so no second recording here.
+    const workflowStageAdapter = (): AgentWorkflowStageScheduleAdapter => {
+      const registry: WorkflowStageRegistry = {
+        getDefinition: async (jobId) => {
+          try {
+            const door = getScheduledAgentDoor(ctx.env);
+            const view = await door.getPipelineJobStatus(jobId);
+            return view.definition ?? null;
+          } catch {
+            return null;
+          }
+        },
+      };
+      return createWorkflowStageScheduleAdapter({
+        store: unifiedStore(),
+        alarms,
+        registry,
+        runCallback: (callback, payload) => ctx.runScheduleCallback(callback, payload),
+        nowIso: () => new Date().toISOString(),
+      });
+    };
 
     // List all schedules (supports ?type=cron|interval|delayed|scheduled)
     if ((path.endsWith("/schedules") || path.endsWith("/api/schedules") || path === "/schedules" || path === "/api/schedules") && request.method === "GET") {
@@ -577,11 +627,54 @@ export async function handleSchedulesRoutes(
         // Approve: arm the recorded definition through the capability
         // under the original requester's principal. A goal definition
         // cannot arm from this DO (goals live in the ScheduledAgent
-        // DO) — it is decided on the goal endpoint instead.
-        if (entry.kind !== "sdk") {
+        // DO) — it is decided on the goal endpoint instead. A
+        // stage-schedule arms through the stages adapter (the
+        // unified store + the alarms port + the door registry read).
+        if (entry.kind === "goal") {
           return Response.json({ error: `Pending approval '${approvalId}' is a goal approval; decide it at POST /api/schedule/goals/approvals/${approvalId}/approve.` }, { status: 409 });
         }
         const def = entry.definition as Record<string, unknown>;
+        const principal = { login: entry.requestedBy, agentId: entry.agentId };
+        const tenantId = resolveIaaaTenant(ctx.env);
+        if (entry.kind === "workflow-stage") {
+          const capabilityDeps = createAgentScheduleExecutorDepsForDo(
+            ctx.env,
+            ctx.agentCtx.storage.sql,
+            (type, payload) => ctx.audit(type, "orchestrator", payload),
+            { stages: workflowStageAdapter() },
+          );
+          let armedStage: AgentScheduleActionResult;
+          if (def.jobId !== undefined) {
+            armedStage = await executeAgentScheduleAction(capabilityDeps, {
+              action: "create",
+              kind: "workflow-stage",
+              principal,
+              tenantId,
+              jobId: String(def.jobId),
+              nodePath: String(def.nodePath),
+              timing: def.timing as AgentSdkTiming,
+              ...(typeof def.reason === "string" ? { reason: def.reason } : {}),
+              approvedPendingId: approvalId,
+            });
+          } else {
+            armedStage = await executeAgentScheduleAction(capabilityDeps, {
+              action: "update",
+              kind: "workflow-stage",
+              principal,
+              tenantId,
+              scheduleId: String(def.scheduleId),
+              ...(def.timing !== undefined ? { timing: def.timing as AgentSdkTiming } : {}),
+              ...(typeof def.reason === "string" ? { reason: def.reason } : {}),
+              approvedPendingId: approvalId,
+            });
+          }
+          if (!armedStage.ok) {
+            return Response.json({ error: `Approval could not be armed: ${armedStage.reason}` }, { status: 502 });
+          }
+          await port.save(decidePendingScheduleApproval(await port.load(), approvalId, "approved", trusted.userLogin, nowIso));
+          ctx.audit("agent.schedule.approval-approved", "orchestrator", { pendingApprovalId: approvalId, decidedBy: trusted.userLogin, kind: entry.kind, scheduleId: armedStage.scheduleId });
+          return Response.json({ approvalId, status: "approved", scheduleId: armedStage.scheduleId });
+        }
         const toItem = (s: unknown): AgentScheduleItem => s as unknown as AgentScheduleItem;
         const sdkAdapter: AgentSdkScheduleAdapter = {
           list: async () => (await ctx.listSchedules()).map(toItem),
@@ -613,8 +706,6 @@ export async function handleSchedulesRoutes(
           (type, payload) => ctx.audit(type, "orchestrator", payload),
           { sdk: sdkAdapter },
         );
-        const principal = { login: entry.requestedBy, agentId: entry.agentId };
-        const tenantId = resolveIaaaTenant(ctx.env);
         let armed: AgentScheduleActionResult;
         if (def.callback !== undefined) {
           armed = await executeAgentScheduleAction(capabilityDeps, {
@@ -926,6 +1017,63 @@ export async function handleSchedulesRoutes(
         return Response.json({ success: true, schedule: unifiedRecordToListItem(result.record) });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to update schedule" }, { status: 500 });
+      }
+    }
+
+    // Create a stage-schedule (POST /api/schedules/workflow-stages) —
+    // issue #3121 #3310: one pipeline job stage on its own schedule.
+    // The REST create has no approval gate (the caller IS the human;
+    // the gate is the agent path's, per #3122's design): session-gated,
+    // registry-validated via the ScheduledAgent door, audited
+    // `schedule.created`. Pause/resume/trigger/delete/detail/update/list
+    // flow through the existing /:id/* routes via the management
+    // service — no new routes for them.
+    if (path.endsWith("/schedules/workflow-stages") && request.method === "POST") {
+      try {
+        const body = (await request.json().catch(() => ({}))) as any;
+        const context = await ctx.getScreenerExecutionContext();
+        const trusted = resolveTrustedScheduleIdentity({
+          headerLogin: request.headers.get("x-user-login") || "",
+          headerEnvironment: (request.headers.get("x-environment") || "").toUpperCase(),
+          context,
+          configuredEnvironment: resolveEnvironmentConfig(ctx.env).name as ScheduleEnv,
+        });
+        if (!trusted.userLogin) {
+          return Response.json({ error: "An authenticated user identity is required to create a stage-schedule." }, { status: 401 });
+        }
+        const validated = validateWorkflowStageScheduleInput({
+          jobId: body.jobId,
+          nodePath: body.nodePath,
+          scheduleType: body.scheduleType,
+          cron: body.cron,
+          intervalSeconds: body.intervalSeconds,
+          reason: body.reason,
+        });
+        if (!validated.ok) {
+          return Response.json({ error: validated.error }, { status: 400 });
+        }
+        const def = validated.value;
+        const created = await workflowStageAdapter().create({
+          jobId: def.jobId,
+          nodePath: def.nodePath,
+          timing:
+            def.type === "cron"
+              ? { type: "cron", cron: def.cron as string }
+              : { type: "interval", intervalSeconds: def.intervalSeconds as number },
+          reason: body.reason,
+          ownerLogin: trusted.userLogin,
+          provenance: agentScheduleProvenance("schedules-api", trusted.userLogin),
+        });
+        ctx.audit("schedule.created", "orchestrator", {
+          scheduleId: created.id,
+          jobId: def.jobId,
+          nodePath: def.nodePath,
+          stageId: def.stageId,
+          origin: "api",
+        });
+        return Response.json({ success: true, schedule: unifiedRecordToListItem(created) });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to create stage-schedule" }, { status: 500 });
       }
     }
 

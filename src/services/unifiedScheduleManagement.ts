@@ -141,6 +141,81 @@ export function screenScheduleToRecord(
   };
 }
 
+/** True when an alarm payload carries a stage address (jobId + nodePath). */
+function isStageAlarmPayload(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const p = payload as Record<string, unknown>;
+  return typeof p.jobId === "string" && typeof p.nodePath === "string";
+}
+
+/** A stage-schedule's unified record, from its armed alarm (record id = alarm id, #3123). */
+export function workflowStageScheduleToRecord(
+  alarm: ScheduleAlarmLike,
+  nowIso: string,
+  ownerLogin?: string | null,
+): UnifiedScheduleRecord {
+  const payload = (alarm.payload ?? {}) as Record<string, unknown>;
+  const jobId = typeof payload.jobId === "string" ? payload.jobId : "";
+  const nodePath = typeof payload.nodePath === "string" ? payload.nodePath : "";
+  const stageId = typeof payload.stageId === "string" ? payload.stageId : "";
+  return {
+    id: alarm.id,
+    kind: "workflow-stage",
+    state: "active",
+    callback: alarm.callback,
+    definition: {
+      type: alarm.type ?? "cron",
+      callback: alarm.callback,
+      payload: alarm.payload,
+      ...(typeof alarm.cron === "string" ? { cron: alarm.cron } : {}),
+      ...(typeof alarm.intervalSeconds === "number"
+        ? { intervalSeconds: alarm.intervalSeconds }
+        : {}),
+      ...(typeof alarm.time === "number" ? { time: alarm.time } : {}),
+      jobId,
+      nodePath,
+      stageId,
+      ...(typeof payload.reason === "string" ? { reason: payload.reason } : {}),
+    },
+    ...(ownerLogin ? { ownerLogin } : {}),
+    ...(payload.provenance !== undefined ? { provenance: payload.provenance } : {}),
+    alarmId: alarm.id,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+}
+
+/** The create input for a stage-schedule: the stage address, timing, and firing payload. */
+export interface WorkflowStageScheduleCreateInput {
+  jobId: string;
+  nodePath: string;
+  stageId: string;
+  callback: string;
+  timing: ResolvedScheduleTiming;
+  payload?: unknown;
+  ownerLogin?: string | null;
+}
+
+/**
+ * Create a stage-schedule: arm the firing alarm, then save the record
+ * with id = alarm id (the #3123 screen precedent). The caller owns
+ * validation (registry + timing) — this service arms and stores.
+ */
+export async function createWorkflowStageSchedule(
+  deps: UnifiedManagementDeps,
+  input: WorkflowStageScheduleCreateInput,
+  nowIso: string,
+): Promise<UnifiedOpResult> {
+  const alarm = await deps.alarms.arm(input.timing, input.callback, input.payload);
+  const record = workflowStageScheduleToRecord(
+    { ...alarm, payload: input.payload ?? alarm.payload },
+    nowIso,
+    input.ownerLogin ?? null,
+  );
+  await deps.store.save(record);
+  return { ok: true, record, alarm };
+}
+
 /** The list-item shape the SchedulesPanel renders for one record. */
 export function unifiedRecordToListItem(record: UnifiedScheduleRecord, nextRun?: number) {
   const def = record.definition as Partial<ScheduleDefinitionLike> & {
@@ -164,6 +239,14 @@ export function unifiedRecordToListItem(record: UnifiedScheduleRecord, nextRun?:
     paused: record.state === "paused",
     ...(record.pausedAt ? { pausedAt: record.pausedAt } : {}),
     ...(nextRun !== undefined ? { nextRun } : {}),
+    // Issue #3310 — a stage-schedule names its workflow + stage, so
+    // the home renders the stage, not just the firing callback.
+    ...(typeof (def as Record<string, unknown>).jobId === "string"
+      ? { jobId: (def as Record<string, unknown>).jobId as string }
+      : {}),
+    ...(typeof (def as Record<string, unknown>).stageId === "string"
+      ? { stageId: (def as Record<string, unknown>).stageId as string }
+      : {}),
   };
 }
 
@@ -253,7 +336,7 @@ export async function listUnifiedScheduleItems(
   const items: Array<ReturnType<typeof unifiedRecordToListItem>> = [];
   for (const alarm of alarms) {
     const record = byAlarmId.get(alarm.id) ?? byId.get(alarm.id);
-    if (record && record.kind !== "screen") continue;
+    if (record && record.kind !== "screen" && record.kind !== "workflow-stage") continue;
     if (record) {
       const item = unifiedRecordToListItem(record, alarm.nextRun);
       if (!typeParam || item.type === typeParam) items.push(item);
@@ -292,7 +375,12 @@ export async function listUnifiedScheduleItems(
     }
   }
   for (const record of records) {
-    if (record.kind !== "screen" || record.state !== "paused") continue;
+    if (
+      (record.kind !== "screen" && record.kind !== "workflow-stage") ||
+      record.state !== "paused"
+    ) {
+      continue;
+    }
     if (record.alarmId && alarms.some((a) => a.id === record.alarmId)) continue;
     const item = unifiedRecordToListItem(record);
     if (!typeParam || item.type === typeParam) items.push(item);
@@ -319,7 +407,7 @@ export async function pauseUnifiedSchedule(
   const existing = await deps.store.get(id);
   if (existing) {
     if (existing.kind === "goal") return goalSurfaceError("pause");
-    if (existing.kind !== "screen") {
+    if (existing.kind !== "screen" && existing.kind !== "workflow-stage") {
       return fail(`Schedule kind '${existing.kind}' cannot be paused.`, 400);
     }
     if (existing.state === "paused") return { ok: true, record: existing };
@@ -331,7 +419,9 @@ export async function pauseUnifiedSchedule(
   const record: UnifiedScheduleRecord = existing
     ? { ...existing, state: "paused", pausedAt: nowIso, alarmId: alarm.id, updatedAt: nowIso }
     : {
-        ...screenScheduleToRecord(alarm, nowIso),
+        ...(isStageAlarmPayload(alarm.payload)
+          ? workflowStageScheduleToRecord(alarm, nowIso)
+          : screenScheduleToRecord(alarm, nowIso)),
         id,
         state: "paused",
         pausedAt: nowIso,
@@ -351,7 +441,7 @@ export async function resumeUnifiedSchedule(
     return fail(`Schedule '${id}' is not paused`, 404);
   }
   if (record.kind === "goal") return goalSurfaceError("resume");
-  if (record.kind !== "screen") {
+  if (record.kind !== "screen" && record.kind !== "workflow-stage") {
     return fail(`Schedule kind '${record.kind}' cannot be resumed.`, 400);
   }
   if (record.state !== "paused") {
@@ -383,7 +473,7 @@ export async function deleteUnifiedSchedule(
   id: string,
 ): Promise<{ ok: true; cancelled: boolean }> {
   const record = await deps.store.get(id);
-  if (record && record.kind !== "screen") {
+  if (record && record.kind !== "screen" && record.kind !== "workflow-stage") {
     return { ok: true, cancelled: false };
   }
   const alarmId = record?.alarmId ?? id;
@@ -429,7 +519,9 @@ export async function triggerUnifiedSchedule(
   | { ok: false; error: string; status: number }
 > {
   const record = await deps.store.get(id);
-  if (record && record.kind !== "screen") return goalSurfaceError("trigger");
+  if (record && record.kind !== "screen" && record.kind !== "workflow-stage") {
+    return goalSurfaceError("trigger");
+  }
   if (record?.state === "paused") {
     return fail("Schedule is paused — resume it before triggering.", 409);
   }
@@ -566,7 +658,9 @@ export async function updateUnifiedSchedule(
 ): Promise<UnifiedOpResult> {
   const nowIso = new Date(nowMs).toISOString();
   const record = await deps.store.get(id);
-  if (record && record.kind !== "screen") return goalSurfaceError("update");
+  if (record && record.kind !== "screen" && record.kind !== "workflow-stage") {
+    return goalSurfaceError("update");
+  }
   if (record?.state === "paused") {
     const resolution = resolveScheduleUpdate(
       record.definition as unknown as ScheduleDefinitionLike,
@@ -641,7 +735,9 @@ export async function updateUnifiedSchedule(
         updatedAt: nowIso,
       }
     : {
-        ...screenScheduleToRecord(rearmed, nowIso),
+        ...(isStageAlarmPayload(rearmed.payload)
+          ? workflowStageScheduleToRecord(rearmed, nowIso)
+          : screenScheduleToRecord(rearmed, nowIso)),
         id,
       };
   await deps.store.save(updated);

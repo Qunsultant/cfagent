@@ -289,10 +289,40 @@ async function executeScheduleOperation(
     }
     return id;
   };
+  // Issue #3121 #3310 — the schedule.* ops accept an optional kind
+  // arg: "sdk" (the default) or "workflow-stage" (with jobId +
+  // nodePath). No new ops: the mesh census is unchanged.
+  const kindArg = args.kind === "workflow-stage" ? "workflow-stage" : "sdk";
+  const stageAddress = (op: string): { jobId: string; nodePath: string } => {
+    const jobId = stringArg(args, "jobId");
+    const nodePath = stringArg(args, "nodePath");
+    if (jobId === null || nodePath === null) {
+      throw new OrchestratorA2AInputError(
+        `Operation "${op}" with kind "workflow-stage" requires non-empty string "jobId" and "nodePath" arguments.`,
+      );
+    }
+    return { jobId, nodePath };
+  };
 
   let request: AgentScheduleActionRequest;
   switch (operation) {
     case "schedule.create": {
+      if (kindArg === "workflow-stage") {
+        const { jobId, nodePath } = stageAddress(operation);
+        request = {
+          action: "create",
+          kind: "workflow-stage",
+          principal,
+          tenantId,
+          jobId,
+          nodePath,
+          timing: scheduleTimingArg(args),
+          ...(typeof args.reason === "string" ? { reason: args.reason } : {}),
+          ...(typeof args.budgetCents === "number" ? { budgetCents: args.budgetCents } : {}),
+          ...(args.isExternalSend === true ? { isExternalSend: true } : {}),
+        };
+        break;
+      }
       const callback = stringArg(args, "callback");
       if (callback === null) {
         throw new OrchestratorA2AInputError(
@@ -313,9 +343,23 @@ async function executeScheduleOperation(
       break;
     }
     case "schedule.list":
-      request = { action: "list", kind: "sdk", principal, tenantId };
+      request = { action: "list", kind: kindArg, principal, tenantId };
       break;
     case "schedule.update":
+      if (kindArg === "workflow-stage") {
+        request = {
+          action: "update",
+          kind: "workflow-stage",
+          principal,
+          tenantId,
+          scheduleId: scheduleId(operation),
+          ...(scheduleTimingArgOptional(args) !== undefined
+            ? { timing: scheduleTimingArgOptional(args)! }
+            : {}),
+          ...(typeof args.reason === "string" ? { reason: args.reason } : {}),
+        };
+        break;
+      }
       request = {
         action: "update",
         kind: "sdk",
@@ -329,16 +373,16 @@ async function executeScheduleOperation(
       };
       break;
     case "schedule.pause":
-      request = { action: "pause", kind: "sdk", principal, tenantId, scheduleId: scheduleId(operation) };
+      request = { action: "pause", kind: kindArg, principal, tenantId, scheduleId: scheduleId(operation) };
       break;
     case "schedule.resume":
-      request = { action: "resume", kind: "sdk", principal, tenantId, scheduleId: scheduleId(operation) };
+      request = { action: "resume", kind: kindArg, principal, tenantId, scheduleId: scheduleId(operation) };
       break;
     case "schedule.trigger":
-      request = { action: "trigger", kind: "sdk", principal, tenantId, scheduleId: scheduleId(operation) };
+      request = { action: "trigger", kind: kindArg, principal, tenantId, scheduleId: scheduleId(operation) };
       break;
     case "schedule.delete":
-      request = { action: "delete", kind: "sdk", principal, tenantId, scheduleId: scheduleId(operation) };
+      request = { action: "delete", kind: kindArg, principal, tenantId, scheduleId: scheduleId(operation) };
       break;
     default:
       throw new OrchestratorA2AInputError(`Unknown schedule operation: "${operation}".`);

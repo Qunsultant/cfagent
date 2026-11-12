@@ -1541,7 +1541,9 @@ export const jobPipelineDefinitions = sqliteTable("job_pipeline_definitions", {
 /**
  * Pipeline J1 (#3534, #3548) — live job instance state, one row
  * per job id: management state, the resume-cursor view, and the
- * stage-runner checkpoint ledger (#3549). DDL: migration 0046.
+ * stage-runner checkpoint ledger (#3549). DDL: migration 0046;
+ * `run_schedule_id` (#3310) arrives via D1 migration 0059 and
+ * the DO probed additive column in ensureSchema.
  */
 export const jobPipelineInstances = sqliteTable("job_pipeline_instances", {
   jobId: text("job_id").primaryKey(),
@@ -1550,6 +1552,7 @@ export const jobPipelineInstances = sqliteTable("job_pipeline_instances", {
   currentRunId: text("current_run_id"),
   runStartedAt: text("run_started_at"),
   runTrigger: text("run_trigger"),
+  runScheduleId: text("run_schedule_id"),
   checkpointJson: text("checkpoint_json"),
   stageCheckpointJson: text("stage_checkpoint_json"),
   stageDesiredJson: text("stage_desired_json"),

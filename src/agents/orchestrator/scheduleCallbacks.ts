@@ -51,6 +51,8 @@ export const INTERNAL_RECORDED_SCHEDULE_CALLBACKS = [
   "expireStaleOrderDraft",
   "collectIvHistory",
   "autoRenewETradeTokens",
+  // Issue #3121 #3310 — the per-stage workflow firing callback.
+  "runWorkflowStage",
 ] as const;
 
 /**

@@ -632,7 +632,7 @@ export class JobPipelineControl {
    */
   async runJob(
     jobId: string,
-    opts?: { trigger?: JobRunTrigger; scopePath?: string },
+    opts?: { trigger?: JobRunTrigger; scopePath?: string; scheduleId?: string },
   ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
@@ -653,6 +653,7 @@ export class JobPipelineControl {
       runId,
       trigger: opts?.trigger ?? "manual",
       scopePath: opts?.scopePath ?? "",
+      scheduleId: opts?.scheduleId ?? null,
       resuming: false,
     });
     this.inflight.set(runId, completion);
@@ -708,6 +709,8 @@ export class JobPipelineControl {
       runId,
       trigger: instance.runTrigger ?? "manual",
       scopePath: instance.checkpoint.scopePath,
+      // A resumed run keeps the schedule id that dispatched it.
+      scheduleId: instance.runScheduleId ?? null,
       resuming: true,
     });
     this.inflight.set(runId, completion);
@@ -787,6 +790,7 @@ export class JobPipelineControl {
       currentRunId: null,
       runStartedAt: null,
       runTrigger: null,
+      runScheduleId: null,
       lastError: null,
       updatedAt: this.iso(),
     };
@@ -1788,6 +1792,7 @@ export class JobPipelineControl {
       currentRunId: null,
       runStartedAt: null,
       runTrigger: null,
+      runScheduleId: null,
       checkpoint: null,
       stageCheckpoint: null,
       stageDesired: null,
@@ -1835,6 +1840,14 @@ export class JobPipelineControl {
       outcome:
         outcome === "completed" ? "success" : outcome === "failed" ? "failure" : "skipped",
       triggeredBy: instance.runTrigger ?? "manual",
+      // Issue #3310 — the terminal record joins to the dispatching
+      // schedule and to the workflow instance (the pipeline run IS
+      // the workflow instance on the direct-execution firing path);
+      // no async job exists on this path, so its id is an explicit
+      // null, never a laundered one.
+      scheduleId: instance.runScheduleId ?? null,
+      asyncJobId: null,
+      workflowId: instance.currentRunId,
       ...(outcome === "failed" ? { error: error ?? "job run failed" } : {}),
       ...(outcome === "cancelled" ? { detail: "job_cancelled" } : {}),
       ...(descriptor !== undefined ? { descriptor } : {}),
@@ -1907,6 +1920,7 @@ export class JobPipelineControl {
       runId: string;
       trigger: JobRunTrigger;
       scopePath: string;
+      scheduleId: string | null;
       resuming: boolean;
     },
   ): Promise<JobRunOutcome> {
@@ -1921,6 +1935,7 @@ export class JobPipelineControl {
       currentRunId: opts.runId,
       runStartedAt: opts.resuming ? (instance.runStartedAt ?? startedAt) : startedAt,
       runTrigger: opts.trigger,
+      runScheduleId: opts.scheduleId,
       stageCheckpoint: opts.resuming
         ? instance.stageCheckpoint
         : { runId: opts.runId, units: [] },
