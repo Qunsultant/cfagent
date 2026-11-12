@@ -175,8 +175,8 @@ describe("Issue #17 — wiring pins (run hook + flag plumbing)", () => {
   it("the manual route reads the flag and passes it to both run paths", () => {
     const route = src("agents/routes/etradeBrokerScreen.ts");
     expect(route).toContain("isPortfolioContextEnabled(ctx.readSettingRaw)");
-    // runSharded (inline literal) and runScreen (multiline literal).
-    expect(route).toContain("environment: requestedEnv, portfolioContext }");
+    // Issue #4278: both run paths (sync + sharded) now go through the
+    // one engine seam call, which carries environment + portfolioContext.
     expect(route).toContain("environment: requestedEnv,\n      portfolioContext,");
   });
 

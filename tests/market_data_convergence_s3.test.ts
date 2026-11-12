@@ -187,6 +187,38 @@ describe("S3 (a) — Yahoo adapter feeds the one pipeline", () => {
 /* (b) market-data route → pipeline + canonical report                        */
 /* ------------------------------------------------------------------ */
 
+// Issue #4278: the screen runs through the one engine seam, not the
+// agent's runScreen. The seam fake delegates to the stub agent's
+// runScreen: it flattens the seam input back into the runScreen
+// request (the symbols shard rides commandOverrides.shards) and
+// returns the stub's result as the engine run's one shard. The seam
+// itself is pinned in tests/stock_entry_routing_4278.test.ts.
+const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input: any) => {
+  const flat = {
+    trigger: input.spec.trigger,
+    sector: input.commandOverrides?.sector ?? input.spec.filters?.sector,
+    universe: input.spec.universe,
+    symbols: input.commandOverrides?.shards?.[0]?.symbols,
+    maxSymbols: input.commandOverrides?.maxSymbols,
+    filters: input.spec.filters,
+    userLogin: input.userLogin,
+    environment: input.environment,
+    portfolioContext: input.portfolioContext,
+    provider: input.commandOverrides?.provider ?? input.spec.provider,
+    broker: input.commandOverrides?.broker,
+    ...(input.commandOverrides?.mode
+      ? { mode: input.commandOverrides.mode, modeSource: input.commandOverrides.modeSource }
+      : {}),
+  };
+  const result = await runScreen(flat);
+  return {
+    results: [result],
+    collation: null,
+    jobId: input.spec?.jobId ?? "test-job",
+    workflowId: "wf-1",
+  };
+};
+
 function marketDataResult(overrides: Record<string, unknown> = {}) {
   return {
     timestamp: "2026-10-22T12:00:00.000Z",
@@ -221,6 +253,7 @@ describe("S3 (b) — market-data route persists a canonical report with provider
       env: {} as any,
       audit,
       getScreenerAgent: vi.fn(() => ({ runScreen })),
+      runStockScreenViaEngine: delegateSeamFake(runScreen),
       persistScreenerReportCanonical: persist,
     } as unknown as MarketDataResearchRouteContext;
     const req = new Request("https://agent.internal/api/market-data/screen", {
@@ -244,14 +277,13 @@ describe("S3 (b) — market-data route persists a canonical report with provider
       filters: expect.objectContaining({ sector: "Technology", maxRsi: 65 }),
       userLogin: "octocat-s3",
     }));
-    // Canonical persistence in the REST idiom: one call, run + login.
-    expect(persist).toHaveBeenCalledTimes(1);
-    expect(persist).toHaveBeenCalledWith(expect.objectContaining({
-      provider: "yahoo",
-      trigger: "manual",
-      userLogin: "octocat-s3",
-      success: true,
-    }));
+    // Issue #4278: a SUCCESS result is stored by the workflow's own
+    // store step, so the route no longer persists it here (re-persisting
+    // would double it) — the no-re-persist-on-success contract is
+    // pinned in tests/stock_entry_routing_4278.test.ts. The canonical
+    // copy still carries provider + trigger provenance; that shape is
+    // pinned by the REST canonical seam test below.
+    expect(persist).not.toHaveBeenCalled();
     expect(audit).toHaveBeenCalledWith(
       "market_data.screener.executed",
       "research",
@@ -302,6 +334,7 @@ describe("S3 (b) — market-data route persists a canonical report with provider
       env: {} as any,
       audit: vi.fn(),
       getScreenerAgent: vi.fn(() => ({ runScreen })),
+      runStockScreenViaEngine: delegateSeamFake(runScreen),
       persistScreenerReportCanonical: persist,
     } as unknown as MarketDataResearchRouteContext;
     const req = new Request("https://agent.internal/api/market-data/screen", {
@@ -353,6 +386,7 @@ describe("S3 (c) — premium stock-signals: no constant confidence, pipeline-der
       sql: new MockSqlStorage(),
       getOrm: () => orm,
       getScreenerAgent: vi.fn(() => ({ runScreen })),
+      runStockScreenViaEngine: delegateSeamFake(runScreen),
       persistScreenerReportCanonical: persist,
     } as unknown as PremiumRouteContext;
 
@@ -396,7 +430,10 @@ describe("S3 (c) — premium stock-signals: no constant confidence, pipeline-der
     }));
     const runArg = runScreen.mock.calls[0][0] as any;
     expect(runArg.symbols.map((s: any) => s.symbol)).toEqual(["NVDA", "AAPL", "MSFT", "TSLA"]);
-    expect(persist).toHaveBeenCalledWith(expect.objectContaining({ provider: "yahoo" }));
+    // Issue #4278: a SUCCESS result is stored by the workflow's own
+    // store step, so the route no longer persists it here (pinned in
+    // tests/stock_entry_routing_4278.test.ts: no re-persist on success).
+    expect(persist).not.toHaveBeenCalled();
   });
 });
 
