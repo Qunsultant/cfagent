@@ -1,0 +1,3 @@
+### Added
+
+- Token-tier discipline for template surfaces (#3135): the 201 raw length values in `primitives.css` are triaged — 113 converted to frozen-scale tokens (nearest step, ties round up), 34 allow-listed hairline/pill constants, 54 registered as named exceptions (layout widths, breakpoints, viewport units, stroke widths, component size ladders); new pin test `tests/template_token_tiers_3135.test.ts`; legacy-class mapping table `docs/architecture/UX/token-mapping-order-options-autopilot.md` (647 classes: 109 Token, 538 deletion candidate, none deleted in this slice); §2.2 now names the W3C DTCG three-tier model (primitive → semantic → component) and the template-surface discipline.
