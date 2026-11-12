@@ -94,6 +94,10 @@ const KNOWN_ORPHANS = [
   // in the chat box); preserved under the zero-deletions policy
   // gate (§22).
   "src/client/StockCopilotVoiceControl.tsx",
+  // Its last mount (Platform Admin → the scheduled-jobs sub-view) was
+  // removed in #4110 as unreachable; the component is kept for a future
+  // re-mount, so it is listed here rather than left silently dead.
+  "src/client/JobsPanel.tsx",
 ];
 
 describe("tab content wiring gates (#2083)", () => {
