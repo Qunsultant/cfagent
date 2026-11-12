@@ -23,6 +23,7 @@ import {
   Badge,
   Button,
   EmptyState,
+  Modal,
   Notice,
   SegmentedControl,
   Spinner,
@@ -30,6 +31,10 @@ import {
   type TableColumn,
 } from "./components/ui";
 import { listAllRuns } from "./jobsApi";
+import { apiFetch } from "./apiFetch";
+import { attachWorkflowRuns, type WorkflowLedgerEntry } from "../services/runLedgerWorkflowRuns";
+import type { WorkflowRun } from "../services/workflowRuns";
+import { RunDetail } from "./WorkflowRunsPanel";
 import {
   isMissingIdLiteral,
   normalizeJobRunRecord,
@@ -244,12 +249,29 @@ export function ScheduleRunLedgerPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Issue #4262 (S2) — the workflow-runs read is attached to the ledger rows,
+  // never listed beside them: a run the ledger already carries is dropped by
+  // linkage in `attachWorkflowRuns`.
+  const [workflowEntries, setWorkflowEntries] = useState<WorkflowLedgerEntry[]>([]);
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const { runs } = await listAllRuns(undefined, 200);
+      let attached: WorkflowLedgerEntry[] = [];
+      try {
+        const res = await apiFetch("/api/workflow-runs?limit=100");
+        if (res.ok) {
+          const body = (await res.json()) as { runs?: WorkflowRun[] };
+          attached = attachWorkflowRuns(runs, body.runs ?? []);
+        }
+      } catch {
+        // The workflow-runs read is additive: a failed store must not empty
+        // the ledger (docs/agents/workflow-runs.md, honesty rules).
+        attached = [];
+      }
       setRuns(runs);
+      setWorkflowEntries(attached);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load run ledger");
     } finally {
@@ -261,7 +283,16 @@ export function ScheduleRunLedgerPanel({
     void refresh();
   }, [refresh]);
 
-  const visible = filterLedgerRuns(runs, scheduleId, runId);
+  const workflowByJobId = useMemo(() => {
+    const map = new Map<string, WorkflowRun>();
+    for (const entry of workflowEntries) map.set(entry.row.jobId, entry.run);
+    return map;
+  }, [workflowEntries]);
+  const mergedRuns = useMemo(
+    () => [...runs, ...workflowEntries.map((entry) => entry.row)],
+    [runs, workflowEntries],
+  );
+  const visible = filterLedgerRuns(mergedRuns, scheduleId, runId);
   // Issue #4262 (S1) — the one ledger's kind filters. The filter set and the
   // default come from config (src/config/runLedgerModes.ts), never literals.
   const filters = useMemo(() => resolveRunLedgerFilters(), []);
@@ -272,13 +303,19 @@ export function ScheduleRunLedgerPanel({
   const filterLabel = runId ?? scheduleId;
   // Issue #3605 — the async job whose detail is open below the table.
   const [selectedAsyncJobId, setSelectedAsyncJobId] = useState<string | null>(null);
+  // Issue #4262 (S2) — the folded workflow run whose detail is open.
+  const [selectedRun, setSelectedRun] = useState<WorkflowRun | null>(null);
   const columns = useMemo(
     () =>
       ledgerColumns(
-        (jobId) => navigateToTab("schedules", "runs", { run: jobId }),
+        (jobId) => {
+          const folded = workflowByJobId.get(jobId);
+          if (folded) setSelectedRun(folded);
+          else navigateToTab("schedules", "runs", { run: jobId });
+        },
         (asyncJobId) => setSelectedAsyncJobId(asyncJobId),
       ),
-    [],
+    [workflowByJobId],
   );
 
   return (
@@ -368,6 +405,17 @@ export function ScheduleRunLedgerPanel({
             />
           }
         />
+      )}
+
+      {selectedRun && (
+        <Modal
+          open
+          onClose={() => setSelectedRun(null)}
+          title="Workflow run detail"
+          size="xl"
+        >
+          <RunDetail run={selectedRun} />
+        </Modal>
       )}
 
       {selectedAsyncJobId && (

@@ -173,6 +173,12 @@ export function legacySchedulesRedirect(search: string): LegacySchedulesRedirect
   if (tab === "platform-admin" && view === "jobs") {
     return { tab: SCHEDULES_HOME_TAB, view: "runs" };
   }
+  // Issue #4262 (S2): the Workflow Runs address is a folded view of the one
+  // ledger. It keeps working as a deep link (the issue's change-management
+  // rule) and lands on the ledger with the workflow filter pre-set.
+  if (tab === "workflow-runs") {
+    return { tab: SCHEDULES_HOME_TAB, view: "runs", params: { kind: "workflow" } };
+  }
   if (
     tab === "platform-admin" &&
     view === "iaaa-admin" &&
