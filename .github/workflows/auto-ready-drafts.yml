@@ -1,0 +1,99 @@
+# Auto-ready draft PRs when their checks go green — issue #4315.
+#
+# WHAT: publish-early (#4054) creates a draft PR as soon as Tier 1 is green, but
+# nothing ever marks that draft ready — the auto-merge workflow only acts once a
+# PR is ready, and a draft reaches ready_for_review only by a human click (#4296
+# needed a manual update_pull_request). This workflow closes the gap: when a
+# gating workflow completes, it re-evaluates the head's full check set and marks
+# an eligible draft ready. After that the existing chain takes over untouched:
+# ready_for_review fires, the auto-merge workflow labels and enqueues, the queue
+# merges.
+#
+# SCOPE: only open draft PRs carrying the `auto-merge` label — the marker that
+# the PR is in the automated pipeline. Human drafts without the label are never
+# touched.
+#
+# SAFETY: the full required set must be green on the head SHA, judged by the
+# watcher's verdict logic — latest run per workflow name, cancelled/skipped never
+# decides a verdict, a missing run is pending, never green. Marking ready merges
+# NOTHING by itself: the merge queue re-validates every requirement.
+#
+# TOKEN: the workflow's own scoped GITHUB_TOKEN (pull requests: write), as in
+# auto-merge-trusted.yml since #4305 — no App credentials are needed to mark a
+# same-repo draft ready.
+
+name: Auto-ready draft PRs
+
+on:
+  workflow_run:
+    workflows:
+      - "Continuous Integration & Test Verification"
+      - "Policy Gate"
+      - "CodeQL"
+      - "Secret Scanning"
+      - "Auto-merge trusted PRs"
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: auto-ready-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  mark-ready:
+    name: Mark eligible drafts ready when all checks are green
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Mark eligible drafts ready when all checks are green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          GATING="Continuous Integration & Test Verification|Policy Gate|CodeQL|Secret Scanning|Auto-merge trusted PRs"
+
+          # Full required set green on this head? (watcher verdict logic:
+          # latest run per workflow name, cancelled/skipped never decides a
+          # verdict, a missing run is pending, never green.)
+          ALL_GREEN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?per_page=50" --jq "
+            [ .workflow_runs[]
+              | select(.head_sha == \"$HEAD_SHA\")
+              | select(.status == \"completed\")
+              | select(.conclusion != \"cancelled\" and .conclusion != \"skipped\") ]
+            | sort_by(.name) | group_by(.name) | map(max_by(.created_at))
+            | map(select(.name | test(\"^($GATING)$\")))
+            | select(length == 5)
+            | all(.conclusion == \"success\")
+          ")
+          if [ "$ALL_GREEN" != "true" ]; then
+            echo "Not all gating workflows are green on $HEAD_SHA — leaving drafts as-is."
+            exit 0
+          fi
+
+          # Eligible drafts on this branch: draft + the auto-merge label.
+          PRS=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&head=$OWNER:$HEAD_BRANCH&per_page=30" --jq \
+            '.[] | select(.draft == true) | select(.labels | map(.name) | index("auto-merge")) | .number')
+          if [ -z "$PRS" ]; then
+            echo "No eligible draft PRs on $HEAD_BRANCH."
+            exit 0
+          fi
+
+          for PR in $PRS; do
+            # Re-check the draft flag immediately before the POST; tolerate a
+            # 422 (already ready — two workflows finishing the same minute).
+            STILL_DRAFT=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.draft')
+            if [ "$STILL_DRAFT" != "true" ]; then
+              echo "PR #$PR is no longer a draft — skipping."
+              continue
+            fi
+            if gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$PR/ready_for_review" --silent; then
+              echo "Marked PR #$PR ready for review."
+            else
+              echo "Could not mark PR #$PR ready (probably already ready) — continuing."
+            fi
+          done
