@@ -17,6 +17,11 @@
 # resolved, and — once the queue is on — queue validation on the
 # merge-group commit).
 #
+# ENROLLMENT (#4281): the request always names mergeMethod: REBASE, and the
+# fallback is enqueuePullRequest. A flagless gh pr merge --auto enrolls with
+# the repository default, which is SQUASH here while only REBASE is allowed —
+# the PR then shows auto-merge on, all checks green, CLEAN, and never merges.
+#
 # SAFETY: use pull_request_target only to inspect PR metadata, apply a
 # label, and request auto-merge. Never check out or execute PR code in
 # this privileged workflow. All changed files, including workflow files, follow
@@ -65,6 +70,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_IS_DRAFT: ${{ github.event.pull_request.draft }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
         run: |
           set -euo pipefail
           LANE_LABEL=""
@@ -96,32 +102,40 @@ jobs:
           # instead of defaulting to SQUASH (which is disallowed by ruleset and stalls PRs).
           # Note: REST API returns .auto_merge.merge_method (lowercase e.g. "squash")
           # while GraphQL returns autoMergeRequest.mergeMethod (uppercase e.g. "SQUASH").
-          PR_INFO=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '{node_id: .node_id, method: (.auto_merge.merge_method // .auto_merge_request.merge_method // empty)}' 2>/dev/null || true)
-          PR_NODE_ID=$(echo "$PR_INFO" | jq -r '.node_id // empty' 2>/dev/null || true)
+          # The node id comes from the event payload (#4281): the previous REST
+          # round-trip could fail and fall through to `gh pr merge --auto` with no
+          # method, which enrolls with the repository default (SQUASH here) and
+          # leaves a CLEAN PR that never merges.
+          PR_INFO=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '{method: (.auto_merge.merge_method // .auto_merge_request.merge_method // empty)}' 2>/dev/null || true)
           CURRENT_METHOD=$(echo "$PR_INFO" | jq -r '.method // empty' 2>/dev/null | tr '[:lower:]' '[:upper:]' || true)
-          if [ -n "$PR_NODE_ID" ]; then
-            if [ -n "$CURRENT_METHOD" ] && [ "$CURRENT_METHOD" != "REBASE" ]; then
-              echo "Auto-merge currently configured with $CURRENT_METHOD; resetting to REBASE..."
-              gh api graphql -F id="$PR_NODE_ID" -f query='
-                mutation($id: ID!) {
-                  disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
-                    pullRequest { autoMergeRequest { mergeMethod } }
-                  }
-                }
-              ' || true
-            fi
+          if [ -n "$CURRENT_METHOD" ] && [ "$CURRENT_METHOD" != "REBASE" ]; then
+            echo "Auto-merge currently configured with $CURRENT_METHOD; resetting to REBASE..."
             gh api graphql -F id="$PR_NODE_ID" -f query='
               mutation($id: ID!) {
-                enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: REBASE }) {
-                  pullRequest {
-                    isInMergeQueue
-                    autoMergeRequest {
-                      mergeMethod
-                    }
+                disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+                  pullRequest { autoMergeRequest { mergeMethod } }
+                }
+              }
+            ' || true
+          fi
+          # Enroll with REBASE. If the ruleset refuses the request, go straight to
+          # the queue (enqueuePullRequest takes no merge method at all); never fall
+          # back to a flagless `gh pr merge --auto` (#4281, gitops §11).
+          gh api graphql -F id="$PR_NODE_ID" -f query='
+            mutation($id: ID!) {
+              enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: REBASE }) {
+                pullRequest {
+                  isInMergeQueue
+                  autoMergeRequest {
+                    mergeMethod
                   }
                 }
               }
-            ' || gh pr merge "$PR_NUMBER" --auto --repo "$GITHUB_REPOSITORY" || true
-          else
-            gh pr merge "$PR_NUMBER" --auto --repo "$GITHUB_REPOSITORY" || true
-          fi
+            }
+          ' || gh api graphql -F id="$PR_NODE_ID" -f query='
+            mutation($id: ID!) {
+              enqueuePullRequest(input: { pullRequestId: $id }) {
+                mergeQueueEntry { position state }
+              }
+            }
+          ' || true
