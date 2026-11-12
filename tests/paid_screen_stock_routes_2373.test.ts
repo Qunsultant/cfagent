@@ -120,6 +120,38 @@ function cannedAgent() {
   } as never;
 }
 
+// Issue #4278: the screen runs through the one engine seam, not the
+// agent's runScreen. The seam fake delegates to the stub agent's
+// runScreen: it flattens the seam input back into the runScreen
+// request (provider/sector ride the spec on the routes, the
+// overrides on the scheduled path) and returns the stub's result
+// as the engine run's one shard. The seam itself is pinned in
+// tests/stock_entry_routing_4278.test.ts.
+const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input: any) => {
+  const flat = {
+    trigger: input.spec.trigger,
+    sector: input.commandOverrides?.sector ?? input.spec.filters?.sector,
+    universe: input.spec.universe,
+    maxSymbols: input.commandOverrides?.maxSymbols,
+    filters: input.spec.filters,
+    userLogin: input.userLogin,
+    environment: input.environment,
+    portfolioContext: input.portfolioContext,
+    provider: input.commandOverrides?.provider ?? input.spec.provider,
+    broker: input.commandOverrides?.broker,
+    ...(input.commandOverrides?.mode
+      ? { mode: input.commandOverrides.mode, modeSource: input.commandOverrides.modeSource }
+      : {}),
+  };
+  const result = await runScreen(flat);
+  return {
+    results: [result],
+    collation: null,
+    jobId: input.spec?.jobId ?? "test-job",
+    workflowId: "wf-1",
+  };
+};
+
 function etradeCtx(env: Record<string, unknown>, agent: unknown) {
   const audits: Array<{ type: string; agent: string; payload: Record<string, unknown> }> = [];
   return {
@@ -349,11 +381,13 @@ describe("POST /etrade/screen under #2373 Slice A", () => {
     }
   });
 
-  it("flag OFF + async with no workflow binding → today's broker-null sync fallthrough, unchanged", async () => {
+  it("flag OFF + async with no workflow binding → #4278: no direct fallback — the sync branch answers a coded failure", async () => {
     const payment = paymentBinding();
     const env = envFor(payment, false);
     delete env.PAYMENT_WORKFLOW;
-    const { ctx } = etradeCtx(env, cannedAgent());
+    const agent = cannedAgent();
+    (agent as any).runScreen = vi.fn((agent as any).runScreen);
+    const { ctx } = etradeCtx(env, agent);
     const res = await handleEtradeBrokerRoutes(
       req("POST", "/api/etrade/screen", { async: true }),
       urlOf("/api/etrade/screen"),
@@ -361,13 +395,21 @@ describe("POST /etrade/screen under #2373 Slice A", () => {
       "s",
       ctx,
     );
-    expect(res!.status).toBe(200);
+    // Issue #4278 removed the broker-null sync fallthrough: the
+    // sync branch runs through the one engine seam, and the seam
+    // cannot start without a workflow binding — so the run answers
+    // the caller's coded failure instead of silently running the
+    // agent directly. No payment workflow, no direct run.
+    expect(res!.status).toBe(500);
     expect(payment.creates).toHaveLength(0);
+    expect((agent as any).runScreen).not.toHaveBeenCalled();
   });
 
   it("flag OFF + sync → today's synchronous run, unchanged", async () => {
     const payment = paymentBinding();
-    const { ctx } = etradeCtx(envFor(payment, false), cannedAgent());
+    const agent = cannedAgent();
+    const { ctx } = etradeCtx(envFor(payment, false), agent);
+    (ctx as any).runStockScreenViaEngine = delegateSeamFake((agent as any).runScreen);
     const res = await handleEtradeBrokerRoutes(
       req("POST", "/api/etrade/screen", {}),
       urlOf("/api/etrade/screen"),
@@ -495,7 +537,9 @@ describe("POST /market-data/screen under #2373 Slice A", () => {
 
   it("flag OFF + sync → today's synchronous run, unchanged", async () => {
     const payment = paymentBinding();
-    const { ctx } = marketCtx(envFor(payment, false), cannedAgent());
+    const agent = cannedAgent();
+    const { ctx } = marketCtx(envFor(payment, false), agent);
+    (ctx as any).runStockScreenViaEngine = delegateSeamFake((agent as any).runScreen);
     const res = await handleMarketDataCompareScreenRoutes(
       req("POST", "/api/market-data/screen", {}),
       urlOf("/api/market-data/screen"),

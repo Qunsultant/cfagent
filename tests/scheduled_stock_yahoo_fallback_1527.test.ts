@@ -80,6 +80,38 @@ describe("scheduled stock Yahoo fallback (#1527)", () => {
     mockOrm = new DatabaseORM(mockSql as any);
   });
 
+// Issue #4278: the screen runs through the one engine seam, not the
+// agent's runScreen. The seam fake delegates to the stub agent's
+// runScreen: it flattens the seam input back into the runScreen
+// request (provider/sector ride the spec on the routes, the
+// overrides on the scheduled path) and returns the stub's result
+// as the engine run's one shard. The seam itself is pinned in
+// tests/stock_entry_routing_4278.test.ts.
+const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input: any) => {
+  const flat = {
+    trigger: input.spec.trigger,
+    sector: input.commandOverrides?.sector ?? input.spec.filters?.sector,
+    universe: input.spec.universe,
+    maxSymbols: input.commandOverrides?.maxSymbols,
+    filters: input.spec.filters,
+    userLogin: input.userLogin,
+    environment: input.environment,
+    portfolioContext: input.portfolioContext,
+    provider: input.commandOverrides?.provider ?? input.spec.provider,
+    broker: input.commandOverrides?.broker,
+    ...(input.commandOverrides?.mode
+      ? { mode: input.commandOverrides.mode, modeSource: input.commandOverrides.modeSource }
+      : {}),
+  };
+  const result = await runScreen(flat);
+  return {
+    results: [result],
+    collation: null,
+    jobId: input.spec?.jobId ?? "test-job",
+    workflowId: "wf-1",
+  };
+};
+
   function fallbackService(runScreenImpl: (req: any) => Promise<any>) {
     const service = new ScheduledTasksService(mockEnv, mockOrm, "test_trader");
     const publish = vi.fn(async () => {});
@@ -92,6 +124,7 @@ describe("scheduled stock Yahoo fallback (#1527)", () => {
       error: "⚠️ [FAILURE_AUTH_NO_SESSION] E*TRADE connection missing — scheduled stock screen is blocked.",
     });
     (service as any).getScreenerAgent = () => ({ runScreen });
+    (service as any).runStockScreenViaEngine = delegateSeamFake(runScreen);
     return { service, publish, audit, runScreen };
   }
 
@@ -186,6 +219,7 @@ describe("scheduled stock Yahoo fallback (#1527)", () => {
     (service as any).audit = vi.fn(() => {});
     (service as any).guardScheduledAuth = async () => ({ blocked: false });
     (service as any).getScreenerAgent = () => ({ runScreen });
+    (service as any).runStockScreenViaEngine = delegateSeamFake(runScreen);
     const result = await service.autonomousMarketScreen({});
     expect(result.success).toBe(true);
     const req = runScreen.mock.calls[0][0];
@@ -204,6 +238,7 @@ describe("scheduled stock Yahoo fallback (#1527)", () => {
     (service as any).audit = vi.fn(() => {});
     (service as any).guardScheduledAuth = guard;
     (service as any).getScreenerAgent = () => ({ runScreen });
+    (service as any).runStockScreenViaEngine = delegateSeamFake(runScreen);
     const result = await service.autonomousMarketScreen({ provider: "yahoo" });
     expect(result.success).toBe(true);
     expect(guard).not.toHaveBeenCalled();

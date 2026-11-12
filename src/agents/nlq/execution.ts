@@ -2348,14 +2348,27 @@ async function executeNLQQueryAsyncCore(
         // screening service when the port is threaded (the standout
         // opportunities of the service run are its screened picks);
         // contexts without a port keep the listings screener.
+        // Issue #4278: one listings-screen call site, shared by
+        // the port-failure fallback and the no-port branch.
+        const screenListings = () => etrade.screenMarketsAsync(plan.tradingData?.filters);
         if (deps?.stockScreenPort) {
-          const run = await deps.stockScreenPort.runScreen({
-            filters: plan.tradingData?.filters ?? {},
-            userLogin: login,
-          });
-          symbols = run.opportunities.map((o) => o.symbol).slice(0, 10);
+          try {
+            const run = await deps.stockScreenPort.runScreen({
+              filters: plan.tradingData?.filters ?? {},
+              userLogin: login,
+            });
+            symbols = run.opportunities.map((o) => o.symbol).slice(0, 10);
+          } catch {
+            // Issue #4278: the port no longer falls back to a
+            // direct screen — a refused workflow start throws
+            // instead. The watchlist action still needs picks,
+            // so a failed port run falls through to the listings
+            // screener, exactly as contexts without a port behave.
+            const screened = await screenListings();
+            symbols = screened.stocks.slice(0, 10).map((s) => s.symbol);
+          }
         } else {
-          const screened = await etrade.screenMarketsAsync(plan.tradingData?.filters);
+          const screened = await screenListings();
           symbols = screened.stocks.slice(0, 10).map((s) => s.symbol);
         }
       }

@@ -179,6 +179,38 @@ export function admitScreenModeSelection(
   return selection;
 }
 
+/**
+ * Issue #2530 / #4278 — the ND backstop, extracted so the one
+ * engine seam (runStockScreenViaEngine) enforces the identical
+ * refusal before any side effect. An ND command while the gate
+ * is closed THROWS (never a silent downgrade to a deterministic
+ * run the caller did not ask for); a deterministic command is
+ * untouched. Wired seams refuse earlier (400); this is the
+ * guarantee for every other present or future caller.
+ */
+export function assertScreenModeGate(
+  env: Env,
+  command: WorkflowJobCommand,
+  deps?: {
+    /** Issue #3922: forwarded to resolveScreenerNdGateForHost. */
+    readSettingRaw?: (key: string) => string | null;
+  },
+): void {
+  if (command.screenMode !== "non-deterministic") return;
+  const gate = resolveScreenerNdGateForHost({ env, readSettingRaw: deps?.readSettingRaw });
+  if (gate.invalid) {
+    console.warn(
+      `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
+    );
+  }
+  if (!gate.enabled) {
+    throw new WorkflowError(
+      "invalid_command",
+      "Non-deterministic screen command refused: the SCREENER_ND_MODE gate is closed in this environment (issue #2530). Refusing the start outright — never a synchronous deterministic fallback.",
+    );
+  }
+}
+
 /** Start a workflow when the port is available; null → caller falls back to sync. */
 export async function tryStartScreenerWorkflow(
   env: Env,
@@ -193,27 +225,13 @@ export async function tryStartScreenerWorkflow(
     readSettingRaw?: (key: string) => string | null;
   },
 ): Promise<WorkflowHandle | null> {
-  // Issue #2530 backstop, BEFORE the fallback try/catch: an
-  // ND command while the gate is closed THROWS instead of
-  // returning null — the null path means "fall back to the
-  // synchronous screen", which for an ND request would be a
-  // silent downgrade to a deterministic run the caller did
-  // not ask for. Wired seams refuse earlier (400); this is
-  // the guarantee for every other present or future caller.
-  if (command.screenMode === "non-deterministic") {
-    const gate = resolveScreenerNdGateForHost({ env, readSettingRaw: deps?.readSettingRaw });
-    if (gate.invalid) {
-      console.warn(
-        `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
-      );
-    }
-    if (!gate.enabled) {
-      throw new WorkflowError(
-        "invalid_command",
-        "Non-deterministic screen command refused: the SCREENER_ND_MODE gate is closed in this environment (issue #2530). Refusing the start outright — never a synchronous deterministic fallback.",
-      );
-    }
-  }
+  // Issue #2530 backstop, BEFORE the fallback try/catch — see
+  // assertScreenModeGate: an ND command while the gate is
+  // closed THROWS instead of returning null (the null path
+  // means "fall back to the synchronous screen", which for an
+  // ND request would be a silent downgrade to a deterministic
+  // run the caller did not ask for).
+  assertScreenModeGate(env, command, { readSettingRaw: deps?.readSettingRaw });
   try {
     const ports = createWorkflowPorts(env);
     if (!ports) return null;

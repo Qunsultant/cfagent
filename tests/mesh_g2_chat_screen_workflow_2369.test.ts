@@ -360,26 +360,24 @@ describe("issue #2369 — chat screen as a ScreenerScreenWorkflow run", () => {
     expect(storedReportBodies(h.sql)).toHaveLength(universes.length);
   });
 
-  it("falls back to the direct ScreenerAgent call when the workflow port is unavailable (route precedent)", async () => {
+  it("refuses coded when the workflow port is unavailable — no direct fallback (issue #4278)", async () => {
     const direct = fullResult("NASDAQ100");
     const h = makeHarness({
       withWorkflow: false,
       agentImpl: async () => direct,
     });
     const port = nlqStockScreenPort(h.ctx);
-    const result = await port.runScreen({
-      filters: { universe: "NASDAQ100" } as never,
-      userLogin: LOGIN,
-    });
-    expect(h.agentCalls).toHaveLength(1);
-    expect(h.agentCalls[0]).toMatchObject({
-      trigger: "manual",
-      universe: "NASDAQ100",
-      userLogin: LOGIN,
-      maxItems: 10,
-    });
-    expect(result.success).toBe(true);
-    expect(result.allStocks.map((s) => s.symbol)).toEqual(["NVDA", "AMD"]);
+    // The #2914 fallback (direct agent call when the port was
+    // unavailable) is gone: a screen is a workflow run or it
+    // does not run, so the port throws coded and the agent is
+    // never called.
+    await expect(
+      port.runScreen({
+        filters: { universe: "NASDAQ100" } as never,
+        userLogin: LOGIN,
+      }),
+    ).rejects.toThrow(/workflow/i);
+    expect(h.agentCalls).toHaveLength(0);
   });
 
   it("returns an honest tracked failure when the workflow never reaches a terminal state in the await window", async () => {

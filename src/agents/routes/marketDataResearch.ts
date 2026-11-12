@@ -50,6 +50,7 @@ import {
 import { workflowAcceptedResponse } from "../../workflows/screenerWorkflowRoutes";
 import { extractCheckoutEmail, submitPaidStockScreenOrNull } from "./paidStockScreenSeam";
 import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionBroker";
+import { runStockScreenViaEngine } from "../../workflows/runStockScreenViaEngine";
 import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { buildStockScreenRunSpec, specCanonicalFields, withRunProvenance } from "../../workflows/stockScreenRunSpec";
 import type { ScreenerAgent } from "../screener-agent";
@@ -79,6 +80,14 @@ export interface MarketDataResearchRouteContext {
   readSettingRaw?: ((key: string) => string | null) | undefined;
   /** Screener agent (owner: OrchestratorAgent.getScreenerAgent) — issue #1007: the market-data screen runs through the one pipeline via this agent, with the Yahoo data-source adapter as its provider. */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
+  /**
+   * Issue #4278: the one engine seam (runStockScreenViaEngine)
+   * this route's sync screen runs through. Optional: absent in
+   * production construction, the route calls the real seam;
+   * tests inject a fake. The field exists only so a test can
+   * substitute the seam — it never selects a different engine.
+   */
+  runStockScreenViaEngine?: import("../../workflows/runStockScreenViaEngine").RunStockScreenViaEngine;
   /** Canonical-copy screener persistence (owner: OrchestratorAgent.persistScreenerReportCanonical) — the REST idiom the E*TRADE screen route stores through. */
   persistScreenerReportCanonical(result: {
     timestamp: string;
@@ -386,17 +395,20 @@ export async function handleMarketDataCompareScreenRoutes(
         }
       }
       if (universe === "ALL") {
-        const shards = await agent.runSharded({
-          trigger: "manual",
-          provider: spec.provider,
-          filters: spec.filters,
+        // Issue #4278: the sharded sync screen runs through the
+        // one engine seam (was agent.runSharded). The workflow's
+        // own store step owns every SUCCESS shard; a FAILED shard
+        // never reached it, so it keeps the #2861 persist-only
+        // finalizer (market-data has no deliver step).
+        const { results: shards } = await (ctx.runStockScreenViaEngine ?? runStockScreenViaEngine)({
+          env: ctx.env,
+          spec,
           userLogin,
+          readSettingRaw: ctx.readSettingRaw,
+          agent,
         });
-        // Issue #2861: persist-then-deliver finalizer, persist-only
-        // here (market-data has no deliver step) — same order as
-        // before, now shared with the E*TRADE route.
         await persistThenDeliverAll({
-          results: shards,
+          results: shards.filter((r) => !r.success),
           // Issue #2863: record the run's criteria with each shard's canonical copy.
           persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) }),
         });
@@ -431,13 +443,18 @@ export async function handleMarketDataCompareScreenRoutes(
       }
       let result;
       try {
-        result = await agent.runScreen({
-          trigger: "manual",
-          provider: spec.provider,
-          filters: spec.filters,
-          universe: universe as any,
+        // Issue #4278: the sync screen runs through the one engine
+        // seam (was agent.runScreen) — same spec (the provider
+        // rides the command), same agent, same throw contract
+        // below (429s, quota, rethrow).
+        const outcome = await (ctx.runStockScreenViaEngine ?? runStockScreenViaEngine)({
+          env: ctx.env,
+          spec,
           userLogin,
+          readSettingRaw: ctx.readSettingRaw,
+          agent,
         });
+        result = outcome.results[0];
       } catch (screenErr) {
         // Issue #832 parity with /etrade/screen: "already running" is
         // not a failure — a 429 the client can retry.
@@ -468,14 +485,18 @@ export async function handleMarketDataCompareScreenRoutes(
         }
         throw screenErr;
       }
-      // Issue #307/#308 + #1007: store the canonical report copy (one
-      // row per generation) so market-data runs are visible in GET /api/reports
-      // and Reports history, with provider provenance in the body.
-      await persistThenDeliverAll({
-        results: [result],
-        // Issue #2863: record the run's criteria with the canonical copy.
-        persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) }),
-      });
+      // Issue #4278: a SUCCESS result was already stored by the
+      // workflow's own store step — persisting it here would twin
+      // the row. A FAILED result never reached that step, so it
+      // keeps the #307/#308 + #1007 canonical-copy persist (one
+      // row per generation, provider provenance in the body).
+      if (!result.success) {
+        await persistThenDeliverAll({
+          results: [result],
+          // Issue #2863: record the run's criteria with the canonical copy.
+          persist: (r) => ctx.persistScreenerReportCanonical({ ...r, userLogin, criteria: spec.filters, ...specCanonicalFields(spec) }),
+        });
+      }
       ctx.audit("market_data.screener.executed", "research", {
         filterSummary: result.filterSummary,
         count: result.allStocks.length,

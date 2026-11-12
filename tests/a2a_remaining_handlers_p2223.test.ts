@@ -107,24 +107,50 @@ const envelope = (data: Record<string, unknown>) => ({
 // Screener
 // ---------------------------------------------------------------------------
 
-function makeScreenerExecutor(overrides: Partial<ScreenerA2AExecutor> = {}) {
+// Issue #4278: run_screen goes through the one engine seam — the
+// executor carries the seam's gates (probe + quota) and the dispatch
+// receives the seam fake via deps. The fake exercises the gates the
+// dispatch threads through (pins the wiring, not just the call),
+// then returns the configured result as the engine run's outcome.
+const defaultSeamResult = () => ({
+  timestamp: "2026-10-29T00:00:00.000Z",
+  trigger: "manual",
+  provider: "etrade",
+  universe: "nasdaq100",
+  sector: "ALL",
+  success: true,
+  totalScanned: 42,
+  matchedCount: 3,
+  opportunities: [],
+  allStocks: [],
+  discoveryMessage: "ok",
+});
+
+function makeScreenerExecutor(
+  overrides: Partial<ScreenerA2AExecutor> = {},
+  seamResult: Record<string, unknown> = defaultSeamResult(),
+) {
   const calls: Array<{ method: string; args: unknown }> = [];
+  const seamCalls: unknown[] = [];
+  const seam = async (input: any) => {
+    seamCalls.push(input);
+    // The dispatch must thread working gates through — exercise them.
+    await input.agent.isScreenRunning("TECH", "svc-user");
+    await input.agent.chargeScreenQuota({ userLogin: "svc-user", runId: "test-run" });
+    return {
+      results: [seamResult],
+      collation: null,
+      jobId: "screener:manual:TECH:2026-10-29T00:00:00.000Z",
+      workflowId: "wf-1",
+    };
+  };
   const executor: ScreenerA2AExecutor = {
-    runScreen: async (req) => {
-      calls.push({ method: "runScreen", args: req });
-      return {
-        timestamp: "2026-10-29T00:00:00.000Z",
-        trigger: "manual",
-        provider: "etrade",
-        universe: "nasdaq100",
-        sector: "ALL",
-        success: true,
-        totalScanned: 42,
-        matchedCount: 3,
-        opportunities: [],
-        allStocks: [],
-        discoveryMessage: "ok",
-      } as any;
+    isScreenRunning: async (universe, userLogin) => {
+      calls.push({ method: "isScreenRunning", args: [universe, userLogin] });
+      return { running: false, startedAt: null, runId: null, status: "idle" as const };
+    },
+    chargeScreenQuota: async (input) => {
+      calls.push({ method: "chargeScreenQuota", args: input });
     },
     runGoalScreen: async (req) => {
       calls.push({ method: "runGoalScreen", args: req });
@@ -144,27 +170,31 @@ function makeScreenerExecutor(overrides: Partial<ScreenerA2AExecutor> = {}) {
     },
     ...overrides,
   };
-  return { executor, calls };
+  return { executor, calls, seam, seamCalls };
 }
 
 describe("dispatchScreenerA2A (#2223 final slice)", () => {
   it("screener.run_screen routes with the service identity threaded, overriding any body-supplied login", async () => {
-    const { executor, calls } = makeScreenerExecutor();
+    const { executor, calls, seam, seamCalls } = makeScreenerExecutor();
     const data = await dispatchScreenerA2A(
       ENV_SVC,
       { operation: "screener.run_screen", trigger: "manual", userLogin: "mallory", maxItems: 5 },
-      { executor },
+      { executor, runStockScreenViaEngine: seam as never },
     );
     expect(data.ok).toBe(true);
     expect(data.operation).toBe("screener.run_screen");
     expect(data.errorToken).toBeUndefined();
-    const req = calls[0].args as any;
-    expect(req.userLogin).toBe("svc-user");
-    expect(req.maxItems).toBe(5);
+    // The dispatch threads the service identity into the seam's spec,
+    // and the gates the seam admits through.
+    const input = seamCalls[0] as any;
+    expect(input.spec.userLogin).toBe("svc-user");
+    expect(input.commandOverrides.maxItems).toBe(5);
+    expect(calls.find((c) => c.method === "isScreenRunning")).toBeDefined();
+    expect(calls.find((c) => c.method === "chargeScreenQuota")).toBeDefined();
     // The scheduled layer's fallback-provenance marker and the test
     // seam are never accepted from an A2A caller.
-    expect(req.providerFallback).toBeUndefined();
-    expect(req.yahooDeps).toBeUndefined();
+    expect(input.spec.providerFallback).toBeUndefined();
+    expect(input.spec.yahooDeps).toBeUndefined();
   });
 
   it("screener.run_screen fails closed (not_configured) with no service identity — the executor is never called", async () => {
@@ -178,24 +208,25 @@ describe("dispatchScreenerA2A (#2223 final slice)", () => {
   });
 
   it("screener.run_screen mirrors a failed run (success:false + error) as a failure with the record attached", async () => {
-    const { executor } = makeScreenerExecutor({
-      runScreen: async () =>
-        ({
-          timestamp: "2026-10-29T00:00:00.000Z",
-          trigger: "manual",
-          provider: "etrade",
-          universe: "nasdaq100",
-          sector: "ALL",
-          success: false,
-          totalScanned: 0,
-          matchedCount: 0,
-          opportunities: [],
-          allStocks: [],
-          discoveryMessage: "",
-          error: "E*TRADE quotes returned zero symbols",
-        }) as any,
+    const { executor, seam } = makeScreenerExecutor({}, {
+      timestamp: "2026-10-29T00:00:00.000Z",
+      trigger: "manual",
+      provider: "etrade",
+      universe: "nasdaq100",
+      sector: "ALL",
+      success: false,
+      totalScanned: 0,
+      matchedCount: 0,
+      opportunities: [],
+      allStocks: [],
+      discoveryMessage: "",
+      error: "E*TRADE quotes returned zero symbols",
     });
-    const data = await dispatchScreenerA2A(ENV_SVC, { operation: "screener.run_screen" }, { executor });
+    const data = await dispatchScreenerA2A(
+      ENV_SVC,
+      { operation: "screener.run_screen" },
+      { executor, runStockScreenViaEngine: seam as never },
+    );
     expect(data.ok).toBe(false);
     expect(data.error).toContain("zero symbols");
     expect((data.result as any).success).toBe(false);

@@ -54,6 +54,7 @@ import {
   tryStartScreenerWorkflow,
   workflowTenantId,
 } from "../../workflows/screenerWorkflowRoutes";
+import { runStockScreenViaEngine } from "../../workflows/runStockScreenViaEngine";
 import type { Env } from "../../types";
 import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
@@ -88,6 +89,15 @@ export interface PremiumRouteContext {
   getOrm(): DatabaseORM;
   /** Screener agent (owner: OrchestratorAgent.getScreenerAgent) — issue #1007: premium stock-signals execute through the one stock pipeline via this agent, with the Yahoo data-source adapter as provider. */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
+  /**
+   * Issue #4278: the one engine seam (runStockScreenViaEngine)
+   * this route's sync stock-signals screen runs through.
+   * Optional: absent in production construction, the route
+   * calls the real seam; tests inject a fake. The field exists
+   * only so a test can substitute the seam — it never selects
+   * a different engine.
+   */
+  runStockScreenViaEngine?: import("../../workflows/runStockScreenViaEngine").RunStockScreenViaEngine;
   /** Canonical-copy screener persistence (owner: OrchestratorAgent.persistScreenerReportCanonical) — the REST idiom. */
   persistScreenerReportCanonical(result: {
     timestamp: string;
@@ -618,17 +628,40 @@ export async function handlePremiumRoutes(
             };
           }
         }
+        // Issue #4278: the sync fulfillment runs through the one
+        // engine seam (was agent.runScreen). The spec is the paid
+        // fulfillment's own provider, store-only (deliver
+        // false, as the async path's literal), explicit-symbols
+        // universe. The command overrides carry the async path's
+        // literal shape verbatim — symbols shard, caps, job id —
+        // so the sync and async fulfillments run the same command.
+        const spec = {
+          source: "premium" as const,
+          trigger: "manual" as const,
+          deliver: false,
+          provider: "yahoo" as const,
+          filters: {},
+          universe: "symbols",
+          jobId: manualWorkflowJobId("symbols"),
+          asyncRequested: false,
+          delivery: {},
+          userLogin,
+        };
         let result;
         try {
-          result = await agent.runScreen({
-            trigger: "manual",
-            provider: "yahoo",
-            symbols: listings,
-            maxSymbols: listings.length,
-            maxItems: listings.length,
-            filters: {},
+          const outcome = await (ctx.runStockScreenViaEngine ?? runStockScreenViaEngine)({
+            env: ctx.env,
+            spec,
             userLogin,
+            agent,
+            commandOverrides: {
+              jobId: manualWorkflowJobId("symbols"),
+              shards: [{ shardId: "symbols", symbols: listings }],
+              maxItems: listings.length,
+              maxSymbols: listings.length,
+            },
           });
+          result = outcome.results[0];
         } catch (screenErr) {
           const error = screenErr instanceof Error ? screenErr.message : String(screenErr);
           if (error.includes("already running")) {
@@ -648,7 +681,14 @@ export async function handlePremiumRoutes(
           }
           throw screenErr;
         }
-        await ctx.persistScreenerReportCanonical({ ...result, userLogin });
+        // Issue #4278: a SUCCESS result was already stored by the
+        // workflow's own store step — persisting it here would twin
+        // the row. A FAILED result never reached that step, so it
+        // keeps the canonical-copy persist, then answers the honest
+        // failure below.
+        if (!result.success) {
+          await ctx.persistScreenerReportCanonical({ ...result, userLogin });
+        }
         if (!result.success) {
           // Honest failure (the options-scan idiom above): Yahoo
           // unavailable fails the fulfillment visibly — no signals are

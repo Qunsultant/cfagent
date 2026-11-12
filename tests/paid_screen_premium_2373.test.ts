@@ -5,7 +5,7 @@
  * The stock-signals handler (src/agents/routes/premium.ts) returns
  * ETradeAgenticPaymentService.handleGatedEndpoint directly, and BOTH the
  * async branch (tryStartScreenerWorkflow) and the sync branch
- * (agent.runScreen) run INSIDE its fulfill callback — behind verified
+ * (the engine seam) run INSIDE its fulfill callback — behind verified
  * payment, with no path that serves without a verified receipt. The gate
  * (src/services/agenticPayments.ts) reads no monetization flag, so flag
  * ON and flag OFF behave identically here; the flag variations below
@@ -165,7 +165,7 @@ const syncScreenResult = () => ({
 
 interface Harness {
   ctx: PremiumRouteContext;
-  runScreen: ReturnType<typeof vi.fn>;
+  runStockScreenViaEngine: ReturnType<typeof vi.fn>;
   persist: ReturnType<typeof vi.fn>;
   meterSql: MockSqlStorage;
   meterRows: (userLogin: string) => Array<{ id: string; userLogin: string; runId: string; category: string; createdAt: string }>;
@@ -176,7 +176,14 @@ function makeHarness(flagOn: boolean): Harness {
   const ormSql = new MockSqlStorage();
   const orm = new DatabaseORM(ormSql);
   orm.initializeSchema("trader_session_1");
-  const runScreen = vi.fn().mockResolvedValue(syncScreenResult());
+  // Issue #4278: the sync branch runs through the one engine seam — the
+  // fake returns the engine run's outcome (the canned result as its one shard).
+  const runStockScreenViaEngine = vi.fn().mockResolvedValue({
+    results: [syncScreenResult()],
+    collation: null,
+    jobId: "screener:manual:symbols:2026-11-03T00:00:00.000Z",
+    workflowId: "wf-symbols",
+  });
   const persist = vi.fn().mockResolvedValue(undefined);
   const env = {
     X402_NETWORK: "base-sepolia",
@@ -191,12 +198,14 @@ function makeHarness(flagOn: boolean): Harness {
     env,
     sql: meterSql,
     getOrm: () => orm,
-    getScreenerAgent: () => ({ runScreen }) as any,
+    // The agent is the seam's gates + read-back; the fake seam ignores it.
+    getScreenerAgent: () => ({}) as any,
     persistScreenerReportCanonical: persist,
+    runStockScreenViaEngine,
   } as unknown as PremiumRouteContext;
   return {
     ctx,
-    runScreen,
+    runStockScreenViaEngine,
     persist,
     meterSql,
     meterRows: (userLogin: string) =>
@@ -270,12 +279,12 @@ describe("stock-signals paid shape on current main (#2373 Slice B)", () => {
     expect(block).toContain("handleGatedEndpoint");
     expect(block).toContain("TRADING_PAID_SERVICES.STOCK_SIGNALS");
     // Both branches live inside the fulfill callback: the async workflow
-    // start AND the sync agent run, before the metered-gate options that
+    // start AND the sync seam run, before the metered-gate options that
     // close the handleGatedEndpoint call.
     expect(block.indexOf("tryStartScreenerWorkflow")).toBeGreaterThan(-1);
-    expect(block.indexOf("agent.runScreen")).toBeGreaterThan(-1);
+    expect(block.indexOf("runStockScreenViaEngine")).toBeGreaterThan(-1);
     expect(block.indexOf("tryStartScreenerWorkflow")).toBeLessThan(block.indexOf("premiumMeteredGateOptions"));
-    expect(block.indexOf("agent.runScreen")).toBeLessThan(block.indexOf("premiumMeteredGateOptions"));
+    expect(block.indexOf("runStockScreenViaEngine")).toBeLessThan(block.indexOf("premiumMeteredGateOptions"));
   });
 
   it("the sibling premium families are separate entries, untouched by this slice", () => {
@@ -322,7 +331,7 @@ for (const flagOn of [true, false]) {
       expect(res!.status).toBe(402);
       const body = (await res!.json()) as any;
       expect(body.error).toBe("Payment Required");
-      expect(h.runScreen).not.toHaveBeenCalled();
+      expect(h.runStockScreenViaEngine).not.toHaveBeenCalled();
       expect(h.persist).not.toHaveBeenCalled();
     });
 
@@ -335,7 +344,7 @@ for (const flagOn of [true, false]) {
       );
       expect(res).not.toBeNull();
       expect(res!.status).toBe(402);
-      expect(h.runScreen).not.toHaveBeenCalled();
+      expect(h.runStockScreenViaEngine).not.toHaveBeenCalled();
     });
 
     it("verified x402 session traffic, sync branch -> served + metered under the login", async () => {
@@ -353,8 +362,10 @@ for (const flagOn of [true, false]) {
       expect(body.success).toBe(true);
       expect(body.count).toBe(1);
       expect(body.signals[0].symbol).toBe("NVDA");
-      expect(h.runScreen).toHaveBeenCalledTimes(1);
-      expect(h.persist).toHaveBeenCalledTimes(1);
+      expect(h.runStockScreenViaEngine).toHaveBeenCalledTimes(1);
+      // Issue #4278: the SUCCESS sync result is stored by the
+      // workflow's own store step — the route persists nothing.
+      expect(h.persist).toHaveBeenCalledTimes(0);
       const rows = h.meterRows("owner-login");
       expect(rows).toHaveLength(1);
       expect(rows[0].category).toBe("stock_signals");
@@ -376,7 +387,7 @@ for (const flagOn of [true, false]) {
       expect(body.jobId).toBe("job_symbols_test");
       expect(body.workflowId).toBe("wf_test");
       expect(body.statusUrl).toBe("/api/jobs/job_symbols_test");
-      expect(h.runScreen).not.toHaveBeenCalled();
+      expect(h.runStockScreenViaEngine).not.toHaveBeenCalled();
       expect(h.meterRows("owner-login")).toHaveLength(1);
     });
 
