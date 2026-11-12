@@ -274,6 +274,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
       "yahoo-sp100-quotes-pipeline",
       "yahoo-sp500-quotes-pipeline",
       "yahoo-dow-quotes-pipeline",
+      "yahoo-sp400-quotes-pipeline",
       "alpaca-nasdaq100-quotes-pipeline",
       "etrade-nasdaq100-quotes-pipeline",
       "public-nasdaq100-quotes-pipeline",
@@ -332,7 +333,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
   });
 
   it("resolves names in the family idiom and refuses ambiguous/unknown names", () => {
-    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(7);
+    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(8);
     expect(resolvePipelineChain(CHAIN_ID)?.jobId).toBe(CHAIN_ID);
     expect(resolvePipelineChain("yahoo nasdaq100 pipeline")?.jobId).toBe(CHAIN_ID);
     expect(resolvePipelineChain("yahoo-nasdaq100-pipeline")?.jobId).toBe(CHAIN_ID);
@@ -358,7 +359,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
 describe("pipeline chain definitions (#3540)", () => {
   it("every chain definition resolves as a valid J1 job composed of the stage jobs' own nodes", () => {
     const raws = buildAllChainPipelineJobDefinitions({});
-    expect(raws).toHaveLength(7);
+    expect(raws).toHaveLength(8);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("feed");
@@ -420,7 +421,7 @@ describe("pipeline chain definitions (#3540)", () => {
     expect(params[7]).toMatchObject({ deliverJobId: DELIVER_ID });
   });
 
-  it("ensure is idempotent and registerSchedules declares the whole plane (46)", async () => {
+  it("ensure is idempotent and registerSchedules declares the whole plane (52)", async () => {
     const h = await makeHarness();
     const first = await h.stores.definitions.getDefinition(CHAIN_ID);
     await ensureChainPipelineJobs(h.control, h.stores, {});
@@ -431,9 +432,9 @@ describe("pipeline chain definitions (#3540)", () => {
     });
     // #3932: one more job on the plane — the parameterized
     // sentiment job (one definition, folded into every chain).
-    expect(registrations).toHaveLength(46);
+    expect(registrations).toHaveLength(52);
     const chainRegs = registrations.filter((r) => r.jobId.endsWith("-pipeline"));
-    expect(chainRegs).toHaveLength(7);
+    expect(chainRegs).toHaveLength(8);
     expect(chainRegs.every((r) => r.nodePath === "")).toBe(true);
   });
 });
