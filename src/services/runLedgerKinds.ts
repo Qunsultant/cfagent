@@ -21,6 +21,12 @@ export interface RunKindCandidate {
   operation?: string | null;
   system?: string | null;
   jobId?: string | null;
+  /**
+   * Issue #4262 (S2) — a kind stamped by a folded source that knows its own
+   * family (the workflow-runs read records one). It wins over the rule table:
+   * the store that owns the run is more specific than its namespace.
+   */
+  kind?: RunLedgerKind | null;
 }
 
 function matches(rule: RunLedgerKindRule, run: RunKindCandidate): boolean {
@@ -40,6 +46,7 @@ export function classifyRunKind(
   run: RunKindCandidate,
   rules: readonly RunLedgerKindRule[] = RUN_LEDGER_KIND_RULES,
 ): RunLedgerKind {
+  if (run.kind) return run.kind;
   for (const rule of rules) {
     if (matches(rule, run)) return rule.kind;
   }

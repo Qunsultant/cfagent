@@ -19,6 +19,12 @@
  *    /api/runs/details payload the Docs tab renders (issue #2786
  *    losslessness fix) — additive only; every section above stays.
  *
+ * Issue #4262 (S2): the Workflow Runs ADDRESS (?tab=workflow-runs) now
+ * redirects to the one run ledger with kind=workflow, so there is one run
+ * list. This module is no longer mounted as a page; it remains the source of
+ * the shared `RunDetail` the ledger renders for a folded run, so the detail
+ * (stages, inputs/outputs, artifacts, delivery) has one implementation.
+ *
  * Compliance (docs/agents/ux-architecture.md §20): ui/ primitives only,
  * semantic tokens only, server state is authoritative, and a field the
  * stores do not record renders as absent/not recorded — never invented.
@@ -1065,7 +1071,11 @@ export function WorkflowRunsPanel() {
   );
 }
 
-function RunDetail({ run }: { run: WorkflowRun }) {
+/**
+ * Issue #4262 (S2) — exported so the one run ledger renders the SAME detail
+ * for a folded workflow row instead of growing a second implementation.
+ */
+export function RunDetail({ run }: { run: WorkflowRun }) {
   // Issue #2786 Part 3: when canonical documents exist they are the
   // authoritative doc links — the outcome's doc-kind artifacts are
   // the same files, so they are hidden here and the modal never
