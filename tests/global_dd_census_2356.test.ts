@@ -39,11 +39,19 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC_FILES: string[] = [];
+/**
+ * Issue #4247 — the allow-lists below are keyed `src/services/...` with forward
+ * slashes, while `readdirSync` + `join` yield backslashes on Windows. Normalize
+ * at the seam so one checkout cannot make the census disagree with itself.
+ */
+function posixPath(p: string): string {
+  return p.split(/[\\/]/).join("/");
+}
 function walk(dir: string): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) walk(path);
-    else if (entry.name.endsWith(".ts")) SRC_FILES.push(path);
+    else if (entry.name.endsWith(".ts")) SRC_FILES.push(posixPath(path));
   }
 }
 walk("src");
@@ -1256,7 +1264,7 @@ describe("global D-D census: step 5e — residual bucket family port composition
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = join(dir, entry.name);
         if (entry.isDirectory()) walkTests(path);
-        else if (entry.name.endsWith(".ts")) testFiles.push(path);
+        else if (entry.name.endsWith(".ts")) testFiles.push(posixPath(path));
       }
     })("tests");
     const pairs: Array<[string, string]> = [];
