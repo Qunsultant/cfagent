@@ -51,9 +51,15 @@
  *   stand in so the other six stages' ports can still be built.
  *   Panel/scanner shapes build their own shapeReport/deliver, so
  *   all eight stages are controllable for them.
- * - The goal leg's ports cannot be rebuilt here either (the goal run
- *   lives on the ScreenerAgent DO, not the chat host's) — a goal
- *   shape refuses `stage_port_unavailable`.
+ * - The goal leg's job record is not addressable from the chat host
+ *   (decided-not-to, #4274): the goal leg runs over in-memory engine
+ *   stores on the ScreenerAgent DO, so no durable job exists in this
+ *   host's SQL — the control cannot find the job to drive a stage of
+ *   it, and binding the ports alone cannot fix that (a cross-DO
+ *   control path is needed). A goal shape refuses
+ *   `stage_port_unavailable`. (The goal leg's shapeReport/deliver are
+ *   pure functions of their inputs and ARE rebuildable — the blocker
+ *   is the job record, not the ports.)
  * - Runs on other DOs, and in-memory paid-screen runs, have no
  *   durable record in this DO: the control refuses them by name
  *   (`job_not_found`), never by pretending they ran here.
@@ -108,10 +114,11 @@ export type OptionsStageControlRequestShape = "manual" | "panel" | "scan";
 
 /**
  * The shape a stored request decodes to — including the goal leg,
- * which a control action can name but cannot rebuild ports for
- * (its ports live on the ScreenerAgent DO), and "unknown" for a
- * stop/cancel on a run whose definition carries no request (the
- * operation needs no ports, so the shape does not matter there).
+ * which a control action can name but cannot drive an execution op
+ * for (its job record is not addressable from the chat host —
+ * decided-not-to, #4274), and "unknown" for a stop/cancel on a run
+ * whose definition carries no request (the operation needs no ports,
+ * so the shape does not matter there).
  */
 export type OptionsStageControlDecodedShape =
   | OptionsStageControlRequestShape
@@ -366,12 +373,15 @@ export async function controlOptionsStage(
     // execution op always has its request by the check above.
     const shape: OptionsStageControlDecodedShape =
       request === undefined ? "unknown" : readRequestShape(request, runId);
-    // The goal leg's ports live on the ScreenerAgent DO, not the chat
-    // host — an execution op on a goal-shape run refuses by name.
+    // The goal leg's job record is not addressable from the chat
+    // host (decided-not-to, #4274): the goal leg runs over
+    // in-memory engine stores on the ScreenerAgent DO, so no durable
+    // job exists in this host's SQL — an execution op on a
+    // goal-shape run refuses by name.
     if (shape === "goal" && needsExecution) {
       throw new OptionsStageControlError(
         "stage_port_unavailable",
-        `options run ${runId}: the goal leg's ports live on the ScreenerAgent DO, not the chat host — a goal-leg stage cannot be controlled from this turn; re-dispatch from the goal leg`,
+        `options run ${runId}: the goal leg's job record is not addressable from this turn (decided-not-to, #4274) — the goal leg runs over in-memory engine stores on the ScreenerAgent DO, so no durable job exists in this host; a goal-leg stage cannot be controlled from chat; re-dispatch from the goal leg`,
       );
     }
     // The manual route's shapeReport / deliver need the
