@@ -32,6 +32,7 @@ import {
   MIGRATION_0011_PRICE_CATALOGUE,
   MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
   MIGRATION_0058_PRODUCT_VERSIONS,
+  MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -78,6 +79,7 @@ export async function ensureJournalSchema(db: JournalDb): Promise<number[]> {
     MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
     MIGRATION_0012_NATIVE_LEDGER,
     MIGRATION_0058_PRODUCT_VERSIONS,
+    MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   ]);
   const now = Date.now();
   for (const account of MINIMAL_CHART) {

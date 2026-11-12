@@ -2344,6 +2344,38 @@ CREATE INDEX IF NOT EXISTS agent_reports_tenant_user_idx
 `,
 };
 
+/**
+ * Migration 0062 — upgrade-offer dismissal suppressions + product
+ * ladder rank (#3246 slice 1, sub-issue of #3241).
+ * - agent_offer_suppressions: one row per (login, trigger) — a
+ *   dismissed offer trigger stays suppressed until
+ *   suppressed_until_ms. Expired rows are inert (read as
+ *   absent); no deletion sweeper exists in v1.
+ * - agent_products.rank: the nullable explicit ladder position
+ *   (1 = the lowest rung, larger = higher; NULL = unranked, and
+ *   the derived order applies). `rank` is safe unquoted in
+ *   SQLite DDL/DML (verified against node:sqlite); Drizzle
+ *   quotes the identifier in generated queries.
+ * - The Free baseline row (prod-free) is seeded to rank 1: it is
+ *   the definitional ladder floor and its rank is not editable.
+ * Prerequisites: 0058 (agent_products).
+ */
+export const MIGRATION_0062_OFFER_SUPPRESSIONS_RANK: DataMigration = {
+  version: 62,
+  name: "0062_offer_suppressions_rank",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_offer_suppressions (
+  login TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  suppressed_until_ms INTEGER NOT NULL,
+  dismissed_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (login, trigger)
+);
+ALTER TABLE agent_products ADD COLUMN rank INTEGER;
+UPDATE agent_products SET rank = 1 WHERE id = 'prod-free';
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -2404,6 +2436,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0059_RUN_LEDGER,
   MIGRATION_0060_RUN_LEDGER_OWNER,
   MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
+  MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
 ];
 
 function splitStatements(sqlText: string): string[] {

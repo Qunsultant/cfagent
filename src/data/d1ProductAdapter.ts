@@ -22,11 +22,13 @@ import {
   MIGRATION_0011_PRICE_CATALOGUE,
   MIGRATION_0027_PRICE_CATALOGUE_APPROVAL,
   MIGRATION_0058_PRODUCT_VERSIONS,
+  MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   type MigrationDb,
 } from "./migrationRunner";
 import {
   assertBulkMoveStatus,
   assertProduct,
+  assertProductRank,
   assertSegment,
   type BulkMoveRecord,
   type ProductKind,
@@ -72,6 +74,10 @@ export async function ensureProductSchema(db: ProductDb): Promise<number[]> {
     MIGRATION_0009_JOURNAL,
     MIGRATION_0012_NATIVE_LEDGER,
     MIGRATION_0058_PRODUCT_VERSIONS,
+    // Issue #3246: the rank column (0062) must ride every ensure
+    // list that creates agent_products — a store ensured without
+    // it would fail every product read (no such column: rank).
+    MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   ]);
 }
 
@@ -81,6 +87,7 @@ function toProduct(raw: typeof agentProducts.$inferSelect): ProductRecord {
     name: raw.name,
     kind: raw.kind as ProductKind,
     description: raw.description ?? null,
+    rank: raw.rank ?? null,
     createdAtMs: raw.createdAtMs,
     updatedAtMs: raw.updatedAtMs,
   };
@@ -127,6 +134,7 @@ export class D1ProductAdapter implements ProductStore {
     name?: unknown;
     kind?: unknown;
     description?: unknown;
+    rank?: unknown;
   }): Promise<ProductRecord> {
     const product = assertProduct(input);
     const id = product.id || `prod-${crypto.randomUUID().slice(0, 8)}`;
@@ -138,6 +146,7 @@ export class D1ProductAdapter implements ProductStore {
         name: record.name,
         kind: record.kind,
         description: record.description,
+        rank: record.rank,
         createdAtMs: record.createdAtMs,
         updatedAtMs: record.updatedAtMs,
       });
@@ -172,11 +181,25 @@ export class D1ProductAdapter implements ProductStore {
     name?: unknown;
     kind?: unknown;
     description?: unknown;
+    rank?: unknown;
   }): Promise<ProductRecord> {
     const product = assertProduct(input);
     const existing = await this.findProductByName(product.name, product.kind);
     if (existing) return existing;
     return this.createProduct(input);
+  }
+
+  async setProductRank(productId: string, rank: number | null): Promise<ProductRecord> {
+    const validated = assertProductRank(rank);
+    const existing = await this.getProduct(productId);
+    if (!existing) throw new Error(`No product ${productId}.`);
+    await this.db
+      .update(agentProducts)
+      .set({ rank: validated, updatedAtMs: Date.now() })
+      .where(eq(agentProducts.id, productId));
+    const updated = await this.getProduct(productId);
+    if (!updated) throw new Error(`No product ${productId}.`);
+    return updated;
   }
 
   async listProducts(): Promise<ProductRecord[]> {

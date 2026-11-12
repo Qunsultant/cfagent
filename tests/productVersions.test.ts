@@ -46,7 +46,10 @@ import {
   type MigrationDb,
 } from "../src/data/migrationRunner";
 import {
+  assertProduct,
+  assertProductRank,
   DEFAULT_SEGMENT,
+  FREE_PRODUCT_ID,
   resolveEffectiveVersion,
   type VersionLike,
 } from "../src/data/productPorts";
@@ -673,5 +676,58 @@ describe("migration 0058 — product versions (#3289)", () => {
     ]);
     const store = new D1CommercialAdapter(db);
     expect((await store.getAccount("user-1"))?.segment).toBe(DEFAULT_SEGMENT);
+  });
+});
+
+describe("explicit product rank (#3246 §3.3)", () => {
+  it("assertProductRank accepts a positive whole number or null, absent reads as null", () => {
+    expect(assertProductRank(1)).toBe(1);
+    expect(assertProductRank(10001)).toBe(10001);
+    expect(assertProductRank(null)).toBeNull();
+    expect(assertProductRank(undefined)).toBeNull();
+    for (const bad of [0, -1, 1.5, NaN, Infinity, "2", true, {}]) {
+      expect(() => assertProductRank(bad)).toThrow(/positive whole number/);
+    }
+  });
+
+  it("assertProduct validates the rank shape only; the prod-free refusal lives in the route", () => {
+    expect(assertProduct({ id: "prod-basic", name: "Basic", kind: "subscription", rank: 2 }).rank).toBe(2);
+    expect(assertProduct({ id: "prod-basic", name: "Basic", kind: "subscription" }).rank).toBeNull();
+    expect(() => assertProduct({ id: "prod-basic", name: "Basic", kind: "subscription", rank: 0 })).toThrow();
+    // No product-identity policy in the assert: prod-free's rank-1
+    // floor is the migration seed + the route 409 (pinned in
+    // tests/upgradeOfferRoutes.test.ts), not the port assert.
+    expect(assertProduct({ id: "prod-free", name: "Free", kind: "subscription", rank: 1 }).rank).toBe(1);
+  });
+
+  it("both adapters round-trip rank at creation and through setProductRank", async () => {
+    const mock = new MockD1Database();
+    const db = createD1ProductDb(mock as unknown as D1Database);
+    await ensureProductSchema(db);
+    const stores: ProductStore[] = [new InMemoryProductAdapter(), new D1ProductAdapter(db)];
+    for (const store of stores) {
+      const created = await store.createProduct({ id: "prod-ranked", name: "Ranked", kind: "subscription", rank: 3 });
+      expect(created.rank).toBe(3);
+      expect((await store.getProduct("prod-ranked"))?.rank).toBe(3);
+      const unranked = await store.createProduct({ id: "prod-plain", name: "Plain", kind: "subscription" });
+      expect(unranked.rank).toBeNull();
+      const updated = await store.setProductRank("prod-plain", 4);
+      expect(updated.rank).toBe(4);
+      expect((await store.getProduct("prod-plain"))?.rank).toBe(4);
+      const cleared = await store.setProductRank("prod-plain", null);
+      expect(cleared.rank).toBeNull();
+      await expect(store.setProductRank("prod-missing", 2)).rejects.toThrow(/No product/);
+      await expect(store.setProductRank("prod-plain", 0)).rejects.toThrow(/positive whole number/);
+    }
+  });
+
+  it("the seeded prod-free row reads rank 1 after ensure (migration 0062 backfill)", async () => {
+    const mock = new MockD1Database();
+    const db = createD1ProductDb(mock as unknown as D1Database);
+    await ensureProductSchema(db);
+    const store = new D1ProductAdapter(db);
+    expect((await store.getProduct(FREE_PRODUCT_ID))?.rank).toBe(1);
+    // The per-run seeds stay unranked.
+    expect((await store.getProduct("prod-per-run-stock"))?.rank).toBeNull();
   });
 });

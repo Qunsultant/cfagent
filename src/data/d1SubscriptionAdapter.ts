@@ -30,6 +30,7 @@ import {
   MIGRATION_0041_PLAN_TRIAL_DAYS,
   MIGRATION_0049_PLAN_PRICE_APPROVAL,
   MIGRATION_0058_PRODUCT_VERSIONS,
+  MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -62,7 +63,7 @@ export function createD1SubscriptionDb(d1: D1Database): SubscriptionDb {
 
 /** Idempotent schema-ensure: applies migrations 0008 + 0013 + 0014 + 0041 + 0049 if unapplied (0013 adds the native Stripe id columns; 0014 adds the Billing provider columns + policy table; 0041 adds the plan trial-days column; 0049 adds the plan price-approval columns). Issue #3289: 0058 versions the plans, so its prerequisites ride along — 0007 (accounts/claims), 0008 (plans), 0009 (journal), 0011 + 0027 (catalogue), 0012 (native ledger) — and 0058 itself. */
 export async function ensureSubscriptionSchema(db: SubscriptionDb): Promise<number[]> {
-  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0007_COMMERCIAL_STORE, MIGRATION_0008_SUBSCRIPTIONS, MIGRATION_0009_JOURNAL, MIGRATION_0011_PRICE_CATALOGUE, MIGRATION_0012_NATIVE_LEDGER, MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS, MIGRATION_0014_BILLING, MIGRATION_0027_PRICE_CATALOGUE_APPROVAL, MIGRATION_0041_PLAN_TRIAL_DAYS, MIGRATION_0049_PLAN_PRICE_APPROVAL, MIGRATION_0058_PRODUCT_VERSIONS]);
+  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0007_COMMERCIAL_STORE, MIGRATION_0008_SUBSCRIPTIONS, MIGRATION_0009_JOURNAL, MIGRATION_0011_PRICE_CATALOGUE, MIGRATION_0012_NATIVE_LEDGER, MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS, MIGRATION_0014_BILLING, MIGRATION_0027_PRICE_CATALOGUE_APPROVAL, MIGRATION_0041_PLAN_TRIAL_DAYS, MIGRATION_0049_PLAN_PRICE_APPROVAL, MIGRATION_0058_PRODUCT_VERSIONS, MIGRATION_0062_OFFER_SUPPRESSIONS_RANK]);
 }
 
 function toPlan(raw: typeof agentSubscriptionPlans.$inferSelect): SubscriptionPlanRecord {
