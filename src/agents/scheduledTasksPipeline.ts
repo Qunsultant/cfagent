@@ -82,6 +82,7 @@ import {
   ENRICH_PIPELINE_CATALOG,
   type EnrichStepDeps,
 } from "../services/enrichPipelineJobs";
+import { screenerStepDepsForScheduledAgent } from "../services/screenerPipelineJobs";
 import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
 import {
   ensureAnalyzePipelineJobs,
@@ -453,6 +454,11 @@ export function createScheduledAgentPipelineControl(
       analyzeStepDepsForScheduledAgent(ctx),
       generateStepDepsForScheduledAgent(ctx),
       deliverStepDepsForScheduledAgent(ctx),
+      // Issue #4190 (#3550 S1): the screener steps compose here
+      // too — registration only; no job names them until the S2
+      // cutover, and the quote/history deps refuse by name until
+      // then, so production behavior is unchanged.
+      screenerStepDepsForScheduledAgent(ctx),
     ),
     invocation: "sync",
   });
@@ -718,6 +724,9 @@ export async function startPipelineJobWorkflow(
       analyzeStepDepsForScheduledAgent(ctx),
       generateStepDepsForScheduledAgent(ctx),
       deliverStepDepsForScheduledAgent(ctx),
+      // Issue #4190 (#3550 S1): the screener steps compose here
+      // too — registration only (see the host control above).
+      screenerStepDepsForScheduledAgent(ctx),
     ),
     invocation: "workflow-shard",
   });

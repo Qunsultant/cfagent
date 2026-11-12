@@ -1,0 +1,3 @@
+### One engine
+
+- **Screener substrate (#3550 S1, #4190)**: the engine now executes a stock screen — a per-run six-node job definition (`feed → enrich → analyze → store → serve → deliver`, one node per catalog stage) built from `WorkflowJobCommand`, six new `ScreenerAgent` stage methods extracting the per-stage bodies of `runScreenInner`, a screener step registry composed into the shared pipeline registry in both residencies (host + workflow), and the goal leg on the same six nodes. Registration only in this slice: no job names the screener steps yet and the live path is untouched (`runScreenInner` unchanged); the quote/history platform binding lands in S2 (#4192).

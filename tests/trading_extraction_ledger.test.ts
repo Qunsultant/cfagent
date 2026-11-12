@@ -175,6 +175,10 @@ const PINNED_NAMED_REEXPORTS = ["MAX_SCAN_SYMBOLS from ./options/opportunityScan
  * #2581 — the mesh options-strategy door composes the service
  * for the acting login exactly as the NLQ execution layer does:
  * +1 in a new file.
+ * #4190 (#3550 S1) — the engine's feed stage constructs its own
+ * ETradeService for etrade-provider runs, mirroring runScreenInner's
+ * construction (the stage methods duplicate the per-stage bodies in
+ * S1; the live path is untouched): screener-agent 2 -> 3.
  */
 const CONSTRUCTION_LEDGER: Record<string, number> = {
   "agents/nlq/execution.ts": 2,
@@ -184,7 +188,7 @@ const CONSTRUCTION_LEDGER: Record<string, number> = {
   "agents/routes/etradeOptions.ts": 6,
   "agents/routes/etradeOptionsNoView.ts": 1,
   "agents/routes/watchlists.ts": 5,
-  "agents/screener-agent.ts": 2,
+  "agents/screener-agent.ts": 3,
   "mcps/openaimp/cloudflareAgentCommands.ts": 1,
   "mcps/openaimp/etradeCommands.ts": 6,
   "mcps/openaimp/index.ts": 1,
