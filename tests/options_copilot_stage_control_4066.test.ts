@@ -657,10 +657,12 @@ describe("options copilot stage control (#4066)", () => {
       expect(res.status).toBe("ranked_candidates");
       expect(res.count).toBeGreaterThan(0);
       // One pipeline record: the job definition is durable in the
-      // host DO, and it carries the dispatch request.
+      // host DO, and it carries the dispatch request. Issue #4271:
+      // the panel is a strategy screen, so its job is the strategy
+      // job (strategy-screen:<runId>), not the options job.
       const stores = optionsEngineStoresFromSql(sql);
       const definitions = await stores.stores.definitions.listDefinitions();
-      const panelJob = definitions.find((d) => d.jobId.startsWith("options-screen:nlq-panel:"));
+      const panelJob = definitions.find((d) => d.jobId.startsWith("strategy-screen:nlq-panel:"));
       expect(panelJob).toBeDefined();
       const definition = await stores.stores.definitions.getDefinition(panelJob!.jobId);
       const request = (definition?.rawConfig as { request?: unknown } | undefined)?.request as
@@ -668,7 +670,7 @@ describe("options copilot stage control (#4066)", () => {
         | undefined;
       expect(request?.classInput?.strategyRequest?.symbol).toBe("AAPL");
       // …and the run is controllable from the turn.
-      const runId = panelJob!.jobId.slice("options-screen:".length);
+      const runId = panelJob!.jobId.slice("strategy-screen:".length);
       const controlled = await controlOptionsStage({
         sql,
         storage,
@@ -707,9 +709,11 @@ describe("options copilot stage control (#4066)", () => {
       expect(result.count).toBeGreaterThan(0);
       const stores = optionsEngineStoresFromSql(sql);
       const definitions = await stores.stores.definitions.listDefinitions();
-      const scanJob = definitions.find((d) => d.jobId.startsWith("options-screen:nlq-scan:"));
+      // Issue #4271: the scan is a strategy screen, so its job is the
+      // strategy job (strategy-screen:<runId>), not the options job.
+      const scanJob = definitions.find((d) => d.jobId.startsWith("strategy-screen:nlq-scan:"));
       expect(scanJob).toBeDefined();
-      const runId = scanJob!.jobId.slice("options-screen:".length);
+      const runId = scanJob!.jobId.slice("strategy-screen:".length);
       const controlled = await controlOptionsStage({
         sql,
         storage,

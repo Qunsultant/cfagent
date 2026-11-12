@@ -23,7 +23,7 @@ import {
   memoryStageClaims,
   memoryStageStorage,
 } from "./optionsScreenWorkflow";
-import { optionsEngineStoresFromSql, runOptionsScreenViaEngine } from "./optionsScreenEngine";
+import { optionsEngineStoresFromSql, runStrategyScreenViaEngine } from "./optionsScreenEngine";
 import {
   createStrategyScreenPorts,
   panelResultToPipelineResult,
@@ -63,7 +63,9 @@ export async function runManualPanelViaPipeline(
   const claims = input.getSql
     ? createSqlStageClaimStore(input.getSql)
     : memoryStageClaims();
-  const outcome = await runOptionsScreenViaEngine(
+  // Issue #4271: the manual panel is a strategy screen — it defines
+  // the strategy job (strategy-screen:<runId>), not the options job.
+  const outcome = await runStrategyScreenViaEngine(
     {
       runId,
       userLogin: input.userLogin,

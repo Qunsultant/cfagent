@@ -46,7 +46,7 @@ import {
 import {
   optionsEngineStoresFromSql,
   optionsEngineStoresInMemory,
-  runOptionsScreenViaEngine,
+  runStrategyScreenViaEngine,
 } from "../workflows/optionsScreenEngine";
 import type { SqlStorage } from "../orm";
 import {
@@ -893,7 +893,9 @@ export async function runOptionsStrategyAction(
   const panelUserLogin = deps?.userLogin;
   const panelRunId = `nlq-panel:${crypto.randomUUID()}`;
   const panelStorage = deps?.pipelineStorage ?? memoryStageStorage();
-  const panelOutcome = await runOptionsScreenViaEngine(
+  // Issue #4271: the panel is a strategy screen — it defines the
+  // strategy job (strategy-screen:<runId>), not the options job.
+  const panelOutcome = await runStrategyScreenViaEngine(
     {
       runId: panelRunId,
       userLogin: panelUserLogin,
@@ -1300,7 +1302,9 @@ async function runOpportunityScan(
   const scanUserLogin = deps?.userLogin;
   const scanPipelineRunId = `nlq-scan:${crypto.randomUUID()}`;
   const scanStorage = deps?.pipelineStorage ?? memoryStageStorage();
-  const scanOutcome = await runOptionsScreenViaEngine(
+  // Issue #4271: the scan is a strategy screen — it defines the
+  // strategy job (strategy-screen:<runId>), not the options job.
+  const scanOutcome = await runStrategyScreenViaEngine(
     {
       runId: scanPipelineRunId,
       userLogin: scanUserLogin,

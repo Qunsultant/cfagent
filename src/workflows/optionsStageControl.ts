@@ -13,10 +13,14 @@
  * absence.
  *
  * How it works:
- * - The job id is `options-screen:<runId>` (one job per run, #4068),
- *   so the run is addressed by its own id — no engine run id is ever
- *   passed (the engine's run id is not the options run id; passing
- *   the options id as `opts.runId` would trip `stage_run_mismatch`).
+ * - The job id is `options-screen:<runId>` for an options screen and
+ *   `strategy-screen:<runId>` for a strategy screen (one job per run,
+ *   #4068 / #4271), so the run is addressed by its own id — no engine
+ *   run id is ever passed (the engine's run id is not the options run
+ *   id; passing the options id as `opts.runId` would trip
+ *   `stage_run_mismatch`). The control resolves which job a run
+ *   defined (resolveScreenJobId) — a strategy run stays controllable
+ *   under its new job.
  * - The stage must be one of the 8 addressable stages (#4067 pin);
  *   display ids (feed/store/serve) refuse `stage_vocabulary_unknown`.
  * - The dispatch request rides the job definition's rawConfig
@@ -63,6 +67,7 @@ import {
   optionsEngineStoresFromSql,
   optionsScreenJobId,
   registerOptionsScreenStep,
+  strategyScreenJobId,
   type OptionsScreenStepDeps,
 } from "./optionsScreenEngine";
 import {
@@ -117,7 +122,9 @@ export interface OptionsStageControlInput {
   storage?: OptionsStageStorage;
   /** The Worker env — the manual leg's canonical leg needs it. */
   env?: Env;
-  /** The options run id (the job is `options-screen:<runId>`). */
+  /** The options run id (the job is `options-screen:<runId>` for an
+   * options screen, `strategy-screen:<runId>` for a strategy screen
+   * since #4271 — the control resolves which one this run defined). */
   runId: string;
   /** One of the 8 addressable stages (#4067). */
   stage: string;
@@ -268,6 +275,40 @@ function rebuildStepDeps(
  * the stored dispatch request. Failures throw OptionsStageControlError
  * carrying the code + the stage + the reason — never a silent absence.
  */
+/**
+ * Issue #4271: resolve which job a screen run defined. An options
+ * screen defines `options-screen:<runId>`; a strategy screen defines
+ * `strategy-screen:<runId>` (since #4271). The control plane addresses
+ * a run by its runId, so it tries the options job first (the pre-#4271
+ * shape) and then the strategy job. The stages, the vocabulary, and
+ * the port rebuilding are identical for both — the strategy job's
+ * children carry the same eight stage kinds — so only the job identity
+ * is resolved here. A run defined on neither is the pre-existing
+ * job_not_found refusal. (The strategy STAGE VOCABULARY is S2's work,
+ * #4272; this is only the lookup that keeps strategy runs controllable
+ * under their new job.)
+ */
+async function resolveScreenJobId(
+  reader: JobPipelineControl,
+  runId: string,
+): Promise<{ jobId: string; view: Awaited<ReturnType<JobPipelineControl["getJob"]>> }> {
+  for (const jobId of [optionsScreenJobId(runId), strategyScreenJobId(runId)]) {
+    try {
+      const view = await reader.getJob(jobId);
+      return { jobId, view };
+    } catch (error) {
+      if (error instanceof JobPipelineError && error.code === "job_not_found") {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new OptionsStageControlError(
+    "job_not_found",
+    `options run ${runId}: no engine record for job ${optionsScreenJobId(runId)} or ${strategyScreenJobId(runId)} in this host — the run was dispatched on another host, in-memory, or before the engine routing; re-dispatch the screen from this turn`,
+  );
+}
+
 export async function controlOptionsStage(
   input: OptionsStageControlInput,
 ): Promise<OptionsStageControlResult> {
@@ -281,13 +322,14 @@ export async function controlOptionsStage(
     );
   }
   const optionsStage = stage as OptionsPipelineStage;
-  const jobId = optionsScreenJobId(runId);
   const engineStores = optionsEngineStoresFromSql(input.sql);
   const storage = input.storage ?? memoryStageStorage();
   try {
     // Read first, over a control without the step: getJob executes
     // nothing, so the step is only registered when an execution op
-    // needs it.
+    // needs it. Issue #4271: resolve which job this run defined — the
+    // options job or the strategy job — so a strategy run stays
+    // controllable under its new job.
     const reader = new JobPipelineControl({
       stores: engineStores.stores,
       runRecorder: engineStores.runRecorder,
@@ -295,18 +337,7 @@ export async function controlOptionsStage(
       steps: createBuiltinStepRegistry(),
       invocation: "sync",
     });
-    let view;
-    try {
-      view = await reader.getJob(jobId);
-    } catch (error) {
-      if (error instanceof JobPipelineError && error.code === "job_not_found") {
-        throw new OptionsStageControlError(
-          "job_not_found",
-          `options run ${runId}: no engine record for job ${jobId} in this host — the run was dispatched on another host, in-memory, or before the engine routing; re-dispatch the screen from this turn`,
-        );
-      }
-      throw error;
-    }
+    const { jobId, view } = await resolveScreenJobId(reader, runId);
     const rawConfig = (view.definition as { rawConfig?: unknown }).rawConfig;
     const request = (rawConfig as { request?: unknown } | null)?.request;
     const needsExecution =

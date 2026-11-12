@@ -95,7 +95,7 @@ import {
   memoryStageClaims,
   memoryStageStorage,
 } from "../workflows/optionsScreenWorkflow";
-import { runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
+import { runStrategyScreenViaEngine } from "../workflows/optionsScreenEngine";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook
@@ -2937,7 +2937,10 @@ export class ScheduledTasksService {
         eventCalendarBySymbol: Object.fromEntries(scanCalendarCoverage.bySymbol),
       };
       const scanStorage = memoryStageStorage();
-      const scanOutcome = await runOptionsScreenViaEngine(
+      // Issue #4271: the scheduled scan is a strategy screen — it
+      // defines the strategy job (strategy-screen:<runId>), not the
+      // options job.
+      const scanOutcome = await runStrategyScreenViaEngine(
         {
           runId: reportRunId,
           userLogin,
