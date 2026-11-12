@@ -194,7 +194,11 @@ describe("3122-P22 goals adapter operates on the unified store", () => {
     expect(src).toContain("setEnabled: (id, enabled) => this.setGoalEnabled(id, enabled)");
     // The funnel reads/writes the unified store, not the legacy KV key.
     expect(src).toContain('store.listByKind("goal")');
-    expect(src).toContain("store.save(goalToRecord(goal))");
+    // saveGoals converts each goal via goalToRecord into a record
+    // and saves the record (the intermediate variable preserves
+    // createdAt and sets updatedAt between conversion and save).
+    expect(src).toContain("const record = goalToRecord(goal);");
+    expect(src).toContain("store.save(record);");
   });
 
   it("a goal round-trips goal → unified record → goal through the store", async () => {

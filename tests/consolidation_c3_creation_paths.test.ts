@@ -62,8 +62,12 @@ const ARMING_SITES: Record<string, { count: number; role: string }> = {
     role: "migration re-arm: re-arms exported schedules on the target instance from the migration payload (#2681)",
   },
   "src/agents/routes/schedules.ts": {
-    count: 7,
-    role: "the schedule store's own arming helpers (create route + resume/update re-arm); payloads arrive builder-validated",
+    count: 11,
+    role: "the schedule store's own arming helpers (create route + resume/update re-arm; payloads arrive builder-validated) + the alarms adapter arm (3: cron/interval/delayed, #3123 unified-store alarms port) + the approve-route sdkAdapter.create (4: cron/interval/scheduled/delay, #3122) — the approve path re-arms an already-validated approved pending definition (payload built upstream via buildSchedulePayload at proposal; no new payload construction) and adopts the record into the unified store",
+  },
+  "src/services/agentScheduleCapability.ts": {
+    count: 4,
+    role: "the capability's SDK adapter (nlqPortToAgentSdkAdapter.create, #3122) — a pass-through arming funnel for agent-schedulable callbacks (cron/interval/scheduled/delay); payloads arrive from the NLQ executor (buildSchedulePayload) or the approved definition; armed alarms are adopted into the unified store, cancellations remove the record",
   },
   "src/agents/nlq/execution.ts": {
     count: 4,
