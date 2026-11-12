@@ -68,7 +68,10 @@ describe("own pages (#2970)", () => {
     expect(tradingHubSrc).not.toContain("<SchedulesPanel");
     const chatSrc = readFileSync(join(here, "..", "src", "client", "Chat.tsx"), "utf8");
     expect(chatSrc).toContain('import { SchedulesHome } from "./SchedulesHome";');
-    expect(chatSrc).toContain("schedules: (\n      <SchedulesHome");
+    // Issue #4247 class: match the entry regardless of line endings (a CRLF
+    // checkout would never satisfy an exact "\n" literal — the assertion is
+    // about Chat.tsx routing the schedules tab to SchedulesHome, not spacing).
+    expect(chatSrc).toMatch(/schedules: \(\r?\n\s*<SchedulesHome/);
     // Issue #3050 PR1: the track-record dashboards moved one level down —
     // the hub renders TrackRecordPanel, which composes all three.
     for (const dashboard of [
