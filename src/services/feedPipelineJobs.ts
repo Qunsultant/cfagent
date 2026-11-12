@@ -608,6 +608,10 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
       universeStore: deps.universeStore,
       datasetStore: deps.datasetStore,
       ...(deps.indexRefresh ? { indexRefresh: deps.indexRefresh } : {}),
+      // #4312 — the Worker env rides the runner deps for every
+      // dataset (not only sentiment), so the feed leg bounds
+      // resolve from their env knobs on every feed run.
+      ...(deps.env ? { env: deps.env } : {}),
     };
     const result: FeedRunResult =
       def.dataset === "fundamentals"
@@ -617,7 +621,7 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
           : def.dataset === "sentiment"
             ? await runFeedSentimentJob(
                 deps.registry,
-                { ...runnerDeps, ...(deps.env ? { env: deps.env } : {}) },
+                runnerDeps,
                 def.id,
                 runOpts,
               )
