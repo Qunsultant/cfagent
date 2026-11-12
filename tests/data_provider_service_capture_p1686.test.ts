@@ -482,12 +482,21 @@ describe("source pins: NLQ mcp-mode coverage (scope update — fully in scope)",
 describe("goal-screen leg (new construction, scope update — fully in scope)", () => {
   it("handler constructs a seamed listings stockScreener from the goal bundle (Red pin)", () => {
     const fileSrc = src("agents/screener-agent.ts");
-    const idx = fileSrc.indexOf("let goalUniverseDeps");
+    // Issue #4279 (#3550 S4): the goal bundle is built and bound before the run,
+    // and the seamed listings screener is constructed from it at the single site
+    // that owns the fallback. The slice from the bundle block to the run call no
+    // longer contains the construction — the helper extraction moved it below —
+    // so the assertions anchor on the construction site itself.
+    expect(fileSrc).toContain("let goalUniverseDeps");
+    expect(fileSrc).toContain("nasdaqUniverseRouteBundle({");
+    expect(fileSrc).toContain(
+      "bindNasdaqUniverseDeps(goalNasdaqProvider, goalBundle.runContext)",
+    );
+    const idx = fileSrc.indexOf("if (!stockScreener && goalBundle)");
     expect(idx).toBeGreaterThan(-1);
-    const span = fileSrc.slice(idx, fileSrc.indexOf("runProductionGoalScreen({", idx));
+    const span = fileSrc.slice(idx, idx + 400);
     expect(span).toContain("createLiveStockScreener");
     expect(span).toContain("universeRoute: goalBundle");
-    expect(span).toContain("if (!stockScreener && goalBundle)");
   });
 
   it("seamed listings screener fetches + captures (mechanism, passes on control — disclosed)", async () => {
