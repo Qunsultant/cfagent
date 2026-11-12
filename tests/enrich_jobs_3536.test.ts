@@ -132,6 +132,10 @@ describe("the element vocabulary (#3536)", () => {
       "public-nasdaq100-quotes-enrich",
       "yahoo-dow-quotes-enrich",
       "yahoo-nasdaq100-quotes-enrich",
+      "yahoo-sector-consumer-discretionary-quotes-enrich",
+      "yahoo-sector-energy-quotes-enrich",
+      "yahoo-sector-industrials-quotes-enrich",
+      "yahoo-sector-materials-quotes-enrich",
       "yahoo-sp100-quotes-enrich",
       "yahoo-sp400-quotes-enrich",
       "yahoo-sp500-quotes-enrich"
