@@ -26,6 +26,16 @@ export interface ResolvedEnvironment {
   payments: EnvironmentPaymentsConfig;
   /** #1185 / #1066 — the configured service identity for unattended work, when set. */
   serviceUserLogin?: string;
+  /**
+   * Issue #3122 — owner-configured approval gating values for agent
+   * schedules. Each is undefined when its variable is unset or invalid:
+   * the classifier binds the class (fail-closed). The owner sets the
+   * values at enablement; no default is invented here.
+   */
+  agentSchedule?: {
+    budgetCentsThreshold?: number;
+    minIntervalSeconds?: number;
+  };
 }
 
 /**
@@ -207,11 +217,31 @@ export function resolveEnvironmentConfig(env?: Partial<Env>, overrideEnv?: strin
   // src/security/serviceIdentity.ts).
   const serviceUserLogin = sanitize(env?.SERVICE_USER_LOGIN);
 
+  // Issue #3122 — agent-schedule approval gating values. A non-negative
+  // integer parses; anything else (unset, blank, non-numeric, negative)
+  // is undefined, and the classifier binds the class (fail-closed).
+  const parseNonNegativeInt = (raw: unknown): number | undefined => {
+    if (typeof raw !== "string") return undefined;
+    const trimmed = raw.trim();
+    if (!/^\d+$/.test(trimmed)) return undefined;
+    const value = Number(trimmed);
+    return Number.isSafeInteger(value) ? value : undefined;
+  };
+  const agentSchedule = {
+    budgetCentsThreshold: parseNonNegativeInt(
+      (env as Record<string, unknown>)?.AGENT_SCHEDULE_BUDGET_THRESHOLD_CENTS,
+    ),
+    minIntervalSeconds: parseNonNegativeInt(
+      (env as Record<string, unknown>)?.AGENT_SCHEDULE_MIN_INTERVAL_SECONDS,
+    ),
+  };
+
   return {
     name: activeName,
     label: baseDef.label || (isLive ? "Live" : "Sandbox"),
     isLive,
     serviceUserLogin,
+    agentSchedule,
     etrade: {
       baseUrl,
       type: isLive ? "live" : "sandbox",

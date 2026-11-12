@@ -66,6 +66,11 @@ import type {
 import { resolveAiModelName } from "../model";
 import { getUserDid } from "../did";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
+import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import {
+  createAgentScheduleExecutorDepsForDo,
+  nlqPortToAgentSdkAdapter,
+} from "../../services/agentScheduleCapability";
 import { createDiscoveryService } from "../../services/discoveryService";
 import { buildDataProviderPorts } from "../../data/buildDataProviderPorts";
 import { createFitDiscoveryRunner } from "../../services/fitDiscoveryRunner";
@@ -408,7 +413,7 @@ export async function handleMcpChatNlqRoutes(
             ctx.env,
             userLogin,
             userDid,
-            { context: contextHeader, validateWithLLM: body.validateWithLLM, scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), socialBriefPort, storage: ctx.getStorage?.(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin, orm, sql: ctx.getStorageSql(), blobStorage: ctx.getStorage?.(), platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, orm, userLogin), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin, sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }) }
+            { context: contextHeader, validateWithLLM: body.validateWithLLM, scanRunStore: createOptionsDiscoveryPorts({ sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }).scanRuns, profileStore: createOptionsDiscoveryPorts({ sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }).strategyProfiles, schedulingPort: ctx.nlqSchedulingPort(), agentScheduleCapability: createAgentScheduleExecutorDepsForDo(ctx.env, ctx.getStorageSql(), (type, payload) => ctx.audit(type, "orchestrator", payload), { sdk: nlqPortToAgentSdkAdapter(ctx.nlqSchedulingPort(), createUnifiedSchedulePorts({ sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }).unifiedSchedules) }), socialBriefPort, storage: ctx.getStorage?.(), discoveryRunner: createDiscoveryService({ env: ctx.env, userLogin, orm, sql: ctx.getStorageSql(), blobStorage: ctx.getStorage?.(), platform: TradingPlatformRegistry.getPlatform(await resolveTenantBroker(ctx.env), ctx.env, orm, userLogin), ...(nlqDpPorts?.config ? { configPort: nlqDpPorts.config } : {}), ...(nlqDpPorts?.captures ? { capturePort: nlqDpPorts.captures } : {}) }), fitDiscoveryRunner: createFitDiscoveryRunner({ env: ctx.env, userLogin, sql: ctx.getStorageSql(), storage: ctx.getStorage?.() }) }
           );
       ctx.audit("nlq.executed", "nlq", {
         query,

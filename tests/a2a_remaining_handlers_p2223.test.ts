@@ -329,17 +329,32 @@ describe("dispatchScheduledA2A (#2223 final slice)", () => {
     const { executor, calls } = makeScheduledExecutor();
     const data = await dispatchScheduledA2A(
       ENV_NONE,
-      { operation: "scheduled.add_goal", id: "g2", name: "Two", cron: "0 9 * * 1-5", op: "search.query", budgetCents: 250, enabled: false },
+      { operation: "scheduled.add_goal", id: "g2", name: "Two", cron: "0 9 * * 1-5", op: "resource.rollup_daily", budgetCents: 250, enabled: false },
       { executor },
     );
     expect(data.ok).toBe(true);
-    expect(calls[0].args).toMatchObject({ id: "g2", name: "Two", cron: "0 9 * * 1-5", operation: "search.query", budgetCents: 250, enabled: false });
+    expect(calls[0].args).toMatchObject({ id: "g2", name: "Two", cron: "0 9 * * 1-5", operation: "resource.rollup_daily", budgetCents: 250, enabled: false });
     const bad = await dispatchScheduledA2A(
       ENV_NONE,
       { operation: "scheduled.add_goal", id: "g3", name: "Three", cron: "0 9 * * *", op: "search.query", budgetCents: -5 },
       { executor },
     );
     expect(bad.code).toBe("invalid_input");
+  });
+
+  it("scheduled.add_goal refuses a descriptor-only operation (issue #3122 F2)", async () => {
+    const { executor, calls } = makeScheduledExecutor();
+    for (const op of ["search.query", "trading.screen_stocks", "tasks.create"]) {
+      const data = await dispatchScheduledA2A(
+        ENV_NONE,
+        { operation: "scheduled.add_goal", id: "g-f2", name: "F2", cron: "0 9 * * *", op, budgetCents: 100 },
+        { executor },
+      );
+      expect(data.ok).toBe(false);
+      expect(data.code).toBe("invalid_input");
+      expect(data.error).toMatch(/descriptor-only/);
+    }
+    expect(calls).toHaveLength(0);
   });
 
   it("scheduled.remove_goal / set_goal_enabled report a missing goal as a state answer, not an error", async () => {
