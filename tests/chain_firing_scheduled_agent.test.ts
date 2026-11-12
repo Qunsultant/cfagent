@@ -216,3 +216,78 @@ describe("materialization in ScheduledAgent (#1517)", () => {
     );
   });
 });
+
+describe("one-shot direct firing records a consolidated-ledger row (#3393)", () => {
+  it("3393-P01 fired one-shot records a success row with §4 linkage joining record <-> job", async () => {
+    const { ctx } = makeCtx();
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
+    const email = compileGoal("Send me yesterday's report by email", { budgetCents: 0 });
+    if (!email) throw new Error("test chain did not compile");
+    await agent.synthesizeSchedule(email, { id: "synth-3393-one" });
+    await agent.approveSynthesizedSchedule("synth-3393-one");
+    const first = await agent.fireSynthesizedSchedule("synth-3393-one");
+    expect(first.fired).toBe(true);
+    expect(first.jobId).toBeTruthy();
+    // Joinability: the row's scheduleId IS the record id and its
+    // asyncJobId IS the created job — the ledger row joins to the
+    // synthesized record and to the created job without a second hop.
+    const rows = (await agent.listJobRuns("synth-3393-one")) as any[];
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
+    expect(row.outcome).toBe("success");
+    expect(row.trigger).toBe("manual");
+    expect(row.triggeredBy).toBe("manual");
+    expect(row.jobId).toBe("synth-3393-one");
+    expect(row.operation).toBe("chain.execute");
+    expect(row.scheduleId).toBe("synth-3393-one");
+    expect(row.asyncJobId).toBe(first.jobId);
+    expect(row.workflowId).toBeNull();
+    expect(row.descriptor).toBe(`job:${first.jobId}`);
+  });
+
+  it("3393-P02 blocked re-fire records a skipped row with the reason", async () => {
+    const { ctx } = makeCtx();
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv());
+    const email = compileGoal("Send me yesterday's report by email", { budgetCents: 0 });
+    if (!email) throw new Error("test chain did not compile");
+    await agent.synthesizeSchedule(email, { id: "synth-3393-refire" });
+    await agent.approveSynthesizedSchedule("synth-3393-refire");
+    const first = await agent.fireSynthesizedSchedule("synth-3393-refire");
+    expect(first.fired).toBe(true);
+    const second = await agent.fireSynthesizedSchedule("synth-3393-refire");
+    expect(second.fired).toBe(false);
+    expect(second.reason).toMatch(/already fired/);
+    // Two firing attempts, two rows: the success row and the
+    // refusal row (newest first).
+    const rows = (await agent.listJobRuns("synth-3393-refire")) as any[];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].outcome).toBe("skipped");
+    expect(rows[0].detail).toMatch(/already fired/);
+    expect(rows[0].scheduleId).toBe("synth-3393-refire");
+    expect(rows[0].asyncJobId).toBeNull();
+    expect(rows[0].workflowId).toBeNull();
+    expect(rows[1].outcome).toBe("success");
+  });
+
+  it("3393-P03 budget-rejected one-shot records a skipped row with the reason", async () => {
+    const { ctx } = makeCtx();
+    const agent = new (ScheduledAgent as any)(ctx, makeEnv(false));
+    const email = compileGoal("Send me yesterday's report by email", { budgetCents: 0 });
+    if (!email) throw new Error("test chain did not compile");
+    await agent.synthesizeSchedule(email, { id: "synth-3393-budget" });
+    await agent.approveSynthesizedSchedule("synth-3393-budget");
+    const fired = await agent.fireSynthesizedSchedule("synth-3393-budget");
+    expect(fired.fired).toBe(false);
+    expect(fired.reason).toMatch(/budget check rejected/);
+    const rows = (await agent.listJobRuns("synth-3393-budget")) as any[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].outcome).toBe("skipped");
+    expect(rows[0].detail).toMatch(/budget check rejected/);
+    expect(rows[0].scheduleId).toBe("synth-3393-budget");
+    expect(rows[0].asyncJobId).toBeNull();
+    expect(rows[0].workflowId).toBeNull();
+    // A refused firing consumes nothing: the record stays unfired.
+    const synth = (await agent.listSynthesizedSchedules()) as any[];
+    expect(synth.find((r) => r.id === "synth-3393-budget")?.firedAt).toBeFalsy();
+  });
+});

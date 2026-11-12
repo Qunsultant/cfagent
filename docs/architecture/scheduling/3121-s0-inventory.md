@@ -119,6 +119,27 @@
   internal-only callbacks leave no per-run record). No file is deleted
   in S3; the store stays the DO `goals` key until #3123 unifies it
   (Phase 2).
+- **#3393 amendment (Slice #3393, #3121):** the direct one-shot
+  firing now records its ledger row — `fireSynthesizedSchedule`
+  records a `job_run_records` row (system `scheduled-agent-goal`)
+  at every terminal point (success + blocked / budget-rejected /
+  failed legs), with the §4 linkage resolved through
+  `buildLedgerLinkage` (trigger manual, scheduleId = record id,
+  asyncJobId = created job, workflowId null). The §9 row for the
+  B-T3-06 direct one-shot firing now reads landed. #3394 (B-T2-07)
+  landed — see the #3394 amendment below.
+- **#3394 amendment (Slice #3394, #3121):** the B-T2-07 named gap is
+  closed as a joinability proof, not a behavior change — the recording
+  itself landed in #3788 (`recordScheduleCallbackRun` wrappers on the
+  four internal-only callback methods); #3394 proves each firing joins
+  to its schedule (SDK firing: scheduleId = schedule id, explicit
+  nulls for workflow/async job; no-schedule firing: explicit nulls;
+  manual trigger: exactly one row, the wrapper's, never a second
+  invocation-level record) with pins 3394-P01–P04. The §9 row for the
+  B-T2-07 internal-callback firing records now reads landed. Out of
+  scope, filed not dropped: `sendScheduledReminder` has no recording
+  wrapper — its SDK firings leave no per-run record
+  (Qunsultant/cfagent#4186).
 - **S6 amendment (Slice S6, #3121 — final parity):** the §9 map is
   proved complete against §1 (§9.7 traces every §1 item plus the §2
   drift items and the §7 open items to a landed slice, a preserved
@@ -245,12 +266,14 @@ it does not re-inventory it.
   (`findDuplicateSchedule`: same callback + canonical payload + cadence)
   and audits `schedule.duplicate_suppressed` instead of minting a second
   row. [S0-P04]
-- B-T2-04 — Pause/resume/trigger/delete/detail/update: pause cancels the
-  SDK schedule and stores a paused record
-  (`src/services/scheduleManagement.ts`, `SqlPausedScheduleStore`); resume
-  re-creates it (new schedule id); trigger manually dispatches the
-  schedule's own callback; delete removes a paused record too; update
-  re-creates. List merges paused items back, flagged `paused`. [S0-P05]
+- B-T2-04 — Pause/resume/trigger/delete/detail/update: pause is a
+  record state in the unified store
+  (`src/services/unifiedScheduleManagement.ts`,
+  `src/data/unifiedSchedulePorts.ts` — issue #3121 Phase 2, #3123);
+  resume re-arms the SAME record id (no copy-and-recreate identity
+  churn); trigger manually dispatches the schedule's own callback;
+  delete removes the record; update re-arms or updates in place.
+  List merges paused records back, flagged `paused`. [S0-P05]
 - B-T2-05 — System-job trigger routes (no schedule row needed):
   `trigger-screen`, `trigger-renew`, `trigger-options-analysis`,
   `trigger-retention` (#255), `trigger-iv-collection` (#15),
@@ -265,11 +288,18 @@ it does not re-inventory it.
   (`recordScheduleCallbackRun`) into `job_run_records` with the outcome
   the callback itself reports (success/failure/skipped); a throwing
   delegate records failure and the throw still propagates; recording
-  never breaks the callback. Manual triggers of non-creatable callbacks
-  via the generic trigger route are recorded invocation-level. Named gap
-  (carried, not fixed here): SDK firings of internal-only callbacks
-  (`executeAsyncJob`, `expireStaleOrderDraft`, `collectIvHistory`,
-  `autoRenewETradeTokens`) leave no per-run record. [S0-P08]
+  never breaks the callback. Since #3788 the four internal-only
+  callbacks (`executeAsyncJob`, `expireStaleOrderDraft`,
+  `collectIvHistory`, `autoRenewETradeTokens`) record the same way, via
+  `recordScheduleCallbackRun` wrappers on the orchestrator methods
+  (the trigger route treats them as self-recording and does not add a
+  second invocation-level record); #3394 proves the joinability (an
+  SDK firing joins its schedule to its row; a firing with no
+  originating schedule records explicit nulls). Manual triggers of
+  other non-creatable callbacks via the generic trigger route are
+  recorded invocation-level. Remaining gap, filed not dropped:
+  `sendScheduledReminder` has no recording wrapper — its SDK firings
+  leave no per-run record (Qunsultant/cfagent#4186). [S0-P08]
 - B-T2-08 — Baseline reconciliation on agent start:
   `removeUnownedBaselineSchedules` removes baselines not owned by the
   instance. [S0-P09]
@@ -305,8 +335,11 @@ it does not re-inventory it.
 - B-T3-06 — Synthesized schedules must materialize first and fire via
   `onCron` (`materializeSynthesizedSchedule`); direct firing is refused.
   [S0-P15]
-- B-T3-07 — Goal store: ScheduledAgent DO SQL, key `goals`; seeded from
-  `DEFAULT_SCHEDULES` (`src/schedule.ts`) only when storage is empty.
+- B-T3-07 — Goal store: the unified `unified_schedules` table
+  (kind=goal) in the ScheduledAgent DO (issue #3121 Phase 2, #3123);
+  seeded from `DEFAULT_SCHEDULES` (`src/schedule.ts`) only when the
+  store is empty. The legacy `goals` KV key is read once for a
+  one-way import (store wins on conflict) and never written again.
   The 8 shipped goal ids are `daily-qa-sweep`, `opportunity-hunt`,
   `daily-social-post`, `resource-daily-rollup`, `resource-cap-alert`,
   `resource-dashboard-comparison`, `index-refresh-wikipedia`,
@@ -1022,8 +1055,8 @@ no home and no filed issue is a defect in the map.
 | `ScheduledOptionsManager` (own form, system-job triggers, audit read) | S2 (§1.3) | Embedded in `view=list` | S2 — landed |
 | `ScheduledGoalsPanel` (list/ticks/add/toggle/trigger/remove/preset) | S3 (§1.3) | `?tab=schedules&view=goals` on the S1 primitives | S3 — landed |
 | Admin Queue tab (dump/cancel-all/wipe/export/Track 1 recreate) | S4 (§1.3) | `?tab=schedules&view=queue` (`ScheduleQueueView`) | S2 — landed |
-| Unified Jobs UI (goals + schedules + crons, read-only merge) | §1.3 | `JobsPanel` over `listGoals` + `listGoalRuns` + `listScheduleRuns` | S0 — preserved (reads the S1 ledger) |
-| Read-only run history (`JobsPanel`, Autopilot, `WorkflowRunsPanel`) | §1.3 | Consolidated ledger reads | S1/S2 — landed |
+| Unified Jobs UI (goals + schedules + crons, read-only merge) | §1.3 | `JobsPanel` over `listGoals` + `listAllRuns` (the one merged ledger read) | S0 — preserved (reads the one merged ledger, GET `/api/ledger/runs`) |
+| Read-only run history (`JobsPanel`, Autopilot, `WorkflowRunsPanel`) | §1.3 | The one merged read (`GET /api/ledger/runs`) | S1/S2 — landed; #3123 — landed |
 | Preview-trade candidate prefill from the schedules home | S2 (§8.3) | — lost in the S2 de-hub; no home — | **Filed #3361 (open)** |
 
 ### 9.3 Tick-polled goal behaviors (B-T3)
@@ -1036,8 +1069,8 @@ no home and no filed issue is a defect in the map.
 | In-flight firing claim, shared by cron and manual firings | B-T3-04 | `src/services/goalFiringClaims.ts` + `onCron` claim/release | S3 — landed (preserved verbatim) |
 | `pipeline:` goals run ordered stages in ONE firing, single budget check | B-T3-05 | `onCron` pipeline branch | S3 — landed (preserved verbatim) |
 | Synthesized schedules materialize first, fire via `onCron`; direct firing refused for recurring | B-T3-06 | `materializeSynthesizedSchedule` + governed `onCron` branch | S3 — landed (+ system provenance on materialization) |
-| Direct one-shot synthesized firing | B-T3-06 | `fireSynthesizedSchedule` (firing preserved) — but NO ledger row | **Filed #3393 (open)** — firing has a home, its ledger visibility does not |
-| Goal store: DO `goals` key, seeded from `DEFAULT_SCHEDULES` only when empty; 8 shipped ids | B-T3-07 | `ScheduledAgent` DO storage (unchanged) | Phase 2 #3123 (one schedule store) |
+| Direct one-shot synthesized firing | B-T3-06 | `fireSynthesizedSchedule` records a `job_run_records` row (system `scheduled-agent-goal`) at every terminal point, via `buildLedgerLinkage` | #3393 — landed (success + blocked / budget-rejected / failed-legs rows; scheduleId = record id, asyncJobId = created job, workflowId null) |
+| Goal store: unified `unified_schedules` (kind=goal) in the ScheduledAgent DO, seeded from `DEFAULT_SCHEDULES` only when empty; 8 shipped ids; legacy `goals` KV key imported once, never written | B-T3-07 | `ScheduledAgent` `getGoals`/`saveGoals` over the unified store | #3123 — landed |
 | Per-run records for every goal firing terminal point | B-T3-08 | `recordGoalRun` → `buildJobRunRecord` via `buildLedgerLinkage` | S1 (columns); S3 (resolver) — landed |
 | Goal lifecycle audit events (`schedule.goal.*`) on every entry path | O2 | DO-side sink in the mutation methods | S1 (enumerated + route funnel); S3 (DO sink, #3312 fixed) — landed |
 | Goal creation provenance (user/system, creator, reason, time) | B-L-04 / S1-P09 | Route stamp (user) + `addGoal` validation + materialization stamp (system) | S1 (route/addGoal); S3 (materialization) — landed |
@@ -1053,11 +1086,11 @@ no home and no filed issue is a defect in the map.
 | Four timing forms resolve (cron/interval/date/delay) | B-T2-01 | `resolveTimingForm` | S1 — landed |
 | Creatable-callback allow-list (4 callbacks) | B-T2-02 | `CREATABLE_SCHEDULE_CALLBACKS` + create route | S2 — landed |
 | Idempotent creates + duplicate suppression + audit | B-T2-03 | `findDuplicateSchedule` + `schedule.duplicate_suppressed` | S1 (dedupe fix); S2 — landed |
-| Pause/resume/trigger/delete/detail/update | B-T2-04 | `scheduleManagement.ts` + routes | S2 — landed |
+| Pause/resume/trigger/delete/detail/update | B-T2-04 | `unifiedScheduleManagement.ts` + routes (one management path) | S2 — landed; #3123 — landed |
 | System-job trigger routes (7) | B-T2-05 | Trigger routes | S2 — landed |
 | Per-schedule audit events (8, B-T2-06 funnel) | B-T2-06 | `SCHEDULE_LIFECYCLE_AUDIT_EVENTS` + `ctx.audit` | S1 (map); S2 — landed |
 | Per-run records for creatable callbacks + manual triggers | B-T2-07 | `recordScheduleCallbackRun` → `job_run_records` | S1 — landed |
-| Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | — no home — | **Filed #3394 (open)** |
+| Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | `recordScheduleCallbackRun` → `job_run_records` | #3394 — landed (recording via #3788 wrappers; joinability proven per callback, SDK + no-schedule explicit nulls + route exactly-once) |
 | Baseline reconciliation on agent start | B-T2-08 | `removeUnownedBaselineSchedules` | S2 — landed |
 | Renewal (`0 3`), tick (`*/30`), retention (`0 4`) incl. #2331 gate + #2037 trace | B-T1-01..03 | `scheduled()` dispatch → named entry points (`src/services/consolidatedCronEntries.ts`) | S5 — landed |
 | Piggyback research guard (#354) + retention constants | B-T1-04..05 | `researchScheduleGuard.ts` + `storageRetention.ts` | S5 — landed (preserved verbatim, guards unchanged) |
@@ -1085,7 +1118,7 @@ no home and no filed issue is a defect in the map.
 | `?tab=options&view=scheduled-screening` (U-03) | U-03 | Redirect to the home (owner-decided 2026-11-05) | U-03 redirect slice — landed (parallel, not S3) |
 | Queues tab (async jobs, DLQ, approvals) | U-07 | `?tab=queues` (`QueuesPage`) — the T4 surface; the admin queue is `?tab=schedules&view=queue` (`ScheduleQueueView`, S2) | S4 — landed (chain linkage; the tab itself never moved — the "until S4" phrasing is retired in S6) |
 | Workflow-runs deep link | U-08 | `WorkflowRunsPanel`: `?tab=workflow-runs&run=<id>` deep link (#2777/#3163) + schedule column/filter reading stamped `schedule_id` (#3810) | landed via #2777/#3163 + #3810 (outside #3121 slices; verified in S6 — the #3264 gap's remainder is mas_opportunity_scans joinability, #3314 open) |
-| Per-run records API (`/api/schedules/runs?scheduleId=`) | U-09 | Joined by home deep links in S2 | S2 — landed |
+| Per-run records API (the one merged read, `GET /api/ledger/runs?jobId=`; the orchestrator half stays at `/api/schedules/runs?scheduleId=`, the goal half at `/api/schedule/runs`) | U-09 | `GET /api/ledger/runs` (merged, newest-first, dedup) + home deep links in S2 | S2 — landed; #3123 — landed |
 | Chat Scheduler sub-view (#3122, planned) | U-10 | Third `ChatSubView` | Phase 3 #3122 (planned) |
 
 ### 9.7 S6 final parity — trace closure
@@ -1114,11 +1147,42 @@ another program) — that rule is pinned in
 | Ledger / jobs / workflows / stages gaps from the operations doc | §9 / jobs-workflows-stages-01.md | — | **Filed #3640 (open)** + #3641–#3645 (open, unbuilt per owner direction) |
 | Seeded `opportunity-hunt` goal fails every firing (operation not registered) | §1.4 B-T3-07 | — no home — | **Filed #3652 (open)** |
 
+### 9.8 Phase 2 #3123 reuse — one store, one ledger, one management path
+
+#3123 lands the reuse slice: the six schedule stores become one
+logical store, the split ledger becomes one physical ledger with
+one merged read, and the ten management code paths become one
+service behind both route families. Worker crons stay OFF
+(wrangler.jsonc, #4112): the unified store is trigger-agnostic —
+it stores records and evaluation is a pure function over the
+store; the S5 named entry points stay the dispatch targets and
+restoring firing is an uncomment, not a code change. Physical
+placement follows ADR D-0 (a record lives in the same DO as its
+mechanism): OrchestratorAgent instances host screen/followup/
+worker-duty records, the ScheduledAgent hosts goal records — one
+port, one schema, one adapter, placement by ownership. The Agents
+SDK scheduler's `cf_agents_jobs` stays the alarm substrate
+(framework-owned); the D1 chain tables stay a projection.
+
+| Capability | S0 id | Consolidated home | Status |
+|------------|-------|-------------------|--------|
+| One schedule store: screens, goals, followups, worker duties as records behind one ScheduleStore port | #3123 | `src/data/unifiedSchedulePorts.ts` + DO SQLite adapter + in-memory double + factory | #3123 — landed |
+| Goal store migrated: KV `goals` → unified store, one-way import, store wins on conflict, seed only when empty | B-T3-07 | `ScheduledAgent` `getGoals`/`saveGoals` | #3123 — landed |
+| Pause is a record state, not a copy: resume re-arms the SAME record id | B-T2-04 | `pauseUnifiedSchedule` / `resumeUnifiedSchedule` (alarm id rides the record) | #3123 — landed |
+| One run ledger: ScheduledAgent KV half → OrchestratorAgent DO SQLite; existing KV rows keep reading through the merged read | B-T3-08 | `recordLedgerRun` (one DO-SQLite write entry) + `GET /api/ledger/runs` | #3123 — landed |
+| One management path: pause/resume/trigger/delete/detail/update for all kinds | B-T2-04 | `src/services/unifiedScheduleManagement.ts` + both route families | #3123 — landed |
+| One client module: goal wrappers + run reads converge onto jobsApi; `listAllRuns` is the one merged read | #3123 | `src/client/jobsApi.ts` | #3123 — landed |
+| Worker duties as records (kind worker-duty, state disabled) | #3123 | `workerDutiesFromInventory` + `GET /api/schedule/systems` `workerDuties` | #3123 — landed |
+| Maintenance wipe clears paused records only | #3123 | `clearPaused()` over `unified_schedules` | #3123 — landed |
+| Five duplicated modules retired by deprecation rename only (zero deletions) | #3123 | `*.deprecated.ts` + `docs/architecture/transition/deprecations.md` | #3123 — landed |
+| D1 pipeline run records stay in D1 (workflow residency has no DO sql handle) | #3123 | — no home — | **Filed #4124 (open)** |
+| `mas_async_jobs` stays the async-job execution record; `mas_job_outcomes` stays the outcome sink (recorded scoping decision, not a merge) | #3123 | Scoping decision in the #3123 PR body + this row | #3123 — landed |
+
 What stays open after S6 (the program does not close with this
 slice): the filed sub-issues #3393, #3394, #3314, #3313, #3312 (live
 proof only), #3361, #3640–#3645 (unbuilt per owner direction),
-#3652, #4110; the Phase 2 item B-T3-07 (goal store → #3123) and
-the Phase 3 item U-10 (Chat Scheduler sub-view → #3122). What S6
+#3652, #4110, #4124 (open); the Phase 3 item U-10 (Chat Scheduler
+sub-view → #3122). What S6
 deliberately does NOT do: no deprecation rename (zero modules
 proven retired — see the S6 amendment), no firing-time, cron, or
 payload change, no Phase 2/3 build, no build of any filed

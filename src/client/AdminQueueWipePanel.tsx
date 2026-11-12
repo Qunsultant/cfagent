@@ -56,7 +56,7 @@ import {
   track1RecreatePlan,
 } from "./adminQueueApi";
 
-const CLEARABLE_TABLES: ClearableTable[] = ["mas_async_jobs", "mas_job_outcomes", "paused_schedules"];
+const CLEARABLE_TABLES: ClearableTable[] = ["mas_async_jobs", "mas_job_outcomes", "unified_schedules"];
 
 type SelectiveKind = "framework" | "sql" | "messages" | "kv";
 
@@ -75,7 +75,7 @@ const SELECTIVE_ROWS: SelectiveRowDef[] = [
   { id: "mas_job_outcomes_meta", label: "Outcome prune watermark (mas_job_outcomes_meta)", scope: "Own instance", note: "Clearing resets the pruning cursor; the next prune recomputes it.", kind: "sql" },
   { id: "mas_messages", label: "Messages (mas_messages)", scope: "Own instance", note: "Per-session purge: only this session's messages, not all sessions'. No preview count.", kind: "messages" },
   { id: "mas_events", label: "Audit history (mas_events)", scope: "Own instance", note: "Destroys audit history, irreversibly. Needs a second confirmation, and an export is offered first.", kind: "sql" },
-  { id: "paused_schedules", label: "Paused schedules (paused_schedules)", scope: "Own instance", note: "", kind: "sql" },
+  { id: "unified_schedules", label: "Paused schedules (unified_schedules)", scope: "Own instance", note: "Paused records only; active schedules are never wiped here.", kind: "sql" },
   { id: "kv:memberships", label: "Memberships (iaaa-membership:*)", scope: "Platform-wide", note: "All users, all tenants. Always clears the genesis marker with it.", kind: "kv" },
   { id: "kv:tokens", label: "Broker tokens (etrade:token:*)", scope: "Platform-wide", note: "Every user reconnects their broker after.", kind: "kv" },
   { id: "kv:bindings", label: "Identity bindings + aliases (iaaa-binding:*, iaaa-alias:*)", scope: "Platform-wide", note: "Re-created on next sign-in; required for re-bootstrap.", kind: "kv" },
@@ -370,7 +370,7 @@ export function AdminQueueWipePanel() {
           results.push({ id: "framework", ok: false, detail: messageOf(err) });
         }
       }
-      for (const table of ["mas_async_jobs", "mas_job_outcomes", "mas_job_outcomes_meta", "mas_events", "paused_schedules"] as const) {
+      for (const table of ["mas_async_jobs", "mas_job_outcomes", "mas_job_outcomes_meta", "mas_events", "unified_schedules"] as const) {
         if (!sel[table]) continue;
         try {
           const result =

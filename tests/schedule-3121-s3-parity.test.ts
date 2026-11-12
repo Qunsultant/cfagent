@@ -108,10 +108,16 @@ function makeAuditCapture(
     get: (_id: unknown) => ({
       fetch: async (req: Request) => {
         if (opts.throws) throw new Error("audit down");
-        posted.push({
-          url: req.url,
-          body: await req.clone().json().catch(() => null),
-        });
+        // The ORCHESTRATOR_AGENT namespace carries TWO channels
+        // (#3123): the audit sink AND the ledger post/read channel
+        // (POST /schedules/runs/record, GET /schedules/runs). This
+        // capture is the audit sink's — only the audit URL counts.
+        if (req.url === "https://agent.internal/audit/event") {
+          posted.push({
+            url: req.url,
+            body: await req.clone().json().catch(() => null),
+          });
+        }
         return { status: opts.status ?? 200 };
       },
     }),
@@ -710,9 +716,10 @@ describe("S3-P05 #3312 — the DO-side audit sink covers every entry path (#3121
 });
 
 describe("S3-P06 the goals view reads the one consolidated ledger (#3121)", () => {
-  it("the goals panel reads runs from listGoalRuns, normalized, with the ledger's null rule", () => {
+  it("the goals panel reads runs from listAllRuns, normalized, with the ledger's null rule", () => {
     const panel = source("src/client/ScheduledGoalsPanel.tsx");
-    expect(panel).toContain("listGoalRuns");
+    expect(panel).toContain("listAllRuns");
+    expect(panel).not.toContain("listGoalRuns");
     expect(panel).toContain("normalizeJobRunRecord");
     expect(panel).toContain("ledgerLinkageCell");
     expect(panel).toContain("Recent goal runs");
@@ -731,7 +738,7 @@ describe("S3-P06 the goals view reads the one consolidated ledger (#3121)", () =
 });
 
 describe("S3-P08 the coverage map is seeded and its homeless rows are filed (#3121)", () => {
-  it("§9 maps every B-T3 capability to a home, and the homeless ones name their filed issue", () => {
+  it("§9 maps every B-T3 capability to a home; #3393 and #3394 landed", () => {
     const doc = source("docs/architecture/scheduling/3121-s0-inventory.md");
     expect(doc).toContain("## 9. Capability-coverage map");
     expect(doc).toContain("LOSSLESS AND ADDITIVE");
@@ -748,12 +755,13 @@ describe("S3-P08 the coverage map is seeded and its homeless rows are filed (#31
     ]) {
       expect(map).toContain(id);
     }
-    // The S3 comb's two homeless capabilities are filed, not
-    // dropped — and the map says so with their numbers.
+    // The S3 comb's two homeless capabilities were filed, not
+    // dropped — and the map says so with their numbers. #3393
+    // and #3394 both landed.
     expect(map).toContain("#3393");
     expect(map).toContain("#3394");
-    expect(map).toContain("Filed #3393 (open)");
-    expect(map).toContain("Filed #3394 (open)");
+    expect(map).toContain("#3393 — landed");
+    expect(map).toContain("#3394 — landed");
   });
 });
 

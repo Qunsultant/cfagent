@@ -116,6 +116,7 @@ describe("universal retention registry (#1766 extends #1765)", () => {
       "mas_discovery_runs",
       "mas_screener_presets",
       "paused_schedules",
+      "unified_schedules",
       "cf_agents_jobs",
       "usage_events",
       "screener_runs",

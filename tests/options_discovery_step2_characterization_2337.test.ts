@@ -31,7 +31,7 @@
  *  - feed snapshots: keep-per-symbol pruning and the resolver's
  *    filter-match honesty (a mismatch is a MISSING outcome,
  *    never a silent live fallback);
- *  - paused schedules: the upsert round-trip behind pause/resume.
+ *  - unified schedules: the upsert round-trip behind pause/resume (#3123).
  *
  * These pins must be green before the cutover and green after
  * it, unchanged — that is what makes the cutover a behaviour-
@@ -91,9 +91,9 @@ import {
 } from "../src/services/feedSnapshotStore";
 import type { OptionsDataSnapshot } from "../src/trading";
 import {
-  SqlPausedScheduleStore,
-  type PausedScheduleRecord,
-} from "../src/services/scheduleManagement";
+  SqlUnifiedScheduleStore,
+} from "../src/data/doSqliteUnifiedScheduleAdapter";
+import type { UnifiedScheduleRecord } from "../src/data/unifiedSchedulePorts";
 
 /* ------------------------------------------------------------------ */
 /* Doubles + fixtures                                                  */
@@ -215,14 +215,22 @@ function snapshot(symbol: string): OptionsDataSnapshot {
   return { symbol, screen: { scannedAt: "2026-10-22T12:00:00.000Z" } } as unknown as OptionsDataSnapshot;
 }
 
-function pausedRecord(overrides: Partial<PausedScheduleRecord> = {}): PausedScheduleRecord {
+function pausedRecord(overrides: Partial<UnifiedScheduleRecord> = {}): UnifiedScheduleRecord {
   return {
     id: "job-1",
+    kind: "screen",
+    state: "paused",
     callback: "scheduledOptionsScan",
-    payload: { userLogin: "op", symbols: ["AAA"] },
-    type: "cron",
-    cron: "0 9 * * 1-5",
+    definition: {
+      type: "cron",
+      callback: "scheduledOptionsScan",
+      payload: { userLogin: "op", symbols: ["AAA"] },
+      cron: "0 9 * * 1-5",
+    },
+    alarmId: "job-1",
     pausedAt: "2026-10-22T12:00:00.000Z",
+    createdAt: "2026-10-22T12:00:00.000Z",
+    updatedAt: "2026-10-22T12:00:00.000Z",
     ...overrides,
   };
 }
@@ -795,31 +803,47 @@ describe("#2337 characterization — feed snapshots", () => {
 /* Paused schedules — upsert round-trip                                */
 /* ------------------------------------------------------------------ */
 
-describe("#2337 characterization — paused schedules", () => {
+describe("#2337 characterization — unified schedules (paused records)", () => {
   it("save → get round-trips the full definition (payload JSON, optional fields only when present)", () => {
-    const store = new SqlPausedScheduleStore(new SqliteTestStorage() as never);
+    const store = new SqlUnifiedScheduleStore(new SqliteTestStorage() as never);
     store.save(pausedRecord());
     const got = store.get("job-1");
     expect(got).toEqual(pausedRecord());
-    const bare = pausedRecord({ id: "job-2", type: "interval", cron: undefined, intervalSeconds: 3600 });
+    const bare = pausedRecord({
+      id: "job-2",
+      definition: {
+        type: "interval",
+        callback: "scheduledOptionsScan",
+        payload: { userLogin: "op", symbols: ["AAA"] },
+        intervalSeconds: 3600,
+      },
+    });
     store.save(bare);
     const gotBare = store.get("job-2");
-    expect(gotBare?.intervalSeconds).toBe(3600);
-    expect(gotBare && "cron" in gotBare).toBe(false);
+    expect((gotBare?.definition as any).intervalSeconds).toBe(3600);
+    expect(gotBare && "cron" in gotBare.definition).toBe(false);
   });
 
   it("save is an upsert: re-saving an id replaces the record (pause → update → resume reads the new definition)", () => {
-    const store = new SqlPausedScheduleStore(new SqliteTestStorage() as never);
+    const store = new SqlUnifiedScheduleStore(new SqliteTestStorage() as never);
     store.save(pausedRecord());
-    store.save(pausedRecord({ cron: "0 10 * * 1-5", pausedAt: "2026-10-23T12:00:00.000Z" }));
+    store.save(pausedRecord({
+      definition: {
+        type: "cron",
+        callback: "scheduledOptionsScan",
+        payload: { userLogin: "op", symbols: ["AAA"] },
+        cron: "0 10 * * 1-5",
+      },
+      pausedAt: "2026-10-23T12:00:00.000Z",
+    }));
     expect(store.list()).toHaveLength(1);
-    expect(store.get("job-1")?.cron).toBe("0 10 * * 1-5");
+    expect((store.get("job-1")?.definition as any).cron).toBe("0 10 * * 1-5");
   });
 
-  it("list is paused_at ascending; remove returns true once", () => {
-    const store = new SqlPausedScheduleStore(new SqliteTestStorage() as never);
-    store.save(pausedRecord({ id: "job-b", pausedAt: "2026-10-23T12:00:00.000Z" }));
-    store.save(pausedRecord({ id: "job-a", pausedAt: "2026-10-22T12:00:00.000Z" }));
+  it("list is created_at ascending; remove returns true once", () => {
+    const store = new SqlUnifiedScheduleStore(new SqliteTestStorage() as never);
+    store.save(pausedRecord({ id: "job-b", createdAt: "2026-10-23T12:00:00.000Z", pausedAt: "2026-10-23T12:00:00.000Z" }));
+    store.save(pausedRecord({ id: "job-a", createdAt: "2026-10-22T12:00:00.000Z", pausedAt: "2026-10-22T12:00:00.000Z" }));
     expect(store.list().map((r) => r.id)).toEqual(["job-a", "job-b"]);
     expect(store.remove("job-a")).toBe(true);
     expect(store.remove("job-a")).toBe(false);

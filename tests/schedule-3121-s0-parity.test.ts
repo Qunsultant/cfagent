@@ -104,9 +104,13 @@ describe("S0-P02 SDK timing forms (B-T2-01): four forms resolve through ctx.sche
   it("lists all four forms in the route table and resolves each", () => {
     const routes = read("src/agents/routes/schedules.ts");
     expect(routes).toContain("?type=cron|interval|delayed|scheduled");
-    expect(routes).toContain("ctx.schedule(timing.cron, callback, payload, { idempotent: true })");
-    expect(routes).toContain("ctx.scheduleEvery(timing.intervalSeconds, callback, payload)");
-    expect(routes).toContain("ctx.schedule(new Date(timing.time * 1000), callback, payload)");
+    // Arming lives in the `alarms` adapter (#3123): the receiver is
+    // `ctx` (one line up), so the forms assert without the prefix;
+    // the create route arms directly in the same four forms.
+    expect(routes).toContain("schedule(timing.cron, callback, payload, { idempotent: true })");
+    expect(routes).toContain("scheduleEvery(timing.intervalSeconds, callback, payload)");
+    expect(routes).toContain("schedule(new Date(timing.time * 1000), callback, payload)");
+    expect(routes).toContain("ctx.schedule(cron, callback, screeningPayload, { idempotent: body.idempotent !== false })");
   });
 });
 
@@ -133,8 +137,8 @@ describe("S0-P04 idempotent creates (B-T2-03): duplicate suppression + idempoten
   });
 });
 
-describe("S0-P05 pause/resume/trigger/delete/detail (B-T2-04): paused store round-trips", () => {
-  it("names the pause/resume/trigger/delete/detail routes and the paused store", () => {
+describe("S0-P05 pause/resume/trigger/delete/detail (B-T2-04): unified store round-trips", () => {
+  it("names the pause/resume/trigger/delete/detail routes and the unified store", () => {
     const routes = read("src/agents/routes/schedules.ts");
     for (const route of [
       "POST        /schedules/:id/pause",
@@ -145,8 +149,10 @@ describe("S0-P05 pause/resume/trigger/delete/detail (B-T2-04): paused store roun
     ]) {
       expect(routes).toContain(route);
     }
-    expect(routes).toContain("pausedStore()");
-    expect(routes).toContain("pausedRecordToListItem");
+    // Issue #3121 Phase 2 (#3123) — the one store + one management path.
+    expect(routes).toContain("unifiedStore()");
+    expect(routes).toContain("unifiedScheduleManagement");
+    expect(routes).toContain("pauseUnifiedSchedule");
     expect(routes).toContain('ctx.audit("schedule.paused"');
     expect(routes).toContain('ctx.audit("schedule.resumed"');
     expect(routes).toContain('ctx.audit("schedule.triggered"');
@@ -539,11 +545,16 @@ describe("S0-P24 ledger gap (B-L-01/02/03): S1 closes B-L-01 on job_run_records;
   });
 });
 
-describe("S0-P25 provenance gap (B-L-04): S1 stamps provenance on the create route; scheduleManagement stays provenance-free", () => {
-  it("finds provenance stamping on the schedule create route, none in schedule management", () => {
+describe("S0-P25 provenance gap (B-L-04): S1 stamps provenance on the create route; the update path preserves it", () => {
+  it("finds provenance stamping on the schedule create route, and the update service carries provenance through", () => {
     expect(read("src/agents/routes/schedules.ts")).toContain("provenance");
     expect(read("src/agents/routes/schedules.ts")).toContain("stampScheduleProvenance");
-    expect(read("src/services/scheduleManagement.ts")).not.toContain("provenance");
+    // Issue #3121 Phase 2 (#3123) — scheduleManagement.ts is retired;
+    // the update rule lives in unifiedScheduleManagement.ts, where a
+    // rebuilt payload keeps the original creation provenance verbatim
+    // (an update never rewrites creation time).
+    expect(read("src/services/unifiedScheduleManagement.ts")).toContain("provenance");
+    expect(read("src/services/unifiedScheduleManagement.ts")).toContain("carryScheduleProvenance");
   });
 });
 

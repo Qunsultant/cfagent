@@ -1,4 +1,13 @@
 /**
+ * @deprecated Issue #3121 Phase 2 (#3123) — retired by deprecation
+ * rename only (gitops §22: never deleted). Superseded by
+ * `src/client/jobsApi.ts`. Every wrapper moved
+ * verbatim to `src/client/jobsApi.ts`, which is now THE schedule
+ * client module; the run reads converge onto `listAllRuns` there.
+ * This file is FROZEN: no new features, no new consumers; delete
+ * only when it has zero consumers and the owner decides (see
+ * `docs/architecture/transition/deprecations.md`).
+ *
  * Issue #159: client API for the ScheduledAgent dashboard.
  */
 import { withCsrfInit } from "./apiFetch";

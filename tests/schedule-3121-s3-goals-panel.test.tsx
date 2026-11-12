@@ -1,7 +1,7 @@
 /**
  * Issue #3121 Slice S3 — the goals view renders through the S1
  * primitives: run history from the one consolidated ledger read
- * (`listGoalRuns`, the same read the runs view uses), normalized
+ * (`listAllRuns`, the same read the runs view uses), normalized
  * with the S1 normalizer, and creation provenance on every goal.
  *
  * @vitest-environment jsdom
@@ -92,7 +92,9 @@ function installFetch(runsStatus = 200) {
     if (path === "/api/schedule/operations" && method === "GET") {
       return jsonResponse({ ok: true, operations: OPERATIONS });
     }
-    if (path.startsWith("/api/schedule/runs")) {
+    // The one merged read (#3123): the panel reads runs only from
+    // GET /api/ledger/runs now.
+    if (path.startsWith("/api/ledger/runs")) {
       if (runsStatus !== 200) {
         return jsonResponse({ ok: false, error: "ledger down" }, runsStatus);
       }

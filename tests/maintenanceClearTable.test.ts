@@ -32,10 +32,11 @@ function seed(db: DatabaseSync) {
   )`);
   db.exec(`CREATE TABLE mas_job_outcomes (id TEXT PRIMARY KEY, kind TEXT, trigger TEXT, status TEXT, scanned INTEGER, matched INTEGER, coded_error TEXT, report_url TEXT, pdf_key TEXT, xlsx_key TEXT, csv_key TEXT, delivery_json TEXT, origin TEXT, created_at TEXT)`);
   db.exec(`CREATE TABLE mas_job_outcomes_meta (k TEXT PRIMARY KEY, v TEXT)`);
-  db.exec(`CREATE TABLE paused_schedules (
-    id TEXT PRIMARY KEY, callback TEXT NOT NULL, payload_json TEXT,
-    sched_type TEXT NOT NULL, cron TEXT, interval_seconds INTEGER,
-    time INTEGER, delay_seconds INTEGER, paused_at TEXT NOT NULL
+  db.exec(`CREATE TABLE unified_schedules (
+    id TEXT PRIMARY KEY, kind TEXT NOT NULL, state TEXT NOT NULL,
+    callback TEXT, operation TEXT, definition_json TEXT NOT NULL,
+    owner_login TEXT, provenance_json TEXT, alarm_id TEXT,
+    paused_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
   )`);
   const job = db.prepare(
     "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, created_at, updated_at) VALUES (?, ?, 'c', 'd', ?, '{}', '2026-10-29', '2026-10-29')",
@@ -50,9 +51,10 @@ function seed(db: DatabaseSync) {
   outcome.run("o2");
   outcome.run("o3");
   db.prepare("INSERT INTO mas_job_outcomes_meta (k, v) VALUES ('pruned_at', '2026-10-29T00:00:00.000Z')").run();
-  const paused = db.prepare("INSERT INTO paused_schedules (id, callback, sched_type, paused_at) VALUES (?, 'autonomousOptionsAnalysis', 'cron', '2026-10-29')");
-  paused.run("p1");
-  paused.run("p2");
+  const paused = db.prepare("INSERT INTO unified_schedules (id, kind, state, callback, definition_json, alarm_id, paused_at, created_at, updated_at) VALUES (?, 'screen', ?, 'autonomousOptionsAnalysis', '{\"type\":\"cron\",\"callback\":\"autonomousOptionsAnalysis\",\"cron\":\"35 * * * *\"}', ?, ?, '2026-10-29', '2026-10-29')");
+  paused.run("p1", "paused", "p1", "2026-10-29");
+  paused.run("p2", "paused", "p2", "2026-10-29");
+  paused.run("a1", "active", "a1", null);
 }
 
 function count(db: DatabaseSync, sql: string): number {
@@ -149,11 +151,12 @@ describe("POST /api/maintenance/clear-table (#2280)", () => {
     expect(count(db, "SELECT COUNT(*) AS n FROM mas_job_outcomes_meta")).toBe(1);
   });
 
-  it("paused clear deletes the paused records", async () => {
+  it("paused clear deletes the paused records, never active ones (#3123)", async () => {
     const ctx = makeCtx(db);
-    const { body } = await postClear(ctx, { table: "paused_schedules", confirm: true });
+    const { body } = await postClear(ctx, { table: "unified_schedules", confirm: true });
     expect(body.deleted).toBe(2);
-    expect(count(db, "SELECT COUNT(*) AS n FROM paused_schedules")).toBe(0);
+    expect(count(db, "SELECT COUNT(*) AS n FROM unified_schedules")).toBe(1);
+    expect(count(db, "SELECT COUNT(*) AS n FROM unified_schedules WHERE state = 'active'")).toBe(1);
   });
 
   it("missing tables preview and confirm at zero, never 500", async () => {

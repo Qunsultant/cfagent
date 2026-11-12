@@ -13,7 +13,7 @@
  * - SDK schedules, re-armed on the target (new SDK ids — ids never
  *   survive a copy) with fingerprint dedupe, so a re-run never
  *   double-arms.
- * - paused_schedules rows and every other user SQL table discovered
+ * - legacy paused-schedule rows and every other user SQL table discovered
  *   via sqlite_master, as history, with one exclusion: in-flight
  *   mas_async_jobs rows (queued/running) are NOT copied — they drain
  *   on the source instance, whose alarms keep firing current code

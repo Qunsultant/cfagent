@@ -209,7 +209,9 @@ describe("Issue #3605 & #3624: ScheduleRunLedgerPanel and ToolResultView clickab
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes("/api/schedules/runs")) {
+      // The one merged read (#3123): the panel reads runs only from
+      // GET /api/ledger/runs now.
+      if (url.includes("/api/ledger/runs")) {
         return Promise.resolve(new Response(JSON.stringify({ runs: [mockRun] }), { status: 200 }));
       }
       return Promise.resolve(new Response(JSON.stringify({ runs: [] }), { status: 200 }));

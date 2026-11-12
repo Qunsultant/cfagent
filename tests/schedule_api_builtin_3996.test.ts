@@ -1,5 +1,6 @@
 /**
- * Issue #3996 — scheduleApi built-in goals client:
+ * Issue #3996 — jobsApi built-in goals client (moved from
+ * scheduleApi, issue #3121 Phase 2 #3123):
  * listBuiltinGoals() reads the canonical definitions from the
  * server, and addBuiltinGoals() posts each missing goal in order,
  * reporting per-goal added / skipped / failed — never duplicating,
@@ -9,7 +10,7 @@
  * Red first: neither function exists yet.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { listBuiltinGoals, addBuiltinGoals } from "../src/client/scheduleApi";
+import { listBuiltinGoals, addBuiltinGoals } from "../src/client/jobsApi";
 
 const BUILTINS = [
   { id: "daily-qa-sweep", name: "Daily QA sweep", cron: "0 6 * * *", operation: "qa.run_sweep", budgetCents: 500, enabled: true },
@@ -21,7 +22,7 @@ function jsonResponse(body: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
 }
 
-describe("scheduleApi built-in goals (#3996)", () => {
+describe("jobsApi built-in goals (#3996)", () => {
   let posted: { path: string; body: any }[];
   let failIds: Map<string, string>;
 

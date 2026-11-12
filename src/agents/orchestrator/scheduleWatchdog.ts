@@ -41,7 +41,7 @@
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import type { SqlStorage } from "../../orm";
 import { resolveMissedScheduleGraceMs } from "../../config/missedScheduleAlert";
-import { buildJobRunRecord } from "../../services/jobRunRecords";
+import { recordLedgerRun } from "../../services/unifiedLedger";
 import {
   findMissedDurableSchedule,
   missedFiringDetail,
@@ -173,22 +173,20 @@ export async function watchdogMissedSchedules(
       // Claim-first: the ledger record is the exactly-once claim.
       // A failed write alerts nothing for this row this tick.
       try {
-        store.record(
-          buildJobRunRecord({
-            system: "orchestrator-schedule",
-            jobId: schedule.id,
-            operation: schedule.callback,
-            started: nowIso,
-            finished: nowIso,
-            outcome: "skipped",
-            triggeredBy: "scheduled",
-            trigger: "scheduled",
-            scheduleId: schedule.id,
-            asyncJobId: null,
-            workflowId: null,
-            detail: missedFiringDetail(schedule.id, finding, schedule.cron),
-          }),
-        );
+        recordLedgerRun(store, {
+          system: "orchestrator-schedule",
+          jobId: schedule.id,
+          operation: schedule.callback,
+          started: nowIso,
+          finished: nowIso,
+          outcome: "skipped",
+          triggeredBy: "scheduled",
+          trigger: "scheduled",
+          scheduleId: schedule.id,
+          asyncJobId: null,
+          workflowId: null,
+          detail: missedFiringDetail(schedule.id, finding, schedule.cron),
+        });
       } catch {
         continue;
       }
@@ -226,24 +224,22 @@ export async function watchdogMissedSchedules(
   // Heartbeat: the sweep ran, with examined counts. Best-effort — a
   // failed heartbeat never fails the sweep.
   try {
-    store.record(
-      buildJobRunRecord({
-        system: "orchestrator-schedule",
-        jobId: SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
-        operation: "schedule.watchdog_sweep",
-        started: nowIso,
-        finished: nowIso,
-        outcome: "success",
-        triggeredBy: "scheduled",
-        trigger: "scheduled",
-        scheduleId: null,
-        asyncJobId: null,
-        workflowId: null,
-        detail:
-          `examined=${result.examined} missed=${result.missed} ` +
-          `skippedUnrecorded=${result.skippedUnrecorded}`,
-      }),
-    );
+    recordLedgerRun(store, {
+      system: "orchestrator-schedule",
+      jobId: SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
+      operation: "schedule.watchdog_sweep",
+      started: nowIso,
+      finished: nowIso,
+      outcome: "success",
+      triggeredBy: "scheduled",
+      trigger: "scheduled",
+      scheduleId: null,
+      asyncJobId: null,
+      workflowId: null,
+      detail:
+        `examined=${result.examined} missed=${result.missed} ` +
+        `skippedUnrecorded=${result.skippedUnrecorded}`,
+    });
   } catch {
     // Best-effort heartbeat.
   }

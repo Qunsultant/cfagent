@@ -496,7 +496,7 @@ const PORTED_TABLES = [
   // step 2
   "mas_opportunity_scans", "mas_discovery_runs", "mas_discovery_setup_runs",
   "mas_discovery_alerts", "mas_iv_history", "mas_strategy_profiles",
-  "mas_feed_snapshots", "paused_schedules", "mas_enrichment_runs",
+  "mas_feed_snapshots", "paused_schedules", "unified_schedules", "mas_enrichment_runs",
   // step 3a (+ marketplace)
   "mas_messages", "mas_events", "mas_memory", "mas_watchlists",
   "mas_transactions", "mas_trades", "mas_categories", "mas_external_ads",
@@ -542,7 +542,12 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   mas_strategy_profiles: { layer: ["src/data/doSqliteStrategyProfileAdapter.ts"] },
   mas_feed_snapshots: { layer: ["src/data/doSqliteFeedSnapshotAdapter.ts"] },
   paused_schedules: {
-    layer: ["src/data/doSqlitePausedScheduleAdapter.ts"],
+    // #3123: the legacy table is frozen — its only writer is the
+    // deprecated adapter; live pause state lives in unified_schedules.
+    layer: ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts"],
+  },
+  unified_schedules: {
+    layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts"],
   },
   mas_enrichment_runs: { layer: ["src/data/doSqliteEnrichmentAdapter.ts"] },
   mas_messages: {

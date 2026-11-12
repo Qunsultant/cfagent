@@ -3,10 +3,11 @@
  *
  * The `view=runs` / `view=ledger` view of the one schedules home. It
  * reads the S1 ledger (`job_run_records`, §4 columns `trigger`,
- * `scheduleId`, `asyncJobId`, `workflowId`) through the existing reads
- * (`jobsApi.listScheduleRuns` + `listGoalRuns` — the same reads
- * `JobsPanel` uses; no second ledger read path) and normalizes every
- * row with `normalizeJobRunRecord`, so a legacy row reads as
+ * `scheduleId`, `asyncJobId`, `workflowId`) through the one merged
+ * read (`jobsApi.listAllRuns` — server-side merge of the
+ * orchestrator DO-SQLite half and the ScheduledAgent KV half; the
+ * same read `JobsPanel` uses; no second ledger read path) and
+ * normalizes every row with `normalizeJobRunRecord`, so a legacy row
  * `trigger: "unknown"` with null ids instead of dropping out.
  *
  * Null-handling is the §4 rule, rendered not hidden: a null linkage id
@@ -27,7 +28,7 @@ import {
   Table,
   type TableColumn,
 } from "./components/ui";
-import { listGoalRuns, listScheduleRuns } from "./jobsApi";
+import { listAllRuns } from "./jobsApi";
 import {
   isMissingIdLiteral,
   normalizeJobRunRecord,
@@ -223,11 +224,8 @@ export function ScheduleRunLedgerPanel({
     setLoading(true);
     setError(null);
     try {
-      const [scheduleRuns, goalRuns] = await Promise.all([
-        listScheduleRuns(undefined, 200),
-        listGoalRuns(undefined, 200),
-      ]);
-      setRuns(mergeLedgerRuns(scheduleRuns, goalRuns));
+      const { runs } = await listAllRuns(undefined, 200);
+      setRuns(runs);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load run ledger");
     } finally {
