@@ -547,7 +547,7 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
         expect(def.elements).toContain(element);
       }
     }
-    expect(registry.list()).toHaveLength(7);
+    expect(registry.list()).toHaveLength(8);
   });
 
   it("the join knob opts one job out (quotes-only preserved) and falls back to auto on bad values", () => {
@@ -780,14 +780,14 @@ describe("the enrich join attaches the parameterized job (#3930)", () => {
         universe: "sp100",
       },
     ]);
-    expect(ENRICH_PIPELINE_CATALOG).toHaveLength(7);
+    expect(ENRICH_PIPELINE_CATALOG).toHaveLength(8);
   });
 });
 
 describe("the chains fold the parameterized fundamentals node (#3930)", () => {
   it("every chain declares the fundamentals job and its own universe", () => {
     const registry = buildPipelineChainRegistry({});
-    expect(registry.list()).toHaveLength(7);
+    expect(registry.list()).toHaveLength(8);
     for (const chain of registry.list()) {
       expect(chain.fundamentalsJobId).toBe(FUND_ID);
     }
@@ -795,6 +795,7 @@ describe("the chains fold the parameterized fundamentals node (#3930)", () => {
     expect(registry.forId("yahoo-sp100-quotes-pipeline")!.universeIndex).toBe("sp100");
     expect(registry.forId("yahoo-sp500-quotes-pipeline")!.universeIndex).toBe("sp500");
     expect(registry.forId("yahoo-dow-quotes-pipeline")!.universeIndex).toBe("dow");
+    expect(registry.forId("yahoo-sp400-quotes-pipeline")!.universeIndex).toBe("sp400");
     expect(registry.forId("alpaca-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
     expect(registry.forId("etrade-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
     expect(registry.forId("public-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
@@ -809,7 +810,7 @@ describe("the chains fold the parameterized fundamentals node (#3930)", () => {
         children?: Array<unknown>;
       };
     }>;
-    expect(raws).toHaveLength(7);
+    expect(raws).toHaveLength(8);
     const walk = (raw: (typeof raws)[number]) => {
       const nodes: Array<{ step?: string; params?: Record<string, unknown> }> = [];
       let node: (typeof raw)["root"] | undefined = raw.root;
@@ -841,7 +842,7 @@ describe("the chains fold the parameterized fundamentals node (#3930)", () => {
     // technicals, and sentiment fold in, #3931/#3932).
     expect(walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
     expect(walk(byId.get("yahoo-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
-    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(7);
+    expect(CHAIN_PIPELINE_CATALOG).toHaveLength(8);
   });
 });
 

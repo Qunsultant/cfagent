@@ -178,7 +178,7 @@ describe("feed-job copilot tools (#3535)", () => {
     const { context } = await makeContext();
     const result = (await new ListFeedJobsCommand().execute({}, context)) as any;
     // #4065 pin update: three options-chains jobs join the registry.
-    expect(result.jobs).toHaveLength(14);
+    expect(result.jobs).toHaveLength(15);
     expect(result.jobs.map((j: any) => j.jobId)).toContain("nasdaq-nasdaq100-universe");
   });
 
