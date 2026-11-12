@@ -318,8 +318,8 @@ describe("feed job registry (#3530 S2)", () => {
       expect(job.dataset).toBe("quotes");
       expect(job.elements).toEqual(["quotes"]);
       expect(job.universe).toMatchObject({ kind: "index", index: "nasdaq100", label: "Nasdaq-100" });
-      expect(job.cadenceMinutes).toBe(60);
-      expect(job.staleAfterMinutes).toBe(180);
+      expect(job.cadenceMinutes).toBe(43200);
+      expect(job.staleAfterMinutes).toBe(44640);
       expect(registry.forSource(sourceId)?.id).toBe(id);
     }
   });
@@ -337,8 +337,8 @@ describe("feed job registry (#3530 S2)", () => {
       FEED_JOB_ALPACA_NASDAQ100_QUOTES_STALE_MINUTES: "720",
     });
     expect(registry.get("etrade-nasdaq100-quotes")?.cadenceMinutes).toBe(240);
-    expect(registry.get("etrade-nasdaq100-quotes")?.staleAfterMinutes).toBe(180);
-    expect(registry.get("alpaca-nasdaq100-quotes")?.cadenceMinutes).toBe(60);
+    expect(registry.get("etrade-nasdaq100-quotes")?.staleAfterMinutes).toBe(44640);
+    expect(registry.get("alpaca-nasdaq100-quotes")?.cadenceMinutes).toBe(43200);
     expect(registry.get("alpaca-nasdaq100-quotes")?.staleAfterMinutes).toBe(720);
   });
 });
