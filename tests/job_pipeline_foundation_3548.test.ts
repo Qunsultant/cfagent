@@ -130,6 +130,7 @@ const INSTANCE: JobInstanceRecord = {
   currentRunId: "run-1",
   runStartedAt: "2026-11-06T12:00:00.000Z",
   runTrigger: "scheduled",
+  runScheduleId: null,
   checkpoint: {
     runId: "run-1",
     nodePath: "",

@@ -220,6 +220,15 @@ export interface JobInstanceRecord {
   runStartedAt: string | null;
   /** How the live/last run was triggered (stamped onto its terminal run record). */
   runTrigger: "scheduled" | "manual" | null;
+  /**
+   * The schedule id that dispatched the live/last run (stamped onto
+   * its terminal run record, #3310). Null when the run was not
+   * dispatched by a schedule — an explicit null, never a laundered
+   * id. Persisted on the instance (same class of fact as
+   * `runTrigger`): cancel/settle paths stamp the id of the run
+   * they settle, so it must survive the dispatching process.
+   */
+  runScheduleId: string | null;
   checkpoint: JobCheckpoint | null;
   /**
    * The run's stage-runner checkpoint (#3549): one entry per

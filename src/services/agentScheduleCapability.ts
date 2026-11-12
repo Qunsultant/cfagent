@@ -6,11 +6,13 @@
  * recorded, no tenant mapping invented), can create, update, pause, resume,
  * trigger, delete, and list a schedule for any task the tenant may run —
  * through this module only. It operates on the #3123 unified schedule
- * store through injected adapters (SDK alarms + goal records): the SDK
- * adapter adopts each armed alarm into the store (record id = alarm
- * id, #3123's adoption precedent) and the goals adapter reads the
- * store through the ScheduledAgent's getGoals/saveGoals — no second
- * schedule path is built here.
+ * store through injected adapters (SDK alarms + goal records + stage
+ * records, #3310): the SDK adapter adopts each armed alarm into the
+ * store (record id = alarm id, #3123's adoption precedent), the goals
+ * adapter reads the store through the ScheduledAgent's
+ * getGoals/saveGoals, and the stages adapter arms one pipeline stage
+ * through the SDK alarm substrate with the internal-only
+ * `runWorkflowStage` callback — no second schedule path is built here.
  *
  * Layering (each layer is independently testable, and no layer trusts the
  * one above it):
@@ -57,6 +59,10 @@ import type { Env } from "../types";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { createPendingScheduleApprovalPort } from "../data/doSqlitePendingScheduleApprovalsAdapter";
 import type { UnifiedStoreLike } from "./unifiedScheduleManagement";
+import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
+import type { JobNodeConfig } from "../data/jobPipelinePorts";
+import { isExternalSendStage } from "./workflowStageSchedule";
+import type { ResolvedWorkflowStage } from "./workflowStageSchedule";
 import { screenScheduleToRecord } from "./unifiedScheduleManagement";
 import { resolveEnvironmentConfig } from "../config/environment";
 import type { SqlStorage } from "../orm";
@@ -183,12 +189,16 @@ export interface AgentScheduleApprovalConfig {
   minIntervalSeconds?: number;
 }
 
-export type AgentScheduleKind = "sdk-callback" | "goal-operation" | "workflow";
+export type AgentScheduleKind = "sdk-callback" | "goal-operation" | "workflow" | "workflow-stage";
 
 export interface AgentScheduleClassifyInput {
   kind: AgentScheduleKind;
   callback?: string;
   operation?: string;
+  /** The job whose stage is scheduled (workflow-stage kind only). */
+  jobId?: string;
+  /** The child-index path of the stage (workflow-stage kind only). */
+  nodePath?: string;
   /** Budget the schedule carries (cents), when any. */
   budgetCents?: number;
   /** Interval the schedule fires on (seconds), when it is an interval schedule. */
@@ -279,8 +289,20 @@ export function classifyAgentScheduleRequest(
         denialReason: `Goal operation '${input.operation}' is not agent-schedulable: it is neither an executing family nor a known operation (S0 §8).`,
       };
     }
+  } else if (input.kind === "workflow-stage") {
+    // Issue #3310 — one pipeline stage on its own schedule. The
+    // stage must be addressed (job + node path); registry existence
+    // and retirement are checked by the stages adapter, which names
+    // the refusal. The consequential classes below (external send /
+    // spend / frequency) apply exactly as for any other schedule.
+    if (typeof input.jobId !== "string" || !input.jobId.trim()) {
+      return { schedulable: false, denialReason: "A stage-schedule requires a jobId naming its workflow." };
+    }
+    if (typeof input.nodePath !== "string" || !input.nodePath.trim()) {
+      return { schedulable: false, denialReason: "A stage-schedule requires a nodePath naming its stage." };
+    }
   } else {
-    // Whole-workflow schedules: schedulable as today; per-stage is #3310.
+    // Whole-workflow schedules: schedulable as today.
     if (input.kind !== "workflow") {
       return { schedulable: false, denialReason: "Unknown schedule kind." };
     }
@@ -473,7 +495,7 @@ export function agentScheduleProvenance(
 
 export interface PendingScheduleApproval {
   id: string;
-  kind: "sdk" | "goal";
+  kind: "sdk" | "goal" | "workflow-stage";
   requestedBy: string;
   agentId: string;
   requestedAt: string;
@@ -521,7 +543,7 @@ export function decidePendingScheduleApproval(
 }
 
 /* =====================================================================
- * Executor (port-injected; one capability, two store adapters)
+ * Executor (port-injected; one capability, three store adapters)
  * ===================================================================== */
 
 export type AgentSdkTiming =
@@ -550,6 +572,39 @@ export interface AgentGoalScheduleAdapter {
   trigger(id: string): Promise<unknown>;
 }
 
+/**
+ * The stages adapter (#3310): the unified-store record for one
+ * pipeline job stage, armed through the SDK alarm substrate with the
+ * internal-only `runWorkflowStage` callback. Implemented by
+ * `createWorkflowStageScheduleAdapter` (src/services/workflowStageSchedule.ts)
+ * over the one management service — no second management path.
+ */
+export interface AgentWorkflowStageScheduleAdapter {
+  /** Resolve the stage against the registry; null when the job has none. */
+  resolveStage(
+    jobId: string,
+    nodePath: string,
+  ): Promise<ResolvedWorkflowStage | null>;
+  list(): Promise<UnifiedScheduleRecord[]>;
+  get(id: string): Promise<UnifiedScheduleRecord | undefined>;
+  create(input: {
+    jobId: string;
+    nodePath: string;
+    timing: AgentSdkTiming;
+    reason?: string;
+    ownerLogin?: string;
+    provenance?: ScheduleProvenance;
+  }): Promise<UnifiedScheduleRecord>;
+  cancel(id: string): Promise<boolean>;
+  pause?(id: string): Promise<UnifiedScheduleRecord>;
+  resume?(id: string): Promise<UnifiedScheduleRecord>;
+  trigger?(id: string): Promise<unknown>;
+  update?(
+    id: string,
+    input: { timing?: AgentSdkTiming; reason?: string },
+  ): Promise<UnifiedScheduleRecord>;
+}
+
 export interface AgentScheduleExecutorDeps {
   pdp: (input: AgentSchedulePdpInput) => Promise<AgentSchedulePdpOutcome>;
   config?: AgentScheduleApprovalConfig;
@@ -564,6 +619,7 @@ export interface AgentScheduleExecutorDeps {
   stores: {
     sdk?: AgentSdkScheduleAdapter;
     goals?: AgentGoalScheduleAdapter;
+    stages?: AgentWorkflowStageScheduleAdapter;
   };
 }
 
@@ -597,8 +653,22 @@ export type AgentScheduleActionRequest =
       approvedPendingId?: string;
     }
   | {
+      action: "create";
+      kind: "workflow-stage";
+      principal: AgentSchedulePrincipal;
+      tenantId: string;
+      jobId: string;
+      nodePath: string;
+      timing: AgentSdkTiming;
+      reason?: string;
+      budgetCents?: number;
+      isExternalSend?: boolean;
+      /** As on create (sdk): the approve endpoint's gate-skip token. */
+      approvedPendingId?: string;
+    }
+  | {
       action: "list";
-      kind: "sdk" | "goal";
+      kind: "sdk" | "goal" | "workflow-stage";
       principal: AgentSchedulePrincipal;
       tenantId: string;
     }
@@ -624,8 +694,19 @@ export type AgentScheduleActionRequest =
       approvedPendingId?: string;
     }
   | {
+      action: "update";
+      kind: "workflow-stage";
+      principal: AgentSchedulePrincipal;
+      tenantId: string;
+      scheduleId: string;
+      timing?: AgentSdkTiming;
+      reason?: string;
+      /** As on create: the approve endpoint's gate-skip token. */
+      approvedPendingId?: string;
+    }
+  | {
       action: "pause" | "resume" | "trigger" | "delete";
-      kind: "sdk" | "goal";
+      kind: "sdk" | "goal" | "workflow-stage";
       principal: AgentSchedulePrincipal;
       tenantId: string;
       scheduleId: string;
@@ -640,8 +721,8 @@ export type AgentScheduleActionResult =
       pendingApprovalId?: string;
     };
 
-function ledgerSystem(kind: "sdk" | "goal"): "orchestrator-schedule" | "scheduled-agent-goal" {
-  return kind === "sdk" ? "orchestrator-schedule" : "scheduled-agent-goal";
+function ledgerSystem(kind: "sdk" | "goal" | "workflow-stage"): "orchestrator-schedule" | "scheduled-agent-goal" {
+  return kind === "goal" ? "scheduled-agent-goal" : "orchestrator-schedule";
 }
 
 function auditEventFor(action: AgentScheduleAction): string | null {
@@ -679,6 +760,27 @@ function ownerOfGoal(goal: Record<string, unknown>): string | undefined {
   return typeof createdBy === "string" && createdBy.trim() ? createdBy : undefined;
 }
 
+function ownerOfStageSchedule(record: UnifiedScheduleRecord): string | undefined {
+  if (typeof record.ownerLogin === "string" && record.ownerLogin.trim()) return record.ownerLogin;
+  const provenance = record.provenance;
+  if (!provenance || typeof provenance !== "object") return undefined;
+  const createdBy = (provenance as Record<string, unknown>).createdBy;
+  return typeof createdBy === "string" && createdBy.trim() ? createdBy : undefined;
+}
+
+function timingOfStageSchedule(record: UnifiedScheduleRecord): AgentSdkTiming | undefined {
+  const def = record.definition as Record<string, unknown>;
+  if (def.type === "cron" && typeof def.cron === "string") return { type: "cron", cron: def.cron };
+  if (def.type === "interval" && typeof def.intervalSeconds === "number") {
+    return { type: "interval", intervalSeconds: def.intervalSeconds };
+  }
+  if (def.type === "scheduled" && typeof def.time === "number") return { type: "scheduled", time: def.time };
+  if (def.type === "delayed" && typeof def.delayInSeconds === "number") {
+    return { type: "delayed", delayInSeconds: def.delayInSeconds };
+  }
+  return undefined;
+}
+
 function timingOfSdkSchedule(item: AgentScheduleItem): AgentSdkTiming | undefined {
   const s = item as AgentScheduleItem & { cron?: string; intervalSeconds?: number; time?: number };
   if (s.type === "cron" && s.cron) return { type: "cron", cron: s.cron };
@@ -706,7 +808,7 @@ export async function executeAgentScheduleAction(
     principal: AgentSchedulePrincipal;
     tenantId: string;
     action: AgentScheduleAction;
-    kind: "sdk" | "goal";
+    kind: "sdk" | "goal" | "workflow-stage";
   };
   const nowMs = deps.nowMs();
   const nowIso = deps.nowIso();
@@ -758,6 +860,7 @@ export async function executeAgentScheduleAction(
     // --- Load the target for non-create actions (existence + ownership + classification inputs).
     let targetSdk: AgentScheduleItem | undefined;
     let targetGoal: Record<string, unknown> | undefined;
+    let targetStage: UnifiedScheduleRecord | undefined;
     if (action !== "create" && action !== "list") {
       const scheduleId = (request as { scheduleId: string }).scheduleId;
       if (kind === "sdk") {
@@ -766,6 +869,13 @@ export async function executeAgentScheduleAction(
         if (!targetSdk) {
           await recordOutcome("skipped", scheduleId, `agent ${principal.agentId} (${principal.login}): schedule not found`);
           return { ok: false, code: "not-found", reason: `Schedule '${scheduleId}' was not found.` };
+        }
+      } else if (kind === "workflow-stage") {
+        if (!deps.stores.stages) return deny("No stage schedule store is available on this channel.", scheduleId);
+        targetStage = await deps.stores.stages.get(scheduleId);
+        if (!targetStage) {
+          await recordOutcome("skipped", scheduleId, `agent ${principal.agentId} (${principal.login}): stage-schedule not found`);
+          return { ok: false, code: "not-found", reason: `Stage-schedule '${scheduleId}' was not found.` };
         }
       } else {
         if (!deps.stores.goals) return deny("No goal schedule store is available on this channel.", scheduleId);
@@ -793,10 +903,69 @@ export async function executeAgentScheduleAction(
         },
         deps.config,
       );
+    } else if (request.action === "create" && request.kind === "workflow-stage") {
+      // The stage must exist (and not be retired) before classification:
+      // the classifier's external-send class is derived from the node,
+      // never guessed from the request.
+      if (!deps.stores.stages) return deny("No stage schedule store is available on this channel.", null);
+      let stage: Awaited<ReturnType<NonNullable<typeof deps.stores.stages.resolveStage>>> | null;
+      try {
+        stage = await deps.stores.stages.resolveStage(request.jobId, request.nodePath);
+      } catch (err) {
+        return deny(err instanceof Error ? err.message : String(err), null);
+      }
+      if (!stage) {
+        return deny(`Job '${request.jobId}' has no stage registry; nothing was scheduled.`, null);
+      }
+      const timing = request.timing;
+      classification = classifyAgentScheduleRequest(
+        {
+          kind: "workflow-stage",
+          jobId: request.jobId,
+          nodePath: request.nodePath,
+          budgetCents: request.budgetCents,
+          intervalSeconds: timing.type === "interval" ? timing.intervalSeconds : undefined,
+          cron: timing.type === "cron" ? timing.cron : undefined,
+          isExternalSend:
+            request.isExternalSend === true ||
+            isExternalSendStage(stage.node as unknown as JobNodeConfig),
+        },
+        deps.config,
+      );
     } else if (request.action === "create" && request.kind === "goal") {
       const goal = request.goal as { operation?: unknown; budgetCents?: number };
       classification = classifyAgentScheduleRequest(
         { kind: "goal-operation", operation: typeof goal.operation === "string" ? goal.operation : undefined, budgetCents: goal.budgetCents },
+        deps.config,
+      );
+    } else if (request.action === "update" && request.kind === "workflow-stage") {
+      // The REQUEST's timing is what will arm (falling back to the
+      // target's); the external-send class comes from the target's
+      // stage, resolved against the registry.
+      const updateReq = request as Extract<AgentScheduleActionRequest, { action: "update"; kind: "workflow-stage" }>;
+      const timing = updateReq.timing ?? (targetStage ? timingOfStageSchedule(targetStage) : undefined);
+      let isExternalSend: boolean | undefined;
+      if (targetStage && deps.stores.stages) {
+        const def = targetStage.definition as Record<string, unknown>;
+        const jobId = typeof def.jobId === "string" ? def.jobId : "";
+        const nodePath = typeof def.nodePath === "string" ? def.nodePath : "";
+        try {
+          const stage = await deps.stores.stages.resolveStage(jobId, nodePath);
+          if (stage) isExternalSend = isExternalSendStage(stage.node as unknown as JobNodeConfig);
+        } catch (err) {
+          return deny(err instanceof Error ? err.message : String(err), updateReq.scheduleId);
+        }
+      }
+      const def = targetStage ? (targetStage.definition as Record<string, unknown>) : {};
+      classification = classifyAgentScheduleRequest(
+        {
+          kind: "workflow-stage",
+          jobId: typeof def.jobId === "string" ? def.jobId : "",
+          nodePath: typeof def.nodePath === "string" ? def.nodePath : "",
+          intervalSeconds: timing?.type === "interval" ? timing.intervalSeconds : undefined,
+          cron: timing?.type === "cron" ? timing.cron : undefined,
+          isExternalSend,
+        },
         deps.config,
       );
     } else if (request.action === "update" && request.kind === "goal") {
@@ -828,6 +997,37 @@ export async function executeAgentScheduleAction(
           callback: targetSdk.callback,
           intervalSeconds: timing?.type === "interval" ? timing.intervalSeconds : undefined,
           cron: timing?.type === "cron" ? timing.cron : undefined,
+        },
+        deps.config,
+      );
+    } else if (kind === "workflow-stage" && targetStage) {
+      const timing = timingOfStageSchedule(targetStage);
+      let isExternalSend: boolean | undefined;
+      if (deps.stores.stages) {
+        const def = targetStage.definition as Record<string, unknown>;
+        const jobId = typeof def.jobId === "string" ? def.jobId : "";
+        const nodePath = typeof def.nodePath === "string" ? def.nodePath : "";
+        try {
+          const stage = await deps.stores.stages.resolveStage(jobId, nodePath);
+          if (stage) isExternalSend = isExternalSendStage(stage.node as unknown as JobNodeConfig);
+        } catch (err) {
+          // A stage that can no longer run (retired) still allows
+          // housekeeping — pause and delete — but never a re-arm
+          // (resume) or a firing (trigger).
+          if (action === "trigger" || action === "resume") {
+            return deny(err instanceof Error ? err.message : String(err), targetStage.id);
+          }
+        }
+      }
+      const def = targetStage.definition as Record<string, unknown>;
+      classification = classifyAgentScheduleRequest(
+        {
+          kind: "workflow-stage",
+          jobId: typeof def.jobId === "string" ? def.jobId : "",
+          nodePath: typeof def.nodePath === "string" ? def.nodePath : "",
+          intervalSeconds: timing?.type === "interval" ? timing.intervalSeconds : undefined,
+          cron: timing?.type === "cron" ? timing.cron : undefined,
+          isExternalSend,
         },
         deps.config,
       );
@@ -864,9 +1064,11 @@ export async function executeAgentScheduleAction(
       const owner =
         kind === "sdk" && targetSdk
           ? ownerOfSdkSchedule(targetSdk)
-          : kind === "goal" && targetGoal
-            ? ownerOfGoal(targetGoal)
-            : undefined;
+          : kind === "workflow-stage" && targetStage
+            ? ownerOfStageSchedule(targetStage)
+            : kind === "goal" && targetGoal
+              ? ownerOfGoal(targetGoal)
+              : undefined;
       if (owner !== undefined && owner !== principal.login) {
         return deny(`Schedule '${scheduleId}' belongs to '${owner}', not to '${principal.login}'.`, scheduleId);
       }
@@ -898,11 +1100,15 @@ export async function executeAgentScheduleAction(
         const definition =
           request.action === "create" && request.kind === "sdk"
             ? { callback: request.callback, timing: request.timing, payload: request.payload }
-            : request.action === "create" && request.kind === "goal"
-              ? { goal: request.goal }
-              : request.action === "update" && request.kind === "sdk"
-                ? { scheduleId: request.scheduleId, timing: request.timing, payload: request.payload }
-                : { scheduleId: (request as { scheduleId: string }).scheduleId, goal: (request as { goal: unknown }).goal };
+            : request.action === "create" && request.kind === "workflow-stage"
+              ? { jobId: request.jobId, nodePath: request.nodePath, timing: request.timing, reason: request.reason }
+              : request.action === "create" && request.kind === "goal"
+                ? { goal: request.goal }
+                : request.action === "update" && request.kind === "sdk"
+                  ? { scheduleId: request.scheduleId, timing: request.timing, payload: request.payload }
+                  : request.action === "update" && request.kind === "workflow-stage"
+                    ? { scheduleId: request.scheduleId, timing: request.timing, reason: request.reason }
+                    : { scheduleId: (request as { scheduleId: string }).scheduleId, goal: (request as { goal: unknown }).goal };
         const pending = await deps.pendingApprovals.load();
         await deps.pendingApprovals.save(
           recordPendingScheduleApproval(pending, {
@@ -947,11 +1153,41 @@ export async function executeAgentScheduleAction(
           ? deps.stores.sdk
             ? await deps.stores.sdk.list()
             : []
-          : deps.stores.goals
-            ? await deps.stores.goals.list()
-            : [];
+          : kind === "workflow-stage"
+            ? deps.stores.stages
+              ? await deps.stores.stages.list()
+              : []
+            : deps.stores.goals
+              ? await deps.stores.goals.list()
+              : [];
       await recordOutcome("success", null, `agent ${principal.agentId} (${principal.login}) listed ${items.length} ${kind} schedule(s)`);
       return { ok: true, schedule: items };
+    }
+    if (request.action === "create" && request.kind === "workflow-stage") {
+      if (!deps.stores.stages) return deny("No stage schedule store is available on this channel.", null);
+      const created = await deps.stores.stages.create({
+        jobId: request.jobId,
+        nodePath: request.nodePath,
+        timing: request.timing,
+        reason: request.reason,
+        ownerLogin: principal.login,
+        provenance,
+      });
+      const def = created.definition as Record<string, unknown>;
+      await recordOutcome("success", created.id, `agent ${principal.agentId} (${principal.login}) created stage-schedule ${created.id} (${request.jobId} ${String(def.stageId ?? request.nodePath)})`);
+      const event = auditEventFor(action);
+      if (event) {
+        deps.audit(event, {
+          scheduleId: created.id,
+          jobId: request.jobId,
+          nodePath: request.nodePath,
+          stageId: def.stageId,
+          agentId: principal.agentId,
+          principal: principal.login,
+          origin: "agent",
+        });
+      }
+      return { ok: true, scheduleId: created.id, schedule: created };
     }
     if (request.action === "create" && request.kind === "sdk") {
       if (!deps.stores.sdk) return deny("No SDK schedule store is available on this channel.", null);
@@ -1025,6 +1261,46 @@ export async function executeAgentScheduleAction(
         await recordOutcome("success", created.id, `agent ${principal.agentId} (${principal.login}) updated schedule ${scheduleId} (recreated as ${created.id})`);
         deps.audit("schedule.updated", { scheduleId, newScheduleId: created.id, agentId: principal.agentId, principal: principal.login, origin: "agent" });
         return { ok: true, scheduleId: created.id, schedule: created };
+      }
+    } else if (kind === "workflow-stage") {
+      const stages = deps.stores.stages;
+      if (!stages) return deny("No stage schedule store is available on this channel.", scheduleId);
+      if (request.action === "delete") {
+        const cancelled = await stages.cancel(scheduleId);
+        if (!cancelled) return { ok: false, code: "not-found", reason: `Stage-schedule '${scheduleId}' was not found.` };
+        await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) deleted stage-schedule ${scheduleId}`);
+        deps.audit("schedule.cancelled", { scheduleId, agentId: principal.agentId, principal: principal.login, origin: "agent" });
+        return { ok: true, scheduleId };
+      }
+      if (request.action === "pause") {
+        if (!stages.pause) return { ok: false, code: "unsupported", reason: "Pause is not supported on this channel." };
+        const paused = await stages.pause(scheduleId);
+        await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) paused stage-schedule ${scheduleId}`);
+        deps.audit("schedule.paused", { scheduleId, agentId: principal.agentId, principal: principal.login, origin: "agent" });
+        return { ok: true, scheduleId, schedule: paused };
+      }
+      if (request.action === "resume") {
+        if (!stages.resume) return { ok: false, code: "unsupported", reason: "Resume is not supported on this channel." };
+        const resumed = await stages.resume(scheduleId);
+        await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) resumed stage-schedule ${scheduleId}`);
+        deps.audit("schedule.resumed", { scheduleId, agentId: principal.agentId, principal: principal.login, origin: "agent" });
+        return { ok: true, scheduleId, schedule: resumed };
+      }
+      if (request.action === "trigger") {
+        if (!stages.trigger) return { ok: false, code: "unsupported", reason: "Trigger is not supported on this channel." };
+        await stages.trigger(scheduleId);
+        await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) triggered stage-schedule ${scheduleId}`);
+        deps.audit("schedule.triggered", { scheduleId, agentId: principal.agentId, principal: principal.login, origin: "agent" });
+        return { ok: true, scheduleId };
+      }
+      // update (workflow-stage): re-time through the management service (same record id).
+      if (request.action === "update") {
+        if (!stages.update) return { ok: false, code: "unsupported", reason: "Update is not supported on this channel." };
+        const updateReq = request as Extract<AgentScheduleActionRequest, { action: "update"; kind: "workflow-stage" }>;
+        const updated = await stages.update(scheduleId, { timing: updateReq.timing, reason: updateReq.reason });
+        await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) updated stage-schedule ${scheduleId}`);
+        deps.audit("schedule.updated", { scheduleId, agentId: principal.agentId, principal: principal.login, origin: "agent" });
+        return { ok: true, scheduleId, schedule: updated };
       }
     } else {
       const goals = deps.stores.goals;

@@ -800,3 +800,61 @@ describe("S3-P07 one of everything — no second audit system, no second read pa
     expect(doors).toContain("door.triggerGoal(goalId, undefined, actingLogin)");
   });
 });
+
+describe("S3-P09 #3310 — a stage-schedule fires only its stage, and the run joins its schedule (#3121)", () => {
+  it("the S0 map carries the #3310 rows as landed (surfaces, firing, ledger)", () => {
+    const doc = source("docs/architecture/scheduling/3121-s0-inventory.md");
+    expect(doc).toContain("#3310 amendment");
+    expect(doc).toContain("Stage-schedules listed on the Schedules home");
+    expect(doc).toContain("Per-stage workflow firing: SDK alarm → `runWorkflowStage`");
+    expect(doc).toContain("Pipeline terminal records stamp the dispatching schedule id");
+    expect(doc).toContain("#3310 — landed");
+    // The issue stays open until live proof, like #3312.
+    expect(doc).toContain("#3310 (live proof only)");
+  });
+
+  it("the firing callback is internal-only, recorded, and dispatches the scoped run through the door", () => {
+    const callbacks = source("src/agents/orchestrator/scheduleCallbacks.ts");
+    expect(callbacks).toContain("\"runWorkflowStage\"");
+    expect(callbacks).toContain("INTERNAL_RECORDED_SCHEDULE_CALLBACKS");
+    const delegate = source("src/agents/orchestrator/scheduledCallbacks.ts");
+    expect(delegate).toContain("runPipelineStage");
+    expect(delegate).toContain("runWorkflowStage");
+    // The delegate never throws a stage that cannot run into an
+    // alarm retry storm: failures return a failure outcome.
+    expect(delegate).toContain("outcome: \"failure\"");
+    // The orchestrator class method records its own per-run row.
+    expect(source("src/agents/orchestrator.ts")).toContain("runWorkflowStage");
+  });
+
+  it("the engine stamps the dispatching schedule id on the terminal record (joinable linkage)", () => {
+    const engine = source("src/services/jobPipelineEngine.ts");
+    expect(engine).toContain("runScheduleId");
+    expect(engine).toContain("scheduleId: instance.runScheduleId ?? null");
+    expect(engine).toContain("workflowId: instance.currentRunId");
+    // The scoped run keeps the id across a resume (resumeJob threads
+    // it back into executeRun, which re-stamps it on the instance).
+    expect(engine).toContain("runScheduleId: opts.scheduleId");
+  });
+
+  it("the capability serves the workflow-stage kind on the same enforcement path as the sdk kind", () => {
+    const capability = source("src/services/agentScheduleCapability.ts");
+    expect(capability).toContain("\"workflow-stage\"");
+    expect(capability).toContain("AgentWorkflowStageScheduleAdapter");
+    // The A2A ops take the kind as an argument — no new ops: the
+    // seven schedule.* operation names are the whole set.
+    const a2a = source("src/agents/orchestrator/a2aDispatch.ts");
+    expect(a2a).toContain("\"workflow-stage\"");
+    expect(new Set(a2a.match(/"schedule\.[a-z]+"/g))).toEqual(
+      new Set([
+        "\"schedule.create\"",
+        "\"schedule.list\"",
+        "\"schedule.update\"",
+        "\"schedule.pause\"",
+        "\"schedule.resume\"",
+        "\"schedule.trigger\"",
+        "\"schedule.delete\"",
+      ]),
+    );
+  });
+});

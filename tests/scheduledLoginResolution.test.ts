@@ -34,7 +34,7 @@ describe("scheduled wrapper wiring (#1965)", () => {
   it("all four scheduled wrappers resolve login through the helper, payload first", () => {
     const helperCall =
       "resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin)";
-    expect(callbacks.split(helperCall).length - 1).toBe(3);
+    expect(callbacks.split(helperCall).length - 1).toBe(4);
     expect(orchestrator.split(helperCall).length - 1).toBe(1);
   });
 

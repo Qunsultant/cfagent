@@ -20,6 +20,7 @@ import {
 import {
   applyMigrations,
   MIGRATION_0046_JOB_PIPELINE,
+  MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -43,9 +44,12 @@ export function createD1JobPipelineDb(d1: D1Database): JobPipelineDb {
   });
 }
 
-/** Idempotent schema-ensure: applies migration 0046 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0046 + 0059 if unapplied. */
 export async function ensureJobPipelineSchema(db: JobPipelineDb): Promise<number[]> {
-  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0046_JOB_PIPELINE]);
+  return applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0046_JOB_PIPELINE,
+    MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
+  ]);
 }
 
 type JobInstanceRow = typeof jobPipelineInstances.$inferSelect;
@@ -58,6 +62,7 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     currentRunId: record.currentRunId,
     runStartedAt: record.runStartedAt,
     runTrigger: record.runTrigger,
+    runScheduleId: record.runScheduleId,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -74,6 +79,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     currentRunId: row.currentRunId,
     runStartedAt: row.runStartedAt,
     runTrigger: row.runTrigger as JobInstanceRecord["runTrigger"],
+    runScheduleId: row.runScheduleId ?? null,
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,

@@ -69,6 +69,10 @@ export interface ScheduleItem {
   /** Issue #273: paused jobs are merged into the list by the backend. */
   paused?: boolean;
   pausedAt?: string;
+  /** Issue #3121 #3310 — the unified kind, and the workflow + stage a stage-schedule names. */
+  kind?: string;
+  jobId?: string;
+  stageId?: string;
 }
 
 type ScheduleGroup = "all" | "stocks" | "options" | "system" | "queued";
@@ -199,6 +203,14 @@ const ACCOUNT_SCOPED = [
   "autorenewetradetokens",
   "collectivhistory",
 ];
+
+/** The row name: a stage-schedule names its workflow + stage, not the firing callback. */
+export function scheduleDisplayName(s: ScheduleItem): string {
+  if (s.kind === "workflow-stage" && s.jobId) {
+    return s.stageId ? `${s.jobId} · ${s.stageId}` : s.jobId;
+  }
+  return s.callback;
+}
 
 /** Cadence sentence for a generic row. */
 function genericCadence(s: ScheduleItem): string {
@@ -384,7 +396,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       header: "Schedule",
       render: (s) => (
         <div className="schedule-row-job">
-          <span className="schedule-row-name">{s.callback}</span>
+          <span className="schedule-row-name">{scheduleDisplayName(s)}</span>
           <span className="schedule-row-badges">
             {/* #2329: the same badge vocabulary as the screening rows — a
                 generic job is a System job, never a screening kind. */}

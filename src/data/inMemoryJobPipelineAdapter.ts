@@ -68,6 +68,7 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     currentRunId: record.currentRunId,
     runStartedAt: record.runStartedAt,
     runTrigger: record.runTrigger,
+    runScheduleId: record.runScheduleId,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -84,6 +85,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     currentRunId: row.currentRunId,
     runStartedAt: row.runStartedAt,
     runTrigger: row.runTrigger as JobInstanceRecord["runTrigger"],
+    runScheduleId: row.runScheduleId ?? null,
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,
