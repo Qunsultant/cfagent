@@ -1,4 +1,4 @@
-﻿### Fixed
+### Fixed
 
 - **The enqueue resolves the PR by the right field (#4305):** gh pr list --json exposes a pull request's node id as id, not 
 odeId; asking for 
