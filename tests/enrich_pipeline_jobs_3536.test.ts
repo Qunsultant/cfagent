@@ -256,7 +256,8 @@ describe("enrich pipeline catalog + resolution (#3536)", () => {
         return `reg:${spec.jobId}`;
       },
     });
-    expect(registrations).toHaveLength(18);
+    // #4065 pin update: three options-chains jobs join the plane.
+    expect(registrations).toHaveLength(21);
     expect(specs.map((s) => s.jobId)).toContain(ENRICH_ID);
   });
 });

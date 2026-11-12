@@ -369,6 +369,11 @@ describe("feed job contract + registry (#3530 S1)", () => {
       "alpaca-nasdaq100-quotes",
       "etrade-nasdaq100-quotes",
       "public-nasdaq100-quotes",
+      // #4065: one options-chains job per optionsChains-serving
+      // source (one definition each, parameterized by universe).
+      "etrade-options-chains",
+      "alpaca-options-chains",
+      "public-options-chains",
     ]);
     const job = jobs[0];
     expect(job.id).toBe("yahoo-nasdaq100-quotes");
