@@ -393,6 +393,13 @@ function measure(): Map<string, number> {
  * alpaca 18->22 / yahoo 58->66 / nasdaq 7->10). The counts fall back
  * when S2 repoints the live path at the engine and the duplicated
  * branches are retired. Totals move 1161/9142 -> 1161/9171.
+ * Baseline update (#4193, 2026-11-12): the S&P 400 universe joins
+ * the feed workflow as a Yahoo quotes feed job - one registry
+ * definition in the feed-job registry and one entry in the feed
+ * pipeline catalog. Both files are the provider-id registries
+ * (INTEGRATION at seed: naming the provider is their job), and
+ * the only growth is the new job's own id/label lines: 2 raises
+ * (feedJobs.ts/yahoo 26->28, feedPipelineJobs.ts/yahoo 31->35).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -1041,12 +1048,12 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/feedJobs.ts", "alpaca", 5],
   ["src/services/feedJobs.ts", "etrade", 5],
   ["src/services/feedJobs.ts", "nasdaq", 10],
-  ["src/services/feedJobs.ts", "yahoo", 26],
+  ["src/services/feedJobs.ts", "yahoo", 28],
   ["src/services/feedPipelineJobs.ts", "alpaca", 5],
   ["src/services/feedPipelineJobs.ts", "etrade", 4],
   ["src/services/feedPipelineJobs.ts", "nasdaq", 20],
   ["src/services/feedPipelineJobs.ts", "public.com", 2],
-  ["src/services/feedPipelineJobs.ts", "yahoo", 31],
+  ["src/services/feedPipelineJobs.ts", "yahoo", 35],
   ["src/services/feedProviderWiring.ts", "alpaca", 2],
   ["src/services/feedProviderWiring.ts", "etrade", 4],
   ["src/services/feedProviderWiring.ts", "nasdaq", 1],
