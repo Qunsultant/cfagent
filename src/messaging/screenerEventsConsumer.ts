@@ -56,8 +56,8 @@ import { isLoginShaped } from "../security/serviceIdentity";
 export const SCREENER_EVENTS_CONSUMER_CONFIG: QueueConsumerConfig = {
   // Issue #4213 (owner direction) — DO usage: one invocation at a time,
   // smaller batches, two retries (was 10 / 30s / 3 / 4). Mirrored in
-  // wrangler.jsonc and held equal to it by
-  // tests/cloudflare_migration_step1_queue_consumer_2544.test.ts.
+  // wrangler.jsonc and held equal to it by the queue-consumer config
+  // pin (the migration step-1 slice, #2544).
   maxBatchSize: 5,
   maxBatchTimeoutSeconds: 10,
   maxRetries: 2,
