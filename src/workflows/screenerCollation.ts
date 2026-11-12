@@ -593,7 +593,7 @@ export interface ScreenerFinalizeDeps {
 // still drive screens through canned ScreenRunners: the vocabulary is
 // the contract those fixtures speak, and the builders are pure.
 // The deprecated file imports them back; nothing else imports the
-// deprecated file.
+// deprecated file (superseded by this module + the engine path).
 
 /** The screen request one shard executes (structural subset of the agent's request). */
 export interface ShardScreenRequest {
