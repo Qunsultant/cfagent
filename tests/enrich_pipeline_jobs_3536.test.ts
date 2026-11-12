@@ -210,6 +210,10 @@ describe("enrich pipeline catalog + resolution (#3536)", () => {
       "yahoo-sector-materials-quotes-enrich",
       "yahoo-sector-industrials-quotes-enrich",
       "yahoo-sector-consumer-discretionary-quotes-enrich",
+      "yahoo-sector-consumer-staples-quotes-enrich",
+      "yahoo-sector-health-care-quotes-enrich",
+      "yahoo-sector-financials-quotes-enrich",
+      "yahoo-sector-information-technology-quotes-enrich",
       "alpaca-nasdaq100-quotes-enrich",
       "etrade-nasdaq100-quotes-enrich",
       "public-nasdaq100-quotes-enrich",
@@ -229,7 +233,7 @@ describe("enrich pipeline catalog + resolution (#3536)", () => {
 
   it("every catalog definition resolves as a valid J1 job definition", () => {
     const raws = buildAllEnrichPipelineJobDefinitions({});
-    expect(raws).toHaveLength(12);
+    expect(raws).toHaveLength(16);
     for (const raw of raws) {
       const resolved = resolveJobDefinition(raw);
       expect(resolved.root.kind).toBe("enrich");
@@ -262,7 +266,7 @@ describe("enrich pipeline catalog + resolution (#3536)", () => {
       },
     });
     // #4065 pin update: three options-chains jobs join the plane.
-    expect(registrations).toHaveLength(31);
+    expect(registrations).toHaveLength(39);
     expect(specs.map((s) => s.jobId)).toContain(ENRICH_ID);
   });
 });
