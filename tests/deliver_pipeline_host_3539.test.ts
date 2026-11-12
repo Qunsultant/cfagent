@@ -88,13 +88,17 @@ async function pollRecords(
 }
 
 describe("the generate → deliver host hand-off (#3539)", () => {
-  it("the host manages the eight deliver jobs", () => {
+  it("the host manages the twelve deliver jobs", () => {
     expect(pipelineDeliverJobIds()).toEqual([
       "yahoo-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp100-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp500-quotes-enrich-analyze-generate-deliver",
       "yahoo-dow-quotes-enrich-analyze-generate-deliver",
       "yahoo-sp400-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-energy-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-materials-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-industrials-quotes-enrich-analyze-generate-deliver",
+      "yahoo-sector-consumer-discretionary-quotes-enrich-analyze-generate-deliver",
       "alpaca-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "etrade-nasdaq100-quotes-enrich-analyze-generate-deliver",
       "public-nasdaq100-quotes-enrich-analyze-generate-deliver",
