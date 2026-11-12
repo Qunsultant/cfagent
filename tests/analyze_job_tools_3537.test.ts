@@ -233,7 +233,7 @@ describe("analyze-job copilot tools (#3537)", () => {
     expect(status.jobId).toBe(ANALYZE_ID);
     expect(status.analyze.snapshot.inputRunId).toBeTruthy();
     const list = (await new ListAnalyzeJobsCommand().execute({}, context)) as any;
-    expect(list.jobs).toHaveLength(8);
+    expect(list.jobs).toHaveLength(12);
     expect(list.jobs.map((j: any) => j.jobId)).toContain(ANALYZE_ID);
   });
 
