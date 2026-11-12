@@ -1184,6 +1184,32 @@ div.ui-drawer-title {
 .ui-grid.autofit-lg { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
 .ui-grid.autofit-xl { grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); }
 
+/* Template organisms III (#3134): the workspace grid variants.
+   The workspace/feed variant classes are identity-only hooks —
+   their layout comes from Grid's autofit/cols classes. List-detail
+   carries the one rule Grid's equal-column API cannot express: the
+   order ticket's 1.4fr/1fr ratio, collapsing to one column below
+   900px (the compact breakpoint, §1.6b) — the same collapse
+   `.order-ticket-layout` already has, so the migration changes
+   nothing visual. */
+.ui-workspace-grid.variant-list-detail { grid-template-columns: 1.4fr 1fr; }
+@media (max-width: 900px) {
+  .ui-workspace-grid.variant-list-detail { grid-template-columns: 1fr; }
+}
+
+/* ActionBar (#3134): the closing actions bar. Layout comes from
+   .ui-flex; the one own rule is the wrap — actions wrap onto a
+   second row on compact screens instead of overflowing. No surface,
+   no margin: slot spacing is the template's (§1.6b). */
+.ui-action-bar { flex-wrap: wrap; }
+
+/* QueueFeed (#3134): the closing queue/feed surface. The surface
+   comes from Card and the item rhythm from Stack; the one own rule
+   is min-width: 0 — as a grid item the card must be allowed to
+   shrink below its longest row (an approval id), or the column
+   blows out. No own margin (slot spacing is the template's, §1.6b). */
+.ui-queue-feed { min-width: 0; }
+
 /* Issue #3367: a section-nav anchor. `scrollIntoView` lands the section's top
    under the page's sticky chrome, so the anchor carries a token-based offset —
    the same effect the E*TRADE panels get from an inline scrollMarginTop, without
