@@ -50,6 +50,7 @@ import { handleAuthMeRoutes, handleAuthIaaaRoutes } from "./server/routes/auth";
 import { handlePrivacyRoutes, handlePrivacyChainsRoutes, handlePrivacyReportsRoutes } from "./server/routes/privacy";
 import { handleTradingScheduleRoutes, handleTradingOmniRoutes, handleTradingQuotesRoutes, handleTradingApproveRoutes } from "./server/routes/trading";
 import { handleMessagingSagaRoutes, handleMessagingSocialRoutes, handleMessagingSlackRoutes } from "./server/routes/messaging";
+import { handleScheduleWebhookRoutes } from "./server/routes/scheduleWebhook";
 import { handlePlatformTelemetryRoutes, handlePlatformRetrievalRoutes, handlePlatformMcpRoutes, handlePlatformPaymentsRoutes, handlePlatformBrowserRoutes } from "./server/routes/platform";
 import { handleScheduledEvent, handleQueueBatch } from "./server/routes/queue";
 import { createStructuredLogger } from "./observability/structuredLogger";
@@ -147,6 +148,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // /api/qa/investigate, /api/memory/search.
     const messagingSagaResponse = await handleMessagingSagaRoutes(request, env, url, path, throttle);
     if (messagingSagaResponse) return messagingSagaResponse;
+    // Issue #3311: schedule webhook ingress — POST /api/schedules/webhook/followup
+    // (HMAC edge + DO mint). Runs right after the saga/NLQ webhook family:
+    // same ingress shape, separate handler module.
+    const scheduleWebhookResponse = await handleScheduleWebhookRoutes(request, env, url, path, throttle);
+    if (scheduleWebhookResponse) return scheduleWebhookResponse;
     // Slice 5 (#2902): /api/schedule/* moved to src/server/routes/trading.ts —
     // goals, operations, ticks, runs, systems.
     const tradingScheduleResponse = await handleTradingScheduleRoutes(request, env, url, path);

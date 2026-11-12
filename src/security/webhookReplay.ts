@@ -55,6 +55,14 @@ export async function deriveNlqNonce(
   return "nlq:" + (await sha256Hex(`nlq|${query}|${emailTo ?? ""}|${timestamp}`));
 }
 
+/** Schedule webhook (#3311): no stable provider event id — hash the signed body. */
+export async function deriveScheduleWebhookNonce(
+  signature: string | null,
+  rawBody: string
+): Promise<string> {
+  return "schedule-webhook:" + (await sha256Hex(`schedule-webhook|${signature ?? ""}|${rawBody}`));
+}
+
 /**
  * Durable nonce-claim store. `claim` returns true when the nonce was
  * already claimed and has not expired — i.e. the event is a REPLAY and

@@ -99,9 +99,9 @@ function stubBrokerPlacement() {
 }
 
 describe("Agent Mesh S13 (#2412) — channel registry completeness", () => {
-  it("records six channels, each with ingress, identity, gate, parity and a named adapter", () => {
+  it("records seven channels, each with ingress, identity, gate, parity and a named adapter", () => {
     expect(MESH_CHANNELS.map((c) => c.id).sort()).toEqual(
-      ["email", "nlq-webhook", "slack", "voice", "web-chat", "webhook"].sort(),
+      ["email", "nlq-webhook", "schedule-webhook", "slack", "voice", "web-chat", "webhook"].sort(),
     );
     for (const channel of MESH_CHANNELS) {
       expect(channel.ingress.length, channel.id).toBeGreaterThan(0);
@@ -115,6 +115,15 @@ describe("Agent Mesh S13 (#2412) — channel registry completeness", () => {
       const adapterFile = channel.adapter.split(/\s/)[0];
       expect(existsSync(resolve(root, adapterFile)), `${channel.id} adapter ${adapterFile}`).toBe(true);
     }
+  });
+
+  it("the schedule webhook channel is recorded with its HMAC gate and PDP mint (#3311)", () => {
+    const channel = getChannel("schedule-webhook")!;
+    expect(channel.posture).toBe("FORWARDER");
+    expect(channel.gate).toContain("INBOUND_SCHEDULE_WEBHOOK_SECRET");
+    expect(channel.gate).toContain("task:create");
+    expect(channel.parity).toContain("Follow-up minting only");
+    expect(channel.adapter).toContain("src/server/routes/scheduleWebhook");
   });
 
   it("Slack's posture is converged (no longer MIXED) and its adapter is the shared channel handler", () => {

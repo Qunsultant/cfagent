@@ -925,6 +925,7 @@ const EXPECTED_INVENTORY = [
   "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/export\")",
   "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/import\")",
   "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/migrate\")",
+  "handleSchedulesRoutes :: endsWith(\"/schedules/webhook/followup\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules\")",
   "handleSchedulesRoutes :: endsWith(\"/api/schedules\")",
   "handleSchedulesRoutes :: === \"/schedules\"",
