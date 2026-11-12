@@ -185,6 +185,61 @@ export function workflowStageScheduleToRecord(
   };
 }
 
+/** The one ticker-push record's stable id (one shared feed, #4237). */
+export const TICKER_PUSH_RECORD_ID = "ticker-push";
+
+/** The TickerAgent feed facts one ticker-push record carries. */
+export interface TickerPushRecordInput {
+  intervalSeconds: number;
+  alarmId?: string | null;
+  lastPushAt?: string | null;
+  armed: boolean;
+}
+
+/**
+ * A ticker-push unified record, from the TickerAgent's live feed
+ * state (issue #4237). The record id is stable (one shared feed);
+ * the SDK alarm id rides as `alarmId` and changes on every re-arm
+ * (the #3123 screen precedent). An `existing` record keeps its
+ * creation time: a push updates the record in place, it never
+ * recreates it. The feed writes no ledger rows — one record,
+ * updated per push, is the whole visibility surface.
+ */
+export function tickerPushScheduleToRecord(
+  input: TickerPushRecordInput,
+  nowIso: string,
+  existing?: UnifiedScheduleRecord | null,
+): UnifiedScheduleRecord {
+  // A push that carries no timestamp keeps the previous one: the
+  // record's lastPushAt only ever moves forward to a real push.
+  const prevLastPushAt =
+    existing?.definition !== undefined &&
+    typeof (existing.definition as Record<string, unknown>).lastPushAt === "string"
+      ? ((existing.definition as Record<string, unknown>).lastPushAt as string)
+      : undefined;
+  const lastPushAt = input.lastPushAt ?? prevLastPushAt;
+  return {
+    id: TICKER_PUSH_RECORD_ID,
+    kind: "ticker-push",
+    state: "active",
+    callback: "pushTicks",
+    definition: {
+      type: "interval",
+      callback: "pushTicks",
+      intervalSeconds: input.intervalSeconds,
+      armed: input.armed,
+      ...(lastPushAt !== undefined ? { lastPushAt } : {}),
+    },
+    ...(input.alarmId !== undefined && input.alarmId !== null
+      ? { alarmId: input.alarmId }
+      : existing?.alarmId !== undefined
+        ? { alarmId: existing.alarmId }
+        : {}),
+    createdAt: existing?.createdAt ?? nowIso,
+    updatedAt: nowIso,
+  };
+}
+
 /** The create input for a stage-schedule: the stage address, timing, and firing payload. */
 export interface WorkflowStageScheduleCreateInput {
   jobId: string;
@@ -214,6 +269,59 @@ export async function createWorkflowStageSchedule(
   );
   await deps.store.save(record);
   return { ok: true, record, alarm };
+}
+
+/** Ticker-push health as the Schedules home renders it (#4237). */
+export type TickerPushHealth = "healthy" | "idle" | "stale";
+
+/**
+ * Derive ticker-push health from the record, purely (issue #4237).
+ * - idle: the feed is disarmed (no listeners) — nothing is missed,
+ *   however old the last push is.
+ * - healthy: armed and the last push (or the record's creation, when
+ *   armed but never pushed) is within `staleAfterIntervals` cadences.
+ * - stale: armed and older than that — the stopped push, visible as
+ *   a missed run. An unparseable baseline or an unknown cadence is
+ *   stale (fail toward visible, never toward silent health).
+ */
+export function tickerPushHealth(
+  record: UnifiedScheduleRecord,
+  nowMs: number,
+  staleAfterIntervals: number,
+): TickerPushHealth {
+  const def = record.definition as Record<string, unknown>;
+  if (def.armed === false) return "idle";
+  const intervalSeconds =
+    typeof def.intervalSeconds === "number" &&
+    Number.isFinite(def.intervalSeconds) &&
+    def.intervalSeconds > 0
+      ? def.intervalSeconds
+      : null;
+  if (intervalSeconds === null) return "stale";
+  const baseline =
+    typeof def.lastPushAt === "string" ? def.lastPushAt : record.createdAt;
+  const baselineMs = Date.parse(baseline);
+  if (!Number.isFinite(baselineMs)) return "stale";
+  return nowMs - baselineMs > staleAfterIntervals * intervalSeconds * 1000
+    ? "stale"
+    : "healthy";
+}
+
+/**
+ * A ticker-push record as a Schedules home list item: the shared
+ * list shape plus the derived health (issue #4237). The caller
+ * supplies `nowMs` and the owner-configured stale threshold; the
+ * health is computed here, never on the client.
+ */
+export function tickerPushRecordToListItem(
+  record: UnifiedScheduleRecord,
+  nowMs: number,
+  staleAfterIntervals: number,
+): ReturnType<typeof unifiedRecordToListItem> & { health: TickerPushHealth } {
+  return {
+    ...unifiedRecordToListItem(record),
+    health: tickerPushHealth(record, nowMs, staleAfterIntervals),
+  };
 }
 
 /** The list-item shape the SchedulesPanel renders for one record. */
@@ -246,6 +354,16 @@ export function unifiedRecordToListItem(record: UnifiedScheduleRecord, nextRun?:
       : {}),
     ...(typeof (def as Record<string, unknown>).stageId === "string"
       ? { stageId: (def as Record<string, unknown>).stageId as string }
+      : {}),
+    // Issue #4237 — a ticker-push row shows its last push and
+    // whether the feed is armed, so the home can render health.
+    ...(record.kind === "ticker-push" &&
+    typeof (def as Record<string, unknown>).lastPushAt === "string"
+      ? { lastPushAt: (def as Record<string, unknown>).lastPushAt as string }
+      : {}),
+    ...(record.kind === "ticker-push" &&
+    typeof (def as Record<string, unknown>).armed === "boolean"
+      ? { armed: (def as Record<string, unknown>).armed as boolean }
       : {}),
   };
 }
@@ -519,8 +637,12 @@ export async function triggerUnifiedSchedule(
   | { ok: false; error: string; status: number }
 > {
   const record = await deps.store.get(id);
+  // Issue #4237 — a non-screen kind is refused with its own name:
+  // the goal-surface text is wrong for a live feed (or a worker
+  // duty), and a wrong refusal is worse than a terse one.
   if (record && record.kind !== "screen" && record.kind !== "workflow-stage") {
-    return goalSurfaceError("trigger");
+    if (record.kind === "goal") return goalSurfaceError("trigger");
+    return fail(`Schedule kind '${record.kind}' cannot be triggered.`, 400);
   }
   if (record?.state === "paused") {
     return fail("Schedule is paused — resume it before triggering.", 409);
@@ -658,8 +780,11 @@ export async function updateUnifiedSchedule(
 ): Promise<UnifiedOpResult> {
   const nowIso = new Date(nowMs).toISOString();
   const record = await deps.store.get(id);
+  // Issue #4237 — see triggerUnifiedSchedule: refuse a non-screen
+  // kind with its own name, not the goal-surface text.
   if (record && record.kind !== "screen" && record.kind !== "workflow-stage") {
-    return goalSurfaceError("update");
+    if (record.kind === "goal") return goalSurfaceError("update");
+    return fail(`Schedule kind '${record.kind}' cannot be updated.`, 400);
   }
   if (record?.state === "paused") {
     const resolution = resolveScheduleUpdate(

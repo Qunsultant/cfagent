@@ -43,6 +43,7 @@
  */
 
 import type { DoNamespaceLike, DoStubLike } from "../data/durableKv";
+import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
 
 /**
  * A DO namespace as the gateway sees it: the existing
@@ -77,6 +78,16 @@ export interface PaymentsAgentStub {
 /** The ScreenerAgent PDF RPC used by `fetchScreenerPdf`. */
 export interface ScreenerPdfStub {
   getPdfByKey(key: string): Promise<{ bytes: Uint8Array; fileName: string } | null>;
+}
+
+/**
+ * The TickerAgent RPC used by the Schedules home list read (issue
+ * #3121 #4237): the one ticker-push record, or null when the feed
+ * was never armed. Typed RPC through `actorGateway.stub`, the
+ * `budgetCheck` / `getPdfByKey` precedent — no new addressing.
+ */
+export interface TickerPushRecordStub {
+  getTickerPushRecord(): Promise<UnifiedScheduleRecord | null>;
 }
 
 /**

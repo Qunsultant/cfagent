@@ -224,7 +224,7 @@ function runRecord(overrides: Partial<JobRunRecord> = {}): JobRunRecord {
 }
 
 describe("3123-P01 one ScheduleStore port (kinds/states census)", () => {
-  it("declares exactly the five kinds and three states, each once", () => {
+  it("declares exactly the six kinds and three states, each once", () => {
     expect([...UNIFIED_SCHEDULE_KINDS]).toEqual([
       "screen",
       "goal",
@@ -232,6 +232,8 @@ describe("3123-P01 one ScheduleStore port (kinds/states census)", () => {
       "worker-duty",
       // Issue #3121 #3310 — the fifth kind: one workflow stage.
       "workflow-stage",
+      // Issue #3121 #4237 — the sixth kind: the ticker-push live feed.
+      "ticker-push",
     ]);
     expect([...UNIFIED_SCHEDULE_STATES]).toEqual(["active", "paused", "disabled"]);
     expect(UNIFIED_SCHEDULES_TABLE).toBe("unified_schedules");
@@ -684,14 +686,15 @@ describe("3123-P12 scoping preserved", () => {
     );
   });
 
-  it("no new schedule kinds beyond the five", () => {
-    expect(UNIFIED_SCHEDULE_KINDS).toHaveLength(5);
+  it("no new schedule kinds beyond the six", () => {
+    expect(UNIFIED_SCHEDULE_KINDS).toHaveLength(6);
     const kinds = new Set<string>(UNIFIED_SCHEDULE_KINDS as unknown as string[]);
     expect(kinds.has("screen")).toBe(true);
     expect(kinds.has("goal")).toBe(true);
     expect(kinds.has("followup")).toBe(true);
     expect(kinds.has("worker-duty")).toBe(true);
     expect(kinds.has("workflow-stage")).toBe(true);
+    expect(kinds.has("ticker-push")).toBe(true);
   });
 });
 

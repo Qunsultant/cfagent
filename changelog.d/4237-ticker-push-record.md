@@ -1,0 +1,3 @@
+### Added
+
+- **Scheduling consolidation (#3121) — ticker push in the single schedule (#4237):** the TickerAgent pushTicks live feed is now a record in the single schedule — a fifth unified-store kind (`ticker-push`, one record updated in place with interval, last push, and armed state; no per-push ledger rows) — and the Schedules home lists it with its interval, last push, and health (Healthy / Idle / Missed push), so a stopped push is visible as a missed run. The record lives in the TickerAgent's own store and is read into the list by typed RPC; pause/resume/trigger/delete/update are refused with coded errors because the feed is listener-driven.
