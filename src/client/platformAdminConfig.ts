@@ -27,6 +27,7 @@ export type PlatformAdminSectionId =
   | "data-providers"
   | "accounts"
   | "free-runs"
+  | "products"
   | "iaaa-admin"
   | "users"
   | "data-lifecycle"

@@ -183,6 +183,12 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
       .sort((a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
+  async listAllSubscriptions(): Promise<SubscriptionRecord[]> {
+    return [...this.subscriptions.values()].sort(
+      (a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+  }
+
   async findByProviderSubscriptionId(providerSubscriptionId: string): Promise<SubscriptionRecord | null> {
     if (!providerSubscriptionId) return null;
     for (const s of this.subscriptions.values()) {

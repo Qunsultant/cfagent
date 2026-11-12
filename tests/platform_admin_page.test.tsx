@@ -38,6 +38,9 @@ vi.mock("../src/client/IaaaAdminPanel", () => ({
 vi.mock("../src/client/FreeRunAllowanceSection", () => ({
   FreeRunAllowanceSection: () => <div data-testid="free-runs-panel">free runs content</div>,
 }));
+vi.mock("../src/client/ProductsSection", () => ({
+  ProductsSection: () => <div data-testid="products-panel">products content</div>,
+}));
 
 import { PlatformAdminPage, PLATFORM_ADMIN_TABS } from "../src/client/PlatformAdminPage";
 
@@ -77,8 +80,8 @@ describe("PlatformAdminPage component", () => {
     expect(tablist).toBeTruthy();
 
     const tabs = container.querySelectorAll('[role="tab"]');
-    expect(tabs).toHaveLength(15);
-    expect(PLATFORM_ADMIN_TABS).toHaveLength(15);
+    expect(tabs).toHaveLength(16);
+    expect(PLATFORM_ADMIN_TABS).toHaveLength(16);
 
     // Initial default tab is ads
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
@@ -112,6 +115,20 @@ describe("PlatformAdminPage component", () => {
     const freeRunsTab = Array.from(tabs).find((t) => t.textContent?.includes("Free Runs"));
     expect(freeRunsTab?.getAttribute("aria-selected")).toBe("true");
     expect(container.querySelector('[data-testid="free-runs-panel"]')).toBeTruthy();
+  });
+
+  it("renders the products section when initialSection is passed (#3289 slice 2)", async () => {
+    await render(
+      <PlatformAdminPage
+        initialSection="products"
+        user={{ login: "operator" }}
+      />
+    );
+
+    const tabs = container.querySelectorAll('[role="tab"]');
+    const productsTab = Array.from(tabs).find((t) => t.textContent?.includes("Products"));
+    expect(productsTab?.getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector('[data-testid="products-panel"]')).toBeTruthy();
   });
 
   it("switches tabs and displays the matching panel on click", async () => {
