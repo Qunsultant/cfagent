@@ -286,6 +286,12 @@ export const YAHOO_SECTOR_FINANCIALS_QUOTES_JOB_ID =
   "yahoo-sector-financials-quotes";
 export const YAHOO_SECTOR_INFORMATION_TECHNOLOGY_QUOTES_JOB_ID =
   "yahoo-sector-information-technology-quotes";
+export const YAHOO_SECTOR_COMMUNICATION_SERVICES_QUOTES_JOB_ID =
+  "yahoo-sector-communication-services-quotes";
+export const YAHOO_SECTOR_UTILITIES_QUOTES_JOB_ID =
+  "yahoo-sector-utilities-quotes";
+export const YAHOO_SECTOR_REAL_ESTATE_QUOTES_JOB_ID =
+  "yahoo-sector-real-estate-quotes";
 export const ALPACA_NASDAQ100_QUOTES_JOB_ID = "alpaca-nasdaq100-quotes";
 export const ETRADE_NASDAQ100_QUOTES_JOB_ID = "etrade-nasdaq100-quotes";
 export const PUBLIC_NASDAQ100_QUOTES_JOB_ID = "public-nasdaq100-quotes";
@@ -352,6 +358,10 @@ function nasdaq100QuotesJob(
  * (Consumer Staples, Health Care, Financials, Information
  * Technology) on the same contract, immediately after the slice-1
  * jobs — #3667 sectors slice 2, in the same SECTOR_IDS order.
+ * #4250 registers the last three GICS sector quotes universes
+ * (Communication Services, Utilities, Real Estate) on the same
+ * contract, immediately after the slice-2 jobs — #3667 sectors
+ * slice 3, in the same SECTOR_IDS order.
  *
  * The Nasdaq provider declares screenUniverse only — it has NO
  * quotes job here (S2 finding, #3530: its dataset is the US
@@ -580,6 +590,45 @@ export function buildFeedJobRegistry(
       YAHOO_SECTOR_INFORMATION_TECHNOLOGY_QUOTES_JOB_ID,
       "sector-information-technology",
       "Information Technology",
+    ],
+  ] as const) {
+    registry.register({
+      id: jobId,
+      sourceId: "yahoo",
+      dataset: "quotes",
+      elements: ["quotes"],
+      universe: { kind: "index", index, label },
+      cadenceMinutes: resolveFeedJobCadenceMinutes(
+        env,
+        jobId,
+        FEED_JOB_DEFAULTS.cadenceMinutes,
+      ),
+      staleAfterMinutes: resolveFeedJobStaleMinutes(
+        env,
+        jobId,
+        FEED_JOB_DEFAULTS.staleAfterMinutes,
+      ),
+    });
+  }
+  // #4250 — one Yahoo quotes job per S3 GICS sector, on the same
+  // contract as the S1/S2 jobs. Each universe is the sector's stored
+  // list (the S&P 500 table filtered by its GICS Sector column,
+  // #2962); the label is the GICS name.
+  for (const [jobId, index, label] of [
+    [
+      YAHOO_SECTOR_COMMUNICATION_SERVICES_QUOTES_JOB_ID,
+      "sector-communication-services",
+      "Communication Services",
+    ],
+    [
+      YAHOO_SECTOR_UTILITIES_QUOTES_JOB_ID,
+      "sector-utilities",
+      "Utilities",
+    ],
+    [
+      YAHOO_SECTOR_REAL_ESTATE_QUOTES_JOB_ID,
+      "sector-real-estate",
+      "Real Estate",
     ],
   ] as const) {
     registry.register({

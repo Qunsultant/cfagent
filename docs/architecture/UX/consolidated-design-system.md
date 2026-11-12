@@ -408,6 +408,36 @@ known duplication (§4, C10).
   font sizes 9 steps (caption, body-sm, body, body-lg, title-sm,
   title, title-lg, display, micro). No page invents a spacing
   scale; density arrives as a preference, not a per-page scale.
+- **Three tiers (W3C DTCG, #3135):** primitive values live only in
+  `tokens.css :root` — raw hex, rem steps, font sizes; it is the
+  one place a raw value may appear. Semantic roles are the only
+  thing components reference (`--color-*`, `--space-*`,
+  `--radius-*`, `--font-size-*`, always via `var(--…)`). The
+  component tier is per-component custom properties derived from
+  semantic roles — none exist yet, and none may be invented ad hoc:
+  a component-tier property is created only when a component needs
+  a value no semantic role expresses, named
+  `--<component>-<role>`, defined next to the component, and
+  recorded here.
+- **Template-surface discipline (#3135):** template surfaces
+  (`primitives.css` + `src/client/components/ui/`) carry no raw
+  values at all — no raw colors (pinned by
+  `tests/ux_token_coverage_ratchet.test.ts`), no raw lengths/radii
+  outside the allow-list (1px hairlines, -1px visually-hidden
+  margin, 999px/9999px pill radii, bare 0) and the registered
+  exceptions in `tests/template_token_tiers_3135.test.ts` (layout
+  widths, breakpoints, viewport units, stroke widths, component
+  size ladders — each named with its reason; the registry must not
+  go stale). Conversions use the nearest frozen scale step; ties
+  round up; a conversion that would visibly move layout becomes a
+  registered exception instead, never a quiet scale addition. The
+  scale stays frozen.
+- **Legacy mapping (#3135):** every legacy class the
+  order/options/autopilot layouts use is triaged in
+  `docs/architecture/UX/token-mapping-order-options-autopilot.md`
+  (647 classes; 109 Token, 538 deletion candidate) — the pin test
+  asserts coverage. Deletion candidates are not deleted in the
+  triage slice; removal follows the deprecation process (S-U7).
 - **Density** is a user preference with two modes, `compact` /
   `comfortable` (key `nextgentp_density`, `data-density`
   attribute, cross-tab sync). Density changes spacing; it never
