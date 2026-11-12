@@ -845,6 +845,37 @@ describe("#959 REST interactive screen routes share the schemas", () => {
     },
   };
 
+  // Issue #4278: the screen runs through the one engine seam, not the
+  // agent's runScreen. The seam fake delegates to the stub agent's
+  // runScreen: it flattens the seam input back into the runScreen
+  // request and returns the stub's result as the engine run's one
+  // shard. The seam itself is pinned in
+  // tests/stock_entry_routing_4278.test.ts.
+  const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input: any) => {
+    const flat = {
+      trigger: input.spec.trigger,
+      sector: input.commandOverrides?.sector ?? input.spec.filters?.sector,
+      universe: input.spec.universe,
+      maxSymbols: input.commandOverrides?.maxSymbols,
+      filters: input.spec.filters,
+      userLogin: input.userLogin,
+      environment: input.environment,
+      portfolioContext: input.portfolioContext,
+      provider: input.commandOverrides?.provider ?? input.spec.provider,
+      broker: input.commandOverrides?.broker,
+      ...(input.commandOverrides?.mode
+        ? { mode: input.commandOverrides.mode, modeSource: input.commandOverrides.modeSource }
+        : {}),
+    };
+    const result = await runScreen(flat);
+    return {
+      results: [result],
+      collation: null,
+      jobId: input.spec?.jobId ?? "test-job",
+      workflowId: "wf-1",
+    };
+  };
+
   // The session gate's authenticated login for these route calls
   // (issue #1185: route handlers fail closed without it).
   const authenticatedLogin = "parity_user";
@@ -855,6 +886,7 @@ describe("#959 REST interactive screen routes share the schemas", () => {
       getOrm: () => ({}) as any,
       audit: () => {},
       getScreenerAgent: () => fakeScreenerAgent,
+      runStockScreenViaEngine: delegateSeamFake(fakeScreenerAgent.runScreen),
       persistScreenerReportCanonical: () => {},
     } as any;
   }

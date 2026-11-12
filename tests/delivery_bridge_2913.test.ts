@@ -309,7 +309,44 @@ describe("SQL delivery suppression store (#2913)", () => {
 });
 
 describe("REST bridge deliveryId stamp (#2913)", () => {
+  // Issue #4278: the screen runs through the one engine seam, not the
+  // agent's runScreen. The seam fake delegates to the stub agent's
+  // runScreen: it flattens the seam input back into the runScreen
+  // request and returns the stub's result as the engine run's one
+  // shard. The seam itself is pinned in
+  // tests/stock_entry_routing_4278.test.ts.
+  const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input: any) => {
+    const flat = {
+      trigger: input.spec.trigger,
+      sector: input.commandOverrides?.sector ?? input.spec.filters?.sector,
+      universe: input.spec.universe,
+      maxSymbols: input.commandOverrides?.maxSymbols,
+      filters: input.spec.filters,
+      userLogin: input.userLogin,
+      environment: input.environment,
+      portfolioContext: input.portfolioContext,
+      provider: input.commandOverrides?.provider ?? input.spec.provider,
+      broker: input.commandOverrides?.broker,
+      ...(input.commandOverrides?.mode
+        ? { mode: input.commandOverrides.mode, modeSource: input.commandOverrides.modeSource }
+        : {}),
+    };
+    const result = await runScreen(flat);
+    return {
+      results: [result],
+      collation: null,
+      jobId: input.spec?.jobId ?? "test-job",
+      workflowId: "wf-1",
+    };
+  };
+
   it("the outcome scheduled from the REST route carries manual:<timestamp>:<universe>", async () => {
+    // Issue #4278: a SUCCESS result is stored + delivered by the
+    // workflow's own store/deliver steps, so the route no longer
+    // schedules followups for it (pinned in
+    // tests/stock_entry_routing_4278.test.ts: no re-persist/deliver
+    // on success). The bridge scheduling below is the FAILED-result
+    // path, which keeps the #2861 persist-then-deliver finalizer.
     const scheduled: unknown[] = [];
     const ctx = {
       env: {},
@@ -322,17 +359,19 @@ describe("REST bridge deliveryId stamp (#2913)", () => {
     } as never;
     const agent = {
       runScreen: async () => ({
-        success: true,
+        success: false,
         timestamp: "2026-11-03T12:00:00.000Z",
         universe: "TECH",
         provider: "etrade",
-        totalScanned: 10,
-        matchedCount: 2,
+        totalScanned: 0,
+        matchedCount: 0,
         opportunities: [],
         allStocks: [],
         discoveryMessage: "test",
+        error: "E*TRADE unavailable",
       }),
     } as never;
+    (ctx as any).runStockScreenViaEngine = delegateSeamFake(agent.runScreen);
     const res = await executeEtradeScreen({
       ctx,
       sessionId: "s1",
@@ -342,7 +381,7 @@ describe("REST bridge deliveryId stamp (#2913)", () => {
       universe: "TECH",
       validatedFilters: {},
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(502);
     expect(scheduled).toHaveLength(1);
     expect((scheduled[0] as { deliveryId?: string }).deliveryId).toBe("manual:2026-11-03T12:00:00.000Z:TECH");
   });
