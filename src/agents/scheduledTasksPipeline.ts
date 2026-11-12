@@ -70,6 +70,7 @@ import {
   type JobStatusView,
 } from "../services/jobPipelineEngine";
 import { buildFeedJobRegistry, buildFeedStatus } from "../services/feedJobs";
+import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
 import {
   ensureFeedPipelineJobs,
   FEED_PIPELINE_CATALOG,
@@ -448,6 +449,10 @@ export function createScheduledAgentPipelineControl(
     runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
     runSettledObserver: feedRunSettledObserverFor(ctx),
     publisher: messaging.ports?.publisher ?? null,
+    // #4312 — the feed execution bound resolves from env here
+    // (FEED_JOB_EXECUTION_MS, 240s when no knob is set), so the
+    // host's whole-run deadline is operator-configurable.
+    feedExecutionDeadlineMs: resolveFeedJobTimeouts(envStrings(ctx.env)).executionMs,
     steps: createPipelineStepRegistry(
       feedStepDepsForScheduledAgent(ctx, userLogin),
       enrichStepDepsForScheduledAgent(ctx),
