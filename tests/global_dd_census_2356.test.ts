@@ -980,7 +980,9 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   ["src/server/routes/auth.ts", "wiredAccessRequestStore", 1],
   ["src/server/routes/auth.ts", "wiredMembershipStore", 4],
   ["src/server/routes/platform.ts", "wiredMembershipStore", 2],
-  ["src/server/routes/privacy.ts", "wiredMembershipStore", 4],
+  // #4116 (2026-11-12): the /api/ops/run-ledger-reconcile route composes
+  // wiredMembershipStore once, following the IAAA admin pattern; 4 -> 5.
+  ["src/server/routes/privacy.ts", "wiredMembershipStore", 5],
 ];
 
 describe("global D-D census: step 5b — session family port composition sites (#2433)", () => {
