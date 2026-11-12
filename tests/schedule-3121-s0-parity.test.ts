@@ -625,7 +625,11 @@ describe("U-P03 URL inventory (§8 U-03/U-04/U-05): deep links and deep-link sur
     expect(optionsHub!.values).not.toContain("scheduled-screening");
     const platformAdmin = config.deepLinkSurfaces.find((s) => s.page === "platform-admin");
     expect(platformAdmin).toBeDefined();
-    expect(platformAdmin!.values).toContain("scheduled-goals");
+    // Issue #4110 (#3121 S6 comb): "scheduled-goals" is no longer a
+    // deepLinkSurfaces value — the address redirects to the schedules
+    // home, so it is not a tab id on the platform-admin surface
+    // (matching "jobs", which was never a value there).
+    expect(platformAdmin!.values).not.toContain("scheduled-goals");
     // "jobs" is a platform-admin section (and a PlatformAdminPage tab),
     // not a deepLinkSurfaces value — the view is read from ?view= directly.
     const sections = (
