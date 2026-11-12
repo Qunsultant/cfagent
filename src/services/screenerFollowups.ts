@@ -88,10 +88,12 @@ export interface ScreenerRunOutcome {
    * when the run executed through one. Both are optional because no
    * producer stamps them yet — absent reads as an explicit null at
    * the bridge record, never a missing column. Threading the
-   * originating ids from the firing into the outcome is filed as
-   * sub-issue #3313 (bridge + follow-up joinability). The run's own
-   * async-job id is the bridge record's main job id (see
-   * recordScreenerRunMainJob).
+   * originating ids from the firing into the outcome landed in
+   * sub-issue #3313 (screenerOutcomeFromEvent /
+   * screenerOutcomeFromRunResult stamp them from the event /
+   * run-result record; the workflow path still cannot — see #3313's
+   * [Out-of-Scope] sub-issue). The run's own async-job id is the
+   * bridge record's main job id (see recordScreenerRunMainJob).
    */
   scheduleId?: string;
   workflowId?: string;
@@ -685,6 +687,10 @@ export function screenerOutcomeFromEvent(
         webhookUrl: event.webhookUrl,
         deliveryId: event.deliveryId,
         stageChain: event.stageChain,
+        // Issue #3313: the originating ids ride the event so the
+        // outcome joins the bridge record to its schedule/workflow.
+        scheduleId: event.scheduleId,
+        workflowId: event.workflowId,
       };
     case "screener.failed":
       return {
@@ -698,6 +704,8 @@ export function screenerOutcomeFromEvent(
         webhookUrl: event.webhookUrl,
         deliveryId: event.deliveryId,
         stageChain: event.stageChain,
+        scheduleId: event.scheduleId,
+        workflowId: event.workflowId,
         error: event.error,
       };
     case "options.completed":
@@ -732,6 +740,10 @@ export function screenerOutcomeFromEvent(
         thesis: event.thesis,
         summary: event.summary,
         stageChain: event.stageChain,
+        // Issue #3313: the originating ids ride the event (see the
+        // stock completed branch).
+        scheduleId: event.scheduleId,
+        workflowId: event.workflowId,
         // Issue #1718: the qualification rides the event so the
         // lifecycle completed notice can apply the broadcast floor.
         partial: event.partial,
@@ -745,6 +757,8 @@ export function screenerOutcomeFromEvent(
         thesis: event.thesis,
         error: event.error,
         stageChain: event.stageChain,
+        scheduleId: event.scheduleId,
+        workflowId: event.workflowId,
       };
   }
 }
@@ -808,6 +822,11 @@ export function screenerOutcomeFromRunResult(
     opportunities: asOpportunities(result.opportunities),
     providerFallback: asProviderFallback(result.providerFallback),
     ...(typeof result.scanRunId === "string" && result.scanRunId ? { scanRunId: result.scanRunId } : {}),
+    // Issue #3313: the originating ids ride the run-result record
+    // (producers that know them stamp them; a record with none
+    // keeps the outcome unjoined and the bridge stamps nulls).
+    ...(typeof result.scheduleId === "string" && result.scheduleId ? { scheduleId: result.scheduleId } : {}),
+    ...(typeof result.workflowId === "string" && result.workflowId ? { workflowId: result.workflowId } : {}),
     ...(typeof result.emailTo === "string" && result.emailTo.trim() !== "" ? { emailTo: result.emailTo.trim() } : {}),
     // Issue #2545: the manual route's delivery selection rides the
     // enriched run result — the same per-task overrides the scheduled

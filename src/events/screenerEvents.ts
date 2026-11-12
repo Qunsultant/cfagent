@@ -114,6 +114,15 @@ export interface ScreenerCompletedEvent {
    *  config, carried so the follow-up bridge can stamp the run's
    *  stage jobs. Absent = the fused immediate chain. */
   stageChain?: import("../types").StageChainConfig;
+  /**
+   * Issue #3313: the originating schedule / workflow run, when the
+   * producer knows it — carried onto the outcome so the bridge
+   * record, the follow-up payloads, and the ledger row all join to
+   * the same schedule/workflow. Absent = no originating schedule
+   * (the bridge stamps an explicit null).
+   */
+  scheduleId?: string;
+  workflowId?: string;
 }
 
 export interface ScreenerFailedEvent {
@@ -130,6 +139,10 @@ export interface ScreenerFailedEvent {
   /** Consolidation C3 (#1277): stage-chain config, as on the
    *  completed event. */
   stageChain?: import("../types").StageChainConfig;
+  /** Issue #3313: the originating schedule / workflow run, when the
+   *  producer knows it (see the completed event). */
+  scheduleId?: string;
+  workflowId?: string;
 }
 
 /** One options opportunity as carried on the bus: a summary, not the full row. */
@@ -184,6 +197,10 @@ export interface OptionsCompletedEvent {
    *  opted in — the bridge chains (serve/deliver) instead of
    *  recording only. Absent = the direct path (the degenerate case). */
   stageChain?: import("../types").StageChainConfig;
+  /** Issue #3313: the originating schedule / workflow run, when the
+   *  producer knows it (see the stock completed event). */
+  scheduleId?: string;
+  workflowId?: string;
 }
 
 export interface OptionsFailedEvent {
@@ -196,6 +213,10 @@ export interface OptionsFailedEvent {
   /** Consolidation C4 (#1329): as on the completed event — a chained
    *  failed run still records its generate stage + stop point. */
   stageChain?: import("../types").StageChainConfig;
+  /** Issue #3313: the originating schedule / workflow run, when the
+   *  producer knows it (see the stock completed event). */
+  scheduleId?: string;
+  workflowId?: string;
 }
 
 export type ScreenerEvent =
