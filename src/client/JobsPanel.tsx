@@ -14,26 +14,23 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge, Button, EmptyState, Modal, Notice, Select, Table, TextInput } from "./components/ui";
 import {
   addGoal,
-  listGoals,
-  listOperations,
-  removeGoal,
-  setGoalEnabled,
-  triggerGoal,
-  type CatalogOperation,
-  type ScheduledGoal,
-} from "./scheduleApi";
-import {
   createSchedule,
   deleteSchedule,
-  listGoalRuns,
+  listAllRuns,
+  listGoals,
+  listOperations,
   listScheduleCallbacks,
-  listScheduleRuns,
   listSchedules,
   listSystems,
   pauseSchedule,
+  removeGoal,
   resumeSchedule,
+  setGoalEnabled,
+  triggerGoal,
   triggerSchedule,
+  type CatalogOperation,
   type ScheduleListItem,
+  type ScheduledGoal,
   type SystemsResponse,
 } from "./jobsApi";
 import type { JobRunRecord } from "../services/jobRunRecords";
@@ -93,19 +90,22 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
     setLoading(true);
     setError(null);
     try {
-      const [g, gr, s, sr, sys, ops, cbs] = await Promise.all([
+      const [g, all, s, sys, ops, cbs] = await Promise.all([
         listGoals(),
-        listGoalRuns(undefined, 200),
+        listAllRuns(undefined, 200),
         listSchedules(),
-        listScheduleRuns(undefined, 200),
         listSystems(),
         listOperations(),
         listScheduleCallbacks(),
       ]);
       setGoals(g.goals);
-      setGoalRuns(gr);
+      // The one merged list, split back by system: goal rows carry
+      // system "scheduled-agent-goal" (wherever they were written);
+      // every other system is a schedule row. The split reproduces
+      // the old two-reads shape for the per-kind lookups below.
+      setGoalRuns(all.runs.filter((r) => r.system === "scheduled-agent-goal"));
       setSchedules(s);
-      setScheduleRuns(sr);
+      setScheduleRuns(all.runs.filter((r) => r.system !== "scheduled-agent-goal"));
       setSystems(sys);
       setOperations(ops.operations);
       setCallbacks(cbs);

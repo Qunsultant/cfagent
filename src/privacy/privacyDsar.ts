@@ -567,6 +567,14 @@ const RETENTION_RULES: Record<string, RetentionRule> = {
     enforcement: "enforced",
     enforcementNote: "KEEP is enforced by having no purge: no pass or route deletes from this table",
   },
+  unified_schedules: {
+    table: "unified_schedules",
+    maxAgeDays: null,
+    action: "keep",
+    reason: "user schedule state (issue #3121 Phase 2, #3123 — the unified store replaces the legacy paused-schedule table), bounded by what users schedule; clearing paused rows is an explicit operator/user action (POST /api/maintenance/clear-table), not age hygiene",
+    enforcement: "enforced",
+    enforcementNote: "KEEP is enforced by having no purge: no pass or route deletes from this table",
+  },
   cf_agents_jobs: {
     table: "cf_agents_jobs",
     maxAgeDays: null,

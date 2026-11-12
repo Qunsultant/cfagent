@@ -304,7 +304,7 @@ describe("S7 one surface / one builder (source pins)", () => {
     expect(panelSrc).not.toContain("Payload (JSON)");
   });
 
-  it("within the schedule UI, exactly one file posts creates — the section", () => {
+  it("within the schedule UI, exactly one file posts creates — the section, through the one client module", () => {
     const roots = ["src/client/SchedulesPanel.tsx", "src/client/ScheduledOptionsManager.tsx"];
     const folder = join(here, "..", "src", "client", "scheduledOptionsManager");
     for (const name of readdirSync(folder)) {
@@ -312,7 +312,12 @@ describe("S7 one surface / one builder (source pins)", () => {
         roots.push(`src/client/scheduledOptionsManager/${name}`);
       }
     }
-    const posters = roots.filter((rel) => read(rel).includes('fetch("/api/schedules/create"'));
+    // #3123: creates go through the one client module (jobsApi's
+    // createSchedule) — no schedule-UI file direct-fetches the
+    // create endpoint anymore, and exactly one UI file posts creates.
+    const directPosters = roots.filter((rel) => read(rel).includes('fetch("/api/schedules/create"'));
+    expect(directPosters).toEqual([]);
+    const posters = roots.filter((rel) => read(rel).includes("createSchedule("));
     expect(posters).toEqual(["src/client/ScheduledOptionsManager.tsx"]);
   });
 

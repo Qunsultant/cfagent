@@ -2,6 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Button, Notice } from "./components/ui";
 import { subscribeOptionsLatest, refreshOptionsLatest } from "./optionsLatestShared";
 import { apiFetch as fetch } from "./apiFetch";
+import {
+  cancelSchedule,
+  createSchedule,
+  getSchedule,
+  listSchedules,
+  pauseSchedule,
+  resumeSchedule,
+  triggerSystemJob,
+} from "./jobsApi";
 import { listProfiles } from "./scannerApi";
 import type { StrategyProfile } from "../trading";
 import { etToUtcCron } from "./options/cronTime";
@@ -198,30 +207,34 @@ export function ScheduledOptionsManager({
     [activeEnv, userLogin]
   );
 
-  // Fetch Schedules
+  // Fetch Schedules (issue #3121 Phase 2, #3123 — the one client module).
   const fetchSchedules = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/schedules", { headers: authHeaders() });
-      const data = (await res.json().catch(() => ({}))) as any;
-      const rawList = Array.isArray(data?.schedules) ? data.schedules : Array.isArray(data) ? data : null;
-      if (res.ok && rawList) {
-        // Shape-guard: only rows the card renderer can trust — a
-        // malformed row must never crash the panel.
-        setSchedules(rawList.filter((s: any) =>
+      const rawList = await listSchedules(authHeaders());
+      const items = rawList.filter((s: any) =>
           s && typeof s === "object" && typeof s.id === "string" &&
           (s.callback === "autonomousMarketScreen" || s.callback === "autonomousOptionsAnalysis" ||
             s.callback === "autonomousStrategyDiscovery")
-        ));
-      } else {
-        setSchedules([]);
-        if (data && data.error) setError(data.error);
-      }
+        );
+      // Boundary cast (same precedent as SchedulesPanel, #3123): the
+      // list item's `type` is optional — a paused/legacy row may carry
+      // no timing type — while ScheduledTaskItem requires one of the
+      // four forms. The cards tolerate that, as they did when this
+      // fetch was untyped; the rows are the same endpoint's rows.
+      setSchedules(items as unknown as ScheduledTaskItem[]);
     } catch (err: any) {
       console.warn("[ScheduledOptionsManager] Note on fetching schedules:", err);
       setSchedules([]);
-      setError("Unable to connect to durable scheduling service. Check your connection or trigger analysis directly.");
+      // A server error message rides the thrown error (as before,
+      // when the else branch read data.error); a bare transport
+      // failure keeps the generic message.
+      setError(
+        err instanceof Error && err.message && !err.message.startsWith("HTTP")
+          ? err.message
+          : "Unable to connect to durable scheduling service. Check your connection or trigger analysis directly.",
+      );
     } finally {
       setLoading(false);
     }
@@ -487,24 +500,15 @@ export function ScheduledOptionsManager({
       // If editing an existing schedule, cancel the prior schedule first
       if (editingScheduleId) {
         try {
-          await fetch("/api/schedules/cancel", {
-            method: "POST",
-            headers: authHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({ id: editingScheduleId }),
-          });
+          await cancelSchedule(editingScheduleId, authHeaders());
         } catch (priorErr) {
           console.warn("[ScheduledOptionsManager] Note on prior schedule cancellation:", priorErr);
         }
       }
 
-      const res = await fetch("/api/schedules/create", {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(requestBody),
-      });
+      const data = await createSchedule(requestBody, authHeaders());
 
-      const data = (await res.json().catch(() => ({}))) as any;
-      if (res.ok && data.success) {
+      if (data.success) {
         setSuccessMsg(
           editingScheduleId
             ? "✓ Schedule updated successfully!"
@@ -527,18 +531,13 @@ export function ScheduledOptionsManager({
   // Cancel Schedule — the actual POST.
   const doCancelSchedule = async (scheduleId: string) => {
     try {
-      const res = await fetch("/api/schedules/cancel", {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ id: scheduleId }),
-      });
-      const data = (await res.json()) as any;
-      if (res.ok && (data.cancelled || data.success)) {
+      const data = await cancelSchedule(scheduleId, authHeaders());
+      if (data.cancelled) {
         setSuccessMsg(`✓ Schedule ${scheduleId} cancelled`);
         fetchSchedules();
         fetchAudit();
       } else {
-        setError(data.error || "Failed to cancel schedule");
+        setError("Failed to cancel schedule");
       }
     } catch (err: any) {
       setError(err.message || "Failed to cancel schedule");
@@ -550,24 +549,20 @@ export function ScheduledOptionsManager({
   };
 
   // S7: pause/resume folded in from the nav panel (issue #273
-  // routes). Pausing keeps the definition in the paused store; the
+  // routes). Pausing keeps the definition in the unified store; the
   // list keeps the row with its Paused badge.
   const handlePauseResume = async (item: ScheduledTaskItem) => {
     setError(null);
     setSuccessMsg(null);
     try {
-      const res = await fetch(`/api/schedules/${item.id}/${item.paused ? "resume" : "pause"}`, {
-        method: "POST",
-        headers: authHeaders(),
-      });
-      const data = (await res.json().catch(() => ({}))) as any;
-      if (res.ok && data.success !== false) {
-        setSuccessMsg(`✓ Schedule ${item.id} ${item.paused ? "resumed" : "paused"}`);
-        fetchSchedules();
-        fetchAudit();
+      if (item.paused) {
+        await resumeSchedule(item.id, authHeaders());
       } else {
-        setError(data.error || `Failed to ${item.paused ? "resume" : "pause"} schedule`);
+        await pauseSchedule(item.id, authHeaders());
       }
+      setSuccessMsg(`✓ Schedule ${item.id} ${item.paused ? "resumed" : "paused"}`);
+      fetchSchedules();
+      fetchAudit();
     } catch (err: any) {
       setError(err.message || "Failed to update schedule");
     }
@@ -581,13 +576,8 @@ export function ScheduledOptionsManager({
     setError(null);
     setSuccessMsg(null);
     try {
-      const res = await fetch(route, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(payloadOf(item)),
-      });
-      const data = (await res.json().catch(() => ({}))) as any;
-      if (res.ok && data.success !== false && !data.error) {
+      const data = await triggerSystemJob(route, payloadOf(item), authHeaders());
+      if (data && data.success !== false && !data.error) {
         const label = systemJobFor(item.callback)?.label || "Autonomous Options Intelligence";
         if (item.callback === "autonomousOptionsAnalysis") {
           if (data.data) setLiveResult(data.data);
@@ -681,14 +671,13 @@ export function ScheduledOptionsManager({
     });
 
     try {
-      const res = await fetch(TRIGGER_ROUTES.autonomousOptionsAnalysis, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(payload),
-      });
+      const data = await triggerSystemJob(
+        TRIGGER_ROUTES.autonomousOptionsAnalysis,
+        payload,
+        authHeaders(),
+      );
 
-      const data = (await res.json()) as any;
-      if (res.ok && data.success) {
+      if (data.success) {
         setLiveResult(data.data);
         setSuccessMsg(`✓ Autonomous options analysis executed! Found ${data.data?.withTrades ?? 0} actionable setups.`);
         fetchAudit();
@@ -709,14 +698,11 @@ export function ScheduledOptionsManager({
     setDetailError(null);
     setDetailLoading(true);
     try {
-      const res = await fetch(`/api/schedules/${encodeURIComponent(item.id)}`, {
-        headers: authHeaders(),
-      });
-      const data = (await res.json().catch(() => ({}))) as any;
-      if (res.ok && data && typeof data === "object" && typeof data.id === "string") {
+      const data = await getSchedule(item.id, authHeaders());
+      if (data && typeof data === "object" && typeof data.id === "string") {
         setDetail(data);
       } else {
-        setDetailError(data?.error || "Schedule details unavailable.");
+        setDetailError("Schedule details unavailable.");
       }
     } catch (err: any) {
       setDetailError(err.message || "Schedule details unavailable.");

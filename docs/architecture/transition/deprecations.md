@@ -54,3 +54,43 @@ slice.
   compliance path no longer resolves as a live document. This entry's
   retirement record is unchanged: the frozen retirement copy remains
   `docs/compliance/anti-drift-controls.deprecated.md`.
+
+## 2026-11-11 — unified schedule store supersedes the duplicated per-kind schedule paths (#3123)
+
+- File: `src/data/pausedSchedulePorts.ts` → `src/data/pausedSchedulePorts.deprecated.ts`
+- File: `src/data/doSqlitePausedScheduleAdapter.ts` → `src/data/doSqlitePausedScheduleAdapter.deprecated.ts`
+- File: `src/data/inMemoryPausedScheduleAdapter.ts` → `src/data/inMemoryPausedScheduleAdapter.deprecated.ts`
+- File: `src/services/scheduleManagement.ts` → `src/services/scheduleManagement.deprecated.ts`
+- File: `src/client/scheduleApi.ts` → `src/client/scheduleApi.deprecated.ts`
+- Date: 2026-11-11
+- Reason: Issue #3123 (sub-issue of #3121) unifies the six schedule
+  stores, the split run ledger, and the ten management code paths
+  into one ScheduleStore port, one ledger write entry, and one
+  management service. Pause becomes a record state in
+  `unified_schedules` instead of a copy in `paused_schedules`;
+  the goals KV key migrates into the store; the client modules
+  converge onto `jobsApi.ts`. The five modules above are the
+  duplicated halves and are frozen, not deleted.
+- Replacement: `src/data/unifiedSchedulePorts.ts` +
+  `src/data/doSqliteUnifiedScheduleAdapter.ts` +
+  `src/data/inMemoryUnifiedScheduleAdapter.ts` +
+  `src/data/createUnifiedSchedulePorts.ts` (store);
+  `src/services/unifiedLedger.ts` (`recordLedgerRun`, merged read
+  `GET /api/ledger/runs`); `src/services/unifiedScheduleManagement.ts`
+  (management); `src/client/jobsApi.ts` (client wrappers, incl.
+  `listAllRuns`).
+- Consumers at deprecation: none in production — every importer was
+  migrated in the same slice (routes, panels, maintenance, tests).
+  The frozen `paused_schedules` table and its adapter still own the
+  legacy table for old instances; the retention registry
+  (`src/privacy/privacyDsar.ts`) keeps a KEEP rule for it alongside
+  the new `unified_schedules` rule. The legacy `paused_schedules`
+  DDL fixtures in `tests/async_jobs_step4a_characterization_2358.test.ts`,
+  `tests/data_lifecycle_3250.test.ts`, and
+  `tests/orchestrator_migration_2681.test.ts` still assert the old
+  table's shape (migration copies its rows); they are fixtures, not
+  consumers.
+- Deletion condition: zero consumers plus an owner decision plus a
+  gate amendment; deletion is never part of a program slice. The
+  legacy `paused_schedules` table itself is deleted only with the
+  frozen adapter, under the same conditions.

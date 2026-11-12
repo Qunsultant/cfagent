@@ -559,7 +559,7 @@ export const SCHEDULING_SUBSTRATES: SchedulingSubstrate[] = [
   {
     id: "schedule-nlq-agents-api",
     capability: "NLQ scheduling via the Cloudflare Agents Schedule API",
-    source: "src/schedule.ts, src/client/scheduleApi.ts",
+    source: "src/schedule.ts, src/client/jobsApi.ts",
     decision: "Undecided — #1362 Phase 3 decides which substrate job synthesis targets.",
   },
 ];

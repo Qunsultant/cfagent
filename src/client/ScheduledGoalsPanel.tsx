@@ -13,18 +13,19 @@ import {
   listBuiltinGoals,
   addBuiltinGoals,
   addResourceGoals,
+  listAllRuns,
   RESOURCE_GOALS_PRESET,
   type ScheduledGoal,
   type ScheduleTick,
   type CatalogOperation,
   type PresetGoalResult,
-} from "./scheduleApi";
+  type JobRunRecord,
+} from "./jobsApi";
 // Issue #3121 S3 — the goals view reads run history from the one
-// consolidated ledger (`listGoalRuns`, the same read the runs view
+// consolidated ledger (`listAllRuns`, the same read the runs view
 // uses), normalized with the S1 normalizer — no second read path.
 // The linkage cells are the ledger view's own rule (null renders
 // as "— / not applicable"), reused, not re-implemented.
-import { listGoalRuns, type JobRunRecord } from "./jobsApi";
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
 import { ledgerLinkageCell, ledgerLinkageTitle } from "./ScheduleRunLedgerPanel";
 import { TextInput, Select, Button, Checkbox, Modal } from "./components/ui";
@@ -87,8 +88,14 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
   // mutation refreshes both.
   const refreshRuns = useCallback(async () => {
     try {
-      const goalRuns = await listGoalRuns(undefined, 20);
-      setRuns(goalRuns.map(normalizeJobRunRecord));
+      const { runs } = await listAllRuns(undefined, 20);
+      // Goal rows only: the merged list also carries schedule rows
+      // (system "orchestrator-schedule" and friends).
+      setRuns(
+        runs
+          .filter((r) => r.system === "scheduled-agent-goal")
+          .map(normalizeJobRunRecord),
+      );
       setRunsError("");
     } catch (cause) {
       setRunsError(cause instanceof Error ? cause.message : "Could not load goal runs.");
@@ -484,7 +491,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
       ))}
 
       {/* Issue #3121 S3 — recent goal runs from the one consolidated
-          ledger (the same `listGoalRuns` read the runs view uses),
+          ledger (the same `listAllRuns` read the runs view uses),
           not a second run-history path. The ticks above stay the
           aggregate per-tick view; these rows are the per-run view,
           with the §4 linkage (trigger, schedule, async job,

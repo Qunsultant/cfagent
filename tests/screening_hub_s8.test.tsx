@@ -171,13 +171,18 @@ describe("S8 one construction path (source pins)", () => {
   });
 
   it("exactly two client files post schedule creates, both via the builders", () => {
-    const posters: Array<[string, string]> = [
-      ["src/client/ScheduledOptionsManager.tsx", "buildScheduleSubmission"],
-      ["src/client/options/StrategyDiscoveryPanel.tsx", "buildDiscoveryCaptureSubmission"],
+    // #3123: the create POST itself lives in the one client module
+    // (jobsApi's createSchedule); the two panels post through it or
+    // — StrategyDiscoveryPanel, outside the #3123 T2 migration —
+    // through the direct fetch the slice did not move. Either way
+    // both files build through the S7 payload builders.
+    const posters: Array<[string, string, string]> = [
+      ["src/client/ScheduledOptionsManager.tsx", "buildScheduleSubmission", "createSchedule("],
+      ["src/client/options/StrategyDiscoveryPanel.tsx", "buildDiscoveryCaptureSubmission", 'fetch("/api/schedules/create"'],
     ];
-    for (const [rel, builder] of posters) {
+    for (const [rel, builder, transport] of posters) {
       const src = read(rel);
-      expect(src).toContain('fetch("/api/schedules/create"');
+      expect(src).toContain(transport);
       expect(src).toContain(builder);
       expect(src).toContain("scheduledOptionsManager/payloadBuilders");
     }

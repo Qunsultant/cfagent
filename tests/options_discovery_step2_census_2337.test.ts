@@ -77,7 +77,7 @@ const FAMILY_FILES = [
   "src/trading/options/ivHistoryStore.ts",
   "src/trading/options/strategyProfileStore.ts",
   "src/services/feedSnapshotStore.ts",
-  "src/services/scheduleManagement.ts",
+  "src/services/scheduleManagement.deprecated.ts",
   "src/enrichment/enrichmentStore.ts",
 ] as const;
 
@@ -96,7 +96,7 @@ const ADAPTER_FILES: Array<[string, number]> = [
   ["src/data/doSqliteIvHistoryAdapter.ts", 11],
   ["src/data/doSqliteStrategyProfileAdapter.ts", 7],
   ["src/data/doSqliteFeedSnapshotAdapter.ts", 7],
-  ["src/data/doSqlitePausedScheduleAdapter.ts", 7],
+  ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts", 7],
   // 8 at step 2; 5 since #2390 (step 4g): the killswitch
   // SELECT + DELETE/INSERT pair left this adapter for the
   // dedicated settings port (the G-7 ruling).

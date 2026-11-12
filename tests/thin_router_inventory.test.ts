@@ -934,6 +934,9 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/cancel-all\")",
   "handleSchedulesRoutes :: === \"/schedules/runs\"",
+  // Issue #3121 Phase 2 (#3123) — the ledger record route, placed
+  // between the runs reads and the callbacks branch it sits next to.
+  "handleSchedulesRoutes :: endsWith(\"/schedules/runs/record\")",
   "handleSchedulesRoutes :: === \"/schedules/callbacks\"",
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
   "handleSchedulesRoutes :: includes(\"/schedules/\")",

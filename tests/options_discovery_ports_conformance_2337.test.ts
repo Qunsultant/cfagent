@@ -75,12 +75,6 @@ import type {
 import { resolveFeedSnapshotForSymbol } from "../src/data/feedSnapshotPorts";
 import { SqlFeedSnapshotStore } from "../src/data/doSqliteFeedSnapshotAdapter";
 import { InMemoryFeedSnapshotStore } from "../src/data/inMemoryFeedSnapshotAdapter";
-import type { PausedScheduleStore } from "../src/data/pausedSchedulePorts";
-import {
-  DoSqlitePausedScheduleStore,
-  SqlPausedScheduleStore,
-} from "../src/data/doSqlitePausedScheduleAdapter";
-import { InMemoryPausedScheduleStore } from "../src/data/inMemoryPausedScheduleAdapter";
 import {
   ALL_MIGRATIONS,
   MIGRATION_0020_IV_HISTORY,
@@ -882,65 +876,16 @@ describe("conformance feedSnapshots — keep-per-symbol prune (both adapters)", 
 });
 
 /* ------------------------------------------------------------------ */
-/* Paused schedules                                                    */
+/* Paused schedules — RETIRED (#3123)                                  */
 /* ------------------------------------------------------------------ */
-
-function pausedSuite(label: string, makeStore: () => PausedScheduleStore) {
-  describe(`conformance pausedSchedules — ${label}`, () => {
-    it("save upserts by id; get/list/remove round-trip", async () => {
-      const store = makeStore();
-      await store.save({
-        id: "job-1",
-        callback: "runScheduledScan",
-        payload: { userLogin: "alice" },
-        type: "interval",
-        intervalSeconds: 300,
-        pausedAt: "2026-10-22T14:00:00.000Z",
-      });
-      await store.save({
-        id: "job-1",
-        callback: "runScheduledScan",
-        payload: { userLogin: "alice", v: 2 },
-        type: "interval",
-        intervalSeconds: 600,
-        pausedAt: "2026-10-22T15:00:00.000Z",
-      });
-      await store.save({
-        id: "job-2",
-        callback: "collectIv",
-        payload: undefined,
-        type: "cron",
-        cron: "*/30 * * * *",
-        pausedAt: "2026-10-22T13:00:00.000Z",
-      });
-      expect(await store.list()).toHaveLength(2);
-      expect((await store.get("job-1"))?.intervalSeconds).toBe(600);
-      expect((await store.get("job-1"))?.payload).toEqual({ userLogin: "alice", v: 2 });
-      expect((await store.list()).map((r) => r.id)).toEqual(["job-2", "job-1"]);
-      expect(await store.remove("job-1")).toBe(true);
-      expect(await store.remove("job-1")).toBe(false);
-      expect(await store.get("job-1")).toBeUndefined();
-    });
-  });
-}
-
-pausedSuite("DO adapter (bare)", () =>
-  new DoSqlitePausedScheduleStore(new SqliteTestStorage() as never),
-);
-pausedSuite("DO adapter (tx-wrapped)", () => {
-  const storage = new SqliteTestStorage();
-  return new DoSqlitePausedScheduleStore(storage as never, storage as never);
-});
-pausedSuite("legacy sync class (async facade)", () => {
-  const sync = new SqlPausedScheduleStore(new SqliteTestStorage() as never);
-  return {
-    save: async (r) => { sync.save(r); },
-    get: async (id) => sync.get(id),
-    list: async () => sync.list(),
-    remove: async (id) => sync.remove(id),
-  } as PausedScheduleStore;
-});
-pausedSuite("in-memory adapter", () => new InMemoryPausedScheduleStore());
+/* Issue #3121 Phase 2 (#3123): the paused-schedule port is retired
+ * by deprecation rename (src/data/pausedSchedulePorts.deprecated.ts
+ * and friends); pause is a record state in the unified store. The
+ * conformance for the unified store — save/get/list/remove,
+ * listByKind/listByState, clearPaused, across the DO-SQLite and
+ * in-memory adapters — lives in tests/schedule-3121-3123-parity.test.ts
+ * (3123-P01…P12). This block is intentionally gone, not moved: the
+ * port it pinned no longer exists in the factory. */
 
 /* ------------------------------------------------------------------ */
 /* Structural pins                                                     */
@@ -987,7 +932,7 @@ describe("#2337 structural pins", () => {
       "src/data/ivHistoryPorts.ts",
       "src/data/strategyProfilePorts.ts",
       "src/data/feedSnapshotPorts.ts",
-      "src/data/pausedSchedulePorts.ts",
+      "src/data/pausedSchedulePorts.deprecated.ts",
     ]) {
       const text = readFileSync(file, "utf8");
       expect(text, file).not.toMatch(/from\s+["']drizzle-orm/);
@@ -1012,7 +957,7 @@ describe("#2337 structural pins", () => {
       ["src/trading/options/ivHistoryStore.ts", "../../data/ivHistoryPorts"],
       ["src/trading/options/strategyProfileStore.ts", "../../data/strategyProfilePorts"],
       ["src/services/feedSnapshotStore.ts", "../data/feedSnapshotPorts"],
-      ["src/services/scheduleManagement.ts", "../data/pausedSchedulePorts"],
+      ["src/services/scheduleManagement.deprecated.ts", "../data/pausedSchedulePorts.deprecated"],
       ["src/enrichment/enrichmentStore.ts", "../data/doSqliteEnrichmentAdapter"],
     ];
     for (const [file, needle] of shims) {

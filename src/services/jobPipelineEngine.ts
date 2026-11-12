@@ -88,6 +88,7 @@ import type {
 } from "../data/jobRunRecordPorts";
 import { createJobPipelineStageCheckpointStore } from "../data/jobPipelineStageCheckpoint";
 import { buildJobRunRecord } from "./jobRunRecords";
+import { recordLedgerRun } from "./unifiedLedger";
 import {
   JobPipelineError,
   assertExecutionModeSupported,
@@ -185,7 +186,9 @@ export interface JobRunRecorder {
 export function jobRunRecorderFromStore(store: JobRunRecordStore): JobRunRecorder {
   return {
     recordRun: async (record) => {
-      store.record(record);
+      // Issue #3121 Phase 2 (#3123): the seam records through the
+      // one ledger entry (which re-validates the built row).
+      recordLedgerRun(store, record);
     },
     listRuns: async (jobId, limit) => store.listByJob(jobId, limit),
     latestRun: async (jobId) => store.latestByJob(jobId),

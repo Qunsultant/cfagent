@@ -53,7 +53,7 @@ import { listScheduledReports } from "../src/services/scheduledReports";
 import { handlePremiumRoutes, type PremiumRouteContext } from "../src/agents/routes/premium";
 import { ETradeAgenticPaymentService } from "../src/services/agenticPayments";
 import { PaidOptionsScreenerCommand } from "../src/mcps/openaimp/agenticPaymentCommands";
-import { resolveScheduleUpdate } from "../src/services/scheduleManagement";
+import { resolveScheduleUpdate } from "../src/services/unifiedScheduleManagement";
 import type { Env } from "../src/types";
 
 const mockEnv = {
