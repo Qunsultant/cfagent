@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Scaffold a new shell-conforming page (UX-as-product creation-time
- * enforcement). A page created by hand must touch six places, several
+ * Scaffold a new template-conforming page (UX-as-product creation-time
+ * enforcement). A page created by hand must touch seven places, several
  * guarded by exact-count pins; this generator touches all of them so a
  * new page is conformant by construction and the suite stays green.
  *
@@ -10,8 +10,10 @@
  *     --description "…" --category Execution [--issue 30xx] [--nav ...]
  *
  * What it writes:
- *   1. src/client/<Component>Panel.tsx — PageShell + PageSection, primitives
+ *   1. src/client/<Component>Panel.tsx — PageTemplate + PageSection, primitives
  *      only, zero inline styles, zero hex (token ratchet + inline budgets).
+ *      The four template slots are omitted from the stub — they are added
+ *      when the page gets real content.
  *   2. src/client/nav-config.json — route entry, ids kept sorted ascending
  *      (nav_config_data_2977 pin). Without --nav the route has no navEntry:
  *      it renders via TAB_CONTENT and is reachable by ?tab=<id>, but it
@@ -19,18 +21,26 @@
  *   3. src/client/Chat.tsx — panel import (with the other top-level panel
  *      imports) + TAB_CONTENT entry (route_content_switch_1804 pin).
  *   4. tests/ux_conformance_gates_3047.test.ts — CONFORMING_ROUTES entry and
- *      EXPECTED_TAB_CONTENT_KEYS entry (route shell conformance gate).
- *   5. tests/ux_scaffold_<id>.test.ts — pin test asserting 1–4.
+ *      EXPECTED_TAB_CONTENT_KEYS entry (route shell conformance gate —
+ *      PageTemplate carries the shell, so the entry still applies).
+ *   5. tests/ux_scaffold_<id>.test.ts — pin test asserting 1–4 and 7.
  *   6. changelog.d/<issue>-<id>.md (or new-page-<id>.md) — Policy Gate
  *      fragment (first line must be `### <Section>`).
- *   7. With --nav additionally: navOrder = max + 1, nav-count pins bumped
+ *   7. Route→template gate (#3136): tests/ux_shell_exceptions_3047.json —
+ *      `template` register entry (state `template`) and
+ *      tests/template_conformance_3136.test.ts — CONFORMING_TEMPLATE_ROUTES
+ *      entry. Without both, the new page fails the template gate on day
+ *      one: every nav route needs a template entry, and the conforming
+ *      set is exactly the registered template routes.
+ *   8. With --nav additionally: navOrder = max + 1, nav-count pins bumped
  *      (nav_config_data_2977 navOrders, route_table nav entries, NAV_COUNT
  *      — all move together, cross-checked). The route count itself needs no
  *      bump: it is asserted dynamically (nav_config_data_2977 compares
  *      ROUTES against nav-config.json). Badge + icon uniqueness guarded.
  *
  * Guards (fail, do not overwrite): id already a route / gate entry /
- * TAB_CONTENT key, panel or test file already exists, bad category,
+ * TAB_CONTENT key / template register entry / CONFORMING_TEMPLATE_ROUTES
+ * entry, panel or test file already exists, bad category,
  * title/description containing characters illegal in a JSX attribute
  * string (", <, >, newline). With --nav: badge collision
  * (case-insensitive), icon reuse, or an icon key missing from
@@ -38,7 +48,7 @@
  *
  * Flags:
  *   --id <kebab-case>        (required) route id, e.g. risk-limits
- *   --title <string>         (required) PageShell title + nav label default
+ *   --title <string>         (required) PageTemplate title + nav label default
  *   --description <string>   (required) scopeNote + route description
  *   --category <cat>         (required) Execution|Intelligence|Platform|
  *                            Billing|Marketing
@@ -60,6 +70,8 @@
  * targeted tests after scaffolding:
  *   npx vitest run tests/ux_scaffold_<id>.test.ts \
  *     tests/ux_conformance_gates_3047.test.ts \
+ *     tests/template_conformance_3136.test.ts \
+ *     tests/route_table.test.ts \
  *     tests/nav_config_data_2977.test.ts \
  *     tests/nav_unique_icons_badges.test.ts tests/route_content_switch_1804.test.ts
  * then tsc and the full suite before opening the PR.
@@ -135,6 +147,58 @@ function insertSortedId(content, id) {
   return content.slice(0, at) + line + content.slice(at);
 }
 
+// Insert a template register entry into the minified
+// tests/ux_shell_exceptions_3047.json, before the `template` object's
+// closing brace, preserving every other byte. A parse + JSON.stringify
+// round-trip is NOT byte-preserving here: the file carries \uXXXX
+// escapes that stringify emits as literal characters, so the rewrite
+// is a targeted text insertion, found by brace matching (string-aware).
+function insertTemplateEntry(raw, entryJson) {
+  const key = '"template":';
+  const start = raw.indexOf(key);
+  if (start === -1) fail('template key not found in tests/ux_shell_exceptions_3047.json');
+  const open = raw.indexOf("{", start + key.length);
+  if (open === -1) fail('template object not found in tests/ux_shell_exceptions_3047.json');
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = open; i < raw.length; i++) {
+    const c = raw[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) {
+        // i is the template object's closing brace. The object is never
+        // empty in practice, but handle it: no leading comma when empty.
+        const empty = raw.slice(open + 1, i).trim() === "";
+        return raw.slice(0, i) + (empty ? "" : ",") + entryJson + raw.slice(i);
+      }
+    }
+  }
+  fail('template object closing brace not found in tests/ux_shell_exceptions_3047.json');
+}
+
+// Insert a route id into tests/template_conformance_3136.test.ts's
+// CONFORMING_TEMPLATE_ROUTES array, keeping it sorted. The #3136 pin
+// "the conforming set is exactly the registered template routes"
+// compares the register against this list, so the two move together.
+function insertConformingRoute(content, id) {
+  const re = /const CONFORMING_TEMPLATE_ROUTES = \[([^\]]*)\];/;
+  const m = content.match(re);
+  if (!m) fail("CONFORMING_TEMPLATE_ROUTES anchor not found in tests/template_conformance_3136.test.ts");
+  const existing = m[1].split(",").map((s) => s.trim().replace(/^"|"$/g, "")).filter(Boolean);
+  if (existing.includes(id)) fail(`CONFORMING_TEMPLATE_ROUTES already has "${id}"`);
+  const next = [...existing, id].sort();
+  return content.replace(re, `const CONFORMING_TEMPLATE_ROUTES = [${next.map((s) => `"${s}"`).join(", ")}];`);
+}
+
 const args = parseArgs(process.argv.slice(2));
 if (args.help) {
   console.log("Usage: node scripts/new-page.mjs --id <kebab> --title <t> --description <d> --category <c> [--issue N] [--nav] [--dry-run]");
@@ -168,6 +232,8 @@ const gatePath = path.join(root, "tests/ux_conformance_gates_3047.test.ts");
 const navDataPath = path.join(root, "tests/nav_config_data_2977.test.ts");
 const navBadgesPath = path.join(root, "tests/nav_unique_icons_badges.test.ts");
 const routeTablePath = path.join(root, "tests/route_table.test.ts");
+const registerPath = path.join(root, "tests/ux_shell_exceptions_3047.json");
+const templatePinPath = path.join(root, "tests/template_conformance_3136.test.ts");
 const pinRel = `tests/ux_scaffold_${id}.test.ts`;
 const pinPath = path.join(root, pinRel);
 const fragmentName = args.issue ? `${args.issue}-${id}.md` : `new-page-${id}.md`;
@@ -189,6 +255,18 @@ if (hasTabKey) fail(`TAB_CONTENT already has "${id}"`);
 if (!chatSrc.includes("const TAB_CONTENT")) fail("TAB_CONTENT anchor not found in Chat.tsx");
 const gateSrc = readFileSync(gatePath, "utf8");
 if (gateSrc.includes(`"${id}":`)) fail(`conformance gate already mentions "${id}"`);
+if (!existsSync(registerPath)) fail("template register not found: tests/ux_shell_exceptions_3047.json");
+if (!existsSync(templatePinPath)) fail("template pin not found: tests/template_conformance_3136.test.ts");
+const registerRaw = readFileSync(registerPath, "utf8");
+const register = JSON.parse(registerRaw);
+if (register.template && register.template[id]) fail(`template register already has "${id}"`);
+const templatePinSrc = readFileSync(templatePinPath, "utf8");
+const conformingRe = /const CONFORMING_TEMPLATE_ROUTES = \[([^\]]*)\];/;
+const conformingMatch = templatePinSrc.match(conformingRe);
+if (!conformingMatch) fail("CONFORMING_TEMPLATE_ROUTES anchor not found in tests/template_conformance_3136.test.ts");
+if (conformingMatch[1].split(",").map((s) => s.trim().replace(/^"|"$/g, "")).includes(id)) {
+  fail(`CONFORMING_TEMPLATE_ROUTES already has "${id}"`);
+}
 if (existsSync(panelPath)) fail(`panel file already exists: ${panelRel}`);
 if (existsSync(pinPath)) fail(`pin test already exists: ${pinRel}`);
 if (existsSync(fragmentPath)) fail(`fragment already exists: ${fragmentRel}`);
@@ -226,8 +304,7 @@ const nextNavRaw =
     `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
   ) + "\n";
 
-const panel = `import { EmptyState } from "./components/ui";
-import { PageShell, PageSection } from "./components/ui/PageShell";
+const panel = `import { EmptyState, PageSection, PageTemplate } from "./components/ui";
 
 /**
  * ${component} — scaffolded page (scripts/new-page.mjs).
@@ -235,14 +312,14 @@ import { PageShell, PageSection } from "./components/ui/PageShell";
  */
 export function ${component}() {
   return (
-    <PageShell title="${title}" scopeNote="${description}">
+    <PageTemplate title="${title}" scopeNote="${description}">
       <PageSection title="Overview">
         <EmptyState
           title="Under construction"
           description="This page was scaffolded; its content is not implemented yet."
         />
       </PageSection>
-    </PageShell>
+    </PageTemplate>
   );
 }
 `;
@@ -277,6 +354,17 @@ insertBeforeClosing(gateLines, /const CONFORMING_ROUTES/, "};", [`  "${id}": "${
 insertBeforeClosing(gateLines, /const EXPECTED_TAB_CONTENT_KEYS/, "];", [`  "${id}",`], "EXPECTED_TAB_CONTENT_KEYS");
 const nextGate = gateLines.join("\n");
 
+// Route→template gate (#3136): the new route needs a `template`
+// register entry (state `template`, no wave — the well-formedness pin
+// forbids a wave on template-state entries) and a
+// CONFORMING_TEMPLATE_ROUTES entry, or the template gate fails on
+// day one. The register file is minified single-line JSON, so the
+// entry is inserted by brace matching (see insertTemplateEntry) and
+// every other byte is preserved.
+const templateEntry = { state: "template", file: panelRel, reason: "Scaffolded by scripts/new-page.mjs; renders PageTemplate." };
+const nextRegisterRaw = insertTemplateEntry(registerRaw, `"${id}":${JSON.stringify(templateEntry)}`);
+const nextTemplatePin = insertConformingRoute(templatePinSrc, id);
+
 const pin = `import { readFileSync } from "fs";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
@@ -287,7 +375,7 @@ function src(p: string): string {
 }
 
 describe("scaffolded page ${id}", () => {
-  it("has a nav-config route wired to TAB_CONTENT and the conformance gate", () => {
+  it("has a nav-config route wired to TAB_CONTENT and the conformance gates", () => {
     const nav = JSON.parse(src("src/client/nav-config.json")) as {
       routes: { id: string }[];
     };
@@ -299,13 +387,22 @@ describe("scaffolded page ${id}", () => {
     expect(gate).toContain("\\"${id}\\": \\"${panelRel}\\"");
     expect(gate).toContain("\\"${id}\\",");
     const panel = src("${panelRel}");
-    expect(panel).toContain('<PageShell title="${title}"');
+    expect(panel.split("<PageTemplate").length - 1).toBe(1);
+    expect(panel).toContain('<PageTemplate title="${title}"');
+    expect(panel).toContain('scopeNote="${description}"');
+    expect(panel).not.toContain("<PageShell");
+    const register = JSON.parse(src("tests/ux_shell_exceptions_3047.json")) as {
+      template: Record<string, { state: string }>;
+    };
+    expect(register.template["${id}"]?.state).toBe("template");
+    const templatePin = src("tests/template_conformance_3136.test.ts");
+    expect(templatePin).toContain('"${id}"');
   });
 });
 `;
 
 const fragment = `### Added
-- New ${title} page (${id}): scaffolded shell-conforming page wired into navigation and the conformance gate. Content implementation follows in its own issue.
+- New ${title} page (${id}): scaffolded template-conforming page wired into navigation and the conformance gates. Content implementation follows in its own issue.
 `;
 
 // EXPECTED_IDS (route_table.test.ts) lists every route id: any scaffolded
@@ -334,10 +431,12 @@ if (args.nav) {
 }
 
 const writes = [
-  { file: panelRel, note: "new panel (PageShell + Overview section)" },
+  { file: panelRel, note: "new panel (PageTemplate + Overview section)" },
   { file: "src/client/nav-config.json", note: `route "${id}"${args.nav ? " with navEntry" : " (no navEntry — reachable by ?tab=" + id + ")"}` },
   { file: "src/client/Chat.tsx", note: "import + TAB_CONTENT entry" },
   { file: "tests/ux_conformance_gates_3047.test.ts", note: "CONFORMING_ROUTES + EXPECTED_TAB_CONTENT_KEYS" },
+  { file: "tests/ux_shell_exceptions_3047.json", note: 'template register entry (state "template")' },
+  { file: "tests/template_conformance_3136.test.ts", note: "CONFORMING_TEMPLATE_ROUTES entry" },
   { file: pinRel, note: "new pin test" },
   { file: fragmentRel, note: "new changelog fragment" },
   { file: "tests/route_table.test.ts", note: "EXPECTED_IDS entry" + (args.nav ? " + nav entries pin bumped" : "") },
@@ -362,6 +461,8 @@ write(panelPath, panel);
 write(navPath, nextNavRaw);
 write(chatPath, nextChat);
 write(gatePath, nextGate);
+write(registerPath, nextRegisterRaw);
+write(templatePinPath, nextTemplatePin);
 write(pinPath, pin);
 write(fragmentPath, fragment);
 write(routeTablePath, nextRouteTable);
