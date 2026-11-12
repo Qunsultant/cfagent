@@ -89,8 +89,9 @@
   linkage rides the async-job rows, not the outcome sink. `executeAsyncJob`
   writes no `job_run_records` rows — a chain step's run record IS its
   `mas_async_jobs` row (payload + result). S4 stamps from what the outcome
-  ALREADY carries — threading originating ids into the outcome stays #3313
-  (open). No file is deleted in S4.
+  ALREADY carries — threading originating ids into the outcome
+  landed in #3313 (direct paths; the workflow path is a separate
+  [Out-of-Scope] slice under #3313). No file is deleted in S4.
 - **S3 amendment (Slice S3, #3121):** goal schedules are migrated onto
   the S1 primitives as the tick-evaluated kind (§3 Q(a)): `onCron`
   evaluates through the S1 re-exported `isDue` / `isValidCron` /
@@ -140,6 +141,23 @@
   scope, filed not dropped: `sendScheduledReminder` has no recording
   wrapper — its SDK firings leave no per-run record
   (Qunsultant/cfagent#4186).
+- **#3313 amendment (Slice #3313, #3121):** the originating
+  scheduleId/workflowId are now stamped onto `ScreenerRunOutcome` at
+  run producers — the bus events carry them from the service methods
+  (`screenerOutcomeFromEvent`), run-result records carry them
+  (`screenerOutcomeFromRunResult`), the goal bridge outcome and the
+  discovery delivery outcome stamp them, and the auth-preflight
+  blocked outcome stamps the trace's scheduleId — so the bridge
+  record, the follow-up payloads, and the `job_run_records` row all
+  join to the same schedule/workflow/async job through the S1
+  linkage resolvers. A run with genuinely no originating schedule
+  records explicit nulls (S1 null-handling unchanged). The §9 B-L-02
+  row now reads landed. What #3313 does NOT do: the workflow path
+  (ScreenerScreenWorkflow / manualOptionsScreen) cannot carry the
+  ids — the workflow command carries no scheduleId and the instance
+  id is returned only to the starter, unknowable inside the
+  workflow — filed as an [Out-of-Scope] sub-issue under #3313
+  (Qunsultant/cfagent#4198).
 - **S6 amendment (Slice S6, #3121 — final parity):** the §9 map is
   proved complete against §1 (§9.7 traces every §1 item plus the §2
   drift items and the §7 open items to a landed slice, a preserved
@@ -1105,7 +1123,7 @@ no home and no filed issue is a defect in the map.
 | Recovery bounds + stuck detection + audit | B-T4-04 | Recovery/stuck machinery | S4 — landed (preserved verbatim) |
 | Keyless options runs recorded (never silently absent) | B-T4-05 | `recordKeylessOptionsServe` | S1 — landed |
 | `job_run_records` carries the §4 columns on every new row | B-L-01 | `buildJobRunRecord` + `normalizeJobRunRecord` | S1 — landed |
-| `mas_async_jobs` linkage (no §4 columns; payload stamping) | B-L-02 | Follow-up payload linkage | S4 — landed (payload/result stamping); #3313 (outcome stamping, open) |
+| `mas_async_jobs` linkage (no §4 columns; payload stamping) | B-L-02 | Follow-up payload linkage | S4 — landed (payload/result stamping); #3313 — landed (outcome stamping) |
 | `mas_opportunity_scans` joinability | B-L-03 | — join key undecided — | **Filed #3314 (open)** |
 | Provenance on schedule payloads | B-L-04 | `buildScheduleProvenance` et al. | S1/S3 — landed |
 
