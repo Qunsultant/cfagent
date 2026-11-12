@@ -112,9 +112,11 @@ describe("CI/CD Merge Queue + Policy Gate + Tree-Hash Deduplication (#2497, #249
     expect(autoUpdateYml).toContain("mergeStateStatus === 'CLEAN'");
   });
 
-  it("enforces REBASE auto-merge and resets non-REBASE configurations (#2580)", () => {
-    expect(autoMergeTrustedYml).toContain('"$CURRENT_METHOD" != "REBASE"');
-    expect(autoMergeTrustedYml).toContain("disablePullRequestAutoMerge");
-    expect(autoMergeTrustedYml).toContain("mergeMethod: REBASE");
+  it("enrolls by queue entry, which is the only REBASE-safe path (#2580, #4305)", () => {
+    // The auto-merge method is coerced to the repository default (SQUASH), so a
+    // method-based enrollment never merges here; the queue entry does.
+    expect(autoMergeTrustedYml).toContain("enqueuePullRequest(input: { pullRequestId: $id })");
+    expect(autoMergeTrustedYml).not.toContain("enablePullRequestAutoMerge");
+    expect(autoMergeTrustedYml).toContain("mergeQueueEntry");
   });
 });
