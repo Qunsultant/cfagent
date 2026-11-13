@@ -2,8 +2,8 @@
   "generatedFrom": "d1a370ab6365f6a595cd36eb1ed6162aef8ad7a3",
   "generatedAt": "2026-11-13",
   "totals": {
-    "createTable": 114,
-    "createIndex": 50,
+    "createTable": 115,
+    "createIndex": 51,
     "createUniqueIndex": 2,
     "alterTable": 42
   },
@@ -217,6 +217,12 @@
       "createIndex": 1,
       "createUniqueIndex": 0,
       "alterTable": 8
+    },
+    "src/data/doSqliteJobStageEventAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
     },
     "src/data/doSqliteOrmAdapters.ts": {
       "createTable": 1,
