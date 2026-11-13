@@ -24,6 +24,18 @@
  * artifact through the artifact-store adapter — a caller awaiting
  * completion reads the report from the durable store, with no
  * in-memory state.
+ *
+ * Issue #4291 — the strategy-discovery dispatch surface over this
+ * host: startStrategyScreenWorkflow pins the strategy job identity
+ * and validates the request's shape before defining anything (a
+ * non-strategy shape is refused synchronously by name, with no job
+ * defined), and awaitOptionsWorkflowRun polls the read-back until
+ * the run settles (the vehicle a future sync-leg cutover awaits on).
+ * No production leg dispatches through the host yet — every strategy
+ * leg is blocked by a named gap (#3960 broker selection, #4453
+ * scan-run store + stage queue in the residency, universe deps that
+ * do not travel); the legs stay on the sync dispatch until those
+ * land, and this surface is what they cut over onto.
  */
 import {
   createJobPipelineStoresFromD1,
@@ -47,6 +59,10 @@ import {
   strategyScreenJobId,
 } from "./optionsScreenEngine";
 import { optionsArtifactKey } from "./optionsScreenPorts";
+import {
+  decodeOptionsRequestShape,
+  OptionsStepPortsError,
+} from "./optionsStepPorts";
 import { OPTIONS_PIPELINE_STAGES } from "./stageRuntimeIds";
 
 /** What one durable options-screen start needs. */
@@ -147,6 +163,45 @@ export async function startOptionsScreenWorkflow(
   return { instanceId: created.id, jobId };
 }
 
+/** What one durable strategy-screen start needs: the options-screen start, minus the job kind (pinned to strategy). */
+export type StartStrategyScreenWorkflowInput = Omit<
+  StartOptionsScreenWorkflowInput,
+  "jobKind"
+>;
+
+/**
+ * Issue #4291 — the strategy screen's start seam: the strategy-named
+ * entry point over startOptionsScreenWorkflow, pinning the strategy
+ * job identity (`strategy-screen:<runId>`) and validating the
+ * request's shape BEFORE defining anything. A strategy screen is a
+ * panel or scan shape; a goal, manual, or comparison request is
+ * refused synchronously by name — the caller learns at dispatch
+ * time, with no job defined and no workflow instance created,
+ * instead of watching a workflow instance fail inside. The shape
+ * decode is the shared one (optionsStepPorts.ts); the resolving
+ * steps re-check per invocation, so the two can never drift.
+ */
+export async function startStrategyScreenWorkflow(
+  env: Env,
+  input: StartStrategyScreenWorkflowInput,
+  opts: StartOptionsScreenWorkflowOpts = {},
+): Promise<{ instanceId: string; jobId: string }> {
+  const shape = decodeOptionsRequestShape(input.request, input.runId);
+  if (shape !== "panel" && shape !== "scan") {
+    const home =
+      shape === "goal"
+        ? "the goal-screen host is #4290"
+        : shape === "manual"
+          ? "a manual-shape screen dispatches from the manual route"
+          : "a comparison run is a single engine step, not a staged pipeline (#4276)";
+    throw new OptionsStepPortsError(
+      "stage_port_unavailable",
+      `strategy screen ${input.runId}: the ${shape} shape is not a strategy screen — ${home}; refusing to dispatch it under the strategy job identity`,
+    );
+  }
+  return startOptionsScreenWorkflow(env, { ...input, jobKind: "strategy-screen" }, opts);
+}
+
 /** One stage's summary in the read-back view. */
 export interface OptionsWorkflowRunStageView {
   stageId: string;
@@ -220,4 +275,58 @@ export async function readOptionsWorkflowRun(
     stages,
     ...(shapeReport !== undefined ? { shapeReport } : {}),
   };
+}
+
+/** The terminal instance states: a run in any other state is still in flight. */
+const TERMINAL_WORKFLOW_RUN_STATES = new Set(["completed", "failed", "cancelled"]);
+
+/** What awaiting a hosted run needs: the poll cadence, the bound, and the injectable seams (tests inject fakes). */
+export interface AwaitOptionsWorkflowRunOpts {
+  /** Poll interval in ms. Default 1000. */
+  intervalMs?: number;
+  /** Maximum wait in ms. Default 120000. */
+  timeoutMs?: number;
+  /** Injectable read: defaults to readOptionsWorkflowRun over the deps. */
+  readRun?: (jobId: string) => Promise<OptionsWorkflowRunView>;
+  /** Injectable sleep: defaults to setTimeout (the runGoalScreenViaEngine idiom). */
+  sleep?: (ms: number) => Promise<void>;
+  /** Injectable clock: defaults to Date.now. */
+  now?: () => number;
+}
+
+/**
+ * Issue #4291 — await a hosted run's settlement: poll the read-back
+ * until the run reaches a terminal state (completed / failed /
+ * cancelled) and return the terminal view. A failed run returns its
+ * view with the stage error — it does not throw — so the caller
+ * decides how a failure surfaces. A run that never settles throws
+ * a named timeout carrying the job id and the last observed state;
+ * the run may still be in flight, and the message says how to read
+ * it back. This is the vehicle a future sync-leg cutover awaits on:
+ * no production caller uses it yet (every strategy leg is blocked
+ * by #3960 / #4453 — see the #4291 report).
+ */
+export async function awaitOptionsWorkflowRun(
+  deps: { stores: JobPipelineStores; runRecorder: JobRunRecorder },
+  jobId: string,
+  opts: AwaitOptionsWorkflowRunOpts = {},
+): Promise<OptionsWorkflowRunView> {
+  const intervalMs = opts.intervalMs ?? 1000;
+  const timeoutMs = opts.timeoutMs ?? 120000;
+  const readRun = opts.readRun ?? ((id: string) => readOptionsWorkflowRun(deps, id));
+  const sleep =
+    opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = opts.now ?? Date.now;
+  const startedAt = now();
+  let view = await readRun(jobId);
+  while (!TERMINAL_WORKFLOW_RUN_STATES.has(view.state)) {
+    await sleep(intervalMs);
+    if (now() - startedAt >= timeoutMs) {
+      throw new Error(
+        `options_workflow_run_timeout: run ${jobId} did not reach a terminal state within ${timeoutMs}ms (last state: ${view.state}); the run may still be in flight — read it back with readOptionsWorkflowRun`,
+      );
+    }
+    view = await readRun(jobId);
+  }
+  return view;
 }
