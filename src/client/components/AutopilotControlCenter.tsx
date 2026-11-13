@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { AGENT_DIDS } from "../../agents/did";
+import { subscribeToRouteChanges } from "../router";
 import { EmptyState, Table, Badge, Button, Card, Flex, Grid, PillGroup, TextInput, Select, Notice, PageSection, PageShell, Stack, type BadgeTone, Modal, useToast } from "./ui";
 import { BRAND } from "../branding";
 import { normalizeAutopilotLimits, type AutopilotPolicyLimits } from "../../services/riskPolicyEngine";
@@ -626,6 +627,35 @@ export function AutopilotControlCenter({
     };
   }, [fetchLiveAutonomousActions, fetchJobOutcomes, fetchAutopilotState]);
 
+  // Issue #4168: the `?tab=autopilot&view=job-outcomes` deep link. Adopt
+  // it on mount and on every route change (nav clicks pushState while
+  // this shell-retained panel stays mounted); the focus scroll is
+  // deferred a tick, same as the #2784 options-research pattern. The
+  // applied ref keeps a repeat arrival on the same value from
+  // re-scrolling, and clears when the view leaves so a return scrolls
+  // again. `view` is the shared sub-view param — no TAB_PARAM_OWNERS
+  // entry needed. Filters (actionsFilter, chartTimeframe) are NOT views
+  // and get no URL: the Job outcomes section is the page's one
+  // addressable target.
+  const appliedAutopilotViewRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const adoptFromUrl = () => {
+      const view = new URLSearchParams(window.location.search).get("view");
+      if (view !== "job-outcomes") {
+        appliedAutopilotViewRef.current = null;
+        return;
+      }
+      if (appliedAutopilotViewRef.current === view) return;
+      appliedAutopilotViewRef.current = view;
+      window.setTimeout(() => {
+        document.getElementById("autopilot-job-outcomes")?.scrollIntoView?.({ block: "start" });
+      }, 0);
+    };
+    adoptFromUrl();
+    return subscribeToRouteChanges(adoptFromUrl);
+  }, []);
+
   const handleToggleAutopilot = async () => {
     if (isKillSwitched) {
       toast.warning("Platform kill switch is active. Clear the kill switch before resuming Autopilot.");
@@ -1016,6 +1046,10 @@ export function AutopilotControlCenter({
       {/* Job Outcomes (issue #1333): every job's success/failure from
           the one outcome sink, labeled by origin — not the trading
           actions feed above, but the job-truth feed. */}
+      {/* Issue #4168: the Job outcomes anchor for ?tab=autopilot&view=job-outcomes.
+          `ui-anchor` carries the token scroll-margin offset (#3367) so the
+          scroll lands the section under the sticky chrome. */}
+      <div id="autopilot-job-outcomes" className="ui-anchor">
       <PageSection title="Job outcomes">
       <Card>
         <Flex gap="2" align="center" justify="between" wrap>
@@ -1116,6 +1150,7 @@ export function AutopilotControlCenter({
         />
       </Card>
       </PageSection>
+      </div>
 
       {/* Bottom Card: Recent Autonomous Actions */}
       <PageSection title="Recent autonomous actions">

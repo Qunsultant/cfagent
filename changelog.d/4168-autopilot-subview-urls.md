@@ -1,0 +1,2 @@
+### Added
+- Autopilot Job outcomes is now linkable: `?tab=autopilot&view=job-outcomes` lands on the Autopilot page and scrolls to the job-truth feed (#4168). The page's one addressable target is registered as the `autopilot:job-outcomes` deep link and the `autopilot` deep-link surface; `orderTab` stays owned by the order page only, so the old `?tab=autopilot&orderTab=risk` form remains a foreign param and is still stripped on navigation.
