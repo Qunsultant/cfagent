@@ -568,9 +568,14 @@ describe("S7 survivor — the one schedule UI renders the union", () => {
     expect(container.textContent).not.toContain("Strategy Discovery · No-view");
     expect(container.textContent).toContain("collectIvHistory");
 
+    // Issue #4331: strategy discovery is its own kind among the owner's ten
+    // filters, so the Strategy tab shows it; Options no longer absorbs it.
     await click(tab("Options"));
-    expect(container.textContent).toContain("Strategy Discovery · No-view");
     expect(container.textContent).not.toContain("Stock Market Screen");
+    expect(container.textContent).not.toContain("Strategy Discovery · No-view");
+
+    await click(tab("Strategy"));
+    expect(container.textContent).toContain("Strategy Discovery · No-view");
 
     await click(tab("Stocks"));
     expect(container.textContent).toContain("Stock Market Screen");
