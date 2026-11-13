@@ -1,0 +1,3 @@
+### Fixed
+
+- **The definition flow names its run inputs and its mutations carry CSRF (#4366):** scheduling a definition now collects the parameters the spec declares — the screener's **Universe** (its options come from the registry, never a hard-coded list) — and binds them to the run's parameters (`universe → shards` through the broker's own derivation). A missing required parameter, an undeclared one or an unknown universe refuses by name before the definition exists, so a scheduled screen is runnable rather than a job whose feed stage has nothing to screen. Both mutations now send the `X-CSRF-Token` header; the cookie-authenticated route no longer refuses them with "CSRF token missing or invalid". #autoclaw-001

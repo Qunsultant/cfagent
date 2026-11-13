@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { jobDefinitionSpec } from "../src/config/jobDefinitionCatalog";
 import { buildJobConfigFromSpec } from "../src/services/jobDefinitionSpecBuilder";
 import { handleJobDefinitionsRoutes } from "../src/agents/routes/jobDefinitions";
+import { bindJobDefinitionParams } from "../src/services/jobDefinitionParamBinders";
 import { CREATABLE_SCHEDULE_CALLBACKS } from "../src/agents/orchestrator/scheduleCallbacks";
 import { JOB_DEFINITION_SCHEDULE_CALLBACK, jobIdForSpec } from "../src/config/jobDefinitionScheduling";
 
@@ -174,11 +175,42 @@ describe("4366-P04 the client flow reuses the schedule path", () => {
 });
 
 describe("4366-P05 the host defines from the validated spec", () => {
-  it("resolves the spec, requires a job id, and stamps the owner into params", () => {
+  it("resolves the spec, requires a job id, and binds the run parameters", () => {
     const agent = readFileSync(join(root, "src/agents/scheduled-agent.ts"), "utf8");
     expect(agent).toContain("async definePipelineJobFromSpec(");
     expect(agent).toContain("jobDefinitionSpec(specId)");
     expect(agent).toContain("one is never invented");
-    expect(agent).toContain("buildJobConfigFromSpec(spec, id, owner)");
+    expect(agent).toContain("bindJobDefinitionParams(spec, opts?.params ?? {}, ownerLogin)");
+    expect(agent).toContain("buildJobConfigFromSpec(spec, id, runParams)");
+  });
+});
+
+describe("4366-P06 the run parameters are bound and the mutation is CSRF-safe", () => {
+  it("binds universe → shards for the screener", () => {
+    const bound = bindJobDefinitionParams(jobDefinitionSpec("screener"), { universe: "NASDAQ100" }, "owner");
+    expect(bound.userLogin).toBe("owner");
+    expect(bound.universe).toBe("NASDAQ100");
+    expect(Array.isArray(bound.shards)).toBe(true);
+    expect((bound.shards as Array<{ universe?: string }>)[0].universe).toBe("NASDAQ100");
+  });
+
+  it("refuses a missing required parameter and an undeclared one by name", () => {
+    expect(() => bindJobDefinitionParams(jobDefinitionSpec("screener"), {}, "owner")).toThrow(
+      /requires the "universe" parameter/,
+    );
+    expect(() =>
+      bindJobDefinitionParams(jobDefinitionSpec("screener"), { universe: "NASDAQ100", nope: 1 }, "owner"),
+    ).toThrow(/does not declare the parameter "nope"/);
+    expect(() =>
+      bindJobDefinitionParams(jobDefinitionSpec("screener"), { universe: "MARS" }, "owner"),
+    ).toThrow(/unknown universe "MARS"/);
+  });
+
+  it("the route passes the parameters through, and the client sends them with CSRF", () => {
+    const route = readFileSync(join(root, "src/agents/routes/jobDefinitions.ts"), "utf8");
+    expect(route).toContain("ctx.defineJobFromSpec(spec.id, jobId, params)");
+    const client = readFileSync(join(root, "src/client/WorkflowDefinitionFlow.tsx"), "utf8");
+    expect(client).toContain("csrfHeaders()");
+    expect(client).toContain("params: paramValues");
   });
 });

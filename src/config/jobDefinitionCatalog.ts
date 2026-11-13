@@ -27,6 +27,17 @@ export interface JobStageSpec {
   children?: JobStageSpec[];
 }
 
+/** One parameter the UX flow must collect before scheduling a definition. */
+export interface JobDefinitionParameter {
+  name: string;
+  label: string;
+  type: "select" | "text" | "number";
+  required?: boolean;
+  description?: string;
+  /** Filled by the API for select parameters whose options come from a registry. */
+  options?: string[];
+}
+
 /** A whole job definition, externalized and versioned. */
 export interface JobDefinitionSpec {
   /** Addressable id (the spec's identity, not the per-run job id). */
@@ -38,6 +49,12 @@ export interface JobDefinitionSpec {
   stages: JobStageSpec[];
   /** The family's default execution mode; a run may override axis by axis. */
   executionMode?: Partial<JobExecutionMode>;
+  /**
+   * The run parameters the flow must collect. A declared parameter is the
+   * only thing a caller may supply; an undeclared one refuses (no silent
+   * ignore), and a required one with no value refuses by name.
+   */
+  parameters?: JobDefinitionParameter[];
   /** Schedule defaults a UX flow may offer (never enabled implicitly). */
   schedule?: { enabled: boolean; cron?: string; intervalSeconds?: number };
   description?: string;
@@ -58,6 +75,15 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
       { kind: "store", step: "screener.store" },
       { kind: "serve", step: "screener.serve" },
       { kind: "deliver", step: "screener.deliver" },
+    ],
+    parameters: [
+      {
+        name: "universe",
+        label: "Universe",
+        type: "select",
+        required: true,
+        description: "The universe the scheduled screen runs over.",
+      },
     ],
     executionMode: {
       concurrency: "sequential",
@@ -130,6 +156,9 @@ export function resolveJobDefinitionSpec(raw: unknown): JobDefinitionSpec {
       );
     }
   }
+  const parameters = Array.isArray(raw.parameters)
+    ? raw.parameters.map((param) => resolveParameter(param, id))
+    : undefined;
   const schedule = isRecord(raw.schedule)
     ? {
         enabled: raw.schedule.enabled === true,
@@ -144,9 +173,29 @@ export function resolveJobDefinitionSpec(raw: unknown): JobDefinitionSpec {
     name,
     version,
     stages,
+    ...(parameters && parameters.length > 0 ? { parameters } : {}),
     ...(executionMode ? { executionMode } : {}),
     ...(schedule ? { schedule } : {}),
     ...(typeof raw.description === "string" ? { description: raw.description } : {}),
+  };
+}
+
+function resolveParameter(raw: unknown, specId: string): JobDefinitionParameter {
+  if (!isRecord(raw)) {
+    throw new Error(`Job definition "${specId}" is invalid: a parameter must be an object.`);
+  }
+  const name = text(raw.name, "parameter name", specId);
+  const type = raw.type === "number" || raw.type === "text" ? raw.type : "select";
+  const options = Array.isArray(raw.options)
+    ? raw.options.filter((option): option is string => typeof option === "string" && option !== "")
+    : undefined;
+  return {
+    name,
+    label: typeof raw.label === "string" && raw.label ? raw.label : name,
+    type,
+    ...(raw.required === true ? { required: true } : {}),
+    ...(typeof raw.description === "string" ? { description: raw.description } : {}),
+    ...(options && options.length > 0 ? { options } : {}),
   };
 }
 
