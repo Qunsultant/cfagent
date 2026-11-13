@@ -4,8 +4,12 @@
  *
  * Moved in #2345 (#1976 step 3a) from src/orm/schema.ts to
  * src/data/ormSchema.ts — the data layer is the canonical home
- * now; src/orm/schema.ts is a §22 re-export shim. The DDL
- * strings below are byte-identical to the pre-move module.
+ * now; src/orm/schema.ts is a §22 re-export shim. #4282 P2a moved
+ * the DDL strings themselves into the schema catalogue
+ * (src/data/schemaComponent/ormCatalogue.ts); this module re-exports
+ * them by code (SHARED_TABLE_DDL below), so it stays the canonical
+ * module every consumer imports while the catalogue is the single
+ * home for the text.
  *
  * These seven tables used to be defined TWICE with byte-identical DDL:
  * in DatabaseORM.initializeSchema() (src/orm/index.ts) and in
@@ -13,7 +17,7 @@
  * CREATE TABLE IF NOT EXISTS semantics the first definition to run wins
  * per Durable Object instance, so any edit to one copy would silently
  * fork the schema by instance history. The DDL strings below are the
- * single source; they are byte-identical to both former copies (the
+ * single source by code; they are byte-identical to both former copies (the
  * drift pin in tests/schema_single_source.test.ts proves the effective
  * DDL of both initialization paths equals these strings). Never define
  * a shared table's DDL anywhere else — the same lesson as mas_reports
@@ -49,6 +53,10 @@
  */
 
 import type { SqlStorage } from "./repositoryPorts";
+import {
+  ormAuditChainAlterSql,
+  ormTableSql,
+} from "./schemaComponent/ormCatalogue";
 
 /** The seven mas_* tables shared by the ORM and the orchestrator. */
 export const SHARED_MAS_TABLES = [
@@ -63,17 +71,6 @@ export const SHARED_MAS_TABLES = [
 
 export type SharedMasTable = (typeof SHARED_MAS_TABLES)[number];
 
-const MAS_MESSAGES_DDL = `
-      CREATE TABLE IF NOT EXISTS mas_messages (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        role TEXT NOT NULL,
-        content TEXT NOT NULL,
-        agent TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )
-    `;
-
 // Issue #792 determination (RSI-Data C9): mas_events is the
 // session-scoped audit/observability log — single insert owner
 // OrchestratorAgent.recordAudit (#270) — and deliberately NOT the
@@ -81,100 +78,24 @@ const MAS_MESSAGES_DDL = `
 // category) lives in usage_events (src/services/scheduledReports.ts),
 // whose attribution axis and indexed per-tenant reads do not fit this
 // table's session_id shape. Keep the two logs distinct.
-const MAS_EVENTS_DDL = `
-      CREATE TABLE IF NOT EXISTS mas_events (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        agent TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        previous_event_hash TEXT,
-        event_hash TEXT
-      )
-    `;
 
-const MAS_MEMORY_DDL = `
-      CREATE TABLE IF NOT EXISTS mas_memory (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `;
-
-const MAS_REFERRALS_DDL = `
-      CREATE TABLE IF NOT EXISTS mas_referrals (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        url TEXT NOT NULL,
-        category TEXT NOT NULL,
-        reward_text TEXT NOT NULL,
-        clicks INTEGER DEFAULT 0,
-        signups INTEGER DEFAULT 0,
-        created_at TEXT NOT NULL
-      )
-    `;
-
-const MAS_ADS_DDL = `
-      CREATE TABLE IF NOT EXISTS mas_ads (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        tagline TEXT NOT NULL,
-        sponsor TEXT NOT NULL,
-        badge TEXT NOT NULL,
-        url TEXT NOT NULL,
-        cta_text TEXT NOT NULL,
-        accent_color TEXT NOT NULL,
-        impressions INTEGER DEFAULT 0,
-        clicks INTEGER DEFAULT 0,
-        created_at TEXT NOT NULL
-      )
-    `;
-
-const MAS_WATCHLISTS_DDL = `
-      CREATE TABLE IF NOT EXISTS mas_watchlists (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        user_login TEXT NOT NULL,
-        symbols_json TEXT NOT NULL,
-        items_json TEXT,
-        source TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `;
-
-const MAS_TRANSACTIONS_DDL = `
-      CREATE TABLE IF NOT EXISTS mas_transactions (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        action TEXT NOT NULL,
-        amount REAL NOT NULL,
-        currency TEXT NOT NULL,
-        customer TEXT NOT NULL,
-        gateway TEXT NOT NULL,
-        gateway_ref TEXT,
-        status TEXT NOT NULL,
-        checkout_url TEXT,
-        proposer_did TEXT NOT NULL,
-        authorizer_did TEXT,
-        proof_signature TEXT,
-        note TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `;
-
-/** Canonical DDL per shared table, byte-identical to the former copies. */
+/**
+ * Canonical DDL per shared table, byte-identical to the former copies.
+ *
+ * #4282 P2a: the DDL strings live in the schema catalogue
+ * (src/data/schemaComponent/ormCatalogue.ts) — this record is the
+ * same strings by code, so the drift pin's canonical-module
+ * assertions and every SHARED_TABLE_DDL consumer keep working
+ * unchanged. Never define a shared table's DDL anywhere else.
+ */
 export const SHARED_TABLE_DDL: Readonly<Record<SharedMasTable, string>> = {
-  mas_messages: MAS_MESSAGES_DDL,
-  mas_events: MAS_EVENTS_DDL,
-  mas_memory: MAS_MEMORY_DDL,
-  mas_referrals: MAS_REFERRALS_DDL,
-  mas_ads: MAS_ADS_DDL,
-  mas_watchlists: MAS_WATCHLISTS_DDL,
-  mas_transactions: MAS_TRANSACTIONS_DDL,
+  mas_messages: ormTableSql("mas_messages"),
+  mas_events: ormTableSql("mas_events"),
+  mas_memory: ormTableSql("mas_memory"),
+  mas_referrals: ormTableSql("mas_referrals"),
+  mas_ads: ormTableSql("mas_ads"),
+  mas_watchlists: ormTableSql("mas_watchlists"),
+  mas_transactions: ormTableSql("mas_transactions"),
 };
 
 /** Create one shared table (IF NOT EXISTS) from the canonical DDL. */
@@ -193,10 +114,10 @@ export function ensureAuditChainColumns(sql: SqlStorage): void {
   const info = Array.from(sql.exec(`PRAGMA table_info(mas_events)`)) as Array<{ name: string }>;
   const names = new Set(info.map((c) => c.name));
   if (!names.has("previous_event_hash")) {
-    sql.exec(`ALTER TABLE mas_events ADD COLUMN previous_event_hash TEXT`);
+    sql.exec(ormAuditChainAlterSql("previous_event_hash"));
   }
   if (!names.has("event_hash")) {
-    sql.exec(`ALTER TABLE mas_events ADD COLUMN event_hash TEXT`);
+    sql.exec(ormAuditChainAlterSql("event_hash"));
   }
 }
 
