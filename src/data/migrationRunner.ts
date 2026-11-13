@@ -2481,6 +2481,102 @@ CREATE INDEX IF NOT EXISTS agent_free_access_grants_login_idx ON agent_free_acce
 `,
 };
 
+/**
+ * Migration 0066 — referral / invite codes (#3307 slice 1, sub-issue of #3241).
+ * - agent_referral_code_rules: one row per (productId, issuer) — the ONLY
+ *   source of issuance/redemption terms. A missing or inactive rule
+ *   disables codes for that (product, issuer) entirely (fail-closed).
+ * - agent_referral_codes: one row per issued code. The code VALUE is
+ *   never stored — only its SHA-256 hash + display prefix. Terms
+ *   (runs, reusable, expiry) are snapshotted at issuance; caps are
+ *   read live from the rule at redemption.
+ * - agent_code_redemptions: one row per redemption (the audit +
+ *   idempotency record for one-time replay).
+ * - agent_code_redemption_counts: one row per (code, login) — the
+ *   per-login cap's conditional-increment counter (the cap is
+ *   enforced by the counter, NOT by counting redemption rows).
+ * - agent_code_run_balances: one row per login — the family-agnostic
+ *   code-runs balance (mirrors agent_runs_pack_balances).
+ * Seeds (INSERT OR IGNORE, inactive): one rule row per per-run
+ * product x platform_admin issuer, with PROPOSED defaults (5 runs,
+ * one-time, 30-day expiry, attribution ledger, caps 1/1, no global
+ * cap, active 0). No seed codes, no seed balances. Prerequisite:
+ * 0058 (agent_products, for the seed product ids).
+ */
+export const MIGRATION_0066_REFERRAL_CODES: DataMigration = {
+  version: 66,
+  name: "0066_referral_codes",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_referral_code_rules (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  issuer TEXT NOT NULL,
+  runs_per_code INTEGER NOT NULL,
+  reusable INTEGER NOT NULL,
+  expiry_days INTEGER,
+  attribution_mode TEXT NOT NULL,
+  max_redemptions_per_code INTEGER,
+  max_redemptions_per_login INTEGER,
+  global_cap INTEGER,
+  redemption_count INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 0,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  UNIQUE (product_id, issuer)
+);
+CREATE TABLE IF NOT EXISTS agent_referral_codes (
+  id TEXT PRIMARY KEY,
+  code_hash TEXT NOT NULL UNIQUE,
+  display_prefix TEXT NOT NULL,
+  rule_id TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  issuer_login TEXT NOT NULL,
+  issuer_kind TEXT NOT NULL,
+  referrer_user_id TEXT,
+  tenant_scope TEXT,
+  runs INTEGER NOT NULL,
+  reusable INTEGER NOT NULL,
+  expires_at_ms INTEGER,
+  revoked_at_ms INTEGER,
+  redemption_count INTEGER NOT NULL DEFAULT 0,
+  created_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_referral_codes_rule_idx ON agent_referral_codes (rule_id);
+CREATE INDEX IF NOT EXISTS agent_referral_codes_issuer_idx ON agent_referral_codes (issuer_login);
+CREATE TABLE IF NOT EXISTS agent_code_redemptions (
+  id TEXT PRIMARY KEY,
+  code_id TEXT NOT NULL,
+  redeemer_login TEXT NOT NULL,
+  redeemer_tenant_id TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  runs_granted INTEGER NOT NULL,
+  attribution_written INTEGER NOT NULL,
+  created_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_code_redemptions_code_login_idx ON agent_code_redemptions (code_id, redeemer_login);
+CREATE INDEX IF NOT EXISTS agent_code_redemptions_login_idx ON agent_code_redemptions (redeemer_login, created_at_ms);
+CREATE TABLE IF NOT EXISTS agent_code_redemption_counts (
+  code_id TEXT NOT NULL,
+  redeemer_login TEXT NOT NULL,
+  redemption_count INTEGER NOT NULL DEFAULT 0,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (code_id, redeemer_login)
+);
+CREATE TABLE IF NOT EXISTS agent_code_run_balances (
+  login TEXT PRIMARY KEY,
+  runs_remaining INTEGER NOT NULL DEFAULT 0,
+  updated_at_ms INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO agent_referral_code_rules (id, product_id, issuer, runs_per_code, reusable, expiry_days, attribution_mode, max_redemptions_per_code, max_redemptions_per_login, global_cap, redemption_count, active, created_at_ms, updated_at_ms)
+  VALUES
+    ('coderule-seed-prod-per-run-stock', 'prod-per-run-stock', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),
+    ('coderule-seed-prod-per-run-goal', 'prod-per-run-goal', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),
+    ('coderule-seed-prod-per-run-options', 'prod-per-run-options', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),
+    ('coderule-seed-prod-per-run-strategy', 'prod-per-run-strategy', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -2545,6 +2641,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0063_RUNS_PACKS,
   MIGRATION_0064_FREE_ACCESS_GRANTS,
   MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
+  MIGRATION_0066_REFERRAL_CODES,
 ];
 
 function splitStatements(sqlText: string): string[] {

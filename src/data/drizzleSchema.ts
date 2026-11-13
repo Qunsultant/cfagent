@@ -1097,6 +1097,100 @@ export const agentFreeAccessGrants = sqliteTable("agent_free_access_grants", {
 });
 
 /**
+ * Referral / invite code rules (#3307 slice 1, migration 0066):
+ * one row per (productId, issuer) — the ONLY source of
+ * issuance/redemption terms. This schema MAPS the table; DDL
+ * authority lives in migration 0066.
+ */
+export const agentReferralCodeRules = sqliteTable("agent_referral_code_rules", {
+  id: text("id").primaryKey(),
+  productId: text("product_id").notNull(),
+  issuer: text("issuer").notNull(),
+  runsPerCode: integer("runs_per_code").notNull(),
+  reusable: integer("reusable").notNull(),
+  expiryDays: integer("expiry_days"),
+  attributionMode: text("attribution_mode").notNull(),
+  maxRedemptionsPerCode: integer("max_redemptions_per_code"),
+  maxRedemptionsPerLogin: integer("max_redemptions_per_login"),
+  globalCap: integer("global_cap"),
+  redemptionCount: integer("redemption_count").notNull().default(0),
+  active: integer("active").notNull().default(0),
+  createdAtMs: integer("created_at_ms").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Issued referral codes (#3307 slice 1, migration 0066): one row
+ * per code. The code VALUE is never stored — only its SHA-256
+ * hash + display prefix. Terms are snapshotted at issuance.
+ * This schema MAPS the table; DDL authority lives in migration 0066.
+ */
+export const agentReferralCodes = sqliteTable("agent_referral_codes", {
+  id: text("id").primaryKey(),
+  codeHash: text("code_hash").notNull().unique(),
+  displayPrefix: text("display_prefix").notNull(),
+  ruleId: text("rule_id").notNull(),
+  productId: text("product_id").notNull(),
+  kind: text("kind").notNull(),
+  issuerLogin: text("issuer_login").notNull(),
+  issuerKind: text("issuer_kind").notNull(),
+  referrerUserId: text("referrer_user_id"),
+  tenantScope: text("tenant_scope"),
+  runs: integer("runs").notNull(),
+  reusable: integer("reusable").notNull(),
+  expiresAtMs: integer("expires_at_ms"),
+  revokedAtMs: integer("revoked_at_ms"),
+  redemptionCount: integer("redemption_count").notNull().default(0),
+  createdAtMs: integer("created_at_ms").notNull(),
+});
+
+/**
+ * Code redemptions (#3307 slice 1, migration 0066): one row per
+ * redemption — the audit + idempotency record for one-time
+ * replay. This schema MAPS the table; DDL authority lives in
+ * migration 0066.
+ */
+export const agentCodeRedemptions = sqliteTable("agent_code_redemptions", {
+  id: text("id").primaryKey(),
+  codeId: text("code_id").notNull(),
+  redeemerLogin: text("redeemer_login").notNull(),
+  redeemerTenantId: text("redeemer_tenant_id").notNull(),
+  productId: text("product_id").notNull(),
+  runsGranted: integer("runs_granted").notNull(),
+  attributionWritten: integer("attribution_written").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+});
+
+/**
+ * Per-(code, login) redemption counters (#3307 slice 1,
+ * migration 0066): the per-login cap's conditional-increment
+ * counter. This schema MAPS the table; DDL authority lives in
+ * migration 0066.
+ */
+export const agentCodeRedemptionCounts = sqliteTable(
+  "agent_code_redemption_counts",
+  {
+    codeId: text("code_id").notNull(),
+    redeemerLogin: text("redeemer_login").notNull(),
+    redemptionCount: integer("redemption_count").notNull().default(0),
+    updatedAtMs: integer("updated_at_ms").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.codeId, t.redeemerLogin] })],
+);
+
+/**
+ * Code-runs balances (#3307 slice 1, migration 0066): one row
+ * per login — the family-agnostic code-runs balance (mirrors
+ * agent_runs_pack_balances). This schema MAPS the table; DDL
+ * authority lives in migration 0066.
+ */
+export const agentCodeRunBalances = sqliteTable("agent_code_run_balances", {
+  login: text("login").primaryKey(),
+  runsRemaining: integer("runs_remaining").notNull().default(0),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
  * Per-customer version moves (#3289 §3.8, migration 0058): one
  * row per customer moved — the audit that answers "what
  * happened to customer X". bulkMoveId is null for a

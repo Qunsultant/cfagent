@@ -130,6 +130,17 @@ import {
   ensureFreeAccessGrantSchema,
 } from "../../data/createFreeAccessGrantPorts";
 import { assertFreeAccessGrantInput } from "../../data/freeAccessGrantPorts";
+import {
+  createReferralCodeAdapters,
+  ensureReferralCodeSchema,
+  type ReferralCodeAdapters,
+} from "../../data/createReferralCodePorts";
+import {
+  assertReferralCodeIssuer,
+  assertReferralCodeKind,
+  isTenantAdminForTenant,
+  type ReferralCodeIssuer,
+} from "../../data/referralCodePorts";
 import { createApprovedFreeQuotaAdapter } from "../../data/createApprovedFreeQuotaPorts";
 import {
   APPROVED_FREE_QUOTA_FAMILIES,
@@ -294,6 +305,21 @@ import { createDigestContentProvider } from "../../services/digestContentProvide
 import { readReports } from "../../data/createAuditReportPorts";
 import { digestDayKey } from "../../data/lifecyclePorts";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
+import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
+import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
+import { sessionStore } from "../../security/session";
+import type { MembershipStore } from "../../security/authorization";
+import type { KvLike } from "../../security/kvResilience";
+import {
+  issueReferralCode,
+  publicCodeView,
+  redeemReferralCode,
+  ReferralCodeCapExceededError,
+  ReferralCodeCreditStuckError,
+  ReferralCodeInvalidError,
+  ReferralCodeRuleUnavailableError,
+  ReferralCodeScopeRefusedError,
+} from "../../services/referralCodes";
 import {
   convertReferralCreditsForRun,
   recordFirstPaidRunEarning,
@@ -322,6 +348,16 @@ export interface AgenticPaymentsRouteContext {
    * through the stored layer here too. Absent → env-only.
    */
   readSettingRaw?: ((key: string) => string | null) | undefined;
+  /**
+   * Issue #3307: test seams for the referral-code tenant-admin
+   * path (the adminTenantQueues.ts precedent). Production reads
+   * the SessionStore KV; tests inject an in-memory KV + store.
+   * Absent → sessionStore(ctx.env). Any failure building or
+   * reading them fails the tenant-admin check closed (403).
+   */
+  referralCodeAliasKv?: KvLike;
+  /** Test seam: use this store instead of the SessionStore KV membership store. */
+  referralCodeMembershipStore?: MembershipStore;
   /** ORM accessor (owner: OrchestratorAgent.getOrm - was `this.getOrm()`). */
   getOrm(): DatabaseORM;
   /** Audit funnel (owner: OrchestratorAgent.audit - was `this.audit`). */
@@ -3480,6 +3516,491 @@ export async function handleAgenticPaymentsRoutes(
       });
     } catch (err: any) {
       return runsPackErrorResponse(err);
+    }
+  }
+
+  // Issue #3307 (sub-issue of #3241), slice 1 — referral / invite
+  // code routes (server surface only). A code is a bearer token
+  // that, redeemed by a verified login, credits RUNS to that
+  // login's code-runs balance. Codes confer runs only — never
+  // tier, never credits, never a price, never access. The code
+  // VALUE is never stored (SHA-256 hash + display prefix only)
+  // and the plaintext is returned once, at issuance.
+  //
+  // Rules are the ONLY source of terms, keyed by (productId,
+  // issuer); a missing or inactive rule disables codes for that
+  // (product, issuer) entirely (fail-closed). Terms are
+  // snapshotted onto the code row at issuance; caps are read
+  // live from the rule at redemption. Balances accrue here;
+  // nothing spends them until slice 2 (the gate step), so this
+  // slice has NO gate touch, NO UI, and NO #3247 dependency.
+  //
+  // Issuers: platform_admin (isStoreOperator), tenant_admin
+  // (server-enforced via the KV membership seam — a tenant
+  // admin may issue only tenant-scoped codes for their own
+  // tenant), user (self-service; kind forced to referral,
+  // referrer forced to the caller). Tenant admins do NOT edit
+  // rules — rules are platform-wide operator data.
+  const requireReferralCodes = async (): Promise<ReferralCodeAdapters | Response> => {
+    const adapters = createReferralCodeAdapters(ctx.env as { AGENT_DB?: unknown });
+    if (!adapters) {
+      return Response.json({ error: "Referral-code store unavailable: AGENT_DB is not bound." }, { status: 503 });
+    }
+    try {
+      await ensureReferralCodeSchema(adapters.rules.db);
+    } catch (err: any) {
+      return Response.json({ error: `Referral-code store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+    }
+    return adapters;
+  };
+
+  const referralCodeErrorResponse = (err: unknown): Response => {
+    const catalogCode =
+      err instanceof ReferralCodeInvalidError || err instanceof ReferralCodeScopeRefusedError
+        ? "FAILURE_REFERRAL_CODE_INVALID"
+        : err instanceof ReferralCodeCapExceededError
+          ? "FAILURE_REFERRAL_CODE_CAP_EXCEEDED"
+          : err instanceof ReferralCodeRuleUnavailableError
+            ? "FAILURE_REFERRAL_CODE_RULE_UNAVAILABLE"
+            : null;
+    if (catalogCode) {
+      const outcome = resolveOutcome(catalogCode);
+      // A tenant-scope refusal answers 403 with the GENERIC
+      // invalid message — it must not leak whether the code
+      // exists or which tenant it belongs to.
+      const status =
+        err instanceof ReferralCodeScopeRefusedError
+          ? 403
+          : outcome.entry?.httpStatus ?? 500;
+      return new Response(JSON.stringify({ error: codedMessage(catalogCode), code: catalogCode }), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const message = err instanceof Error ? err.message : "Referral-code request failed.";
+    const status = /required|must be|Unknown referral/.test(message) ? 400 : 500;
+    return new Response(JSON.stringify({ error: message }), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  /**
+   * Tenant-admin check for code issuance (the adminTenantQueues
+   * resolveCaller pattern): the caller's verified login resolves
+   * through the wired-login alias record to an internalUserId,
+   * which must hold a live tenant-admin membership in the named
+   * tenant. Reads only — IAAA writes stay CISO-owned. Any
+   * failure building or reading the seam fails closed (false).
+   */
+  const isTenantAdminForReferralCode = async (
+    login: string,
+    tenantId: string,
+  ): Promise<boolean> => {
+    try {
+      const kv = ctx.referralCodeAliasKv ?? sessionStore(ctx.env);
+      const internalUserId = await lookupInternalUserIdByLogin(kv, login);
+      if (!internalUserId) return false;
+      const store =
+        ctx.referralCodeMembershipStore ?? createKvMembershipStore(sessionStore(ctx.env));
+      const memberships = await store.getMembershipsByUser(internalUserId);
+      return isTenantAdminForTenant(memberships, tenantId, Date.now());
+    } catch {
+      return false;
+    }
+  };
+
+  // GET /payments/agentic/commercial/referral-code-rules?productId=... (operator only).
+  if (path.endsWith("/payments/agentic/commercial/referral-code-rules") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) return Response.json({ error: "Forbidden: operator only." }, { status: 403 });
+      const productId = url.searchParams.get("productId") ?? "";
+      if (!productId) return Response.json({ error: "productId is required." }, { status: 400 });
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      const rules = await codes.rules.listRules(productId);
+      return Response.json({ productId, rules });
+    } catch (err: any) {
+      return referralCodeErrorResponse(err);
+    }
+  }
+
+  // POST /payments/agentic/commercial/referral-code-rules (operator only).
+  // Upsert one rule for (productId, issuer). Rules are created
+  // inactive — the operator activates them in the UI; nothing is
+  // live until then. A rule edit affects only codes issued AFTER
+  // the edit; outstanding codes keep their snapshot.
+  if (path.endsWith("/payments/agentic/commercial/referral-code-rules") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) return Response.json({ error: "Forbidden: operator only." }, { status: 403 });
+      const body = (await request.json().catch(() => ({}))) as {
+        productId: unknown; issuer?: unknown; runsPerCode?: unknown; reusable?: unknown;
+        expiryDays?: unknown; attributionMode?: unknown; maxRedemptionsPerCode?: unknown;
+        maxRedemptionsPerLogin?: unknown; globalCap?: unknown; active?: unknown;
+      };
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      const rule = await codes.rules.upsertRule(body);
+      ctx.audit("commercial.referral_code.rule_upserted", "payments", {
+        productId: rule.productId,
+        issuer: rule.issuer,
+        active: rule.active,
+        operatorLogin: login,
+      });
+      return Response.json({ rule });
+    } catch (err: any) {
+      return referralCodeErrorResponse(err);
+    }
+  }
+
+  // POST /payments/agentic/commercial/referral-codes/issue (operator / tenant admin).
+  // Issues one code under (productId, issuer)'s rule. The
+  // plaintext is returned ONCE — it is never stored, never
+  // logged, never rendered again, and never appears in the audit
+  // record. A tenant admin may issue only tenant-scoped codes
+  // for their own tenant; a user may not call this route (their
+  // self-service issuance is POST /referral-codes/mine).
+  if (path.endsWith("/payments/agentic/commercial/referral-codes/issue") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const body = (await request.json().catch(() => ({}))) as {
+        productId?: unknown; kind?: unknown; issuer?: unknown;
+        referrerUserId?: unknown; tenantScope?: unknown;
+      };
+      const productId = typeof body.productId === "string" ? body.productId.trim() : "";
+      if (!productId) return Response.json({ error: "productId is required." }, { status: 400 });
+      const kind = assertReferralCodeKind(body.kind);
+      const issuer: ReferralCodeIssuer =
+        body.issuer === undefined || body.issuer === null
+          ? "platform_admin"
+          : assertReferralCodeIssuer(body.issuer);
+      const requestedTenantScope =
+        typeof body.tenantScope === "string" && body.tenantScope.trim()
+          ? body.tenantScope.trim()
+          : null;
+      let tenantScope: string | null = null;
+      let referrerUserId: string | null = null;
+      if (issuer === "platform_admin") {
+        if (!isStoreOperator(login)) return Response.json({ error: "Forbidden: operator only." }, { status: 403 });
+        tenantScope = requestedTenantScope;
+        referrerUserId =
+          typeof body.referrerUserId === "string" && body.referrerUserId.trim()
+            ? body.referrerUserId.trim()
+            : null;
+      } else if (issuer === "tenant_admin") {
+        if (!requestedTenantScope) {
+          return Response.json({ error: "tenantScope is required for tenant-admin issuance." }, { status: 400 });
+        }
+        if (!(await isTenantAdminForReferralCode(login, requestedTenantScope))) {
+          return Response.json({ error: "Forbidden: tenant-admin membership required for this tenant." }, { status: 403 });
+        }
+        tenantScope = requestedTenantScope;
+        referrerUserId =
+          typeof body.referrerUserId === "string" && body.referrerUserId.trim()
+            ? body.referrerUserId.trim()
+            : null;
+      } else {
+        // The user issuer is self-service only — it never goes
+        // through this route (see POST /referral-codes/mine).
+        return Response.json({ error: "Forbidden: user issuance uses POST /referral-codes/mine." }, { status: 403 });
+      }
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      const issued = await issueReferralCode(
+        {
+          rules: codes.rules,
+          codes: codes.codes,
+          redemptions: codes.redemptions,
+          balances: codes.balances,
+          lifecycle: null,
+        },
+        {
+          productId,
+          kind,
+          issuerLogin: login,
+          issuerKind: issuer,
+          referrerUserId,
+          tenantScope,
+          nowMs: Date.now(),
+        },
+      );
+      ctx.audit("commercial.referral_code.issued", "payments", {
+        codeId: issued.code.id,
+        productId,
+        kind,
+        issuerKind: issuer,
+        issuerLogin: login,
+        tenantScope,
+        referrerUserId,
+      });
+      return Response.json({ code: issued.code, plaintext: issued.plaintext });
+    } catch (err: any) {
+      return referralCodeErrorResponse(err);
+    }
+  }
+
+  // GET /payments/agentic/commercial/referral-codes?productId=... (operator only).
+  // Operator list: display prefixes only — hashes and plaintext
+  // values never leave the store.
+  if (path.endsWith("/payments/agentic/commercial/referral-codes") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) return Response.json({ error: "Forbidden: operator only." }, { status: 403 });
+      const productId = url.searchParams.get("productId") ?? "";
+      if (!productId) return Response.json({ error: "productId is required." }, { status: 400 });
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      const rows = await codes.codes.listCodes(productId);
+      return Response.json({ productId, codes: rows.map(publicCodeView) });
+    } catch (err: any) {
+      return referralCodeErrorResponse(err);
+    }
+  }
+
+  // POST /payments/agentic/commercial/referral-codes/revoke (operator only).
+  // Idempotent: revoking an already-revoked code returns it
+  // as-is. The audit fires only on an actual transition.
+  if (path.endsWith("/payments/agentic/commercial/referral-codes/revoke") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) return Response.json({ error: "Forbidden: operator only." }, { status: 403 });
+      const body = (await request.json().catch(() => ({}))) as { codeId?: unknown };
+      const codeId = typeof body.codeId === "string" ? body.codeId.trim() : "";
+      if (!codeId) return Response.json({ error: "codeId is required." }, { status: 400 });
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      const before = await codes.codes.getCode(codeId);
+      if (!before) return Response.json({ error: `Unknown referral code ${codeId}.` }, { status: 404 });
+      const revoked = await codes.codes.revokeCode(codeId, Date.now());
+      if (!revoked) return Response.json({ error: `Unknown referral code ${codeId}.` }, { status: 404 });
+      if (before.revokedAtMs === null) {
+        ctx.audit("commercial.referral_code.revoked", "payments", {
+          codeId,
+          productId: revoked.productId,
+          issuerLogin: revoked.issuerLogin,
+          actorLogin: login,
+        });
+      }
+      return Response.json({ code: publicCodeView(revoked) });
+    } catch (err: any) {
+      return referralCodeErrorResponse(err);
+    }
+  }
+
+  // POST /payments/agentic/commercial/referral-codes/redeem (any verified login).
+  // Redeems a code value for the caller: credits the code's runs
+  // to the caller's code-runs balance. Unknown / expired /
+  // revoked / self / disabled-rule all share ONE generic 400;
+  // cap exhaustion is the only specific failure (409); a
+  // tenant-scope refusal is 403 with the generic message. A
+  // one-time code redeemed twice by the same login replays the
+  // earlier redemption (never double-credits). Attribution is
+  // best-effort: the lifecycle port being unbound (or its
+  // ensure failing) skips attribution, never the redemption.
+  if (path.endsWith("/payments/agentic/commercial/referral-codes/redeem") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const body = (await request.json().catch(() => ({}))) as { code?: unknown };
+      const codeValue = typeof body.code === "string" ? body.code : "";
+      if (!codeValue) return Response.json({ error: "code is required." }, { status: 400 });
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      // The redeemer's tenant comes from the resolved identity,
+      // never from the request body (session-scoped always).
+      const identity = await resolvePlatformIdentity(
+        { commercial: store, subscriptions: subs },
+        { userId: login, nowMs: Date.now() },
+      );
+      const redeemerTenantId = identity.tenantId ?? login;
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      // Attribution is best-effort: an unbound lifecycle port (or
+      // a failed ensure) skips attribution — it never fails the
+      // redemption (design D8).
+      let lifecycle: D1LifecycleAdapter | null = null;
+      const lifecycleAdapter = createLifecycleAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (lifecycleAdapter) {
+        const lifecycleEnsured = await ensureLifecycle(lifecycleAdapter);
+        lifecycle = lifecycleEnsured ? null : lifecycleAdapter;
+      }
+      const result = await redeemReferralCode(
+        {
+          rules: codes.rules,
+          codes: codes.codes,
+          redemptions: codes.redemptions,
+          balances: codes.balances,
+          lifecycle,
+        },
+        {
+          codeValue,
+          redeemerLogin: login,
+          redeemerTenantId,
+          nowMs: Date.now(),
+        },
+      );
+      ctx.audit("commercial.referral_code.redeemed", "payments", {
+        codeId: result.redemption.codeId,
+        productId: result.redemption.productId,
+        redeemerLogin: login,
+        redeemerTenantId,
+        runsGranted: result.runsGranted,
+        attributionWritten: result.attributionWritten,
+        replayed: result.replayed,
+      });
+      const codeRunsBalance = await codes.balances.getBalance(login);
+      return Response.json({
+        redemption: result.redemption,
+        runsGranted: result.runsGranted,
+        attributionWritten: result.attributionWritten,
+        replayed: result.replayed,
+        codeRunsBalance,
+      });
+    } catch (err: any) {
+      // Credit-stuck: the redemption row was recorded but the
+      // balance credit failed. Audit loudly (the code id +
+      // redeemer + runs let an operator reconcile) and answer
+      // 500 — never a silent success, never a silent retry.
+      if (err instanceof ReferralCodeCreditStuckError) {
+        ctx.audit("commercial.referral_code.credit_stuck", "payments", {
+          codeId: err.codeId,
+          redeemerLogin: err.redeemerLogin,
+          runsGranted: err.runsGranted,
+        });
+        return Response.json({ error: err.message }, { status: 500 });
+      }
+      return referralCodeErrorResponse(err);
+    }
+  }
+
+  // GET /payments/agentic/commercial/referral-codes/mine (self).
+  // The caller's own issued codes, across products (display
+  // prefixes only — the plaintext is never re-rendered).
+  if (path.endsWith("/payments/agentic/commercial/referral-codes/mine") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      const rows = await codes.codes.listCodesByIssuerLogin(login);
+      return Response.json({ codes: rows.map(publicCodeView) });
+    } catch (err: any) {
+      return referralCodeErrorResponse(err);
+    }
+  }
+
+  // POST /payments/agentic/commercial/referral-codes/mine (self).
+  // Self-service issuance: mints a FRESH code each time (the
+  // plaintext is never stored, so re-display is impossible).
+  // Kind is forced to referral, the referrer is forced to the
+  // caller, and the code is unscoped (any tenant may redeem it
+  // — referrals are inherently cross-tenant). Disabled until an
+  // operator creates and activates a user-issuer rule for the
+  // product (fail-closed: 409).
+  if (path.endsWith("/payments/agentic/commercial/referral-codes/mine") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const body = (await request.json().catch(() => ({}))) as { productId?: unknown };
+      const productId = typeof body.productId === "string" ? body.productId.trim() : "";
+      if (!productId) return Response.json({ error: "productId is required." }, { status: 400 });
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      const issued = await issueReferralCode(
+        {
+          rules: codes.rules,
+          codes: codes.codes,
+          redemptions: codes.redemptions,
+          balances: codes.balances,
+          lifecycle: null,
+        },
+        {
+          productId,
+          kind: "referral",
+          issuerLogin: login,
+          issuerKind: "user",
+          referrerUserId: login,
+          tenantScope: null,
+          nowMs: Date.now(),
+        },
+      );
+      ctx.audit("commercial.referral_code.issued", "payments", {
+        codeId: issued.code.id,
+        productId,
+        kind: "referral",
+        issuerKind: "user",
+        issuerLogin: login,
+        tenantScope: null,
+        referrerUserId: login,
+      });
+      return Response.json({ code: issued.code, plaintext: issued.plaintext });
+    } catch (err: any) {
+      return referralCodeErrorResponse(err);
+    }
+  }
+
+  // POST /payments/agentic/commercial/referral-codes/mine/revoke (self).
+  // Revokes one of the caller's own codes. A code issued by
+  // anyone else answers 403 (never 404 — the existence of
+  // another login's code must not leak through this route).
+  if (path.endsWith("/payments/agentic/commercial/referral-codes/mine/revoke") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const body = (await request.json().catch(() => ({}))) as { codeId?: unknown };
+      const codeId = typeof body.codeId === "string" ? body.codeId.trim() : "";
+      if (!codeId) return Response.json({ error: "codeId is required." }, { status: 400 });
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      const before = await codes.codes.getCode(codeId);
+      if (!before) return Response.json({ error: `Unknown referral code ${codeId}.` }, { status: 404 });
+      if (before.issuerLogin !== login) {
+        return Response.json({ error: "Forbidden: only the issuing login may revoke this code." }, { status: 403 });
+      }
+      const revoked = await codes.codes.revokeCode(codeId, Date.now());
+      if (!revoked) return Response.json({ error: `Unknown referral code ${codeId}.` }, { status: 404 });
+      if (before.revokedAtMs === null) {
+        ctx.audit("commercial.referral_code.revoked", "payments", {
+          codeId,
+          productId: revoked.productId,
+          issuerLogin: revoked.issuerLogin,
+          actorLogin: login,
+        });
+      }
+      return Response.json({ code: publicCodeView(revoked) });
+    } catch (err: any) {
+      return referralCodeErrorResponse(err);
+    }
+  }
+
+  // GET /payments/agentic/commercial/referral-codes/balance?userId=... (own-or-operator).
+  // The caller's code-runs balance: one number, family-agnostic,
+  // kept visibly separate from the USD referral-credit balance
+  // (which lives on /referral/balance).
+  if (path.endsWith("/payments/agentic/commercial/referral-codes/balance") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const userId = url.searchParams.get("userId") ?? "";
+      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
+      if (!canAccessAccount(login, userId)) return Response.json({ error: "Forbidden." }, { status: 403 });
+      const codes = await requireReferralCodes();
+      if (codes instanceof Response) return codes;
+      const codeRunsAvailable = await codes.balances.getBalance(userId);
+      return Response.json({ userId, codeRunsAvailable });
+    } catch (err: any) {
+      return referralCodeErrorResponse(err);
     }
   }
 

@@ -445,6 +445,21 @@
  * pinned inventory to 461 entries (458 measured on main
  * before this slice); the delegation sequence is unchanged
  * (same handler, same position).
+ *
+ * Issue #3307 (slice 1) added ten — GET/POST
+ * /payments/agentic/commercial/referral-code-rules, POST
+ * /payments/agentic/commercial/referral-codes/issue, GET
+ * /payments/agentic/commercial/referral-codes, POST
+ * /payments/agentic/commercial/referral-codes/revoke, POST
+ * /payments/agentic/commercial/referral-codes/redeem, GET/POST
+ * /payments/agentic/commercial/referral-codes/mine, POST
+ * /payments/agentic/commercial/referral-codes/mine/revoke, and
+ * GET /payments/agentic/commercial/referral-codes/balance (in
+ * handleAgenticPaymentsRoutes, after the runs-pack routes,
+ * before the subscription-grant route, in source order) —
+ * bringing the pinned inventory to 471 entries (461 measured on
+ * main before this slice); the delegation sequence is unchanged
+ * (same handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -685,6 +700,23 @@ const EXPECTED_INVENTORY = [
   // before the subscription-grant route, in source order).
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/runs-packs/checkout\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/runs-packs/confirm\")",
+  // Issue #3307 (slice 1): ten referral-code routes (in
+  // handleAgenticPaymentsRoutes, after the runs-pack routes,
+  // before the subscription-grant route, in source order) —
+  // GET/POST .../referral-code-rules, POST .../referral-codes/issue,
+  // GET .../referral-codes, POST .../referral-codes/revoke, POST
+  // .../referral-codes/redeem, GET/POST .../referral-codes/mine,
+  // POST .../referral-codes/mine/revoke, GET .../referral-codes/balance.
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-code-rules\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-code-rules\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-codes/issue\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-codes\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-codes/revoke\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-codes/redeem\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-codes/mine\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-codes/mine\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-codes/mine/revoke\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral-codes/balance\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/grant\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/trial\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/billing-checkout\")",

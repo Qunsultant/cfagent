@@ -92,6 +92,7 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     referrerUserId: string;
     referredUserId: string;
     tenantId: string;
+    source?: ReferralAttribution["source"];
   }): Promise<ReferralAttribution> {
     if (!input.referrerUserId || !input.referredUserId || !input.tenantId) {
       throw new Error("referrerUserId, referredUserId, and tenantId are required.");
@@ -112,7 +113,10 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
       referredUserId: input.referredUserId,
       referrerUserId: input.referrerUserId,
       tenantId: input.tenantId,
-      source: "operator",
+      // Additive (#3307): a caller that passes nothing keeps
+      // stamping "operator"; a referral-kind code redemption
+      // passes "code".
+      source: input.source ?? "operator",
       createdAtMs: Date.now(),
     };
     this.attributions.set(input.referredUserId, record);
