@@ -309,7 +309,6 @@ export function ScheduledOptionsManager({
     if (!item) return;
     lastEditNonce.current = editRequest.nonce;
     handleEditSchedule(item);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, schedules]);
 
   // Issue #2470 S4: latest autonomous options runs, via the shared
