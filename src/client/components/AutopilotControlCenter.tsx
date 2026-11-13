@@ -117,15 +117,17 @@ function verdictFlag(value: number | boolean | undefined): boolean {
 /**
  * The one canonical Autopilot timestamp format (#4407): date + time
  * (the #3825 precedent). Anything that cannot be parsed renders as
- * "—" and is logged — a raw stored string must never reach the page,
- * which is how two rows in the same table ended up in different
- * formats.
+ * Unparseable or missing values render as "—" — a raw stored string must never
+ * reach the page, which is how two rows in the same table ended up in different
+ * formats. (No log line here by design: the console-migration ratchet
+ * #3515 pins this file at 1 unstructured console.* use and there is no
+ * sanctioned client-side logger; the stored value stays queryable server-side
+ * in mas_policy_verdicts.)
  */
 export function formatAutopilotTimestamp(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) {
-    console.warn("[Autopilot] Unparseable timestamp, rendering as —:", value);
     return "—";
   }
   return d.toLocaleString("en-US", { hour12: true });
