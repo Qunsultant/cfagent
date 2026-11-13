@@ -98,6 +98,7 @@ import {
 } from "../config/scheduleListModes";
 import { classifyScheduleKind, countSchedulesByKind } from "../services/scheduleKinds";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
+import { resolveScheduleRowColumns } from "../config/scheduleRowModes";
 
 /**
  * Translate a cron expression to human-readable English.
@@ -410,7 +411,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
 
   const genericColumns: TableColumn<ScheduleItem>[] = [
     {
-      key: "job",
+      key: "schedule",
       header: "Schedule",
       render: (s) => (
         <div className="schedule-row-job">
@@ -642,6 +643,15 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     },
   ];
 
+  // Issue #4333 — the columns this surface shows come from the shared row
+  // vocabulary (`src/config/scheduleRowModes.ts`), the same one the goals and
+  // queue tables resolve: the base identity columns and this list's own
+  // `scope` lead, the action column closes. A deployment can hide a column
+  // from config; the order is the vocabulary's.
+  const visibleGenericColumns: TableColumn<ScheduleItem>[] = genericColumns.filter((column) =>
+    resolveScheduleRowColumns("list").includes(column.key as never),
+  );
+
   return (
     <div className="schedules-panel">
       <ScheduleDetailModal
@@ -774,7 +784,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             {loading && <span className="schedule-row-muted">Refreshing…</span>}
           </header>
           <Table
-            columns={genericColumns}
+            columns={visibleGenericColumns}
             rows={filtered}
             rowKey={(s) => s.id}
             rowClassName="schedule-item-card"

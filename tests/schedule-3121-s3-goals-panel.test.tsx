@@ -138,16 +138,16 @@ describe("S3 goals view — provenance + one ledger read (#3121)", () => {
     expect(container.textContent).toContain("provenance not recorded");
   });
 
-  it("renders recent goal runs from the consolidated ledger with §4 linkage", async () => {
+  it("hands goal runs to the one ledger instead of listing them", async () => {
     await renderPanel();
     expect(container.textContent).toContain("Recent goal runs");
-    // Linked run: trigger + ids render.
-    expect(container.textContent).toContain("job_g-1");
-    expect(container.textContent).toContain("trigger scheduled");
-    // Legacy run: unknown trigger, null ids as "—", never dropped.
-    expect(container.textContent).toContain("trigger unknown");
-    expect(container.textContent).toContain("budget check rejected: over budget");
-    expect(container.textContent).toContain("g-2");
+    // The ledger is the one run list (#4333): the section reports what is
+    // recorded — both rows, the legacy row included — and links to it.
+    expect(container.textContent).toContain("2 goal run(s) recorded in the run ledger");
+    expect(container.textContent).toContain("Open goal runs in the run ledger");
+    // The rows themselves are the ledger's, never a second list here.
+    expect(container.textContent).not.toContain("job_g-1");
+    expect(container.textContent).not.toContain("trigger scheduled");
   });
 
   it("a ledger-read failure never fails the goals list", async () => {
