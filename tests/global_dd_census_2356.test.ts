@@ -555,33 +555,35 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
     layer: ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts"],
   },
   unified_schedules: {
-    // Issue #3121 Phase 2 (#3124) — the index-schema module is a
-    // layer writer like masRetentionIndexSchema.ts below: DDL only
-    // (CREATE INDEX IF NOT EXISTS), never a row write.
-    layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts", "src/data/unifiedScheduleIndexSchema.ts"],
+    // Issue #3121 Phase 2 (#3124) — the catalogue is a layer writer
+    // like the index-schema module was: DDL only (CREATE INDEX IF
+    // NOT EXISTS), never a row write. #4282 P2a moved the index
+    // statement from unifiedScheduleIndexSchema.ts into the ORM
+    // catalogue (src/data/schemaComponent/ormCatalogue.ts).
+    layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts", "src/data/schemaComponent/ormCatalogue.ts"],
   },
   mas_enrichment_runs: { layer: ["src/data/doSqliteEnrichmentAdapter.ts"] },
   mas_messages: {
-    layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/ormSchema.ts", "src/data/masRetentionIndexSchema.ts"],
+    layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/schemaComponent/ormCatalogue.ts"],
   },
   mas_events: {
-    layer: ["src/data/ormSchema.ts", "src/data/masRetentionIndexSchema.ts"],
+    layer: ["src/data/schemaComponent/ormCatalogue.ts"],
     bypass: { "src/agents/routes/maintenance.ts": "#2489 auditConfirm-gated selective wipe" },
   },
-  mas_memory: { layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/ormSchema.ts"] },
-  mas_watchlists: { layer: ["src/data/ormSchema.ts"] },
+  mas_memory: { layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/schemaComponent/ormCatalogue.ts"] },
+  mas_watchlists: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
   mas_transactions: {
-    layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/ormSchema.ts"],
+    layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/schemaComponent/ormCatalogue.ts"],
   },
-  mas_trades: { layer: ["src/data/ormFacade.ts"] },
-  mas_categories: { layer: ["src/data/ormFacade.ts"] },
-  mas_external_ads: { layer: ["src/data/ormFacade.ts"] },
+  mas_trades: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
+  mas_categories: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
+  mas_external_ads: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
   mas_ads: {
-    layer: ["src/data/doSqliteMarketplaceAdapter.ts", "src/data/ormSchema.ts"],
+    layer: ["src/data/doSqliteMarketplaceAdapter.ts", "src/data/schemaComponent/ormCatalogue.ts"],
   },
-  mas_referrals: { layer: ["src/data/ormSchema.ts"] },
-  webhook_replay_nonces: { layer: ["src/data/ormFacade.ts"] },
-  mas_options_chain_cache: { layer: ["src/data/ormFacade.ts"] },
+  mas_referrals: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
+  webhook_replay_nonces: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
+  mas_options_chain_cache: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
   mas_reports: { layer: ["src/data/doSqliteCanonicalReportStoreAdapter.ts"] },
   mas_goals: { layer: ["src/data/doSqliteGoalScenarioAdapter.ts"] },
   mas_scenarios: { layer: ["src/data/doSqliteGoalScenarioAdapter.ts"] },
@@ -618,6 +620,13 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   research_runs: { layer: ["src/data/doSqliteResearchStoreAdapter.ts"] },
   research_evaluations: { layer: ["src/data/doSqliteResearchStoreAdapter.ts"] },
   screen_run_locks: { layer: ["src/data/doSqliteScreenRunLockAdapter.ts"] },
+  // #4282 P2a: the schema authority for the ORM + index-schema
+  // tables above moved from ormSchema.ts / ormFacade.ts / the
+  // index-schema modules to the ORM catalogue
+  // (src/data/schemaComponent/ormCatalogue.ts) — the writer set is
+  // unchanged in kind (port + schema authority), only the file moved;
+  // the authority consolidates from two files (ormSchema.ts +
+  // masRetentionIndexSchema.ts) into one for mas_messages/mas_events.
   // #4282 P1: the schema authority for these tables moved from
   // migrationRunner.ts to the D1 catalogue
   // (src/data/schemaComponent/d1Catalogue.ts) — the writer set is
