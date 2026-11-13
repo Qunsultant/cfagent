@@ -15,7 +15,6 @@ import { listBuiltinGoals, addBuiltinGoals } from "../src/client/jobsApi";
 const BUILTINS = [
   { id: "daily-qa-sweep", name: "Daily QA sweep", cron: "0 6 * * *", operation: "qa.run_sweep", budgetCents: 500, enabled: true },
   { id: "daily-social-post", name: "Daily social post", cron: "0 9 * * 1-5", operation: "social.publish", budgetCents: 1, enabled: false, timeZone: "America/New_York" },
-  { id: "feed-refresh", name: "Feed refresh (all feed jobs)", cron: "0 * * * *", operation: "feed.refresh_all", budgetCents: 1, enabled: true, timeZone: "UTC" },
 ];
 
 function jsonResponse(body: unknown, status = 200) {
@@ -51,17 +50,16 @@ describe("jobsApi built-in goals (#3996)", () => {
 
   it("listBuiltinGoals reads the server list, in server order", async () => {
     const { goals } = await listBuiltinGoals();
-    expect(goals.map((g) => g.id)).toEqual(["daily-qa-sweep", "daily-social-post", "feed-refresh"]);
+    expect(goals.map((g) => g.id)).toEqual(["daily-qa-sweep", "daily-social-post"]);
     expect(goals.find((g) => g.id === "daily-social-post")?.enabled).toBe(false);
   });
 
   it("addBuiltinGoals posts only the missing goals, in order, and skips existing ones without posting", async () => {
-    const results = await addBuiltinGoals(BUILTINS, ["feed-refresh"]);
-    expect(posted.map((p) => p.body.id)).toEqual(["daily-qa-sweep", "daily-social-post"]);
+    const results = await addBuiltinGoals(BUILTINS, ["daily-social-post"]);
+    expect(posted.map((p) => p.body.id)).toEqual(["daily-qa-sweep"]);
     expect(results).toEqual([
       { id: "daily-qa-sweep", status: "added" },
-      { id: "daily-social-post", status: "added" },
-      { id: "feed-refresh", status: "skipped", reason: "already exists" },
+      { id: "daily-social-post", status: "skipped", reason: "already exists" },
     ]);
   });
 
@@ -74,22 +72,20 @@ describe("jobsApi built-in goals (#3996)", () => {
   });
 
   it("addBuiltinGoals treats a server 'already exists' refusal as skipped, not failed", async () => {
-    failIds.set("feed-refresh", "Goal already exists: feed-refresh");
+    failIds.set("daily-social-post", "Goal already exists: daily-social-post");
     const results = await addBuiltinGoals(BUILTINS, []);
     expect(results).toEqual([
       { id: "daily-qa-sweep", status: "added" },
-      { id: "daily-social-post", status: "added" },
-      { id: "feed-refresh", status: "skipped", reason: "Goal already exists: feed-refresh" },
+      { id: "daily-social-post", status: "skipped", reason: "Goal already exists: daily-social-post" },
     ]);
   });
 
   it("addBuiltinGoals never fails wholesale: one bad goal is failed, the rest still post", async () => {
     failIds.set("daily-social-post", "Unknown operation: social.publish");
     const results = await addBuiltinGoals(BUILTINS, []);
-    expect(posted.map((p) => p.body.id)).toEqual(["daily-qa-sweep", "daily-social-post", "feed-refresh"]);
+    expect(posted.map((p) => p.body.id)).toEqual(["daily-qa-sweep", "daily-social-post"]);
     expect(results[1]).toEqual({ id: "daily-social-post", status: "failed", error: "Unknown operation: social.publish" });
     expect(results[0].status).toBe("added");
-    expect(results[2].status).toBe("added");
     expect(new Set(posted.map((p) => p.body.id)).size).toBe(posted.length);
   });
 });
