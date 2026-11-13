@@ -721,7 +721,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "manage_session_memory",
       "get_audit_events",
     ],
-    commandSources: [{ file: "src/mcps/openaimp/commands.ts", kind: "readonly-name" }],
+    commandSources: [{ file: "src/mcps/openaimp/commands.ts", kind: "readonly-name" }, { file: "src/mcps/openaimp/jobStatusCommands.ts", kind: "readonly-name" }],
     notes:
       "Grounding caveat (survey §8 row 1, verified by S14/#2417): knowledge_search and query_platform_knowledge ground on the in-repo platform-knowledge corpus (src/services/platformKnowledge.ts) — a shipped, structured knowledge base of the platform's own capabilities, not the AI Search instance. The survey's caution stands: that grounding must not be counted as a search surface. The AI Search surfaces are the ai-search-service and ai-search-platform families.",
   },
