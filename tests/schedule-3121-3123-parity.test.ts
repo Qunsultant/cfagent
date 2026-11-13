@@ -595,11 +595,16 @@ describe("3123-P09 worker duties as records", () => {
 
 describe("3123-P10 before/after counts", () => {
   it("one unified table; zero live paused_schedules references; one ledger record route", () => {
-    // The table-name literal lives in exactly five declared places:
+    // The table-name literal lives in exactly six declared places:
     // the port const (the definition), the maintenance wipe surface
-    // (route + client table list, keyed by table name), and the
-    // retention registry (keyed by table name). Adapters reference
-    // the const, never the literal.
+    // (route + client table list, keyed by table name), the
+    // retention registry (keyed by table name), and — since #4282 P2a
+    // — the ORM catalogue (src/data/schemaComponent/ormCatalogue.ts),
+    // whose unified-schedules index entry names the table in its
+    // `table` field. (The index-schema module it replaced referenced
+    // the table only via the UNIFIED_SCHEDULES_TABLE const, so the
+    // literal did not live there.) Adapters reference the const,
+    // never the literal.
     const literalHomes = liveSrcFiles()
       .filter((f) =>
         readFileSync(join(REPO_ROOT, f), "utf8").includes('"unified_schedules"'),
@@ -609,6 +614,7 @@ describe("3123-P10 before/after counts", () => {
       "src/agents/routes/maintenance.ts",
       "src/client/AdminQueueWipePanel.tsx",
       "src/client/adminQueueApi.ts",
+      "src/data/schemaComponent/ormCatalogue.ts",
       "src/data/unifiedSchedulePorts.ts",
       "src/privacy/privacyDsar.ts",
     ]);
