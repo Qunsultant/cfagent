@@ -1448,14 +1448,21 @@ Product & experience (CPO; parent programme #3695):
 | OWASP agentic safety | Agentic safety (prompt injection, excessive agency, tool misuse) as a product requirement | Filed | #3832 (S9) |
 | Declarative schema-driven views | Views declared as schema and rendered by the shell — one view definition, every surface | Filed | #3835 (S12) |
 
-Finance & capital (CFO; parent programme #2528):
+Finance & capital (CFO; parent programmes #2528, #4050, #4133, #4148):
+
+The Finance & capital platform covers the platform's cost drivers, financial planning and analysis, cost attribution, and the financial controls over screening, scheduling, and trading-adjacent behaviour. Its frameworks are COSO, GAAP/IFRS where applicable, FP&A, activity-based costing, and FinOps. The CFO role is stewardship only — not legal officer, fiduciary, signatory, auditor, or investment adviser; no bank, payment, or trading authority; no invented financial data.
+
+The Finance & capital (CFO) rows below were updated 2026-11-13; their statuses are as of that date.
 
 | Product | Purpose | Status | Tracking |
 | --- | --- | --- | --- |
-| CFO operating plan & COBIT balanced scorecard | The one-page CFO operating plan and the COBIT balanced scorecard (Financial perspective) over the platform's cost drivers | Partial — scorecard Live on main (Financial perspective only); paid-service costs GAP until billing actuals are recorded; #2474 closed but not Done | #2474; #2475 |
-| Options Screener product programme | Options Screener as a product with its own sub-menu and page, per-sub-product flags, and a human-approved product-mix review loop | Partial — product line Live (flags, nav, product-mix review); remaining slices Filed | #2528 |
-| Broker & provider neutrality | The tenant's broker and data-provider selections governing every run, job, and message — no silent fallback to a single broker | Partial — order page and scheduled jobs merged; remaining slices Filed | #3460; #3216 |
-| Cost attribution (FinOps) | Per-agent and per-workflow cost attribution; paid-service billing actuals | Filed — no cost-attribution mechanism defined yet; paid-service costs GAP | #2474 |
+| CFO operating plan & COBIT balanced scorecard | The one-page CFO operating plan and the COBIT balanced scorecard (Financial perspective) over the platform's cost drivers | Partial — scorecard Live on main (Financial perspective only); paid-service costs GAP until billing actuals are recorded; #2474 closed but not Done; close-out decision (reopen / follow-up / accept closure) still pending | #2474; #2475 |
+| Options Screener product programme | Options Screener as a product with its own sub-menu and page, per-sub-product flags, and a human-approved product-mix review loop | Partial — product line Live (flags, nav, product-mix review loop merged); canonical store leg landed; remaining slices Filed; J-stack readiness verdict NOT READY (gap inventory 2026-11-10); #2612 parked awaiting a quieter window on main | #2528; #3550 |
+| Broker & provider neutrality | The tenant's broker and data-provider selections governing every run, job, and message — no silent fallback to a single broker | Partial — order page and scheduled jobs merged; G1–G4 slices still open; platform-wide S-slices proposed, not yet filed, pending S0 decisions | #3460; #3216 |
+| Cost attribution (FinOps) | Per-agent and per-workflow cost attribution; paid-service billing actuals | Filed — no cost-attribution mechanism defined yet; paid-service costs GAP; Fin Studio Filed | #2474; #3774 |
+| GitOps | Publish early, verify in CI, merge through the queue — one set of rules for every lane | Partial — epic filed 2026-11-11; gitops.md amended (PR #4059 merged); strict required checks ON; Tier 1 shared script deferred (#4082) | #4050 |
+| Operational Excellence | Runtime inventory, observability, and the copilot's execution-mode and autonomous-loop behaviour | Partial — runtime inventory doc on main (PR #4147); observability dashboard filed (#4145); copilot sync/async config and loop diagnosis filed (#4136; #4137) | #4133 |
+| Stock Copilot externalization | Every copilot behaviour externalized, queryable, bounded, and configurable through a prompt — money path, risk limits, learning loop, RSI/ASI, goal support | Filed — epic filed, 14 sub-issues #4150–#4163; implementation paused at filing only; RSI/ASI definition blocked on the owner | #4148 |
 
 Data & knowledge (CDO):
 
@@ -1977,7 +1984,7 @@ owner's word, not on this document.
   (this issue, #3851); the Product & experience (CPO)
   platform's products defined in §12.2 (this issue, #3856);
   the Finance & capital (CFO) platform's products defined in
-  §12.2 (this issue, #3862); the Data & knowledge (CDO)
+  §12.2 (this issue, #3862; refreshed 2026-11-13, #4461); the Data & knowledge (CDO)
   platform's products defined in §12.2 (this issue, #3864);
   the Legal & obligation (CLO) platform's products defined in
   §12.2 (this issue, #3867);
