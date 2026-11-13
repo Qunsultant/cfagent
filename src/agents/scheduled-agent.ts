@@ -95,6 +95,7 @@ import { createSocialStoresFromNamespace } from "./social/durableStores";
 import {
   buildScheduledAgentChainSurfaceView,
   createScheduledAgentPipelineControl,
+  createScheduledAgentStageEventStore,
   declarePipelineTasks,
   dispatchAnalyzeAfterEnrichCompletion,
   dispatchDeliverAfterGenerateCompletion,
@@ -123,6 +124,7 @@ import type {
   JobDefinition,
 } from "../data/jobPipelinePorts";
 import type { JobStagesRead, JobStatusView } from "../services/jobPipelineEngine";
+import type { JobStageEventRecord } from "../data/jobStageEventPorts";
 import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRead";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import {
@@ -1045,6 +1047,22 @@ export class ScheduledAgent extends PortThink {
       }
     }
     return out;
+  }
+
+  /**
+   * Issue #4360 — persist one stage publication durably. The queue
+   * consumer calls this once per `job.stage.*` envelope; the store's
+   * dedup makes a re-delivery a no-op rather than a second row.
+   */
+  async recordStageEvent(event: JobStageEventRecord): Promise<boolean> {
+    const ctx = this.pipelineContext();
+    return createScheduledAgentStageEventStore(ctx).record(event);
+  }
+
+  /** Issue #4360 — a run's recorded stage events, in recorded order. */
+  async listStageEvents(runId: string): Promise<JobStageEventRecord[]> {
+    const ctx = this.pipelineContext();
+    return createScheduledAgentStageEventStore(ctx).listByRun(runId);
   }
 
   /** Every pipeline job definition this host manages. */

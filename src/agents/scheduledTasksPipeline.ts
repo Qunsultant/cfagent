@@ -48,6 +48,8 @@ import {
   SHARED_ORCHESTRATOR_INSTANCE,
 } from "../security/serviceIdentity";
 import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
+import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
+import type { JobStageEventStore } from "../data/jobStageEventPorts";
 import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import {
@@ -436,6 +438,17 @@ function feedRunSettledObserverFor(ctx: ScheduledTasksPipelineContext) {
       await door.recordFeedJobOutcome(input);
     },
   });
+}
+
+/**
+ * Issue #4360 — the host's durable stage-event store. The ScheduledAgent
+ * DO owns the pipeline, so its SQLite is the store's home; the queue
+ * consumer's persist call lands here through the agent's RPC surface.
+ */
+export function createScheduledAgentStageEventStore(
+  ctx: ScheduledTasksPipelineContext,
+): JobStageEventStore {
+  return createDoSqliteJobStageEventStore(pipelineSql(ctx));
 }
 
 export function createScheduledAgentPipelineControl(

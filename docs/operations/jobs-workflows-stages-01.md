@@ -359,6 +359,23 @@ view.
 | `saga.*` | `src/agents/routes/sagaStatus.ts:70-95` | `saga.started`, `saga.payment_*`, `saga.screen_*`, `saga.journey_*`, `saga.trade_*`, `saga.failed`, `saga.outcome_notice`, `saga.ended`. |
 | `reconcile` | `src/agents/orchestrator/shardJobReconcile.ts:100-107` | `eventKind: "reconcile"`, `detailJson: report` — one best-effort tenant-wide audit event per reconcile run. |
 
+### Stage events — the durable per-stage record (#4360)
+
+The engine publishes one `job.stage.<action>` message per stage transition on
+the `job-pipeline-events` queue, addressed by `(runId, stageId)` and carrying
+the #2869 claim key (`runId::jobs::stageId`). `started` is published the moment
+a unit starts — after the checkpoint is written, never before — and carries
+`startedAt`; every terminal action (`completed`, `failed`, `timed_out`,
+`cancelled`, `retired`) carries `endedAt` alongside it. Both stamps are the
+checkpoint's own fields (#4359): the event never invents a clock.
+
+The consumer persists each publication in `job_stage_events` (the
+ScheduledAgent's DO SQLite, `src/data/doSqliteJobStageEventAdapter.ts`), keyed
+by claim key + action + unit + instant, so a re-delivery is ignored while a
+stage's start and its terminal event both survive. A store failure returns
+`retry`, never an ack-and-drop. A stage with a `started` row and no terminal row
+is visibly in flight — or stuck — without guessing.
+
 ## Failure modes
 
 - **A corrupt stored `result_json` 500s the detail view but not the
