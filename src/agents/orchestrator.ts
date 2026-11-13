@@ -2214,6 +2214,14 @@ export class OrchestratorAgent extends PortThink {
     outcome: ScreenerRunOutcome,
     userLogin: string,
     deliveryId?: string,
+    /**
+     * Issue #4280 ([One engine] #3550 S5): the engine job id for a
+     * chained run — the bridge uses it as the run's chain id instead
+     * of minting a fresh one, so the follow-up chain groups under
+     * the engine job in Workflow Runs. Absent = the bridge mints
+     * one, as before.
+     */
+    chainId?: string,
   ): Promise<void> {
     // A caller-supplied deterministic deliveryId lets a
     // retried deliver step converge in the outcome sink
@@ -2222,6 +2230,8 @@ export class OrchestratorAgent extends PortThink {
       this.asyncJobsContext(),
       deliveryId ? { ...outcome, deliveryId } : outcome,
       userLogin,
+      undefined,
+      chainId,
     );
   }
 

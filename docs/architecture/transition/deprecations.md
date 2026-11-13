@@ -153,3 +153,41 @@ slice.
   §15 draft.
 - Deletion condition: zero consumers plus an owner decision plus a gate
   amendment; deletion is never part of a program slice.
+
+## 2026-11-12 — scheduled sharded chain onto the engine (#4280)
+
+- Function: `startScheduledShardedChain` → frozen in place as
+  `src/workflows/startScheduledShardedChain.deprecated.ts` (no rename;
+  the module IS the deprecation marker, with an `@deprecated` tag
+  naming the successor)
+- Date: 2026-11-12
+- Reason: Issue #4280 (sub-issue of #3550, [One engine] S5) routes the
+  scheduled sharded chain through the one engine seam
+  (`submitStockScreenViaEngine`, `src/workflows/runStockScreenViaEngine.ts`)
+  — the chain's submit-and-return contract, the engine job id IS the
+  chain id, and the delivery envelope + stageChain ride the workflow
+  command to the deliver stage. The G7 note's three conditions are now
+  met (stageChain-in-workflow, chain-run-model migration, channel
+  plumbing). No scheduled screen executes outside the engine after
+  this slice. The function is frozen, not deleted, and keeps the
+  broker's old chain start (planFeedStart + the shardSubmit async-job
+  port) exactly as it was.
+- Replacement: `submitStockScreenViaEngine`
+  (`src/workflows/runStockScreenViaEngine.ts`), called by
+  `ScheduledTasksService.autonomousMarketScreenSharded` with
+  `jobId = chainId`. Chain-mode scheduled goal screens ride the goal
+  workflow instead (`buildGoalScreenCommand` carries `stageChain` +
+  `slackChannel`; the workflow's deliver stage bridges).
+- Consumers at deprecation: no production callers remain — the one live
+  caller (`autonomousMarketScreenSharded`) was migrated in the same
+  slice. Tests that pin the retired shape keep calling it:
+  `tests/g7_callers_2914.test.ts` (chain-start describe),
+  `tests/scheduled_sharded_chain_4280.test.ts` (no-live-chain-calls
+  pin allows the deprecated module + tests).
+- Known remaining direct call (NOT retired here, out of scope):
+  `planFeedStart` (`src/services/shardJobs.ts`) is now unreachable in
+  live code — its only caller is the deprecated module. It is kept,
+  never deleted; the options sharded chain still uses the `shardSubmit`
+  port (`autonomousOptionsAnalysis`), which stays.
+- Deletion condition: zero consumers plus an owner decision plus a gate
+  amendment; deletion is never part of a program slice.

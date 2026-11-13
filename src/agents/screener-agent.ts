@@ -156,6 +156,8 @@ import {
 import type { OptionScreenerFilter } from "../types";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
 import type { GoalScreenCommand } from "../workflows/workflowPorts";
+import type { StockScreenDelivery } from "../workflows/stockScreenRunSpec";
+import type { StageChainConfig } from "../types";
 import type {
   GoalDrivenScreenResult,
   OptionsWorkflowDeps,
@@ -424,7 +426,19 @@ export interface ScreenerServeStageOutput extends ScreenerStoreStageOutput {
 }
 
 export interface ScreenerDeliverDoor {
-  (payload: unknown, userLogin: string, opts?: { goalScreen?: GoalScreenCommand; deliveryId?: string }): Promise<void>;
+  (
+    payload: unknown,
+    userLogin: string,
+    opts?: {
+      goalScreen?: GoalScreenCommand;
+      deliveryId?: string;
+      /** Issue #4280 ([One engine] #3550 S5): see ScreenerStepDeps["deliverOutcome"]. */
+      delivery?: StockScreenDelivery;
+      stageChain?: StageChainConfig;
+      chainId?: string;
+      canonicalReportId?: string;
+    },
+  ): Promise<void>;
 }
 
 export interface ScreenerDeliverStageInput {
@@ -432,6 +446,11 @@ export interface ScreenerDeliverStageInput {
   deliver: boolean;
   deliveryId: string;
   goalScreen?: GoalScreenCommand;
+  /** Issue #4280 ([One engine] #3550 S5): carried from the command params (market) — see the deliver step. */
+  delivery?: StockScreenDelivery;
+  stageChain?: StageChainConfig;
+  /** Issue #4280: the engine job id — the chain id for chained runs. */
+  chainId?: string;
   deliverOutcome: ScreenerDeliverDoor;
 }
 
@@ -2860,6 +2879,14 @@ export class ScreenerAgent extends PortThink {
       await input.deliverOutcome(serveOutput.payload, serveOutput.userLogin, {
         ...(input.goalScreen ? { goalScreen: input.goalScreen } : {}),
         deliveryId: input.deliveryId,
+        // Issue #4280 ([One engine] #3550 S5): the deliver step's
+        // envelope + stage chain ride to the door; the canonical
+        // report id the serve stage verified rides too (goal runs
+        // bridge on it — the canonical row IS the artifact).
+        ...(input.delivery ? { delivery: input.delivery } : {}),
+        ...(input.stageChain ? { stageChain: input.stageChain } : {}),
+        ...(input.chainId ? { chainId: input.chainId } : {}),
+        ...(serveOutput.reportId ? { canonicalReportId: serveOutput.reportId } : {}),
       });
       delivered = true;
     } catch (err) {

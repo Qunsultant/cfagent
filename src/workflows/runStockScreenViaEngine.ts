@@ -74,6 +74,7 @@ import {
   workflowStatusUrl,
   WorkflowError,
   type WorkflowCollation,
+  type WorkflowHandle,
   type WorkflowJobCommand,
   type WorkflowPort,
   type WorkflowShard,
@@ -368,9 +369,21 @@ export type RunStockScreenViaEngine = typeof runStockScreenViaEngine;
  * every outcome returns as results — starting anything else would
  * run the screen twice.
  */
-export async function runStockScreenViaEngine(
-  input: RunStockScreenViaEngineInput,
-): Promise<EngineScreenRunOutcome> {
+/**
+ * The shared start: gates 1–3 (ND backstop, in-flight probe, quota) +
+ * workflow start, no awaiting. Both completion modes run it: the await
+ * variant polls the started instance to its collation; the submit
+ * variant (issue #4280) returns the handle at once — the scheduled
+ * sharded chain's contract is submit-and-return, and the tick must not
+ * block awaiting an ALL-universe run.
+ */
+async function startStockScreenViaEngine(input: RunStockScreenViaEngineInput): Promise<{
+  command: WorkflowJobCommand;
+  handle: WorkflowHandle;
+  ports: WorkflowPort;
+  trigger: "manual" | "scheduled";
+  startedAtIso: string;
+}> {
   const { env, spec, userLogin } = input;
   const nowMs = input.nowMs ?? (() => Date.now());
   const startedAtIso = new Date(nowMs()).toISOString();
@@ -458,6 +471,47 @@ export async function runStockScreenViaEngine(
       `Stock screen workflow start failed for job ${command.jobId}: ${err instanceof Error ? err.message : String(err)}. No fallback run was started.`,
     );
   }
+
+  return { command, handle, ports, trigger, startedAtIso };
+}
+
+/**
+ * Issue #4280 ([One engine] #3550 S5) — submit one market screen
+ * through the engine WITHOUT awaiting it: the shared gates + start,
+ * then the handle at once. The scheduled sharded chain's contract is
+ * submit-and-return (queued + chainId, consumed downstream by
+ * scheduledCallbacks); the tick must not block awaiting an
+ * ALL-universe run. Same input as the await variant; `jobId` comes
+ * from the command (callers pass the chain id as the override).
+ */
+export async function submitStockScreenViaEngine(
+  input: RunStockScreenViaEngineInput,
+): Promise<{ jobId: string; workflowId: string }> {
+  const { command, handle } = await startStockScreenViaEngine(input);
+  return { jobId: command.jobId, workflowId: handle.workflowId };
+}
+
+/** The submit variant's function type, for call-site injectables (see RunStockScreenViaEngine). */
+export type SubmitStockScreenViaEngine = typeof submitStockScreenViaEngine;
+
+/**
+ * Run one market screen through the engine: gates -> start ->
+ * awaited collation -> ScreenerRunResults. Throws WorkflowError
+ * (coded) for pre-start refusals that must never start a run
+ * (port unavailable, start failure, ND backstop) and
+ * ScreenAlreadyRunningError / quota errors for the gate refusals
+ * (callers map those to their existing 429s). Once a run exists,
+ * every outcome returns as results — starting anything else would
+ * run the screen twice.
+ */
+export async function runStockScreenViaEngine(
+  input: RunStockScreenViaEngineInput,
+): Promise<EngineScreenRunOutcome> {
+  const { env } = input;
+  const nowMs = input.nowMs ?? (() => Date.now());
+  const tenantId = workflowTenantId(env);
+  const { command, handle, ports, trigger, startedAtIso } = await startStockScreenViaEngine(input);
+  const shards = command.shards;
 
   const readHistory =
     input.readWorkflowJobHistory ?? ((t: string, c: string) => readJobHistory(env, t, c));

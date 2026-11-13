@@ -37,7 +37,12 @@ import type { ScreenerTrace } from "./screenerTrace";
 import { withRetry } from "./resilience";
 import { resolvePipelinePolicy } from "./pipelinePolicy";
 import { planScheduledScreen } from "../workflows/stockScreenPlanner";
-import { runStockScreenViaEngine, type RunStockScreenViaEngine } from "../workflows/runStockScreenViaEngine";
+import {
+  runStockScreenViaEngine,
+  submitStockScreenViaEngine,
+  type RunStockScreenViaEngine,
+  type SubmitStockScreenViaEngine,
+} from "../workflows/runStockScreenViaEngine";
 import { classifyScreenFailure, logScreenRunEvent } from "../workflows/screenRunAspects";
 import { DynamicMarketScreener } from "../trading";
 import { TradingPlatformRegistry, platformChainSource } from "../trading";
@@ -530,6 +535,13 @@ export class ScheduledTasksService {
      * seam — it never selects a different engine.
      */
     private runStockScreenViaEngine?: RunStockScreenViaEngine,
+    /**
+     * Issue #4280: the one engine seam's submit-only entry
+     * (submitStockScreenViaEngine) the scheduled sharded screen
+     * submits through. Same injectable rule as its await sibling
+     * above — tests substitute a fake; production omits it.
+     */
+    private submitStockScreenViaEngine?: SubmitStockScreenViaEngine,
   ) {}
 
   /**
@@ -979,16 +991,18 @@ export class ScheduledTasksService {
    * No screener.completed event is published at submission: the
    * run has no outcome yet, and publishing one would make the
    * follow-up bridge record a second main job + a second report
-   * chain (double delivery). The chain IS the record — its
+   * chain (double delivery). The engine job IS the record — its
    * completion announces via the tracked pipeline's delivered
-   * notifications, and its store shards write the mas_reports
+   * notifications, and its store stage writes the mas_reports
    * rows. The caller (scheduledCallbacks) records last_runs with
-   * the chain id and skips the canonical-row write, which the
-   * store shards own.
+   * the chain id (= the engine job id) and skips the canonical-row
+   * write, which the store stage owns.
    *
-   * Requires the shard-submit port (wired by the orchestrator to
-   * submitAsyncJob). Without it the run fails honestly instead of
-   * running unsharded under a sharded label.
+   * Issue #4280 ([One engine] #3550 S5): submits through the one
+   * engine seam (submit-only — the chain's submit-and-return
+   * contract). The seam fails honestly with a coded WorkflowError
+   * when the workflow port is unavailable; the run never executes
+   * unsharded under a sharded label.
    */
   private async autonomousMarketScreenSharded(
     options: {
@@ -1007,7 +1021,7 @@ export class ScheduledTasksService {
       /** Issue #3655: the run's effective provider, recorded on the chain at submission. */
       provider?: import("../trading").StockScreenProvider;
       /** Issue #3655: tenant broker, recorded on the chain at submission. */
-      brokerId?: string;
+      brokerId?: import("../trading").BrokerId;
       /** Issue #3655: tenant data provider, recorded on the chain at submission. */
       dataProviderId?: string;
       /** Issue #3655: live/paper mode, recorded on the chain at submission. */
@@ -1022,10 +1036,10 @@ export class ScheduledTasksService {
     // the one planner, like the monolithic path (Slice 5) — same
     // values (universe default TECH, sector precedence request >
     // filters > ALL), derived once instead of by hand. Issue
-    // #2914 (G7): the chain submission below is the broker's
-    // scheduled-async branch (startScheduledShardedChain,
-    // feed-start submission + the shardSubmit async-job port,
-    // #2621 mas_async_jobs reused as-is).
+    // #4280 ([One engine] #3550 S5): the submission below is the
+    // engine seam's submit-only entry (submitStockScreenViaEngine)
+    // — the broker's chain start is retired; the engine job id
+    // IS the chain id.
     const shardedPlan = planScheduledScreen(
       {
         sector: options.sector,
@@ -1038,36 +1052,12 @@ export class ScheduledTasksService {
     );
     const universe = shardedPlan.universe;
     const sector = shardedPlan.sector;
-    if (!this.shardSubmit) {
-      // Issue #1412 (mirror of #1369): a missing-port run is a
-      // failure, not a quiet return — throw so the caller's catch
-      // runs the full failure path (audit + session message +
-      // screener.failed bus event). The run still never executes
-      // unsharded under a sharded label.
-      // Issue #2860: the chain bypasses runScreen, so its
-      // submission failures carry the funnel's classification
-      // + structured log event HERE, at the chain's own join
-      // point (same double-record shape as the inner catch
-      // below: this audit is the submission-attempt record,
-      // distinct from the caller run-failure record).
-      const portError = new Error("Sharded runs require the async-job submission port; run unsharded or configure the host.");
-      this.audit("screener.screen_failed", {
-        sector: sector || "ALL",
-        error: portError.message,
-        sharded: true,
-        classification: classifyScreenFailure(portError),
-      });
-      logScreenRunEvent({
-        event: "screen.failed",
-        trigger: options.trigger || "scheduled",
-        universe,
-        userLogin,
-        traceId: crypto.randomUUID(),
-        classification: classifyScreenFailure(portError),
-        error: portError.message,
-      });
-      throw portError;
-    }
+    // Issue #4280 ([One engine] #3550 S5): the shard-submit port
+    // guard is gone with the chain — the seam owns the unavailable
+    // failure now (coded WorkflowError when the workflow port cannot
+    // be built), and the try/catch below audits + rethrows it on the
+    // same failure path. The run still never executes unsharded
+    // under a sharded label.
     // Issue #1993: sharded chains bypass runScreen, so they never
     // acquire the run lock. Refuse submission while a monolithic run
     // holds it (probed on the same per-owner ScreenerAgent stub) or
@@ -1082,6 +1072,10 @@ export class ScheduledTasksService {
     // visible) instead of proceeding ungated — the pre-#2860
     // availability choice is gone; the risk-accepted alternative
     // was not taken (user decision 2026-11-06).
+    // Issue #4280: the probes still run first, unchanged — the
+    // active-chain probe additionally guards the deploy-transition
+    // window (a pre-migration chain still in flight); the seam's
+    // own in-flight probe (gate 2) covers in-flight engine jobs.
     let lockHeld = false;
     try {
       const running = await this.getScreenerAgent(userLogin).isScreenRunning(universe, userLogin);
@@ -1134,43 +1128,57 @@ export class ScheduledTasksService {
     // correlation id — generated before the try so the
     // catch's failed event can carry it too (a UUID
     // generation has no side effects, so this moves
-    // nothing else).
+    // nothing else). Issue #4280: the chain id IS the engine
+    // job id (commandOverrides.jobId below), so the run reads
+    // as one run in Workflow Runs.
     const chainId = crypto.randomUUID();
     try {
-      // Issue #2914 (G7): the chain start lives in the
-      // broker — scheduledTasks plans (above) and gates
-      // (lock probe + active-chain probe), the broker
-      // submits. The chain keeps its engine; see the
-      // broker's note on why execution does not move to
-      // the ScreenerScreenWorkflow.
-      const { startScheduledShardedChain } = await import("../workflows/screenExecutionBroker");
-      const channels = [
-        ...(options.emailTo ? ["email"] : []),
-        ...(options.pushToSlack !== false ? ["slack"] : []),
-        ...(options.webhookUrl ? ["webhook"] : []),
-      ] as import("../types").AsyncJobChannel[];
-      const submitted = await startScheduledShardedChain({
-        chain: {
-          chainId,
+      // Issue #4280 ([One engine] #3550 S5): the sharded run
+      // submits through the one engine seam (submit-only — the
+      // chain's submit-and-return contract; the tick never
+      // awaits the run). The delivery envelope + stageChain ride
+      // the command to the deliver stage, where the follow-up
+      // bridge serves + delivers with the chain's delays. The
+      // overrides carry the fields the spec cannot express: the
+      // effective provider, the sector, the maxItems cap, and
+      // the broker/mode provenance the chain stamped on
+      // submission. The dup, failure, audit, and
+      // screen.started handling below is unchanged.
+      const submitted = await (this.submitStockScreenViaEngine ?? submitStockScreenViaEngine)({
+        env: this.env,
+        spec: {
+          source: "scheduled",
+          trigger: "scheduled",
+          deliver: true,
+          // Issue #4278: StockScreenRunSpec.filters is required —
+          // an absent filter set is the empty filter, same semantics.
+          filters: options.filters ?? {},
           universe,
+          jobId: chainId,
+          asyncRequested: false,
+          delivery: {
+            ...(options.emailTo ? { emailTo: options.emailTo } : {}),
+            ...(options.slackChannel ? { slackChannel: options.slackChannel } : {}),
+            ...(options.webhookUrl ? { webhookUrl: options.webhookUrl } : {}),
+            // The chain's default-on: scheduled runs push to Slack
+            // unless the schedule says not to.
+            pushToSlack: options.pushToSlack !== false,
+          },
+          ...(options.stageChain ? { stageChain: options.stageChain } : {}),
           userLogin,
-          environment: options.environment,
-          // Issue #3655: broker + data provider + mode recorded at
-          // chain submission, for provenance on every shard.
-          ...(options.brokerId ? { brokerId: options.brokerId } : {}),
-          ...(options.dataProviderId ? { dataProviderId: options.dataProviderId } : {}),
+        },
+        userLogin,
+        environment: options.environment,
+        agent: this.getScreenerAgent(userLogin),
+        commandOverrides: {
+          jobId: chainId,
+          sector,
+          ...(shardedPlan.provider ? { provider: shardedPlan.provider } : {}),
+          ...(options.maxItems !== undefined ? { maxItems: options.maxItems } : {}),
+          ...(options.brokerId ? { broker: options.brokerId } : {}),
           ...(options.mode ? { mode: options.mode } : {}),
           ...(options.modeSource ? { modeSource: options.modeSource } : {}),
-          trigger: options.trigger || "scheduled",
-          maxItems: options.maxItems,
-          timestamp,
-          channels,
-          emailTo: options.emailTo,
-          slackChannel: options.slackChannel,
-          webhookUrl: options.webhookUrl,
-          stageChain: options.stageChain,
         },
-        submit: (s) => this.shardSubmit!(s),
       });
       this.audit("screener.sharded_chain_submitted", {
         sector,
@@ -1831,14 +1839,17 @@ export class ScheduledTasksService {
   /**
    * Consolidation C1 (issue #1201, epic #1151 R1): runs a goal-driven
    * screen (Phase 1 scenario + Phase 3 semantics through the Phase 0
-   * registry) via ScreenerAgent — the same one-agent-owns-screening
-   * delegation as autonomousMarketScreen. Canonical recording
-   * (mas_reports + screening activity log) and optional Phase 6
-   * channel delivery happen inside executeGoalScreenRun; the run is
-   * ledger-idempotent on its minute slot, so a duplicate scheduled
-   * delivery reports skipped, exactly like the market screen. Failure
-   * contract mirrors autonomousMarketScreen (issue #112): audit +
-   * session message + a failure result, never a silent vanish.
+   * registry) via the goal workflow — the same one-agent-owns-screening
+   * delegation as autonomousMarketScreen. Issue #4280 ([One engine]
+   * #3550 S5): the workflow is THE path (chain mode included) —
+   * canonical recording (mas_reports + screening activity log) and
+   * optional Phase 6 channel delivery happen inside the workflow's
+   * store + deliver stages; the direct registry-leg path is
+   * retired. The run is ledger-idempotent on its minute slot, so a
+   * duplicate scheduled delivery reports skipped, exactly like the
+   * market screen. Failure contract mirrors autonomousMarketScreen
+   * (issue #112): audit + session message + a failure result,
+   * never a silent vanish.
    */
   async autonomousGoalScreen(options: {
     goalKind?: string;
@@ -1947,8 +1958,15 @@ export class ScheduledTasksService {
         ...(options.emailTo ? ["email" as const] : []),
         ...(options.pushToSlack || options.slackChannel ? ["slack" as const] : []),
       ];
-      const chainMode = Boolean(options.stageChain);
-      const deliver: ("slack" | "email" | "webhook" | "voice")[] = chainMode ? [] : directChannels;
+      // Issue #4280 ([One engine] #3550 S5): chain mode no longer
+      // takes a direct path — the workflow's deliver stage bridges
+      // with the stage chain (deliverViaChain=true) so the chain
+      // delivers exactly once to the same recipients. Direct
+      // delivery (immediate text, draft-marked, no hold) and
+      // chain delivery (followup.deliver, immediate post-#1347)
+      // share the immediate-send posture, so chaining changes
+      // timing (deliverDelaySeconds) and text format (generic
+      // followup text, no hit list), not the hold semantics.
       // Issue #1571: the goal path never went through the scheduled
       // auth guard — unlike the market and options screens, which
       // both pre-flight it. A stocks-requesting goal run now guards
@@ -2085,12 +2103,11 @@ export class ScheduledTasksService {
             data: { taskId: idempotencyKey, status, reason, priceUSD: goalScreenPriceUSD, goalKind: scenario.goalKind },
           } as any;
         };
-        if (chainMode) {
-          return skipPaid(
-            "skipped_chain_mode",
-            "Chain-mode scheduled runs cannot ride the payment workflow (a queued run has no result to bridge); skipped while monetization is on.",
-          );
-        }
+        // Issue #4280 ([One engine] #3550 S5): chain mode rides
+        // the payment workflow now (the paid command carries
+        // stageChain + slackChannel; the payment path passes the
+        // command through unreconstructed) — the chain-mode
+        // monetization skip is gone with the direct path.
         const commercial = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
         const subscriptions = createSubscriptionAdapter(this.env as { AGENT_DB?: unknown });
         if (!commercial || !subscriptions) {
@@ -2174,163 +2191,70 @@ export class ScheduledTasksService {
           },
         };
       }
-      // Issue #4279 (#3550 S4): the workflow path is now THE path
-      // for non-chain scheduled goal screens — the goal_workflow
-      // flag gate is retired and the direct fallthrough below it is
-      // gone. A failed start throws (never a silent direct
-      // fallback). Chain mode keeps the direct path until S5
-      // #4280 routes it — it is the ONE remaining live direct
-      // path, and the chain bridge below still reads its outcome.
-      if (!chainMode) {
-        const { buildGoalScreenCommand, startGoalScreenWorkflow } =
-          await import("./goalScreenWorkflowSubmission");
-        const { createObservabilitySink } =
-          await import("../observability/createObservabilityPorts");
-        const { resolveIaaaTenant } = await import("../security/iaaaGithubEndToEnd");
-        const handle = await startGoalScreenWorkflow(
-          this.env,
-          buildGoalScreenCommand({
-            jobId: idempotencyKey,
-            source: "scheduled-tasks",
-            trigger,
-            userLogin,
-            tenantId: resolveIaaaTenant(this.env),
-            scenario,
-            scenarioSource,
-            ...(options.assetClasses ? { assetClasses: options.assetClasses } : {}),
-            ...(options.symbols ? { symbols: options.symbols } : {}),
-            ...(directChannels.length > 0 ? { deliverChannels: directChannels } : {}),
-            ...(options.emailTo ? { emailTo: options.emailTo } : {}),
-            ...(options.environment ? { environment: options.environment } : {}),
-            ...(providerFallback ? { provider: "yahoo" as const, providerFallback } : {}),
-          }),
-          createObservabilitySink(this.env),
-        );
-        if (!handle) {
-          throw new Error(
-            `Goal screen workflow start returned no handle for job ${idempotencyKey}; refusing to fall back to the direct path.`,
-          );
-        }
-        this.audit("goal_screen.workflow_submitted", {
-          goalKind: scenario.goalKind,
+      // Issue #4280 ([One engine] #3550 S5): the workflow path is
+      // now THE path for ALL scheduled goal screens — chain mode
+      // rides the payment workflow too (the paid command carries
+      // stageChain + slackChannel; the payment path passes the
+      // command through unreconstructed), and the direct path +
+      // the chain bridge below it are gone (the workflow's
+      // deliver stage bridges with the stage chain instead). A
+      // failed start throws (never a silent direct fallback).
+      const { buildGoalScreenCommand, startGoalScreenWorkflow } =
+        await import("./goalScreenWorkflowSubmission");
+      const { createObservabilitySink } =
+        await import("../observability/createObservabilityPorts");
+      const { resolveIaaaTenant } = await import("../security/iaaaGithubEndToEnd");
+      const handle = await startGoalScreenWorkflow(
+        this.env,
+        buildGoalScreenCommand({
           jobId: idempotencyKey,
-          workflowId: handle.workflowId,
+          source: "scheduled-tasks",
           trigger,
-        });
-        return {
-          success: true,
-          taskType: "goal_screen",
-          timestamp,
-          data: {
-            taskId: idempotencyKey,
-            status: "queued",
-            workflowId: handle.workflowId,
-            goalKind: scenario.goalKind,
-            ...(providerFallback ? { providerFallback } : {}),
-          },
-        };
+          userLogin,
+          tenantId: resolveIaaaTenant(this.env),
+          scenario,
+          scenarioSource,
+          ...(options.assetClasses ? { assetClasses: options.assetClasses } : {}),
+          ...(options.symbols ? { symbols: options.symbols } : {}),
+          ...(directChannels.length > 0 ? { deliverChannels: directChannels } : {}),
+          ...(options.emailTo ? { emailTo: options.emailTo } : {}),
+          ...(options.slackChannel ? { slackChannel: options.slackChannel } : {}),
+          ...(options.stageChain ? { stageChain: options.stageChain } : {}),
+          ...(options.environment ? { environment: options.environment } : {}),
+          ...(providerFallback ? { provider: "yahoo" as const, providerFallback } : {}),
+        }),
+        createObservabilitySink(this.env),
+      );
+      if (!handle) {
+        throw new Error(
+          `Goal screen workflow start returned no handle for job ${idempotencyKey}; refusing to fall back to the direct path.`,
+        );
       }
-      const out = await runtime.executeGoalScreenRun({
-        agent: this.getScreenerAgent(userLogin),
-        orm: this.orm,
-        env: this.env,
-        userLogin,
-        scenario,
-        scenarioSource,
+      this.audit("goal_screen.workflow_submitted", {
+        goalKind: scenario.goalKind,
+        jobId: idempotencyKey,
+        workflowId: handle.workflowId,
         trigger,
-        idempotencyKey,
-        environment: options.environment,
-        assetClasses: options.assetClasses,
-        symbols: options.symbols,
-        ...(deliver.length > 0 ? { deliver } : {}),
-        ...(options.emailTo ? { emailTo: options.emailTo } : {}),
-        // Issue #1571: a fallback run rides provider "yahoo" plus the
-        // marker; an E*TRADE-live run is unchanged.
-        ...(providerFallback
-          ? { provider: "yahoo" as const, providerFallback }
-          : {}),
       });
-      if (!out.executed) {
-        return { success: true, taskType: "goal_screen", skipped: true, timestamp } as any;
-      }
-      this.audit("goal_screen.run_completed", {
-        goalKind: out.result?.goalKind,
-        status: out.result?.status,
-        hits: out.result?.counts.hits,
-        taskId: out.taskId,
-        ...(providerFallback ? { providerFallback } : {}),
-      });
-      if (out.result?.status === "failed") {
-        throw new Error("Goal-driven screen failed on every requested asset class.");
-      }
-      // Consolidation C4 (#1329): chain identity + serve stage for a
-      // completed goal screen. Consolidation #1236 chains delivery:
-      // the direct path above is suppressed in chain mode, and the
-      // bridge carries the per-task recipients + a delivery-channel
-      // allowlist mirroring the direct path, so the chain delivers
-      // exactly once and adds no env-configured channel the direct
-      // path never used. A bridge failure never fails the run's
-      // screen outcome — but Issue #1999: the submission retries
-      // under the report policy, and a final failure is audited
-      // (followup.schedule_failed) so no chain delivery is silently
-      // assumed from a kept canonical row.
-      if (options.stageChain && this.followupScheduler) {
-        const scheduler = this.followupScheduler;
-        try {
-          await withRetry(
-            () =>
-              scheduler(
-                {
-                  kind: "goal",
-                  trigger,
-                  success: true,
-                  thesis: `Goal screen — ${out.result?.goalKind ?? "goal"}`,
-                  pdfKeys: [],
-                  canonicalReportId: out.canonicalReportId,
-                  deliverViaChain: true,
-                  ...(options.emailTo ? { emailTo: options.emailTo } : {}),
-                  ...(options.slackChannel ? { slackChannel: options.slackChannel } : {}),
-                  deliveryChannels: directChannels,
-                  matchedCount: out.result?.counts.hits,
-                  totalScanned: (out.result?.counts.stocksScanned ?? 0)
-                    + (out.result?.counts.optionsUnderlyingsScanned ?? 0),
-                  stageChain: options.stageChain,
-                  // Issue #3313: the arming schedule rides the bridge
-                  // outcome so the goal run joins its schedule.
-                  scheduleId: options.scheduleId,
-                  // Issue #1571: the bridge outcome names the fallback.
-                  ...(providerFallback ? { providerFallback } : {}),
-                },
-                userLogin,
-                true,
-              ),
-            resolvePipelinePolicy(this.env as unknown as Record<string, unknown>).retry.report,
-            { label: "followup-bridge" },
-          );
-        } catch (bridgeErr) {
-          structuredLog.warn("scheduledTasks.goal_bridge_failed", {
-            message: "[ScheduledTasksService] Goal bridge failed (canonical row kept)",
-            error: bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr),
-          });
-          this.audit("followup.schedule_failed", {
-            taskId: out.taskId,
-            trigger,
-            error: bridgeErr instanceof Error ? bridgeErr.message : String(bridgeErr),
-          });
-        }
-      }
       return {
         success: true,
         taskType: "goal_screen",
         timestamp,
         data: {
-          taskId: out.taskId,
-          status: out.result?.status,
-          hits: out.result?.counts.hits,
-          goalKind: out.result?.goalKind,
+          taskId: idempotencyKey,
+          status: "queued",
+          workflowId: handle.workflowId,
+          goalKind: scenario.goalKind,
           ...(providerFallback ? { providerFallback } : {}),
         },
       };
+      // Issue #4280 ([One engine] #3550 S5): the direct path is
+      // gone — the workflow submission above returns the queued
+      // shape, and the workflow's deliver stage bridges with the
+      // stage chain. (The direct run + bridge block that used to
+      // follow here is deleted by this slice; the scheduleId
+      // linkage the bridge carried is the #3313 out-of-scope
+      // sub-issue's, not this slice's.)
     } catch (err: any) {
       // Issue #1571: a fallback run that itself fails takes this same
       // path; the audit names the fallback so the failure record

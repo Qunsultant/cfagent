@@ -19,6 +19,12 @@
  * fails a screen, the inner audit still rethrows, and
  * the caller failure path still runs in full.
  *
+ * Issue #4280 ([One engine] #3550 S5): the chain submits
+ * through the engine seam now — the submission fake is
+ * the seam's submit-only entry, and the missing-port case
+ * is the seam's coded WorkflowError("unavailable") (the
+ * old shard-submit port guard is gone with the chain).
+ *
  * Behavioral assertions go through the structured log
  * lines (logScreenRunEvent writes one JSON line per
  * event), reusing the #1412 harness shape. The aspects
@@ -60,8 +66,11 @@ describe("sharded-chain logging / classification (#2860)", () => {
     // Issue #2860 (Factor 8): the lock probe is fail-closed — an
     // unanswering probe refuses the submission. This harness tests
     // logging of wired submissions, so the probe answers not-running.
+    // Issue #4280: the missing-port test runs the REAL seam, so the
+    // agent stub also answers the seam's quota gate.
     (service as any).getScreenerAgent = vi.fn(() => ({
       isScreenRunning: async () => ({ running: false, startedAt: null }),
+      chargeScreenQuota: async () => ({}),
     }));
     return { service, publish };
   }
@@ -84,10 +93,9 @@ describe("sharded-chain logging / classification (#2860)", () => {
 
   it("a wired submission emits screen.started with trigger, universe, and actor", async () => {
     const { service } = unblockedService();
-    (service as any).shardSubmit = vi.fn(async () => ({
-      jobId: "test-chain",
-      status: "queued" as const,
-      statusUrl: "https://example.test/jobs/test-chain",
+    (service as any).submitStockScreenViaEngine = vi.fn(async (input: { commandOverrides: { jobId: string } }) => ({
+      jobId: input.commandOverrides.jobId,
+      workflowId: "wf-test-chain",
     }));
     const result = await service.autonomousMarketScreen({ sharded: true });
     expect(result.success).toBe(true);
@@ -101,7 +109,7 @@ describe("sharded-chain logging / classification (#2860)", () => {
 
   it("a rejected submission emits screen.failed with the classifier verdict", async () => {
     const { service, publish } = unblockedService();
-    (service as any).shardSubmit = vi.fn(async () => {
+    (service as any).submitStockScreenViaEngine = vi.fn(async () => {
       throw new Error("E*TRADE auth token expired");
     });
     const result = await service.autonomousMarketScreen({ sharded: true });
@@ -115,14 +123,22 @@ describe("sharded-chain logging / classification (#2860)", () => {
     expect(busFailed).toHaveLength(1);
   });
 
-  it("a missing-port submission emits screen.failed (classification unknown: a config error, not a classified kind)", async () => {
+  it("a missing-port submission emits screen.failed (classification provider: the seam's coded unavailable error)", async () => {
     const { service } = unblockedService();
     const result = await service.autonomousMarketScreen({ sharded: true });
     expect(result.success).toBe(false);
     const failed = logEvents().filter((e) => e.event === "screen.failed");
     expect(failed).toHaveLength(1);
-    expect(failed[0].classification).toBe("unknown");
-    expect(String(failed[0].error)).toContain("submission port");
+    // Issue #4280: the missing port is the seam's coded
+    // unavailable error now — classifyScreenFailure maps
+    // "unavailable" to "provider" (screenRunAspects.ts:126),
+    // so the old "unknown" pin (a config error, not a
+    // classified kind) no longer applies.
+    expect(failed[0].classification).toBe("provider");
+    // Issue #4280: the missing port is the seam's coded
+    // unavailable error now — the old "submission port" text
+    // is gone with the chain.
+    expect(String(failed[0].error)).toContain("unavailable");
   });
 
   it("the aspects map names the chain submission join points", () => {

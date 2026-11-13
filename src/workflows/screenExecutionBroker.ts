@@ -40,14 +40,14 @@
  */
 
 import { shardableUniverses } from "../trading";
-import type { AsyncJobSubmission, Env, ShardChainContext } from "../types";
+import type { Env, StageChainConfig } from "../types";
 import {
   manualWorkflowJobId,
   tryStartScreenerWorkflow,
   workflowTenantId,
 } from "./screenerWorkflowRoutes";
 import type { WorkflowHandle, WorkflowJobCommand, WorkflowShard } from "./workflowPorts";
-import type { StockScreenRunSpec } from "./stockScreenRunSpec";
+import type { StockScreenDelivery, StockScreenRunSpec } from "./stockScreenRunSpec";
 import { workflowTriggerForSpec } from "./stockScreenRunSpec";
 
 export type ScreenWorkflowStarter = (
@@ -108,6 +108,13 @@ export interface ParentScreenCommandInput {
   provider?: string;
   environment?: "TEST" | "PROD";
   portfolioContext?: boolean;
+  /**
+   * Issue #4280 ([One engine] #3550 S5): the per-request delivery
+   * envelope + the stage-chain config, carried onto the command
+   * (defined fields only; an empty envelope stays absent).
+   */
+  delivery?: StockScreenDelivery;
+  stageChain?: StageChainConfig;
   scheduleId?: string;
   goalId?: string;
   patternRef?: WorkflowJobCommand["patternRef"];
@@ -134,6 +141,10 @@ export function buildParentScreenCommand(
     ...(input.presetRef !== undefined ? { presetRef: input.presetRef } : {}),
     ...(input.patternQualifications !== undefined ? { patternQualifications: input.patternQualifications } : {}),
     ...(input.deliver !== undefined ? { deliver: input.deliver } : {}),
+    ...(input.delivery && Object.keys(input.delivery).length > 0
+      ? { delivery: input.delivery }
+      : {}),
+    ...(input.stageChain !== undefined ? { stageChain: input.stageChain } : {}),
     ...(input.provider ? { provider: input.provider } : {}),
     filters: input.filters,
     ...(input.maxItems !== undefined ? { maxItems: input.maxItems } : {}),
@@ -193,6 +204,10 @@ export function buildStockScreenWorkflowCommand(
     ...(spec.presetRef !== undefined ? { presetRef: spec.presetRef } : {}),
     ...(spec.patternQualifications !== undefined ? { patternQualifications: spec.patternQualifications } : {}),
     deliver: spec.deliver,
+    ...(spec.delivery && Object.keys(spec.delivery).length > 0
+      ? { delivery: spec.delivery }
+      : {}),
+    ...(spec.stageChain !== undefined ? { stageChain: spec.stageChain } : {}),
     ...(spec.provider ? { provider: spec.provider } : {}),
     filters: spec.filters as unknown as Record<string, unknown>,
     ...(deps.environment !== undefined ? { environment: deps.environment } : {}),
@@ -254,39 +269,23 @@ export async function startStockScreenWorkflowOrNull(args: {
 }
 
 /**
- * Issue #2914 (G7) — the broker's scheduled-async branch:
- * start a scheduled sharded run's chain. The submission
- * (planFeedStart + the shardSubmit async-job port) moved
- * here from ScheduledTasksService, so scheduledTasks no
- * longer imports the chain planner for its start — the
- * broker owns every screen start, and the chain keeps its
- * own engine (below).
+ * Issue #2914 (G7) — the broker's scheduled-async branch, RETIRED by
+ * issue #4280 ([One engine] #3550 S5): the scheduled sharded chain
+ * moved onto the engine. The three conditions the G7 note named are now
+ * met: (1) stageChain-in-workflow — the workflow command carries
+ * `stageChain` and the deliver stage stamps it onto the run outcome, so
+ * the follow-up bridge serves + delivers with its delays; (2)
+ * chain-run-model migration — the engine job id IS the chain id
+ * (`commandOverrides.jobId = chainId`), and the bridge uses that id
+ * instead of minting a fresh one, so the run reads as one run in
+ * Workflow Runs; (3) channel plumbing — the workflow command carries the
+ * per-request delivery envelope (`delivery`: emailTo / slackChannel /
+ * webhookUrl / pushToSlack) through to the deliver stage.
  *
- * What this is NOT: a migration of scheduled-sharded
- * execution onto the ScreenerScreenWorkflow. That literal
- * migration was considered and rejected in G7, for the
- * record: (1) the chain is the stage pipeline — its
- * stageChain config (serve delays, stage options) has no
- * workflow equivalent (zero stageChain references in
- * src/workflows/); (2) the chain run model (chain_id) is
- * read by the workflowRuns surface as one run, and the
- * chain's serve step feeds the same delivery bridge
- * (followup.report -> followup.deliver) the workflow
- * feeds; (3) per-run delivery channels (emailTo,
- * slackChannel, webhookUrl) ride the chain context, while
- * the workflow command carries no channel fields. Moving
- * execution would drop staging + channels and fight the
- * #2869 production-wiring direction (chain stages -> the
- * bridge). If a workflow-start migration is ever wanted,
- * it needs channel plumbing + stageChain-in-workflow +
- * chain-run-model migration as its own designed issue,
- * not a silent side effect of G7.
+ * Successor: `submitStockScreenViaEngine`
+ * (`src/workflows/runStockScreenViaEngine.ts`), called by
+ * `ScheduledTasksService.autonomousMarketScreenSharded` with
+ * `jobId = chainId`. The chain start itself is frozen, not deleted
+ * (see the deprecation ledger:
+ * `docs/architecture/transition/deprecations.md`).
  */
-export async function startScheduledShardedChain(args: {
-  chain: ShardChainContext;
-  /** Injectable for tests; production passes the async-job submission port. */
-  submit: (submission: AsyncJobSubmission) => Promise<{ jobId: string }>;
-}): Promise<{ jobId: string }> {
-  const { planFeedStart } = await import("../services/shardJobs");
-  return args.submit(planFeedStart(args.chain));
-}
