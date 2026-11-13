@@ -333,7 +333,7 @@ describe("S6-P07 retired-module determination: the #3123 renames", () => {
     }
   });
 
-  it("the deprecated set is exactly the three known AOP files plus the five #3123 renames plus the #4192 screener-flow rename", () => {
+  it("the deprecated set is exactly the three known AOP files plus the five #3123 renames plus the #4192 screener-flow rename plus the #4280 chain-start rename", () => {
     const found: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(join(dir), { withFileTypes: true })) {
@@ -357,6 +357,7 @@ describe("S6-P07 retired-module determination: the #3123 renames", () => {
       "src/errors/errorCatalog.deprecated.json",
       "src/services/scheduleManagement.deprecated.ts",
       "src/workflows/screenerWorkflowFlow.deprecated.ts",
+      "src/workflows/startScheduledShardedChain.deprecated.ts",
     ]);
   });
 

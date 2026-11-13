@@ -2,10 +2,14 @@
  * Issue #1999 (Phase 4) — conformance pins for the stage-contract
  * remainder that tests/stage_contracts_1999.test.ts does not pin:
  *
- * - D5: the chain-bridge submission (goal + discovery) retries
- *   under the report policy (2 attempts) and, on final failure,
- *   audits `followup.schedule_failed` instead of silently assuming
- *   delivery from a kept canonical row.
+ * - D5: the chain-bridge submission retries under the report policy
+ *   (2 attempts) and, on final failure, audits
+ *   `followup.schedule_failed` instead of silently assuming delivery
+ *   from a kept canonical row. Discovery still bridges directly
+ *   (below); the GOAL half moved onto the workflow in S5 #4280 —
+ *   chain-mode goal screens submit the workflow and the bridge
+ *   outcome is built by the deliver stage, so the goal tests pin
+ *   the submission shape instead of the retired direct call.
  * - D8: audit vs telemetry on the goal path — stage audit records
  *   land in mas_events (orm.events), telemetry lands in the #1743
  *   Analytics Engine stream (env.OBSERVABILITY data points), and
@@ -28,6 +32,34 @@ import type { ScreenerFailedEvent } from "../src/events/screenerEvents";
 import type { Env } from "../src/types";
 import type { GoalDrivenScreenResult } from "../src/services/goalDrivenScreen";
 import { STOCK_SCREENING_PROVIDER_ID } from "../src/trading/screeningProvider";
+
+const GOAL_CHAIN_4280 = { serveDelaySeconds: 60, deliverDelaySeconds: 3600 };
+
+const GOAL_HANDLE_4280 = {
+  workflowId: "wf-goal-test",
+  jobId: "goal-screen:test",
+  status: "queued" as const,
+  existing: false,
+  statusUrl: "/api/jobs/history?chainId=goal-screen%3Atest",
+};
+
+vi.mock("../src/services/goalScreenWorkflowSubmission", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("../src/services/goalScreenWorkflowSubmission")>();
+  return {
+    ...original,
+    // Default: delegate to the real start (the D8 tests below need
+    // the real binding behaviour); the D5 tests override per test.
+    startGoalScreenWorkflow: vi.fn(
+      async (...args: Parameters<typeof original.startGoalScreenWorkflow>) =>
+        original.startGoalScreenWorkflow(...args),
+    ),
+  };
+});
+
+import { startGoalScreenWorkflow } from "../src/services/goalScreenWorkflowSubmission";
+
+const mockedGoalStart = vi.mocked(startGoalScreenWorkflow);
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -97,85 +129,72 @@ function scheduleFailedCalls(audit: ReturnType<typeof vi.fn>) {
 }
 
 /* ------------------------------------------------------------------ */
-/* D5 — chain-bridge retry + followup.schedule_failed audit            */
+/* D5 — chain-bridge submission (#1999)                                 */
 /* ------------------------------------------------------------------ */
 
-describe("D5 chain-bridge retry (#1999)", () => {
-  it("goal bridge: an always-failing bridge is retried under the report policy, then audited", async () => {
-    // #3515 S3: the warn now travels as a structured
-    // scheduledTasks.goal_bridge_failed event (level warn) on the
-    // console-info JSON fallback, not a console.warn line.
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+// Issue #4280 ([One engine] #3550 S5): the direct bridge call is
+// gone — chain-mode goal screens submit the goal workflow and the
+// bridge outcome is built by the workflow's deliver stage. The old
+// report-policy retry + followup.schedule_failed audit around the
+// direct submission has no engine-path home: the deliver stage
+// retries under the engine's stage retry buckets and a final
+// failure fails the stage visibly instead of auditing. That gap is
+// tracked as a follow-up of #4280 (see its §15), not silently
+// dropped. These tests pin the new shape: the direct bridge is
+// never invoked from autonomousGoalScreen, and a failing workflow
+// start fails the tick (fail-closed) instead of assuming delivery.
+
+describe("D5 chain-bridge submission (#1999)", () => {
+  it("goal bridge: chain mode submits the workflow; the direct bridge is never invoked", async () => {
+    mockedGoalStart.mockResolvedValueOnce(GOAL_HANDLE_4280 as never);
+    // Even a bridge that would always fail is never consulted —
+    // the submission path does not call it.
     const bridge = vi.fn(async () => {
       throw new Error("bridge boom");
     });
     const { service, audit } = goalService({ followupScheduler: bridge });
     const result = await service.autonomousGoalScreen({
       goalKind: "income",
-      stageChain: {} as never,
+      stageChain: GOAL_CHAIN_4280 as never,
     });
-    // Report policy = 2 total attempts (pipelinePolicy retry.report).
-    expect(bridge).toHaveBeenCalledTimes(2);
-    // The screen outcome is kept; delivery is NOT claimed — the
-    // failure is on the audit record instead.
     expect(result.success).toBe(true);
-    const failed = scheduleFailedCalls(audit);
-    expect(failed).toHaveLength(1);
-    expect(failed[0][1]).toMatchObject({ error: "bridge boom" });
-    expect(String(failed[0][1].taskId ?? "")).not.toBe("");
-    const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
-    for (const call of infoSpy.mock.calls) {
-      try {
-        const parsed = JSON.parse(String(call[0])) as {
-          operation?: unknown;
-          level?: unknown;
-          fields?: unknown;
-        };
-        if (parsed && typeof parsed.operation === "string") {
-          events.push({
-            operation: parsed.operation,
-            level: typeof parsed.level === "string" ? parsed.level : "",
-            fields:
-              parsed.fields && typeof parsed.fields === "object"
-                ? (parsed.fields as Record<string, unknown>)
-                : {},
-          });
+    expect(mockedGoalStart).toHaveBeenCalledTimes(1);
+    // The built command (start's second arg) carries the chain
+    // inside goalScreen.
+    expect(
+      (
+        mockedGoalStart.mock.calls[0][1] as {
+          goalScreen?: Record<string, unknown>;
         }
-      } catch {
-        // Non-JSON console.info lines are not structured events.
-      }
-    }
-    const bridgeFailed = events.find((e) => e.operation === "scheduledTasks.goal_bridge_failed");
-    expect(bridgeFailed).toBeDefined();
-    expect(bridgeFailed?.level).toBe("warn");
-    expect(String(bridgeFailed?.fields.message ?? "")).toMatch(/Goal bridge failed \(canonical row kept\)/);
-  });
-
-  it("goal bridge: a bridge that fails once then succeeds is retried and NOT audited as failed", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    let calls = 0;
-    const bridge = vi.fn(async () => {
-      calls += 1;
-      if (calls === 1) throw new Error("transient bridge boom");
-    });
-    const { service, audit } = goalService({ followupScheduler: bridge });
-    const result = await service.autonomousGoalScreen({
-      goalKind: "income",
-      stageChain: {} as never,
-    });
-    expect(bridge).toHaveBeenCalledTimes(2);
-    expect(result.success).toBe(true);
+      ).goalScreen?.stageChain,
+    ).toEqual(GOAL_CHAIN_4280);
+    expect(bridge).not.toHaveBeenCalled();
     expect(scheduleFailedCalls(audit)).toHaveLength(0);
   });
 
-  it("goal bridge: a first-try success makes exactly one call and no failure audit", async () => {
+  it("goal bridge: a failing workflow start fails the tick (fail-closed); no delivery is assumed", async () => {
+    mockedGoalStart.mockRejectedValueOnce(new Error("workflow start boom"));
     const bridge = vi.fn(async () => {});
     const { service, audit } = goalService({ followupScheduler: bridge });
     const result = await service.autonomousGoalScreen({
       goalKind: "income",
-      stageChain: {} as never,
+      stageChain: GOAL_CHAIN_4280 as never,
     });
-    expect(bridge).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(bridge).not.toHaveBeenCalled();
+    expect(scheduleFailedCalls(audit)).toHaveLength(0);
+  });
+
+  it("goal bridge: a first-try submission makes exactly one start call and no failure audit", async () => {
+    mockedGoalStart.mockResolvedValueOnce(GOAL_HANDLE_4280 as never);
+    const bridge = vi.fn(async () => {});
+    const { service, audit } = goalService({ followupScheduler: bridge });
+    const result = await service.autonomousGoalScreen({
+      goalKind: "income",
+      stageChain: GOAL_CHAIN_4280 as never,
+    });
+    expect(mockedGoalStart).toHaveBeenCalledTimes(1);
+    expect(bridge).not.toHaveBeenCalled();
     expect(result.success).toBe(true);
     expect(scheduleFailedCalls(audit)).toHaveLength(0);
   });
