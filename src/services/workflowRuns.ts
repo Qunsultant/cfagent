@@ -906,6 +906,13 @@ function runStatusFromStages(stages: WorkflowRunStage[]): WorkflowRunStatus {
   if (statuses.includes("failed")) return "failed";
   if (statuses.includes("running")) return "running";
   if (statuses.includes("queued")) return "queued";
+  // Issue #4359 — the engine's own non-terminal and terminal verbs:
+  // a stage that has not started yet reads queued, a stopped one is
+  // resumable (awaiting), and a wholly cancelled run is the platform's
+  // "skipped" rather than an unknown verb.
+  if (statuses.length > 0 && statuses.every((s) => s === "pending")) return "queued";
+  if (statuses.includes("stopped")) return statuses.includes("completed") ? "partial" : "awaiting";
+  if (statuses.length > 0 && statuses.every((s) => s === "cancelled")) return "skipped";
   if (statuses.includes("held")) return statuses.includes("completed") ? "partial" : "awaiting";
   if (statuses.includes("skipped")) return statuses.includes("completed") ? "partial" : "skipped";
   if (statuses.length > 0 && statuses.every((s) => s === "completed")) return "completed";

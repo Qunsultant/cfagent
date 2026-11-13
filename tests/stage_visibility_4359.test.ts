@@ -308,6 +308,28 @@ describe("4359-P06 the runs read asks the job-status surface", () => {
   });
 });
 
+describe("4359-P08 the run verb follows the engine's stage verbs", () => {
+  const view = (
+    status: JobStageView["units"][number]["status"],
+  ): JobStageView => ({
+    stageId: "job:root",
+    nodePath: "",
+    kind: "feed",
+    startedAt: null,
+    endedAt: null,
+    durationMs: null,
+    units: [{ unitId: "unit-1", status, attempt: 0 }],
+  });
+
+  it("reads queued before a stage starts, awaiting when stopped, skipped when cancelled", () => {
+    expect(runFromJobs([jobRow()], [], undefined, T0, [view("never-attempted")]).status).toBe(
+      "queued",
+    );
+    expect(runFromJobs([jobRow()], [], undefined, T0, [view("stopped")]).status).toBe("awaiting");
+    expect(runFromJobs([jobRow()], [], undefined, T0, [view("cancelled")]).status).toBe("skipped");
+  });
+});
+
 describe("4359-P07 another run's checkpoint is never projected", () => {
   it("drops stages whose checkpoint belongs to a different run", async () => {
     const h = await runSixStageJob();
