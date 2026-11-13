@@ -46,6 +46,7 @@ import {
 } from "../services/scheduledReports";
 import type { IndexEnv } from "../services/reportSemanticIndex";
 import { ensureSharedTable, ensureAuditChainColumns } from "./ormSchema";
+import { ormTableSql } from "./schemaComponent/ormCatalogue";
 import {
   createDoAdRepository,
   createDoCategoryRepository,
@@ -253,19 +254,7 @@ export class DatabaseORM {
    */
   initializeSchema(sessionId: string): void {
     // 1. Categories Table
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_categories (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        slug TEXT NOT NULL,
-        description TEXT NOT NULL,
-        icon TEXT NOT NULL,
-        is_active INTEGER DEFAULT 1,
-        sort_order INTEGER DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
+    this.sql.exec(ormTableSql("mas_categories"));
 
     // 2. Referrals Table
     ensureSharedTable(this.sql, "mas_referrals");
@@ -274,26 +263,7 @@ export class DatabaseORM {
     ensureSharedTable(this.sql, "mas_ads");
 
     // 4. External Ads & Network Inventory Table
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_external_ads (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        network TEXT NOT NULL,
-        placement TEXT NOT NULL,
-        title TEXT NOT NULL,
-        tagline TEXT NOT NULL,
-        cta_text TEXT NOT NULL,
-        target_url TEXT NOT NULL,
-        banner_image_url TEXT,
-        cpm_rate REAL DEFAULT 15.0,
-        cpc_rate REAL DEFAULT 1.25,
-        impressions INTEGER DEFAULT 0,
-        clicks INTEGER DEFAULT 0,
-        earnings REAL DEFAULT 0.0,
-        is_active INTEGER DEFAULT 1,
-        created_at TEXT NOT NULL
-      )
-    `);
+    this.sql.exec(ormTableSql("mas_external_ads"));
 
     // 5. Transactions Table
     ensureSharedTable(this.sql, "mas_transactions");
@@ -310,14 +280,7 @@ export class DatabaseORM {
     ensureAuditChainColumns(this.sql);
 
     // 8b. Inbound webhook replay-protection nonces (issue #143 P0)
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS webhook_replay_nonces (
-        nonce TEXT PRIMARY KEY,
-        source TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        expires_at TEXT NOT NULL
-      )
-    `);
+    this.sql.exec(ormTableSql("webhook_replay_nonces"));
 
     // 8c. Scheduled-run reports (issues #278, #308) — the DDL lives in
     // src/services/scheduledReports.ts ensureScheduledReportsTable(),
@@ -331,35 +294,15 @@ export class DatabaseORM {
     ensureScheduledReportsTable(this.sql);
 
     // 9. Trades & E*TRADE Orders Table
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_trades (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        symbol TEXT NOT NULL,
-        action TEXT NOT NULL,
-        order_type TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        price REAL NOT NULL,
-        total_value REAL NOT NULL,
-        status TEXT NOT NULL,
-        order_ref TEXT,
-        proposer_did TEXT NOT NULL,
-        authorizer_did TEXT,
-        proof_signature TEXT NOT NULL,
-        preview_notes TEXT,
-        expiration_schedule_id TEXT,
-        broker TEXT,
-        price_source TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
+    this.sql.exec(ormTableSql("mas_trades"));
 
     // Issue #3089: broker stamp on stored drafts. Pre-existing tables
     // lack the column (CREATE TABLE IF NOT EXISTS never alters), so
     // guard the ALTER with a PRAGMA check — the #308 generation_id
     // precedent: an unguarded DDL change throws on every schema init
     // for tables that predate it.
+    // #4282 P3 owns these two guarded ALTERs (broker, price_source):
+    // they stay inline here until the reconciliation catalogue lands.
     {
       const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
       if (!cols.some((c) => c.name === "broker")) {
@@ -381,17 +324,7 @@ export class DatabaseORM {
     ensureSharedTable(this.sql, "mas_watchlists");
 
     // 11. Options Chain Cache Table (Durable Options Storage)
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_options_chain_cache (
-        id TEXT PRIMARY KEY,
-        symbol TEXT NOT NULL,
-        expirations_json TEXT NOT NULL,
-        chains_json TEXT NOT NULL,
-        fetched_at INTEGER NOT NULL,
-        expires_at INTEGER NOT NULL,
-        contract_count INTEGER NOT NULL DEFAULT 0
-      )
-    `);
+    this.sql.exec(ormTableSql("mas_options_chain_cache"));
 
     // Seed Categories if table is empty
     if (this.categories.count() === 0) {
