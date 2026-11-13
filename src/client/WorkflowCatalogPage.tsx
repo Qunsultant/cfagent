@@ -27,7 +27,7 @@ export function WorkflowCatalogPage() {
       </PageSection>
       <PageSection
         title="Define and schedule"
-        description="Issue #4366 — a definition is a validated spec: pick one, give it a job id, choose a cadence, and its runs land in Workflow Runs with per-stage status and times."
+        description="A definition is a validated spec: pick one, give it a job id, choose a cadence, and its runs land in Workflow Runs with per-stage status and times."
       >
         <WorkflowDefinitionFlow />
       </PageSection>
