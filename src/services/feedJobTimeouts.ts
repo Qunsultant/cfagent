@@ -23,14 +23,21 @@
  * callers resolve through resolveFeedJobTimeouts(env) instead,
  * so an operator changes a bound by setting its knob, never by
  * editing this file.
+ *
+ * Issue #4304 — the verify bound joins the catalogue: the
+ * provider verify probe (a conformance kit over the adapter's
+ * declared capabilities, run sequentially) gets verifyMs, with
+ * its own knob FEED_JOB_VERIFY_MS, resolved the same way.
  */
 
-/** The resolved bounds for one feed run, in milliseconds. */
+/** The resolved bounds for one feed run, in milliseconds — plus the provider verify-probe bound (#4304). */
 export interface FeedJobTimeouts {
   refreshMs: number;
   fetchMs: number;
   captureMs: number;
   executionMs: number;
+  /** #4304 — bound for one provider verify probe. */
+  verifyMs: number;
 }
 
 /**
@@ -61,6 +68,18 @@ export const FEED_JOB_TIMEOUTS: FeedJobTimeouts = {
   captureMs: 30_000,
   /** Bound for a whole feed.pull execution, above every leg. */
   executionMs: 240_000,
+  /**
+   * Bound for one provider verify probe (#4304). Basis: the
+   * probe is the conformance kit over the adapter's declared
+   * capabilities, run SEQUENTIALLY — up to 4 round-trips
+   * (quotes, historicalBars, fundamentals, news), each one
+   * provider round-trip seconds-scale like the fetch leg. 120s
+   * is 2x the fetch bound and half the execution bound: far
+   * above the normal multi-probe duration (tens of seconds),
+   * far below the executor's 90-minute backstop, and well
+   * inside a single verify action (no pipeline run beneath it).
+   */
+  verifyMs: 120_000,
 };
 
 /**
@@ -74,6 +93,7 @@ export const FEED_JOB_TIMEOUT_KNOBS = {
   fetchMs: "FEED_JOB_FETCH_MS",
   captureMs: "FEED_JOB_CAPTURE_MS",
   executionMs: "FEED_JOB_EXECUTION_MS",
+  verifyMs: "FEED_JOB_VERIFY_MS",
 } as const;
 
 /**
@@ -105,9 +125,10 @@ export function resolveFeedJobTimeoutMs(
 }
 
 /**
- * Resolve all four feed-job bounds from env (#4312). Each knob
- * is independent: a set knob overrides only its own bound, the
- * rest fall back to FEED_JOB_TIMEOUTS per bound.
+ * Resolve all four feed-job bounds from env (#4312), plus the
+ * verify-probe bound (#4304). Each knob is independent: a set
+ * knob overrides only its own bound, the rest fall back to
+ * FEED_JOB_TIMEOUTS per bound.
  */
 export function resolveFeedJobTimeouts(
   env: Record<string, unknown> = {},
@@ -117,6 +138,7 @@ export function resolveFeedJobTimeouts(
     fetchMs: resolveFeedJobTimeoutMs(env, FEED_JOB_TIMEOUT_KNOBS.fetchMs, FEED_JOB_TIMEOUTS.fetchMs),
     captureMs: resolveFeedJobTimeoutMs(env, FEED_JOB_TIMEOUT_KNOBS.captureMs, FEED_JOB_TIMEOUTS.captureMs),
     executionMs: resolveFeedJobTimeoutMs(env, FEED_JOB_TIMEOUT_KNOBS.executionMs, FEED_JOB_TIMEOUTS.executionMs),
+    verifyMs: resolveFeedJobTimeoutMs(env, FEED_JOB_TIMEOUT_KNOBS.verifyMs, FEED_JOB_TIMEOUTS.verifyMs),
   };
 }
 
