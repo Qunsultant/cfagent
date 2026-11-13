@@ -152,6 +152,13 @@ function stockService(opts: { sharded: boolean }) {
   (service as any).guardScheduledAuth = guard;
   (service as any).getScreenerAgent = () => ({ runScreen, isScreenRunning });
   (service as any).runStockScreenViaEngine = delegateSeamFake(runScreen);
+  // Issue #4280: the sharded path submits through the submit-only
+  // seam (submitStockScreenViaEngine), not the monolithic seam —
+  // stub it with the submit contract ({ jobId, workflowId }).
+  (service as any).submitStockScreenViaEngine = async (input: any) => ({
+    jobId: input.commandOverrides?.jobId ?? input.spec?.jobId ?? "test-job",
+    workflowId: "wf-1",
+  });
   (service as any).publishScreenerEvent = vi.fn(async () => undefined);
   return { service, audit, guard, runScreen, isScreenRunning };
 }

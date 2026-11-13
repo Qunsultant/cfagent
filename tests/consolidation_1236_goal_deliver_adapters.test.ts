@@ -210,9 +210,11 @@ describe("goal bridge deliver suppression (#1236)", () => {
       APP_ENV: "TEST",
       SESSION_STORE: sessionStoreNs,
       SCREENER_AGENT: { idFromName: (n: string) => n, get: () => ({}) },
-      // #2051: goal_workflow is default-ON. The chained tests pin
-      // the DIRECT deliver path (chain mode keeps it until S5
-      // #4280); the unchained test pins the workflow submission.
+      // #2051: goal_workflow is default-ON. S5 #4280 removed the
+      // direct path for chain mode too: chained and unchained runs
+      // both pin the workflow submission now, and the bridge outcome
+      // (deliverViaChain true + recipients + stageChain) is built by
+      // the workflow's deliver stage, not here.
       // The flag no longer gates either entry (#4279).
       FEATURE_FLAGS: JSON.stringify({ goal_workflow: false }),
     } as unknown as Env;
@@ -226,7 +228,8 @@ describe("goal bridge deliver suppression (#1236)", () => {
     );
   }
 
-  it("chained goal: no direct deliver; bridge carries deliverViaChain true + per-task recipients", async () => {
+  it("chained goal: the workflow submission carries the deliver channels + stageChain; the bridge lives in the deliver stage (#4280)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const bridge = vi.fn().mockResolvedValue(undefined);
     const service = makeService(bridge);
     const result = await service.autonomousGoalScreen({
@@ -236,19 +239,20 @@ describe("goal bridge deliver suppression (#1236)", () => {
       stageChain: CHAIN,
     });
     expect(result.success).toBe(true);
-    expect(executeGoalScreenRun).toHaveBeenCalledTimes(1);
-    expect(executeGoalScreenRun.mock.calls[0][0]).not.toHaveProperty("deliver");
-    expect(bridge).toHaveBeenCalledTimes(1);
-    const outcome = bridge.mock.calls[0][0] as ScreenerRunOutcome;
-    expect(outcome.kind).toBe("goal");
-    expect(outcome.deliverViaChain).toBe(true);
-    expect(outcome.emailTo).toBe("owner@example.com");
-    expect(outcome.slackChannel).toBe("C123");
-    expect(outcome.deliveryChannels).toEqual(["email", "slack"]);
-    expect(outcome.canonicalReportId).toBe("rep-1");
-    expect(outcome.matchedCount).toBe(2);
-    expect(outcome.totalScanned).toBe(14);
-    expect(outcome.stageChain).toEqual(CHAIN);
+    expect((result as { data: Record<string, unknown> }).data.status).toBe("queued");
+    // Issue #4280 ([One engine] #3550 S5): the direct run + bridge
+    // block are gone — chain mode submits the goal workflow, and the
+    // bridge outcome (deliverViaChain true + recipients + stageChain)
+    // is built by the workflow's deliver stage
+    // (screenerPipelineJobs buildDeliverDoor), not here.
+    expect(executeGoalScreenRun).not.toHaveBeenCalled();
+    expect(bridge).not.toHaveBeenCalled();
+    expect(mockedBuild).toHaveBeenCalledTimes(1);
+    const input = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
+    expect(input.deliverChannels).toEqual(["email", "slack"]);
+    expect(input.emailTo).toBe("owner@example.com");
+    expect(input.slackChannel).toBe("C123");
+    expect(input.stageChain).toEqual(CHAIN);
   });
 
   it("unchained goal: the workflow submission carries the deliver channels; bridge never runs (#4279: the direct path is retired for unchained runs)", async () => {
@@ -270,14 +274,19 @@ describe("goal bridge deliver suppression (#1236)", () => {
     expect((mockedBuild.mock.calls[0][0] as Record<string, unknown>).deliverChannels).toEqual(["email", "slack"]);
   });
 
-  it("chained goal with no recipients: bridge allowlist is empty (no invented deliveries)", async () => {
+  it("chained goal with no recipients: the submission carries no deliver channels and invents none (#4280)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const bridge = vi.fn().mockResolvedValue(undefined);
     const service = makeService(bridge);
-    await service.autonomousGoalScreen({ goalKind: "income", stageChain: CHAIN });
-    expect(executeGoalScreenRun.mock.calls[0][0]).not.toHaveProperty("deliver");
-    const outcome = bridge.mock.calls[0][0] as ScreenerRunOutcome;
-    expect(outcome.deliveryChannels).toEqual([]);
-    expect(outcome.emailTo).toBeUndefined();
-    expect(outcome.slackChannel).toBeUndefined();
+    const result = await service.autonomousGoalScreen({ goalKind: "income", stageChain: CHAIN });
+    expect(result.success).toBe(true);
+    expect(executeGoalScreenRun).not.toHaveBeenCalled();
+    expect(bridge).not.toHaveBeenCalled();
+    expect(mockedBuild).toHaveBeenCalledTimes(1);
+    const input = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
+    expect(input).not.toHaveProperty("deliverChannels");
+    expect(input.emailTo).toBeUndefined();
+    expect(input.slackChannel).toBeUndefined();
+    expect(input.stageChain).toEqual(CHAIN);
   });
 });

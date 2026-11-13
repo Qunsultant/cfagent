@@ -99,8 +99,9 @@
 
 import type { StageName } from "../messaging/messagingPorts";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
-import type { OptionScreenerFilter, StockScreenerFilter } from "../types";
+import type { OptionScreenerFilter, StageChainConfig, StockScreenerFilter } from "../types";
 import type { BrokerId } from "../trading";
+import type { StockScreenDelivery } from "./stockScreenRunSpec";
 
 /** Re-exported for workflow callers (single import surface). */
 export type { StageName };
@@ -203,6 +204,21 @@ export interface GoalScreenCommand {
   deliver?: ("slack" | "email" | "webhook" | "voice")[];
   /** Delivery recipient for the email channel. */
   emailTo?: string;
+  /**
+   * Issue #4280 ([One engine] #3550 S5): the Slack channel a
+   * chain-mode scheduled goal run delivers to. The direct bridge
+   * carried it; the goal workflow's deliver stage carries it now.
+   * The goal path never had a webhookUrl — not added here.
+   */
+  slackChannel?: string;
+  /**
+   * Issue #4280 ([One engine] #3550 S5): the stage-chain config a
+   * chain-mode scheduled goal run was armed with. The goal
+   * workflow's deliver stage bridges generate + serve with its
+   * delays (serveDelaySeconds / deliverDelaySeconds) instead of
+   * delivering directly. Absent = the unchained direct delivery.
+   */
+  stageChain?: StageChainConfig;
   /** Issue #1571: "yahoo" runs the stock leg on the Yahoo engine (scheduled fallback runs). */
   provider?: "yahoo";
   /** Issue #1571: fallback marker, stamped onto the result before artifact generation. */
@@ -323,6 +339,23 @@ export interface WorkflowJobCommand {
   portfolioContext?: boolean;
   /** Whether the deliver step runs (etrade routes: true; market-data/premium: false). */
   deliver?: boolean;
+  /**
+   * Issue #4280 ([One engine] #3550 S5) — the per-request delivery
+   * envelope, carried from the spec through to the deliver stage.
+   * The chain carried these fields in its chain context; the command
+   * carries them now (this also implements #4300's outcome for every
+   * stock entry, not just scheduled). Defined fields only; an empty
+   * envelope stays absent.
+   */
+  delivery?: StockScreenDelivery;
+  /**
+   * Issue #4280 ([One engine] #3550 S5) — the stage-chain config the
+   * run was armed with. The deliver stage stamps it onto the run
+   * outcome so the follow-up bridge serves + delivers with its
+   * delays (serveDelaySeconds / deliverDelaySeconds). Absent = the
+   * unchained immediate bridge.
+   */
+  stageChain?: StageChainConfig;
   /**
    * Issue #1996 (#1972 slice 1) — goal-screen descriptor. Present
    * only for goal-screen runs: the child executes the goal-driven

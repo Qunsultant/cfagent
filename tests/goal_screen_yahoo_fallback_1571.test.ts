@@ -37,8 +37,8 @@
  * engine. The guard + fallback still run first, and the fallback
  * rides the submission (provider "yahoo" + the marker) into the
  * engine job; a run failure now lives on the engine job, not on
- * the tick. The chained tests below still pin the direct fallback
- * path (chain mode keeps it until S5 #4280).
+ * the tick. S5 #4280 removed the direct path for chain mode too:
+ * the chained test below pins the submission, like the rest.
  */
 import { describe, it, expect, vi } from "vitest";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
@@ -134,7 +134,8 @@ function goalService(opts: {
 }
 
 describe("goal-screen Yahoo fallback (#1571)", () => {
-  it("a guard-blocked run with stocks requested completes via Yahoo with the fallback marker and no failure audit", async () => {
+  it("a guard-blocked run with stocks requested submits to the engine carrying the Yahoo fallback marker (#4280: chain mode rides the workflow now)", async () => {
+    mockedStart.mockResolvedValue(HANDLE as never);
     const bridge = vi.fn(async () => {});
     const { service, audit, guard, runGoalScreen } = goalService({
       blocked: true,
@@ -146,24 +147,23 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
       stageChain: {} as any,
     });
     expect(result.success).toBe(true);
+    expect((result as any).data.status).toBe("queued");
     // The guard is consulted for the stock leg, exactly once.
     expect(guard).toHaveBeenCalledTimes(1);
     expect(guard.mock.calls[0][2]).toBe("stock");
-    // The agent request rides Yahoo + the marker.
-    expect(runGoalScreen).toHaveBeenCalledTimes(1);
-    const req = runGoalScreen.mock.calls[0][0];
-    expect(req.provider).toBe("yahoo");
-    expect(req.providerFallback).toEqual({ ...FALLBACK_MARKER });
-    // Marker on the returned data and the completion audit.
-    expect((result as any).data.providerFallback).toEqual({ ...FALLBACK_MARKER });
-    const completed = audit.mock.calls.find((c) => c[0] === "goal_screen.run_completed");
-    expect(completed).toBeDefined();
-    expect(completed[1].providerFallback).toEqual({ ...FALLBACK_MARKER });
-    // No failure notice on fallback success.
+    // The direct agent is never consulted — the fallback rides the
+    // submission into the engine job, where the stock leg runs it.
+    expect(runGoalScreen).not.toHaveBeenCalled();
+    expect(mockedBuild).toHaveBeenCalledTimes(1);
+    const submitted = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
+    expect(submitted.provider).toBe("yahoo");
+    expect(submitted.providerFallback).toEqual({ ...FALLBACK_MARKER });
+    expect(submitted.stageChain).toEqual({});
+    // No failure notice on fallback submission success; the run's
+    // failure, if any, lives on the engine job.
     expect(audit.mock.calls.find((c) => c[0] === "goal_screen.run_failed")).toBeUndefined();
-    // The stage-chain bridge payload names the fallback.
-    expect(bridge).toHaveBeenCalledTimes(1);
-    expect(bridge.mock.calls[0][0].providerFallback).toEqual({ ...FALLBACK_MARKER });
+    // The bridge lives in the deliver stage now, not on this path.
+    expect(bridge).not.toHaveBeenCalled();
   });
 
   it("a fallback that itself fails is submitted to the engine carrying the marker (#4279: the run failure now lives on the engine job, not the tick)", async () => {

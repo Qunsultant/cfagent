@@ -12,13 +12,16 @@
  *    start fails. The #2914 broker-consult pin below is
  *    superseded: nlqPorts.ts contains no broker consult and no
  *    direct agent call any more.
- *  - Scheduled sharded starts through the broker: the broker
- *    owns the chain start (planFeedStart + shardSubmit), so
- *    scheduledTasks.ts contains no planFeedStart. The literal
- *    workflow-start migration is NOT claimed here: the chain
- *    is the stage pipeline (stageChain has no workflow
- *    equivalent) and the chain run model (chain_id) is read
- *    by workflowRuns — see the broker header note.
+ *  - Issue #4280 ([One engine] #3550 S5): the scheduled sharded
+ *    chain moved onto the engine — the broker's chain start is
+ *    RETIRED (frozen in startScheduledShardedChain.deprecated.ts,
+ *    ledger entry), and scheduledTasks.ts contains no
+ *    startScheduledShardedChain and no planFeedStart. The
+ *    submission below is the engine seam's submit-only entry
+ *    (submitStockScreenViaEngine, jobId = chainId); the G7
+ *    note's three conditions are met (stageChain-in-workflow,
+ *    chain-run-model migration, channel plumbing) — see the
+ *    broker header note.
  *  - Direct ScreenerAgent.runScreen lives only in the
  *    allow-listed files, each with its role named (agent
  *    internals, NLQ port call, workflow runner seams). Issue
@@ -42,9 +45,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildParentScreenCommand,
   shardsForUniverse,
-  startScheduledShardedChain,
   startStockScreenWorkflowOrNull,
 } from "../src/workflows/screenExecutionBroker";
+import { startScheduledShardedChain } from "../src/workflows/startScheduledShardedChain.deprecated";
 import { nlqStockScreenPort } from "../src/agents/orchestrator/nlqPorts";
 
 const read = (p: string) => readFileSync(join("src", p), "utf8");
@@ -164,8 +167,8 @@ describe("one parent command builder (#2914)", () => {
   });
 });
 
-describe("scheduled sharded start through the broker (#2914)", () => {
-  it("the broker's chain start submits the feed-start submission through the injected port", async () => {
+describe("scheduled sharded start — retired chain start, frozen shape (#2914, #4280)", () => {
+  it("the retired chain start still submits the feed-start submission through the injected port (frozen, not deleted)", async () => {
     const submitted: unknown[] = [];
     const result = await startScheduledShardedChain({
       chain: {
@@ -234,6 +237,7 @@ describe("caller pins (#2914)", () => {
   });
 
   it("scheduledTasks no longer starts the sharded chain by hand", () => {
+    expect(read("services/scheduledTasks.ts")).not.toContain("startScheduledShardedChain");
     expect(read("services/scheduledTasks.ts")).not.toContain("planFeedStart");
   });
 
@@ -293,6 +297,6 @@ describe("caller pins (#2914)", () => {
     expect(inv).toContain("2026-11-03");
     expect(inv).toContain("stays goal-owned");
     expect(inv).toContain("buildParentScreenCommand");
-    expect(inv).toContain("Broker-owned chain start");
+    expect(inv).toContain("Engine seam submit");
   });
 });
