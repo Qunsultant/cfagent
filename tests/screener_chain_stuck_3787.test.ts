@@ -799,22 +799,17 @@ describe("screening chain run with missing feed data (#3787c)", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* (d) Feed on a schedule — seed + catalog                             */
+/* (d) Feed on a schedule — removed (#4306 S2)                         */
 /* ------------------------------------------------------------------ */
 
-describe("feed datasets on a schedule (#3787d)", () => {
-  it("DEFAULT_SCHEDULES seeds an enabled hourly feed-refresh goal", () => {
+describe("feed datasets on a schedule — goal removed (#4306 S2)", () => {
+  it("DEFAULT_SCHEDULES carries no feed-refresh goal", () => {
     const goal = DEFAULT_SCHEDULES.find((g) => g.id === "feed-refresh");
-    expect(goal).toBeDefined();
-    expect(goal?.operation).toBe("feed.refresh_all");
-    expect(goal?.enabled).toBe(true);
-    expect(goal?.cron).toBe("0 * * * *");
-    expect(goal?.timeZone).toBe("UTC");
+    expect(goal).toBeUndefined();
   });
 
-  it("the operation catalog accepts feed.refresh_all, so addGoal can add the goal", () => {
+  it("the operation catalog carries no feed.refresh_all entry, so addGoal cannot add the goal", () => {
     const entry = OPERATION_CATALOG.find((e) => e.operations.includes("feed.refresh_all"));
-    expect(entry).toBeDefined();
-    expect(entry?.binding).toBe("SCHEDULED_AGENT");
+    expect(entry).toBeUndefined();
   });
 });
