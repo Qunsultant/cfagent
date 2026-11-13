@@ -477,8 +477,8 @@ describe("S7 survivor — the one schedule UI renders the union", () => {
     expect(text).toContain("Options Market Screen");
     // The other callbacks as generic cards on the same surface.
     expect(text).toContain("collectIvHistory");
-    // Folded-in sections.
-    expect(text).toContain("Latest Autonomous Options Runs");
+    // Folded-in sections: the audit trail stays; the options-runs card moved
+    // into the one run ledger (#4329 S3, pinned in 4332's tests).
     expect(text).toContain("Execution History & Audit Trail");
   });
 
