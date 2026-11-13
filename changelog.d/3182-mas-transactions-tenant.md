@@ -1,0 +1,3 @@
+### DO ledger of record (mas_transactions) carries tenantId
+
+- `mas_transactions` gains a nullable `tenant_id` column (DO migration: PRAGMA-checked ALTER plus a tenant index; fresh tables carry it in the DDL). The refund/charge/credit paths stamp it at write time from resolved identity: cfpay charge and credit rows carry the payment workflow's verified tenant, channel rows carry the draft's tenant, and rows written where no tenant is resolvable (drafts, agent-to-agent x402 rows, wallet receipts) carry explicit NULL — never invented. A new tenant-scoped read (`findByTenant`) returns only that tenant's rows; null-tenant legacy rows are excluded and stay reachable via the unfiltered read and the audit-payload join, which is unchanged.

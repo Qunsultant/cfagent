@@ -1111,6 +1111,9 @@ export class ETradeAgenticPaymentService {
       note: isSimulated ? `${baseNote} [Simulated local payment record — no real payment was made or verified.]` : baseNote,
       createdAt: now,
       updatedAt: now,
+      // Issue #3182: wallet receipts carry payer/recipient addresses,
+      // not a resolved tenant — explicit null, never invented.
+      tenantId: null,
     };
 
     if (this.orm?.transactions) {

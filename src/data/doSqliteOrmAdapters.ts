@@ -121,6 +121,10 @@ export const TRANSACTION_COLUMN_MAP = {
   note: "note",
   createdAt: "created_at",
   updatedAt: "updated_at",
+  // Issue #3182: last in the map, matching the DDL position, so
+  // replace()'s INSERT column order and the PRAGMA column order
+  // agree on fresh and migrated tables alike.
+  tenantId: "tenant_id",
 } as const;
 
 export const MESSAGE_COLUMN_MAP = {
@@ -344,6 +348,12 @@ export class DoSqliteTransactionLedgerAdapter
     >;
     const values = cols.map((prop) => {
       const val = record[prop];
+      // Issue #3182: the map drives every column, so an optional field
+      // a record does not carry (tenantId on pre-stamping rows) would
+      // bind `undefined` — real SQLite rejects that ("Provided value
+      // cannot be bound"). Absent means NULL, exactly like the
+      // nullable columns the DDL already carries.
+      if (val === undefined) return null;
       return typeof val === "boolean" ? (val ? 1 : 0) : val;
     });
     this.sql.exec(
@@ -353,6 +363,12 @@ export class DoSqliteTransactionLedgerAdapter
       ...values,
     );
     return record;
+  }
+
+  /** #3182: tenant-scoped read. `tenant_id = ?` excludes
+   *  null-tenant legacy rows by construction — see the port. */
+  findByTenant(tenantId: string): TransactionRecord[] {
+    return this.findMany({ where: { tenantId }, orderBy: "created_at DESC" });
   }
 
   /** #2360: the route's four status transitions, statements

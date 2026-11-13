@@ -522,6 +522,9 @@ export class PaymentWorkflow extends ThinkWorkflow<
             checkoutId: e.checkoutId,
             claimTxHash: e.claimTxHash,
             paymentIntentId: e.paymentIntentId,
+            // Issue #3182: the workflow's verified tenant, so the
+            // ledger row is tenant-attributed at write time.
+            tenantId: p.tenantId,
           });
           if (duplicate) {
             console.log(
@@ -605,6 +608,8 @@ export class PaymentWorkflow extends ThinkWorkflow<
           userId: p.userId,
           family: p.family,
           priceUSD,
+          // Issue #3182: see the charge call above.
+          tenantId: p.tenantId,
         });
         try {
           const adapter = createCommercialAdapter(this.env as { AGENT_DB?: unknown });

@@ -262,6 +262,12 @@ export class InMemoryTransactionLedgerAdapter
     return record;
   }
 
+  /** #3182: tenant-scoped read — same null-exclusion as the DO
+   *  adapter (findMany's `=` filter drops null-tenant rows). */
+  findByTenant(tenantId: string): TransactionRecord[] {
+    return this.findMany({ where: { tenantId }, orderBy: "createdAt DESC" });
+  }
+
   /** #2360: the route's four status transitions with the
    *  same field sets and WHERE shapes as the DO adapter —
    *  no status guard on any of them (the legacy UPDATEs

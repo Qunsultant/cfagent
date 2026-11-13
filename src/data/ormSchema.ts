@@ -162,7 +162,8 @@ const MAS_TRANSACTIONS_DDL = `
         proof_signature TEXT,
         note TEXT,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        tenant_id TEXT
       )
     `;
 
@@ -198,6 +199,31 @@ export function ensureAuditChainColumns(sql: SqlStorage): void {
   if (!names.has("event_hash")) {
     sql.exec(`ALTER TABLE mas_events ADD COLUMN event_hash TEXT`);
   }
+}
+
+/**
+ * Issue #3182: tenant column for mas_transactions on tables created
+ * before the column existed. CREATE TABLE IF NOT EXISTS never
+ * migrates, so the missing column is added explicitly (the
+ * #2178 audit-chain pattern above). Idempotent: a table that
+ * already has the column is untouched. The column is nullable by
+ * design — legacy rows without a resolvable tenant stay explicitly
+ * NULL, never invented — and tenant-filtered reads exclude nulls.
+ * The index keeps the tenant-scoped read from table-scanning the
+ * ledger; fresh tables get the column from the DDL above, in the
+ * same (last) position, so fresh and migrated tables agree.
+ */
+export function ensureTransactionTenantColumn(sql: SqlStorage): void {
+  const info = Array.from(sql.exec(`PRAGMA table_info(mas_transactions)`)) as Array<{
+    name: string;
+  }>;
+  const names = new Set(info.map((c) => c.name));
+  if (!names.has("tenant_id")) {
+    sql.exec(`ALTER TABLE mas_transactions ADD COLUMN tenant_id TEXT`);
+  }
+  sql.exec(
+    `CREATE INDEX IF NOT EXISTS idx_mas_transactions_tenant_id ON mas_transactions (tenant_id)`,
+  );
 }
 
 /** Create every shared table, in SHARED_MAS_TABLES order. */

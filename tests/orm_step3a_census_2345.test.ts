@@ -60,7 +60,11 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // 17 since #3782 added the mas_trades price_source column's
   // PRAGMA-guarded ALTER (same precedent: check + ALTER).
   ["src/data/ormFacade.ts", 17],
-  ["src/data/ormSchema.ts", 4],
+  // 4 at 3a; 7 since #3182 added the mas_transactions tenant
+  // column's PRAGMA-guarded ALTER (PRAGMA table_info check +
+  // ALTER + tenant index, same #2178 precedent as the audit
+  // chain columns above).
+  ["src/data/ormSchema.ts", 7],
   ["src/data/d1MarketplaceAdapter.ts", 0],
   ["src/data/inMemoryOrmAdapters.ts", 0],
   ["src/data/inMemoryMarketplaceAdapter.ts", 0],

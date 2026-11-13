@@ -16,5 +16,6 @@ export {
   ensureAuditChainColumns,
   ensureSharedTable,
   ensureSharedTables,
+  ensureTransactionTenantColumn,
   type SharedMasTable,
 } from "../data/ormSchema";
