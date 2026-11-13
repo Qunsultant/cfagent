@@ -71,13 +71,6 @@ export interface ScheduleTick {
 }
 
 /**
- * Issue #3787: the feed-refresh goal's operation. The branch in
- * ScheduledAgent.onCron dispatches every J2 feed job through
- * the pipeline control plane's own scheduled-firing seam.
- */
-export const FEED_REFRESH_OPERATION = "feed.refresh_all";
-
-/**
  * Default schedules. Goals themselves live in the ScheduledAgent's
  * SQL; these are the built-in evaluations that ship with the system.
  * Stored goals are seeded from this list only when storage is empty,
@@ -193,28 +186,6 @@ export const DEFAULT_SCHEDULES: ScheduledGoal[] = [
     operation: "index.refresh_holdings",
     budgetCents: 1,
     enabled: false,
-    timeZone: "UTC",
-  },
-  {
-    // #3787: feed datasets on a schedule — the J2 feed jobs
-    // (provider quotes + fundamentals)
-    // dispatch hourly through the pipeline control plane's own
-    // feed-job seam (dispatchScheduledPipelineJob), on the
-    // existing */30 tick; no new scheduler, no new wrangler
-    // cron triggers. Canonical definition: fresh deployments
-    // seed from here; the running deployment needs the operator
-    // dashboard-API add (the #1819 pattern) — adding an entry
-    // here does not inject it into an already-running
-    // deployment. The branch never stamps lastRun (isDue's 23h
-    // guard would suppress an hourly goal — the
-    // resource.cap_alert precedent); hourly dedup lives in the
-    // goal's latest run record.
-    id: "feed-refresh",
-    name: "Feed refresh (all feed jobs)",
-    cron: "0 * * * *",
-    operation: FEED_REFRESH_OPERATION,
-    budgetCents: 1,
-    enabled: true,
     timeZone: "UTC",
   },
 ];
