@@ -32,6 +32,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Badge,
   Button,
+  Flex,
   Notice,
   PillGroup,
   Table,
@@ -558,15 +559,42 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         // refused server-side, so the row offers no action buttons.
         // A Badge (ui/ primitive) keeps the row at zero new bespoke
         // classes — the interior ratchet counts className tokens.
+        // Issue #4352 — the feed is schedulable like any other job: the row
+        // offers Pause/Resume and its cadence. No Delete: a live feed has no
+        // definition to delete (the agent rewrites its record on the next
+        // push), so Pause is the destructive-equivalent action and says so.
         if (s.kind === "ticker-push") {
           return (
-            <Badge
-              tone="neutral"
-              size="xs"
-              title="Managed by listeners — the feed runs while clients are connected"
-            >
-              Live feed
-            </Badge>
+            <Flex gap="1" justify="end">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handlePauseResume(s)}
+                title={s.paused ? "Resume the live feed" : "Pause the live feed"}
+              >
+                {s.paused ? "Resume" : "Pause"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setCadenceError(null);
+                  setCadenceTarget(s);
+                }}
+                title="Set the live feed's cadence"
+              >
+                Edit frequency
+              </Button>
+              <Badge
+                tone="neutral"
+                size="xs"
+                title="Managed by listeners — the feed runs while clients are connected"
+              >
+                Live feed
+              </Badge>
+            </Flex>
           );
         }
         return (

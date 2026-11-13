@@ -88,6 +88,10 @@ export interface ScreenerPdfStub {
  */
 export interface TickerPushRecordStub {
   getTickerPushRecord(): Promise<UnifiedScheduleRecord | null>;
+  /** Issue #4352 — the feed is schedulable: pause, resume, set the cadence. */
+  pauseTickerPush(): Promise<{ ok: true }>;
+  resumeTickerPush(): Promise<{ ok: true }>;
+  setTickerPushInterval(intervalSeconds: number): Promise<{ ok: true; intervalSeconds: number }>;
 }
 
 /**
