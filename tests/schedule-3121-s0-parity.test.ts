@@ -386,12 +386,12 @@ describe("S0-P15 synthesized schedules (B-T3-06): materialize first, fire via on
   });
 });
 
-describe("S0-P16 goal store (B-T3-07): nine shipped goals, social post disabled", () => {
+describe("S0-P16 goal store (B-T3-07): eight shipped goals, social post disabled", () => {
   it("pins the DEFAULT_SCHEDULES ids and the disabled social post", () => {
     expect(DEFAULT_SCHEDULES.map((g) => g.id)).toEqual([
       ...SCHEDULED_GOAL_IDS_INVENTORY,
     ]);
-    expect(SCHEDULED_GOAL_IDS_INVENTORY).toHaveLength(9);
+    expect(SCHEDULED_GOAL_IDS_INVENTORY).toHaveLength(8);
     const social = DEFAULT_SCHEDULES.find((g) => g.id === "daily-social-post");
     expect(social).toMatchObject({
       cron: "0 9 * * 1-5",
