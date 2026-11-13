@@ -33,6 +33,7 @@ import { RefundFlowSection } from "./RefundFlowSection";
 import { ApprovedFreeQuotaSection } from "./ApprovedFreeQuotaSection";
 import { UsageBillingSection } from "./UsageBillingSection";
 import { TopUpLimitsSection } from "./TopUpLimitsSection";
+import { ReferralCodesSection } from "./ReferralCodesSection";
 import { OfferRulesSection } from "./OfferRulesSection";
 import {
   buildBillingView,
@@ -173,6 +174,7 @@ export function BillingServicingPanel() {
           <RefundPolicySection />
           <RefundFlowSection />
           <UsageBillingSection />
+          <ReferralCodesSection />
           <ApprovedFreeQuotaSection />
           <TopUpLimitsSection />
           <OfferRulesSection />

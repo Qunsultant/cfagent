@@ -1,0 +1,6 @@
+### Referral / invite codes: gate step, failure-credit guard, and UI
+
+- Code runs now spend in the gate: a code-runs balance covers a run after subscription included runs and before runs-pack runs (`paidVia: "code_runs"`), only when the family's catalogue price is approved. No journal entry — a code run is a granted run, not a purchase.
+- A failed code-covered run issues no failure credit (`screener_failed_no_credit`): a free run has no charge to reverse, so the flow skips the issue-failure-credit step instead of minting a USD claim. Every other paid run keeps the existing credit path.
+- Operator panel: referral-code rules (one form per issuer) plus code issue, list, and revoke inside each product's view in the Products section. Billing tab: a Referral codes section with the code-runs balance, a redeem form, the caller's own codes, and a per-family "Get my referral code" action.
+- Docs: the entitlements definition gains the `code_runs` gate clause and a codes paragraph; the platform entity map gains the code-rules / codes / redemptions / code-runs-balance entities. One stale comment fixed: the referral-attribute route note now says code attributions are written by the redeem service directly.

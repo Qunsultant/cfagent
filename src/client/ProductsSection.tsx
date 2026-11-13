@@ -19,8 +19,10 @@
  * Catalogue approval stays in #2739's UI (the payment
  * assurance tab) — this section shows catalogue approval
  * status read-only and links there. Referral-code rules are
- * keyed by product id and land with #3307; this section
- * carries only the placement note, no referral mechanics.
+ * keyed by product id and configured here (#3307 slice 2):
+ * one rule form per issuer plus code issue / list / revoke,
+ * inside each product's view — no referral mechanics live
+ * anywhere else in this section.
  * The per-product ladder position (issue #3246) is edited
  * in each row: 1 = lowest, empty = unranked, the Free
  * baseline fixed at 1.
@@ -456,6 +458,484 @@ export function ProductsSection() {
   );
 }
 
+/**
+ * Issue #3307 (sub-issue of #3241), slice 2 — referral-code
+ * rules + code management inside a product's view.
+ *
+ * Rules are keyed by (productId, issuer) and are the ONLY source
+ * of issuance terms; a missing or inactive rule disables codes
+ * for that product and issuer (fail-closed). The operator saves
+ * terms here; nothing is live until the rule is active. Codes
+ * confer runs only — never tier, never credits, never a price,
+ * never access. The plaintext of an issued code is shown ONCE,
+ * in the issuing session, and never rendered again.
+ */
+const REFERRAL_CODE_BASE = "/api/payments/agentic/commercial";
+const REFERRAL_ISSUERS = ["platform_admin", "tenant_admin", "user"] as const;
+type ReferralIssuer = (typeof REFERRAL_ISSUERS)[number];
+
+interface ReferralCodeRuleView {
+  id: string;
+  productId: string;
+  issuer: string;
+  runsPerCode: number;
+  reusable: boolean;
+  expiryDays: number | null;
+  attributionMode: string;
+  maxRedemptionsPerCode: number | null;
+  maxRedemptionsPerLogin: number | null;
+  globalCap: number | null;
+  redemptionCount: number;
+  active: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+interface PublicReferralCodeView {
+  id: string;
+  displayPrefix: string;
+  ruleId: string;
+  productId: string;
+  kind: string;
+  issuerLogin: string;
+  issuerKind: string;
+  referrerUserId: string | null;
+  tenantScope: string | null;
+  runs: number;
+  reusable: boolean;
+  expiresAtMs: number | null;
+  revokedAtMs: number | null;
+  redemptionCount: number;
+  createdAtMs: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isReferralCodeRuleView(value: unknown): value is ReferralCodeRuleView {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.productId === "string" &&
+    typeof value.issuer === "string" &&
+    typeof value.runsPerCode === "number" &&
+    typeof value.reusable === "boolean" &&
+    (value.expiryDays === null || typeof value.expiryDays === "number") &&
+    typeof value.attributionMode === "string" &&
+    (value.maxRedemptionsPerCode === null || typeof value.maxRedemptionsPerCode === "number") &&
+    (value.maxRedemptionsPerLogin === null || typeof value.maxRedemptionsPerLogin === "number") &&
+    (value.globalCap === null || typeof value.globalCap === "number") &&
+    typeof value.redemptionCount === "number" &&
+    typeof value.active === "boolean"
+  );
+}
+
+function isPublicReferralCodeView(value: unknown): value is PublicReferralCodeView {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.displayPrefix === "string" &&
+    typeof value.productId === "string" &&
+    typeof value.kind === "string" &&
+    typeof value.issuerLogin === "string" &&
+    typeof value.issuerKind === "string" &&
+    typeof value.runs === "number" &&
+    typeof value.reusable === "boolean" &&
+    (value.expiresAtMs === null || typeof value.expiresAtMs === "number") &&
+    (value.revokedAtMs === null || typeof value.revokedAtMs === "number") &&
+    typeof value.redemptionCount === "number"
+  );
+}
+
+/** The PROPOSED starting values a new rule form is pre-filled with (design §2.4). */
+const PROPOSED_RULE_DEFAULTS = {
+  runsPerCode: 5,
+  reusable: false,
+  expiryDays: 30,
+  attributionMode: "ledger",
+  maxRedemptionsPerCode: 1,
+  maxRedemptionsPerLogin: 1,
+  globalCap: null as number | null,
+  active: false,
+};
+
+function ReferralRuleForm({
+  productId,
+  issuer,
+  rule,
+  onSaved,
+  onNote,
+}: {
+  productId: string;
+  issuer: ReferralIssuer;
+  rule: ReferralCodeRuleView | null;
+  onSaved: () => Promise<void>;
+  onNote: (note: string) => void;
+}) {
+  const initial = rule ?? { ...PROPOSED_RULE_DEFAULTS, id: "", productId, issuer };
+  const [runsPerCode, setRunsPerCode] = useState(String(initial.runsPerCode));
+  const [reusable, setReusable] = useState(initial.reusable ? "1" : "0");
+  const [expiryDays, setExpiryDays] = useState(
+    initial.expiryDays === null ? "" : String(initial.expiryDays),
+  );
+  const [attributionMode, setAttributionMode] = useState(initial.attributionMode);
+  const [maxPerCode, setMaxPerCode] = useState(
+    initial.maxRedemptionsPerCode === null ? "" : String(initial.maxRedemptionsPerCode),
+  );
+  const [maxPerLogin, setMaxPerLogin] = useState(
+    initial.maxRedemptionsPerLogin === null ? "" : String(initial.maxRedemptionsPerLogin),
+  );
+  const [globalCap, setGlobalCap] = useState(
+    initial.globalCap === null ? "" : String(initial.globalCap),
+  );
+  const [active, setActive] = useState(initial.active ? "1" : "0");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async () => {
+    const parsedRuns = Number(runsPerCode);
+    if (!Number.isInteger(parsedRuns) || parsedRuns < 1) {
+      setError("Runs per code must be a positive whole number.");
+      return;
+    }
+    const parseCap = (value: string, name: string): number | null => {
+      if (value.trim() === "") return null;
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${name} must be a whole number or empty (uncapped).`);
+      return parsed;
+    };
+    let expiry: number | null = null;
+    let perCode: number | null = null;
+    let perLogin: number | null = null;
+    let cap: number | null = null;
+    try {
+      if (expiryDays.trim() !== "") {
+        const parsed = Number(expiryDays);
+        if (!Number.isInteger(parsed) || parsed < 1) throw new Error("Expiry days must be a positive whole number or empty (no expiry).");
+        expiry = parsed;
+      }
+      perCode = parseCap(maxPerCode, "Max redemptions per code");
+      perLogin = parseCap(maxPerLogin, "Max redemptions per login");
+      cap = parseCap(globalCap, "Global cap");
+    } catch (err: any) {
+      setError(err.message || "Invalid rule values.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await apiJson(`${REFERRAL_CODE_BASE}/referral-code-rules`, {
+        method: "POST",
+        body: JSON.stringify({
+          productId,
+          issuer,
+          runsPerCode: parsedRuns,
+          reusable: reusable === "1",
+          expiryDays: expiry,
+          attributionMode,
+          maxRedemptionsPerCode: perCode,
+          maxRedemptionsPerLogin: perLogin,
+          globalCap: cap,
+          active: active === "1",
+        }),
+      });
+      onNote(`Referral-code rule saved for ${issuer} (${active === "1" ? "active" : "inactive"}).`);
+      await onSaved();
+    } catch (err: any) {
+      setError(err.message || "Failed to save the rule.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <div>
+        <strong>{issuer}</strong>
+        {rule
+          ? ` — ${rule.active ? "Active" : "Inactive"} · ${rule.redemptionCount} redemptions under this rule`
+          : " — No rule yet: codes are disabled for this issuer until a rule is saved and activated."}
+      </div>
+      <TextInput
+        label="Runs per code"
+        type="number"
+        value={runsPerCode}
+        onChange={(e) => setRunsPerCode(e.target.value)}
+      />
+      <Select
+        label="One-time or reusable"
+        value={reusable}
+        onChange={(e) => setReusable(e.target.value)}
+      >
+        <option value="0">One-time (a login redeems a given code at most once)</option>
+        <option value="1">Reusable (subject to the per-login cap)</option>
+      </Select>
+      <TextInput
+        label="Expiry days (empty = no expiry)"
+        type="number"
+        value={expiryDays}
+        onChange={(e) => setExpiryDays(e.target.value)}
+      />
+      <Select
+        label="Attribution mode (referral codes only)"
+        value={attributionMode}
+        onChange={(e) => setAttributionMode(e.target.value)}
+        hint="Ledger writes the referrer link through the referral-credit ledger; none writes nothing even for referral codes. Invite codes never attribute."
+      >
+        <option value="ledger">Ledger</option>
+        <option value="none">None</option>
+      </Select>
+      <TextInput
+        label="Max redemptions per code (empty = uncapped)"
+        type="number"
+        value={maxPerCode}
+        onChange={(e) => setMaxPerCode(e.target.value)}
+      />
+      <TextInput
+        label="Max redemptions per login (empty = uncapped)"
+        type="number"
+        value={maxPerLogin}
+        onChange={(e) => setMaxPerLogin(e.target.value)}
+      />
+      <TextInput
+        label="Global cap (empty = uncapped)"
+        type="number"
+        value={globalCap}
+        onChange={(e) => setGlobalCap(e.target.value)}
+      />
+      <Select label="Rule state" value={active} onChange={(e) => setActive(e.target.value)}>
+        <option value="0">Inactive (codes disabled)</option>
+        <option value="1">Active</option>
+      </Select>
+      <Button size="sm" loading={saving} onClick={() => void save()}>
+        Save rule
+      </Button>
+      {error && <Notice tone="danger">{error}</Notice>}
+    </div>
+  );
+}
+
+function ReferralCodeRulesPanel({
+  productId,
+  onChanged,
+  onNote,
+}: {
+  productId: string;
+  onChanged: () => Promise<void>;
+  onNote: (note: string) => void;
+}) {
+  const [rules, setRules] = useState<ReferralCodeRuleView[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const body = await apiJson<{ productId: string; rules: unknown }>(
+        `${REFERRAL_CODE_BASE}/referral-code-rules?productId=${encodeURIComponent(productId)}`,
+      );
+      const rows = Array.isArray(body.rules) ? body.rules.filter(isReferralCodeRuleView) : [];
+      setRules(rows);
+    } catch (err: any) {
+      setError(err.message || "Failed to load referral-code rules.");
+    } finally {
+      setLoading(false);
+    }
+  }, [productId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div>
+      <h3>Referral-code rules</h3>
+      <p>
+        Rules are keyed by this product and survive version changes. Terms are snapshotted onto a code at
+        issuance, so a later rule edit never reprices outstanding codes; caps are read live at redemption,
+        so tightening a cap affects outstanding codes immediately. Deactivating a rule instantly disables
+        its outstanding codes.
+      </p>
+      {loading && <p>Loading referral-code rules…</p>}
+      {error && <Notice tone="danger">{error}</Notice>}
+      {!loading &&
+        !error &&
+        REFERRAL_ISSUERS.map((issuer) => (
+          <ReferralRuleForm
+            key={issuer}
+            productId={productId}
+            issuer={issuer}
+            rule={rules?.find((row) => row.issuer === issuer) ?? null}
+            onSaved={load}
+            onNote={onNote}
+          />
+        ))}
+    </div>
+  );
+}
+
+function ReferralCodeManagementPanel({ productId }: { productId: string }) {
+  const [codes, setCodes] = useState<PublicReferralCodeView[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [kind, setKind] = useState("referral");
+  const [issuer, setIssuer] = useState("platform_admin");
+  const [referrerUserId, setReferrerUserId] = useState("");
+  const [tenantScope, setTenantScope] = useState("");
+  const [issuing, setIssuing] = useState(false);
+  const [issueError, setIssueError] = useState("");
+  const [issuedPlaintext, setIssuedPlaintext] = useState<string | null>(null);
+  const [issuedPrefix, setIssuedPrefix] = useState("");
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const body = await apiJson<{ productId: string; codes: unknown }>(
+        `${REFERRAL_CODE_BASE}/referral-codes?productId=${encodeURIComponent(productId)}`,
+      );
+      const rows = Array.isArray(body.codes) ? body.codes.filter(isPublicReferralCodeView) : [];
+      setCodes(rows);
+    } catch (err: any) {
+      setError(err.message || "Failed to load referral codes.");
+    } finally {
+      setLoading(false);
+    }
+  }, [productId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const issue = async () => {
+    if (issuer === "tenant_admin" && tenantScope.trim() === "") {
+      setIssueError("Tenant scope is required for tenant-admin issuance.");
+      return;
+    }
+    setIssuing(true);
+    setIssueError("");
+    setIssuedPlaintext(null);
+    try {
+      const body = await apiJson<{ code: unknown; plaintext: string }>(
+        `${REFERRAL_CODE_BASE}/referral-codes/issue`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            productId,
+            kind,
+            issuer,
+            referrerUserId: referrerUserId.trim() === "" ? null : referrerUserId.trim(),
+            tenantScope: tenantScope.trim() === "" ? null : tenantScope.trim(),
+          }),
+        },
+      );
+      if (typeof body.plaintext !== "string" || !body.plaintext) {
+        throw new Error("The issue route did not return a code value.");
+      }
+      setIssuedPlaintext(body.plaintext);
+      setIssuedPrefix(
+        isPublicReferralCodeView(body.code) ? body.code.displayPrefix : body.plaintext.slice(0, 4),
+      );
+      await load();
+    } catch (err: any) {
+      setIssueError(err.message || "Failed to issue a code.");
+    } finally {
+      setIssuing(false);
+    }
+  };
+
+  const revoke = async (codeId: string) => {
+    setRevokingId(codeId);
+    setError("");
+    try {
+      await apiJson(`${REFERRAL_CODE_BASE}/referral-codes/revoke`, {
+        method: "POST",
+        body: JSON.stringify({ codeId }),
+      });
+      await load();
+    } catch (err: any) {
+      setError(err.message || "Failed to revoke the code.");
+    } finally {
+      setRevokingId(null);
+    }
+  };
+
+  return (
+    <div>
+      <h3>Referral codes</h3>
+      <p>
+        Issue a code under this product&apos;s rule. The code value is shown once, in this session — copy
+        it now; it is never stored and never shown again. Revoking a code never claws back runs already
+        credited.
+      </p>
+      <Select label="Kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+        <option value="referral">Referral (may attribute a referrer)</option>
+        <option value="invite">Invite (never attributes)</option>
+      </Select>
+      <Select label="Issuer" value={issuer} onChange={(e) => setIssuer(e.target.value)}>
+        <option value="platform_admin">Platform admin (any tenant may redeem)</option>
+        <option value="tenant_admin">Tenant admin (redeemable only in the named tenant)</option>
+      </Select>
+      {kind === "referral" && (
+        <TextInput
+          label="Referrer login (optional)"
+          value={referrerUserId}
+          onChange={(e) => setReferrerUserId(e.target.value)}
+        />
+      )}
+      {issuer === "tenant_admin" && (
+        <TextInput
+          label="Tenant scope (required for tenant-admin issuance)"
+          value={tenantScope}
+          onChange={(e) => setTenantScope(e.target.value)}
+        />
+      )}
+      <Button size="sm" loading={issuing} onClick={() => void issue()}>
+        Issue code
+      </Button>
+      {issueError && <Notice tone="danger">{issueError}</Notice>}
+      {issuedPlaintext && (
+        <Notice tone="info">
+          Code issued ({issuedPrefix}): {issuedPlaintext} — copy it now. This value is never shown again.
+        </Notice>
+      )}
+      {loading && <p>Loading referral codes…</p>}
+      {error && <Notice tone="danger">{error}</Notice>}
+      {!loading && !error && codes !== null && codes.length === 0 && <p>No codes issued for this product yet.</p>}
+      {!loading &&
+        !error &&
+        codes !== null &&
+        codes.map((code) => (
+          <div key={code.id}>
+            <div>
+              <strong>{code.displayPrefix}</strong> · {code.kind} · issued by {code.issuerLogin} (
+              {code.issuerKind}) · {code.runs} runs · {code.reusable ? "reusable" : "one-time"} ·{" "}
+              {code.expiresAtMs === null ? "no expiry" : `expires ${formatDate(code.expiresAtMs)}`} ·{" "}
+              {code.redemptionCount} redemptions
+              {code.tenantScope ? ` · tenant ${code.tenantScope}` : ""}
+              {code.referrerUserId ? ` · referrer ${code.referrerUserId}` : ""}
+            </div>
+            {code.revokedAtMs !== null ? (
+              <div>Revoked {formatDate(code.revokedAtMs)}.</div>
+            ) : (
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={revokingId === code.id}
+                onClick={() => void revoke(code.id)}
+              >
+                Revoke
+              </Button>
+            )}
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function ProductDetail({
   entry,
   onChanged,
@@ -643,10 +1123,12 @@ function ProductDetail({
       {!isFree && product.kind === "subscription" && (
         <BulkMovePanel product={product} versions={versions} onChanged={onChanged} />
       )}
-      <div>
-        Referral codes for this product are configured with issue 3307: rules are keyed by this product id and
-        survive version changes. No referral mechanics live in this section.
-      </div>
+      {!isFree && (
+        <>
+          <ReferralCodeRulesPanel productId={product.id} onChanged={onChanged} onNote={onNote} />
+          <ReferralCodeManagementPanel productId={product.id} />
+        </>
+      )}
     </Stack>
   );
 }

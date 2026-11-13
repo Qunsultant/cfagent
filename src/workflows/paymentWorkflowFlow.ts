@@ -457,7 +457,8 @@ export type PaymentWorkflowOutcome =
   | { status: "coverage_required"; runRequestId: string; priceUSD: number }
   | { status: "approval_rejected"; runRequestId: string }
   | { status: "expired"; runRequestId: string }
-  | { status: "screener_failed_credit_issued"; runRequestId: string; screenerError: string };
+  | { status: "screener_failed_credit_issued"; runRequestId: string; screenerError: string }
+  | { status: "screener_failed_no_credit"; runRequestId: string; screenerError: string };
 
 /** How long a checkout waits for verified payment before lapsing. */
 export const PAYMENT_VERIFICATION_TIMEOUT = "24 hours";
@@ -877,6 +878,16 @@ async function startScreenerOrCredit(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // Issue #3307 slice 2 (D12): a code-covered run is a FREE run
+    // — no charge was taken, so there is nothing to reverse. The
+    // failure-credit step is SKIPPED for paidVia "code_runs":
+    // issuing a USD claim here would convert a grant into money.
+    // No balance re-credit in v1; the failure is recorded with
+    // the honest status below. Every other paidVia keeps the
+    // existing credit path (including the $0-run edge, untouched).
+    if (paidVia === "code_runs") {
+      return { status: "screener_failed_no_credit", runRequestId: params.runRequestId, screenerError: message };
+    }
     await doStep("issue-failure-credit", async () => {
       await deps.issueFailureCredit(params.runRequestId, priceUSD, {
         ...(productId ? { productId } : {}),
