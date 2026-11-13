@@ -52,6 +52,7 @@ import {
   createJobPipelineStoresFromSql,
   type JobPipelineStores,
 } from "../data/createJobPipelinePorts";
+import type { JobArtifactStore } from "../data/jobPipelinePorts";
 import { createInMemoryJobPipelineStores } from "../data/inMemoryJobPipelineAdapter";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
@@ -66,7 +67,11 @@ import {
   type JobStepRegistry,
 } from "../services/jobPipelineSteps";
 import { OPTIONS_BLOCKS } from "./blocks/optionsBlocks";
-import { createOptionsScreenPorts, optionsArtifactKey } from "./optionsScreenPorts";
+import {
+  createOptionsScreenPorts,
+  optionsArtifactKey,
+  type OptionsStageStorage,
+} from "./optionsScreenPorts";
 import {
   memoryStageClaims,
   memoryStageStorage,
@@ -164,11 +169,16 @@ export const STRATEGY_SCREEN_JOB_ID_PREFIX = "strategy-screen";
  * the same stages run over the same ports; only the job identity
  * changes.
  */
-export function strategyScreenJobDefinition(jobId: string, request?: unknown): Record<string, unknown> {
+export function strategyScreenJobDefinition(jobId: string, request?: unknown, userLogin?: string): Record<string, unknown> {
   return {
     jobId,
     name: `Strategy screen ${jobId}`,
     ...(request !== undefined ? { request } : {}),
+    // Issue #4289: the acting login rides the raw config beside the
+    // request, so the workflow host's resolving steps can rebuild
+    // owner-scoped ports per invocation. Absent, the definition is
+    // byte-identical to before (the resolver ignores both fields).
+    ...(userLogin !== undefined ? { userLogin } : {}),
     root: {
       kind: "strategy-screen",
       steps: [{ step: OPTIONS_SCREEN_ROOT_STEP }],
@@ -212,11 +222,16 @@ export function strategyScreenJobId(runId: string): string {
  * OPTIONS_SCREEN_ROOT_STEP): without it the root produces a null
  * hand-off and no stage operation can execute on this job.
  */
-export function optionsScreenJobDefinition(jobId: string, request?: unknown): Record<string, unknown> {
+export function optionsScreenJobDefinition(jobId: string, request?: unknown, userLogin?: string): Record<string, unknown> {
   return {
     jobId,
     name: `Options screen ${jobId}`,
     ...(request !== undefined ? { request } : {}),
+    // Issue #4289: the acting login rides the raw config beside the
+    // request, so the workflow host's resolving steps can rebuild
+    // owner-scoped ports per invocation. Absent, the definition is
+    // byte-identical to before (the resolver ignores both fields).
+    ...(userLogin !== undefined ? { userLogin } : {}),
     root: {
       kind: "options-screen",
       steps: [{ step: OPTIONS_SCREEN_ROOT_STEP }],
@@ -325,6 +340,102 @@ export interface OptionsScreenStepDeps {
 const optionsBlocks = new Map(OPTIONS_BLOCKS.map((block) => [block.id, block]));
 
 /**
+ * Issue #4289 — resolve the stage id a step invocation carries. The
+ * one validation both step registrations share: the closure
+ * registration (registerOptionsScreenStep) and the resolving
+ * registration (registerOptionsWorkflowSteps) refuse a bad stageId
+ * with the same error.
+ */
+export function resolveOptionsStageId(params: unknown): OptionsPipelineStage {
+  const stageId = (params as { stageId?: unknown } | null)?.stageId;
+  if (typeof stageId !== "string" || !(OPTIONS_PIPELINE_STAGES as readonly string[]).includes(stageId)) {
+    throw new Error(
+      `options.runStage: params.stageId must be one of ${OPTIONS_PIPELINE_STAGES.join(", ")}; got ${JSON.stringify(stageId)}`,
+    );
+  }
+  return stageId as OptionsPipelineStage;
+}
+
+/**
+ * Issue #4289 — the shared `options.runStage` step body: run one
+ * stage through the shared per-stage body (runOptionsStageOnce — the
+ * same body the thin composer calls), record the stage in the
+ * holder, and throw on failure so the engine stops the run and
+ * marks it failed. The hand-off to the next step is the artifact
+ * keys the next stage reads. Both registrations — the closure one
+ * (dispatch + control) and the resolving one (the workflow host) —
+ * execute this one body; they differ only in how the deps are
+ * obtained (closed over per dispatch vs rebuilt per invocation).
+ */
+export async function runOptionsScreenStep(
+  ctx: JobStepContext,
+  deps: OptionsScreenStepDeps,
+): Promise<{ output: { stageId: string; artifactKeys: string[] }; descriptor: string }> {
+  const stageId = resolveOptionsStageId(ctx.params);
+  const input: OptionsStageInput = {
+    runId: deps.runId,
+    userLogin: deps.userLogin,
+    stageId,
+    artifactKeys: ((ctx.input as { artifactKeys?: unknown } | null)?.artifactKeys as string[] | undefined) ?? [],
+    request: deps.request,
+  };
+  const result = await runOptionsStageOnce(
+    input,
+    deps.workflow,
+    optionsBlocks.get(`options-${stageId}`)!,
+  );
+  // Upsert by stageId, never push: the engine retries a failed step
+  // within its budget, so one stage can be invoked more than once in
+  // a run — the holder keeps the stage's LATEST record, one entry per
+  // stage, in pipeline order (the first invocation's position).
+  const existing = deps.stageRecords.findIndex((record) => record.stageId === stageId);
+  if (existing >= 0) {
+    deps.stageRecords[existing] = result.record;
+  } else {
+    deps.stageRecords.push(result.record);
+  }
+  if (result.publishedMessage) {
+    deps.published.push(result.publishedMessage);
+  }
+  if (result.failed) {
+    throw new Error(result.reason ?? `options stage ${stageId} failed`);
+  }
+  return {
+    output: { stageId, artifactKeys: result.nextArtifactKeys },
+    descriptor: `options stage ${stageId} ${result.record.status}`,
+  };
+}
+
+/**
+ * Issue #4289 — the stage storage over the engine's artifact store:
+ * the durable home for stage artifacts in the workflow residency.
+ * The adapter is scoped by the ENGINE run id (the artifact store's
+ * scoping — a resumed run re-uses its engine run id, so its
+ * artifacts stay readable across executions); the keys are the
+ * options-scoped `options:<optionsRunId>:<stageId>` keys the ports
+ * already use. Values are JSON-shaped data, as the artifact store
+ * requires.
+ */
+export function optionsStageStorageFromArtifacts(
+  artifacts: JobArtifactStore,
+  engineRunId: string,
+): OptionsStageStorage {
+  return {
+    put: async (key, value) => {
+      await artifacts.putArtifact(engineRunId, key, value);
+    },
+    get: async <T>(key: string): Promise<T | undefined> => {
+      // The artifact store reports a missing key as null; the
+      // stage-storage contract is undefined-for-missing, and the
+      // stages branch on it — a null read crashes readers that
+      // iterate the value's fields.
+      const value = await artifacts.getArtifact(engineRunId, key);
+      return (value ?? undefined) as T | undefined;
+    },
+  };
+}
+
+/**
  * Register the `options.runStage` step on a registry: one step per stage,
  * the stageId riding its params. The step runs the shared per-stage body
  * (runOptionsStageOnce — the same body the thin composer calls), records
@@ -345,46 +456,9 @@ export function registerOptionsScreenStep(
     output: deps.request,
     descriptor: `options screen ${deps.runId} input`,
   }));
-  registry.register(OPTIONS_SCREEN_STEP, async (ctx: JobStepContext) => {
-    const stageId = ctx.params?.stageId;
-    if (typeof stageId !== "string" || !(OPTIONS_PIPELINE_STAGES as readonly string[]).includes(stageId)) {
-      throw new Error(
-        `options.runStage: params.stageId must be one of ${OPTIONS_PIPELINE_STAGES.join(", ")}; got ${JSON.stringify(stageId)}`,
-      );
-    }
-    const input: OptionsStageInput = {
-      runId: deps.runId,
-      userLogin: deps.userLogin,
-      stageId: stageId as OptionsPipelineStage,
-      artifactKeys: ((ctx.input as { artifactKeys?: unknown } | null)?.artifactKeys as string[] | undefined) ?? [],
-      request: deps.request,
-    };
-    const result = await runOptionsStageOnce(
-      input,
-      deps.workflow,
-      optionsBlocks.get(`options-${stageId}`)!,
-    );
-    // Upsert by stageId, never push: the engine retries a failed step
-    // within its budget, so one stage can be invoked more than once in
-    // a run — the holder keeps the stage's LATEST record, one entry per
-    // stage, in pipeline order (the first invocation's position).
-    const existing = deps.stageRecords.findIndex((record) => record.stageId === stageId);
-    if (existing >= 0) {
-      deps.stageRecords[existing] = result.record;
-    } else {
-      deps.stageRecords.push(result.record);
-    }
-    if (result.publishedMessage) {
-      deps.published.push(result.publishedMessage);
-    }
-    if (result.failed) {
-      throw new Error(result.reason ?? `options stage ${stageId} failed`);
-    }
-    return {
-      output: { stageId, artifactKeys: result.nextArtifactKeys },
-      descriptor: `options stage ${stageId} ${result.record.status}`,
-    };
-  });
+  registry.register(OPTIONS_SCREEN_STEP, async (ctx: JobStepContext) =>
+    runOptionsScreenStep(ctx, deps),
+  );
   return registry;
 }
 
@@ -888,6 +962,16 @@ async function dispatchScreenViaEngine(
  * Route one options screen through the J engine: define the per-run
  * options job, dispatch it synchronously, and map the settled run onto
  * the outcome the call sites already consume.
+ *
+ * Issue #4289 — the durable path for an options screen is the
+ * workflow host (startOptionsScreenWorkflow in optionsWorkflowHost.ts,
+ * executed by JobPipelineWorkflow with the workflow step as the
+ * engine's journal). This sync/in-process dispatch is KEPT, not
+ * retired, for the legs that cannot move yet: the manual route (its
+ * shapeReport/deliver builders need the route's getScreenerAgent) and
+ * the goal leg (its host is #4290). New callers must dispatch
+ * through the host; a leg moves here only when its ports are
+ * rebuildable per invocation (see optionsStepPorts.ts).
  */
 export async function runOptionsScreenViaEngine(
   params: {

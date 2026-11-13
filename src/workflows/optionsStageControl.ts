@@ -38,7 +38,9 @@
  *   (strategyRequest → panel ports; scan → scanner ports;
  *   request/filter → manual ports) with the SAME stage storage the
  *   original leg used, so a re-run reads the earlier stages'
- *   artifacts from the keys the original run wrote. The claims store
+ *   artifacts from the keys the original run wrote. The rebuild is
+ *   the shared one (optionsStepPorts.ts — the workflow host's
+ *   resolving steps use it per invocation, #4289). The claims store
  *   is fresh in-memory: a claim is per-dispatch idempotency, and an
  *   explicit re-run IS a new execution (the engine's checkpoint is
  *   what `rerunStage` reset). The queue is null: a control re-run
@@ -76,7 +78,7 @@ import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { SqlStorage } from "../orm";
 import type { Env } from "../types";
-import { DynamicOptionsScreener } from "../trading";
+import type { DynamicOptionsScreener } from "../trading";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import {
   OPTIONS_ADDRESSABLE_STAGES,
@@ -89,26 +91,19 @@ import {
   optionsScreenJobId,
   registerOptionsScreenStep,
   strategyScreenJobId,
-  type OptionsScreenStepDeps,
 } from "./optionsScreenEngine";
-import {
-  createOptionsScreenPorts,
-  type OptionsStageStorage,
+import type {
+  OptionsStageStorage,
 } from "./optionsScreenPorts";
 import {
-  memoryStageClaims,
   memoryStageStorage,
 } from "./optionsScreenWorkflow";
 import {
-  createScannerScreenPorts,
-  createStrategyScreenAgents,
-  createStrategyScreenPorts,
-} from "./strategyScreenPorts";
-import { createManualOptionsCanonicalLeg } from "./optionsCanonicalLeg";
-import {
-  createManualOptionsRecordBuilder,
-  type ManualOptionsScreenCtx,
-} from "./manualOptionsRecordBuilder";
+  decodeOptionsRequestShape,
+  rebuildOptionsStepDeps,
+  type OptionsDecodedRequestShape,
+  type OptionsRequestShape,
+} from "./optionsStepPorts";
 
 export type OptionsStageControlOperation =
   | "run"
@@ -117,7 +112,7 @@ export type OptionsStageControlOperation =
   | "resume"
   | "cancel";
 
-export type OptionsStageControlRequestShape = "manual" | "panel" | "scan";
+export type OptionsStageControlRequestShape = OptionsRequestShape;
 
 /**
  * The shape a stored request decodes to — including the goal leg,
@@ -131,9 +126,7 @@ export type OptionsStageControlRequestShape = "manual" | "panel" | "scan";
  * matter there).
  */
 export type OptionsStageControlDecodedShape =
-  | OptionsStageControlRequestShape
-  | "goal"
-  | "comparison"
+  | OptionsDecodedRequestShape
   | "unknown";
 
 export interface OptionsStageControlInput {
@@ -198,6 +191,9 @@ export class OptionsStageControlError extends Error {
 function asControlError(error: unknown): OptionsStageControlError {
   if (error instanceof OptionsStageControlError) return error;
   if (error instanceof JobPipelineError) {
+    // Includes OptionsStepPortsError (a JobPipelineError): the shared
+    // rebuild's named codes (stage_request_unrecognized et al.)
+    // reach the caller with their code intact.
     return new OptionsStageControlError(error.code, error.message);
   }
   if (error instanceof Error) {
@@ -207,93 +203,6 @@ function asControlError(error: unknown): OptionsStageControlError {
     "stage_control_failed",
     `options stage control failed: ${String(error)}`,
   );
-}
-
-function readRequestShape(
-  request: unknown,
-  runId: string,
-): OptionsStageControlRequestShape | "goal" | "comparison" {
-  const classInput = (
-    request as { classInput?: Record<string, unknown> } | null
-  )?.classInput;
-  if (!classInput || typeof classInput !== "object") {
-    throw new OptionsStageControlError(
-      "stage_request_unrecognized",
-      `options run ${runId}: the stored request has no classInput — the run's shape cannot be determined, so no stage can be rebuilt; re-dispatch the screen`,
-    );
-  }
-  if (classInput.strategyRequest !== undefined) return "panel";
-  if (classInput.scan !== undefined) return "scan";
-  if (classInput.request !== undefined) return "manual";
-  if (classInput.goalPlan !== undefined) return "goal";
-  if (classInput.comparisonRequest !== undefined) return "comparison";
-  throw new OptionsStageControlError(
-    "stage_request_unrecognized",
-    `options run ${runId}: the stored request's classInput carries none of strategyRequest / scan / request / goalPlan / comparisonRequest — the run's shape cannot be determined, so no stage can be rebuilt; re-dispatch the screen`,
-  );
-}
-
-/**
- * Rebuild the step's ports for one request shape. The storage is the
- * caller-supplied stage storage (the original leg's store); the claims
- * are fresh (see the module header); the queue is null (no publishing
- * on a control re-run).
- */
-function rebuildStepDeps(
-  input: OptionsStageControlInput,
-  request: unknown,
-  shape: OptionsStageControlRequestShape,
-  storage: OptionsStageStorage,
-): OptionsScreenStepDeps {
-  const stages =
-    shape === "panel"
-      ? createStrategyScreenPorts({
-          agents: createStrategyScreenAgents(input.etradeClient),
-          storage,
-        })
-      : shape === "scan"
-        ? createScannerScreenPorts({
-            agents: createStrategyScreenAgents(input.etradeClient),
-            storage,
-            ...(input.scanRunStore ? { scanRunStore: input.scanRunStore } : {}),
-          })
-        : createOptionsScreenPorts({
-            screener: new DynamicOptionsScreener(input.etradeClient),
-            storage,
-            ...(input.env
-              ? {
-                  canonicalLeg: createManualOptionsCanonicalLeg(input.env),
-                  // The record builder reads only ctx.env (the tenant
-                  // provider context); the rest of the ctx (getOrm /
-                  // getScreenerAgent) is never touched by the builder.
-                  record: createManualOptionsRecordBuilder({
-                    env: input.env,
-                  } as ManualOptionsScreenCtx),
-                }
-              : {}),
-            // Plain defaults: the manual route's shapeReport/deliver
-            // are not rebuildable in this turn (see the module
-            // header), and those two stages refuse before execution.
-            // The defaults exist so the other six stages' ports can
-            // still be built — they are never invoked for them.
-            shapeReport: async ({ screen }) => screen,
-            deliver: async () => ({
-              terminal: "completed",
-              deliveryState: "deferred-to-caller",
-            }),
-          });
-  return {
-    runId: input.runId,
-    ...(input.userLogin ? { userLogin: input.userLogin } : {}),
-    request,
-    workflow: {
-      stages,
-      claims: memoryStageClaims(),
-      queue: null,
-    },
-    stageRecords: [],
-    published: [],
-  };
 }
 
 /**
@@ -388,7 +297,7 @@ export async function controlOptionsStage(
     // can still be stopped or cancelled (shape "unknown"); an
     // execution op always has its request by the check above.
     const shape: OptionsStageControlDecodedShape =
-      request === undefined ? "unknown" : readRequestShape(request, runId);
+      request === undefined ? "unknown" : decodeOptionsRequestShape(request, runId);
     // The goal leg's job record is not addressable from the chat
     // host (decided-not-to, #4274): the goal leg runs over
     // in-memory engine stores on the ScreenerAgent DO, so no durable
@@ -433,12 +342,19 @@ export async function controlOptionsStage(
             // Narrowed by the guards above: an execution op has its
             // request, and the goal and comparison shapes refused,
             // so the shape is one of the three rebuildable shapes here.
-            rebuildStepDeps(
-              input,
+            // The rebuild is the shared one (optionsStepPorts.ts):
+            // the same decode + port construction the workflow host's
+            // resolving steps use per invocation.
+            rebuildOptionsStepDeps({
+              runId: input.runId,
+              ...(input.userLogin ? { userLogin: input.userLogin } : {}),
               request,
-              shape as OptionsStageControlRequestShape,
+              shape: shape as OptionsStageControlRequestShape,
               storage,
-            ),
+              ...(input.env ? { env: input.env } : {}),
+              ...(input.etradeClient ? { chainSource: input.etradeClient } : {}),
+              ...(input.scanRunStore ? { scanRunStore: input.scanRunStore } : {}),
+            }),
           ),
           invocation: "sync",
         })

@@ -59,7 +59,16 @@ export type JobPipelineErrorCode =
   | "stage_reschedule_unsupported"
   | "stage_vocabulary_unknown"
   | "stage_vocabulary_ambiguous"
-  | "stage_reschedule_failed";
+  | "stage_reschedule_failed"
+  // Issue #4289: the rebuild refusals, shared by per-stage control
+  // (#4066) and the workflow host's resolving steps — thrown from
+  // step handlers as JobPipelineError, so the engine rethrows them
+  // with their code intact instead of wrapping them job_step_failed
+  // (the run record carries the message; the control surface maps
+  // the code onto its own error).
+  | "stage_request_missing"
+  | "stage_request_unrecognized"
+  | "stage_port_unavailable";
 
 export class JobPipelineError extends Error {
   readonly code: JobPipelineErrorCode;

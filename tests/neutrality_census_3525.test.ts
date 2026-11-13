@@ -494,6 +494,17 @@ function measure(): Map<string, number> {
  * the direct runGoalScreen (chain-mode only after S4) is retired
  * by S5 #4280.
  * Totals move 1178/9323 -> 1178/9324.
+ * Baseline update (#4289, 2026-11-13): the options workflow host
+ * composes the options steps into the workflow residency, binding
+ * the chain source to the provider's client in
+ * optionsStepDepsForWorkflow — 1 new row
+ * (jobPipelineWorkflow.ts etrade 2: the import + construction),
+ * dispositioned INTEGRATION — the binding names the provider its
+ * leg serves, which is its job (the #4192/#4279 precedent). The
+ * prose around it is neutralized (no brand in the comments), the
+ * shared rebuild module carries no brand row, and the count falls
+ * back when provider selection (#3960) replaces the direct binding.
+ * Totals move 1178/9324 -> 1179/9326.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -1361,6 +1372,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/types.ts", "etrade", 82],
   ["src/types.ts", "yahoo", 3],
   ["src/workflows/goalStockScreenSpec.ts", "etrade", 1],
+  // #4289 INTEGRATION: the workflow residency binds the options
+  // steps' chain source — the import + construction of the
+  // provider's client in optionsStepDepsForWorkflow. Naming the
+  // provider is the binding's job (the #4192/#4279 precedent);
+  // the prose around it is neutralized, and the count falls back
+  // when provider selection (#3960) replaces the direct binding.
+  ["src/workflows/jobPipelineWorkflow.ts", "etrade", 2],
   ["src/workflows/legalApplicability.ts", "alpaca", 1],
   ["src/workflows/legalApplicability.ts", "etrade", 1],
   ["src/workflows/manualOptionsRecordBuilder.ts", "etrade", 1],

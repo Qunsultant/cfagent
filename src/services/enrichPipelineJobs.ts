@@ -63,6 +63,10 @@ import {
   registerScreenerSteps,
   type ScreenerStepDeps,
 } from "./screenerPipelineJobs";
+import {
+  registerOptionsWorkflowSteps,
+  type OptionsWorkflowStepDeps,
+} from "./optionsPipelineJobs";
 import type { JobPipelineStores } from "../data/jobPipelinePorts";
 import type {
   JobPipelineControl,
@@ -416,6 +420,12 @@ export function createPipelineStepRegistry(
   // families. Absent ⇒ the registry simply lacks them, exactly
   // as registerAnalyzeStep alone composes an analyze-less one.
   screenerDeps?: ScreenerStepDeps,
+  // Issue #4289: the options steps compose here too, in the
+  // workflow residency — the resolving registration, which reads
+  // the dispatch request back out of the stored definition and
+  // rebuilds the stage ports per invocation. Absent ⇒ the
+  // registry simply lacks them, as for the screener steps.
+  optionsDeps?: OptionsWorkflowStepDeps,
 ): JobStepRegistry {
   const registry = createFeedStepRegistry(feedDeps);
   registerEnrichStep(registry, enrichDeps);
@@ -423,6 +433,7 @@ export function createPipelineStepRegistry(
   if (generateDeps) registerGenerateStep(registry, generateDeps);
   if (deliverDeps) registerDeliverStep(registry, deliverDeps);
   if (screenerDeps) registerScreenerSteps(registry, screenerDeps);
+  if (optionsDeps) registerOptionsWorkflowSteps(registry, optionsDeps);
   return registry;
 }
 
