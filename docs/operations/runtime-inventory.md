@@ -118,26 +118,25 @@ this list is the built-in seed.
 | --- | --- | --- | --- | --- | --- | --- |
 | `daily-qa-sweep` | Daily QA sweep | `0 6 * * *` | — (UTC `isDue`) | `qa.run_sweep` | 500¢ | true |
 | `opportunity-hunt` | Opportunity hunt | `0 */6 * * *` | — (UTC `isDue`) | `search.opportunity_hunt` | 1000¢ | true, but **never fires** — see quirk below |
-| `daily-social-post` | Daily social post | `0 9 * * 1-5` | `America/New_York` | `social.publish` | 1¢ | **false** — shipped disabled; the owner enables it via the dashboard API (`src/schedule.ts:101-106`) |
+| `daily-social-post` | Daily social post | `0 9 * * 1-5` | `America/New_York` | `social.publish` | 1¢ | **false** — shipped disabled; the owner enables it via the dashboard API (`src/schedule.ts:98-103`) |
 | `resource-daily-rollup` | SessionStore daily resource rollup | `30 1 * * *` | UTC | `resource.rollup_daily` | 1¢ | true |
 | `resource-cap-alert` | SessionStore 70% cap alert | `0 * * * *` | UTC | `resource.cap_alert` | 1¢ | true |
 | `resource-dashboard-comparison` | SessionStore dashboard comparison | `0 2 * * *` | UTC | `resource.dashboard_comparison` | 1¢ | true |
 | `index-refresh-wikipedia` | Index-list refresh (Wikipedia) | `0 4 * * 0` | UTC | `index.refresh_wikipedia` | 1¢ | true |
-| `index-refresh-holdings` | Index-list refresh (ETF holdings) | `0 3 * * *` | UTC | `index.refresh_holdings` | 1¢ | **false** — disabled; no holdings-fetcher binding exists (`src/schedule.ts:172-176`) |
-| `feed-refresh` | Feed refresh (all feed jobs) | `0 * * * *` | UTC | `feed.refresh_all` (`FEED_REFRESH_OPERATION`, defined `src/schedule.ts:81`) | 1¢ | true |
+| `index-refresh-holdings` | Index-list refresh (ETF holdings) | `0 3 * * *` | UTC | `index.refresh_holdings` | 1¢ | **false** — disabled; no holdings-fetcher binding exists (`src/schedule.ts:163-173`) |
 
-Line references: `daily-qa-sweep` `:85-90`, `opportunity-hunt`
-`:93-98`, `daily-social-post` `:107-113`,
-`resource-daily-rollup` `:126-131`, `resource-cap-alert` `:135-140`,
-`resource-dashboard-comparison` `:144-149`,
-`index-refresh-wikipedia` `:177-182`, `index-refresh-holdings`
-`:186-191`, `feed-refresh` `:208-213`.
+Line references: `daily-qa-sweep` `:78-83`, `opportunity-hunt`
+`:86-91`, `daily-social-post` `:100-106`,
+`resource-daily-rollup` `:119-124`, `resource-cap-alert` `:128-133`,
+`resource-dashboard-comparison` `:137-142`,
+`index-refresh-wikipedia` `:170-175`, `index-refresh-holdings`
+`:179-184`.
 
 **Trigger:** the Worker `tick` only. Goals are evaluated in
-`onCron` (`src/agents/scheduled-agent.ts:1224` —
+`onCron` (`src/agents/scheduled-agent.ts:1448` —
 `isDue(goal.cron, goal.lastRun, now, goal.timeZone)`), and ticks
 arrive via the Worker cron trigger, never via the SDK scheduler
-(`src/agents/scheduled-agent.ts:383-386`). With the triggers
+(`src/agents/scheduled-agent.ts:383-397`). With the triggers
 commented out (§1), **no goal in this table fires in the deployed
 config**. They are armed, seeded, and evaluated — just never
 ticked.
@@ -147,7 +146,7 @@ from this list only when storage is empty, so adding an entry here
 does not inject it into already-running deployments — an operator
 adds it via the schedule dashboard API" (`src/schedule.ts:79-82`).
 Implementation: `getGoals()` writes `DEFAULT_SCHEDULES` only when
-no stored goals exist (`src/agents/scheduled-agent.ts:414-419`).
+no stored goals exist (`src/agents/scheduled-agent.ts:490-495`).
 
 **Quirk — `opportunity-hunt` never fires, deliberately.**
 Without a `timeZone`, the `isDue` branch parses the hour with
@@ -253,7 +252,7 @@ when that completion is recorded.
 
 | Stage | Trigger |
 | --- | --- |
-| Feed | ScheduledAgent goal `feed-refresh` (§2) → `dispatchScheduledPipelineJob` (`src/agents/scheduled-agent.ts:1769`, `src/agents/scheduledTasksPipeline.ts:641`) and Think pipeline tasks (`scheduledTasksPipeline.ts:780+`); also direct via the MCP door `runFeedJobViaDoor` (`src/agents/orchestrator/meshDoors.ts:456`). Pulls one provider dataset through the provider port and persists to the feed-dataset store (header `src/services/feedJobs.ts:1-35`). |
+| Feed | Think pipeline tasks — one `pipeline-job:` task per feed job (monthly), dispatched via `dispatchScheduledPipelineJob` (`src/agents/scheduledTasksPipeline.ts:650`, declared `:780+`); also direct via the MCP door `runFeedJobViaDoor` (`src/agents/orchestrator/meshDoors.ts:456`). Pulls one provider dataset through the provider port and persists to the feed-dataset store (header `src/services/feedJobs.ts:1-35`). |
 | Enrich | Consumer of its feed job — the host dispatches it when the feed job's completion is recorded (per `src/services/enrichPipelineJobs.ts` header); independently dispatchable via MCP door `runEnrichJobViaDoor` (`meshDoors.ts:635`). |
 | Analyze | Consumer of its enrich job, dispatched when the enrich completion is recorded (per `src/services/analyzePipelineJobs.ts` header; `runAnalyzeJob` at `src/services/analyzeJobs.ts:674`); MCP door `runAnalyzeJobViaDoor` (`meshDoors.ts:759`). |
 | Generate | Consumer of its analyze job, dispatched when the analyze completion is recorded (per `src/services/generatePipelineJobs.ts` header); MCP door `runGenerateJobViaDoor` (`meshDoors.ts:883`). |
