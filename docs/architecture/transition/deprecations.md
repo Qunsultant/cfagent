@@ -6,6 +6,27 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-12 — the scheduled firer routes through the engine panel (#4275)
+
+- Function: `runPanelWithAgents` → `runPanelWithAgentsRetired4275` (`src/trading/options/panelPipeline.ts`)
+- Date: 2026-11-12
+- Reason: Issue #4275 (#3551 follow-up) routes the scheduled firer
+  (`runDiscoveryRequest`, `src/services/scheduledTasks.ts`) — the ONE
+  remaining direct panel call recorded in the #3551 §15 — through the
+  engine-routed panel. The engine panel helper accepts pre-built
+  agents (`runOptionsPanelViaEngineWithAgents`), the shape the #4068
+  entry below prescribed: the firer constructs shared `PanelAgents`
+  once from the scheduled universe deps. No scheduled options screen
+  executes outside the engine-routed workflow after this slice.
+- Replacement: `runOptionsPanelViaEngineWithAgents`
+  (`src/workflows/optionsScreenEngine.ts`), over the firer's
+  pre-built agents; `runOptionsPanelViaEngine` delegates to it.
+- Consumers at deprecation: no production callers remain. Tests that
+  pin the panel decomposition keep calling the retired name
+  (strategy-screen workflow parity suite).
+- Deletion condition: zero consumers plus an owner decision plus a
+  gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-12 — the one workflow engine supersedes the bespoke screener flow (#4192)
 
 - File: `src/workflows/screenerWorkflowFlow.ts` → `src/workflows/screenerWorkflowFlow.deprecated.ts`
@@ -150,6 +171,9 @@ slice.
   scheduled universe deps and passes them to both `runPanelWithAgents` and
   agent methods; routing it needs the engine panel helper to accept
   pre-built agents or universe deps. Recorded in the #4068 PR body and
-  §15 draft.
+  §15 draft. Resolved by #4275 (2026-11-12): the helper accepts
+  pre-built agents (`runOptionsPanelViaEngineWithAgents`), the firer
+  routes through it, and the function is retired by rename — see the
+  #4275 entry at the top of this ledger.
 - Deletion condition: zero consumers plus an owner decision plus a gate
   amendment; deletion is never part of a program slice.

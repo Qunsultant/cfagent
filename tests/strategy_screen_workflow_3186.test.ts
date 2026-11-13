@@ -2,7 +2,7 @@
  * Issue #3186 (step 3e) - the strategy leg's behavior pin: the panel
  * path through the one pipeline reproduces runPanelPipelineRetired4068 EXACTLY.
  * Same fake agents + same request on both paths; the pipeline's
- * shapeReport artifact, mapped through runPanelWithAgents' own
+ * shapeReport artifact, mapped through the retired direct panel's own
  * mapping, deep-equals the direct PipelineResult.
  *
  * The fakes replace ONLY the three agents (data / risk /
@@ -11,7 +11,7 @@
  * dropped field) fails here, not in production.
  */
 import { describe, expect, it } from "vitest";
-import { runPanelWithAgents } from "../src/trading/options/panelPipeline";
+import { runPanelWithAgentsRetired4275 } from "../src/trading/options/panelPipeline";
 import { createStrategyScreenPorts } from "../src/workflows/strategyScreenPorts";
 import { runOptionsScreenWorkflow } from "../src/workflows/optionsScreenWorkflow";
 import type { OptionsStageStorage } from "../src/workflows/optionsScreenPorts";
@@ -119,7 +119,7 @@ describe("strategy leg through the one pipeline (#3186 step 3e)", () => {
       minDte: 21,
       maxDte: 60,
     };
-    const direct = await runPanelWithAgents(agents as never, request as never, {
+    const direct = await runPanelWithAgentsRetired4275(agents as never, request as never, {
       riskProfile: "balanced",
       alternatives: 3,
     });
@@ -169,7 +169,7 @@ describe("strategy leg through the one pipeline (#3186 step 3e)", () => {
     );
     expect(shapeReport).toBeDefined();
     // The shapeReport artifact IS the panel result (the kernel result
-    // spread at top level); map it through runPanelWithAgents' own
+    // spread at top level); map it through the retired direct panel's own
     // mapping and compare with the direct run.
     const viaPipeline = toPipelineResult({
       snapshot: shapeReport!.snapshot,

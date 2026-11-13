@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 
 // The orchestrator extends AIChatAgent from @cloudflare/ai-chat, whose
 // real module graph pulls in `cloudflare:` protocol imports the node
@@ -654,6 +655,16 @@ interface FakeProfileRow {
 class FakeSql implements DiscoverySqlExecutor {
   discoveryRows: FakeDiscoveryRow[] = [];
   profileRows: FakeProfileRow[] = [];
+  /**
+   * Issue #4275: the real-SQLite fallback for statements outside the
+   * two stores this fake emulates. The trigger route wires the ctx
+   * sql handle as the firer's engineSql, so the engine's
+   * job-pipeline tables live on the same handle — in prod, one DO
+   * handle serves all stores, and this fallback mirrors that. A
+   * mistyped discovery/profile statement still fails loudly (its
+   * table does not exist in the fallback).
+   */
+  private readonly fallback = new DatabaseSync(":memory:");
 
   private sortedDiscovery(): FakeDiscoveryRow[] {
     return [...this.discoveryRows].sort((a, b) =>
@@ -671,7 +682,15 @@ class FakeSql implements DiscoverySqlExecutor {
 
   exec(query: string, ...params: unknown[]): Iterable<unknown> {
     const q = query.replace(/\s+/g, " ").trim();
-    if (q.startsWith("CREATE TABLE") || q.startsWith("CREATE INDEX")) return [];
+    // DDL for the two emulated stores is swallowed (the fake needs
+    // no tables); DDL for anything else runs on the fallback, so
+    // the engine's tables actually exist when its DML arrives.
+    if (
+      (q.startsWith("CREATE TABLE") || q.startsWith("CREATE INDEX")) &&
+      (q.includes("mas_discovery_runs") || q.includes("mas_strategy_profiles"))
+    ) {
+      return [];
+    }
     // Discovery store statements.
     if (q.startsWith("INSERT INTO mas_discovery_runs")) {
       const [id, created_at, status, user_login, summary_json, run_json] = params as [
@@ -694,7 +713,9 @@ class FakeSql implements DiscoverySqlExecutor {
         .slice(offset, offset + limit)
         .map((r) => ({ summary_json: r.summary_json }));
     }
-    if (q.startsWith("SELECT COUNT(*)")) return [{ count: this.discoveryRows.length }];
+    if (q.startsWith("SELECT COUNT(*)") && q.includes("mas_discovery_runs")) {
+      return [{ count: this.discoveryRows.length }];
+    }
     if (q.startsWith("DELETE FROM mas_discovery_runs WHERE created_at < ?")) {
       const cutoff = params[0] as string;
       this.discoveryRows = this.discoveryRows.filter((r) => !(r.created_at < cutoff));
@@ -731,7 +752,15 @@ class FakeSql implements DiscoverySqlExecutor {
       this.profileRows = this.profileRows.filter((r) => !(r.user_login === params[0] && r.id === params[1]));
       return [];
     }
-    throw new Error(`FakeSql: unhandled statement: ${q}`);
+    // Issue #4275: anything outside the two emulated stores runs on
+    // real SQLite (the engine's job-pipeline tables, via the wired
+    // engineSql handle).
+    const stmt = this.fallback.prepare(query);
+    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
+      return stmt.all(...(params as never[])) as unknown[];
+    }
+    stmt.run(...(params as never[]));
+    return [];
   }
 }
 

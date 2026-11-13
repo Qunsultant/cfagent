@@ -834,7 +834,10 @@ export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext
       ctx.scheduleScreenerFollowups,
       { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage as any, env: ctx.env },
       undefined,
-      createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).feedSnapshots, ctx.env.SCREENER_EVENTS ?? null
+      createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).feedSnapshots, ctx.env.SCREENER_EVENTS ?? null,
+      // Issue #4275: the firer's engine run record is durable in
+      // the host DO (runStockScreenViaEngine seam: none).
+      undefined, ctx.agentCtx.storage.sql
     );
     const res = await service.autonomousStrategyDiscovery({ ...payload, userLogin: resolvedLogin, environment });
     if ((res as any).skipped) {

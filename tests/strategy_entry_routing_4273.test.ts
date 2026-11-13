@@ -6,9 +6,10 @@
  *
  * The audit (see ~/workspace/verify-fully-on-engine/4273/audit.md) found
  * every strategy entry already routes through the strategy job — #4271
- * switched them — except the scheduled firer (`runDiscoveryRequest`,
- * scheduledTasks.ts:4239), which runs a StrategyRequest directly through
- * runPanelWithAgents and is explicitly #4275's scope. There is no paid
+ * switched them — except the scheduled firer (`runDiscoveryRequest`),
+ * which ran a StrategyRequest directly through the direct panel call.
+ * #4275 routed the firer through the engine panel (pinned in
+ * tests/scheduled_firer_engine_routing_4275.test.ts). There is no paid
  * strategy surface (paid_options_screener is a plain options screen).
  *
  * These tests pin the entry points that were not yet pinned at the entry

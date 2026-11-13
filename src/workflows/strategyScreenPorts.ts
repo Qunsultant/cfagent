@@ -53,10 +53,10 @@ import { optionsArtifactKey, type OptionsStageStorage } from "./optionsScreenPor
 import type { PlannerInput } from "./blocks/plannerPort";
 
 /**
- * runPanelWithAgents' mapping, as a shared function: a panel result
+ * The retired direct panel's mapping, as a shared function: a panel result
  * (kernel result spread at top level) back to the PipelineResult shape
- * the NLQ envelope and the panel route read. Callers that migrate off
- * runPanelWithAgents use this instead of re-implementing the mapping.
+ * the NLQ envelope and the panel route read. Callers that migrated off
+ * the direct panel use this instead of re-implementing the mapping.
  */
 export function panelResultToPipelineResult(panel: PanelDiscoveryResult): PipelineResult {
   const snapshot = panel.snapshot;
@@ -202,7 +202,7 @@ export function createStrategyScreenPorts(
         snapshotOverride?: PanelSnapshotData;
         expirationDteBands: unknown;
       }>(storage, input.runId, "plan");
-      // The runPanelWithAgents adapter, verbatim: a stored snapshot
+      // The retired direct-panel adapter, verbatim: a stored snapshot
       // runs instead of live-loading; the result maps to the six
       // fields the kernel consumes.
       const snapshot = planArtifact.snapshotOverride ?? (await agents.data.loadSnapshot({

@@ -71,6 +71,7 @@ import {
   createScannerScreenPorts,
   createStrategyScreenPorts,
   panelResultToPipelineResult,
+  type StrategyScreenAgents,
 } from "./strategyScreenPorts";
 import type { StageMessage } from "./stageMessage";
 import { OPTIONS_PIPELINE_STAGES, type OptionsPipelineStage } from "./stageRuntimeIds";
@@ -335,51 +336,57 @@ export function registerOptionsScreenStep(
 }
 
 /**
- * Issue #4068 — the single-name panel run on the engine: the shared
- * successor to UnifiedOptionsService.runStrategyPipeline (site 4) AND to
- * runPanelPipelineRetired4068 (the bypass), so the panel runs go through the one
- * engine-routed workflow instead of the direct composer / the direct
- * panel pipeline. The agents are constructed exactly as runPanelPipelineRetired4068
- * built them (data agent over the given screener — fresh risk +
- * recommender); the optional universeDeps ride the screener's third
- * constructor argument for callers that thread them (the evaluate
- * route), exactly as runPanelPipelineRetired4068's callers passed them. All four PipelineOptions fields ride the
- * classInput (the feed seam's snapshotOverride included), so the
- * contract is preserved for callers that pass a stored snapshot. The
- * service holds no DO storage/queue handle, so stage storage/claims are
- * the shared in-memory helpers and publishing is skipped (queue null);
- * the durable record for these runs is the caller's downstream record,
- * unchanged. The engine stores are in-memory (the #4069 accepted-absent
- * discipline for legs with no SQL handle).
+ * Issue #4275 — what one caller-agents panel run needs, beyond the
+ * four PipelineOptions fields (strategyFilter / riskProfile /
+ * alternatives / snapshotOverride): the run's identity and trigger,
+ * the engine stores it records over, and the stage-message queue.
+ * Defaults preserve runOptionsPanelViaEngine's contract exactly:
+ * trigger "manual", the `options-panel:service:` run id, in-memory
+ * engine stores (the #4069 accepted-absent discipline), no
+ * publishing.
  */
-export async function runOptionsPanelViaEngine(
-  source: OptionChainSource | undefined,
+export interface PanelViaEngineOptions extends PipelineOptions {
+  userLogin?: string;
+  trigger?: "manual" | "scheduled";
+  runId?: string;
+  engineStores?: OptionsEngineStores | null;
+  queue?: OptionsScreenWorkflowDeps["queue"];
+}
+
+/**
+ * Issue #4275 — the engine-routed panel over CALLER-OWNED agents:
+ * the shared successor to runPanelWithAgentsRetired4275 (the scheduled firer's
+ * direct panel call). The #4068 deprecation ledger prescribed this
+ * shape: the firer constructs shared PanelAgents once from the
+ * scheduled universe deps and passes them to both the panel run and
+ * agent methods, so the engine panel helper must accept pre-built
+ * agents instead of constructing its own from a chain source.
+ * The dispatch is runOptionsPanelViaEngine's, unchanged: the
+ * strategy job (strategy-screen:<runId>) over the strategy ports,
+ * the shapeReport artifact mapped back to PipelineResult. All four
+ * PipelineOptions fields ride the classInput (the feed seam's
+ * snapshotOverride included), so the contract is preserved for
+ * callers that pass a stored snapshot.
+ */
+export async function runOptionsPanelViaEngineWithAgents(
+  agents: StrategyScreenAgents,
   request: StrategyRequest,
-  options: PipelineOptions = {},
-  userLogin?: string,
-  universeDeps?: NasdaqUniverseDeps,
-  /**
-   * Issue #4066: the engine stores the panel run records over. Absent,
-   * in-memory stores are built explicitly (the #4069 accepted-absent
-   * discipline) — a leg that has a SQL handle passes
-   * optionsEngineStoresFromSql(sql) instead, so the run is addressable
-   * by a later per-stage control action from the copilot turn.
-   */
-  engineStores?: OptionsEngineStores | null,
+  options: PanelViaEngineOptions = {},
 ): Promise<PipelineResult> {
-  const runId = `options-panel:service:${request.symbol}:${new Date().toISOString()}`;
+  const runId = options.runId ?? `options-panel:service:${request.symbol}:${new Date().toISOString()}`;
+  const trigger = options.trigger ?? "manual";
   const storage = memoryStageStorage();
   // Issue #4271: the panel is a strategy screen — it defines the
   // strategy job (strategy-screen:<runId>), not the options job.
   const outcome = await runStrategyScreenViaEngine(
     {
       runId,
-      userLogin,
-      trigger: "manual",
+      userLogin: options.userLogin,
+      trigger,
       request: {
         assetClass: "options",
         runIdentity: { runId },
-        trigger: "manual",
+        trigger,
         classInput: {
           strategyRequest: request,
           strategyFilter: options.strategyFilter,
@@ -391,18 +398,12 @@ export async function runOptionsPanelViaEngine(
     },
     {
       stages: createStrategyScreenPorts({
-        agents: {
-          data: new OptionsDataAgent(
-            new DynamicOptionsScreener(source, undefined, universeDeps),
-          ),
-          risk: new StrategyRiskAgent(),
-          recommender: new RecommendationAgent(),
-        },
+        agents,
         storage,
       }),
       claims: memoryStageClaims(),
-      queue: null,
-      ...(engineStores ? { engineStores } : {}),
+      queue: options.queue ?? null,
+      ...(options.engineStores ? { engineStores: options.engineStores } : {}),
     },
   );
   if (outcome.outcome !== "completed") {
@@ -419,6 +420,55 @@ export async function runOptionsPanelViaEngine(
     );
   }
   return panelResultToPipelineResult(panelResult);
+}
+
+/**
+ * Issue #4068 — the single-name panel run on the engine: the shared
+ * successor to UnifiedOptionsService.runStrategyPipeline (site 4) AND to
+ * runPanelPipelineRetired4068 (the bypass), so the panel runs go through the one
+ * engine-routed workflow instead of the direct composer / the direct
+ * panel pipeline. The agents are constructed exactly as runPanelPipelineRetired4068
+ * built them (data agent over the given screener — fresh risk +
+ * recommender); the optional universeDeps ride the screener's third
+ * constructor argument for callers that thread them (the evaluate
+ * route), exactly as runPanelPipelineRetired4068's callers passed them. All four PipelineOptions fields ride the
+ * classInput (the feed seam's snapshotOverride included), so the
+ * contract is preserved for callers that pass a stored snapshot. The
+ * service holds no DO storage/queue handle, so stage storage/claims are
+ * the shared in-memory helpers and publishing is skipped (queue null);
+ * the durable record for these runs is the caller's downstream record,
+ * unchanged. The engine stores are in-memory (the #4069 accepted-absent
+ * discipline for legs with no SQL handle).
+ *
+ * Issue #4275: delegates to runOptionsPanelViaEngineWithAgents with
+ * freshly constructed agents — one panel routing, not two.
+ */
+export async function runOptionsPanelViaEngine(
+  source: OptionChainSource | undefined,
+  request: StrategyRequest,
+  options: PipelineOptions = {},
+  userLogin?: string,
+  universeDeps?: NasdaqUniverseDeps,
+  /**
+   * Issue #4066: the engine stores the panel run records over. Absent,
+   * in-memory stores are built explicitly (the #4069 accepted-absent
+   * discipline) — a leg that has a SQL handle passes
+   * optionsEngineStoresFromSql(sql) instead, so the run is addressable
+   * by a later per-stage control action from the copilot turn.
+   */
+  engineStores?: OptionsEngineStores | null,
+): Promise<PipelineResult> {
+  return runOptionsPanelViaEngineWithAgents(
+    {
+      data: new OptionsDataAgent(
+        new DynamicOptionsScreener(source, undefined, universeDeps),
+      ),
+      risk: new StrategyRiskAgent(),
+      recommender: new RecommendationAgent(),
+    },
+    request,
+    { ...options, userLogin, engineStores },
+  );
 }
 
 /**
