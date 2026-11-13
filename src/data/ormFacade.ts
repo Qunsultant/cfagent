@@ -45,7 +45,7 @@ import {
   type CanonicalStoreResult,
 } from "../services/scheduledReports";
 import type { IndexEnv } from "../services/reportSemanticIndex";
-import { ensureSharedTable, ensureAuditChainColumns } from "./ormSchema";
+import { ensureSharedTable, ensureAuditChainColumns, ensurePromotionsIndex } from "./ormSchema";
 import { ormTableSql } from "./schemaComponent/ormCatalogue";
 import {
   createDoAdRepository,
@@ -325,6 +325,12 @@ export class DatabaseORM {
 
     // 11. Options Chain Cache Table (Durable Options Storage)
     this.sql.exec(ormTableSql("mas_options_chain_cache"));
+
+    // 12. Promotions Table (issue #4412): the mas_promotions table,
+    // restored so the #1257 active-check route reads a real table.
+    // The index is a separate exec, matching #760's two exec calls.
+    ensureSharedTable(this.sql, "mas_promotions");
+    ensurePromotionsIndex(this.sql);
 
     // Seed Categories if table is empty
     if (this.categories.count() === 0) {

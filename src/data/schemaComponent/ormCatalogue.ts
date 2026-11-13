@@ -188,6 +188,30 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #4412: the mas_promotions table, restored to the canonical
+    // schema so the #1257 active-check route can read a real table.
+    // Columns/defaults are the exact #760 DDL verbatim (from the
+    // retired src/services/stagedPromotion.ts ensurePromotionsTable);
+    // only the layout follows this catalogue's multiline form.
+    code: "schema.orm.mas_promotions.create_table",
+    plane: "orm",
+    table: "mas_promotions",
+    statement: `
+      CREATE TABLE IF NOT EXISTS mas_promotions (
+        id TEXT PRIMARY KEY,
+        candidate_id TEXT NOT NULL,
+        stage TEXT NOT NULL DEFAULT 'shadow',
+        stage_started_at TEXT NOT NULL,
+        baseline_json TEXT NOT NULL DEFAULT '{}',
+        applied_json TEXT NOT NULL DEFAULT '{}',
+        last_check_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.orm.mas_events.alter_table_add_column_previous_event_hash",
     plane: "orm",
     table: "mas_events",
@@ -364,6 +388,18 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     table: "mas_events",
     index: "idx_mas_events_session_type",
     statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_session_type ON mas_events(session_id, type, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #4412: the mas_promotions candidate index — a separate
+    // exec from the table (SqlStorage.exec takes one statement at a
+    // time), matching #760's two exec calls.
+    code: "schema.index.mas_promotions.create_index_idx_promotions_candidate",
+    plane: "index",
+    table: "mas_promotions",
+    index: "idx_promotions_candidate",
+    statement: `CREATE INDEX IF NOT EXISTS idx_promotions_candidate ON mas_promotions(candidate_id, created_at)`,
     kind: "schema",
     form: "literal",
   },

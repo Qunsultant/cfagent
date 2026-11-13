@@ -1,0 +1,3 @@
+### Fixed
+
+- Restore the `mas_promotions` table in the canonical shared schema (issue #4412, parent #1257): the #760 staged-promotion table's DDL (verbatim, columns + `idx_promotions_candidate` index) is registered as catalogue entries in `src/data/schemaComponent/ormCatalogue.ts` and re-exported by code in `src/data/ormSchema.ts`, and ensured in both initialization paths (`ensureOrchestratorTables` and `DatabaseORM.initializeSchema`), so the #1257 active-check route reads a real table and returns a genuine in-flight count instead of 500 `FAILURE_PROMOTIONS_ACTIVE_CHECK_QUERY`. Schema only — no promotion logic resurrected, check route and outcome catalog unchanged.

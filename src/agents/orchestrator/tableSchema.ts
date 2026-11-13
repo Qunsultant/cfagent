@@ -10,7 +10,7 @@
  * async-job ports. The ensure order below is the legacy order and is
  * load-bearing (retention indexes need mas_messages/mas_events first).
  */
-import { ensureSharedTable } from "../../orm/schema";
+import { ensureSharedTable, ensurePromotionsIndex } from "../../orm/schema";
 import { ensureAsyncJobTables } from "./asyncJobs";
 import { ensureMasRetentionIndexes } from "../../services/masRetentionIndexes";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
@@ -155,6 +155,12 @@ export function ensureOrchestratorTables(sql: SqlStorage): SqlStorage {
   }
 
   ensureSharedTable(sql, "mas_transactions");
+
+  // Issue #4412: the mas_promotions table, restored so the #1257
+  // active-check route reads a real table. The index is a separate
+  // exec, matching #760's two exec calls.
+  ensureSharedTable(sql, "mas_promotions");
+  ensurePromotionsIndex(sql);
 
   // Issue #175: this store previously seeded two fabricated "default"
   // transactions on first use — completed charges carrying invented

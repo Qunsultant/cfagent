@@ -95,6 +95,9 @@ const SHARED_TABLES = [
   "mas_ads",
   "mas_watchlists",
   "mas_transactions",
+  // Issue #4412: mas_promotions, restored so the #1257 active-check
+  // route reads a real table.
+  "mas_promotions",
 ] as const;
 
 const ORM_ONLY_TABLES = [
@@ -209,7 +212,7 @@ function walkSrc(dir: string, out: string[] = []): string[] {
 }
 
 describe("issue #782: single-source shared mas_* schema", () => {
-  it("canonical module: src/data/ormSchema.ts exports the seven shared tables and their DDL", async () => {
+  it("canonical module: src/data/ormSchema.ts exports the eight shared tables and their DDL", async () => {
     // Dynamic import so this suite still loads against pre-change code,
     // where the module does not exist yet (the test then fails as a
     // test, not as a module load error). #2345 retarget (disclosed

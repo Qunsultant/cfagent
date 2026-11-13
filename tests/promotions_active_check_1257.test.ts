@@ -12,7 +12,10 @@
  * pinned here: auth, JSON shape, SELECT-only statements).
  */
 import { describe, it, expect } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { codedMessage } from "../src/outcomes/outcomeAspects";
+import { ensureSharedTable, ensurePromotionsIndex } from "../src/data/ormSchema";
+import type { SqlStorage } from "../src/data/repositoryPorts";
 import {
   handleScreenerResearchRoutes,
   type ScreenerResearchRouteContext,
@@ -66,6 +69,19 @@ async function call(
     ctx
   );
   return res;
+}
+
+/** Real SQLite over node:sqlite behind the SqlStorage seam (test-only). */
+class SqliteSqlStorage implements SqlStorage {
+  readonly sqlite = new DatabaseSync(":memory:");
+  exec(query: string, ...args: unknown[]): Iterable<unknown> {
+    const stmt = this.sqlite.prepare(query);
+    if (/^\s*(SELECT|PRAGMA|WITH)\b/i.test(query)) {
+      return stmt.all(...(args as any[]));
+    }
+    stmt.run(...(args as any[]));
+    return [];
+  }
 }
 
 describe("GET /adaptation/promotions/active-check (#1257)", () => {
@@ -137,5 +153,39 @@ describe("GET /adaptation/promotions/active-check (#1257)", () => {
     const res = await call(routeCtx(sql), "POST", { "x-user-login": "alice" });
     expect(res).toBeNull();
     expect(sql.issued).toEqual([]);
+  });
+
+  it("ensure-then-read (#4412): freshly ensured empty table → real inFlightCount 0", async () => {
+    // Issue #4412 (#1257 fix): the live DO had no mas_promotions table
+    // at all, so the route's SELECT threw "no such table" and the hit
+    // 500'd. After the canonical ensure runs, the same route reads a
+    // real, empty table — a genuine 0, not a missing-table shortcut.
+    const sql = new SqliteSqlStorage();
+    ensureSharedTable(sql, "mas_promotions");
+    ensurePromotionsIndex(sql);
+    const res = await call(routeCtx(sql), "GET", { "x-user-login": "alice" });
+    expect(res!.status).toBe(200);
+    const data = (await res!.json()) as any;
+    expect(data.inFlight).toEqual([]);
+    expect(data.inFlightCount).toBe(0);
+    expect(data.byStage).toEqual([]);
+  });
+
+  it("ensure-then-read (#4412): seeded row is read back with its real stage", async () => {
+    // Proves the ensured DDL's shape matches the route's SELECT
+    // (id, candidate_id, stage, stage_started_at, created_at): a
+    // column mismatch would throw and the route would 500.
+    const sql = new SqliteSqlStorage();
+    ensureSharedTable(sql, "mas_promotions");
+    ensurePromotionsIndex(sql);
+    sql.exec(
+      `INSERT INTO mas_promotions (id, candidate_id, stage, stage_started_at, created_at) VALUES ('p-1', 'c-1', 'shadow', '2026-10-20T00:00:00.000Z', '2026-10-20T00:00:00.000Z')`
+    );
+    const res = await call(routeCtx(sql), "GET", { "x-user-login": "alice" });
+    expect(res!.status).toBe(200);
+    const data = (await res!.json()) as any;
+    expect(data.inFlightCount).toBe(1);
+    expect(data.inFlight[0].stage).toBe("shadow");
+    expect(data.byStage).toEqual([{ stage: "shadow", count: 1 }]);
   });
 });
