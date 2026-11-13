@@ -130,6 +130,7 @@ import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRe
 import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { buildJobConfigFromSpec } from "../services/jobDefinitionSpecBuilder";
+import { bindJobDefinitionParams } from "../services/jobDefinitionParamBinders";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import {
   buildFeedJobSurfaceView,
@@ -1180,7 +1181,7 @@ export class ScheduledAgent extends PortThink {
   async definePipelineJobFromSpec(
     specId: string,
     jobId: string,
-    opts?: { userLogin?: string },
+    opts?: { userLogin?: string; params?: Record<string, unknown> },
   ): Promise<{ jobId: string; name: string; version: number; stages: number }> {
     const spec = jobDefinitionSpec(specId);
     const id = typeof jobId === "string" ? jobId.trim() : "";
@@ -1191,11 +1192,15 @@ export class ScheduledAgent extends PortThink {
     }
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx);
-    const owner =
+    const ownerLogin =
       typeof opts?.userLogin === "string" && opts.userLogin.trim()
-        ? { userLogin: opts.userLogin.trim() }
-        : {};
-    const definition = await control.defineJob(buildJobConfigFromSpec(spec, id, owner));
+        ? opts.userLogin.trim()
+        : undefined;
+    // The flow's parameter values are validated and bound to the family's
+    // run parameters (universe → shards for the screener); a missing or
+    // undeclared parameter refuses here, before the definition exists.
+    const runParams = bindJobDefinitionParams(spec, opts?.params ?? {}, ownerLogin);
+    const definition = await control.defineJob(buildJobConfigFromSpec(spec, id, runParams));
     return {
       jobId: definition.jobId,
       name: definition.name,

@@ -12,6 +12,7 @@
  * same alarm machinery every other schedule uses.
  */
 import { jobDefinitionSpec, listJobDefinitionSpecs, type JobDefinitionSpec } from "../../config/jobDefinitionCatalog";
+import { UNIVERSES } from "../../trading";
 
 export interface JobDefinitionDefineResult {
   jobId: string;
@@ -24,11 +25,28 @@ export interface JobDefinitionsRouteContext {
   /** The catalogue; defaults to the built-in specs. */
   readDefinitions?: () => JobDefinitionSpec[];
   /** Define the job on the ScheduledAgent; absent = named 503. */
-  defineJobFromSpec?: (specId: string, jobId: string) => Promise<JobDefinitionDefineResult>;
+  defineJobFromSpec?: (
+    specId: string,
+    jobId: string,
+    params: Record<string, unknown>,
+  ) => Promise<JobDefinitionDefineResult>;
 }
 
 const DEFINE_PATH = /(?:^|\/api)\/job-definitions\/([^/]+)\/define$/;
 const LIST_PATH = /(?:^|\/api)\/job-definitions$/;
+
+/**
+ * Fill a select parameter's options from the registry that owns them
+ * (today: the universe ids), so the client never hard-codes a list.
+ */
+function withSelectOptions(spec: JobDefinitionSpec): JobDefinitionSpec {
+  const parameters = spec.parameters?.map((param) => {
+    if (param.type !== "select" || (param.options && param.options.length > 0)) return param;
+    if (param.name === "universe") return { ...param, options: Object.keys(UNIVERSES) };
+    return param;
+  });
+  return parameters ? { ...spec, parameters } : spec;
+}
 
 function decode(value: string): string {
   try {
@@ -50,7 +68,7 @@ export async function handleJobDefinitionsRoutes(
 
   if (listMatch) {
     if (request.method !== "GET") return null;
-    const definitions = (ctx.readDefinitions ?? listJobDefinitionSpecs)();
+    const definitions = (ctx.readDefinitions ?? listJobDefinitionSpecs)().map(withSelectOptions);
     return Response.json({ count: definitions.length, definitions });
   }
 
@@ -87,8 +105,12 @@ export async function handleJobDefinitionsRoutes(
       { status: 400 },
     );
   }
+  const params =
+    body.params && typeof body.params === "object" && !Array.isArray(body.params)
+      ? (body.params as Record<string, unknown>)
+      : {};
   try {
-    const defined = await ctx.defineJobFromSpec(spec.id, jobId);
+    const defined = await ctx.defineJobFromSpec(spec.id, jobId, params);
     return Response.json({
       ...defined,
       specId: spec.id,

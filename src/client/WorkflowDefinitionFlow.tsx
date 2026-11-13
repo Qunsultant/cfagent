@@ -2,27 +2,33 @@
  * Issue #4366 — the UX workflow-definition + scheduling flow.
  *
  * Lists the externalized definition specs (GET /api/job-definitions) with
- * their stages and mode, and schedules one: define the engine job from the
- * spec (POST /api/job-definitions/:id/define), then arm a unified schedule
- * whose callback runs that job (`runPipelineJobSchedule`) through the
- * existing POST /api/schedules/create path — the same alarm machinery every
- * other schedule uses, no second scheduler.
+ * their stages, mode and the parameters they require, and schedules one:
+ * define the engine job from the spec + the collected parameters
+ * (POST /api/job-definitions/:id/define), then arm a unified schedule whose
+ * callback runs that job (`runPipelineJobSchedule`) through the existing
+ * POST /api/schedules/create path — the same alarm machinery every other
+ * schedule uses, no second scheduler.
  *
- * A definition is only scheduled after it validates; a failure names the
- * reason and leaves nothing armed. ui/ primitives only, tokens only.
+ * Every mutation carries the CSRF header (`csrfHeaders`) — the cookie-
+ * authenticated route refuses a mutation without it.
+ *
+ * A definition is only scheduled after it validates and its required
+ * parameters are supplied; a failure names the reason and leaves nothing
+ * armed. ui/ primitives only, tokens only.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Badge,
-  Button,
-  Card,
-  Modal,
-  Notice,
-  Select,
-  Stack,
-  TextInput,
-} from "./components/ui";
+import { Badge, Button, Card, Modal, Notice, Select, Stack, TextInput } from "./components/ui";
+import { csrfHeaders } from "./apiFetch";
 import { JOB_DEFINITION_SCHEDULE_CALLBACK, jobIdForSpec } from "../config/jobDefinitionScheduling";
+
+interface DefinitionParameter {
+  name: string;
+  label: string;
+  type: "select" | "text" | "number";
+  required?: boolean;
+  description?: string;
+  options?: string[];
+}
 
 interface DefinitionSpec {
   id: string;
@@ -31,6 +37,7 @@ interface DefinitionSpec {
   description?: string;
   stages: Array<{ kind: string; step: string }>;
   executionMode?: Record<string, string>;
+  parameters?: DefinitionParameter[];
 }
 
 const CADENCES: ReadonlyArray<{ id: string; label: string; intervalSeconds: number }> = [
@@ -46,6 +53,7 @@ export function WorkflowDefinitionFlow() {
   const [target, setTarget] = useState<DefinitionSpec | null>(null);
   const [jobId, setJobId] = useState("");
   const [cadence, setCadence] = useState("1h");
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [scheduled, setScheduled] = useState<{ jobId: string; intervalSeconds: number } | null>(null);
@@ -74,10 +82,15 @@ export function WorkflowDefinitionFlow() {
     [cadence],
   );
 
+  const missingRequired = (target?.parameters ?? []).filter(
+    (param) => param.required && !String(paramValues[param.name] ?? "").trim(),
+  );
+
   const open = (spec: DefinitionSpec) => {
     setTarget(spec);
     setJobId(jobIdForSpec(spec.id));
     setCadence("1h");
+    setParamValues({});
     setActionError(null);
     setScheduled(null);
   };
@@ -87,21 +100,26 @@ export function WorkflowDefinitionFlow() {
     setBusy(true);
     setActionError(null);
     try {
-      const defined = await fetch(
-        `/api/job-definitions/${encodeURIComponent(target.id)}/define`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ jobId }),
+      const defined = await fetch(`/api/job-definitions/${encodeURIComponent(target.id)}/define`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...csrfHeaders(),
         },
-      );
+        body: JSON.stringify({ jobId, params: paramValues }),
+      });
       const definedBody = (await defined.json().catch(() => ({}))) as { error?: string };
       if (!defined.ok) {
         throw new Error(definedBody.error || `Defining the job failed (${defined.status}).`);
       }
       const armed = await fetch("/api/schedules/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...csrfHeaders(),
+        },
         body: JSON.stringify({
           scheduleType: "interval",
           intervalSeconds,
@@ -128,7 +146,8 @@ export function WorkflowDefinitionFlow() {
         <span>Define a job from its spec and schedule it</span>
         <Notice tone="info" density="compact">
           Every definition is validated before it is defined: a spec with an unknown stage, a
-          missing step or an invalid mode refuses by name, and nothing is scheduled.
+          missing step or an invalid mode refuses by name, a required parameter with no value
+          refuses by name, and nothing is scheduled.
         </Notice>
         {loadError && (
           <Notice tone="warning" density="compact" title="Definitions unavailable">
@@ -147,11 +166,7 @@ export function WorkflowDefinitionFlow() {
                   </Badge>
                 ))}
               </div>
-              {spec.executionMode && (
-                <span>
-                  {Object.values(spec.executionMode).join(" · ")}
-                </span>
-              )}
+              {spec.executionMode && <span>{Object.values(spec.executionMode).join(" · ")}</span>}
               {spec.description && <span>{spec.description}</span>}
               <Button variant="secondary" size="sm" onClick={() => open(spec)}>
                 Schedule this definition
@@ -177,9 +192,43 @@ export function WorkflowDefinitionFlow() {
                 onChange={(event) => setJobId(event.target.value)}
               />
             </div>
+            {(target.parameters ?? []).map((param) => (
+              <div key={param.name}>
+                <span>{param.label}</span>
+                {param.type === "select" ? (
+                  <Select
+                    aria-label={param.label}
+                    value={paramValues[param.name] ?? ""}
+                    onChange={(event) =>
+                      setParamValues((current) => ({ ...current, [param.name]: event.target.value }))
+                    }
+                  >
+                    <option value="">Select…</option>
+                    {(param.options ?? []).map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <TextInput
+                    aria-label={param.label}
+                    value={paramValues[param.name] ?? ""}
+                    onChange={(event) =>
+                      setParamValues((current) => ({ ...current, [param.name]: event.target.value }))
+                    }
+                  />
+                )}
+                {param.description && <span>{param.description}</span>}
+              </div>
+            ))}
             <div>
               <span>Cadence</span>
-              <Select aria-label="Cadence" value={cadence} onChange={(event) => setCadence(event.target.value)}>
+              <Select
+                aria-label="Cadence"
+                value={cadence}
+                onChange={(event) => setCadence(event.target.value)}
+              >
                 {CADENCES.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
@@ -199,9 +248,17 @@ export function WorkflowDefinitionFlow() {
                 Runs with per-stage status and times.
               </Notice>
             )}
-            <Button variant="primary" onClick={() => void schedule()} loading={busy} disabled={busy || !jobId.trim()}>
+            <Button
+              variant="primary"
+              onClick={() => void schedule()}
+              loading={busy}
+              disabled={busy || !jobId.trim() || missingRequired.length > 0}
+            >
               Define &amp; schedule
             </Button>
+            {missingRequired.length > 0 && (
+              <span>{`Required: ${missingRequired.map((param) => param.label).join(", ")}`}</span>
+            )}
           </Stack>
         </Modal>
       )}
