@@ -464,8 +464,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
       <h3 style={{ margin: "20px 0 12px" }}>Seed all built-in goals</h3>
       <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 8 }}>
         Adds every missing built-in goal (daily QA sweep, opportunity hunt, daily social post,
-        the three SessionStore resource goals, the two index-list refresh goals, and feed
-        refresh). Goals that already exist are skipped, not duplicated. The daily social post
+        the three SessionStore resource goals, and the two index-list refresh goals). Goals that already exist are skipped, not duplicated. The daily social post
         and the ETF-holdings refresh seed as disabled.
       </div>
       {seedResults && (
