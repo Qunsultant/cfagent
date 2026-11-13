@@ -23,7 +23,6 @@ const OPERATIONS = [
   { operation: "resource.dashboard_comparison", agent: "resource", blurb: "SessionStore dashboard comparison." },
   { operation: "index.refresh_wikipedia", agent: "index", blurb: "Index-list refresh (Wikipedia)." },
   { operation: "index.refresh_holdings", agent: "index", blurb: "Index-list refresh (ETF holdings)." },
-  { operation: "feed.refresh_all", agent: "feed", blurb: "Feed refresh (all feed jobs)." },
 ];
 
 // Canonical built-ins (the server's DEFAULT_SCHEDULES, as the
@@ -38,7 +37,6 @@ const BUILTINS = [
   { id: "resource-dashboard-comparison", name: "SessionStore dashboard comparison", cron: "0 2 * * *", operation: "resource.dashboard_comparison", budgetCents: 1, enabled: true, timeZone: "UTC" },
   { id: "index-refresh-wikipedia", name: "Index-list refresh (Wikipedia)", cron: "0 4 * * 0", operation: "index.refresh_wikipedia", budgetCents: 1, enabled: true, timeZone: "UTC" },
   { id: "index-refresh-holdings", name: "Index-list refresh (ETF holdings)", cron: "0 3 * * *", operation: "index.refresh_holdings", budgetCents: 1, enabled: false, timeZone: "UTC" },
-  { id: "feed-refresh", name: "Feed refresh (all feed jobs)", cron: "0 * * * *", operation: "feed.refresh_all", budgetCents: 1, enabled: true, timeZone: "UTC" },
 ];
 
 let container: HTMLDivElement;
@@ -144,34 +142,34 @@ afterEach(async () => {
 });
 
 describe("ScheduledGoalsPanel built-in goals (#3996)", () => {
-  it("dropdown lists all 9 built-ins by name and id", async () => {
+  it("dropdown lists all 8 built-ins by name and id", async () => {
     await renderPanel();
     const select = builtinSelect();
     const options = Array.from(select.options).map((o) => o.textContent ?? "");
-    expect(options).toHaveLength(10); // placeholder + 9 built-ins
+    expect(options).toHaveLength(9); // placeholder + 8 built-ins
     for (const goal of BUILTINS) {
       expect(options.some((t) => t.includes(goal.name) && t.includes(goal.id))).toBe(true);
     }
     expect(options.map((t) => t)).toEqual(
-      expect.arrayContaining(["Daily QA sweep (daily-qa-sweep)", "Feed refresh (all feed jobs) (feed-refresh)"]),
+      expect.arrayContaining(["Daily QA sweep (daily-qa-sweep)", "SessionStore 70% cap alert (resource-cap-alert)"]),
     );
   });
 
   it("selecting a built-in fills the whole form, including the enabled state", async () => {
     await renderPanel();
     await act(async () => {
-      setInput(builtinSelect(), "feed-refresh");
+      setInput(builtinSelect(), "resource-cap-alert");
     });
-    expect(inputByPlaceholder("id (e.g. weekly-report)").value).toBe("feed-refresh");
-    expect(inputByPlaceholder("name").value).toBe("Feed refresh (all feed jobs)");
+    expect(inputByPlaceholder("id (e.g. weekly-report)").value).toBe("resource-cap-alert");
+    expect(inputByPlaceholder("name").value).toBe("SessionStore 70% cap alert");
     expect(inputByPlaceholder('cron (e.g. "0 6 * * *")').value).toBe("0 * * * *");
-    expect((container.querySelector('select[aria-label="operation"]') as HTMLSelectElement).value).toBe("feed.refresh_all");
+    expect((container.querySelector('select[aria-label="operation"]') as HTMLSelectElement).value).toBe("resource.cap_alert");
     expect(inputByPlaceholder("budget in cents (e.g. 500)").value).toBe("1");
     expect(inputByPlaceholder("timeZone (IANA, e.g. UTC)").value).toBe("UTC");
     expect(enabledCheckbox().checked).toBe(true);
     // The Delegation Contract preview reflects the filled form.
-    expect(container.textContent).toMatch(/Create scheduled goal "Feed refresh \(all feed jobs\)" \(id "feed-refresh"\)/);
-    expect(container.textContent).toMatch(/Run operation "feed\.refresh_all" on schedule "0 \* \* \* \*" \(UTC\)/);
+    expect(container.textContent).toMatch(/Create scheduled goal "SessionStore 70% cap alert" \(id "resource-cap-alert"\)/);
+    expect(container.textContent).toMatch(/Run operation "resource\.cap_alert" on schedule "0 \* \* \* \*" \(UTC\)/);
   });
 
   it("selecting a disabled-by-design built-in fills enabled off and its timeZone", async () => {
@@ -236,27 +234,24 @@ describe("ScheduledGoalsPanel built-in goals (#3996)", () => {
       "resource-dashboard-comparison",
       "index-refresh-wikipedia",
       "index-refresh-holdings",
-      "feed-refresh",
     ]);
     // No duplicate is posted, and the two disabled-by-design goals seed disabled.
     expect(new Set(posted.map((p) => p.body.id)).size).toBe(posted.length);
     expect(posted.find((p) => p.body.id === "daily-social-post")?.body.enabled).toBe(false);
     expect(posted.find((p) => p.body.id === "index-refresh-holdings")?.body.enabled).toBe(false);
-    expect(posted.find((p) => p.body.id === "feed-refresh")?.body.enabled).toBe(true);
     expect(container.textContent).toMatch(/daily-qa-sweep.*Added/);
     expect(container.textContent).toMatch(/resource-cap-alert.*already exists/i);
-    expect(container.textContent).toMatch(/feed-refresh.*Added/);
   });
 
   it("seed-all never fails wholesale: one server refusal is failed, the rest still add", async () => {
-    failIds = new Map([["feed-refresh", "Unknown operation: feed.refresh_all"]]);
+    failIds = new Map([["resource-cap-alert", "Unknown operation: resource.cap_alert"]]);
     await renderPanel();
     await act(async () => {
       buttonByText("Seed all built-in goals").click();
     });
     await act(async () => {});
     expect(posted.map((p) => p.body.id)).toEqual(BUILTINS.map((g) => g.id));
-    expect(container.textContent).toMatch(/feed-refresh.*Failed/);
+    expect(container.textContent).toMatch(/resource-cap-alert.*Failed/);
     expect(container.textContent).toMatch(/daily-qa-sweep.*Added/);
   });
 });
