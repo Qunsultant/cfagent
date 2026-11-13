@@ -79,13 +79,22 @@ export interface ScheduleItem {
   health?: "healthy" | "idle" | "stale";
 }
 
-type ScheduleGroup = "all" | "stocks" | "options" | "system" | "queued";
+// Issue #4329 S2 (#4331): the owner's ten filters, configured in
+// src/config/scheduleListModes.ts — one vocabulary, not a second one here.
+type ScheduleGroup = ScheduleListFilter;
 
 /** Frequency presets for the one cadence dialog — defined once in the
  *  screening section's format module since S7; re-exported here for
  *  existing importers. */
 export { FREQUENCY_PRESETS } from "./scheduledOptionsManager/format";
 import { ScheduledOptionsManager } from "./ScheduledOptionsManager";
+import {
+  SCHEDULE_LIST_FILTER_LABELS,
+  resolveScheduleListFilters,
+  type ScheduleListFilter,
+  type ScheduleListKind,
+} from "../config/scheduleListModes";
+import { classifyScheduleKind, countSchedulesByKind } from "../services/scheduleKinds";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
 
 /**
@@ -129,34 +138,14 @@ export function cronToEnglish(cron: string): string {
 }
 
 /**
- * Categorize a schedule into a group for filtered display.
+ * Categorize a schedule into a kind for filtered display.
+ *
+ * Issue #4329 S2 — one classifier for the page: `classifyScheduleKind`
+ * (src/services/scheduleKinds.ts). Kept as the exported name existing
+ * importers use; the rule table lives in the service, not here.
  */
-export function categorizeSchedule(s: ScheduleItem): Exclude<ScheduleGroup, "all" | "queued"> {
-  const cb = s.callback.toLowerCase();
-  const payload = s.payload || {};
-
-  // Queued async jobs
-  if (s.type === "delayed" || cb.includes("executeasyncjob")) {
-    return "system"; // Will be overridden to "queued" by caller for delayed type
-  }
-
-  // Options scanners + strategy discovery (S7: discovery was
-  // previously miscounted as "system" — it is an options kind).
-  if (
-    cb.includes("autonomousoptionsanalysis") ||
-    cb.includes("autonomousstrategydiscovery") ||
-    cb.includes("options")
-  ) {
-    return "options";
-  }
-
-  // Stock screeners
-  if (cb.includes("autonomousmarketscreen") || payload.universe) {
-    return "stocks";
-  }
-
-  // System jobs (token renewal, IV collection)
-  return "system";
+export function categorizeSchedule(s: ScheduleItem): ScheduleListKind {
+  return classifyScheduleKind(s);
 }
 
 /** One-line payload summary for payloads without universe/thesis. */
@@ -374,24 +363,21 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     }
   }, [focusScheduleId, loading, schedules]);
 
-  // The screening kinds render in the screening section (kind rows);
-  // the generic table below carries every other callback.
-  const genericSchedules = schedules.filter((s) => !SCREENING_CALLBACKS.has(s.callback));
+  // Issue #4329 S2 (#4331): ONE list. Every durable schedule is a row here —
+  // the screening callbacks included — and the options manager renders its
+  // form, latest runs and audit trail without an embedded list of its own.
+  const allSchedules = schedules;
 
-  // Filter by active tab
-  const filtered = genericSchedules.filter((s) => {
-    if (activeTab === "all") return true;
-    if (activeTab === "queued") return s.type === "delayed";
-    return categorizeSchedule(s) === activeTab;
-  });
+  // Filter by the active kind (issue #4329 S2): "all" is the unfiltered list.
+  const filtered = allSchedules.filter(
+    (s) => activeTab === "all" || classifyScheduleKind(s) === activeTab,
+  );
 
-  // Count by group
-  const counts: Record<ScheduleGroup, number> = {
-    all: schedules.length,
-    stocks: schedules.filter((s) => categorizeSchedule(s) === "stocks" && s.type !== "delayed").length,
-    options: schedules.filter((s) => categorizeSchedule(s) === "options" && s.type !== "delayed").length,
-    system: schedules.filter((s) => categorizeSchedule(s) === "system" && s.type !== "delayed").length,
-    queued: schedules.filter((s) => s.type === "delayed").length,
+  // Count by kind (issue #4329 S2): one classifier, every configured filter.
+  const kindCounts = countSchedulesByKind(allSchedules);
+  const counts: Record<string, number> = {
+    all: allSchedules.length,
+    ...kindCounts,
   };
 
   // The generic table only appears when it has something to say: on
@@ -400,13 +386,14 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   // empty state (issue #2329: no duplicate "nothing here" blocks).
   const showGenericSection = filtered.length > 0 || activeTab === "system" || activeTab === "queued";
 
-  const tabs: { id: ScheduleGroup; label: string }[] = [
-    { id: "all", label: `All (${counts.all})` },
-    { id: "stocks", label: `Stocks (${counts.stocks})` },
-    { id: "options", label: `Options (${counts.options})` },
-    { id: "system", label: `System (${counts.system})` },
-    { id: "queued", label: `Queued (${counts.queued})` },
-  ];
+  // The filter buttons are configuration (#4329 S2): the set and the default
+  // live in src/config/scheduleListModes.ts, with the owner's order as the
+  // built-in default.
+  const scheduleFilters = resolveScheduleListFilters();
+  const tabs: { id: ScheduleGroup; label: string }[] = scheduleFilters.map((id) => ({
+    id,
+    label: `${SCHEDULE_LIST_FILTER_LABELS[id]} (${counts[id] ?? 0})`,
+  }));
 
   const genericColumns: TableColumn<ScheduleItem>[] = [
     {
@@ -728,6 +715,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           onPreviewTrade={onPreviewTrade}
           groupFilter={activeTab === "all" ? "all" : activeTab}
           refreshSignal={refreshSignal}
+          // Issue #4331: the one list is the table below; this manager keeps
+          // its form, latest runs and audit trail.
+          showSchedulesSection={false}
         />
       )}
 
@@ -744,7 +734,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         <section className="sched-section-card">
           <header className="sched-section-header">
             <h4>
-              <span aria-hidden="true">🗂️</span> Other Durable Schedules
+              <span aria-hidden="true">🗂️</span> Schedules
               <span className="sched-count-pill">{filtered.length} Shown</span>
             </h4>
             {loading && <span className="schedule-row-muted">Refreshing…</span>}
@@ -755,7 +745,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             rowKey={(s) => s.id}
             rowClassName="schedule-item-card"
             rowTitle={(s) => `${s.id} · ${s.callback}`}
-            caption="Durable schedules outside the screening kinds"
+            caption="Every durable schedule, one row each"
             containerClassName="sched-table-scroll"
             empty={<p className="sched-table-status">No schedules in this group.</p>}
           />

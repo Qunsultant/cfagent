@@ -107,6 +107,9 @@ export function ScheduledOptionsManager({
   onSendPrompt,
   groupFilter = "all",
   refreshSignal,
+  // Issue #4329 S2 (#4331): the schedules home hosts the ONE schedule list and
+  // passes false; the standalone default keeps the embedded list as before.
+  showSchedulesSection = true,
 }: ScheduledOptionsManagerProps) {
   // Schedules List State
   const [schedules, setSchedules] = useState<ScheduledTaskItem[]>([]);
@@ -854,21 +857,24 @@ export function ScheduledOptionsManager({
         runsError={runsError}
       />
 
-      {/* Active Schedules Section */}
-      <SchedulesSection
-        schedules={visibleSchedules}
-        loading={loading}
-        openCreateModal={openCreateModal}
-        activeEnv={activeEnv}
-        userLogin={userLogin}
-        profiles={profiles}
-        busyKey={triggeringKey}
-        onShowDetails={openDetails}
-        onEdit={handleEditSchedule}
-        onTrigger={handleTriggerCard}
-        onTogglePause={handlePauseResume}
-        onCancel={handleCancelSchedule}
-      />
+      {/* Active Schedules Section — the schedules home hosts the ONE list
+          (#4331); the embedded list renders only when a caller asks for it. */}
+      {showSchedulesSection && (
+        <SchedulesSection
+          schedules={visibleSchedules}
+          loading={loading}
+          openCreateModal={openCreateModal}
+          activeEnv={activeEnv}
+          userLogin={userLogin}
+          profiles={profiles}
+          busyKey={triggeringKey}
+          onShowDetails={openDetails}
+          onEdit={handleEditSchedule}
+          onTrigger={handleTriggerCard}
+          onTogglePause={handlePauseResume}
+          onCancel={handleCancelSchedule}
+        />
+      )}
 
       {/* Execution Audit Trail Section */}
       <AuditTrailSection
