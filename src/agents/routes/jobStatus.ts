@@ -65,6 +65,7 @@ export function jobStatusPayload(report: JobStatusReport): Record<string, unknow
     endedAt: report.endedAt,
     durationMs: report.durationMs,
     runId: report.runId,
+    executionMode: report.executionMode,
     subJobCount: report.subJobs.length,
     subJobs: report.subJobs,
   };

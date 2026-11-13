@@ -269,6 +269,12 @@ export interface WorkflowJobCommand {
   presetRef?: { presetId: string; resolvedAt: string };
   /** Issue #2909 (G2): run qualifications for unmapped pattern guardrails, carried on the command like patternRef. */
   patternQualifications?: string[];
+  /**
+   * Issue #4363 — the run's execution mode (all four axes), chosen at
+   * start. Absent = the family default from configuration; never a
+   * second hard-coded mode.
+   */
+  executionMode?: import("../data/jobPipelinePorts").JobExecutionMode;
   /** Owner login. Required — fail closed without an identity (#1185). */
   userLogin: string;
   /** Shards to run in parallel (computed by the starter from the request). */

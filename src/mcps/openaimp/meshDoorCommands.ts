@@ -1259,6 +1259,17 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
           maxRsi: { type: "number", description: "Maximum 14-period RSI." },
         },
       },
+      executionMode: {
+        type: "object",
+        description:
+          "Issue #4363 — the run's execution mode. Omit a field for the family default; online+sync is refused.",
+        properties: {
+          concurrency: { type: "string", enum: ["sequential", "parallel"] },
+          pacing: { type: "string", enum: ["batch", "online"] },
+          delivery: { type: "string", enum: ["sync", "async"] },
+          shape: { type: "string", enum: ["monolith", "sharded"] },
+        },
+      },
     },
   };
   readonly zodSchema = z.object({
@@ -1278,6 +1289,15 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
       })
       .optional()
       .describe("Optional structured screener filters"),
+    executionMode: z
+      .object({
+        concurrency: z.enum(["sequential", "parallel"]).optional(),
+        pacing: z.enum(["batch", "online"]).optional(),
+        delivery: z.enum(["sync", "async"]).optional(),
+        shape: z.enum(["monolith", "sharded"]).optional(),
+      })
+      .optional()
+      .describe("Issue #4363 — the run's execution mode; online+sync is refused"),
   });
 
   async execute(

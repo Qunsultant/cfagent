@@ -127,6 +127,7 @@ import type { JobStagesRead, JobStatusView } from "../services/jobPipelineEngine
 import { buildJobStatusReport, resolveSubJob } from "../services/jobStageStatus";
 import type { JobStageEventRecord } from "../data/jobStageEventPorts";
 import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRead";
+import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import {
   buildFeedJobSurfaceView,
@@ -1132,6 +1133,35 @@ export class ScheduledAgent extends PortThink {
   async listStageEvents(runId: string): Promise<JobStageEventRecord[]> {
     const ctx = this.pipelineContext();
     return createScheduledAgentStageEventStore(ctx).listByRun(runId);
+  }
+
+  /**
+   * Issue #4363 — set a job's execution mode for its NEXT run. The mode is
+   * fixed at start, so a live run refuses by name with the next-run-only
+   * rule; a terminal/idle job takes the new mode and the next dispatch uses
+   * it (the definition is versioned, so the change is a new version).
+   */
+  async setPipelineJobExecutionMode(
+    jobId: string,
+    mode: unknown,
+  ): Promise<{ jobId: string; executionMode: Record<string, string>; appliedTo: "next-run" }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    const view = await control.getJob(jobId);
+    const state = view.instance?.state ?? "idle";
+    if (state === "running" || state === "queued" || state === "paused") {
+      throw new Error(
+        `Job "${jobId}" is ${state} — the execution mode is fixed at start and cannot change mid-run. Next-run-only: stop or cancel this run, set the mode, then start a new run.`,
+      );
+    }
+    const resolved = resolveExecutionMode(mode);
+    assertExecutionModeSupported(resolved);
+    await control.configureJob(jobId, { executionMode: resolved });
+    return {
+      jobId,
+      executionMode: resolved as unknown as Record<string, string>,
+      appliedTo: "next-run",
+    };
   }
 
   /** Every pipeline job definition this host manages. */

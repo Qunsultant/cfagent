@@ -123,6 +123,8 @@ export interface WorkflowRunStage {
    * carries no buttons rather than a guess.
    */
   engineJobId?: string | null;
+  /** Issue #4363 — the run's execution mode, as the definition recorded it. */
+  executionMode?: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   durationMs: number | null;
@@ -1117,6 +1119,11 @@ export function stagesFromEngineViews(
       status,
       recordedBy: "engine-checkpoint",
       ...(engineJobId ? { engineJobId } : {}),
+      ...(view.executionMode
+        ? {
+            executionMode: `${view.executionMode.concurrency} · ${view.executionMode.pacing} · ${view.executionMode.delivery} · ${view.executionMode.shape}`,
+          }
+        : {}),
       startedAt: view.startedAt,
       finishedAt: view.endedAt,
       durationMs: view.durationMs,

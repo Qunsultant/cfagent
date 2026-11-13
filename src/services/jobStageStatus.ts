@@ -39,6 +39,8 @@ export interface JobStatusReport {
   durationMs: number | null;
   /** The engine run id the report describes (null when the job never ran). */
   runId: string | null;
+  /** Issue #4363 — the execution mode the definition records (null when none). */
+  executionMode: Record<string, string> | null;
   subJobs: JobSubJobStatus[];
 }
 
@@ -108,6 +110,7 @@ export function buildJobStatusReport(jobId: string, view: JobStatusView): JobSta
       view.instance?.stageCheckpoint?.runId ??
       view.latestRun?.workflowId ??
       null,
+    executionMode: (view.definition.config.executionMode as unknown as Record<string, string> | undefined) ?? null,
     subJobs: view.stages.map(subJobStatusFromStageView),
   };
 }

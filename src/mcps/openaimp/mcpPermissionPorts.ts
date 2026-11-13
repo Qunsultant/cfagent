@@ -167,6 +167,7 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   get_job_status: "mcp:read",
   get_job_stage_status: "mcp:read",
   stock_copilot_stage_control: "mcp:write",
+  set_job_execution_mode: "mcp:write",
   list_async_jobs: "mcp:read",
   etrade_get_quote: "mcp:read",
   etrade_get_positions: "mcp:read",

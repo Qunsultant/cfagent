@@ -322,6 +322,12 @@ export interface JobStageView {
   nodePath: string;
   kind: string | null;
   /**
+   * Issue #4363 — the execution mode this run was defined with (all four
+   * axes), read from the definition. Recorded, never inferred: a legacy
+   * definition without one reads null.
+   */
+  executionMode?: JobExecutionMode | null;
+  /**
    * Issue #4359 — the stage's recorded window: the earliest unit start
    * and the latest unit end, both read from the checkpoint. `endedAt`
    * stays null while any unit is non-terminal (the stage is still the
@@ -1848,6 +1854,7 @@ export class JobPipelineControl {
           stageId: unit.stage,
           nodePath,
           kind: kinds.get(nodePath) ?? null,
+          executionMode: definition.config.executionMode ?? null,
           startedAt: null,
           endedAt: null,
           durationMs: null,

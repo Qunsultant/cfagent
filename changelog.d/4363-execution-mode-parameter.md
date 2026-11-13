@@ -1,0 +1,5 @@
+### Added
+
+- **A run's execution mode is a parameter, not a literal (#4363):** `run_stock_screen` accepts `executionMode` (concurrency, pacing, delivery, shape); an omitted axis takes the family default from configuration (`SCREENER_DEFAULT_EXECUTION_MODE`, malformed = named refusal), and `online + sync` is refused by the engine's resolver before any run starts. The screener builder's hard-coded mode literal is retired.
+- **The mode is recorded and visible (#4363):** the job definition carries it, `/api/jobs/:id/status` returns it, and the Workflow Runs run detail shows **Execution mode** — a legacy definition without one shows nothing rather than an invented default.
+- **Changing the mode is next-run-only (#4363):** `set_job_execution_mode` writes the definition for the next run; a running, queued or paused job refuses by name with that rule instead of pretending a live run can change shape mid-flight. #autoclaw-001

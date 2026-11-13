@@ -59,6 +59,7 @@ import type {
 } from "../workflows/workflowPorts";
 import type { StockScreenDelivery } from "../workflows/stockScreenRunSpec";
 import type { WorkflowGoalScreenEnvelope } from "../agents/orchestrator/goalScreenDispatch";
+import { SCREENER_DEFAULT_EXECUTION_MODE } from "../config/screenerExecutionMode";
 
 /** The step names a screener job's configuration references. */
 export const SCREENER_FEED_STEP = "screener.feed";
@@ -416,11 +417,16 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
     node = next;
   }
   const root = node!;
+  // Issue #4363 — the execution mode is a run parameter: the caller's
+  // choice when one was made, else the family default from configuration
+  // (never a second hard-coded literal). `shape` follows the shard count
+  // unless the caller chose one.
+  const requestedMode = command.executionMode;
   root.executionMode = {
-    concurrency: "sequential",
-    pacing: "batch",
-    delivery: "async",
-    shape: shardIds.length > 1 ? "sharded" : "monolith",
+    concurrency: requestedMode?.concurrency ?? SCREENER_DEFAULT_EXECUTION_MODE.concurrency,
+    pacing: requestedMode?.pacing ?? SCREENER_DEFAULT_EXECUTION_MODE.pacing,
+    delivery: requestedMode?.delivery ?? SCREENER_DEFAULT_EXECUTION_MODE.delivery,
+    shape: requestedMode?.shape ?? (shardIds.length > 1 ? "sharded" : "monolith"),
   };
   return {
     jobId: command.jobId,
