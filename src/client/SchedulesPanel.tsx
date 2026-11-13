@@ -785,9 +785,13 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       ) : showGenericSection ? (
         <section className="sched-section-card">
           <header className="sched-section-header">
+            {/* Issue #4353 — one heading row: the name, the count and the
+                table's own description, instead of a title stacked over the
+                caption. */}
             <h4>
               <span aria-hidden="true">🗂️</span> Schedules
               <span className="sched-count-pill">{filtered.length} Shown</span>
+              <small className="schedule-row-muted">Every durable schedule, one row each</small>
             </h4>
             {loading && <span className="schedule-row-muted">Refreshing…</span>}
           </header>
@@ -797,7 +801,6 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             rowKey={(s) => s.id}
             rowClassName="schedule-item-card"
             rowTitle={(s) => `${s.id} · ${s.callback}`}
-            caption="Every durable schedule, one row each"
             containerClassName="sched-table-scroll"
             empty={<p className="sched-table-status">No schedules in this group.</p>}
           />
