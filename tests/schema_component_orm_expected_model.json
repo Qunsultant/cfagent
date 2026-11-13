@@ -1,0 +1,712 @@
+{
+  "tables": {
+    "mas_messages": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "content",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "agent",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_events": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "agent",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "payload",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "previous_event_hash",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "event_hash",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_memory": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_referrals": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "url",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "reward_text",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "clicks",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "signups",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_ads": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tagline",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "sponsor",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "badge",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "url",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "cta_text",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "accent_color",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "impressions",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "clicks",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_watchlists": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "user_login",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "symbols_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "items_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_transactions": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "action",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "amount",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "currency",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "customer",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "gateway",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "gateway_ref",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "checkout_url",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "proposer_did",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "authorizer_did",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "proof_signature",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "note",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_categories": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "icon",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "is_active",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "sort_order",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_external_ads": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "network",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "placement",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tagline",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "cta_text",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "target_url",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "banner_image_url",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "cpm_rate",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "cpc_rate",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "impressions",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "clicks",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "earnings",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "is_active",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "webhook_replay_nonces": {
+      "columns": [
+        {
+          "name": "nonce",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "expires_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_trades": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "symbol",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "action",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "order_type",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "quantity",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "price",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "total_value",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "order_ref",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "proposer_did",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "authorizer_did",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "proof_signature",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "preview_notes",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "expiration_schedule_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "broker",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "price_source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_options_chain_cache": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "symbol",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "expirations_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "chains_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "fetched_at",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "expires_at",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "contract_count",
+          "type": "INTEGER",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    }
+  },
+  "indexes": {
+    "idx_cf_agents_jobs_time": {
+      "table": "cf_agents_jobs",
+      "columns": [
+        "time"
+      ],
+      "unique": false
+    },
+    "idx_cf_agents_jobs_exclusive_time": {
+      "table": "cf_agents_jobs",
+      "columns": [
+        "exclusive",
+        "time"
+      ],
+      "unique": false
+    },
+    "idx_cf_agents_jobs_singleflight_running": {
+      "table": "cf_agents_jobs",
+      "columns": [
+        "singleflight",
+        "running",
+        "execution_started_at",
+        "hung_timeout_seconds"
+      ],
+      "unique": false
+    },
+    "idx_mas_messages_created": {
+      "table": "mas_messages",
+      "columns": [
+        "created_at",
+        "id"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_created": {
+      "table": "mas_events",
+      "columns": [
+        "created_at",
+        "id"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_session_type": {
+      "table": "mas_events",
+      "columns": [
+        "session_id",
+        "type",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "unified_schedules_created_idx": {
+      "table": "unified_schedules",
+      "columns": [
+        "created_at ASC",
+        "id ASC"
+      ],
+      "unique": false
+    },
+    "job_run_records_recent_idx": {
+      "table": "job_run_records",
+      "columns": [
+        "started DESC",
+        "id DESC"
+      ],
+      "unique": false
+    }
+  }
+}
