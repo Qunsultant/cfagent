@@ -107,6 +107,12 @@ export function ScheduledOptionsManager({
   onSendPrompt,
   groupFilter = "all",
   refreshSignal,
+  // Issue #4329 S2 (#4331): the schedules home owns the ONE list and passes
+  // false; the standalone default keeps the embedded section as before.
+  showSchedulesSection = true,
+  // The page's Edit control asks this manager to open its form for a schedule
+  // the hosted section used to own; the nonce lets the same id re-open.
+  editRequest,
 }: ScheduledOptionsManagerProps) {
   // Schedules List State
   const [schedules, setSchedules] = useState<ScheduledTaskItem[]>([]);
@@ -292,6 +298,19 @@ export function ScheduledOptionsManager({
     };
   }, [activeEnv, userLogin]);
 
+
+  // Issue #4329 S2 (#4331): the page's Edit control carries a request; honor it
+  // once the schedule it names is loaded. A ref stops the effect re-firing.
+  const lastEditNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!editRequest) return;
+    if (lastEditNonce.current === editRequest.nonce) return;
+    const item = schedules.find((s) => s.id === editRequest.scheduleId);
+    if (!item) return;
+    lastEditNonce.current = editRequest.nonce;
+    handleEditSchedule(item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, schedules]);
 
   // Issue #2470 S4: latest autonomous options runs, via the shared
   // subscription (one network poll per cadence even when
@@ -854,8 +873,10 @@ export function ScheduledOptionsManager({
         runsError={runsError}
       />
 
-      {/* Active Schedules Section */}
-      <SchedulesSection
+      {/* Active Schedules Section — rendered only when the caller keeps the
+          embedded list; the schedules home hosts the ONE list (#4331). */}
+      {showSchedulesSection && (
+        <SchedulesSection
           schedules={visibleSchedules}
           loading={loading}
           openCreateModal={openCreateModal}
@@ -867,8 +888,9 @@ export function ScheduledOptionsManager({
           onEdit={handleEditSchedule}
           onTrigger={handleTriggerCard}
           onTogglePause={handlePauseResume}
-        onCancel={handleCancelSchedule}
-      />
+          onCancel={handleCancelSchedule}
+        />
+      )}
 
       {/* Execution Audit Trail Section */}
       <AuditTrailSection

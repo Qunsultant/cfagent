@@ -37,6 +37,13 @@ export interface ScheduledOptionsManagerProps {
    *  create form is opened by the section's own hero button — the
    *  page has exactly one create action (issue #2329). */
   refreshSignal?: number;
+  /**
+   * Issue #4331 (#4329 S2): false when the schedules home hosts the one list —
+   * the manager then renders its form, latest runs and audit trail only.
+   */
+  showSchedulesSection?: boolean;
+  /** The page's Edit control: open the form for this schedule (nonce re-opens). */
+  editRequest?: { scheduleId: string; nonce: number };
 }
 
 /**

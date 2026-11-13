@@ -244,6 +244,11 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   const [refreshSignal, setRefreshSignal] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ScheduleItem | null>(null);
+  // Issue #4331: the row's Edit control asks the options manager to open its
+  // form for that schedule; the nonce lets the same row re-open.
+  const [editRequest, setEditRequest] = useState<{ scheduleId: string; nonce: number } | null>(
+    null,
+  );
   const [deleting, setDeleting] = useState(false);
   const [cadenceTarget, setCadenceTarget] = useState<ScheduleItem | null>(null);
   const [cadenceBusy, setCadenceBusy] = useState(false);
@@ -369,13 +374,12 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     }
   }, [focusScheduleId, loading, schedules]);
 
-  // Issue #4329 S2 (#4331): the FILTER vocabulary is one vocabulary for the
-  // page (config/scheduleListModes.ts) and the classifier is one classifier.
-  // The physical one-list merge is still open: the hosted section also owns
-  // the screening rows' Edit flow, so folding it into this table must move
-  // that flow with it (recorded on #4331). Until then the table keeps
-  // carrying the callbacks the hosted section does not.
-  const allSchedules = schedules.filter((s) => !SCREENING_CALLBACKS.has(s.callback));
+  // Issue #4329 S2 (#4331): ONE list. Every durable schedule is a row here —
+  // the screening callbacks included. The options manager keeps its form,
+  // latest runs and audit trail, and its Edit flow is reached through the
+  // row's Edit control (an edit request), so dropping its embedded list loses
+  // nothing.
+  const allSchedules = schedules;
 
   // Filter by the active kind (issue #4329 S2): "all" is the unfiltered list.
   const filtered = allSchedules.filter(
@@ -558,6 +562,17 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         }
         return (
           <div className="schedule-row-actions">
+            {SCREENING_CALLBACKS.has(s.callback) && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setEditRequest({ scheduleId: s.id, nonce: Date.now() })}
+                title="Edit this screening schedule"
+              >
+                Edit
+              </Button>
+            )}
             <Button
               type="button"
               variant="secondary"
@@ -594,18 +609,23 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
                 picking a cadence converts a one-shot to recurring (the
                 backend treats a supplied cron/interval as a timing-kind
                 switch); the modal warns one-shot rows before they pick. */}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setCadenceError(null);
-                setCadenceTarget(s);
-              }}
-              title="Edit this schedule's cadence"
-            >
-              Edit frequency
-            </Button>
+                        {/* Issue #4331: a screening row's cadence is edited in the options
+                manager's form (that row's Edit control), so the generic cadence
+                dialog is not offered there. */}
+            {!SCREENING_CALLBACKS.has(s.callback) && (
+  <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setCadenceError(null);
+                  setCadenceTarget(s);
+                }}
+                title="Edit this schedule's cadence"
+              >
+                Edit frequency
+              </Button>
+            )}
             <Button
               type="button"
               variant="danger"
@@ -724,8 +744,11 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           onPreviewTrade={onPreviewTrade}
           groupFilter={activeTab === "all" ? "all" : activeTab}
           refreshSignal={refreshSignal}
-          // Issue #4331: the one list is the table below; this manager keeps
-          // its form, latest runs and audit trail.
+          // Issue #4331: the one list is the table below; the manager keeps its
+          // form, latest runs and audit trail, and opens that form when a row's
+          // Edit control sends a request.
+          showSchedulesSection={false}
+          editRequest={editRequest ?? undefined}
         />
       )}
 
@@ -742,7 +765,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         <section className="sched-section-card">
           <header className="sched-section-header">
             <h4>
-              <span aria-hidden="true">🗂️</span> Other Durable Schedules
+              <span aria-hidden="true">🗂️</span> Schedules
               <span className="sched-count-pill">{filtered.length} Shown</span>
             </h4>
             {loading && <span className="schedule-row-muted">Refreshing…</span>}
@@ -753,7 +776,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             rowKey={(s) => s.id}
             rowClassName="schedule-item-card"
             rowTitle={(s) => `${s.id} · ${s.callback}`}
-            caption="Durable schedules outside the screening kinds"
+            caption="Every durable schedule, one row each"
             containerClassName="sched-table-scroll"
             empty={<p className="sched-table-status">No schedules in this group.</p>}
           />

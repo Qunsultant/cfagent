@@ -119,19 +119,25 @@ describe("4331-P04 counts per kind", () => {
   });
 });
 
-describe("4331-P05 one vocabulary for the page", () => {
-  it("the filter bar is the configured set, in order, with live counts", () => {
-    expect(panel).toContain("resolveScheduleListFilters()");
-    expect(panel).toContain("SCHEDULE_LIST_FILTER_LABELS[id]");
-    expect(panel).toContain("countSchedulesByKind(allSchedules)");
+describe("4331-P05 one list on the page", () => {
+  it("the table lists every durable schedule", () => {
+    expect(panel).toContain("const allSchedules = schedules;");
+    expect(panel).not.toContain("schedules.filter((s) => !SCREENING_CALLBACKS.has(s.callback))");
+    expect(panel).toContain("Every durable schedule, one row each");
   });
 
-  it("the hosted section keeps the friendly titles the one table will reuse", () => {
-    // The physical one-list merge is still open (#4331): the hosted section also
-    // owns the screening rows' Edit flow, so folding it must move that flow too.
-    // What landed here is the vocabulary + one classifier + the friendly name —
-    // a row reads "Strategy Discovery · No-view", never the raw callback.
-    expect(panel).toContain("scheduleTitle(s as unknown as ScheduledTaskItem)");
-    expect(panel).toContain("SCREENING_CALLBACKS.has(s.callback)");
+  it("the hosted section is off and its Edit flow is reached from the row", () => {
+    expect(panel).toContain("showSchedulesSection={false}");
+    expect(panel).toContain("editRequest={editRequest ?? undefined}");
+    expect(panel).toContain("title=\"Edit this screening schedule\"");
+    // The screening row's cadence lives in the manager's form, not the generic dialog.
+    expect(panel).toContain("{!SCREENING_CALLBACKS.has(s.callback) && (");
+    expect(manager).toContain("editRequest,");
+    expect(manager).toContain("handleEditSchedule(item)");
+  });
+
+  it("the manager's own section is opt-in, so standalone use is unchanged", () => {
+    expect(manager).toContain("showSchedulesSection = true,");
+    expect(manager).toContain("{showSchedulesSection && (");
   });
 });
