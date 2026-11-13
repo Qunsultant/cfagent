@@ -169,20 +169,24 @@ export function WorkflowDefinitionFlow() {
       {target && (
         <Modal open onClose={() => setTarget(null)} title={`Schedule ${target.name}`}>
           <Stack gap="3">
-            <label>
-              Job id
-              <TextInput value={jobId} onChange={(event) => setJobId(event.target.value)} />
-            </label>
-            <label>
-              Cadence
-              <Select value={cadence} onChange={(event) => setCadence(event.target.value)}>
+            <div>
+              <span>Job id</span>
+              <TextInput
+                aria-label="Job id"
+                value={jobId}
+                onChange={(event) => setJobId(event.target.value)}
+              />
+            </div>
+            <div>
+              <span>Cadence</span>
+              <Select aria-label="Cadence" value={cadence} onChange={(event) => setCadence(event.target.value)}>
                 {CADENCES.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
                   </option>
                 ))}
               </Select>
-            </label>
+            </div>
             {actionError && (
               <Notice tone="danger" density="compact">
                 {actionError}
