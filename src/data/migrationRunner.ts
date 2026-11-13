@@ -2440,6 +2440,35 @@ CREATE TABLE IF NOT EXISTS agent_runs_pack_drafts (
 `,
 };
 
+/**
+ * Migration 0064 — free-access grants (#3247 slice 1, sub-issue of #3241).
+ * - agent_free_access_grants: one row per grant — the durable,
+ *   auditable, revocable record of free access for one login
+ *   (kind lifetime|limited, grantedBy, grantedAtMs, expiresAtMs,
+ *   revokedAtMs, reason). Expired and revoked rows stay as
+ *   history; no seed rows; no tenant column (keyed by login —
+ *   the audit event carries the tenant from the account row).
+ *   The login index serves the per-login history reads.
+ *   No prerequisites: a standalone table.
+ */
+export const MIGRATION_0064_FREE_ACCESS_GRANTS: DataMigration = {
+  version: 64,
+  name: "0064_free_access_grants",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_free_access_grants (
+  id TEXT PRIMARY KEY,
+  login TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  granted_by TEXT NOT NULL,
+  granted_at_ms INTEGER NOT NULL,
+  expires_at_ms INTEGER,
+  revoked_at_ms INTEGER,
+  reason TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_free_access_grants_login_idx ON agent_free_access_grants (login);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -2502,6 +2531,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
   MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   MIGRATION_0063_RUNS_PACKS,
+  MIGRATION_0064_FREE_ACCESS_GRANTS,
 ];
 
 function splitStatements(sqlText: string): string[] {
