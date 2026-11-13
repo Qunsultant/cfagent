@@ -78,7 +78,10 @@ import {
   type DiscoveryRiskCaps,
 } from "../trading";
 import { estimateExpectedMove } from "../trading";
-import { runOptionsPanelViaEngine } from "../workflows/optionsScreenEngine";
+import {
+  runOptionsPanelViaEngine,
+  type OptionsEngineStores,
+} from "../workflows/optionsScreenEngine";
 import { OptionsDataAgent, type OptionsDataSnapshot } from "../trading";
 import { DynamicOptionsScreener } from "../trading";
 import {
@@ -113,7 +116,13 @@ export interface DiscoveryServiceDeps {
    *  flow is a confidence modifier, so the service treats a flow
    *  outage as no flow data. */
   flowFor(symbol: string): Promise<readonly FlowItemLike[]>;
-  runPipeline(request: StrategyRequest): Promise<PipelineResult>;
+  /** Issue #4276: the pipeline runner receives the run's engine
+   *  stores (when the caller threaded them) so each expression's
+   *  panel run records durably over the caller's stores. */
+  runPipeline(
+    request: StrategyRequest,
+    options?: { engineStores?: OptionsEngineStores | null },
+  ): Promise<PipelineResult>;
   store: DiscoverySetupStore;
   /** Issue #18: alert dispatch wiring (Decision 2). Absent, runs
    *  never alert — dispatch is opt-in per caller. */
@@ -132,6 +141,12 @@ export interface DiscoveryRunRequest {
   source: string;
   caps: DiscoveryRiskCaps;
   userLogin?: string;
+  /** Issue #4276: the engine stores the run's panel expressions
+   *  record over (the #4066 pattern — threaded by the NLQ leg from
+   *  engineSql). Absent, each expression runs over in-memory stores
+   *  (the #4069 accepted-absent discipline) and leaves no durable
+   *  pipeline record. */
+  engineStores?: OptionsEngineStores | null;
   /** Issue #18: Strategy Profile biasing — the resolved profile's
    *  allowed strategy types. Ranking only: the service adds the
    *  configured boost for pick selection; signals, inference, and
@@ -260,7 +275,9 @@ export async function runDiscovery(
       built.request.eventCalendar = eventCalendar;
 
       const expression = await expressDiscoverySetup(
-        { run: (req) => deps.runPipeline(req) },
+        // Issue #4276: the run's engine stores ride into the
+        // pipeline runner so each expression records durably.
+        { run: (req) => deps.runPipeline(req, { engineStores: request.engineStores }) },
         built.request,
         gate,
         request.profileBias && request.profileBias.preferredTypes.length > 0
@@ -485,7 +502,11 @@ export function createDiscoveryService(args: {
     // Issue #4068: the discovery panel runs through the one engine-routed
     // panel (runOptionsPanelViaEngine) over the same chainSource the
     // screener above was built from — no direct runPanelPipelineRetired4068 call.
-    runPipeline: (request) => runOptionsPanelViaEngine(chainSource, request, {}, args.userLogin),
+    // Issue #4276: the run's engine stores ride as the panel's 6th
+    // argument, so the expression records durably over the caller's
+    // stores; absent, the panel builds in-memory stores explicitly.
+    runPipeline: (request, options) =>
+      runOptionsPanelViaEngine(chainSource, request, {}, args.userLogin, undefined, options?.engineStores),
     store: ports.discoverySetupRuns,
     ...(args.alerts
       ? {

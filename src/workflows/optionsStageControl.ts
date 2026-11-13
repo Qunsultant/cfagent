@@ -60,6 +60,12 @@
  *   `stage_port_unavailable`. (The goal leg's shapeReport/deliver are
  *   pure functions of their inputs and ARE rebuildable — the blocker
  *   is the job record, not the ports.)
+ * - A comparison run (#4276) is a single engine step, not a staged
+ *   pipeline: the control resolves its `comparison:<runId>` job and
+ *   decodes its shape, but run / re-run / resume refuse
+ *   `stage_port_unavailable` (no stage ports exist to rebuild) and
+ *   stop / cancel refuse the engine's `stage_vocabulary_unknown`
+ *   (no stage node exists in the job) — both by name, never silent.
  * - Runs on other DOs, and in-memory paid-screen runs, have no
  *   durable record in this DO: the control refuses them by name
  *   (`job_not_found`), never by pretending they ran here.
@@ -78,6 +84,7 @@ import {
   type OptionsPipelineStage,
 } from "./stageRuntimeIds";
 import {
+  comparisonJobId,
   optionsEngineStoresFromSql,
   optionsScreenJobId,
   registerOptionsScreenStep,
@@ -116,13 +123,17 @@ export type OptionsStageControlRequestShape = "manual" | "panel" | "scan";
  * The shape a stored request decodes to — including the goal leg,
  * which a control action can name but cannot drive an execution op
  * for (its job record is not addressable from the chat host —
- * decided-not-to, #4274), and "unknown" for a stop/cancel on a run
- * whose definition carries no request (the operation needs no ports,
- * so the shape does not matter there).
+ * decided-not-to, #4274), the comparison leg, which a control
+ * action can name but cannot drive a stage op for (a comparison
+ * run is a single engine step, not a staged pipeline — #4276), and
+ * "unknown" for a stop/cancel on a run whose definition carries no
+ * request (the operation needs no ports, so the shape does not
+ * matter there).
  */
 export type OptionsStageControlDecodedShape =
   | OptionsStageControlRequestShape
   | "goal"
+  | "comparison"
   | "unknown";
 
 export interface OptionsStageControlInput {
@@ -139,7 +150,8 @@ export interface OptionsStageControlInput {
   env?: Env;
   /** The options run id (the job is `options-screen:<runId>` for an
    * options screen, `strategy-screen:<runId>` for a strategy screen
-   * since #4271 — the control resolves which one this run defined). */
+   * since #4271, `comparison:<runId>` for a comparison run since
+   * #4276 — the control resolves which one this run defined). */
   runId: string;
   /** One of the 8 addressable stages (#4067). */
   stage: string;
@@ -200,7 +212,7 @@ function asControlError(error: unknown): OptionsStageControlError {
 function readRequestShape(
   request: unknown,
   runId: string,
-): OptionsStageControlRequestShape | "goal" {
+): OptionsStageControlRequestShape | "goal" | "comparison" {
   const classInput = (
     request as { classInput?: Record<string, unknown> } | null
   )?.classInput;
@@ -214,9 +226,10 @@ function readRequestShape(
   if (classInput.scan !== undefined) return "scan";
   if (classInput.request !== undefined) return "manual";
   if (classInput.goalPlan !== undefined) return "goal";
+  if (classInput.comparisonRequest !== undefined) return "comparison";
   throw new OptionsStageControlError(
     "stage_request_unrecognized",
-    `options run ${runId}: the stored request's classInput carries none of strategyRequest / scan / request / goalPlan — the run's shape cannot be determined, so no stage can be rebuilt; re-dispatch the screen`,
+    `options run ${runId}: the stored request's classInput carries none of strategyRequest / scan / request / goalPlan / comparisonRequest — the run's shape cannot be determined, so no stage can be rebuilt; re-dispatch the screen`,
   );
 }
 
@@ -293,12 +306,15 @@ function rebuildStepDeps(
 /**
  * Issue #4271: resolve which job a screen run defined. An options
  * screen defines `options-screen:<runId>`; a strategy screen defines
- * `strategy-screen:<runId>` (since #4271). The control plane addresses
+ * `strategy-screen:<runId>` (since #4271); a comparison run defines
+ * `comparison:<runId>` (since #4276). The control plane addresses
  * a run by its runId, so it tries the options job first (the pre-#4271
- * shape) and then the strategy job. The stages, the vocabulary, and
- * the port rebuilding are identical for both — the strategy job's
- * children carry the same eight stage kinds — so only the job identity
- * is resolved here. A run defined on neither is the pre-existing
+ * shape), then the strategy job, then the comparison job. The stages,
+ * the vocabulary, and the port rebuilding are identical for the two
+ * screen jobs — the strategy job's children carry the same eight
+ * stage kinds — so only the job identity is resolved here; the
+ * comparison job carries no stages, and stage ops on it refuse by
+ * name further down. A run defined on none is the pre-existing
  * job_not_found refusal. (The strategy STAGE VOCABULARY is S2's work,
  * #4272; this is only the lookup that keeps strategy runs controllable
  * under their new job.)
@@ -307,7 +323,7 @@ async function resolveScreenJobId(
   reader: JobPipelineControl,
   runId: string,
 ): Promise<{ jobId: string; view: Awaited<ReturnType<JobPipelineControl["getJob"]>> }> {
-  for (const jobId of [optionsScreenJobId(runId), strategyScreenJobId(runId)]) {
+  for (const jobId of [optionsScreenJobId(runId), strategyScreenJobId(runId), comparisonJobId(runId)]) {
     try {
       const view = await reader.getJob(jobId);
       return { jobId, view };
@@ -320,7 +336,7 @@ async function resolveScreenJobId(
   }
   throw new OptionsStageControlError(
     "job_not_found",
-    `options run ${runId}: no engine record for job ${optionsScreenJobId(runId)} or ${strategyScreenJobId(runId)} in this host — the run was dispatched on another host, in-memory, or before the engine routing; re-dispatch the screen from this turn`,
+    `options run ${runId}: no engine record for job ${optionsScreenJobId(runId)}, ${strategyScreenJobId(runId)}, or ${comparisonJobId(runId)} in this host — the run was dispatched on another host, in-memory, or before the engine routing; re-dispatch the screen from this turn`,
   );
 }
 
@@ -384,6 +400,15 @@ export async function controlOptionsStage(
         `options run ${runId}: the goal leg's job record is not addressable from this turn (decided-not-to, #4274) — the goal leg runs over in-memory engine stores on the ScreenerAgent DO, so no durable job exists in this host; a goal-leg stage cannot be controlled from chat; re-dispatch from the goal leg`,
       );
     }
+    // The comparison leg's run is a single engine step, not a staged
+    // pipeline (#4276): there are no stage ports to rebuild, so an
+    // execution op on a comparison-shape run refuses by name.
+    if (shape === "comparison" && needsExecution) {
+      throw new OptionsStageControlError(
+        "stage_port_unavailable",
+        `options run ${runId}: a comparison run is a single engine step, not an eight-stage pipeline — stage ${stage} has no ports to rebuild, so it cannot be run, re-run, or resumed; re-dispatch the comparison`,
+      );
+    }
     // The manual route's shapeReport / deliver need the
     // ScreenerAgent-bound delivery builders: refuse by name before
     // any execution, rather than running a shape that is not the
@@ -406,8 +431,8 @@ export async function controlOptionsStage(
           steps: registerOptionsScreenStep(
             createBuiltinStepRegistry(),
             // Narrowed by the guards above: an execution op has its
-            // request, and the goal shape refused, so the shape is
-            // one of the three rebuildable shapes here.
+            // request, and the goal and comparison shapes refused,
+            // so the shape is one of the three rebuildable shapes here.
             rebuildStepDeps(
               input,
               request,

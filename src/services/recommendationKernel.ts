@@ -1690,6 +1690,17 @@ export function recordComparisonArmOutcome(
 }
 
 /**
+ * The comparison run id mint: `cmp-<millis>-<random>` — the single
+ * source of truth for the format. Issue #4276: the NLQ runner mints
+ * the id before dispatch so the engine job (`comparison:<runId>`)
+ * and the artifact carry one id; runComparison mints only when the
+ * caller did not supply one.
+ */
+export function mintComparisonRunId(): string {
+  return `cmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
  * runComparison: a run mode of the kernel. The three arms differ ONLY in
  * generator × scorer; every arm passes the SAME gate chain, pricing,
  * falsification, and assembly. `composed` is NOT an arm (it is a builder
@@ -1709,8 +1720,7 @@ export async function runComparison(input: ComparisonInput): Promise<ComparisonA
   if (missing.length > 0) {
     throw new Error(`runComparison requires all three arms (llm, quant, hybrid); missing: ${missing.join(", ")}.`);
   }
-  const runId =
-    input.runId ?? `cmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const runId = input.runId ?? mintComparisonRunId();
   const arms = {} as ComparisonArtifact["arms"];
   for (const arm of armNames) {
     const config = rawArms[arm] as ComparisonArmConfig;
