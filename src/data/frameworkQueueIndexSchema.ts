@@ -49,19 +49,25 @@
  * behind the burning per-user instances.
  */
 import type { SqlStorage } from "../orm";
+import { ormIndexSql } from "./schemaComponent/ormCatalogue";
 
+/**
+ * #4282 P2a: the index SQL lives in the schema catalogue
+ * (src/data/schemaComponent/ormCatalogue.ts); this array is the same
+ * statements by name, so callers reading it see identical SQL.
+ */
 export const FRAMEWORK_QUEUE_INDEXES: Array<{ name: string; sql: string }> = [
   {
     name: "idx_cf_agents_jobs_time",
-    sql: "CREATE INDEX IF NOT EXISTS idx_cf_agents_jobs_time ON cf_agents_jobs(time)",
+    sql: ormIndexSql("idx_cf_agents_jobs_time"),
   },
   {
     name: "idx_cf_agents_jobs_exclusive_time",
-    sql: "CREATE INDEX IF NOT EXISTS idx_cf_agents_jobs_exclusive_time ON cf_agents_jobs(exclusive, time)",
+    sql: ormIndexSql("idx_cf_agents_jobs_exclusive_time"),
   },
   {
     name: "idx_cf_agents_jobs_singleflight_running",
-    sql: "CREATE INDEX IF NOT EXISTS idx_cf_agents_jobs_singleflight_running ON cf_agents_jobs(singleflight, running, execution_started_at, hung_timeout_seconds)",
+    sql: ormIndexSql("idx_cf_agents_jobs_singleflight_running"),
   },
 ];
 
