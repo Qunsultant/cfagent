@@ -24,6 +24,7 @@ import type { CommercialAccountRecord, CommercialStore } from "../src/data/comme
 import type { FreeRunCounter } from "../src/data/freeRunCounterPorts";
 import type { ApprovedFreeQuota } from "../src/data/approvedFreeQuotaPorts";
 import type { ReferralCreditPort } from "../src/data/lifecyclePorts";
+import type { FreeAccessGrantPort, FreeAccessGrantRecord } from "../src/data/freeAccessGrantPorts";
 import type { OfferSuppressionPort } from "../src/data/offerSuppressionPorts";
 import type { PriceCatalogue, PriceEntry } from "../src/data/priceCataloguePorts";
 import type { ProductRecord, ProductStore } from "../src/data/productPorts";
@@ -118,6 +119,20 @@ function makeCatalogueEntry(overrides: Partial<PriceEntry> = {}): PriceEntry {
   };
 }
 
+function makeFreeAccessGrant(overrides: Partial<FreeAccessGrantRecord> = {}): FreeAccessGrantRecord {
+  return {
+    id: "fa1",
+    login: "u1",
+    kind: "lifetime",
+    grantedBy: "op1",
+    grantedAtMs: NOW - 1000,
+    expiresAtMs: null,
+    revokedAtMs: null,
+    reason: "Owner-approved",
+    ...overrides,
+  };
+}
+
 interface FakeState {
   account: CommercialAccountRecord | null;
   subscriptions: Array<Record<string, unknown>>;
@@ -139,6 +154,8 @@ interface FakeState {
     attribution: { referrerUserId: string } | null;
   } | null;
   referralThrows: boolean;
+  freeAccess: FreeAccessGrantRecord | null;
+  freeAccessThrows: boolean;
 }
 
 function baseState(overrides: Partial<FakeState> = {}): FakeState {
@@ -158,6 +175,8 @@ function baseState(overrides: Partial<FakeState> = {}): FakeState {
     quotaUsed: 0,
     referral: null,
     referralThrows: false,
+    freeAccess: null,
+    freeAccessThrows: false,
     ...overrides,
   };
 }
@@ -184,6 +203,15 @@ function fakePorts(state: FakeState, overrides: Partial<ResolveOfferPorts> = {})
             return state.referral!.attribution;
           },
         } as unknown as ReferralCreditPort);
+  const freeAccess: FreeAccessGrantPort | null =
+    state.freeAccess === null && !state.freeAccessThrows
+      ? null
+      : ({
+          getActiveGrant: async () => {
+            if (state.freeAccessThrows) throw new Error("free-access store down");
+            return state.freeAccess;
+          },
+        } as unknown as FreeAccessGrantPort);
   return {
     store: { getAccount: async () => state.account } as unknown as CommercialStore,
     subs: {
@@ -207,6 +235,7 @@ function fakePorts(state: FakeState, overrides: Partial<ResolveOfferPorts> = {})
       getUsed: async () => state.quotaUsed,
     } as unknown as ApprovedFreeQuota,
     referral,
+    freeAccess,
     ...overrides,
   };
 }
@@ -615,7 +644,7 @@ describe("resolveOffer annual option (#3246 §2.4)", () => {
 });
 
 describe("resolveOffer mentions (#3246 §3.8)", () => {
-  it("renders the referral mention from rules + balance + earnings + attribution", async () => {
+  it("renders the referral mention from rules + balance + earnings + attribution, beside the free-access mention", async () => {
     const state = baseState({
       referral: {
         rules: { earnAmountUSD: 5, vestingDelayMs: 7 * DAY_MS },
@@ -623,6 +652,7 @@ describe("resolveOffer mentions (#3246 §3.8)", () => {
         earnings: [{ amountUSD: 10 }, { amountUSD: 5 }],
         attribution: { referrerUserId: "ref1" },
       },
+      freeAccess: makeFreeAccessGrant(),
     });
     const payload = await offer(state);
     expect(payload.mentions.referral).toEqual({
@@ -632,6 +662,30 @@ describe("resolveOffer mentions (#3246 §3.8)", () => {
       vestingDelayMs: 7 * DAY_MS,
       attributedReferrer: "ref1",
     });
+    expect(payload.mentions.freeAccess).toEqual({ kind: "lifetime", expiresAtMs: null });
+  });
+
+  it("renders the limited free-access mention with its expiry", async () => {
+    const state = baseState({
+      freeAccess: makeFreeAccessGrant({ kind: "limited", expiresAtMs: NOW + 30 * DAY_MS }),
+    });
+    const payload = await offer(state);
+    expect(payload.mentions.freeAccess).toEqual({ kind: "limited", expiresAtMs: NOW + 30 * DAY_MS });
+  });
+
+  it("the free-access toggle off or an unbound port hides the mention", async () => {
+    const toggledOff = baseState({
+      policy: seedPolicy(seedRules({ mentionsEnabled: { referral: true, freeAccess: false } })),
+      freeAccess: makeFreeAccessGrant(),
+    });
+    expect((await offer(toggledOff)).mentions.freeAccess).toBeNull();
+    expect((await offer(baseState())).mentions.freeAccess).toBeNull();
+  });
+
+  it("a free-access store failure degrades the mention, never the offer", async () => {
+    const state = baseState({ freeAccess: makeFreeAccessGrant(), freeAccessThrows: true });
+    const payload = await offer(state);
+    expect(payload.eligible).toBe(true);
     expect(payload.mentions.freeAccess).toBeNull();
   });
 

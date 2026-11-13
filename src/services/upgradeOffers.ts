@@ -111,6 +111,7 @@ import type {
   RunsPackBalancePort,
   RunsPackVersionStore,
 } from "../data/runsPackPorts";
+import type { FreeAccessGrantPort } from "../data/freeAccessGrantPorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** The offer payload (§2.4): one shape, returned by both offer routes. */
@@ -164,7 +165,7 @@ export interface OfferPayload {
   runsPacks: RunsPackOffer[];
   mentions: {
     referral: ReferralMention | null;
-    /** Null until #3247 lands (no port exists) or no grant. */
+    /** Null when no active grant, the port is unbound, or the toggle is off. */
     freeAccess: FreeAccessMention | null;
   };
   /** The pay-per-run alternative, when an approved price exists. */
@@ -261,6 +262,11 @@ export interface ResolveOfferPorts {
   quota: ApprovedFreeQuota | null;
   /** Optional: unbound reads as no referral state (no mention renders). */
   referral: ReferralCreditPort | null;
+  /**
+   * Slice 2 (#3247), optional: unbound reads as no grant (no mention
+   * renders). The port is bound by the route whenever AGENT_DB is bound.
+   */
+  freeAccess?: FreeAccessGrantPort | null;
   /**
    * Slice 3, optional: unbound reads as no pack state — an empty
    * runsPacks list and a zero pack balance, exactly as the offer
@@ -645,6 +651,21 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
     }
   }
 
+  // Free-access mention (#3247 §4.3): the active grant, projected to
+  // { kind, expiresAtMs }. Same degradation as the referral mention:
+  // a store failure degrades to null and never hides the offer.
+  let freeAccessMention: FreeAccessMention | null = null;
+  if (!reasonCode && rules.mentionsEnabled.freeAccess && ports.freeAccess) {
+    try {
+      const grant = await ports.freeAccess.getActiveGrant(login, nowMs);
+      if (grant) {
+        freeAccessMention = { kind: grant.kind, expiresAtMs: grant.expiresAtMs };
+      }
+    } catch {
+      freeAccessMention = null;
+    }
+  }
+
   // Slice 3 (§3.4): the held product's CURRENT effective price —
   // the price a new customer pays today for the held product's
   // segment — resolved over APPROVED versions only (a PROPOSED
@@ -711,7 +732,7 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
     downgradeTargets,
     unavailableTargets,
     runsPacks,
-    mentions: { referral: referralMention, freeAccess: null },
+    mentions: { referral: referralMention, freeAccess: freeAccessMention },
     perRun:
       family && approvedPrice !== null && catalogueEntry
         ? {
