@@ -1,0 +1,4 @@
+### Added
+
+- **A stage publishes its start the moment it happens (#4360):** the engine's stage contract gains a `started` action — published after the checkpoint holds the stamp, so the event can never run ahead of the record — and every terminal action (`completed`, `failed`, `timed_out`, `cancelled`, `retired`) now carries `endedAt` beside `startedAt`. In-flight visibility stops being a guess: a stage with a start and no end is visibly running (or stuck). #autoclaw-001
+- **Stage events are durably stored, once (#4360):** the `job-pipeline-events` consumer persists every `job.stage.*` publication into `job_stage_events` (the ScheduledAgent's DO SQLite), deduplicated on the #2869 claim key plus action, unit and instant — a re-delivery is ignored, a start and its terminal event both survive, and a store failure is a `retry` rather than an ack-and-drop. The ScheduledAgent exposes `recordStageEvent` / `listStageEvents` for the consumer and for the reads that follow.

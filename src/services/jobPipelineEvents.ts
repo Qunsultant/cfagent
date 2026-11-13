@@ -117,6 +117,8 @@ export type JobStageAction =
   | "rerun"
   | "stop"
   | "resume"
+  /** Issue #4360 — published the moment a unit starts (the in-flight visible event). */
+  | "started"
   | "cancel"
   | "retire"
   | "schedule"
@@ -137,6 +139,15 @@ export interface JobStageActionInput {
   unitId?: string;
   action: JobStageAction;
   at: string;
+  /**
+   * Issue #4360 — when the unit started, as the engine recorded it on the
+   * checkpoint (the same field #4359 defines; no second timestamp). A
+   * start event always carries it; a terminal event carries it when the
+   * unit had started.
+   */
+  startedAt?: string;
+  /** Issue #4360 — when the unit reached a terminal state (terminal actions only). */
+  endedAt?: string;
   detail?: string;
 }
 
@@ -161,6 +172,8 @@ export function jobStageActionEvent(input: JobStageActionInput): MessageEnvelope
       ...(input.unitId !== undefined ? { unitId: input.unitId } : {}),
       action: input.action,
       idempotencyKey: stageIdempotencyKey(input.runId, input.stageId, "jobs"),
+      ...(input.startedAt !== undefined ? { startedAt: input.startedAt } : {}),
+      ...(input.endedAt !== undefined ? { endedAt: input.endedAt } : {}),
       ...(input.detail !== undefined ? { detail: input.detail } : {}),
     },
   });

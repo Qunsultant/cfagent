@@ -2258,6 +2258,20 @@ export class JobPipelineControl {
   }
 
   /** Persist the ledger through the StageCheckpointStore (a snapshot — later mutations never alias it). */
+  /**
+   * Issue #4360 — the latest recorded end across a stage's units, or now
+   * when none is recorded. The stage-level control events (cancelled /
+   * retired) carry it as `endedAt`, so they stay in the same vocabulary
+   * as the unit transitions.
+   */
+  private stageEndedAt(ctx: RunContext, stageId: string): string {
+    const ends = ctx.ledger.units
+      .filter((unit) => unit.stage === stageId && typeof unit.endedAt === "string")
+      .map((unit) => unit.endedAt as string)
+      .sort();
+    return ends[ends.length - 1] ?? this.iso();
+  }
+
   private async persistLedger(ctx: RunContext): Promise<void> {
     await ctx.checkpoints.write({
       runId: ctx.runId,
@@ -2329,12 +2343,14 @@ export class JobPipelineControl {
       });
     }
     await this.persistLedger(ctx);
+    const retiredAt = this.stageEndedAt(ctx, stageId);
     await publishStageAction(this.deps.publisher, {
       jobId: ctx.jobId,
       runId: ctx.runId,
       stageId,
       action: "retired",
-      at: this.iso(),
+      at: retiredAt,
+      endedAt: retiredAt,
       detail: "stage retired before it ran",
     });
     throw new StageRetired(stageId);
@@ -2372,12 +2388,14 @@ export class JobPipelineControl {
         });
       }
       await this.persistLedger(ctx);
+      const cancelledAt = this.stageEndedAt(ctx, stageId);
       await publishStageAction(this.deps.publisher, {
         jobId: ctx.jobId,
         runId: ctx.runId,
         stageId,
         action: "cancelled",
-        at: this.iso(),
+        at: cancelledAt,
+        endedAt: cancelledAt,
         detail: "stage cancelled before it ran",
       });
       throw new StageCancelled(stageId);
@@ -2473,12 +2491,14 @@ export class JobPipelineControl {
       if (instance.desiredState !== "cancel") {
         await this.clearStageDesired(ctx.jobId, cancelStageId);
       }
+      const cancelledAt = this.stageEndedAt(ctx, cancelStageId);
       await publishStageAction(this.deps.publisher, {
         jobId: ctx.jobId,
         runId: ctx.runId,
         stageId: cancelStageId,
         action: "cancelled",
-        at: this.iso(),
+        at: cancelledAt,
+        endedAt: cancelledAt,
       });
       throw new StageCancelled(cancelStageId);
     }
@@ -2877,6 +2897,20 @@ export class JobPipelineControl {
             : {}),
         });
         await this.persistLedger(ctx);
+        // Issue #4360 — the start is published the moment it happens,
+        // after the checkpoint holds the stamp (persist → checkpoint →
+        // publish, the stage contract's order). The event carries the
+        // recorded instant, never a second clock reading.
+        const running = this.entryFor(ctx.ledger, stageId, unit.unitId);
+        await publishStageAction(this.deps.publisher, {
+          jobId: ctx.jobId,
+          runId: ctx.runId,
+          stageId,
+          unitId: unit.unitId,
+          action: "started",
+          at: running?.startedAt ?? this.iso(),
+          ...(running?.startedAt ? { startedAt: running.startedAt } : {}),
+        });
         try {
           const out = await this.withUnitDeadline(stage, () =>
             this.execSteps(ctx, node, path, input, {
@@ -2908,13 +2942,16 @@ export class JobPipelineControl {
             updatedAt: this.iso(),
           });
           await this.persistLedger(ctx);
+          const settled = this.entryFor(ctx.ledger, stageId, unit.unitId);
           await publishStageAction(this.deps.publisher, {
             jobId: ctx.jobId,
             runId: ctx.runId,
             stageId,
             unitId: unit.unitId,
             action: "completed",
-            at: this.iso(),
+            at: settled?.endedAt ?? this.iso(),
+            ...(settled?.startedAt ? { startedAt: settled.startedAt } : {}),
+            ...(settled?.endedAt ? { endedAt: settled.endedAt } : {}),
           });
           return out;
         } catch (error) {
@@ -2935,13 +2972,16 @@ export class JobPipelineControl {
               updatedAt: this.iso(),
             });
             await this.persistLedger(ctx);
+            const timedOutSettled = this.entryFor(ctx.ledger, stageId, unit.unitId);
             await publishStageAction(this.deps.publisher, {
               jobId: ctx.jobId,
               runId: ctx.runId,
               stageId,
               unitId: unit.unitId,
               action: "timed_out",
-              at: this.iso(),
+              at: timedOutSettled?.endedAt ?? this.iso(),
+              ...(timedOutSettled?.startedAt ? { startedAt: timedOutSettled.startedAt } : {}),
+              ...(timedOutSettled?.endedAt ? { endedAt: timedOutSettled.endedAt } : {}),
               detail: message,
             });
             throw error;
@@ -2979,13 +3019,16 @@ export class JobPipelineControl {
             updatedAt: this.iso(),
           });
           await this.persistLedger(ctx);
+          const failedSettled = this.entryFor(ctx.ledger, stageId, unit.unitId);
           await publishStageAction(this.deps.publisher, {
             jobId: ctx.jobId,
             runId: ctx.runId,
             stageId,
             unitId: unit.unitId,
             action: "failed",
-            at: this.iso(),
+            at: failedSettled?.endedAt ?? this.iso(),
+            ...(failedSettled?.startedAt ? { startedAt: failedSettled.startedAt } : {}),
+            ...(failedSettled?.endedAt ? { endedAt: failedSettled.endedAt } : {}),
             detail: message,
           });
           throw error;

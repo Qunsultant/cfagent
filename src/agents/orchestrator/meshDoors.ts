@@ -120,6 +120,7 @@ import type {
   JobScheduleConfig,
 } from "../../data/jobPipelinePorts";
 import type { JobStagesRead, JobStatusView } from "../../services/jobPipelineEngine";
+import type { JobStageEventRecord } from "../../data/jobStageEventPorts";
 import {
   resolveFeedJob,
   type FeedJobSurfaceView,
@@ -310,6 +311,13 @@ export interface ScheduledAgentDoorStub {
    * and the run they describe.
    */
   getPipelineRunStages(jobIds: string[]): Promise<Record<string, JobStagesRead>>;
+  /**
+   * Issue #4360 — persist one `job.stage.*` publication in the host's
+   * stage store (the queue consumer's write door), and read a run's
+   * recorded stage events back.
+   */
+  recordStageEvent(event: JobStageEventRecord): Promise<boolean>;
+  listStageEvents(runId: string): Promise<JobStageEventRecord[]>;
   stopPipelineChainStage(jobId: string, stage: string): Promise<JobInstanceRecord>;
   resumePipelineChainStage(
     jobId: string,

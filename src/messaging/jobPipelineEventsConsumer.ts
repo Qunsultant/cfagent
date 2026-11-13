@@ -39,6 +39,8 @@ import {
   type DeadLetterSink,
 } from "./deadLetter";
 import { createStructuredLogger } from "../observability/structuredLogger";
+import type { JobStageEventRecord } from "../data/jobStageEventPorts";
+import { stageEventFromEnvelope } from "../services/jobStageEvents";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
 /** Module logger on the S2 structured-logging seam (#3515 S3 ratchet). */
@@ -118,6 +120,14 @@ export interface JobPipelineEventsHandlerDeps {
    * A throw becomes "retry" — the platform redelivers, then DLQs.
    */
   routeCompletion: (completion: JobPipelineCompletion) => Promise<void>;
+  /**
+   * Issue #4360 — persist one `job.stage.*` publication in the durable
+   * stage store, deduplicated on its claim key. Absent = today's
+   * pass-through behaviour; a throw becomes "retry", never a silent
+   * ack-and-drop. The queue branch that delivers these envelopes is
+   * #3958; this is the persistence behind it.
+   */
+  recordStageEvent?: (event: JobStageEventRecord) => Promise<boolean>;
   /** Dead-letter sink for terminal drops; defaults to the console sink. */
   onDeadLetter?: DeadLetterSink;
   /** Optional persistence for terminal drops (the #2000 closure). */
@@ -133,6 +143,37 @@ export function createJobPipelineEventsHandler(
 ): MessageHandler {
   const sink = deps.onDeadLetter ?? consoleDeadLetterSink;
   return async (envelope): Promise<ConsumeOutcome> => {
+    // Issue #4360 — a stage publication is persisted before it is acked.
+    // Dedup lives in the store (the #2869 claim key + action + instant), so
+    // a re-delivery is "processed" without a second row.
+    if (envelope.type.startsWith("job.stage.") && deps.recordStageEvent) {
+      const stageEvent = stageEventFromEnvelope(envelope);
+      if (!stageEvent) {
+        const record = createDeadLetterRecord({
+          queue: "job-pipeline-events",
+          reason: "invalid_envelope",
+          messageId: envelope.id,
+          runId: envelope.jobid ?? envelope.subject ?? envelope.id,
+          detail: `Stage envelope "${envelope.type}" carries no run/stage identity — nothing to persist, and redelivery would loop.`,
+        });
+        sink.record(record);
+        await deps.persistDeadLetter?.(record, envelope);
+        return "drop";
+      }
+      try {
+        await deps.recordStageEvent(stageEvent);
+        return "processed";
+      } catch (error) {
+        structuredLog.warn("job_pipeline.stage_event_record_failed", {
+          message: `[job-pipeline] persisting stage event for job "${stageEvent.jobId}" run "${stageEvent.runId}" stage "${stageEvent.stageId}" failed; the message will retry: ${error instanceof Error ? error.message : String(error)}`,
+          jobId: stageEvent.jobId,
+          runId: stageEvent.runId,
+          stageId: stageEvent.stageId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return "retry";
+      }
+    }
     const completion = extractJobPipelineCompletion(envelope);
     if (!completion) {
       // A job.* status publication that is not a completion is
