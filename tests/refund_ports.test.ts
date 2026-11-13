@@ -60,6 +60,7 @@ import { agentRefundPolicy, agentRefunds } from "../src/data/drizzleSchema";
 import {
   CRYPTO_NON_REFUNDABLE_MESSAGE,
   PROPOSED_SEED_POLICY,
+  type RefundPaymentSourceResolver,
   type RefundPolicyStore,
   type RefundStore,
 } from "../src/data/refundPorts";
@@ -84,6 +85,7 @@ import {
   createSubscriptionPaymentResolver,
   decideRefund,
   executeRefund,
+  RefundTenantUnresolvableError,
   requestRefund,
 } from "../src/services/refundService";
 import {
@@ -335,6 +337,24 @@ describe("refund service lifecycle (#2204)", () => {
     return { policy, store, subs, commercial, plan, sub, gateway, journal, base, now };
   }
 
+  // Issue #3180: a stub resolved payment source for pay-per-run
+  // service tests — the tenant comes from the source, never from
+  // request input. Amounts/dates stay null so the request input
+  // values are exercised exactly as before.
+  function stubPayPerRunSource(tenantId: string | null): RefundPaymentSourceResolver {
+    return {
+      resolve: async () => ({
+        paymentIntentId: null,
+        rail: "card",
+        originalAmountUSD: null,
+        originalPaidAtMs: null,
+        userId: "u1",
+        tenantId,
+        subscriptionId: null,
+      }),
+    };
+  }
+
   it("requests a subscription refund from the subscription row", async () => {
     const { base } = await serviceSetup();
     const record = await requestRefund(base, {
@@ -374,13 +394,12 @@ describe("refund service lifecycle (#2204)", () => {
   it("refuses crypto, partial-when-disallowed, over-amount, and stale-window requests", async () => {
     const { base } = await serviceSetup();
     await expect(
-      requestRefund(base, {
+      requestRefund({ ...base, sourceResolver: stubPayPerRunSource("t1") }, {
         kind: "pay_per_run",
         originalPaymentRef: "run-1",
         amountUSD: 0.1,
         originalAmountUSD: 0.1,
         originalPaidAtMs: Date.now() - 1000,
-        tenantId: "t1",
         rail: "crypto",
         reason: "crypto back",
         requesterLogin: "u1",
@@ -388,13 +407,12 @@ describe("refund service lifecycle (#2204)", () => {
       }),
     ).rejects.toThrow(CRYPTO_NON_REFUNDABLE_MESSAGE);
     await expect(
-      requestRefund(base, {
+      requestRefund({ ...base, sourceResolver: stubPayPerRunSource("t1") }, {
         kind: "pay_per_run",
         originalPaymentRef: "run-1",
         amountUSD: 0.05,
         originalAmountUSD: 0.1,
         originalPaidAtMs: Date.now() - 1000,
-        tenantId: "t1",
         rail: "card",
         reason: "partial",
         requesterLogin: "u1",
@@ -402,13 +420,12 @@ describe("refund service lifecycle (#2204)", () => {
       }),
     ).rejects.toThrow(/Partial refunds are not allowed/);
     await expect(
-      requestRefund(base, {
+      requestRefund({ ...base, sourceResolver: stubPayPerRunSource("t1") }, {
         kind: "pay_per_run",
         originalPaymentRef: "run-1",
         amountUSD: 0.2,
         originalAmountUSD: 0.1,
         originalPaidAtMs: Date.now() - 1000,
-        tenantId: "t1",
         rail: "card",
         reason: "too much",
         requesterLogin: "u1",
@@ -416,19 +433,80 @@ describe("refund service lifecycle (#2204)", () => {
       }),
     ).rejects.toThrow(/exceeds the original amount/);
     await expect(
-      requestRefund(base, {
+      requestRefund({ ...base, sourceResolver: stubPayPerRunSource("t1") }, {
         kind: "pay_per_run",
         originalPaymentRef: "run-1",
         amountUSD: 0.1,
         originalAmountUSD: 0.1,
         originalPaidAtMs: Date.now() - 31 * 86_400_000,
-        tenantId: "t1",
         rail: "card",
         reason: "too late",
         requesterLogin: "u1",
         isOperator: false,
       }),
     ).rejects.toThrow(/window expired/);
+  });
+
+  it("refuses a pay-per-run request whose resolved source carries no tenant, and records nothing (#3180)", async () => {
+    const { base, store } = await serviceSetup();
+    await expect(
+      requestRefund({ ...base, sourceResolver: stubPayPerRunSource(null) }, {
+        kind: "pay_per_run",
+        originalPaymentRef: "run-1",
+        amountUSD: 0.1,
+        originalAmountUSD: 0.1,
+        originalPaidAtMs: Date.now() - 1000,
+        rail: "card",
+        reason: "run failed",
+        requesterLogin: "u1",
+        isOperator: false,
+      }),
+    ).rejects.toThrow(RefundTenantUnresolvableError);
+    expect(await store.listRefunds("u1")).toEqual([]);
+  });
+
+  it("refuses a pay-per-run request with no source resolver at all, and records nothing (#3180)", async () => {
+    const { base, store } = await serviceSetup();
+    await expect(
+      requestRefund({ policyStore: base.policyStore, refundStore: base.refundStore }, {
+        kind: "pay_per_run",
+        originalPaymentRef: "run-1",
+        amountUSD: 0.1,
+        originalAmountUSD: 0.1,
+        originalPaidAtMs: Date.now() - 1000,
+        rail: "card",
+        reason: "run failed",
+        requesterLogin: "u1",
+        isOperator: false,
+      }),
+    ).rejects.toThrow(RefundTenantUnresolvableError);
+    expect(await store.listRefunds("u1")).toEqual([]);
+  });
+
+  it("refuses a subscription request whose source row carries no tenant, and records nothing (#3180)", async () => {
+    const { base, store } = await serviceSetup();
+    const tenantlessSubscriptionSource: RefundPaymentSourceResolver = {
+      resolve: async () => ({
+        paymentIntentId: "pi_test_1",
+        rail: "card",
+        originalAmountUSD: 20,
+        originalPaidAtMs: Date.now() - 1000,
+        userId: "u1",
+        tenantId: null,
+        subscriptionId: "sub-row-1",
+      }),
+    };
+    await expect(
+      requestRefund({ ...base, sourceResolver: tenantlessSubscriptionSource }, {
+        kind: "subscription",
+        originalPaymentRef: "sub-row-1",
+        amountUSD: 20,
+        reason: "changed mind",
+        requesterLogin: "u1",
+        isOperator: false,
+      }),
+    ).rejects.toThrow(RefundTenantUnresolvableError);
+    expect(await store.listRefunds("u1")).toEqual([]);
   });
 
   it("refuses a legacy subscription row with no stored payment-intent id", async () => {
@@ -540,13 +618,12 @@ describe("refund service lifecycle (#2204)", () => {
 
   it("an approved pay-per-run refund with no resolvable payment-intent id fails closed, gateway untouched", async () => {
     const { base, gateway } = await serviceSetup();
-    const record = await requestRefund(base, {
+    const record = await requestRefund({ ...base, sourceResolver: stubPayPerRunSource("t1") }, {
       kind: "pay_per_run",
       originalPaymentRef: "run-9",
       amountUSD: 0.1,
       originalAmountUSD: 0.1,
       originalPaidAtMs: Date.now() - 1000,
-      tenantId: "t1",
       rail: "card",
       reason: "run failed",
       requesterLogin: "u1",
@@ -755,8 +832,26 @@ describe("refund routes (#2204)", () => {
     expect(listed.refunds.map((r: any) => r.id)).toEqual([refund.id]);
   });
 
+  it("a client-supplied tenantId in the refund body is never trusted: a sourceless pay-per-run request is refused and nothing is recorded (#3180)", async () => {
+    const { ctx } = await setup({ monetization: true });
+    const res = await call(ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
+      kind: "pay_per_run",
+      originalPaymentRef: "run-1",
+      amountUSD: 0.1,
+      originalAmountUSD: 0.1,
+      originalPaidAtMs: Date.now() - 1000,
+      tenantId: "t-evil",
+      rail: "card",
+      reason: "run failed",
+    });
+    expect(res?.status).toBe(400);
+    expect((await bodyOf(res)).error).toMatch(/tenantId is required/);
+    const listed = await bodyOf(await call(ctx, "GET", "/payments/agentic/commercial/refunds", "u1"));
+    expect(listed.refunds).toEqual([]);
+  });
+
   it("flag OFF refuses execution; crypto request fails closed; policy routes are operator-gated", async () => {
-    const { ctx, env } = await setup({ monetization: true });
+    const { ctx, env, subs } = await setup({ monetization: true });
     stubRefundGateway();
     const requested = await call(ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
       kind: "subscription",
@@ -780,14 +875,26 @@ describe("refund routes (#2204)", () => {
         refundId: refund.id,
       }))?.status,
     ).toBe(403);
-    const crypto = await call(ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
-      kind: "pay_per_run",
-      originalPaymentRef: "run-1",
-      amountUSD: 0.1,
-      originalAmountUSD: 0.1,
-      originalPaidAtMs: Date.now() - 1000,
+    // Issue #3180: the crypto refusal is exercised through a
+    // subscription request now — a route pay-per-run request has
+    // no resolved source and refuses at tenant derivation before
+    // rail validation, so it can no longer reach the crypto check.
+    await subs.createSubscription({
+      id: "sub-x402",
+      userId: "u1",
       tenantId: "t1",
-      rail: "crypto",
+      planId: "plan-pro",
+      provider: "x402",
+      providerPaymentRef: "sub-x402-draft",
+      stripeSessionId: "cs_test_x",
+      stripePaymentIntentId: "pi_test_x",
+      periodStartMs: Date.now(),
+      periodEndMs: Date.now() + 30 * 86_400_000,
+    });
+    const crypto = await call(ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
+      kind: "subscription",
+      originalPaymentRef: "sub-x402",
+      amountUSD: 20,
       reason: "crypto back",
     });
     expect(crypto?.status).toBe(400);

@@ -287,7 +287,6 @@ describe("refund-policy approve route (2.7)", () => {
       amountUSD: 0.1,
       originalAmountUSD: 0.1,
       originalPaidAtMs: Date.now() - 1000,
-      tenantId: "t1",
       rail: "card",
       reason: "run failed",
     });
@@ -297,30 +296,39 @@ describe("refund-policy approve route (2.7)", () => {
 
   it("unapproved request refuses 422 with no record; approved request succeeds", async () => {
     const s = await setup({ monetization: true });
-    const refused = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
-      kind: "pay_per_run",
-      originalPaymentRef: "run-1",
-      amountUSD: 0.1,
-      originalAmountUSD: 0.1,
-      originalPaidAtMs: Date.now() - 1000,
+    // Issue #3180: the succeeding request is a subscription
+    // refund — its tenant comes from the resolved subscription
+    // row. A route pay-per-run request has no resolved source and
+    // is refused at tenant derivation (see refund_ports.test.ts).
+    const plan = await s.subs.createPlan({ id: "plan-pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 10 });
+    await s.subs.createSubscription({
+      id: "sub-row-1",
+      userId: "u1",
       tenantId: "t1",
-      rail: "card",
-      reason: "run failed",
+      planId: plan.id,
+      provider: "stripe",
+      providerPaymentRef: "sub-draft-1",
+      stripeSessionId: "cs_test_1",
+      stripePaymentIntentId: "pi_test_1",
+      periodStartMs: Date.now(),
+      periodEndMs: Date.now() + 30 * 86_400_000,
+    });
+    const refused = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
+      kind: "subscription",
+      originalPaymentRef: "sub-row-1",
+      amountUSD: 20,
+      reason: "changed mind",
     });
     expect(refused?.status).toBe(422);
     await call(s.ctx, "POST", "/payments/agentic/commercial/refund-policy/approve", "op1", {
-      kind: "pay_per_run",
+      kind: "subscription",
       approved: true,
     });
     const ok = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
-      kind: "pay_per_run",
-      originalPaymentRef: "run-1",
-      amountUSD: 0.1,
-      originalAmountUSD: 0.1,
-      originalPaidAtMs: Date.now() - 1000,
-      tenantId: "t1",
-      rail: "card",
-      reason: "run failed",
+      kind: "subscription",
+      originalPaymentRef: "sub-row-1",
+      amountUSD: 20,
+      reason: "changed mind",
     });
     expect(ok?.status).toBe(200);
     expect((await bodyOf(ok)).refund.status).toBe("requested");

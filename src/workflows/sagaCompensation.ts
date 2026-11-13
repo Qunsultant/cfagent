@@ -170,7 +170,29 @@ export async function compensateFailedScreen(
   }
   try {
     const record = await requestRefund(
-      { policyStore: ports.policy, refundStore: ports.store, nowMs: deps.nowMs() },
+      {
+        policyStore: ports.policy,
+        refundStore: ports.store,
+        // Issue #3180: the refund tenant comes from the resolved
+        // payment source only, so the saga presents its verified
+        // payment context as the source — the run's payment was
+        // verified by the saga flow (price, rail, and a tenant
+        // cross-checked against the verified account tenant at
+        // saga entry, with no default identity). No request input
+        // reaches the tenant derivation.
+        sourceResolver: {
+          resolve: async () => ({
+            paymentIntentId: null,
+            rail: "card" as const,
+            originalAmountUSD: priceUSD,
+            originalPaidAtMs: input.paidAtMs,
+            userId: input.userLogin,
+            tenantId: input.tenantId,
+            subscriptionId: null,
+          }),
+        },
+        nowMs: deps.nowMs(),
+      },
       {
         kind: "pay_per_run",
         originalPaymentRef: input.runRequestId,
@@ -178,7 +200,6 @@ export async function compensateFailedScreen(
         reason: input.reason,
         requesterLogin: input.userLogin,
         isOperator: false,
-        tenantId: input.tenantId,
         originalAmountUSD: priceUSD,
         originalPaidAtMs: input.paidAtMs,
         rail: "card",

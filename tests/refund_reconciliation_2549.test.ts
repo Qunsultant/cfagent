@@ -34,7 +34,7 @@ import {
   type CommercialAccount,
 } from "../src/services/cfpayMonetization";
 import { NATIVE_PAYMENT_DISCLOSURE } from "../src/services/nativeMonetization";
-import { REFUND_POLICY_COPY } from "../src/data/refundPorts";
+import { REFUND_POLICY_COPY, type RefundPaymentSourceResolver } from "../src/data/refundPorts";
 import {
   createSubscriptionPaymentResolver,
   decideRefund,
@@ -204,15 +204,27 @@ describe("credit XOR refund at the execute gate (#2549)", () => {
     // gate, while the approval gate is covered by the 2.7 tests.
     await policy.setKindApproval("pay_per_run", true, "op1");
     const store = new InMemoryRefundAdapter();
+    // Issue #3180: the tenant comes from the resolved source, never
+    // from request input — the stub source carries it here.
+    const stubSource: RefundPaymentSourceResolver = {
+      resolve: async () => ({
+        paymentIntentId: null,
+        rail: "card",
+        originalAmountUSD: null,
+        originalPaidAtMs: null,
+        userId: "u1",
+        tenantId: "t1",
+        subscriptionId: null,
+      }),
+    };
     const record = await requestRefund(
-      { policyStore: policy, refundStore: store },
+      { policyStore: policy, refundStore: store, sourceResolver: stubSource },
       {
         kind: "pay_per_run",
         originalPaymentRef: "run-xor-1",
         amountUSD: 0.1,
         originalAmountUSD: 0.1,
         originalPaidAtMs: Date.now() - 1000,
-        tenantId: "t1",
         rail: "card",
         family: "goal",
         reason: "run failed",

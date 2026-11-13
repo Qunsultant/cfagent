@@ -6823,7 +6823,11 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // the Stripe payment-intent id from the subscription row (#2200)
   // or fails closed when it cannot resolve one. Policy reads and
   // the operator policy update are NOT flag-gated: operators
-  // configure policy before activation.
+  // configure policy before activation. Tenant is source-only
+  // (#3180): the request body carries no tenant field, and the
+  // service derives the record's tenant from the resolved payment
+  // source, refusing with a typed error when the source carries
+  // none — a client-supplied tenantId is never read.
   if (path.endsWith("/payments/agentic/commercial/refunds") && request.method === "POST") {
     try {
       const login = commercialLogin();
@@ -6832,7 +6836,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as {
         kind?: unknown; originalPaymentRef?: unknown; amountUSD?: unknown; reason?: unknown;
-        tenantId?: unknown; originalAmountUSD?: unknown; originalPaidAtMs?: unknown;
+        originalAmountUSD?: unknown; originalPaidAtMs?: unknown;
         rail?: unknown; family?: unknown;
       };
       const ports = requireRefunds();
@@ -6861,7 +6865,6 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           reason: body.reason,
           requesterLogin: login,
           isOperator: isStoreOperator(login),
-          tenantId: body.tenantId,
           originalAmountUSD: body.originalAmountUSD,
           originalPaidAtMs: body.originalPaidAtMs,
           rail: body.rail,

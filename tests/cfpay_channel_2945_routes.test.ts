@@ -417,7 +417,7 @@ describe("channel reads + reconcile (#2945)", () => {
 });
 
 describe("channel refund rail (#2945 on 2.7 machinery)", () => {
-  it("accepts a pay_per_run refund request with rail cfpay-channel once the kind is approved", async () => {
+  it("refuses a pay-per-run cfpay-channel refund request without a resolved source (#3180)", async () => {
     stubCfpay();
     const { ctx } = await setup({ approveStock: true, attested: 0.02 });
     const approve = await call(ctx, "POST", "/api/payments/agentic/commercial/refund-policy/approve", "op1", {
@@ -425,6 +425,11 @@ describe("channel refund rail (#2945 on 2.7 machinery)", () => {
       approved: true,
     });
     expect(approve?.status).toBe(200);
+    // Issue #3180: the refund tenant comes from the resolved
+    // payment source only. A channel run has no resolved source
+    // at request time, so the request is refused even though the
+    // kind is approved and the body carries a tenantId — the
+    // client-supplied tenant is never trusted.
     const res = await call(ctx, "POST", "/api/payments/agentic/commercial/refunds", "user1", {
       kind: "pay_per_run",
       originalPaymentRef: "cfpay-x",
@@ -435,7 +440,7 @@ describe("channel refund rail (#2945 on 2.7 machinery)", () => {
       originalPaidAtMs: Date.now(),
       rail: "cfpay-channel",
     });
-    expect(res?.status).toBe(200);
-    expect((await bodyOf(res)).refund.rail).toBe("cfpay-channel");
+    expect(res?.status).toBe(400);
+    expect((await bodyOf(res)).error).toMatch(/tenantId is required/);
   });
 });

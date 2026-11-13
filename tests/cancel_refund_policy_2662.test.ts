@@ -32,6 +32,7 @@ import {
 } from "../src/data/inMemoryRefundAdapter";
 import {
   PROPOSED_SEED_POLICY,
+  type RefundPaymentSourceResolver,
   type RefundPolicyStore,
   type RefundStore,
 } from "../src/data/refundPorts";
@@ -154,6 +155,20 @@ describe("refund policy approval (2.7, per kind, fail-closed)", () => {
 });
 
 describe("refund service approval gate (2.7)", () => {
+  // Issue #3180: a stub resolved payment source — the tenant comes
+  // from the source, never from request input.
+  const stubSource: RefundPaymentSourceResolver = {
+    resolve: async () => ({
+      paymentIntentId: null,
+      rail: "card",
+      originalAmountUSD: null,
+      originalPaidAtMs: null,
+      userId: "u1",
+      tenantId: "t1",
+      subscriptionId: null,
+    }),
+  };
+
   it("request refuses an unapproved kind before any record is created", async () => {
     for (const { policy, store } of await seededPolicies()) {
       await expect(
@@ -165,7 +180,6 @@ describe("refund service approval gate (2.7)", () => {
             amountUSD: 0.1,
             originalAmountUSD: 0.1,
             originalPaidAtMs: Date.now() - 1000,
-            tenantId: "t1",
             rail: "card",
             reason: "run failed",
             requesterLogin: "u1",
@@ -182,14 +196,13 @@ describe("refund service approval gate (2.7)", () => {
       await policy.setKindApproval("pay_per_run", true, "op1");
       const gateway = gatewayStub();
       const record = await requestRefund(
-        { policyStore: policy, refundStore: store },
+        { policyStore: policy, refundStore: store, sourceResolver: stubSource },
         {
           kind: "pay_per_run",
           originalPaymentRef: "run-1",
           amountUSD: 0.1,
           originalAmountUSD: 0.1,
           originalPaidAtMs: Date.now() - 1000,
-          tenantId: "t1",
           rail: "card",
           reason: "run failed",
           requesterLogin: "u1",
