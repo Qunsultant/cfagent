@@ -71,27 +71,30 @@ describe("sharded submission gate behavior (#1993)", () => {
     (service as any).getScreenerAgent = () => ({
       isScreenRunning: async () => ({ running, startedAt: running ? Date.now() : null }),
     });
-    const shardSubmit = vi.fn(async () => ({
-      jobId: "test-chain",
-      status: "queued" as const,
-      statusUrl: "https://example.test/jobs/test-chain",
+    // Issue #4280 ([One engine] #3550 S5): the submission fake is the
+    // engine seam's submit-only entry now — the shard-submit port is
+    // gone from the stock path. The fake echoes the job id the service
+    // passed in (commandOverrides.jobId = chainId), as the real seam does.
+    const submit = vi.fn(async (input: { commandOverrides: { jobId: string } }) => ({
+      jobId: input.commandOverrides.jobId,
+      workflowId: "wf-test-chain",
     }));
-    (service as any).shardSubmit = shardSubmit;
-    return { service, shardSubmit };
+    (service as any).submitStockScreenViaEngine = submit;
+    return { service, submit };
   }
 
   it("refuses submission while a monolithic run holds the lock", async () => {
-    const { service, shardSubmit } = await gatedService(true);
+    const { service, submit } = await gatedService(true);
     const result = await service.autonomousMarketScreen({ sharded: true });
-    expect(shardSubmit).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
     expect((result as any).skipped).toBe(true);
     expect((result as any).skippedReason).toBe("already-running");
   });
 
   it("submits when no run holds the lock", async () => {
-    const { service, shardSubmit } = await gatedService(false);
+    const { service, submit } = await gatedService(false);
     const result = await service.autonomousMarketScreen({ sharded: true });
-    expect(shardSubmit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);
   });
 });
@@ -129,9 +132,11 @@ describe("wiring (#1993)", () => {
   it("the sharded path gates submission on the lock probe", () => {
     expect(tasksSrc).toContain("isScreenRunning(universe, userLogin)");
     expect(tasksSrc).toContain('skippedReason: "already-running"');
-    // Gate sits before submission: the probe precedes the shardSubmit
-    // call in the sharded function.
+    // Gate sits before submission: the probe precedes the seam
+    // submit call in the sharded function.
     const sharded = tasksSrc.slice(tasksSrc.indexOf("autonomousMarketScreenSharded"));
-    expect(sharded.indexOf("isScreenRunning")).toBeLessThan(sharded.indexOf("await this.shardSubmit("));
+    expect(sharded.indexOf("isScreenRunning")).toBeLessThan(
+      sharded.indexOf("await (this.submitStockScreenViaEngine ?? submitStockScreenViaEngine)("),
+    );
   });
 });

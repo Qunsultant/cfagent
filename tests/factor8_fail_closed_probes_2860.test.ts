@@ -65,41 +65,44 @@ async function gatedService(opts: {
       return { running, startedAt: running ? Date.now() : null };
     },
   });
-  const shardSubmit = vi.fn(async () => ({
-    jobId: "test-chain",
-    status: "queued" as const,
-    statusUrl: "https://example.test/jobs/test-chain",
+  // Issue #4280 ([One engine] #3550 S5): the submission fake is the
+  // engine seam's submit-only entry now — the shard-submit port is
+  // gone from the stock path. The fake echoes the job id the service
+  // passed in (commandOverrides.jobId = chainId), as the real seam does.
+  const submit = vi.fn(async (input: { commandOverrides: { jobId: string } }) => ({
+    jobId: input.commandOverrides.jobId,
+    workflowId: "wf-test-chain",
   }));
-  (service as any).shardSubmit = shardSubmit;
-  return { service, shardSubmit };
+  (service as any).submitStockScreenViaEngine = submit;
+  return { service, submit };
 }
 
 describe("fail-closed chain probes (#2860 Factor 8)", () => {
   it("refuses submission when the lock probe cannot answer (no submit, gate-unavailable)", async () => {
-    const { service, shardSubmit } = await gatedService({ lockThrows: true });
+    const { service, submit } = await gatedService({ lockThrows: true });
     const result = await service.autonomousMarketScreen({ sharded: true });
-    expect(shardSubmit).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
     expect((result as any).skipped).toBe(true);
     expect((result as any).skippedReason).toBe("gate-unavailable");
   });
 
   it("refuses submission when the active-chain probe cannot answer (no submit, gate-unavailable)", async () => {
-    const { service, shardSubmit } = await gatedService({ activeChainThrows: true });
+    const { service, submit } = await gatedService({ activeChainThrows: true });
     const result = await service.autonomousMarketScreen({ sharded: true });
-    expect(shardSubmit).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
     expect((result as any).skipped).toBe(true);
     expect((result as any).skippedReason).toBe("gate-unavailable");
   });
 
   it("still refuses with already-running when the lock probe answers held", async () => {
-    const { service, shardSubmit } = await gatedService({ running: true });
+    const { service, submit } = await gatedService({ running: true });
     const result = await service.autonomousMarketScreen({ sharded: true });
-    expect(shardSubmit).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
     expect((result as any).skippedReason).toBe("already-running");
   });
 
   it("still refuses with already-running when the active-chain probe answers active", async () => {
-    const { service, shardSubmit } = await gatedService({
+    const { service, submit } = await gatedService({
       activeChainRows: [
         {
           payload_json: JSON.stringify({
@@ -109,21 +112,21 @@ describe("fail-closed chain probes (#2860 Factor 8)", () => {
       ],
     });
     const result = await service.autonomousMarketScreen({ sharded: true });
-    expect(shardSubmit).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
     expect((result as any).skippedReason).toBe("already-running");
   });
 
   it("still submits when both probes answer clear", async () => {
-    const { service, shardSubmit } = await gatedService({ activeChainRows: [] });
+    const { service, submit } = await gatedService({ activeChainRows: [] });
     const result = await service.autonomousMarketScreen({ sharded: true });
-    expect(shardSubmit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);
   });
 
   it("submits when no platform sql is configured (lock probe only — the unconfigured-probe boundary)", async () => {
-    const { service, shardSubmit } = await gatedService({});
+    const { service, submit } = await gatedService({});
     const result = await service.autonomousMarketScreen({ sharded: true });
-    expect(shardSubmit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);
   });
 });

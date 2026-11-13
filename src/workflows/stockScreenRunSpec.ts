@@ -53,7 +53,7 @@ import {
   admitScreenModeSelection,
   type ScreenModeSelection,
 } from "./screenerWorkflowRoutes";
-import type { StockScreenerFilter } from "../types";
+import type { StageChainConfig, StockScreenerFilter } from "../types";
 
 /** The per-request delivery envelope, defined once here. */
 export interface StockScreenDelivery {
@@ -132,6 +132,13 @@ export interface StockScreenRunSpec extends StockScreenRunProvenance {
   minScore?: number;
   asyncRequested: boolean;
   delivery: StockScreenDelivery;
+  /**
+   * Issue #4280 ([One engine] #3550 S5): the stage-chain config the
+   * scheduled run was armed with — carried onto the workflow command
+   * so the deliver stage bridges serve + deliver with its delays.
+   * Absent = the unchained immediate bridge.
+   */
+  stageChain?: StageChainConfig;
   screenMode?: "non-deterministic";
   screenIntent?: string;
   /** Issue #2882: goal provenance, present only on source "goal" specs. Kept as a reference, never flattened into the filter. */

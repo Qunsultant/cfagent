@@ -3,7 +3,11 @@
  * the two entry points: the manual route (async flag) and
  * the scheduled service. The submission module is mocked
  * here so these tests pin the BRANCHING (workflow vs
- * direct, chain-mode exclusion), not the port itself.
+ * direct), not the port itself.
+ * Issue #4280 ([One engine] #3550 S5): the branching is gone —
+ * chain mode rides the workflow too (the direct path +
+ * chain-mode exclusion are retired); these tests pin that the
+ * workflow is THE path for every scheduled goal screen.
  * TDD: written before the implementation.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -312,14 +316,17 @@ describe("autonomousGoalScreen workflow submission (#1996)", () => {
     expect(audit.mock.calls.find((c) => c[0] === "goal_screen.run_failed")).toBeDefined();
   });
 
-  it("chain mode keeps the direct path even when a workflow start would succeed", async () => {
+  it("chain mode submits the workflow too — the direct path is gone (#4280)", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const bridge = vi.fn(async () => {});
     const { service, runGoalScreen } = goalService({ followupScheduler: bridge });
     const result = await service.autonomousGoalScreen({ goalKind: "income", stageChain: {} as never });
     expect(result.success).toBe(true);
-    expect(mockedStart).not.toHaveBeenCalled();
-    expect(runGoalScreen).toHaveBeenCalledTimes(1);
-    expect(bridge).toHaveBeenCalledTimes(1);
+    expect(mockedStart).toHaveBeenCalledTimes(1);
+    expect(runGoalScreen).not.toHaveBeenCalled();
+    expect(bridge).not.toHaveBeenCalled();
+    const data = (result as { data: Record<string, unknown> }).data;
+    expect(data.status).toBe("queued");
+    expect(data.workflowId).toBe(HANDLE.workflowId);
   });
 });

@@ -29,7 +29,8 @@ import { resolveScreenerAgentName } from "../agents/screenerAgentName";
 import type { OrchestratorAgent } from "../agents/orchestrator";
 import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
 import { screenerOutcomeFromRunResult } from "../services/screenerFollowups";
-import type { Env } from "../types";
+import type { ScreenerRunOutcome } from "../services/screenerFollowups";
+import type { AsyncJobChannel, Env, StageChainConfig } from "../types";
 import type { JobPipelineStores, JobNodeConfig } from "../data/jobPipelinePorts";
 import type { JobPipelineControl } from "./jobPipelineEngine";
 import {
@@ -56,6 +57,7 @@ import type {
   GoalScreenCommand,
   WorkflowJobCommand,
 } from "../workflows/workflowPorts";
+import type { StockScreenDelivery } from "../workflows/stockScreenRunSpec";
 import type { WorkflowGoalScreenEnvelope } from "../agents/orchestrator/goalScreenDispatch";
 
 /** The step names a screener job's configuration references. */
@@ -120,7 +122,23 @@ export interface ScreenerStepDeps {
   deliverOutcome: (
     payload: unknown,
     userLogin: string,
-    opts?: { goalScreen?: GoalScreenCommand; deliveryId?: string },
+    opts?: {
+      goalScreen?: GoalScreenCommand;
+      deliveryId?: string;
+      /**
+       * Issue #4280 ([One engine] #3550 S5): the per-request delivery
+       * envelope + stage-chain config the deliver step carries from
+       * the command params (market runs), the engine job id (the
+       * chain id for chained runs), and the canonical report id the
+       * serve stage verified (goal runs). The door overlays the
+       * envelope + stageChain onto the run outcome and bridges
+       * through it.
+       */
+      delivery?: StockScreenDelivery;
+      stageChain?: StageChainConfig;
+      chainId?: string;
+      canonicalReportId?: string;
+    },
   ) => Promise<void>;
   /**
    * The goal runner (defaults to the agent's runGoalScreen).
@@ -314,6 +332,13 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
       deliver: params.deliver === true,
       deliveryId: `workflow:${ctx.jobId}`,
       ...(goalScreen ? { goalScreen } : {}),
+      ...(params.delivery && typeof params.delivery === "object"
+        ? { delivery: params.delivery as StockScreenDelivery }
+        : {}),
+      ...(params.stageChain && typeof params.stageChain === "object"
+        ? { stageChain: params.stageChain as StageChainConfig }
+        : {}),
+      chainId: ctx.jobId,
       deliverOutcome: deps.deliverOutcome,
     });
     return { output };
@@ -371,6 +396,10 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
     ...(command.modeSource ? { modeSource: command.modeSource } : {}),
     ...(command.traceparent ? { traceparent: command.traceparent } : {}),
     deliver: command.deliver === true,
+    ...(command.delivery && Object.keys(command.delivery).length > 0
+      ? { delivery: command.delivery }
+      : {}),
+    ...(command.stageChain !== undefined ? { stageChain: command.stageChain } : {}),
     ...(command.goalScreen ? { goalScreen: command.goalScreen } : {}),
     symbols,
     shards: shardTable,
@@ -458,11 +487,92 @@ function buildStoreDoor(env: Env): ScreenerStepDeps["storeReport"] {
   };
 }
 
+/**
+ * Issue #4280 ([One engine] #3550 S5) — overlay the per-request delivery
+ * envelope + stage-chain config onto a run outcome. Pure: the envelope
+ * lands only where the outcome lacks the field (a payload-stamped value
+ * wins — it reflects a stored explicit selection). The channel allowlist
+ * is explicit-only: slack rides when the caller asked for it
+ * (`pushToSlack === true` or a named `slackChannel`) — the door never
+ * invents a Slack delivery. The scheduled caller applies the chain's
+ * default-on (`pushToSlack !== false`) when it builds the envelope, so
+ * scheduled runs keep the chain's Slack-by-default. Exported for tests.
+ */
+export function overlayEngineDelivery(
+  outcome: ScreenerRunOutcome,
+  delivery: StockScreenDelivery | undefined,
+  stageChain: StageChainConfig | undefined,
+): ScreenerRunOutcome {
+  if (!delivery && !stageChain) return outcome;
+  const channels: AsyncJobChannel[] = [];
+  if (delivery?.emailTo) channels.push("email");
+  if (delivery && (delivery.pushToSlack === true || delivery.slackChannel !== undefined)) {
+    channels.push("slack");
+  }
+  if (delivery?.webhookUrl) channels.push("webhook");
+  return {
+    ...outcome,
+    ...(delivery?.emailTo && !outcome.emailTo ? { emailTo: delivery.emailTo } : {}),
+    ...(delivery?.slackChannel && !outcome.slackChannel
+      ? { slackChannel: delivery.slackChannel }
+      : {}),
+    ...(delivery?.webhookUrl && !outcome.webhookUrl ? { webhookUrl: delivery.webhookUrl } : {}),
+    ...(channels.length > 0 && !outcome.deliveryChannels
+      ? { deliveryChannels: channels }
+      : {}),
+    ...(stageChain ? { stageChain } : {}),
+  };
+}
+
 /** The deliver door, mirroring screenerWorkflow.ts buildDeps (goal seam + market outcome sink). */
 function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
   return async (payload, userLogin, opts) => {
     const orchestrator = orchestratorDoor(env);
     if (opts?.goalScreen) {
+      // Issue #4280 ([One engine] #3550 S5): a chain-mode goal run
+      // bridges generate + serve through the follow-up bridge (the
+      // direct bridge's semantics, carried into the workflow's
+      // deliver stage) instead of delivering directly: the outcome
+      // carries the stage chain, the per-task recipients, and the
+      // delivery-channel allowlist, so the bridge serves with
+      // serveDelaySeconds and delivers with deliverDelaySeconds,
+      // exactly once. Unchained goal runs deliver directly, as before.
+      if (opts.goalScreen.stageChain) {
+        const envelope = payload as WorkflowGoalScreenEnvelope;
+        const result = envelope.result;
+        const goalOutcome: ScreenerRunOutcome = {
+          kind: "goal",
+          trigger: envelope.trigger === "scheduled" ? "scheduled" : "manual",
+          success: true,
+          pdfKeys: [],
+          thesis: `Goal screen — ${result.goalKind}`,
+          matchedCount: result.counts.hits,
+          totalScanned:
+            (result.counts.stocksScanned ?? 0) + (result.counts.optionsUnderlyingsScanned ?? 0),
+          deliverViaChain: true,
+          ...(opts.canonicalReportId ? { canonicalReportId: opts.canonicalReportId } : {}),
+          ...(opts.goalScreen.emailTo ? { emailTo: opts.goalScreen.emailTo } : {}),
+          ...(opts.goalScreen.slackChannel ? { slackChannel: opts.goalScreen.slackChannel } : {}),
+          ...(opts.goalScreen.deliver && opts.goalScreen.deliver.length > 0
+            ? {
+                deliveryChannels: opts.goalScreen.deliver.filter(
+                  (c): c is AsyncJobChannel => c === "slack" || c === "email" || c === "webhook",
+                ),
+              }
+            : {}),
+          stageChain: opts.goalScreen.stageChain,
+          ...(opts.goalScreen.providerFallback
+            ? { providerFallback: opts.goalScreen.providerFallback }
+            : {}),
+        };
+        await orchestrator.deliverWorkflowScreenOutcome(
+          goalOutcome,
+          userLogin,
+          opts?.deliveryId ?? `workflow:${(payload as { jobId?: string }).jobId ?? "unknown"}`,
+          opts?.chainId,
+        );
+        return;
+      }
       await orchestrator.deliverWorkflowGoalScreenOutcome(
         payload as WorkflowGoalScreenEnvelope,
         userLogin,
@@ -471,15 +581,16 @@ function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
       );
       return;
     }
-    const outcome = screenerOutcomeFromRunResult(
-      "stock",
-      payload as Record<string, unknown>,
-      env.APP_BASE_URL,
+    const outcome = overlayEngineDelivery(
+      screenerOutcomeFromRunResult("stock", payload as Record<string, unknown>, env.APP_BASE_URL),
+      opts?.delivery,
+      opts?.stageChain,
     );
     await orchestrator.deliverWorkflowScreenOutcome(
       outcome,
       userLogin,
       opts?.deliveryId ?? `workflow:${(payload as { jobId?: string }).jobId ?? "unknown"}`,
+      opts?.chainId,
     );
   };
 }

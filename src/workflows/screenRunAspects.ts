@@ -66,11 +66,11 @@ import { parseTraceparent } from "../observability/observabilityPorts";
 import { ingestScreenRunEvent } from "../telemetry/screenRunStats";
 
 export const SCREEN_RUN_ASPECTS = {
-  logging: { joinPoint: "ScreenerAgent.runScreen via logScreenRunEvent (this module); chain submission via the same fn (scheduledTasks autonomousMarketScreenSharded)" },
+  logging: { joinPoint: "ScreenerAgent.runScreen via logScreenRunEvent (this module); chain submission via the same fn (engine seam submitStockScreenViaEngine, scheduledTasks autonomousMarketScreenSharded)" },
   authScoping: { joinPoint: "ScreenerAgent.recordOwner + screenRunLock (#1185, #828, #1993)" },
   paidRun: { joinPoint: "Chat monetization budget gate (nlqPorts / meshScreenDoor paid paths)" },
   retry: { joinPoint: "pipelinePolicy retry budgets" },
-  failureClassification: { joinPoint: "classifyScreenFailure (this module), wired in runScreen + chain submission (scheduledTasks autonomousMarketScreenSharded)" },
+  failureClassification: { joinPoint: "classifyScreenFailure (this module), wired in runScreen + chain submission (engine seam submitStockScreenViaEngine, scheduledTasks autonomousMarketScreenSharded)" },
   partialResultMarking: { joinPoint: "screenerCollation.collateShards qualified rule + ScreenerRunResult.partial (#462)" },
   delivery: { joinPoint: "persistThenDeliverAll + deliverySuppressor (Slices 3 and 7)" },
   provenance: { joinPoint: "manualWorkflowJobId + workflow traceparent + canonical generation screener:<timestamp>; funnel trace_id is the workflow traceparent's trace-id (funnelTraceIdForRun, #2860 Factor 14)" },

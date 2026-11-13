@@ -60,6 +60,18 @@ export interface GoalScreenSubmissionInput {
   /** Delivery channels for the completed run (absent = no delivery step). */
   deliverChannels?: ("slack" | "email" | "webhook" | "voice")[];
   emailTo?: string;
+  /**
+   * Issue #4280 ([One engine] #3550 S5): the Slack channel a
+   * chain-mode scheduled goal run delivers to (carried from the
+   * schedule's options; the direct bridge carried it).
+   */
+  slackChannel?: string;
+  /**
+   * Issue #4280 ([One engine] #3550 S5): the stage-chain config a
+   * chain-mode scheduled goal run was armed with — the goal
+   * workflow's deliver stage bridges with its delays.
+   */
+  stageChain?: import("../types").StageChainConfig;
   environment?: "TEST" | "PROD";
   /** Issue #1571: "yahoo" runs the stock leg on the Yahoo engine (scheduled fallback runs). */
   provider?: "yahoo";
@@ -102,6 +114,8 @@ export function buildGoalScreenCommand(
         ? { deliver: input.deliverChannels }
         : {}),
       ...(input.emailTo ? { emailTo: input.emailTo } : {}),
+      ...(input.slackChannel ? { slackChannel: input.slackChannel } : {}),
+      ...(input.stageChain ? { stageChain: input.stageChain } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.providerFallback ? { providerFallback: input.providerFallback } : {}),
       ...(input.baseStockFilter ? { baseStockFilter: input.baseStockFilter } : {}),

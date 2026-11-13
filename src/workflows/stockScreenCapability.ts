@@ -123,11 +123,11 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
     id: "scheduled-sharded",
     name: "Scheduled sharded screen",
     entry: "ScheduledTasksService.autonomousMarketScreenSharded",
-    engine: "Broker-owned chain start (startScheduledShardedChain) + collation; the chain keeps its engine (see the broker's G7 note on why execution does not move to the workflow)",
+    engine: "Engine seam submit (submitStockScreenViaEngine, jobId = chainId) + collation; the run reads as one run in Workflow Runs (see the broker's G7 note on the retirement)",
     provider: "requested, else planner default (etrade); fallback forces yahoo with marker",
     persistence: "Canonical report store per shard",
     delivery: "Delivery bridge via chain",
-    canonical: ["screenExecutionBroker.startScheduledShardedChain", "stockScreenPlanner.planScheduledScreen", "screenerCollation.collateShards (qualified partial rule)", "screenRunAspects"],
+    canonical: ["workflows/runStockScreenViaEngine.submitStockScreenViaEngine", "stockScreenPlanner.planScheduledScreen", "screenerCollation.collateShards (qualified partial rule)", "screenRunAspects"],
     status: "canonical",
   },
   {

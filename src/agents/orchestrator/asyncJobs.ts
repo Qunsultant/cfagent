@@ -1364,7 +1364,16 @@ export async function recordScreenerRunMainJob(
   ctx: AsyncJobsContext,
   outcome: ScreenerRunOutcome,
   userLogin: string,
-  options?: { chainReport?: boolean },
+  options?: {
+    chainReport?: boolean;
+    /**
+     * Issue #4280 ([One engine] #3550 S5): the run's chain id when
+     * the caller knows it (the engine job id). Used instead of
+     * minting a fresh id, so the follow-up chain groups under the
+     * engine job in Workflow Runs. Absent = mint fresh, as before.
+     */
+    chainId?: string;
+  },
 ): Promise<string> {
   ctx.ensureTables();
   const jobId = crypto.randomUUID();
@@ -1375,7 +1384,9 @@ export async function recordScreenerRunMainJob(
   // Consolidation C3 (#1277): with a stage chain on the outcome, the
   // run's main job IS the chain's generate stage — stamped with the
   // stage + a fresh chain id the serve/deliver stages link back to.
-  const chainId = outcome.stageChain ? crypto.randomUUID() : undefined;
+  // Issue #4280: a caller-supplied id (the engine job id) replaces
+  // the fresh mint, so the chain groups under the engine job.
+  const chainId = outcome.stageChain ? (options?.chainId ?? crypto.randomUUID()) : undefined;
   // Issue #3121 S4 — the main job's payload carries the same §4
   // linkage its result does (S1), resolved through the shared
   // builder: the run's trigger (the main job is the chain root, not
@@ -1509,8 +1520,18 @@ export async function scheduleScreenerFollowups(
   outcome: ScreenerRunOutcome,
   userLogin: string,
   chainReport?: boolean,
+  /**
+   * Issue #4280 ([One engine] #3550 S5): the run's chain id when the
+   * caller knows it (the engine job id) — threaded to the bridge so
+   * the follow-up chain groups under the engine job instead of a
+   * freshly minted id. Absent = the bridge mints one, as before.
+   */
+  chainId?: string,
 ): Promise<void> {
-  await recordScreenerRunMainJob(ctx, outcome, userLogin, { chainReport: chainReport !== false });
+  await recordScreenerRunMainJob(ctx, outcome, userLogin, {
+    chainReport: chainReport !== false,
+    ...(chainId ? { chainId } : {}),
+  });
 }
 
 /**
