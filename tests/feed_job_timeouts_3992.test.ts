@@ -234,6 +234,8 @@ describe("resolveFeedJobTimeouts (#4312)", () => {
       fetchMs: 60_000,
       captureMs: 30_000,
       executionMs: 240_000,
+      // #4304 — the verify-probe bound joins the catalogue.
+      verifyMs: 120_000,
     });
     expect(resolveFeedJobTimeouts()).toEqual(FEED_JOB_TIMEOUTS);
   });
@@ -243,6 +245,8 @@ describe("resolveFeedJobTimeouts (#4312)", () => {
     ["FEED_JOB_FETCH_MS", "90000", { fetchMs: 90_000 }],
     ["FEED_JOB_CAPTURE_MS", "10000", { captureMs: 10_000 }],
     ["FEED_JOB_EXECUTION_MS", "60000", { executionMs: 60_000 }],
+    // #4304 — the verify knob overrides only its own bound.
+    ["FEED_JOB_VERIFY_MS", "45000", { verifyMs: 45_000 }],
   ] as const)(
     "overrides only %s from its knob and leaves the other bounds at defaults",
     (knob, raw, changed) => {
@@ -258,8 +262,10 @@ describe("resolveFeedJobTimeouts (#4312)", () => {
         FEED_JOB_FETCH_MS: "2000",
         FEED_JOB_CAPTURE_MS: "3000",
         FEED_JOB_EXECUTION_MS: "4000",
+        // #4304 — the verify knob joins the all-knobs case.
+        FEED_JOB_VERIFY_MS: "5000",
       }),
-    ).toEqual({ refreshMs: 1_000, fetchMs: 2_000, captureMs: 3_000, executionMs: 4_000 });
+    ).toEqual({ refreshMs: 1_000, fetchMs: 2_000, captureMs: 3_000, executionMs: 4_000, verifyMs: 5_000 });
   });
 
   it("accepts a numeric knob value", () => {
