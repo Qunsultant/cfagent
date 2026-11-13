@@ -1205,6 +1205,20 @@ export function RunDetail({
           <dt>Duration</dt>
           <dd>{formatDuration(run.durationMs)}</dd>
         </div>
+        {(() => {
+          // Issue #4363 — the execution mode the engine definition recorded.
+          // Absent on a run whose stages carry none: no invented default.
+          const mode = run.stages.find((stage) => stage.executionMode)?.executionMode;
+          // Rendered as a bare dt/dd pair: no new bespoke class occurrence
+          // (the interior snapshot counts them), and the token styling of
+          // the surrounding <dl> still applies.
+          return mode ? (
+            <>
+              <dt>Execution mode</dt>
+              <dd>{mode}</dd>
+            </>
+          ) : null;
+        })()}
         <div className="workflow-runs-fact">
           <dt>Stages</dt>
           <dd>

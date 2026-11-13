@@ -53,6 +53,21 @@ refuses with the stages that do exist; a door outage is a 503, never a pretend
 "not found". `get_async_job` keeps its verbatim `mas_async_jobs` passthrough and
 is deliberately not widened: its record carries no stages.
 
+## Execution mode is a run parameter (#4363)
+
+The engine's four mode axes — `concurrency` (sequential|parallel), `pacing`
+(batch|online), `delivery` (sync|async), `shape` (monolith|sharded) — are
+chosen at start, not hard-coded per family:
+
+- `run_stock_screen` takes an `executionMode` object; an omitted axis takes the
+  family default from configuration (`SCREENER_DEFAULT_EXECUTION_MODE`), and
+  `online + sync` is refused by the engine's resolver before any run starts.
+- The mode is recorded on the job definition and surfaced: the job-status read
+  returns `executionMode`, and the Workflow Runs detail shows it.
+- A mid-run change is refused by name: `set_job_execution_mode` writes the
+  definition for the **next** run only, and a running/queued/paused job refuses
+  with that rule. The definition is versioned, so the change is a new version.
+
 ## Entity relationships
 
 ```mermaid

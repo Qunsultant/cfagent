@@ -312,6 +312,11 @@ export interface ScheduledAgentDoorStub {
    * and the run they describe.
    */
   getPipelineRunStages(jobIds: string[]): Promise<Record<string, JobStagesRead>>;
+  /** Issue #4363 — set a job's execution mode for its next run (refused mid-run). */
+  setPipelineJobExecutionMode(
+    jobId: string,
+    mode: unknown,
+  ): Promise<{ jobId: string; executionMode: Record<string, string>; appliedTo: "next-run" }>;
   /**
    * Issue #4360 — persist one `job.stage.*` publication in the host's
    * stage store (the queue consumer's write door), and read a run's
@@ -1308,6 +1313,16 @@ export async function controlPipelineStageViaDoor(
  * name); a door outage throws, so a caller never reports "not found" for
  * an unreachable host.
  */
+export async function setPipelineJobExecutionModeViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  jobId: string,
+  mode: unknown,
+): Promise<{ jobId: string; executionMode: Record<string, string>; appliedTo: "next-run" }> {
+  requireActingLogin(actingLogin);
+  return getScheduledAgentDoor(env).setPipelineJobExecutionMode(jobId, mode);
+}
+
 export async function getPipelineJobStatusViaDoor(
   env: Env,
   jobId: string,

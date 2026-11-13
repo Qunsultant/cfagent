@@ -116,6 +116,8 @@ import {
   type ScheduledReportHit,
 } from "../../services/scheduledReports";
 import { createFeatureFlagPort } from "../../features/createFeatureFlagPort";
+import { assertExecutionModeSupported, resolveExecutionMode } from "../../services/jobPipelineConfig";
+import { resolveScreenerDefaultExecutionMode } from "../../config/screenerExecutionMode";
 import {
   resolveScreenerNdGateForHost,
   screenerNdConfigErrorEvent,
@@ -204,6 +206,12 @@ export interface MeshScreenDoorInput {
   universe?: string;
   /** Structured screener filters, passed through to the workflow command. */
   filters?: StockScreenerFilter;
+  /**
+   * Issue #4363 — the run's execution mode (all four axes), chosen at
+   * start. Validated here before any run; absent = the family default
+   * from configuration. Partial: an omitted axis takes the default.
+   */
+  executionMode?: Partial<import("../../data/jobPipelinePorts").JobExecutionMode>;
   /**
    * Issue #2530 — the per-run mode selection. Absent or
    * "deterministic" → today's deterministic run, unaffected
@@ -469,10 +477,38 @@ export async function runStockScreenViaDoor(
   const modeFields = ndRequested
     ? { screenMode: "non-deterministic" as const, screenIntent }
     : {};
-  if (await screenMonetizationOn(ctx)) {
-    return runPaidScreen(ctx, { filters, userLogin: login, universeId, ...modeFields });
+  // Issue #4363 — the execution mode is validated BEFORE any run starts
+  // (fail closed, never a silent fallback to the family default).
+  let executionMode: import("../../data/jobPipelinePorts").JobExecutionMode | undefined;
+  if (input.executionMode !== undefined) {
+    try {
+      executionMode = resolveExecutionMode(input.executionMode);
+      assertExecutionModeSupported(executionMode);
+    } catch (err) {
+      throw new MeshDoorError(
+        "door_unavailable",
+        `run_stock_screen refused: ${err instanceof Error ? err.message : String(err)} No workflow was started.`,
+      );
+    }
+  } else {
+    // The mode is ALWAYS explicit: absent means the family default from
+    // configuration (a malformed knob fails closed, never a silent value).
+    try {
+      executionMode = resolveScreenerDefaultExecutionMode(
+        ctx.env as unknown as { SCREENER_DEFAULT_EXECUTION_MODE?: string },
+      );
+    } catch (err) {
+      throw new MeshDoorError(
+        "door_unavailable",
+        `run_stock_screen refused: ${err instanceof Error ? err.message : String(err)} No workflow was started.`,
+      );
+    }
   }
-  return runFreeScreen(ctx, { filters, userLogin: login, universeId, ...modeFields });
+  const execFields = executionMode ? { executionMode } : {};
+  if (await screenMonetizationOn(ctx)) {
+    return runPaidScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields });
+  }
+  return runFreeScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields });
 }
 
 /** The pieces of one door screen run, shared by the free and paid paths. */
@@ -501,6 +537,8 @@ function buildScreenCommand(
     /** Issue #2530: present only on an admitted ND run (gate + intent checked at the seam). */
     screenMode?: "non-deterministic";
     screenIntent?: string;
+    /** Issue #4363 — the validated execution mode, when the caller chose one. */
+    executionMode?: import("../../data/jobPipelinePorts").JobExecutionMode;
   },
 ): ScreenCommandParts {
   // Issue #2867: shard derivation is the broker's one policy.
@@ -528,6 +566,7 @@ function buildScreenCommand(
     ...(req.screenMode
       ? { screenMode: req.screenMode, screenIntent: req.screenIntent }
       : {}),
+    ...(req.executionMode ? { executionMode: req.executionMode } : {}),
     ...(traceparent ? { traceparent } : {}),
   });
   return { command, jobId, tenantId, shards, startedAtIso };
@@ -910,6 +949,7 @@ async function runPaidScreen(
     universeId: UniverseId;
     screenMode?: "non-deterministic";
     screenIntent?: string;
+    executionMode?: import("../../data/jobPipelinePorts").JobExecutionMode;
   },
 ): Promise<MeshScreenRunResult> {
   const parts = buildScreenCommand(ctx, req);

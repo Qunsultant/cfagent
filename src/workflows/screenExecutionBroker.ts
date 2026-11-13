@@ -120,6 +120,8 @@ export interface ParentScreenCommandInput {
   patternRef?: WorkflowJobCommand["patternRef"];
   presetRef?: WorkflowJobCommand["presetRef"];
   patternQualifications?: string[];
+  /** Issue #4363 — the run's execution mode, validated at the door. */
+  executionMode?: WorkflowJobCommand["executionMode"];
 }
 
 export function buildParentScreenCommand(
@@ -155,6 +157,8 @@ export function buildParentScreenCommand(
     ...(input.screenMode
       ? { screenMode: input.screenMode, screenIntent: input.screenIntent }
       : {}),
+    // Issue #4363 — the run's execution mode, chosen at the door.
+    ...(input.executionMode ? { executionMode: input.executionMode } : {}),
   };
 }
 
