@@ -618,11 +618,15 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   research_runs: { layer: ["src/data/doSqliteResearchStoreAdapter.ts"] },
   research_evaluations: { layer: ["src/data/doSqliteResearchStoreAdapter.ts"] },
   screen_run_locks: { layer: ["src/data/doSqliteScreenRunLockAdapter.ts"] },
-  quote_source_setting: { layer: ["src/data/d1QuoteSourceAdapter.ts", "src/data/migrationRunner.ts"] },
-  resource_sql_ops: { layer: ["src/data/d1ResourceUsageAdapter.ts", "src/data/migrationRunner.ts"] },
-  resource_daily_rollups: { layer: ["src/data/d1ResourceRollupAdapter.ts", "src/data/migrationRunner.ts"] },
-  resource_alert_state: { layer: ["src/data/d1ResourceRollupAdapter.ts", "src/data/migrationRunner.ts"] },
-  resource_comparison_reports: { layer: ["src/data/d1ResourceRollupAdapter.ts", "src/data/migrationRunner.ts"] },
+  // #4282 P1: the schema authority for these tables moved from
+  // migrationRunner.ts to the D1 catalogue
+  // (src/data/schemaComponent/d1Catalogue.ts) — the writer set is
+  // unchanged in kind (port + schema authority), only the file moved.
+  quote_source_setting: { layer: ["src/data/d1QuoteSourceAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
+  resource_sql_ops: { layer: ["src/data/d1ResourceUsageAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
+  resource_daily_rollups: { layer: ["src/data/d1ResourceRollupAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
+  resource_alert_state: { layer: ["src/data/d1ResourceRollupAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
+  resource_comparison_reports: { layer: ["src/data/d1ResourceRollupAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
 };
 
 const WRITE_VERB =
