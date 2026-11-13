@@ -1,0 +1,462 @@
+{
+  "generatedFrom": "d1a370ab6365f6a595cd36eb1ed6162aef8ad7a3",
+  "generatedAt": "2026-11-13",
+  "totals": {
+    "createTable": 114,
+    "createIndex": 50,
+    "createUniqueIndex": 2,
+    "alterTable": 42
+  },
+  "files": {
+    "src/agents/orchestrator/alarmInventory.ts": {
+      "createTable": 0,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/agents/orchestrator/asyncJobs.ts": {
+      "createTable": 2,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/config/schemaMigrationModes.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/d1AuditReportAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/d1FeedDatasetAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/d1IndexListAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/d1ProfileAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/d1QuoteSourceAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/d1ResourceRollupAdapter.ts": {
+      "createTable": 3,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/d1ResourceUsageAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/deliveryClaimsStore.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSchemaMarker.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSchemaMigrations.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSessionStoreAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteAdaptationAuditAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteAnalyzedDatasetAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteAsyncJobAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 4,
+      "createUniqueIndex": 0,
+      "alterTable": 12
+    },
+    "src/data/doSqliteAutopilotStateAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteCanonicalReportStoreAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 2,
+      "createUniqueIndex": 2,
+      "alterTable": 1
+    },
+    "src/data/doSqliteChallengerAdapter.ts": {
+      "createTable": 4,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteComparisonLedgerAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteDeliveryDatasetAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteDiscoveryAlertAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteDiscoveryRunAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteDiscoverySetupAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteEnrichedDatasetAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteEnrichmentAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteFeedSnapshotAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteGeneratedDatasetAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteGoalScenarioAdapter.ts": {
+      "createTable": 3,
+      "createIndex": 3,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteIndexListAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteIvHistoryAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 1
+    },
+    "src/data/doSqliteJobOutcomeAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteJobPipelineAdapter.ts": {
+      "createTable": 5,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 2
+    },
+    "src/data/doSqliteJobRunRecordAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 8
+    },
+    "src/data/doSqliteOrmAdapters.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteOutcomeTrackingAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqlitePausedScheduleAdapter.deprecated.ts": {
+      "createTable": 2,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqlitePendingScheduleApprovalsAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqlitePolicyVerdictAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteProviderCaptureAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 2,
+      "createUniqueIndex": 0,
+      "alterTable": 2
+    },
+    "src/data/doSqliteProviderConfigAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 1
+    },
+    "src/data/doSqliteReportConfirmationAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 1
+    },
+    "src/data/doSqliteResearchStoreAdapter.ts": {
+      "createTable": 4,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteReselectionAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteScanRunAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 5
+    },
+    "src/data/doSqliteScreenerPresetAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteScreeningActivityAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteScreenRunLockAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteStockCopilotStoreAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 2
+    },
+    "src/data/doSqliteStockCopilotSurfaceAdapter.ts": {
+      "createTable": 3,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 3
+    },
+    "src/data/doSqliteStrategyPolicyAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteStrategyProfileAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteStrategyReviewAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 2,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteStrategyWeightsAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteUnifiedScheduleAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 2,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteUsageEventAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 1,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteUserRequestQuotaAdapter.ts": {
+      "createTable": 2,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/doSqliteWorkspaceStoreAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/frameworkQueueIndexSchema.ts": {
+      "createTable": 0,
+      "createIndex": 5,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/indexListPorts.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/jobRunRecordIndexSchema.ts": {
+      "createTable": 0,
+      "createIndex": 2,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/masRetentionIndexSchema.ts": {
+      "createTable": 0,
+      "createIndex": 3,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/ormFacade.ts": {
+      "createTable": 6,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 2
+    },
+    "src/data/ormSchema.ts": {
+      "createTable": 9,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 2
+    },
+    "src/data/stageClaimsStore.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/data/unifiedScheduleIndexSchema.ts": {
+      "createTable": 0,
+      "createIndex": 2,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/enrichment/enrichmentStore.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/ports/schemaMigration.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/services/asyncJobGate.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/services/cancelPreviewStore.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/services/feedSnapshotStore.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/services/ladderStateStore.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/services/learnings.ts": {
+      "createTable": 1,
+      "createIndex": 2,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    },
+    "src/trading/options/scanRunStore.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0
+    }
+  }
+}
