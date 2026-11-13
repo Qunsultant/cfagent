@@ -301,6 +301,8 @@ export function shouldQueueApiRequest(opts: {
 export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "get_async_job",
   "list_async_jobs",
+  "get_job_status",
+  "get_job_stage_status",
   "stock_copilot_status",
   "stock_copilot_control",
   "stock_copilot_introspect",

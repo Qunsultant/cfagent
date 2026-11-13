@@ -77,6 +77,8 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `web_search` | mcp:read | L (I / R on other doors); provider-gated at the seam (#2731) — no provider key configured in production, so calls fail loud with `web_search_provider_not_configured` until the owner sets the secret |
 | `get_async_job` | mcp:read | L (I / R on other doors) |
 | `list_async_jobs` | mcp:read | L (I / R on other doors) |
+| `get_job_status` | mcp:read | L (I / R on other doors) — the engine job's status plus its per-stage (sub-job) roll-up with recorded start/end/duration (#4361); reads the ScheduledAgent door, never a second stage source |
+| `get_job_stage_status` | mcp:read | L (I / R on other doors) — one stage of an engine job by job id + stage address (#4361); unknown or ambiguous addresses refuse by name |
 | `etrade_get_quote` | mcp:read | L (I / R on other doors) |
 | `etrade_get_positions` | mcp:read | L (I / R on other doors) |
 | `etrade_auth_status` | mcp:read | L (I / R on other doors) |

@@ -710,6 +710,8 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "execute_nlq",
       "get_async_job",
       "list_async_jobs",
+      "get_job_status",
+      "get_job_stage_status",
       "list_database_tables",
       "query_table_data",
       "manage_categories",

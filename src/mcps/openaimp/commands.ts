@@ -12,6 +12,7 @@
  */
 
 import { z } from "zod";
+import { GetJobStageStatusCommand, GetJobStatusCommand } from "./jobStatusCommands";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import { computeMarketplaceRevenueSummary } from "../../data/marketplacePorts";
 import {
@@ -1745,6 +1746,8 @@ export class McpToolFactory {
     this.registerTool(new ExecuteNlqCommand());
     this.registerTool(new GetAsyncJobCommand());
     this.registerTool(new ListAsyncJobsCommand());
+    this.registerTool(new GetJobStatusCommand());
+    this.registerTool(new GetJobStageStatusCommand());
     this.registerTool(new ListDatabaseTablesCommand());
     this.registerTool(new QueryTableDataCommand());
     this.registerTool(new ManageCategoriesCommand());

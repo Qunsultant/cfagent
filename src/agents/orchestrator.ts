@@ -80,7 +80,8 @@ import {
   createWorkflowStageScheduleAdapter,
   type WorkflowStageRegistry,
 } from "../services/workflowStageSchedule";
-import { getScheduledAgentDoor } from "./orchestrator/meshDoors";
+import { getPipelineJobStatusViaDoor, getScheduledAgentDoor } from "./orchestrator/meshDoors";
+import { handleJobStatusRoutes } from "./routes/jobStatus";
 import { makeRunScheduleCallback, makeScheduleAlarmsPort } from "./routes/schedules";
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
 import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
@@ -3054,6 +3055,15 @@ export class OrchestratorAgent extends PortThink {
       }
       return Response.json(applyJobListEnvelope(jobs, resolvedEnvelope.mode));
     }
+
+    // Issue #4361 — the stage read: the whole-job roll-up and one sub-job.
+    // Both read the engine's own status view through the ScheduledAgent
+    // door (one stage source); a missing job refuses by name, a door
+    // outage is a 503 rather than a pretend 404.
+    const statusRoute = await handleJobStatusRoutes(request, url, path, {
+      readJobStatus: (engineJobId) => getPipelineJobStatusViaDoor(this.env, engineJobId),
+    });
+    if (statusRoute) return statusRoute;
 
     const jobMatch = path.match(/(?:^|\/api)\/jobs\/([0-9a-f-]{36})$/i);
     if (jobMatch && request.method === "GET") {
