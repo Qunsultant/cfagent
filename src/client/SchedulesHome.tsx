@@ -100,6 +100,8 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
 
       <TabPanel idBase="schedules-home" tabId="list" active={deepLink.view === "list"}>
         <Card padding="md">
+          {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
+          <div className="ui-scroll-frame">
           <SchedulesPanel
             activeEnv={activeEnv}
             userLogin={userLogin}
@@ -108,11 +110,14 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
             }
             focusScheduleId={deepLink.scheduleId}
           />
+        </div>
         </Card>
       </TabPanel>
 
       <TabPanel idBase="schedules-home" tabId="runs" active={deepLink.view === "runs"}>
         <Card padding="md">
+          {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
+          <div className="ui-scroll-frame">
           <div className="section-label-row">
             <span>Run ledger</span>
             <small>Every run with its schedule, async-job, and workflow linkage</small>
@@ -122,26 +127,33 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
             runId={deepLink.runId}
             kind={deepLink.kind}
           />
+        </div>
         </Card>
       </TabPanel>
 
       <TabPanel idBase="schedules-home" tabId="goals" active={deepLink.view === "goals"}>
         <Card padding="md">
+          {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
+          <div className="ui-scroll-frame">
           <div className="section-label-row">
             <span>Goal schedules</span>
             <small>ScheduledAgent goals, ticks &amp; add-goal form</small>
           </div>
           <ScheduledGoalsPanel embedded />
+        </div>
         </Card>
       </TabPanel>
 
       <TabPanel idBase="schedules-home" tabId="queue" active={deepLink.view === "queue"}>
         <Card padding="md">
+          {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
+          <div className="ui-scroll-frame">
           <div className="section-label-row">
             <span>Queue</span>
             <small>Admin queue — dump, cancel-all, wipe, and Track 1 recreate</small>
           </div>
           <ScheduleQueueView />
+        </div>
         </Card>
       </TabPanel>
     </PageShell>
