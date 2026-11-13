@@ -92,6 +92,8 @@ export interface TickerPushRecordStub {
   pauseTickerPush(): Promise<{ ok: true }>;
   resumeTickerPush(): Promise<{ ok: true }>;
   setTickerPushInterval(intervalSeconds: number): Promise<{ ok: true; intervalSeconds: number }>;
+  /** Issue #4389 — the row's Trigger Now: push once, now. */
+  triggerTickerPush(): Promise<{ ok: true }>;
 }
 
 /**

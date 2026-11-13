@@ -613,16 +613,18 @@ export async function handleSchedulesRoutes(
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
         if (scheduleId === TICKER_PUSH_RECORD_ID) {
-          // A live feed has no definition to delete: its record IS the feed's
-          // state, and the agent re-creates it on the next push. Pause is the
-          // honest equivalent, and the refusal says so.
-          return Response.json(
-            {
-              error:
-                "The ticker push is a live feed, not a stored schedule — pause it instead of deleting it.",
-            },
-            { status: 400 },
-          );
+          // Issue #4389 — Delete is every row's destructive control, and on a
+          // live feed it means the only destructive thing there is: stop it.
+          // The feed has no definition to remove (the agent rewrites its record
+          // on the next push), so the cancellation IS the deletion; the row's
+          // confirmation says so, and Resume brings it back.
+          await tickerPushStub().pauseTickerPush();
+          ctx.audit("schedule.cancelled", "orchestrator", {
+            scheduleId,
+            success: true,
+            callback: "pushTicks",
+          });
+          return Response.json({ scheduleId, cancelled: true });
         }
         const deleted = await deleteUnifiedSchedule({ store: unifiedStore(), alarms }, scheduleId);
         const cancelled = deleted.cancelled;
@@ -969,6 +971,21 @@ export async function handleSchedulesRoutes(
     if (path.includes("/schedules/") && request.method === "GET") {
       try {
         const scheduleId = path.split("/schedules/").pop() || "";
+        // Issue #4389 — the live feed's Details come from its own DO, like every
+        // other row's detail: one dialog, one path, no kind-specific gap.
+        if (scheduleId === TICKER_PUSH_RECORD_ID) {
+          const record = await tickerPushStub().getTickerPushRecord();
+          if (!record) {
+            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
+          }
+          return Response.json(
+            tickerPushRecordToListItem(
+              record,
+              Date.now(),
+              resolveTickerPushStaleAfterIntervals(ctx.env),
+            ),
+          );
+        }
         const detail = await getUnifiedScheduleDetail({ store: unifiedStore(), alarms }, scheduleId);
         if (!detail.ok) {
           return Response.json({ error: detail.error }, { status: detail.status });
@@ -1040,6 +1057,20 @@ export async function handleSchedulesRoutes(
         const scheduleId = subpathId(path);
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
+        }
+        // Issue #4389 — Trigger Now is every row's action: for the live feed it
+        // pushes to the connected clients once, now, through its own DO.
+        if (scheduleId === TICKER_PUSH_RECORD_ID) {
+          const feed = await tickerPushStub().getTickerPushRecord();
+          if (feed?.state === "paused") {
+            return Response.json(
+              { success: false, error: "The live feed is paused — resume it before triggering." },
+              { status: 409 },
+            );
+          }
+          await tickerPushStub().triggerTickerPush();
+          ctx.audit("schedule.triggered", "orchestrator", { scheduleId, callback: "pushTicks" });
+          return Response.json({ success: true, scheduleId, callback: "pushTicks" });
         }
         const result = await triggerUnifiedSchedule(
           { store: unifiedStore(), alarms },

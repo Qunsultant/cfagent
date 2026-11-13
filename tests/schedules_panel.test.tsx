@@ -44,7 +44,7 @@ const LIST_RESPONSE = {
       cron: "5 * * * *",
       paused: true,
     },
-    // Issue #2957: one-shot rows — these get Edit frequency too, and
+    // Issue #2957: one-shot rows — these get Edit too, and
     // picking a cadence converts them to recurring.
     {
       id: "job-delayed-3",
@@ -128,7 +128,7 @@ describe("SchedulesPanel (#273)", () => {
   it("offers the cadence editor presets for a recurring job in one dialog", async () => {
     await render();
     const editBtn = [...container.querySelectorAll("button")].find((b) =>
-      (b.textContent || "").includes("Edit frequency")
+      (b.textContent || "").trim() === "Edit"
     );
     expect(editBtn).toBeTruthy();
     await act(async () => {
@@ -144,10 +144,10 @@ describe("SchedulesPanel (#273)", () => {
     expect(modal.querySelector('input[placeholder*="cron" i]')).toBeTruthy();
   });
 
-  it("offers Edit frequency on every generic row, including one-shots (#2957)", async () => {
+  it("offers Edit on every generic row, including one-shots (#2957)", async () => {
     await render();
     const editBtns = [...container.querySelectorAll("button")].filter((b) =>
-      (b.textContent || "").includes("Edit frequency")
+      (b.textContent || "").trim() === "Edit"
     );
     // interval + cron + delayed + scheduled — no row is gated out.
     expect(editBtns).toHaveLength(4);
@@ -157,7 +157,7 @@ describe("SchedulesPanel (#273)", () => {
     await render();
     const delayedBtn = [...container.querySelectorAll("button")].find(
       (b) =>
-        (b.textContent || "").includes("Edit frequency") &&
+        (b.textContent || "").trim() === "Edit" &&
         b.closest("tr")?.textContent?.includes("job-delayed-3")
     );
     expect(delayedBtn).toBeTruthy();

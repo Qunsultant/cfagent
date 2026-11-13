@@ -9,6 +9,8 @@
  *
  *   SCHEDULE_LIST_FILTERS         comma-separated ids, in button order
  *   SCHEDULE_LIST_DEFAULT_FILTER  the filter the list opens with
+ *   SCHEDULE_LIST_STATUSES        the status buttons beside the kinds
+ *                                 (issue #4389: all, active, paused)
  *
  * Rules, applied in this order: "all" always leads and cannot be removed;
  * unknown ids are dropped; duplicates collapse; a blank or wholly-unknown
@@ -49,6 +51,57 @@ export const SCHEDULE_LIST_FILTER_LABELS: Record<ScheduleListFilter, string> = {
 
 export const SCHEDULE_LIST_FILTERS_ENV_VAR = "SCHEDULE_LIST_FILTERS";
 export const SCHEDULE_LIST_DEFAULT_FILTER_ENV_VAR = "SCHEDULE_LIST_DEFAULT_FILTER";
+
+/**
+ * Issue #4389 — the list's SECOND filter dimension: status. The owner asked
+ * for "paused and active buttons" beside the kinds; the two compose (Options +
+ * Paused), so status is its own vocabulary rather than four more kind ids.
+ * "all" leads, cannot be removed, and is the default.
+ */
+export const SCHEDULE_LIST_STATUS_IDS = ["all", "active", "paused"] as const;
+
+export type ScheduleListStatusFilter = (typeof SCHEDULE_LIST_STATUS_IDS)[number];
+
+export const SCHEDULE_LIST_STATUS_LABELS: Record<ScheduleListStatusFilter, string> = {
+  all: "All statuses",
+  active: "Active",
+  paused: "Paused",
+};
+
+export const SCHEDULE_LIST_STATUSES_ENV_VAR = "SCHEDULE_LIST_STATUSES";
+
+export const DEFAULT_SCHEDULE_LIST_STATUSES: readonly ScheduleListStatusFilter[] = [
+  ...SCHEDULE_LIST_STATUS_IDS,
+];
+
+export interface ScheduleListStatusEnv {
+  SCHEDULE_LIST_STATUSES?: string;
+}
+
+export function isScheduleListStatusFilter(
+  value: unknown,
+): value is ScheduleListStatusFilter {
+  return (
+    typeof value === "string" &&
+    (SCHEDULE_LIST_STATUS_IDS as readonly string[]).includes(value)
+  );
+}
+
+/** The status buttons the list shows; never empty, always "all" first. */
+export function resolveScheduleListStatusFilters(
+  env: ScheduleListStatusEnv = {},
+): ScheduleListStatusFilter[] {
+  const raw = env[SCHEDULE_LIST_STATUSES_ENV_VAR];
+  if (typeof raw !== "string") return [...DEFAULT_SCHEDULE_LIST_STATUSES];
+  const out: ScheduleListStatusFilter[] = [];
+  for (const part of raw.split(",")) {
+    const id = part.trim().toLowerCase();
+    if (!isScheduleListStatusFilter(id) || out.includes(id)) continue;
+    out.push(id);
+  }
+  if (out.length === 0) return [...DEFAULT_SCHEDULE_LIST_STATUSES];
+  return out.includes("all") ? out : ["all", ...out];
+}
 
 /** The built-in set: exactly the owner's ten filters, in the owner's order. */
 export const DEFAULT_SCHEDULE_LIST_FILTERS: readonly ScheduleListFilter[] = [

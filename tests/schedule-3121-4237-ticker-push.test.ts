@@ -424,12 +424,14 @@ describe("4237 list route appends the ticker row (best-effort)", () => {
 });
 
 describe("4237 Schedules home renders the ticker row (source pins)", () => {
-  it("the panel names the ticker row, shows its health, and hides feed actions", () => {
+  it("the panel names the ticker row and shows its health (#4237, #4389)", () => {
     const panel = source("src/client/SchedulesPanel.tsx");
     expect(panel).toContain("Ticker push");
     expect(panel).toContain("Missed push");
-    expect(panel).toContain("Live feed");
     expect(panel).toContain('s.kind === "ticker-push"');
+    // Issue #4389 supersedes the #4237 exception: the live feed now carries the
+    // same five controls as every row, so the badge that stood in for them is gone.
+    expect(panel).not.toContain("Live feed");
   });
 
   it("the client list item carries the ticker fields", () => {

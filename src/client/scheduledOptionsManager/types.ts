@@ -3,6 +3,13 @@ import type { TradeOrderContext } from "../trading/tradeOrderContext";
 export interface ScheduledTaskItem {
   id: string;
   type: "interval" | "cron" | "delayed" | "scheduled";
+  /**
+   * Issue #4389 — the unified kind the row carries (screen, workflow-stage,
+   * ticker-push, …). The cadence dialog reads it: a live feed runs on an
+   * interval and is offered no cron. Absent on legacy rows, which read as a
+   * cron-capable schedule (the pre-#4389 behaviour).
+   */
+  kind?: string;
   callback: string;
   payload?: any;
   intervalSeconds?: number;

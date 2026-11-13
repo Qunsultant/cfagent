@@ -129,9 +129,14 @@ describe("4331-P05 one list on the page", () => {
   it("the hosted section is off and its Edit flow is reached from the row", () => {
     expect(panel).toContain("showSchedulesSection={false}");
     expect(panel).toContain("editRequest={editRequest ?? undefined}");
-    expect(panel).toContain("title=\"Edit this screening schedule\"");
-    // The screening row's cadence lives in the manager's form, not the generic dialog.
-    expect(panel).toContain("{!SCREENING_CALLBACKS.has(s.callback) && (");
+    // Issue #4389 — one Edit control for every kind; the screening branch
+    // still raises the manager's edit request.
+    expect(panel).toContain("? \"Edit this schedule\"");
+    expect(panel).toContain("setEditRequest({ scheduleId: s.id, nonce: Date.now() })");
+    // Issue #4389 — one Edit control for every kind; the screening branch is
+    // the row's own editor (its cadence lives in the manager's form), and the
+    // generic rows open the cadence dialog through the same control.
+    expect(panel).toContain("if (SCREENING_CALLBACKS.has(s.callback)) {");
     expect(manager).toContain("editRequest,");
     expect(manager).toContain("handleEditSchedule(item)");
   });
