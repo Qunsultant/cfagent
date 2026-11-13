@@ -17,6 +17,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
 import { Notice } from "./components/ui/Notice";
+import { apiFetch } from "./apiFetch";
 import {
   fetchUsageBilling,
   UsageBillingApiError,
@@ -45,6 +46,55 @@ function provenanceLabel(provenance: UsageBillingProvenance): string {
 function errorMessage(error: unknown): string {
   if (error instanceof UsageBillingApiError) return error.message;
   return "Your usage and billing could not be loaded. Try again later.";
+}
+
+interface FreeAccessGrantLineView {
+  kind: "lifetime" | "limited";
+  expiresAtMs: number | null;
+}
+
+function isFreeAccessGrantLineView(value: unknown): value is FreeAccessGrantLineView {
+  if (typeof value !== "object" || value === null) return false;
+  const grant = value as Record<string, unknown>;
+  return (
+    (grant.kind === "lifetime" || grant.kind === "limited") &&
+    (grant.expiresAtMs === null || typeof grant.expiresAtMs === "number")
+  );
+}
+
+/**
+ * Free-access line (issue #3247 §4.2): the caller's own active
+ * grant, read through the own-or-operator GET route. Renders only
+ * when a grant exists; a null grant or a failed read renders
+ * nothing, so ungranted users see no change. Access only — the
+ * line links nowhere and offers no action.
+ */
+function FreeAccessLine({ userLogin }: { userLogin: string }) {
+  const [grant, setGrant] = useState<FreeAccessGrantLineView | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch(
+          `/api/payments/agentic/commercial/free-access?userId=${encodeURIComponent(userLogin)}`,
+        );
+        if (!res.ok) return;
+        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        if (!cancelled && isFreeAccessGrantLineView(data.active)) {
+          setGrant(data.active);
+        }
+      } catch {
+        // A failed read renders nothing — the billing section loads on.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userLogin]);
+  if (!grant) return null;
+  if (grant.kind === "lifetime") return <p>Free access: lifetime.</p>;
+  if (grant.expiresAtMs === null) return null;
+  return <p>Free access until {day(grant.expiresAtMs)}.</p>;
 }
 
 export function UsageBillingSection() {
@@ -136,6 +186,7 @@ export function UsageBillingSection() {
           ))}
           <p>Redeemable: {usd(view.billing.referral.redeemableUSD)}</p>
           <p>Total earned: {usd(view.billing.referral.totalEarnedUSD)}</p>
+          <FreeAccessLine userLogin={view.userLogin} />
           <Button onClick={load}>Refresh</Button>
         </>
       )}

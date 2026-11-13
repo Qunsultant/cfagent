@@ -46,6 +46,7 @@ import {
 import { apiFetch } from "./apiFetch";
 import { SubscriptionGrantSection } from "./SubscriptionGrantSection";
 import { UnlimitedFreeGrantSection } from "./UnlimitedFreeGrantSection";
+import { FreeAccessGrantSection } from "./FreeAccessGrantSection";
 import { AccountVersionMoveSection } from "./AccountVersionMoveSection";
 
 export interface AccountIdentityView {
@@ -452,6 +453,11 @@ export function AccountAdminPanel() {
                 looked-up account through the commercial account
                 route itself. */}
             <UnlimitedFreeGrantSection userId={lookup.identity.userLogin} />
+            {/* Issue #3247: free-access grant, directly after the
+                unlimited-free grant section. The section reads/writes
+                the looked-up account's grant through the free-access
+                routes itself. */}
+            <FreeAccessGrantSection userId={lookup.identity.userLogin} />
             {/* Issue #3289 slice 2: per-customer version move +
                 segment assignment, beside the grant section. The
                 section reads the looked-up account's segment and

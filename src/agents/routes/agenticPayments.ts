@@ -5248,6 +5248,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
     const quota = createApprovedFreeQuotaAdapter(env);
     const referral = createLifecycleAdapter(env);
     const runsPackAdapters = createRunsPackAdapters(env);
+    const freeAccess = createFreeAccessGrantAdapter(env);
     if (store) await ensureCommercialSchema(store.db);
     if (subs) await ensureSubscriptionSchema(subs.db);
     if (catalogue) await ensurePriceCatalogueSchema(catalogue.db);
@@ -5257,6 +5258,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
     if (quota) await quota.ensureSchema();
     if (referral) await ensureLifecycleSchema(referral.db);
     if (runsPackAdapters) await ensureRunsPackSchema(runsPackAdapters.balance.db);
+    if (freeAccess) await ensureFreeAccessGrantSchema(freeAccess.db);
     return {
       store,
       subs,
@@ -5267,6 +5269,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       freeRunCounter,
       quota,
       referral,
+      freeAccess,
       runsPack: runsPackAdapters
         ? { versions: runsPackAdapters.versions, balance: runsPackAdapters.balance }
         : null,
