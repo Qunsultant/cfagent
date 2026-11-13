@@ -215,7 +215,7 @@ describe("resolveScreenSelection — fail closed, no defaults", () => {
     if (result.resolved) return;
     expect(result.code).toBe("CONNECTION_NOT_BOUND");
     expect(result.error).toContain("no stored credential for this login");
-    expect(result.error).toContain("the deployment declares no Alpaca key pair for paper");
+    expect(result.error).toContain("the deployment declares no key pair for paper");
   });
 
   it("refuses CONNECTION_NOT_BOUND when no credential exists for the selection", async () => {
