@@ -999,8 +999,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/data/ivHistoryPorts.ts", "alpaca", 3],
   ["src/data/ivHistoryPorts.ts", "etrade", 6],
   ["src/data/jobPipelinePorts.ts", "yahoo", 1],
+  // #4282 P1: the runner's etrade count drops 7 -> 4 — the 3 SQL lines
+  // (v19 agent_tenant_settings data_provider_id/broker_id and v45
+  // agent_iv_history broker, all DEFAULT 'etrade') moved to the D1
+  // catalogue; the 4 remaining lines are comments. The catalogue row
+  // at the end of this baseline carries the moved lines.
   ["src/data/migrationRunner.ts", "alpaca", 1],
-  ["src/data/migrationRunner.ts", "etrade", 7],
+  ["src/data/migrationRunner.ts", "etrade", 4],
   ["src/data/ormFacade.ts", "etrade", 5],
   ["src/data/ormSchema.ts", "etrade", 1],
   ["src/data/providerConfigPorts.ts", "alpaca", 3],
@@ -1754,6 +1759,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agentic/unitDrivers.ts", "alpaca", 1],
   ["src/agentic/unitDrivers.ts", "yahoo", 1],
   ["src/agentic/unitDrivers.ts", "nasdaq", 1],
+  // #4282 P1 INTEGRATION: the D1 catalogue carries the 3 moved
+  // DEFAULT 'etrade' lines (v19 agent_tenant_settings
+  // data_provider_id + broker_id, v45 agent_iv_history broker).
+  // They are data-bearing migration defaults, reproduced
+  // byte-identically from the runner; neutralizing them would
+  // falsify the migrations.
+  ["src/data/schemaComponent/d1Catalogue.ts", "etrade", 3],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
