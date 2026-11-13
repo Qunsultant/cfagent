@@ -318,6 +318,9 @@ describe("goal compiler (#1441) — waves and planner prompt on the existing pat
     // for the feed-refresh goal (`feed.refresh_all`, dispatched by
     // ScheduledAgent.onCron through the J2 feed jobs) — same
     // precedent.
+    // #4306 S2 removes that entry with the goal: feed datasets are
+    // produced by the per-job Think scheduled tasks, and the
+    // `feed.refresh_all` operation is refused by addGoal.
     expect(OPERATION_CATALOG.map((e) => e.agent)).toEqual([
       "search",
       "payments",
@@ -330,7 +333,6 @@ describe("goal compiler (#1441) — waves and planner prompt on the existing pat
       "social",
       "resource",
       "index",
-      "feed",
     ]);
   });
 });
