@@ -1284,7 +1284,7 @@ export function RunDetail({
                 header: "Actions",
                 render: (stage: WorkflowRunStage) =>
                   stage.engineJobId ? (
-                    <div className="workflow-runs-workflow">
+                    <>
                       <Button
                         variant="secondary"
                         size="sm"
@@ -1312,7 +1312,7 @@ export function RunDetail({
                       >
                         Resume
                       </Button>
-                    </div>
+                    </>
                   ) : null,
               },
               {
