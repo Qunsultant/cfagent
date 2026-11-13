@@ -241,6 +241,23 @@ export interface StageUnitCheckpoint {
   /** When the newest row for this (stage, unit) was written; absent on never-attempted. */
   updatedAt?: string;
   /**
+   * Issue #4359 — when this unit first started in the run, stamped by
+   * the engine at the running transition. A retry never rewinds it:
+   * the stamp is the unit's first start in this run, so end − start is
+   * the wall clock the run spent on the unit, backoff included. Absent
+   * on a unit that never started (a stage cancelled or retired before
+   * it ran, or a planned unit with no row yet).
+   */
+  startedAt?: string;
+  /**
+   * Issue #4359 — when this unit reached a terminal state (completed,
+   * failed, timed_out, cancelled, retired), stamped by the engine at
+   * that transition. Absent while the unit is queued, running, stopped
+   * (stopped is resumable, not terminal) or never attempted. Duration
+   * is derived from these two stamps, never estimated by a surface.
+   */
+  endedAt?: string;
+  /**
    * Intra-unit resume position, for units whose execution is
    * itself stepped (#3549): the step/item indices a resume
    * continues from. Absent = the unit is atomic from the

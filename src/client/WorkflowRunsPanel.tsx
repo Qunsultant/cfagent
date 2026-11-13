@@ -1233,7 +1233,13 @@ export function RunDetail({ run }: { run: WorkflowRun }) {
                 header: "Recorded",
                 render: (stage: WorkflowRunStage) => (
                   <span className="workflow-runs-muted">
-                    {stage.recordedBy === "job" ? (stage.jobKind ? `${stage.jobKind} job` : "Job") : "Stage record"}
+                    {stage.recordedBy === "job"
+                      ? stage.jobKind
+                        ? `${stage.jobKind} job`
+                        : "Job"
+                      : stage.recordedBy === "engine-checkpoint"
+                        ? "Engine stage"
+                        : "Stage record"}
                   </span>
                 ),
               },

@@ -13,6 +13,7 @@ of record:
 | Source | Grain | What it contributes |
 | --- | --- | --- |
 | `mas_async_jobs` (Durable Object SQLite) | one job = one stage; jobs sharing `chain_id` (or a parent) = one run | ordered stages, per-stage status/timing, payload inputs, `result_json` outputs, `error`, job kind, channel, chain/parent identity |
+| The engine's stage checkpoint (`job_pipeline_instances.stage_checkpoint_json`, read through the ScheduledAgent's job-status surface) | one engine job = its own definition's stages (a screener job: feed · enrich · analyze · store · serve · deliver) | the run's **real** stages while it runs and after it settles: per-stage status from the recorded unit states, and per-stage start/end/duration from the stamps the engine writes at each unit's start and terminal transition (#4359) |
 | `mas_screening_activity`, `kind = "stage"` | one stage transition | the terminal state of a stage — including **skipped** and **held** — with its reason, attached to the job stage it describes or shown as its own `stage-transition` row |
 | `mas_job_outcomes` | one run outcome | the recorded trigger, scan counts, coded error, artifact keys, per-channel delivery states, producer origin |
 
@@ -51,6 +52,11 @@ a label: a run whose stores record no trigger renders **Not recorded**.
   recorded" or "—", never invented.
 - A run with no stage records says so; stages are never inferred from a
   family or a title.
+- Stage timing is **recorded, never inferred** (#4359): the engine stamps a
+  unit's `startedAt` when it starts and `endedAt` on its terminal transition,
+  and the surface subtracts them. A stage with no stamps shows no times. A
+  checkpoint that belongs to another run is never projected onto this run's
+  row; the row keeps an honest empty stage list instead.
 - Inputs and outputs are **summaries**: only whitelisted fields are
   surfaced, secret-shaped keys are redacted, long strings are clipped,
   and arrays/objects are bounded. Raw payloads and `result_json` never

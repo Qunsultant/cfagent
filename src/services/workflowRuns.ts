@@ -68,6 +68,11 @@ import type { ScanRunSummary } from "../trading";
 // (mas_opportunity_scans) merge the same way through runFromScanRun.
 import { d1JobRunRecordId } from "./jobRunRecordReads";
 import type { JobRunRecord } from "./jobRunRecords";
+// Issue #4359 — the run's stages come from the engine's own checkpoint
+// read (getJob's stage views), projected here once; the stage-status
+// roll-up is the chain surface's (one rule, not a second copy).
+import type { JobStageView } from "./jobPipelineEngine";
+import { aggregateStageStatus } from "./chainPipelineJobs";
 
 export type WorkflowRunTrigger = "manual" | "scheduled" | "autonomous" | "webhook" | "agent" | "unknown";
 
@@ -110,7 +115,7 @@ export interface WorkflowRunStage {
   label: string;
   status: string;
   /** Where this stage row came from — an async job, a recorded stage transition, or a unified run record. */
-  recordedBy: "job" | "stage-transition" | "unified-record";
+  recordedBy: "job" | "stage-transition" | "unified-record" | "engine-checkpoint";
   startedAt: string | null;
   finishedAt: string | null;
   durationMs: number | null;
@@ -372,6 +377,13 @@ export interface UnifiedWorkflowRunRecord {
 }
 
 export interface BuildWorkflowRunsInput {
+  /**
+   * Issue #4359 — engine stage views by the job id they belong to (the
+   * run's engine job, read once per page). A group uses the first entry
+   * that names any of its jobs; a group with none keeps today's
+   * job-row projection.
+   */
+  engineStages?: ReadonlyMap<string, JobStageView[]>;
   jobs: WorkflowRunJobRow[];
   outcomes: WorkflowRunOutcomeRow[];
   transitions: WorkflowRunStageTransition[];
@@ -1056,6 +1068,52 @@ function stageRowsForGroup(
   return stages;
 }
 
+/**
+ * Issue #4359 — the engine's stage views as Workflow Runs stage rows.
+ *
+ * One projection, in the definition's order: the status is the units'
+ * recorded roll-up (the chain surface's rule), the times are the stamps
+ * the engine wrote at the unit's start and terminal transition, and the
+ * duration is their difference. A stage with no stamps keeps null times
+ * — this projection never invents a clock. Nothing here is a second
+ * stage-read mechanism: the views come from the job-status surface.
+ */
+export function stagesFromEngineViews(views: JobStageView[]): WorkflowRunStage[] {
+  const statusFor: Record<string, string> = {
+    completed: "completed",
+    failed: "failed",
+    running: "running",
+    stopped: "stopped",
+    cancelled: "cancelled",
+    pending: "pending",
+    "not-run": "pending",
+  };
+  return views.map((view, index) => {
+    const aggregate = aggregateStageStatus([view]);
+    const status = statusFor[aggregate.status] ?? "pending";
+    const stage = view.kind ?? view.nodePath ?? view.stageId;
+    return {
+      key: view.stageId,
+      order: index + 1,
+      stage,
+      label: stageLabel(view.kind, ""),
+      status,
+      recordedBy: "engine-checkpoint",
+      startedAt: view.startedAt,
+      finishedAt: view.endedAt,
+      durationMs: view.durationMs,
+      detail: view.nodePath || null,
+      reason: aggregate.error,
+      error: status === "failed" ? aggregate.error : null,
+      capability: null,
+      jobKind: null,
+      channel: null,
+      input: null,
+      output: null,
+    };
+  });
+}
+
 function outcomeMatchesGroup(outcomeId: string, jobIds: Set<string>): boolean {
   if (jobIds.has(outcomeId)) return true;
   const workflowPrefix = outcomeId.match(/^workflow:([^:]+):/);
@@ -1174,10 +1232,19 @@ export function runFromJobs(
   transitions: WorkflowRunStageTransition[],
   outcome?: WorkflowRunOutcomeRow,
   nowMs: number = Date.now(),
+  /**
+   * Issue #4359 — the engine's own stage views for this group, when the
+   * run is an engine run. Present and non-empty = the checkpoint is the
+   * run's stage truth; absent/empty = today's job-row projection.
+   */
+  engineStages?: JobStageView[] | null,
 ): WorkflowRun {
   const main = mainJobOf(jobs);
   const family = workflowFamilyForJobs(jobs, outcome);
-  const stages = stageRowsForGroup(jobs, transitions);
+  const stages =
+    engineStages && engineStages.length > 0
+      ? stagesFromEngineViews(engineStages)
+      : stageRowsForGroup(jobs, transitions);
   // Real trigger evidence wins; an "unknown" API-channel evidence is
   // the fallback, never a mask over a job that recorded a real one.
   const evidences = jobs.map(triggerEvidence);
@@ -1592,7 +1659,16 @@ export function runFromReportDocument(input: {
  * user. Lifecycle comes from the recorded outcome verb — a terminal
  * outcome is done.
  */
-export function runFromJobRunRecord(record: JobRunRecord): WorkflowRun {
+export function runFromJobRunRecord(
+  record: JobRunRecord,
+  /**
+   * Issue #4359 — the engine's stage views for THIS run (the caller
+   * matched the checkpoint's run id to the record's workflowId). Absent
+   * = the record carries no stage evidence, and the row says so.
+   */
+  engineStages?: JobStageView[] | null,
+): WorkflowRun {
+  const stages = engineStages && engineStages.length > 0 ? stagesFromEngineViews(engineStages) : [];
   const status: WorkflowRunStatus =
     record.outcome === "success"
       ? "completed"
@@ -1620,7 +1696,7 @@ export function runFromJobRunRecord(record: JobRunRecord): WorkflowRun {
             : "Not recorded by the source",
     triggeredBy: record.triggeredBy ?? null,
     status,
-    lifecycle: lifecycleStateForRun({ status, stages: [] }),
+    lifecycle: lifecycleStateForRun({ status, stages }),
     schedule: scheduleProvenanceForTrigger(trigger),
     startedAt: record.started,
     finishedAt: record.finished,
@@ -1628,10 +1704,10 @@ export function runFromJobRunRecord(record: JobRunRecord): WorkflowRun {
       Number.isFinite(startedMs) && Number.isFinite(finishedMs)
         ? Math.max(0, finishedMs - startedMs)
         : null,
-    stageCount: 0,
-    completedStages: 0,
-    failedStages: 0,
-    stages: [],
+    stageCount: stages.length,
+    completedStages: stages.filter((s) => s.status === "completed").length,
+    failedStages: stages.filter((s) => s.status === "failed").length,
+    stages,
     inputs: {},
     outputs: { status },
     artifacts: [],
@@ -1960,11 +2036,31 @@ function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boole
     transitionsByRun.set(key, list);
   }
 
+  // Issue #4359 — a group's engine stages are keyed by the job id that
+  // owns them; the first job in the group with views wins (a wrapper
+  // group carries the bridge child that dispatched the engine run).
+  const engineStagesFor = (groupJobs: WorkflowRunJobRow[]): JobStageView[] | undefined => {
+    if (!input.engineStages || input.engineStages.size === 0) return undefined;
+    for (const job of groupJobs) {
+      const views = input.engineStages.get(job.job_id);
+      if (views && views.length > 0) return views;
+    }
+    return undefined;
+  };
+
   const runs: WorkflowRun[] = [];
   for (const [key, group] of groups) {
     const jobIds = new Set(group.jobs.map((j) => j.job_id));
     const outcome = input.outcomes.find((o) => outcomeMatchesGroup(o.id, jobIds));
-    runs.push(runFromJobs(group.jobs, transitionsByRun.get(key) ?? [], outcome, nowMs));
+    runs.push(
+      runFromJobs(
+        group.jobs,
+        transitionsByRun.get(key) ?? [],
+        outcome,
+        nowMs,
+        engineStagesFor(group.jobs),
+      ),
+    );
   }
 
   for (const outcome of input.outcomes) {
