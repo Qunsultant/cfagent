@@ -36,6 +36,16 @@
  * stops the run: the step throws, the engine marks the stage and the run
  * failed, and the wrapper maps the holder's failed record onto the
  * outcome's failedStage + reason.
+ *
+ * Issue #4276: the three-way comparison ALSO dispatches through this
+ * module, as a single-step engine job (`comparison:<runId>`, one
+ * `comparison.run` root step, no children — the comparison core is
+ * one indivisible thunk, not an eight-stage pipeline). The wrapper
+ * returns the core's result verbatim and rethrows the core's error
+ * verbatim, so the engine record is pure observability: the job
+ * definition + run record make the comparison visible in Workflow
+ * Runs and addressable by control (which refuses stage ops on it by
+ * name — there are no stages to drive).
  */
 import type { SqlStorage } from "../orm";
 import {
@@ -76,6 +86,7 @@ import {
 import type { StageMessage } from "./stageMessage";
 import { OPTIONS_PIPELINE_STAGES, type OptionsPipelineStage } from "./stageRuntimeIds";
 import type { PanelDiscoveryResult } from "../services/recommendationKernel";
+import type { ProductionComparisonResult } from "../services/comparisonRunner";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import type { EtapiScreenerConfig } from "../config/etapiConfig";
 import type { OptionScreenFetchError, OptionScreenResult, OptionScreenerFilter } from "../types";
@@ -223,6 +234,48 @@ export function optionsScreenJobDefinition(jobId: string, request?: unknown): Re
   };
 }
 
+/** The engine job id prefix: one job per comparison run (see the module doc). */
+export const COMPARISON_JOB_ID_PREFIX = "comparison";
+
+/** The step name the comparison job's root references. */
+export const COMPARISON_STEP = "comparison.run";
+
+/**
+ * The comparison job definition, as raw configuration for
+ * JobPipelineControl.defineJob: a root-only tree — the root carries
+ * the single `comparison.run` step and there are no children. The
+ * comparison core (runProductionComparison) is one indivisible thunk
+ * (three arms over one snapshot, one ledger write), not a staged
+ * pipeline, so there is no stage tree to define; the engine record
+ * exists for observability and control addressability, and the step
+ * executes the thunk verbatim. Sequential + batch + sync + monolith,
+ * as the screen jobs. The dispatch request rides the raw config
+ * exactly as the screen jobs' does (classInput.comparisonRequest),
+ * so control can decode the run's shape from the stored definition.
+ */
+export function comparisonJobDefinition(jobId: string, request?: unknown): Record<string, unknown> {
+  return {
+    jobId,
+    name: `Comparison ${jobId}`,
+    ...(request !== undefined ? { request } : {}),
+    root: {
+      kind: "comparison",
+      steps: [{ step: COMPARISON_STEP }],
+      executionMode: {
+        concurrency: "sequential",
+        pacing: "batch",
+        delivery: "sync",
+        shape: "monolith",
+      },
+    },
+  };
+}
+
+/** The engine job id for one comparison run. */
+export function comparisonJobId(runId: string): string {
+  return `${COMPARISON_JOB_ID_PREFIX}:${runId}`;
+}
+
 /** The engine stores + run recorder one dispatch runs over. */
 export interface OptionsEngineStores {
   stores: JobPipelineStores;
@@ -330,6 +383,46 @@ export function registerOptionsScreenStep(
     return {
       output: { stageId, artifactKeys: result.nextArtifactKeys },
       descriptor: `options stage ${stageId} ${result.record.status}`,
+    };
+  });
+  return registry;
+}
+
+/**
+ * What the `comparison.run` step closes over: the run's identity, the
+ * thunk that executes the comparison core, and the per-dispatch
+ * holder the wrapper reads the outcome from.
+ */
+export interface ComparisonStepDeps {
+  runId: string;
+  execute: () => Promise<ProductionComparisonResult>;
+  /** The thunk's result or error, captured before the step returns /
+   *  throws so the wrapper can return / rethrow it verbatim. */
+  holder: { result?: ProductionComparisonResult; error?: unknown };
+}
+
+/**
+ * Register the `comparison.run` step on a registry: one step, the
+ * whole comparison. The step runs the thunk, captures the result in
+ * the holder, and returns the run id as the hand-off; on failure it
+ * captures the error and rethrows it, so the engine marks the run
+ * failed and the wrapper rethrows the original error.
+ */
+export function registerComparisonStep(
+  registry: JobStepRegistry,
+  deps: ComparisonStepDeps,
+): JobStepRegistry {
+  registry.register(COMPARISON_STEP, async () => {
+    try {
+      const result = await deps.execute();
+      deps.holder.result = result;
+    } catch (error) {
+      deps.holder.error = error;
+      throw error;
+    }
+    return {
+      output: { runId: deps.runId },
+      descriptor: `comparison run ${deps.runId}`,
     };
   });
   return registry;
@@ -839,5 +932,57 @@ export async function runStrategyScreenViaEngine(
     deps,
     jobId,
     strategyScreenJobDefinition(jobId, params.request),
+  );
+}
+
+/**
+ * Issue #4276 — route one three-way comparison through the J engine:
+ * define the per-run comparison job, dispatch it synchronously, and
+ * return the core's result verbatim. The engine record (definition +
+ * run) is observability: the comparison is visible as its own job in
+ * Workflow Runs, and control addresses it by run id (refusing stage
+ * ops by name — a single-step job has no stages). A thunk failure
+ * rethrows the ORIGINAL error verbatim (never a wrapped engine
+ * failure), so callers see the core's failure exactly as the direct
+ * path surfaces it. Without engine stores the dispatch runs over
+ * explicitly constructed in-memory stores (the #4069 accepted-absent
+ * discipline) — the run completes, with no durable record.
+ */
+export async function runComparisonViaEngine(
+  params: {
+    runId: string;
+    request: unknown;
+    engineStores?: OptionsEngineStores | null;
+  },
+  execute: () => Promise<ProductionComparisonResult>,
+): Promise<ProductionComparisonResult> {
+  const engineStores = params.engineStores ?? optionsEngineStoresInMemory();
+  const holder: ComparisonStepDeps["holder"] = {};
+  const registry = registerComparisonStep(createBuiltinStepRegistry(), {
+    runId: params.runId,
+    execute,
+    holder,
+  });
+  const control = new JobPipelineControl({
+    stores: engineStores.stores,
+    runRecorder: engineStores.runRecorder,
+    publisher: null,
+    steps: registry,
+    invocation: "sync",
+  });
+  const jobId = comparisonJobId(params.runId);
+  // The dispatch request rides the job definition's rawConfig
+  // (persisted by defineJob) so a later control action can decode
+  // this run's shape from the stored definition.
+  await control.defineJob(comparisonJobDefinition(jobId, params.request));
+  const dispatch = await control.runJob(jobId, { trigger: "manual" });
+  if (dispatch.state === "completed" && holder.result !== undefined) {
+    return holder.result;
+  }
+  if (holder.error !== undefined) {
+    throw holder.error;
+  }
+  throw new Error(
+    `comparison run ${params.runId} ended ${dispatch.state} without a result`,
   );
 }

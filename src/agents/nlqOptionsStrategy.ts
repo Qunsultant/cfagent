@@ -765,6 +765,13 @@ async function runComparisonAction(
     request: request as StrategyRequest,
     riskProfile: filters.riskProfile,
     strategyFilter: filters.strategyFilter,
+    // Issue #4276: a SQL handle records the comparison run durably
+    // in the host DO (the #4066 pattern), so a later per-stage
+    // control action can address it; absent, in-memory stores
+    // (the #4069 accepted-absent discipline).
+    ...(deps.engineSql
+      ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
+      : {}),
   });
   if (!outcome.ok || !outcome.result) {
     return fail(outcome.error ?? "Comparison failed.");
@@ -1161,6 +1168,13 @@ async function runDiscoveryAction(
       minRewardRisk: filters?.request?.minRewardRisk ?? 1.5,
     },
     userLogin,
+    // Issue #4276: a SQL handle records the discovery run's panel
+    // expressions durably in the host DO (the #4066 pattern), so a
+    // later per-stage control action can address them; absent,
+    // in-memory stores (the #4069 accepted-absent discipline).
+    ...(deps.engineSql
+      ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
+      : {}),
   });
   return {
     count: outcome.run.counts.setups,
