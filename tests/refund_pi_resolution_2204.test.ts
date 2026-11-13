@@ -29,6 +29,7 @@ import {
   InMemoryRefundAdapter,
   InMemoryRefundPolicyAdapter,
 } from "../src/data/inMemoryRefundAdapter";
+import type { RefundPaymentSourceResolver } from "../src/data/refundPorts";
 import {
   decideRefund,
   executeRefund,
@@ -104,15 +105,27 @@ async function approvedPayPerRunRecord(opts: {
   const policy = new InMemoryRefundPolicyAdapter();
   await policy.setKindApproval("pay_per_run", true, "op1");
   const store = new InMemoryRefundAdapter();
+  // Issue #3180: the tenant comes from the resolved source, never
+  // from request input — the stub source carries it here.
+  const stubSource: RefundPaymentSourceResolver = {
+    resolve: async () => ({
+      paymentIntentId: null,
+      rail: "card",
+      originalAmountUSD: null,
+      originalPaidAtMs: null,
+      userId: "u1",
+      tenantId: opts.tenantId ?? TENANT,
+      subscriptionId: null,
+    }),
+  };
   const record = await requestRefund(
-    { policyStore: policy, refundStore: store },
+    { policyStore: policy, refundStore: store, sourceResolver: stubSource },
     {
       kind: "pay_per_run",
       originalPaymentRef: opts.originalPaymentRef ?? RUN,
       amountUSD: 0.1,
       originalAmountUSD: 0.1,
       originalPaidAtMs: Date.now() - 1000,
-      tenantId: opts.tenantId ?? TENANT,
       rail: "card",
       reason: "run failed",
       requesterLogin: "u1",

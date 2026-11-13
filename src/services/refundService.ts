@@ -24,6 +24,10 @@
  *   the PI resolves through the resolver seam (pay-per-run half:
  *   createPayPerRunPaymentResolver over the native ledger), and
  *   a run whose PI still does not resolve fails closed there.
+ *   Tenant is source-only (#3180): the record's tenant comes
+ *   from the resolved payment source, and a request whose source
+ *   carries no tenant is refused with a typed error — no
+ *   client-supplied tenant is ever read.
  * - decide: "requested" -> "approved" | "denied" only. The service
  *   records the approver; the route restricts approvers to the
  *   operator list (policy approver is operator_hitl only).
@@ -140,11 +144,26 @@ export interface RequestRefundInput {
   reason: unknown;
   requesterLogin: string;
   isOperator: boolean;
-  tenantId?: unknown;
   originalAmountUSD?: unknown;
   originalPaidAtMs?: unknown;
   rail?: unknown;
   family?: unknown;
+}
+
+/**
+ * Issue #3180: the refund tenant could not be derived from the
+ * resolved payment source. The request is refused — no record is
+ * created, and no client-supplied tenant is ever trusted as a
+ * fallback. The route maps this to 400 via the "required" text.
+ */
+export class RefundTenantUnresolvableError extends Error {
+  constructor() {
+    super(
+      "tenantId is required: the refund tenant could not be derived " +
+        "from the resolved payment source; the refund is refused rather than recorded under a supplied tenant.",
+    );
+    this.name = "RefundTenantUnresolvableError";
+  }
 }
 
 export async function requestRefund(
@@ -199,6 +218,15 @@ export async function requestRefund(
         `Subscription ${source.subscriptionId ?? originalPaymentRef} has no determinable payment rail; the refund is refused rather than guessed.`,
       );
     }
+  } else if (deps.sourceResolver) {
+    // Issue #3180: a pay-per-run request resolves its payment
+    // source when the caller wires a resolver — the saga presents
+    // its verified payment context through this seam. The route
+    // wires no resolver for pay-per-run, so a route request has
+    // no source and fails closed at the tenant check below. The
+    // resolver consult feeds tenant derivation only; rail and
+    // amounts still come from the request input as before.
+    source = await deps.sourceResolver.resolve(originalPaymentRef);
   }
 
   const rail =
@@ -209,10 +237,13 @@ export async function requestRefund(
         : (() => {
             throw new Error("rail is required for pay-per-run refunds (card, crypto, or cfpay-channel).");
           })();
-  const tenantId =
-    source?.tenantId ??
-    (typeof input.tenantId === "string" && input.tenantId.trim() ? input.tenantId.trim() : null);
-  if (!tenantId) throw new Error("tenantId is required.");
+  // Issue #3180: the refund tenant comes from the resolved
+  // payment source only. There is no client-supplied fallback:
+  // when the source carries no tenant (or no source resolves),
+  // the request is refused with a typed error before any record
+  // is created, instead of trusting request input.
+  const tenantId = source?.tenantId && source.tenantId.trim() ? source.tenantId.trim() : null;
+  if (!tenantId) throw new RefundTenantUnresolvableError();
   const originalAmountUSD = source?.originalAmountUSD ?? Number(input.originalAmountUSD);
   const originalPaidAtMs = source?.originalPaidAtMs ?? Number(input.originalPaidAtMs);
   if (!Number.isFinite(originalAmountUSD) || originalAmountUSD <= 0) {
