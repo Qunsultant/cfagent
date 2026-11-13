@@ -79,7 +79,7 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("authenticated GET lists all 9 built-ins with their canonical values", async () => {
+  it("authenticated GET lists all 8 built-ins with their canonical values", async () => {
     const { env } = makeEnv();
     const res = await worker.fetch(req("GET", "/api/schedule/builtin-goals", undefined, SESSION_ID), env);
     expect(res.status).toBe(200);
@@ -96,9 +96,9 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
       }[];
     };
     expect(body.ok).toBe(true);
-    expect(body.goals).toHaveLength(9);
+    expect(body.goals).toHaveLength(8);
     const byId = new Map(body.goals.map((g) => [g.id, g]));
-    expect(new Set(body.goals.map((g) => g.id)).size).toBe(9);
+    expect(new Set(body.goals.map((g) => g.id)).size).toBe(8);
     expect(byId.get("daily-qa-sweep")).toMatchObject({
       name: "Daily QA sweep",
       cron: "0 6 * * *",
@@ -155,14 +155,6 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
       enabled: false,
       timeZone: "UTC",
     });
-    expect(byId.get("feed-refresh")).toMatchObject({
-      name: "Feed refresh (all feed jobs)",
-      cron: "0 * * * *",
-      operation: "feed.refresh_all",
-      budgetCents: 1,
-      enabled: true,
-      timeZone: "UTC",
-    });
     // DEFAULT_SCHEDULES order is the seed order.
     expect(body.goals.map((g) => g.id)).toEqual([
       "daily-qa-sweep",
@@ -173,7 +165,6 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
       "resource-dashboard-comparison",
       "index-refresh-wikipedia",
       "index-refresh-holdings",
-      "feed-refresh",
     ]);
   });
 });
