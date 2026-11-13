@@ -1,0 +1,3 @@
+### Fixed
+
+- **Schedules can be created again on a deployment-key connection (#4329 S6, #4348):** creating an account-scoped schedule failed with `CONNECTION_NOT_BOUND: no credential: connection alpaca:TEST:<login> has no stored credential for this login` even though the account is connected, because the binding check asked only the per-user credential store. A connection is now bound by either the login's own pair or the deployment's pair for that side — the precedence `resolveAlpacaPair` already defines for every read and every order — and the refusal names both sources when neither holds a pair. Broker-neutral: E*TRADE keeps its single (OAuth) source, and no default broker or account is introduced. #autoclaw-001
