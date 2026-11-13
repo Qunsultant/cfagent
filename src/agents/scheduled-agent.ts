@@ -30,7 +30,6 @@ import {
 } from "../agentic/chainFiring";
 import {
   DEFAULT_SCHEDULES,
-  FEED_REFRESH_OPERATION,
   type ScheduledGoal,
   type ScheduleTick,
 } from "../schedule";
@@ -101,7 +100,6 @@ import {
   dispatchDeliverAfterGenerateCompletion,
   dispatchEnrichAfterFeedCompletion,
   dispatchGenerateAfterAnalyzeCompletion,
-  dispatchScheduledPipelineJob,
   ensureScheduledAgentPipelineJobs,
   listPipelineCompletions,
   pipelineAnalyzeJobIds,
@@ -309,20 +307,6 @@ function shardProvenanceOf(run: ChainRunResult): string[] {
 }
 
 /**
- * Issue #3787: one feed job's dispatch outcome in a feed-refresh
- * firing. `queued` = dispatched and awaiting execution; `running`
- * = already in flight (its dataset is being produced — not a
- * failure); `failed` = the dispatch itself refused, with the
- * named error.
- */
-export interface FeedRefreshJobResult {
-  jobId: string;
-  state: string;
-  runId?: string;
-  error?: string;
-}
-
-/**
  * Test/production overrides for onCron. Production passes none: the
  * social brief is read from the durable brief store for the firing
  * date (slice 2); an override here is test-only and wins over the
@@ -384,13 +368,6 @@ export interface ScheduledAgentCronOpts {
   indexRefreshExecutor?: (
     operation: IndexRefreshOperation,
   ) => Promise<IndexListJobResult>;
-  /**
-   * #3787: injected feed-refresh executor (tests, or a caller
-   * that already owns a control plane). Absent, the branch
-   * dispatches every feed job through the pipeline control
-   * plane's own scheduled-firing seam.
-   */
-  feedRefreshExecutor?: () => Promise<FeedRefreshJobResult[]>;
   /**
    * Issue #3121 Phase 2 (#3124) — single evaluation scan: a caller
    * that already loaded the goals (triggerGoal) passes its snapshot
@@ -1966,101 +1943,6 @@ export class ScheduledAgent extends PortThink {
               refreshResult.failures.length > 0
                 ? `stored ${refreshResult.artifacts.length} index lists; failed: ${refreshResult.failures.map((f) => f.index).join(", ")}`
                 : `stored ${refreshResult.artifacts.length} index lists`,
-          });
-          continue;
-        }
-
-        if (goal.operation === FEED_REFRESH_OPERATION) {
-          // #3787 (parent incident #3781): feed datasets on a
-          // schedule. Every J2 feed job is dispatched through the
-          // pipeline control plane's own scheduled-firing seam
-          // (dispatchScheduledPipelineJob — the same dispatch a
-          // Think scheduled firing makes), one dispatch per feed
-          // job in catalog order, on the existing tick. The run's
-          // own records are the dispatch outcome's surface (a
-          // queued dispatch's run outcome is visible through
-          // get_feed_job_status); the goal record below attests
-          // the dispatch, never the runs' outcomes.
-          //
-          // lastRun is NEVER stamped here: isDue's 23h guard
-          // would suppress the next hourly firing (the
-          // resource.cap_alert precedent). Hourly dedup lives in
-          // this goal's latest run record instead: a successful
-          // dispatch within the last 55 minutes is a deduped
-          // no-op (skipped, no tick error). A failed dispatch
-          // records failure and stays due, so the next tick
-          // retries; a partial dispatch stamps success with its
-          // failures named as tick errors (the index-refresh
-          // precedent — the run happened, the next cadence
-          // re-dispatches the failed ones).
-          const latestFeedRun = await this.getLatestJobRun(goal.id);
-          const lastOkAt =
-            latestFeedRun && latestFeedRun.outcome === "success"
-              ? Date.parse(latestFeedRun.finished ?? latestFeedRun.started ?? "")
-              : NaN;
-          if (Number.isFinite(lastOkAt) && now.getTime() - lastOkAt < 55 * 60 * 1000) {
-            tick.jobsSkipped++;
-            await recordGoalRun("skipped", {
-              detail: "feed refresh already dispatched within the hour",
-            });
-            continue;
-          }
-          let feedResults: FeedRefreshJobResult[];
-          if (opts?.feedRefreshExecutor) {
-            feedResults = await opts.feedRefreshExecutor();
-          } else {
-            feedResults = [];
-            for (const jobId of pipelineJobIds()) {
-              try {
-                const dispatch = await dispatchScheduledPipelineJob(
-                  this.pipelineContext(),
-                  jobId,
-                  "",
-                );
-                feedResults.push({
-                  jobId,
-                  state: dispatch?.state ?? "queued",
-                  ...(dispatch?.runId ? { runId: dispatch.runId } : {}),
-                });
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                // Already running is not a failure: the dataset
-                // is being produced by the in-flight run.
-                feedResults.push({
-                  jobId,
-                  state: message.includes("job_already_running") ? "running" : "failed",
-                  error: message,
-                });
-              }
-            }
-          }
-          const feedFailed = feedResults.filter((r) => r.state === "failed");
-          for (const f of feedFailed) {
-            tick.errors.push(`${goal.id}: ${f.jobId}: ${f.error ?? "dispatch failed"}`);
-          }
-          if (feedResults.length === 0 || feedFailed.length === feedResults.length) {
-            tick.jobsSkipped++;
-            await recordGoalRun("failure", {
-              error:
-                feedResults.length === 0
-                  ? "feed refresh dispatched no feed jobs"
-                  : `feed refresh failed (${feedFailed
-                      .map((f) => `${f.jobId}: ${f.error ?? "dispatch failed"}`)
-                      .join("; ")})`,
-            });
-            continue;
-          }
-          const feedRunning = feedResults.filter((r) => r.state === "running");
-          tick.jobsCreated++;
-          await recordGoalRun("success", {
-            descriptor:
-              `dispatched ${feedResults.length} feed jobs` +
-              (feedRunning.length > 0
-                ? `; already running: ${feedRunning.map((r) => r.jobId).join(", ")}`
-                : "") +
-              (feedFailed.length > 0
-                ? `; failed: ${feedFailed.map((f) => f.jobId).join(", ")}`
-                : ""),
           });
           continue;
         }
