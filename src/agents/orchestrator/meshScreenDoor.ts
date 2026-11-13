@@ -290,6 +290,14 @@ export interface MeshScreenDoorContext extends MeshScreenDoorSeams {
    */
   asyncJobSessionId?: string;
   /**
+   * Issue #4357: the async job id executing this door's call (the
+   * wrapper row's id, carried on the tool context). Forwarded as
+   * the bridge row's parentJobId, so the wrapper and bridge rows
+   * group as one run. Absent → the bridge row is unlinked (today's
+   * behavior for sync/direct calls).
+   */
+  asyncJobId?: string;
+  /**
    * The executing instance's SQL storage — the mas_reports
    * read-back (the canonical copies live in the orchestrator
    * instance's own store; chat jobs execute on that instance,
@@ -334,6 +342,9 @@ export function meshScreenDoorContextFromMcp(context: McpToolContext): MeshScree
     // instance id) — the bridge row's session, so the #3784
     // sweep reads it.
     asyncJobSessionId: context.sessionId,
+    // Issue #4357 — forward the executing async job id so the
+    // bridge row links to its wrapper row.
+    asyncJobId: context.asyncJobId,
     ensureTables: () => {
       const sql = storage?.sql;
       if (!sql) {
@@ -597,6 +608,9 @@ function startScreenBridge(
       userLogin: input.userLogin,
       trigger: "manual",
       workflowId: input.workflowId,
+      // Issue #4357 — the join key: the wrapper row that dispatched
+      // this screen. Null for sync/direct calls (no wrapper).
+      parentJobId: ctx.asyncJobId ?? null,
       nowIso: input.nowIso,
     });
     return started ? { ports, jobId: input.jobId } : null;

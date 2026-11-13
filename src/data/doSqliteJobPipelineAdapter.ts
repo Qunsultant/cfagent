@@ -54,6 +54,7 @@ export const JOB_PIPELINE_INSTANCE_COLUMNS: Record<keyof JobInstanceRow & string
   runStartedAt: "run_started_at",
   runTrigger: "run_trigger",
   runScheduleId: "run_schedule_id",
+  runAsyncJobId: "run_async_job_id",
   checkpointJson: "checkpoint_json",
   stageCheckpointJson: "stage_checkpoint_json",
   stageDesiredJson: "stage_desired_json",
@@ -91,6 +92,7 @@ export const JOB_PIPELINE_INSTANCES_DDL = `CREATE TABLE IF NOT EXISTS ${JOB_PIPE
       run_started_at TEXT,
       run_trigger TEXT,
       run_schedule_id TEXT,
+      run_async_job_id TEXT,
       checkpoint_json TEXT,
       stage_checkpoint_json TEXT,
       stage_desired_json TEXT,
@@ -209,6 +211,7 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     runStartedAt: record.runStartedAt,
     runTrigger: record.runTrigger,
     runScheduleId: record.runScheduleId,
+    runAsyncJobId: record.runAsyncJobId,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -226,6 +229,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     runStartedAt: row.runStartedAt,
     runTrigger: row.runTrigger as JobInstanceRecord["runTrigger"],
     runScheduleId: row.runScheduleId ?? null,
+    runAsyncJobId: row.runAsyncJobId ?? null,
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,
@@ -279,6 +283,11 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
     const names = new Set(cols.map((c) => String(c?.name ?? "")));
     if (!names.has("run_schedule_id")) {
       this.sql.exec(`ALTER TABLE ${JOB_PIPELINE_INSTANCES_TABLE} ADD COLUMN run_schedule_id TEXT`);
+    }
+    // Issue #4357 — `run_async_job_id`, the join key to the bridge
+    // row that dispatched the run (same additive-column probe).
+    if (!names.has("run_async_job_id")) {
+      this.sql.exec(`ALTER TABLE ${JOB_PIPELINE_INSTANCES_TABLE} ADD COLUMN run_async_job_id TEXT`);
     }
   }
 

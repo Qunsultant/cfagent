@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildWorkflowRuns,
   compactJsonValue,
+  d1RecordLinkedToJobs,
   runGroupKey,
   stageInputSummary,
   stageOutputSummary,
@@ -18,6 +19,7 @@ import {
   type WorkflowRunOutcomeRow,
   type WorkflowRunStageTransition,
 } from "../src/services/workflowRuns";
+import { buildJobRunRecord } from "../src/services/jobRunRecords";
 
 function job(overrides: Partial<WorkflowRunJobRow> & { job_id: string }): WorkflowRunJobRow {
   return {
@@ -403,5 +405,116 @@ describe("stuck runs (#3784)", () => {
     expect(runs[0].triggeredBy).toBe("test-trader");
     expect(runs[0].schedule?.mechanism).toBe("manual");
     expect(runs[0].schedule?.identity).toBe("not-scheduled");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Join key (#4357): wrapper ↔ bridge ↔ engine D1 record               */
+/* ------------------------------------------------------------------ */
+
+describe("join key (#4357)", () => {
+  const wrapperId = "dfbe7230-d6e5-4d2e-956f-225caafef1b1";
+  const bridgeId = "screener:chat:NASDAQ100:2026-11-13T10:22:40.000Z:abcd1234";
+  const workflowId = "wf-00000000-0000-0000-0000-000000000001";
+
+  const wrapperRow = () =>
+    job({
+      job_id: wrapperId,
+      job_kind: "main",
+      capability: "mcp.tool",
+      display_name: "MCP: run_stock_screen",
+      status: "running",
+      created_at: "2026-11-13T10:22:40.000Z",
+      completed_at: null,
+      started_at: "2026-11-13T10:22:40.000Z",
+    });
+
+  const bridgeRow = (overrides: Partial<WorkflowRunJobRow> = {}) =>
+    job({
+      job_id: bridgeId,
+      job_kind: "main",
+      capability: "screener.run",
+      display_name: "Stock screen — NASDAQ100",
+      status: "running",
+      parent_job_id: wrapperId,
+      created_at: "2026-11-13T10:22:41.000Z",
+      completed_at: null,
+      started_at: "2026-11-13T10:22:41.000Z",
+      payload_json: JSON.stringify({
+        bridge: "screener-run",
+        userLogin: "owner",
+        trigger: "manual",
+        workflowId,
+      }),
+      ...overrides,
+    });
+
+  it("groups a wrapper + bridge pair into ONE run under the wrapper id", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [wrapperRow(), bridgeRow()],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs).toHaveLength(1);
+    expect(runs[0].id).toBe(wrapperId);
+    expect(runs[0].stageCount).toBe(2);
+    expect(runs[0].title).toBe("MCP: run_stock_screen");
+    expect(runs[0].workflowId).toBe(workflowId);
+  });
+
+  it("bridge-first input order still yields the wrapper id", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [bridgeRow(), wrapperRow()],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs).toHaveLength(1);
+    expect(runs[0].id).toBe(wrapperId);
+  });
+
+  it("a bridge with no parent still renders as its own run", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [bridgeRow({ parent_job_id: null })],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs).toHaveLength(1);
+    expect(runs[0].id).toBe(bridgeId);
+  });
+
+  it("no workflow id when no job payload carries one", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [wrapperRow()],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs).toHaveLength(1);
+    expect(runs[0].workflowId).toBeNull();
+  });
+
+  it("d1RecordLinkedToJobs links an engine record to its bridge row only", () => {
+    const record = buildJobRunRecord({
+      system: "job-pipeline",
+      jobId: bridgeId,
+      operation: "job",
+      started: "2026-11-13T10:22:41.000Z",
+      finished: "2026-11-13T10:22:55.000Z",
+      outcome: "success",
+      triggeredBy: "manual",
+      asyncJobId: bridgeId,
+    });
+    expect(d1RecordLinkedToJobs(record, [bridgeRow()])).toBe(true);
+    expect(d1RecordLinkedToJobs(record, [wrapperRow()])).toBe(false);
+    const unlinked = buildJobRunRecord({
+      system: "job-pipeline",
+      jobId: bridgeId,
+      operation: "job",
+      started: "2026-11-13T10:22:41.000Z",
+      finished: "2026-11-13T10:22:55.000Z",
+      outcome: "success",
+      triggeredBy: "manual",
+    });
+    expect(unlinked.asyncJobId).toBeNull();
+    expect(d1RecordLinkedToJobs(unlinked, [bridgeRow()])).toBe(false);
   });
 });

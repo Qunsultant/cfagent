@@ -195,6 +195,37 @@ describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () =>
     expect(bridgeRow(db, input.jobId)?.status).toBe("running");
   });
 
+  it("start stamps parentJobId when provided; null by default (#4357)", () => {
+    const { db, sql, sessionId } = makeBridgeStore();
+    const ports = createAsyncJobPorts(sql as never);
+    const wrapperId = "dfbe7230-d6e5-4d2e-956f-225caafef1b1";
+    const linked = bridgeRunStart(ports, {
+      jobId: "screener:chat:NASDAQ100:2026-11-13T10:22:40.000Z:abcd1234",
+      sessionId,
+      capability: "screener.run",
+      displayName: "Stock screen — NASDAQ100",
+      userLogin: "owner",
+      trigger: "manual",
+      nowIso: new Date().toISOString(),
+      parentJobId: wrapperId,
+    });
+    expect(linked).toBe(true);
+    expect(
+      bridgeRow(db, "screener:chat:NASDAQ100:2026-11-13T10:22:40.000Z:abcd1234")?.parent_job_id,
+    ).toBe(wrapperId);
+    const unlinked = bridgeRunStart(ports, {
+      jobId: "chain:yahoo-nasdaq100-quotes-pipeline:run-1",
+      sessionId,
+      capability: "pipeline.chain",
+      displayName: "Pipeline chain — Yahoo quotes — Nasdaq-100",
+      userLogin: "owner",
+      trigger: "manual",
+      nowIso: new Date().toISOString(),
+    });
+    expect(unlinked).toBe(true);
+    expect(bridgeRow(db, "chain:yahoo-nasdaq100-quotes-pipeline:run-1")?.parent_job_id).toBeNull();
+  });
+
   it("complete/fail on an unknown id write nothing (guarded transitions)", () => {
     const { sql } = makeBridgeStore();
     const ports = createAsyncJobPorts(sql as never);

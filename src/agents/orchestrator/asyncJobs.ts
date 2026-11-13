@@ -1908,6 +1908,10 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           env: ctx.env,
           orm: ctx.getOrm(),
         sessionId: ctx.sessionKey(),
+        // Issue #4357 — the join key: this job's id, so doors
+        // that open a bridge row stamp it as the bridge row's
+        // parent (wrapper ↔ bridge link).
+        asyncJobId: jobId,
         audit: (type, agent, detail) => ctx.audit(type, agent, detail),
         // #1744: job-executor call — the external gate already ran
         // at queue time for /mcp-queued jobs; this gate is the

@@ -131,6 +131,10 @@ const INSTANCE: JobInstanceRecord = {
   runStartedAt: "2026-11-06T12:00:00.000Z",
   runTrigger: "scheduled",
   runScheduleId: null,
+  // Issue #4357 — the bridge id that dispatched this run; null when
+  // no async job dispatched it. The round-trip below proves the
+  // column carries a value through every residency.
+  runAsyncJobId: "bridge-1",
   checkpoint: {
     runId: "run-1",
     nodePath: "",

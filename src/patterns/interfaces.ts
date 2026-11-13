@@ -38,6 +38,15 @@ export interface McpToolContext {
    */
   scopedModes?: AdsRevenueScopedModes;
   /**
+   * #4357: the async job id executing this tool call (the wrapper
+   * row's id, minted by executeAsyncJob). Populated by the
+   * execution-context owner; unset → the tool runs outside any
+   * async job (sync paths, direct calls). Doors that open a bridge
+   * row forward it as the bridge row's parent, so one run links
+   * wrapper ↔ bridge ↔ engine record.
+   */
+  asyncJobId?: string;
+  /**
    * #1722: optional session/user carriers for the NLQ_MODE switch
    * (run comes from the per-call `mode` input, global env from
    * `env`). Populated by the execution-context owner; unset carriers

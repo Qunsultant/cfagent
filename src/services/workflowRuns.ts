@@ -169,6 +169,15 @@ export interface WorkflowRun {
    * null); schedule rows always carry it.
    */
   schedule?: WorkflowRunSchedule | null;
+  /**
+   * Issue #4357: the Cloudflare workflow instance id that executed
+   * this run, when known — read off a job row's payload (the bridge
+   * row carries the workflow instance id it dispatched). Null when
+   * no job row carries one (the run was not workflow-dispatched, or
+   * predates the stamp). Read-only surface field; the engine stage
+   * surfacing (#4359) builds on it.
+   */
+  workflowId?: string | null;
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;
@@ -931,11 +940,33 @@ export function isStandaloneRequestTrace(job: WorkflowRunJobRow): boolean {
 }
 
 function mainJobOf(jobs: WorkflowRunJobRow[]): WorkflowRunJobRow {
+  // Issue #4357 — a linked group carries TWO main rows (the wrapper
+  // and its bridge child); the run's identity stays the ROOT main —
+  // the one with no parent — so the wrapper id (and its MCP title)
+  // is the run id. A lone main keeps today's behavior.
+  const rootMain = jobs.find((j) => j.job_kind === "main" && !str(j.parent_job_id));
+  if (rootMain) return rootMain;
   const main = jobs.find((j) => j.job_kind === "main");
   if (main) return main;
   const root = jobs.find((j) => !str(j.parent_job_id));
   if (root) return root;
   return [...jobs].sort((a, b) => (a.created_at < b.created_at ? -1 : 1))[0];
+}
+
+/**
+ * Issue #4357 — the join-key read: an engine D1 run record belongs
+ * to the grouped run whose bridge row it names (record.asyncJobId
+ * === bridge job_id). Unlinked records (asyncJobId null, or no
+ * matching row in this read) render standalone, as today — a missing
+ * bridge row never drops the run.
+ */
+export function d1RecordLinkedToJobs(
+  record: JobRunRecord,
+  jobs: WorkflowRunJobRow[],
+): boolean {
+  const bridgeId = record.asyncJobId;
+  if (!bridgeId) return false;
+  return jobs.some((j) => j.job_id === bridgeId);
 }
 
 function sortJobs(jobs: WorkflowRunJobRow[]): WorkflowRunJobRow[] {
@@ -1246,6 +1277,14 @@ export function runFromJobs(
       ? "scheduled"
       : lifecycleStateForRun({ status: runStatus, stages }),
     schedule: scheduleProvenanceForJobs(jobs, trigger, nowMs),
+    // Issue #4357 — the workflow instance id, read off the first
+    // job payload that carries one (the bridge row stamps the
+    // workflow instance it dispatched). Null when no job carries
+    // it; the panel renders nothing rather than inventing one.
+    workflowId:
+      sortJobs(jobs)
+        .map((j) => parseObject(j.payload_json)?.workflowId)
+        .find((v): v is string => typeof v === "string" && v !== "") ?? null,
     startedAt,
     finishedAt,
     durationMs: durationBetween(startedAt, finishedAt),

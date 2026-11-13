@@ -266,6 +266,8 @@ export async function executeMCPTool(
     scopedGoalChainModes?: import("../../config/goalChainModes").GoalChainScopedModes;
     /** #1686: optional DO blob handle, spread through to the tool context like the scoped carriers (the factory spread forwards it to the tool command). */
     storage?: import("../../trading").NasdaqUniverseRouteBundleInput["storage"];
+    /** #4357: the async job id executing this call, spread through to the tool context (the factory spread forwards it); doors that open a bridge row stamp it as the bridge row's parent. */
+    asyncJobId?: string;
     audit: (type: string, agent: any, payload: Record<string, unknown>) => void;
     submitJob?: (job: AsyncJobSubmission) => Promise<{
       jobId: string;

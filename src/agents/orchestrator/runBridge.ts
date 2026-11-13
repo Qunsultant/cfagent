@@ -60,6 +60,12 @@ export interface BridgeRunStartInput {
   /** The workflow / chain job the run belongs to, when known. */
   workflowId?: string | null;
   chainJobId?: string | null;
+  /**
+   * Issue #4357 — the async job (wrapper row) that dispatched this
+   * run; stamped as the bridge row's parent so the pair groups as
+   * one run. Null → unlinked (today's behavior).
+   */
+  parentJobId?: string | null;
   nowIso?: string;
 }
 
@@ -90,7 +96,8 @@ export function bridgeRunStart(
         ...(input.chainJobId ? { chainJobId: input.chainJobId } : {}),
       }),
       nowIso,
-      parentJobId: null,
+      // Issue #4357 — the join key; null keeps today's unlinked rows.
+      parentJobId: input.parentJobId ?? null,
       jobKind: "main",
       channel: null,
       notBefore: null,
