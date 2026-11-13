@@ -201,19 +201,6 @@ export const CAPABILITY_REGISTRY: CapabilityEntry[] = [
     status: "shipped",
     verification: "tests/index_list_goals_scheduled_1980.test.ts",
   },
-  {
-    id: "feed-refresh-all",
-    stage: "feed",
-    capability: "Hourly dispatch of every J2 feed job through the pipeline control plane's scheduled-firing seam",
-    source: "src/agents/scheduledTasksPipeline.ts#dispatchScheduledPipelineJob (#3787)",
-    inputs: ["feed job catalog"],
-    outputs: ["per-job dispatch outcomes"],
-    provenance: "goal id + dispatch time",
-    owner: "#3787",
-    status: "shipped",
-    verification: "tests/pipeline_scheduled_goals.test.ts",
-  },
-
   // ---- Enrich (#4178) ----
   {
     id: "enrich-dataset",
