@@ -251,34 +251,38 @@ describe("4d family census: writer sets", () => {
   });
 
   it("the closed bypasses leave only the data layer (and the named out-of-slice remainders)", () => {
+    // #4282 P2a retarget (disclosed pin update): the schema
+    // authority for these tables moved from ormSchema.ts /
+    // masRetentionIndexSchema.ts into the ORM catalogue
+    // (src/data/schemaComponent/ormCatalogue.ts) — the writer
+    // set is unchanged in kind (port + schema authority), only
+    // the file moved; the authority consolidates from two files
+    // into one for mas_messages.
     // mas_messages: orchestrator.ts bypass CLOSED; the
     // masRetentionIndexes bypass was retired by #2362
     // (step 4f) — the index helper now lives in the data
-    // layer (§7 adaptation, justified: this pin's own
-    // comment named #2362 as the retiring slice; the writer
-    // set is unchanged in size, the writer moved in-layer).
+    // layer.
     expect(writerSet("mas_messages")).toEqual([
       "src/data/doSqliteOrmAdapters.ts",
-      "src/data/masRetentionIndexSchema.ts",
-      "src/data/ormSchema.ts",
+      "src/data/schemaComponent/ormCatalogue.ts",
     ]);
     // mas_memory: unchanged — the layer was already its only
     // writer; this slice closed its READ bypasses instead.
     expect(writerSet("mas_memory")).toEqual([
       "src/data/doSqliteOrmAdapters.ts",
-      "src/data/ormSchema.ts",
+      "src/data/schemaComponent/ormCatalogue.ts",
     ]);
     // mas_transactions: orchestrator.ts seed-purge bypass
     // CLOSED by 4d; the payments route bypass was closed by
     // #2360 (step 4d-2) — the writer set is layer-only.
     expect(writerSet("mas_transactions")).toEqual([
       "src/data/doSqliteOrmAdapters.ts",
-      "src/data/ormSchema.ts",
+      "src/data/schemaComponent/ormCatalogue.ts",
     ]);
     // mas_ads: orchestrator.ts seed bypass CLOSED.
     expect(writerSet("mas_ads")).toEqual([
       "src/data/doSqliteMarketplaceAdapter.ts",
-      "src/data/ormSchema.ts",
+      "src/data/schemaComponent/ormCatalogue.ts",
     ]);
   });
 });
