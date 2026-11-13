@@ -758,7 +758,7 @@ export async function remediatePlatformGaps(params: {
     action: "configure_scheduled_goals",
     target: "scheduled_tasks",
     status: "skipped",
-    details: "Not run: this remediation does not read scheduled goals or affirm any cadence. Feed datasets are produced by the feed-refresh goal (#3787); its firing is visible in the goal's run records.",
+    details: "Not run: this remediation does not read scheduled goals or affirm any cadence. Feed datasets are produced by the per-job Think scheduled tasks (one `pipeline-job:` task per feed job, monthly); their firings are visible in the Job outcomes feed.",
   });
 
   const architectureGrounding =
