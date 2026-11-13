@@ -25,14 +25,20 @@
  */
 import type { SqlStorage } from "../orm";
 import { JOB_RUN_RECORDS_TABLE } from "./jobRunRecordPorts";
+import { ormIndexSql } from "./schemaComponent/ormCatalogue";
 
 /** Exact recent-read query for the ledger (doSqliteJobRunRecordAdapter.ts). */
 export const JOB_RUN_RECORDS_RECENT_SQL = `SELECT * FROM ${JOB_RUN_RECORDS_TABLE} ORDER BY started DESC, id DESC LIMIT ?`;
 
+/**
+ * #4282 P2a: the index SQL lives in the schema catalogue
+ * (src/data/schemaComponent/ormCatalogue.ts); this array is the same
+ * statement by name, so callers reading it see identical SQL.
+ */
 export const JOB_RUN_RECORD_INDEXES: Array<{ name: string; sql: string }> = [
   {
     name: "job_run_records_recent_idx",
-    sql: `CREATE INDEX IF NOT EXISTS job_run_records_recent_idx ON ${JOB_RUN_RECORDS_TABLE} (started DESC, id DESC)`,
+    sql: ormIndexSql("job_run_records_recent_idx"),
   },
 ];
 
