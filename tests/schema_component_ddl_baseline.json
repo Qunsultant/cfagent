@@ -2,10 +2,10 @@
   "generatedFrom": "d1a370ab6365f6a595cd36eb1ed6162aef8ad7a3",
   "generatedAt": "2026-11-13",
   "totals": {
-    "createTable": 115,
-    "createIndex": 51,
+    "createTable": 103,
+    "createIndex": 43,
     "createUniqueIndex": 2,
-    "alterTable": 42
+    "alterTable": 40
   },
   "files": {
     "src/agents/orchestrator/alarmInventory.ts": {
@@ -370,7 +370,7 @@
     },
     "src/data/frameworkQueueIndexSchema.ts": {
       "createTable": 0,
-      "createIndex": 5,
+      "createIndex": 2,
       "createUniqueIndex": 0,
       "alterTable": 0
     },
@@ -382,27 +382,21 @@
     },
     "src/data/jobRunRecordIndexSchema.ts": {
       "createTable": 0,
-      "createIndex": 2,
-      "createUniqueIndex": 0,
-      "alterTable": 0
-    },
-    "src/data/masRetentionIndexSchema.ts": {
-      "createTable": 0,
-      "createIndex": 3,
+      "createIndex": 1,
       "createUniqueIndex": 0,
       "alterTable": 0
     },
     "src/data/ormFacade.ts": {
-      "createTable": 6,
+      "createTable": 1,
       "createIndex": 0,
       "createUniqueIndex": 0,
       "alterTable": 2
     },
     "src/data/ormSchema.ts": {
-      "createTable": 9,
+      "createTable": 2,
       "createIndex": 0,
       "createUniqueIndex": 0,
-      "alterTable": 2
+      "alterTable": 0
     },
     "src/data/stageClaimsStore.ts": {
       "createTable": 1,
@@ -412,7 +406,7 @@
     },
     "src/data/unifiedScheduleIndexSchema.ts": {
       "createTable": 0,
-      "createIndex": 2,
+      "createIndex": 1,
       "createUniqueIndex": 0,
       "alterTable": 0
     },
