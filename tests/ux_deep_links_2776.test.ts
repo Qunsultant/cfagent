@@ -71,6 +71,9 @@ describe("Deep-link catalog (issue #2776)", () => {
     // Issue #2994: the options-screener:best-trade key is likewise kept
     // after the Best Trade sub-menu retired, so ?tab=options&research=
     // best-trade still lands on the Custom Thesis tab with the surface.
+    // Issue #4168: the autopilot:job-outcomes key is likewise kept —
+    // Autopilot has no sub-menu node, so the Job outcomes view is
+    // addressed by the `view` param, not by a nav node.
     const legacyKeys = new Set([
       "planned",
       "planned:forex",
@@ -78,6 +81,7 @@ describe("Deep-link catalog (issue #2776)", () => {
       "planned:commodities",
       "planned:bonds",
       "options-screener:best-trade",
+      "autopilot:job-outcomes",
     ]);
     for (const key of Object.keys(DEEP_LINK_OVERRIDES)) {
       expect(keys.has(key) || ids.has(key) || legacyKeys.has(key)).toBe(true);

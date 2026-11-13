@@ -38,8 +38,9 @@
  * Mapping-table coverage: docs/architecture/UX/token-mapping-
  * order-options-autopilot.md must list every legacy class the three
  * layouts use (OrderTicketPanel, ETradeTradingHub,
- * AutopilotControlCenter, plus the options components), 647 classes
- * on this slice's measurement. The extraction below mirrors the
+ * AutopilotControlCenter, plus the options components), 648 classes
+ * on this slice's measurement (#4168 adds `ui-anchor`, used by the
+ * Job outcomes section anchor in AutopilotControlCenter). The extraction below mirrors the
  * generator (scripts/ in the slice's working notes): className
  * attributes, ${...} interpolations stripped from literal parts,
  * lowercase string literals harvested as state classes — except
@@ -384,7 +385,7 @@ function usedLegacyClasses(): Set<string> {
 describe("mapping table covers the order/options/autopilot legacy classes (#3135)", () => {
   it("every used legacy class appears in the mapping table", () => {
     const used = usedLegacyClasses();
-    expect(used.size).toBe(647);
+    expect(used.size).toBe(648);
     const doc = readFileSync(MAPPING_DOC, "utf8");
     const missing = [...used].filter((c) => !doc.includes(`\`${c}\``));
     expect(missing).toEqual([]);
