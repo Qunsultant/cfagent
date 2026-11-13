@@ -62,6 +62,7 @@ import {
 import { buildPaymentWorkflowParams } from "./paymentWorkflowSubmission";
 import type { PaymentWorkflowEventParams } from "../workflows/paymentWorkflow";
 import type { WorkflowJobCommand } from "../workflows/workflowPorts";
+import type { Env } from "../types";
 
 /**
  * The gate's coverage-required reason, mirrored here so the caller's skip
@@ -210,6 +211,61 @@ export async function resolvePaidScreenAccount(
     },
     stored,
   };
+}
+
+/** Result of tick-tenant resolution (issue #3179). */
+export interface TickTenantResolution {
+  /**
+   * The tenant the tick runs under: the schedule owner's stored
+   * account tenant, or the env default when no owner account row
+   * exists (see usedEnvDefaultFallback).
+   */
+  tenantId: string;
+  /**
+   * True when no stored owner account row existed and the env
+   * default was used instead. Callers MUST log this explicitly —
+   * the fallback is never silent (#3179 scope).
+   */
+  usedEnvDefaultFallback: boolean;
+}
+
+/**
+ * Issue #3179: resolve the tenant a scheduled tick runs under from
+ * the schedule OWNER's stored commercial account row — never from
+ * the deployment default. The schedule record carries ownerLogin
+ * only (UnifiedScheduleRecord has no tenant field), so the owner
+ * tenant is derived at tick time from the stored row and threaded
+ * through the tick context by the caller.
+ *
+ * Fallback (issue scope, explicit and logged by the caller): a
+ * schedule with NO owner account row — or an unbound store — runs
+ * under the deployment default resolved by resolveIaaaTenant
+ * (env IAAA_TENANT_ID, else "primary"), with
+ * usedEnvDefaultFallback set. The fallback is the ONLY case in
+ * which the env default stamps a tick; an owner row always wins,
+ * so a mismatched-default deployment no longer fails owner ticks
+ * closed on the mismatch throw in resolvePaidScreenAccount (that
+ * guard is unchanged — it still throws when a caller passes a
+ * tenant that differs from the stored row).
+ *
+ * A store READ failure propagates: the paid gates fail closed on
+ * it (coverage unknown is not a skip), and the free path catches
+ * it and falls back explicitly. The helper never invents a tenant
+ * beyond the documented env default.
+ */
+export async function resolveTickTenant(
+  commercial: CommercialStore | null,
+  input: { userId: string; env: Partial<Env> | null | undefined },
+): Promise<TickTenantResolution> {
+  const stored = commercial ? await commercial.getAccount(input.userId) : null;
+  if (stored) {
+    return { tenantId: stored.tenantId, usedEnvDefaultFallback: false };
+  }
+  // No owner row (or no store): the explicit env-default fallback.
+  // Lazy import matches the existing call-site pattern and keeps
+  // the IAAA wiring layer out of this seam's static graph.
+  const { resolveIaaaTenant } = await import("../security/iaaaGithubEndToEnd");
+  return { tenantId: resolveIaaaTenant(input.env), usedEnvDefaultFallback: true };
 }
 
 /** Inputs to a paid-screen payment-workflow submission. */

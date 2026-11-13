@@ -349,7 +349,12 @@ export interface ScheduledAgentCronOpts {
    * carries bindings, so no env crosses the RPC boundary (#1391).
    */
   haltReader?: HaltReader;
-  /** Tenant for the halt read; default "primary" (single-tenant default, same as IAAA). */
+  /**
+   * Tenant for the halt read. Absent, the deployment default from
+   * resolveIaaaTenant (env IAAA_TENANT_ID, else "primary"), logged
+   * as an explicit fallback — never a silent hardcoded literal
+   * (#3179). A caller with a real tenant context threads it here.
+   */
   tenantId?: string;
   /**
    * #1523 (Lane 2): leg executor for governed chain firings
@@ -1540,7 +1545,21 @@ export class ScheduledAgent extends PortThink {
     // binding read (this.env.AGENT_DB, the DO's own env) is the
     // production path. Unbound + no reader = legacy behavior
     // (false). The governed predicate below stays the decision-maker.
-    const tickTenantId = opts?.tenantId ?? "primary";
+    // Issue #3179: the tick's tenant context is threaded in by the
+    // caller when one exists (opts.tenantId); otherwise the tick
+    // uses the deployment default — resolved explicitly, and
+    // logged, never a silent hardcoded literal. The cron trigger
+    // scans all goals and has no single owner, so the explicit env
+    // default is the honest tick-wide tenant here; per-goal owner
+    // derivation would need an owner on the goal record.
+    const tickTenantId = opts?.tenantId ?? resolveIaaaTenant(this.env);
+    if (!opts?.tenantId) {
+      structuredLog.info("scheduledAgent.tick_tenant_env_fallback", {
+        site: "onCron",
+        tenantId: tickTenantId,
+        reason: "no tenant context threaded into onCron",
+      });
+    }
     const governedHalted =
       opts?.halted ??
       (opts?.sql
@@ -2543,18 +2562,30 @@ export class ScheduledAgent extends PortThink {
 
   /**
    * Issue #1651 (slice 1): best-effort projection of an
-   * already-persisted synthesized record. Tenant/workspace
-   * default to "primary" (the documented single-tenant default,
-   * same as the slice-0 tick, R7) until a tenant context is
-   * threaded through ScheduledAgent.
+   * already-persisted synthesized record. Issue #3179: the
+   * projection stamps the deployment default — resolved
+   * explicitly via resolveIaaaTenant and logged, never a silent
+   * hardcoded literal — until a tenant context is threaded
+   * through ScheduledAgent. The record carries no owner, so
+   * per-record owner derivation needs a record schema change
+   * (not made here); workspaceId mirrors tenantId, the codebase
+   * convention for projection rows.
    */
   private async projectSynthesized(
     record: SynthesizedSchedule,
     transition: ChainScheduleTransition,
   ): Promise<void> {
+    const tenantId = resolveIaaaTenant(this.env);
+    structuredLog.info("scheduledAgent.tick_tenant_env_fallback", {
+      site: "projectSynthesized",
+      tenantId,
+      recordId: record.id,
+      transition,
+      reason: "no tenant context threaded through projection",
+    });
     await projectAfterTransition(this.env, {
-      tenantId: "primary",
-      workspaceId: "primary",
+      tenantId,
+      workspaceId: tenantId,
       record,
       transition,
       nowMs: Date.now(),
@@ -2824,8 +2855,17 @@ export class ScheduledAgent extends PortThink {
       });
     };
     // #1548 (slice 0): same halt resolution as onCron, so the
-    // direct one-shot path sees the mirrored halt too.
-    const fireTenantId = opts?.tenantId ?? "primary";
+    // direct one-shot path sees the mirrored halt too. Issue
+    // #3179: same explicit env-default fallback as onCron when
+    // no tenant context is threaded in — never a silent literal.
+    const fireTenantId = opts?.tenantId ?? resolveIaaaTenant(this.env);
+    if (!opts?.tenantId) {
+      structuredLog.info("scheduledAgent.tick_tenant_env_fallback", {
+        site: "fireSynthesizedSchedule",
+        tenantId: fireTenantId,
+        reason: "no tenant context threaded into fireSynthesizedSchedule",
+      });
+    }
     const halted =
       opts?.halted ??
       (opts?.sql
