@@ -35,6 +35,7 @@ import { sagaAuditOwnerStub, type AuditOwnerStub } from "../../workflows/sagaJou
 import type { SqlStorage } from "../../orm";
 import {
   buildWorkflowRunsPage,
+  d1RecordLinkedToJobs,
   runFromJobRunRecord,
   runFromSagaChain,
   runFromScanRun,
@@ -787,6 +788,14 @@ export async function handleWorkflowRunsRoutes(
         const { d1JobRunRecordId } = await import("../../services/jobRunRecordReads");
         keptRecords = records.filter((r) => !linkedJobRunIds.has(d1JobRunRecordId(r)));
       }
+      // Issue #4357 — the join key: an engine D1 record whose
+      // asyncJobId names a bridge row present in this read is
+      // absorbed into that run (one run, one row), in BOTH modes —
+      // the grouped run already represents it. A record whose
+      // bridge row is absent from the window still renders
+      // standalone; unlinked records (asyncJobId null) are
+      // untouched, so pre-slice rows render as today.
+      keptRecords = keptRecords.filter((r) => !d1RecordLinkedToJobs(r, jobs));
       jobRunRecordRuns = keptRecords.map(runFromJobRunRecord);
     } catch (err) {
       storeErrors.jobRunRecords = err instanceof Error ? err.message : String(err);

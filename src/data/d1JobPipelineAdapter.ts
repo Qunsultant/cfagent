@@ -21,6 +21,7 @@ import {
   applyMigrations,
   MIGRATION_0046_JOB_PIPELINE,
   MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
+  MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -44,11 +45,12 @@ export function createD1JobPipelineDb(d1: D1Database): JobPipelineDb {
   });
 }
 
-/** Idempotent schema-ensure: applies migrations 0046 + 0059 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0046 + 0061 + 0065 if unapplied. */
 export async function ensureJobPipelineSchema(db: JobPipelineDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0046_JOB_PIPELINE,
     MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
+    MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
   ]);
 }
 
@@ -63,6 +65,7 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     runStartedAt: record.runStartedAt,
     runTrigger: record.runTrigger,
     runScheduleId: record.runScheduleId,
+    runAsyncJobId: record.runAsyncJobId,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -80,6 +83,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     runStartedAt: row.runStartedAt,
     runTrigger: row.runTrigger as JobInstanceRecord["runTrigger"],
     runScheduleId: row.runScheduleId ?? null,
+    runAsyncJobId: row.runAsyncJobId ?? null,
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,
@@ -173,6 +177,11 @@ export class D1JobPipelineStores implements JobPipelineStores {
             currentRunId: row.currentRunId,
             runStartedAt: row.runStartedAt,
             runTrigger: row.runTrigger,
+            // Issue #4357 — the join key MUST survive a re-save:
+            // settle paths reload the instance from the store and
+            // stamp its terminal record from it. (runScheduleId is
+            // omitted here — an adjacent gap, not fixed in this slice.)
+            runAsyncJobId: row.runAsyncJobId,
             checkpointJson: row.checkpointJson,
             stageCheckpointJson: row.stageCheckpointJson,
             stageDesiredJson: row.stageDesiredJson,

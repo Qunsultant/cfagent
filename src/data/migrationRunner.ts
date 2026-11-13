@@ -2145,6 +2145,18 @@ export const MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID: DataMigration = {
   sql: `ALTER TABLE job_pipeline_instances ADD COLUMN run_schedule_id TEXT;`,
 };
 
+/**
+ * Issue #4357 — the join key: the engine instance carries the id of
+ * the async job that dispatched its run, so the terminal D1 run
+ * record links to the bridge row. Additive column only; existing
+ * rows read back as NULL (unlinked, rendered as today).
+ */
+export const MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID: DataMigration = {
+  version: 65,
+  name: "0065_job_pipeline_run_async_job_id",
+  sql: `ALTER TABLE job_pipeline_instances ADD COLUMN run_async_job_id TEXT;`,
+};
+
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -2532,6 +2544,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   MIGRATION_0063_RUNS_PACKS,
   MIGRATION_0064_FREE_ACCESS_GRANTS,
+  MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
 ];
 
 function splitStatements(sqlText: string): string[] {

@@ -661,7 +661,7 @@ export class JobPipelineControl {
    */
   async runJob(
     jobId: string,
-    opts?: { trigger?: JobRunTrigger; scopePath?: string; scheduleId?: string },
+    opts?: { trigger?: JobRunTrigger; scopePath?: string; scheduleId?: string; asyncJobId?: string },
   ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
@@ -683,6 +683,7 @@ export class JobPipelineControl {
       trigger: opts?.trigger ?? "manual",
       scopePath: opts?.scopePath ?? "",
       scheduleId: opts?.scheduleId ?? null,
+      asyncJobId: opts?.asyncJobId ?? null,
       resuming: false,
     });
     this.inflight.set(runId, completion);
@@ -740,6 +741,8 @@ export class JobPipelineControl {
       scopePath: instance.checkpoint.scopePath,
       // A resumed run keeps the schedule id that dispatched it.
       scheduleId: instance.runScheduleId ?? null,
+      // ... and the async job id that dispatched it (#4357 join key).
+      asyncJobId: instance.runAsyncJobId ?? null,
       resuming: true,
     });
     this.inflight.set(runId, completion);
@@ -1822,6 +1825,7 @@ export class JobPipelineControl {
       runStartedAt: null,
       runTrigger: null,
       runScheduleId: null,
+      runAsyncJobId: null,
       checkpoint: null,
       stageCheckpoint: null,
       stageDesired: null,
@@ -1871,11 +1875,12 @@ export class JobPipelineControl {
       triggeredBy: instance.runTrigger ?? "manual",
       // Issue #3310 — the terminal record joins to the dispatching
       // schedule and to the workflow instance (the pipeline run IS
-      // the workflow instance on the direct-execution firing path);
-      // no async job exists on this path, so its id is an explicit
-      // null, never a laundered one.
+      // the workflow instance on the direct-execution firing path).
+      // Issue #4357 — the join key: the async job id that dispatched
+      // this run, so the record links to its bridge row; null means
+      // no async job dispatched this run, never a laundered id.
       scheduleId: instance.runScheduleId ?? null,
-      asyncJobId: null,
+      asyncJobId: instance.runAsyncJobId ?? null,
       workflowId: instance.currentRunId,
       ...(outcome === "failed" ? { error: error ?? "job run failed" } : {}),
       ...(outcome === "cancelled" ? { detail: "job_cancelled" } : {}),
@@ -1950,6 +1955,7 @@ export class JobPipelineControl {
       trigger: JobRunTrigger;
       scopePath: string;
       scheduleId: string | null;
+      asyncJobId: string | null;
       resuming: boolean;
     },
   ): Promise<JobRunOutcome> {
@@ -1965,6 +1971,10 @@ export class JobPipelineControl {
       runStartedAt: opts.resuming ? (instance.runStartedAt ?? startedAt) : startedAt,
       runTrigger: opts.trigger,
       runScheduleId: opts.scheduleId,
+      // Issue #4357 — the join key: the async job that dispatched
+      // this run, persisted on the instance so the terminal record
+      // (and any settle path) stamps it.
+      runAsyncJobId: opts.asyncJobId,
       stageCheckpoint: opts.resuming
         ? instance.stageCheckpoint
         : { runId: opts.runId, units: [] },

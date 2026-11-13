@@ -274,6 +274,22 @@ describe("3310-D4 a scoped firing threads the schedule id into the terminal run 
     expect(record?.workflowId).toBe("run-1");
     expect(record?.asyncJobId).toBeNull();
   });
+
+  it("a run dispatched with asyncJobId stamps it on the terminal record (#4357)", async () => {
+    const h = makeEngineHarness();
+    await h.control.defineJob(ENGINE_TWO_CHILD_JOB);
+    const outcome = await h.control.runJob("two-child", {
+      trigger: "manual",
+      asyncJobId: "screener:chat:NASDAQ100:2026-11-13T10:22:40.000Z:abcd1234",
+    });
+    expect(outcome.state).toBe("completed");
+    const record = h.runStore.latestByJob("two-child");
+    expect(record?.asyncJobId).toBe(
+      "screener:chat:NASDAQ100:2026-11-13T10:22:40.000Z:abcd1234",
+    );
+    expect(record?.scheduleId).toBeNull();
+    expect(record?.workflowId).toBe("run-1");
+  });
 });
 
 // --- 3310-D3: the firing callback dispatches the scoped run through the door ---

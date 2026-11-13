@@ -307,6 +307,10 @@ export async function runScreenerScreenOnEngine(
   await ensureScreenerJob(deps.control, deps.stores, runCommand);
   const dispatch = await deps.control.runJob(runCommand.jobId, {
     trigger: runCommand.trigger,
+    // Issue #4357 — the join key: the engine job id IS the bridge
+    // id for a chat stock screen, so the terminal D1 record carries
+    // it and links to the bridge row that dispatched this run.
+    asyncJobId: runCommand.jobId,
   });
   const outcome = dispatch.completion
     ? await dispatch.completion

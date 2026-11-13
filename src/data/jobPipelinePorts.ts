@@ -229,6 +229,16 @@ export interface JobInstanceRecord {
    * they settle, so it must survive the dispatching process.
    */
   runScheduleId: string | null;
+  /**
+   * The async job id that dispatched the live/last run (stamped onto
+   * its terminal run record, #4357 — the join key that links the
+   * engine D1 record to the bridge row that dispatched it). Null
+   * when no async job dispatched the run — an explicit null, never
+   * a laundered id. Persisted on the instance (same class of fact
+   * as `runScheduleId`): cancel/settle paths stamp the id of the
+   * run they settle, so it must survive the dispatching process.
+   */
+  runAsyncJobId: string | null;
   checkpoint: JobCheckpoint | null;
   /**
    * The run's stage-runner checkpoint (#3549): one entry per
