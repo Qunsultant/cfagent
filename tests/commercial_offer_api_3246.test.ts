@@ -221,4 +221,52 @@ describe("isOfferPayloadView", () => {
     ).toBe(false);
     expect(isOfferPayloadView({ ...validPayload(), mentions: null })).toBe(false);
   });
+
+  it("accepts a held plan carrying currentPriceUSD, and rejects one missing it", () => {
+    const heldPlan = {
+      planId: "plan-basic-1",
+      productId: "prod-basic",
+      name: "Basic",
+      heldPriceUSD: 44.99,
+      currentPriceUSD: 49.99,
+      billingPeriod: "monthly" as const,
+      includedRuns: 20,
+      periodEndMs: 1790000000000,
+      billingManaged: false,
+    };
+    expect(
+      isOfferPayloadView(validPayload({ current: { ...validPayload().current, heldPlan } })),
+    ).toBe(true);
+    expect(
+      isOfferPayloadView(
+        validPayload({
+          current: { ...validPayload().current, heldPlan: { ...heldPlan, currentPriceUSD: null } },
+        }),
+      ),
+    ).toBe(true);
+    const { currentPriceUSD: _dropped, ...withoutCurrent } = heldPlan;
+    expect(
+      isOfferPayloadView(
+        validPayload({ current: { ...validPayload().current, heldPlan: withoutCurrent as never } }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a malformed runsPack row and accepts a well-formed one", () => {
+    const pack = {
+      productId: "prod-pack-10",
+      name: "Pack of 10",
+      versionId: "packver-10",
+      runs: 10,
+      priceUSD: 4.99,
+      effectiveFromMs: 1700000000000,
+    };
+    expect(isOfferPayloadView(validPayload({ runsPacks: [pack] }))).toBe(true);
+    const { runs: _dropped, ...withoutRuns } = pack;
+    expect(isOfferPayloadView(validPayload({ runsPacks: [withoutRuns as never] }))).toBe(false);
+    expect(
+      isOfferPayloadView(validPayload({ runsPacks: [{ ...pack, priceUSD: "4.99" as never }] })),
+    ).toBe(false);
+    expect(isOfferPayloadView({ ...validPayload(), runsPacks: "none" })).toBe(false);
+  });
 });

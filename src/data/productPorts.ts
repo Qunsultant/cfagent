@@ -32,11 +32,12 @@ export const DEFAULT_SEGMENT = "default";
 /** The Free product row (kind subscription, no versions — the read-only baseline, migration 0058). */
 export const FREE_PRODUCT_ID = "prod-free";
 
-export type ProductKind = "subscription" | "per_run";
+/** Issue #3246 slice 3: runs packs are a third product kind — prepaid bundles of runs with no tier and no subscription row. */
+export type ProductKind = "subscription" | "per_run" | "runs_pack";
 
 export function assertProductKind(kind: unknown): ProductKind {
-  if (kind !== "subscription" && kind !== "per_run") {
-    throw new Error(`Invalid product kind: ${String(kind)} (must be subscription or per_run).`);
+  if (kind !== "subscription" && kind !== "per_run" && kind !== "runs_pack") {
+    throw new Error(`Invalid product kind: ${String(kind)} (must be subscription, per_run, or runs_pack).`);
   }
   return kind;
 }

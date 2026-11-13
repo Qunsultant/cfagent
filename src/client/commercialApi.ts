@@ -397,6 +397,55 @@ export const topUpConfirm = (body: {
 }): Promise<TopUpConfirmView> => post<TopUpConfirmView>("/top-up/confirm", body);
 
 /**
+ * Issue #3246 slice 3 — runs packs: mint + confirm through the
+ * native verified-payment pattern (the top-up shape). The mint
+ * response carries the provider join key per rail: card →
+ * checkoutUrl + checkoutSessionId (Stripe session id); x402 →
+ * checkoutId + challenge (the 402 challenge the payer's
+ * wallet/agent completes — no URL exists for crypto). The confirm
+ * response carries the credited account and the pack balance, so
+ * the panel shows the new balance from the fresh server read.
+ */
+export interface PackCheckoutView {
+  packRequestId: string;
+  rail: "card" | "x402";
+  runs: number;
+  priceUSD: number;
+  checkoutUrl?: string | null;
+  checkoutSessionId?: string | null;
+  checkoutId?: string | null;
+  challenge?: TopUpChallenge | null;
+}
+
+export interface PackConfirmView {
+  account: CommercialAccountView;
+  packRequestId: string;
+  creditedRuns: number;
+  rail: "card" | "x402";
+  packRunsRemaining: number;
+  code: string;
+  message: string;
+}
+
+export const packCheckout = (body: {
+  versionId: string;
+  rail?: "card" | "x402";
+  email: string;
+  /**
+   * Issue #3246: audit-only offer context, present only when the
+   * pack was bought from an upgrade offer (same contract as the
+   * subscription checkout's offerContext).
+   */
+  offerContext?: OfferContext;
+}): Promise<PackCheckoutView> => post<PackCheckoutView>("/runs-packs/checkout", body);
+export const packConfirm = (body: {
+  packRequestId: string;
+  checkoutSessionId?: string;
+  paymentProof?: string;
+  payer?: string;
+}): Promise<PackConfirmView> => post<PackConfirmView>("/runs-packs/confirm", body);
+
+/**
  * Issue #3246 — upgrade-offer payload views (slice 1 server shape,
  * design §2.4). The client renders the payload verbatim: every
  * number shown comes from here, never from client state, query
@@ -486,6 +535,8 @@ export interface OfferPayloadView {
       productId: string;
       name: string;
       heldPriceUSD: number;
+      /** Slice 3 (§3.4): the held product's current effective price; null when none resolves. */
+      currentPriceUSD: number | null;
       billingPeriod: "monthly" | "annual";
       includedRuns: number;
       periodEndMs: number;
@@ -537,6 +588,18 @@ function isOfferTargetView(value: unknown): value is OfferTargetView {
   );
 }
 
+function isRunsPackOfferView(value: unknown): value is RunsPackOfferView {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.productId === "string" &&
+    typeof value.name === "string" &&
+    typeof value.versionId === "string" &&
+    typeof value.runs === "number" &&
+    typeof value.priceUSD === "number" &&
+    typeof value.effectiveFromMs === "number"
+  );
+}
+
 /**
  * Structural guard for an offer payload: the offer surfaces render
  * the fixed fallback copy on ANY malformed payload (never a blank
@@ -565,6 +628,7 @@ export function isOfferPayloadView(value: unknown): value is OfferPayloadView {
       typeof held.productId !== "string" ||
       typeof held.name !== "string" ||
       typeof held.heldPriceUSD !== "number" ||
+      (held.currentPriceUSD !== null && typeof held.currentPriceUSD !== "number") ||
       (held.billingPeriod !== "monthly" && held.billingPeriod !== "annual") ||
       typeof held.includedRuns !== "number" ||
       typeof held.periodEndMs !== "number" ||
@@ -580,7 +644,8 @@ export function isOfferPayloadView(value: unknown): value is OfferPayloadView {
     !value.downgradeTargets.every(isOfferTargetView) ||
     !Array.isArray(value.unavailableTargets) ||
     !value.unavailableTargets.every(isOfferTargetView) ||
-    !Array.isArray(value.runsPacks)
+    !Array.isArray(value.runsPacks) ||
+    !value.runsPacks.every(isRunsPackOfferView)
   ) {
     return false;
   }

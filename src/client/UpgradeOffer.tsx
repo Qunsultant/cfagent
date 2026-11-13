@@ -15,10 +15,12 @@
  *   family and collapses to the fixed copy on success. Dismissal
  *   state lives ONLY on the server: this component writes nothing
  *   to localStorage, sessionStorage, or any client store.
- * - Choosing a plan or buying credits navigates to the checkout
- *   surface with the target preselected and the offer trigger
- *   carried as query params (`?plan=<versionId>&offer=<trigger>`,
- *   `?checkoutTab=topup&offer=<trigger>`); the checkout surface
+ * - Choosing a plan, buying credits, or buying a pack navigates
+ *   to the checkout surface with the target preselected and the
+ *   offer trigger carried as query params
+ *   (`?plan=<versionId>&offer=<trigger>`,
+ *   `?checkoutTab=topup&offer=<trigger>`,
+ *   `?pack=<versionId>&offer=<trigger>`); the checkout surface
  *   owns the purchase and the acceptance audit. The navigation is
  *   injectable for tests; the default is a plain location assign.
  *
@@ -36,6 +38,7 @@ import {
   type ScreenerFamily,
 } from "./commercialApi";
 import { PlanCompare, type PlanChoice } from "./PlanCompare";
+import type { RunsPackOfferView } from "./commercialApi";
 
 export interface UpgradeOfferProps {
   trigger: Exclude<OfferTrigger, "ambient" | "skip_notice" | "trial_end">;
@@ -105,6 +108,19 @@ export function UpgradeOffer({ trigger, family, runRequestId, fallback, navigate
     go(`?${params.toString()}`);
   };
 
+  // Slice 3: buying a pack navigates to the checkout subscriptions
+  // tab with the pack preselected (the `pack` param); the checkout
+  // mints only from the Buy pack button there — never on arrival.
+  const onBuyPack = (pack: RunsPackOfferView) => {
+    const params = new URLSearchParams({
+      tab: "checkout",
+      checkoutTab: "subscriptions",
+      pack: pack.versionId,
+      offer: trigger,
+    });
+    go(`?${params.toString()}`);
+  };
+
   const onDismiss = async () => {
     setDismissFailed(false);
     try {
@@ -121,7 +137,7 @@ export function UpgradeOffer({ trigger, family, runRequestId, fallback, navigate
       {!dismissed && loading && <p role="status">{LOADING_LINE}</p>}
       {!dismissed && !loading && payload && (
         <div role="status">
-          <PlanCompare payload={payload} onChoosePlan={onChoosePlan} onBuyCredits={onBuyCredits} />
+          <PlanCompare payload={payload} onChoosePlan={onChoosePlan} onBuyCredits={onBuyCredits} onBuyPack={onBuyPack} />
           <Button variant="secondary" onClick={onDismiss}>
             Not now
           </Button>

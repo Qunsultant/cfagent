@@ -19,7 +19,7 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { PlanCompare, AmbientOfferCompare, type PlanChoice } from "../src/client/PlanCompare";
-import type { OfferPayloadView, OfferTargetView } from "../src/client/commercialApi";
+import type { OfferPayloadView, OfferTargetView, RunsPackOfferView } from "../src/client/commercialApi";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -79,6 +79,7 @@ function heldPayload(over: Partial<OfferPayloadView> = {}): OfferPayloadView {
         productId: "prod-basic",
         name: "Basic",
         heldPriceUSD: 44.99,
+        currentPriceUSD: 44.99,
         billingPeriod: "monthly",
         includedRuns: 20,
         periodEndMs: 1790000000000,
@@ -96,7 +97,15 @@ function heldPayload(over: Partial<OfferPayloadView> = {}): OfferPayloadView {
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
-async function renderCompare(p: OfferPayloadView, props: { onChoosePlan?: (c: PlanChoice) => void; onBuyCredits?: () => void } = {}) {
+async function renderCompare(
+  p: OfferPayloadView,
+  props: {
+    onChoosePlan?: (c: PlanChoice) => void;
+    onBuyCredits?: () => void;
+    onBuyPack?: (pack: RunsPackOfferView) => void;
+    selectedPackVersionId?: string | null;
+  } = {},
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -218,6 +227,64 @@ describe("PlanCompare render-verbatim", () => {
   it("renders nothing for an ineligible payload", async () => {
     await renderCompare(payload({ eligible: false, reasonCode: "FAILURE_OFFER_NO_TARGET", targets: [] }));
     expect(text()).toBe("");
+  });
+});
+
+describe("PlanCompare current price (slice 3, §3.4)", () => {
+  it("shows the current price when it differs from the held (grandfathered) price", async () => {
+    const p = heldPayload();
+    p.current.heldPlan = { ...p.current.heldPlan!, currentPriceUSD: 49.99 };
+    await renderCompare(p);
+    expect(text()).toContain("Your price $44.99 / month");
+    expect(text()).toContain("Current price $49.99 / month");
+  });
+
+  it("shows no current-price line when the held version is current", async () => {
+    await renderCompare(heldPayload());
+    expect(text()).toContain("Your price $44.99 / month");
+    expect(text()).not.toContain("Current price");
+  });
+});
+
+describe("PlanCompare runs-pack group (slice 3)", () => {
+  const pack: RunsPackOfferView = {
+    productId: "prod-pack-10",
+    name: "Pack of 10",
+    versionId: "packver-10",
+    runs: 10,
+    priceUSD: 4.99,
+    effectiveFromMs: 1700000000000,
+  };
+
+  it("renders the pack group with runs + price verbatim and a Buy pack action", async () => {
+    const bought: RunsPackOfferView[] = [];
+    await renderCompare(payload({ runsPacks: [pack] }), { onBuyPack: (p) => bought.push(p) });
+    expect(text()).toContain("Runs packs");
+    expect(text()).toContain("Pack of 10");
+    const cells = Array.from(container!.querySelectorAll("td")).map((c) => (c.textContent || "").trim());
+    expect(cells).toContain("$4.99");
+    expect(cells).toContain("10");
+    const buy = buttonsNamed("Buy pack");
+    expect(buy).toHaveLength(1);
+    await act(async () => {
+      buy[0].click();
+    });
+    expect(bought).toEqual([pack]);
+  });
+
+  it("renders no Buy pack button without an onBuyPack handler", async () => {
+    await renderCompare(payload({ runsPacks: [pack] }));
+    expect(text()).toContain("Runs packs");
+    expect(buttonsNamed("Buy pack")).toHaveLength(0);
+  });
+
+  it("marks the selected pack with the comparison badge", async () => {
+    await renderCompare(payload({ runsPacks: [pack] }), { selectedPackVersionId: "packver-10" });
+    expect(text()).toContain("Selected from your plan comparison");
+    if (root) root.unmount();
+    container!.remove();
+    await renderCompare(payload({ runsPacks: [pack] }), { selectedPackVersionId: "packver-other" });
+    expect(text()).not.toContain("Selected from your plan comparison");
   });
 });
 

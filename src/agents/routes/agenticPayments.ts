@@ -154,6 +154,7 @@ import {
 } from "../../data/createNativeLedgerPorts";
 import { parseNativeRail } from "../../data/nativeLedgerPorts";
 import {
+  mapChargeToJournalEntries,
   mapRedemptionToJournalEntries,
   mapSubscriptionPurchaseToJournalEntries,
   mapTopUpToJournalEntries,
@@ -258,6 +259,19 @@ import {
 } from "../../data/createOfferSuppressionPorts";
 import { assertOfferTrigger, type OfferTrigger } from "../../data/offerSuppressionPorts";
 import { parseOfferContext, resolveOffer } from "../../services/upgradeOffers";
+import {
+  createRunsPackAdapters,
+  ensureRunsPackSchema,
+  type RunsPackAdapters,
+} from "../../data/createRunsPackPorts";
+import {
+  assertRunsPackPriceUSD,
+  assertRunsPackRail,
+  assertRunsPackRuns,
+  RunsPackClaimRefusedError,
+  type RunsPackVersion,
+} from "../../data/runsPackPorts";
+import { activateRunsPack } from "../../services/runsPackActivation";
 import {
   createLifecycleAdapter,
   ensureLifecycleSchema,
@@ -2612,6 +2626,38 @@ export async function handleAgenticPaymentsRoutes(
     return adapter;
   };
 
+  // Issue #3246 slice 3: the runs-pack stores (versions, balances,
+  // drafts) — one bundle from one binding, mirroring the top-up
+  // drafts' require helper. The pack checkout/confirm routes and
+  // the pack-version routes all read through this helper.
+  const requireRunsPack = (): RunsPackAdapters | Response => {
+    const adapters = createRunsPackAdapters(ctx.env as { AGENT_DB?: unknown });
+    if (!adapters) {
+      return Response.json({ error: "Runs-pack store unavailable: AGENT_DB is not bound." }, { status: 503 });
+    }
+    return adapters;
+  };
+
+  const runsPackErrorResponse = (err: unknown): Response => {
+    if (err instanceof BusinessError) {
+      const outcome = resolveOutcome(err.code);
+      return new Response(JSON.stringify({ error: codedMessage(err.code), code: err.code }), {
+        status: outcome.entry?.httpStatus ?? 500,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const message = err instanceof Error ? err.message : "Runs-pack purchase failed.";
+    const status = /already credited/.test(message)
+      ? 409
+      : /required|must be|Unknown runs-pack draft/.test(message)
+        ? 400
+        : 500;
+    return new Response(JSON.stringify({ error: message }), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
   const topUpErrorResponse = (err: unknown): Response => {
     if (err instanceof BusinessError) {
       const outcome = resolveOutcome(err.code);
@@ -2994,6 +3040,441 @@ export async function handleAgenticPaymentsRoutes(
       });
     } catch (err: any) {
       return topUpErrorResponse(err);
+    }
+  }
+
+  // ================================================================
+  // Runs packs (#3246 slice 3, sub-issue of #3241) — the pack
+  // checkout/confirm pair, mirroring the top-up routes exactly
+  // (verified payment only; confirm idempotent on replay). A pack
+  // purchase credits a dedicated per-login runs balance — NO tier,
+  // NO subscription row, NO expiry in v1. The draft id
+  // (`pack-<uuid>`) is the Stripe client_reference_id / x402
+  // checkout id and the replay guard.
+  // ================================================================
+
+  // POST /payments/agentic/commercial/runs-packs/checkout — mint a native checkout for a chosen pack version.
+  // The version is validated before any checkout is minted: it must exist, be approved (only an
+  // operator approval makes a pack price buyable), and be active. The draft binds the version's
+  // (runs, price) terms at mint — confirm credits exactly those terms, never a client-supplied
+  // amount. No runs are created here — mint only mints; the balance is credited at confirm, after
+  // verified payment.
+  if (path.endsWith("/payments/agentic/commercial/runs-packs/checkout") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const flag = await requireMonetization();
+      if (flag) return flag;
+      const body = (await request.json().catch(() => ({}))) as {
+        versionId?: unknown;
+        rail?: unknown;
+        email?: unknown;
+        offerContext?: unknown;
+      };
+      const email = typeof body.email === "string" ? body.email.trim() : "";
+      if (!email) return Response.json({ error: "email (checkout contact) is required." }, { status: 400 });
+      const versionId = typeof body.versionId === "string" ? body.versionId.trim() : "";
+      if (!versionId) return Response.json({ error: "versionId is required." }, { status: 400 });
+      let rail: "card" | "x402" = "card";
+      if (body.rail !== undefined) {
+        try {
+          rail = assertRunsPackRail(body.rail);
+        } catch {
+          return Response.json({ error: "rail must be \"card\" or \"x402\"." }, { status: 400 });
+        }
+      }
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const packs = requireRunsPack();
+      if (packs instanceof Response) return packs;
+      try {
+        await ensureRunsPackSchema(packs.versions.db);
+      } catch (err: any) {
+        return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const version = await packs.versions.getVersion(versionId);
+      if (!version) return Response.json({ error: `No runs-pack version ${versionId}.` }, { status: 404 });
+      if (version.approvalStatus !== "approved") {
+        throw new BusinessError("FAILURE_RUNS_PACK_NO_APPROVED_PRICE");
+      }
+      if (!version.active) {
+        return Response.json({ error: `Runs-pack version ${versionId} is not active.` }, { status: 409 });
+      }
+      let identity;
+      try {
+        identity = await resolvePlatformIdentity(
+          { commercial: store, subscriptions: subs },
+          { userId: login, nowMs: Date.now() },
+        );
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+      }
+      // #2219: the tenant comes from the resolved identity, never the request body.
+      const tenantId = identity.tenantId ?? login;
+      const ports = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
+      const port = ports?.[rail] ?? null;
+      if (!port) {
+        throw new BusinessError("FAILURE_RUNS_PACK_UNAVAILABLE");
+      }
+      const packRequestId = `pack-${crypto.randomUUID()}`;
+      let created;
+      try {
+        created = await port.createCheckout({
+          runRequestId: packRequestId,
+          priceUSD: version.priceUSD,
+          email,
+          userId: login,
+        });
+      } catch {
+        throw new BusinessError("FAILURE_RUNS_PACK_UNAVAILABLE");
+      }
+      try {
+        await packs.drafts.createDraft({
+          id: packRequestId,
+          userLogin: login,
+          tenantId,
+          email,
+          versionId: version.id,
+          productId: version.productId,
+          runs: version.runs,
+          priceUSD: version.priceUSD,
+          rail,
+          status: "minted",
+          createdAtMs: Date.now(),
+          creditedAtMs: null,
+          paymentIntentId: null,
+          checkoutSessionId: rail === "card" ? created.checkoutId : null,
+          challengeNonce: rail === "x402" ? (created.challenge?.nonce ?? null) : null,
+        });
+      } catch (err: any) {
+        return Response.json({ error: "Failed to record the runs-pack draft." }, { status: 500 });
+      }
+      ctx.audit("commercial.runs_pack.checkout_created", "payments", {
+        userId: login,
+        tenantId,
+        packRequestId,
+        versionId: version.id,
+        productId: version.productId,
+        runs: version.runs,
+        priceUSD: version.priceUSD,
+        rail,
+      });
+      // Issue #3246: offer acceptance, audit-only — see the
+      // subscription checkout mint. The action names the pack
+      // purchase (not the plan or the top-up).
+      const offerContext = parseOfferContext(body.offerContext);
+      if (offerContext) {
+        ctx.audit("commercial.offer.accepted", "payments", {
+          login,
+          tenantId,
+          trigger: offerContext.trigger,
+          action: "runs_pack",
+          checkoutId: created.checkoutId,
+          ...(offerContext.shownAtMs !== undefined ? { shownAtMs: offerContext.shownAtMs } : {}),
+        });
+      }
+      if (rail === "card") {
+        return Response.json({
+          packRequestId,
+          rail,
+          runs: version.runs,
+          priceUSD: version.priceUSD,
+          checkoutUrl: created.checkoutUrl ?? null,
+          checkoutSessionId: created.checkoutId,
+        });
+      }
+      return Response.json({
+        packRequestId,
+        rail,
+        runs: version.runs,
+        priceUSD: version.priceUSD,
+        checkoutId: created.checkoutId,
+        challenge: created.challenge ?? null,
+      });
+    } catch (err: any) {
+      if (err instanceof BusinessError) return runsPackErrorResponse(err);
+      const message = err.message || "Failed to create runs-pack checkout";
+      return Response.json({ error: message }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/runs-packs/confirm — credit on VERIFIED payment only.
+  // Fulfillment is re-read from the provider, never a return page, exactly like the
+  // top-up confirm. Card requires ALL of: session status complete, payment_status
+  // paid, amount_total == draft price x 100 (the MANDATORY amount re-check), client_reference_id
+  // == the draft id, and a payment-intent id present. x402 requires: facilitator verdict
+  // verified for the draft price, payer match when the caller names one, and the
+  // challenge-nonce binding to the nonce minted for this draft. Any failure refuses
+  // with 402 and credits nothing. A credited draft returns the SAME 200 success
+  // payload on replay (literal idempotency, design §9.3) — no second credit, ever.
+  // The version is re-checked after payment verification and before the claim
+  // (the plan-purchase precedent): a version deactivated after mint refuses
+  // here, and the verified payment is reconciled by an operator from the
+  // draft + provider evidence. The account row is created on verified payment
+  // when missing (purchase-activation precedent), so a first pack needs no
+  // operator step; the credit target is always the server-resolved (user,
+  // tenant), never a client-supplied account (#1069 §8). Purchase confers NO
+  // tier and creates NO subscription row — activation touches the pack
+  // balance only.
+  if (path.endsWith("/payments/agentic/commercial/runs-packs/confirm") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const flag = await requireMonetization();
+      if (flag) return flag;
+      const body = (await request.json().catch(() => ({}))) as {
+        packRequestId?: unknown;
+        checkoutSessionId?: unknown;
+        paymentProof?: unknown;
+        payer?: unknown;
+      };
+      const packRequestId = typeof body.packRequestId === "string" ? body.packRequestId : "";
+      if (!packRequestId) return Response.json({ error: "packRequestId is required." }, { status: 400 });
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const packs = requireRunsPack();
+      if (packs instanceof Response) return packs;
+      try {
+        await ensureRunsPackSchema(packs.drafts.db);
+      } catch (err: any) {
+        return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const draft = await packs.drafts.getDraft(packRequestId);
+      if (!draft) return Response.json({ error: "Unknown runs pack." }, { status: 404 });
+      if (draft.userLogin !== login) {
+        return Response.json({ error: "Forbidden: only the runs-pack owner may confirm it." }, { status: 403 });
+      }
+      const purchased = resolveOutcome("SUCCESS_RUNS_PACK_PURCHASED");
+      if (draft.status === "credited") {
+        // Idempotent replay: the same checkout id returns the same
+        // success — the draft's bound runs, the current account row,
+        // and the current balance. The balance is a fresh read: runs
+        // spent after purchase read as spent, which is the truth,
+        // not a different result.
+        let account = await store.getAccount(login);
+        if (!account) {
+          account = await store.upsertAccount({ userId: login, tenantId: draft.tenantId, tier: "Free" });
+        }
+        const packRunsRemaining = await packs.balance.getBalance(login);
+        return Response.json({
+          account,
+          packRequestId: draft.id,
+          creditedRuns: draft.runs,
+          rail: draft.rail,
+          packRunsRemaining,
+          code: purchased.code,
+          message: purchased.businessMessage,
+        });
+      }
+      if (draft.status !== "minted") {
+        throw new BusinessError("FAILURE_RUNS_PACK_REPLAY");
+      }
+      const ports = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
+      const port = ports?.[draft.rail] ?? null;
+      if (!port) {
+        throw new BusinessError("FAILURE_RUNS_PACK_UNAVAILABLE");
+      }
+      let paymentIntentId: string | null = null;
+      let checkoutSessionId: string | null = null;
+      if (draft.rail === "card") {
+        const sessionId =
+          typeof body.checkoutSessionId === "string" && body.checkoutSessionId
+            ? body.checkoutSessionId
+            : draft.checkoutSessionId;
+        if (!sessionId) return Response.json({ error: "checkoutSessionId is required." }, { status: 400 });
+        checkoutSessionId = sessionId;
+        let evidence;
+        try {
+          evidence = await port.retrieveCardSession({ sessionId });
+        } catch {
+          throw new BusinessError("FAILURE_RUNS_PACK_UNAVAILABLE");
+        }
+        const expectedCents = Math.round(draft.priceUSD * 100);
+        if (
+          evidence.status !== "complete" ||
+          evidence.paymentStatus !== "paid" ||
+          evidence.amountTotalCents !== expectedCents ||
+          evidence.clientReferenceId !== draft.id
+        ) {
+          throw new BusinessError("FAILURE_RUNS_PACK_NOT_PAID");
+        }
+        if (!evidence.paymentIntentId) {
+          throw new BusinessError("FAILURE_RUNS_PACK_NOT_PAID");
+        }
+        paymentIntentId = evidence.paymentIntentId;
+      } else {
+        const paymentProof = typeof body.paymentProof === "string" ? body.paymentProof : "";
+        if (!paymentProof) return Response.json({ error: "paymentProof is required." }, { status: 400 });
+        let verdict;
+        try {
+          verdict = await port.verifyCryptoPayment({ paymentProof, expectedAmountUSD: draft.priceUSD });
+        } catch {
+          throw new BusinessError("FAILURE_RUNS_PACK_UNAVAILABLE");
+        }
+        if (!verdict.verified || !verdict.payer) {
+          throw new BusinessError("FAILURE_RUNS_PACK_NOT_PAID");
+        }
+        const claimedPayer = typeof body.payer === "string" ? body.payer : "";
+        if (claimedPayer && claimedPayer.toLowerCase() !== verdict.payer.toLowerCase()) {
+          throw new BusinessError("FAILURE_RUNS_PACK_NOT_PAID");
+        }
+        if (draft.challengeNonce && verdict.nonce && draft.challengeNonce !== verdict.nonce) {
+          throw new BusinessError("FAILURE_RUNS_PACK_NOT_PAID");
+        }
+      }
+      // Verified: the version must still be buyable — approved and
+      // active — before the claim (the plan-purchase precedent).
+      const version = await packs.versions.getVersion(draft.versionId);
+      if (!version || version.approvalStatus !== "approved") {
+        throw new BusinessError("FAILURE_RUNS_PACK_NO_APPROVED_PRICE");
+      }
+      if (!version.active) {
+        return Response.json({ error: `Runs-pack version ${draft.versionId} is not active.` }, { status: 409 });
+      }
+      // Verified: claim the draft for crediting BEFORE the credit lands
+      // (#3572, the top-up precedent). The claim is a single conditional
+      // transition (minted → crediting), so exactly one confirmer can own
+      // the credit: a retry or concurrent confirm sees a non-minted draft
+      // and refuses 409 instead of crediting again. A claim refusal
+      // here means another confirmer already claimed it (the status
+      // check above passed before the race) — map it to the replay
+      // outcome, never to a store failure.
+      try {
+        await packs.drafts.claimForCredit(draft.id);
+      } catch (err: any) {
+        if (err instanceof RunsPackClaimRefusedError) {
+          throw new BusinessError("FAILURE_RUNS_PACK_REPLAY");
+        }
+        throw err;
+      }
+      ctx.audit("commercial.runs_pack.claimed", "payments", {
+        userId: login,
+        tenantId: draft.tenantId,
+        packRequestId: draft.id,
+        versionId: draft.versionId,
+        productId: draft.productId,
+        runs: draft.runs,
+        priceUSD: draft.priceUSD,
+        rail: draft.rail,
+      });
+      // Verified: ensure the account row exists (created on verified payment when
+      // missing), then credit exactly the draft runs — never a client-supplied count.
+      let account = await store.getAccount(login);
+      if (!account) {
+        account = await store.upsertAccount({ userId: login, tenantId: draft.tenantId, tier: "Free" });
+      }
+      let activation;
+      try {
+        activation = await activateRunsPack({
+          balance: packs.balance,
+          login,
+          runs: draft.runs,
+        });
+      } catch (err: any) {
+        // The credit never landed, so release the claim and let a retry
+        // proceed. If the release itself fails the draft stays
+        // `crediting` with no credit landed: a loud 500 with the draft
+        // id, so an operator can reconcile (the stuck claim is visible
+        // via the claim audit + the 409s, never silent). That path needs
+        // two consecutive store failures.
+        try {
+          await packs.drafts.releaseClaim(draft.id);
+        } catch (releaseErr: any) {
+          ctx.audit("commercial.runs_pack.claim_stuck", "payments", {
+            userId: login,
+            tenantId: draft.tenantId,
+            packRequestId: draft.id,
+            versionId: draft.versionId,
+            productId: draft.productId,
+            runs: draft.runs,
+            priceUSD: draft.priceUSD,
+            rail: draft.rail,
+          });
+          logAspectEvent({
+            aspect: "RunsPack",
+            operationName: "runs-pack.confirm.claim-release",
+            level: "error",
+            message: "runs-pack claim release failed after credit failure; draft stuck crediting",
+            error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+            metadata: { userLogin: login, packRequestId: draft.id },
+          });
+          return Response.json({
+            error: `Runs pack claimed but the credit failed and the claim could not be released: ${draft.id}.`,
+          }, { status: 500 });
+        }
+        throw err;
+      }
+      let marked;
+      try {
+        marked = await packs.drafts.markCredited(draft.id, {
+          creditedAtMs: Date.now(),
+          paymentIntentId,
+          checkoutSessionId,
+        });
+      } catch (err: any) {
+        // The credit landed but the draft could not be marked: a loud
+        // 500 with the draft id, so an operator can reconcile from the
+        // Stripe evidence. The draft is `crediting` (claimed above), so
+        // a retry refuses 409 and cannot credit again — no double
+        // credit, but the draft never reaches `credited` and no
+        // `commercial.runs_pack.purchased` audit fires for it; the operator
+        // reconciles from the claim audit + Stripe evidence. Never
+        // silently swallow this.
+        return Response.json({ error: `Runs pack credited but the draft could not be marked: ${draft.id}.` }, { status: 500 });
+      }
+      void marked;
+      ctx.audit("commercial.runs_pack.purchased", "payments", {
+        userId: login,
+        tenantId: draft.tenantId,
+        packRequestId: draft.id,
+        versionId: draft.versionId,
+        productId: draft.productId,
+        runs: draft.runs,
+        priceUSD: draft.priceUSD,
+        rail: draft.rail,
+        packRunsRemaining: activation.packRunsRemaining,
+        paymentIntentId,
+      });
+      // Project the purchase into the D1 journal (Dr 1000 / Cr 4000 —
+      // a pack is immediate revenue, like a subscription purchase:
+      // the runs are the product, not prepaid credit). BEST-EFFORT,
+      // never thrown: the runs already landed, so a journal failure
+      // is a loud log + a reconcile flag, never a failed purchase.
+      // Posted only after crediting success, never on any refusal
+      // path above (402/403/404/409/503 all return before this point).
+      await postJournalBestEffort(async () => {
+        const adapter = createJournalAdapter(ctx.env as { AGENT_DB?: unknown });
+        if (!adapter) return null;
+        await ensureJournalSchema(adapter.db);
+        return adapter;
+      }, mapChargeToJournalEntries({
+        transactionRef: draft.id,
+        tenantId: draft.tenantId,
+        runRequestId: draft.id,
+        family: "runs_pack",
+        productId: draft.productId,
+        versionId: draft.versionId,
+        amountUSD: draft.priceUSD,
+      }));
+      return Response.json({
+        account,
+        packRequestId: draft.id,
+        creditedRuns: draft.runs,
+        rail: draft.rail,
+        packRunsRemaining: activation.packRunsRemaining,
+        code: purchased.code,
+        message: purchased.businessMessage,
+      });
+    } catch (err: any) {
+      return runsPackErrorResponse(err);
     }
   }
 
@@ -4643,10 +5124,19 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
     product: { id: string; kind: string },
     subs: D1SubscriptionAdapter,
     catalogue: ReturnType<typeof createPriceCatalogueAdapter>,
+    packs: RunsPackAdapters | null,
     segment?: string,
-  ): Promise<SubscriptionPlanRecord[] | PriceEntry[]> => {
+  ): Promise<SubscriptionPlanRecord[] | PriceEntry[] | RunsPackVersion[]> => {
     if (product.kind === "subscription") {
       return subs.listVersions(product.id, segment);
+    }
+    // Issue #3246 slice 3: a runs_pack product's chain is its pack
+    // versions. Reads never ensure the schema (the write paths do):
+    // deploys migrate first, so the table exists whenever the code
+    // serves traffic; a store without it fails closed here.
+    if (product.kind === "runs_pack") {
+      if (!packs) return [];
+      return packs.versions.listVersions(product.id, segment);
     }
     const family = familyForProductId(product.id);
     if (!family || !catalogue) return [];
@@ -4671,12 +5161,13 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
       const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
+      const packs = createRunsPackAdapters(ctx.env as { AGENT_DB?: unknown });
       const listed = await products.listProducts();
       const withVersions = [];
       for (const product of listed) {
         withVersions.push({
           product,
-          versions: await loadProductVersions(product, subs, catalogue),
+          versions: await loadProductVersions(product, subs, catalogue, packs),
         });
       }
       return Response.json({ products: withVersions });
@@ -4751,6 +5242,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
     const freeRunCounter = createFreeRunCounterAdapter(env);
     const quota = createApprovedFreeQuotaAdapter(env);
     const referral = createLifecycleAdapter(env);
+    const runsPackAdapters = createRunsPackAdapters(env);
     if (store) await ensureCommercialSchema(store.db);
     if (subs) await ensureSubscriptionSchema(subs.db);
     if (catalogue) await ensurePriceCatalogueSchema(catalogue.db);
@@ -4759,7 +5251,21 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
     if (freeRunCounter) await ensureFreeRunCounterSchema(freeRunCounter.db);
     if (quota) await quota.ensureSchema();
     if (referral) await ensureLifecycleSchema(referral.db);
-    return { store, subs, products, catalogue, policy, suppressions, freeRunCounter, quota, referral };
+    if (runsPackAdapters) await ensureRunsPackSchema(runsPackAdapters.balance.db);
+    return {
+      store,
+      subs,
+      products,
+      catalogue,
+      policy,
+      suppressions,
+      freeRunCounter,
+      quota,
+      referral,
+      runsPack: runsPackAdapters
+        ? { versions: runsPackAdapters.versions, balance: runsPackAdapters.balance }
+        : null,
+    };
   };
 
   // POST /payments/agentic/commercial/offer — the triggered offer
@@ -5052,10 +5558,11 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
       const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
+      const packs = createRunsPackAdapters(ctx.env as { AGENT_DB?: unknown });
       const product = await products.getProduct(productId);
       if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
       const segment = url.searchParams.get("segment") ?? undefined;
-      const versions = await loadProductVersions(product, subs, catalogue, segment);
+      const versions = await loadProductVersions(product, subs, catalogue, packs, segment);
       return Response.json({ product, versions });
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to read version chain." }, { status: 500 });
@@ -5063,12 +5570,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   }
 
   // POST /payments/agentic/commercial/products/:productId/versions
-  // (operator only) — create a version of a subscription
-  // product. The version lands PROPOSED with a server-assigned
-  // number (max + 1 for the product+segment); approval is the
-  // separate approve action. A price change is never an
-  // in-place edit: it is always a new version. The Free
-  // baseline (prod-free) carries no versions and refuses.
+  // (operator only) — create a version of a subscription product
+  // or a runs-pack version of a runs_pack product. The version
+  // lands PROPOSED with a server-assigned number (max + 1 for the
+  // product+segment); approval is the separate approve action. A
+  // price change is never an in-place edit: it is always a new
+  // version. The Free baseline (prod-free) carries no versions
+  // and refuses. A pack version's terms are (runs, price) —
+  // never derived from a per-run price.
   if (
     path.includes("/payments/agentic/commercial/products/") &&
     path.endsWith("/versions") &&
@@ -5091,6 +5600,59 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const priceUSD = body.priceUSD;
       if (typeof priceUSD !== "number" || !Number.isFinite(priceUSD) || priceUSD < 0) {
         return Response.json({ error: "priceUSD must be a finite non-negative number." }, { status: 400 });
+      }
+      const products = requireProducts();
+      if (products instanceof Response) return products;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      try {
+        await ensureProductSchema(products.db);
+      } catch (err: any) {
+        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const product = await products.getProduct(productId);
+      if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      if (product.id === FREE_PRODUCT_ID) {
+        return Response.json(
+          { error: "The Free baseline carries no versions: it is a read-only baseline, never purchasable." },
+          { status: 409 },
+        );
+      }
+      // Issue #3246 slice 3: a runs_pack product versions through
+      // the pack store — (runs, price) terms, validated by the
+      // pack adapter (a bad field is a 400 through the catch
+      // below). The segment normalizes exactly like the plan path.
+      if (product.kind === "runs_pack") {
+        const packs = requireRunsPack();
+        if (packs instanceof Response) return packs;
+        try {
+          await ensureRunsPackSchema(packs.versions.db);
+        } catch (err: any) {
+          return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        }
+        const segment = typeof body.segment === "string" && body.segment.trim() ? body.segment.trim() : "default";
+        const version = await packs.versions.createVersion({
+          productId: product.id,
+          segment,
+          runs: body.runs,
+          priceUSD,
+          effectiveFromMs: body.effectiveFromMs,
+          effectiveToMs: body.effectiveToMs,
+        });
+        ctx.audit("commercial.runs_pack.version.created", "payments", {
+          productId: product.id,
+          versionId: version.id,
+          version: version.version,
+          segment: version.segment,
+          runs: version.runs,
+          priceUSD: version.priceUSD,
+          createdBy: login,
+        });
+        return Response.json({ version });
       }
       const periodDays = body.periodDays;
       if (typeof periodDays !== "number" || !Number.isInteger(periodDays) || periodDays <= 0) {
@@ -5139,27 +5701,6 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
             : null;
       if (body.stripePriceId !== undefined && body.stripePriceId !== null && typeof body.stripePriceId !== "string") {
         return Response.json({ error: "stripePriceId must be a string when present." }, { status: 400 });
-      }
-      const products = requireProducts();
-      if (products instanceof Response) return products;
-      const subs = requireSubs();
-      if (subs instanceof Response) return subs;
-      const store = requireStore();
-      if (store instanceof Response) return store;
-      const ensured = await ensureStores(store, subs);
-      if (ensured) return ensured;
-      try {
-        await ensureProductSchema(products.db);
-      } catch (err: any) {
-        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
-      }
-      const product = await products.getProduct(productId);
-      if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
-      if (product.id === FREE_PRODUCT_ID) {
-        return Response.json(
-          { error: "The Free baseline carries no versions: it is a read-only baseline, never purchasable." },
-          { status: 409 },
-        );
       }
       if (product.kind !== "subscription") {
         return Response.json(
@@ -5232,6 +5773,32 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       if (ensured) return ensured;
       const product = await products.getProduct(productId);
       if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      // Issue #3246 slice 3: a runs_pack version approves through
+      // the pack store — the same addressed-by-id shape, its own
+      // audit event, and no plan outcome code (there is no pack
+      // approval-success code; the UI reads the version from its
+      // own row, not this response).
+      if (product.kind === "runs_pack") {
+        const packs = requireRunsPack();
+        if (packs instanceof Response) return packs;
+        try {
+          await ensureRunsPackSchema(packs.versions.db);
+        } catch (err: any) {
+          return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        }
+        const existing = await packs.versions.getVersion(versionId);
+        if (!existing || existing.productId !== productId) {
+          return Response.json({ error: `No version ${versionId} for product ${productId}.` }, { status: 404 });
+        }
+        const version = await packs.versions.approveVersion(versionId, login);
+        ctx.audit("commercial.runs_pack.version.approved", "payments", {
+          login,
+          versionId: version.id,
+          productId: version.productId,
+          approvedBy: login,
+        });
+        return Response.json({ version });
+      }
       const existing = await subs.getPlan(versionId);
       if (!existing || existing.productId !== productId) {
         return Response.json({ error: `No version ${versionId} for product ${productId}.` }, { status: 404 });
@@ -5287,6 +5854,28 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       if (ensured) return ensured;
       const product = await products.getProduct(productId);
       if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
+      // Issue #3246 slice 3: a runs_pack version deactivates
+      // through the pack store — blocks NEW purchases only; pack
+      // balances already bought are untouched.
+      if (product.kind === "runs_pack") {
+        const packs = requireRunsPack();
+        if (packs instanceof Response) return packs;
+        try {
+          await ensureRunsPackSchema(packs.versions.db);
+        } catch (err: any) {
+          return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        }
+        const existing = await packs.versions.getVersion(versionId);
+        if (!existing || existing.productId !== productId) {
+          return Response.json({ error: `No version ${versionId} for product ${productId}.` }, { status: 404 });
+        }
+        const version = await packs.versions.deactivateVersion(versionId);
+        ctx.audit("commercial.runs_pack.version.deactivated", "payments", {
+          versionId: version.id,
+          productId: version.productId,
+        });
+        return Response.json({ version });
+      }
       const existing = await subs.getPlan(versionId);
       if (!existing || existing.productId !== productId) {
         return Response.json({ error: `No version ${versionId} for product ${productId}.` }, { status: 404 });
