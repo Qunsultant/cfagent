@@ -3,8 +3,8 @@
  *
  * The ScheduledAgent's DO owns the pipeline, so its SQLite is the stage
  * event store's home (same residency rule as the instance checkpoint).
- * The table is ensured lazily on every operation (CREATE TABLE IF NOT
- * EXISTS), `event_key` is UNIQUE so a re-delivered publication is
+ * The table is ensured lazily on every operation, `event_key` is
+ * UNIQUE so a re-delivered publication is
  * ignored rather than duplicated, and `listByRun` reads a run's events
  * in the order they were recorded. Every sql.exec site lives here,
  * inside src/data/ (the global D-D census rule).
