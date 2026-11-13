@@ -235,7 +235,13 @@ describe("issue #782: single-source shared mas_* schema", () => {
     const offenders = walkSrc(srcRoot)
       .filter((file) => pattern.test(readFileSync(file, "utf-8")))
       .map((file) => path.relative(srcRoot, file).replace(/\\/g, "/"));
-    expect(offenders).toEqual(["data/ormSchema.ts"]);
+    // #4282 P2a retarget (disclosed pin update): the single home for
+    // the shared-table DDL moved from src/data/ormSchema.ts into the
+    // schema catalogue — ormSchema.ts still exports SHARED_TABLE_DDL
+    // (now catalogue-derived, so the canonical-module pin above still
+    // holds), but the literal DDL text lives in exactly one file, the
+    // catalogue module. The single-source intent is unchanged.
+    expect(offenders).toEqual(["data/schemaComponent/ormCatalogue.ts"]);
   });
 
   it("source pin: both initialization paths consume the canonical module", () => {
