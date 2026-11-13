@@ -117,12 +117,6 @@ export const UNIT_DRIVERS: readonly UnitDriver[] = [
     kind: "scheduled-executor",
     entryPoint: "src/services/indexListJob.ts#executeIndexListRefreshJob",
   },
-  {
-    capabilityId: "feed-refresh-all",
-    kind: "scheduled-executor",
-    entryPoint:
-      "src/agents/scheduledTasksPipeline.ts#dispatchScheduledPipelineJob",
-  },
   // ---- Enrich ----
   {
     capabilityId: "enrich-dataset",
