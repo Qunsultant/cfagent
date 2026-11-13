@@ -35,6 +35,25 @@ export const CRON_PRESETS = [
   { label: "Daily Overnight (11:00 PM ET)", etHour: 23, etMinute: 0, daysOfWeek: "*" },
 ];
 
+/**
+ * Issue #4353 — a history row's timestamp, DATE AND TIME (the owner's ask:
+ * "Execution History & Audit Trail must contain datetimestamp"). One format
+ * for every audit row, and a missing/unparseable value says so instead of
+ * rendering "Invalid Date" or today's date.
+ */
+export function formatAuditTimestamp(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "not recorded";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "not recorded";
+  return parsed.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /** The payload object of a schedule, or {} when absent/malformed. */
 export function payloadOf(item: ScheduledTaskItem): Record<string, any> {
   const p = item?.payload;

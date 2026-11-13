@@ -1,5 +1,6 @@
 import React from "react";
 import { Badge, Table, type TableColumn } from "../components/ui";
+import { formatAuditTimestamp } from "./format";
 
 export interface AuditTrailSectionProps {
   auditLogs: any[];
@@ -17,9 +18,10 @@ export function AuditTrailSection({ auditLogs, loadingAudit }: AuditTrailSection
     {
       key: "timestamp",
       header: "Timestamp",
+      // Issue #4353 — the date AND the time: a time alone cannot say when.
       render: (log) => (
         <span className="schedule-row-muted">
-          {new Date(log.created_at || log.createdAt).toLocaleTimeString()}
+          {formatAuditTimestamp(log.created_at ?? log.createdAt)}
         </span>
       ),
     },
@@ -124,11 +126,15 @@ export function AuditTrailSection({ auditLogs, loadingAudit }: AuditTrailSection
   ];
 
   return (
-    <section className="sched-section-card">
+    // Issue #4353 — ONE heading row: the section name, its count and what the
+    // table IS (the caption it used to stack above) live on the same line, so
+    // the page no longer shows two titles for one table.
+    <section className="sched-section-card" aria-labelledby="sched-audit-heading">
       <header className="sched-section-header">
-        <h4>
+        <h4 id="sched-audit-heading">
           <span aria-hidden="true">📜</span> Execution History &amp; Audit Trail
           <span className="sched-count-pill">{auditLogs.length} Events</span>
+          <small className="schedule-row-muted">Schedule execution history</small>
         </h4>
         {loadingAudit && <span className="schedule-row-muted">Loading…</span>}
       </header>
@@ -137,7 +143,6 @@ export function AuditTrailSection({ auditLogs, loadingAudit }: AuditTrailSection
         columns={columns}
         rows={auditLogs}
         rowKey={(log) => log.id}
-        caption="Schedule execution history"
         containerClassName="sched-table-scroll"
         empty={
           <p className="sched-table-status">
