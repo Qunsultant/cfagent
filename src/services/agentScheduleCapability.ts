@@ -103,7 +103,6 @@ export const AGENT_SCHEDULABLE_GOAL_OPERATIONS: readonly string[] = [
   "resource.dashboard_comparison",
   "index.refresh_wikipedia",
   "index.refresh_holdings",
-  "feed.refresh_all",
   "chain.execute",
   "pipeline:*",
 ];
