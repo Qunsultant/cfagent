@@ -154,6 +154,11 @@ import {
 } from "../data/createFreeRunCounterPorts";
 import { createApprovedFreeQuotaAdapter } from "../data/createApprovedFreeQuotaPorts";
 import {
+  createRunsPackAdapters,
+  ensureRunsPackSchema,
+} from "../data/createRunsPackPorts";
+import type { RunsPackBalancePort } from "../data/runsPackPorts";
+import {
   mapChargeToJournalEntries,
   mapFailureCreditToJournalEntries,
 } from "../data/journalPorts";
@@ -363,6 +368,32 @@ export class PaymentWorkflow extends ThinkWorkflow<
       });
       approvedFreeQuota = null;
     }
+    // Issue #3246 slice 3: the runs-pack balance, wired from the
+    // same AGENT_DB binding. Best-effort like the quota (not fatal
+    // like the catalogue): a pack adapter that cannot be ensured
+    // leaves the gate exactly as today — a pack balance simply
+    // does not cover the run — so a wiring failure never fails a
+    // payment and never grants an unverified pack run. No console
+    // call here: the #3515 ratchet pins this file's ceiling at 9.
+    let runsPackBalance: RunsPackBalancePort | null = null;
+    try {
+      const packs = createRunsPackAdapters(this.env as { AGENT_DB?: unknown });
+      if (packs) {
+        await ensureRunsPackSchema(packs.balance.db);
+        runsPackBalance = packs.balance;
+      }
+    } catch (err) {
+      logAspectEvent({
+        aspect: "RunsPack",
+        operationName: "wire-runs-pack-balance",
+        code: "FAILURE_RUNS_PACK_UNAVAILABLE",
+        level: "warn",
+        message: `Runs-pack balance unavailable for run ${p.runRequestId} — gate keeps today's behavior (no pack coverage).`,
+        error: err instanceof Error ? err.message : String(err),
+        metadata: { runRequestId: p.runRequestId },
+      });
+      runsPackBalance = null;
+    }
     const gate = new NativeMonetizationGate(
       {
         // Flagship feature flag "monetization" (#2043): OFF = free
@@ -377,6 +408,7 @@ export class PaymentWorkflow extends ThinkWorkflow<
         proofRedemptions,
         freeRunCounter,
         approvedFreeQuota,
+        runsPackBalance,
         checkout: checkoutPorts,
       },
     );
@@ -617,6 +649,11 @@ export class PaymentWorkflow extends ThinkWorkflow<
           await ensureCommercialSchema(adapter.db);
           if (use.paidVia === "subscription_included") {
             await adapter.consumeIncludedRun(use.userId);
+          } else if (use.paidVia === "runs_pack") {
+            // Issue #3246 slice 3: the pack run was already spent
+            // at gate-decision time (consumePackRun, applied-check)
+            // — the workflow consumes nothing more here, exactly
+            // like the quota and free-run counter paths.
           } else if (use.paidVia === "credits") {
             await adapter.consumeCredits(use.userId, use.priceUSD);
           }

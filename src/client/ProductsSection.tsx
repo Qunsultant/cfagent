@@ -80,7 +80,23 @@ export interface CatalogueVersionView {
   effectiveToMs: number | null;
 }
 
-export type VersionView = PlanVersionView | CatalogueVersionView;
+/** Runs-pack-row version as returned by the products routes (slice 3). */
+export interface RunsPackVersionView {
+  id: string;
+  productId: string;
+  version: number;
+  segment: string;
+  runs: number;
+  priceUSD: number;
+  approvalStatus: string;
+  approvedBy: string | null;
+  approvedAtMs: number | null;
+  active: boolean;
+  effectiveFromMs: number;
+  effectiveToMs: number | null;
+}
+
+export type VersionView = PlanVersionView | CatalogueVersionView | RunsPackVersionView;
 
 export interface ProductEntry {
   product: ProductRecord;
@@ -106,6 +122,11 @@ interface BulkMoveResult {
 }
 
 const isPlanVersion = (version: VersionView): version is PlanVersionView => "periodDays" in version;
+
+const isRunsPackVersion = (version: VersionView): version is RunsPackVersionView => "runs" in version;
+
+/** A version the operator manages here: a plan or a pack (never a catalogue row). */
+type ManageableVersionView = PlanVersionView | RunsPackVersionView;
 
 function formatMoney(priceUSD: number): string {
   return `$${priceUSD.toFixed(2)}`;
@@ -257,7 +278,7 @@ export function ProductsSection() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showNewProduct, setShowNewProduct] = useState(false);
   const [newName, setNewName] = useState("");
-  const [newKind, setNewKind] = useState<"subscription" | "per_run">("subscription");
+  const [newKind, setNewKind] = useState<"subscription" | "per_run" | "runs_pack">("subscription");
   const [newDescription, setNewDescription] = useState("");
   const [newRank, setNewRank] = useState("");
   const [creating, setCreating] = useState(false);
@@ -357,7 +378,13 @@ export function ProductsSection() {
                   <Stack gap="1">
                     <div>
                       <strong>{product.name}</strong>{" "}
-                      <span>{product.kind === "subscription" ? "Subscription" : "Per-run"}</span>{" "}
+                      <span>
+                        {product.kind === "subscription"
+                          ? "Subscription"
+                          : product.kind === "runs_pack"
+                            ? "Runs pack"
+                            : "Per-run"}
+                      </span>{" "}
                       {isFree && <span>· Read-only baseline</span>}
                       {product.description && <div>{product.description}</div>}
                       <div>
@@ -396,9 +423,10 @@ export function ProductsSection() {
           ) : (
             <Stack gap="1">
               <TextInput label="Product name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <Select label="Kind" value={newKind} onChange={(e) => setNewKind(e.target.value as "subscription" | "per_run")}>
+              <Select label="Kind" value={newKind} onChange={(e) => setNewKind(e.target.value as "subscription" | "per_run" | "runs_pack")}>
                 <option value="subscription">Subscription</option>
                 <option value="per_run">Per-run</option>
+                <option value="runs_pack">Runs pack</option>
               </Select>
               <TextInput
                 label="Description (optional)"
@@ -447,7 +475,7 @@ function ProductDetail({
 
   const visibleSegments = segmentFilter === "all" ? segments : segments.filter((s) => s === segmentFilter);
 
-  const approve = async (version: PlanVersionView) => {
+  const approve = async (version: ManageableVersionView) => {
     setActingId(version.id);
     setActionError("");
     try {
@@ -464,7 +492,7 @@ function ProductDetail({
     }
   };
 
-  const deactivate = async (version: PlanVersionView) => {
+  const deactivate = async (version: ManageableVersionView) => {
     setActingId(version.id);
     setActionError("");
     try {
@@ -472,7 +500,13 @@ function ProductDetail({
         `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/versions/${encodeURIComponent(version.id)}/deactivate`,
         { method: "POST", body: JSON.stringify({}) },
       );
-      onNote(`Version v${version.version} (${version.segment}) deactivated. Holders ride to period end.`);
+      // A pack has no holders or period: deactivation blocks new
+      // purchases only, and balances already bought are untouched.
+      onNote(
+        isRunsPackVersion(version)
+          ? `Version v${version.version} (${version.segment}) deactivated. Pack balances already bought are untouched.`
+          : `Version v${version.version} (${version.segment}) deactivated. Holders ride to period end.`,
+      );
       await onChanged();
     } catch (err: any) {
       setActionError(err.message || "Failed to deactivate version.");
@@ -517,6 +551,8 @@ function ProductDetail({
                 const isEffective = effective?.id === version.id;
                 const isFuture = version.effectiveFromMs > Date.now();
                 const plan = isPlanVersion(version) ? version : null;
+                const pack = isRunsPackVersion(version) ? version : null;
+                const manageable = plan ?? pack;
                 return (
                   <div key={version.id} data-testid={`version-row-${version.id}`}>
                     <Stack gap="1">
@@ -536,13 +572,19 @@ function ProductDetail({
                         Approval: {version.approvalStatus}
                         {version.approvedBy ? ` by ${version.approvedBy}` : ""}
                         {version.approvedAtMs ? ` at ${formatDate(version.approvedAtMs)}` : ""}
-                        {plan && <> · {plan.active ? "Active" : "Deactivated"}</>}
+                        {manageable && <> · {manageable.active ? "Active" : "Deactivated"}</>}
                       </div>
                       {plan && (
                         <div>
                           {plan.billingPeriod} · {plan.periodDays} days · {plan.includedRuns} included runs
                           {plan.trialDays !== null && <> · {plan.trialDays}-day trial</>}
                           {plan.stripePriceId && <> · Stripe Price {plan.stripePriceId}</>}
+                        </div>
+                      )}
+                      {pack && (
+                        <div>
+                          {pack.runs} runs · No expiry · No tier · No subscription — buying adds the runs to the
+                          buyer&apos;s pack balance.
                         </div>
                       )}
                       {plan && featuresOf(plan).length > 0 && (
@@ -552,30 +594,30 @@ function ProductDetail({
                           ))}
                         </ul>
                       )}
-                      {!plan && (
+                      {!plan && !pack && (
                         <div>
                           Per-run price approval is managed in{" "}
                           <a href="?tab=payment-assurance">Payment assurance</a>. This section shows the status
                           only — it never approves a catalogue price.
                         </div>
                       )}
-                      {plan && (
+                      {manageable && (
                         <div>
-                          {plan.approvalStatus !== "approved" && (
+                          {manageable.approvalStatus !== "approved" && (
                             <Button
                               size="sm"
                               loading={actingId === version.id}
-                              onClick={() => void approve(plan)}
+                              onClick={() => void approve(manageable)}
                             >
                               Approve v{version.version}
                             </Button>
                           )}{" "}
-                          {plan.active && (
+                          {manageable.active && (
                             <Button
                               size="sm"
                               variant="secondary"
                               loading={actingId === version.id}
-                              onClick={() => void deactivate(plan)}
+                              onClick={() => void deactivate(manageable)}
                             >
                               Deactivate v{version.version}
                             </Button>
@@ -593,6 +635,8 @@ function ProductDetail({
       {!isFree &&
         (product.kind === "subscription" ? (
           <NewVersionForm product={product} versions={versions} onCreated={onChanged} onNote={onNote} />
+        ) : product.kind === "runs_pack" ? (
+          <NewRunsPackVersionForm product={product} onCreated={onChanged} onNote={onNote} />
         ) : (
           <NewCatalogueVersionForm product={product} versions={versions} onCreated={onChanged} onNote={onNote} />
         ))}
@@ -1199,6 +1243,127 @@ function BulkMovePanel({
           </Stack>
         </div>
       )}
+    </Stack>
+  );
+}
+
+/**
+ * Issue #3246 slice 3 — new runs-pack version form. A pack version
+ * is (runs, price) only: no plan fields, no billing period, no
+ * trial, no expiry. It lands proposed and moves no one; approve
+ * it here to make it purchasable. Buying a pack never confers a
+ * tier and never creates a subscription row.
+ */
+function NewRunsPackVersionForm({
+  product,
+  onCreated,
+  onNote,
+}: {
+  product: ProductRecord;
+  onCreated: () => Promise<void>;
+  onNote: (note: string) => void;
+}) {
+  const [show, setShow] = useState(false);
+  const [runs, setRuns] = useState("");
+  const [price, setPrice] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState("");
+  const [effectiveTo, setEffectiveTo] = useState("");
+  const [segment, setSegment] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const create = async () => {
+    const runsValue = parseNonNegativeInt(runs);
+    if (runsValue === null || Number.isNaN(runsValue) || runsValue <= 0) {
+      setFormError("Runs must be a positive integer.");
+      return;
+    }
+    const priceUSD = Number(price);
+    if (!Number.isFinite(priceUSD) || priceUSD < 0) {
+      setFormError("Price must be a finite non-negative number.");
+      return;
+    }
+    const fromMs = parseEffectiveMs(effectiveFrom);
+    if (Number.isNaN(fromMs)) {
+      setFormError("Effective from must be a valid date when present.");
+      return;
+    }
+    const toMs = parseEffectiveMs(effectiveTo);
+    if (Number.isNaN(toMs) || (toMs !== null && fromMs !== null && toMs <= fromMs)) {
+      setFormError("Effective to must be a valid date after effective from when present.");
+      return;
+    }
+    setSaving(true);
+    setFormError("");
+    try {
+      const body = await apiJson<{ version: RunsPackVersionView }>(
+        `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/versions`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            runs: runsValue,
+            priceUSD,
+            segment: segment.trim() || DEFAULT_SEGMENT,
+            effectiveFromMs: fromMs,
+            effectiveToMs: toMs,
+          }),
+        },
+      );
+      onNote(
+        `Pack version v${body.version.version} created for "${product.name}" (${body.version.segment}): ${body.version.runs} runs for ${formatMoney(body.version.priceUSD)}. It lands proposed — approve it to make it purchasable.`,
+      );
+      setShow(false);
+      await onCreated();
+    } catch (err: any) {
+      setFormError(err.message || "Failed to create pack version.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!show) {
+    return (
+      <div>
+        <Button onClick={() => setShow(true)}>New pack version</Button>
+      </div>
+    );
+  }
+  return (
+    <Stack gap="1">
+      <h3>New pack version of {product.name}</h3>
+      <p>
+        A new pack version lands proposed and moves no one. Buying a pack adds its runs to the buyer&apos;s pack
+        balance — it never confers a tier and never creates a subscription row. Pack runs never expire.
+      </p>
+      <TextInput label="Runs" value={runs} onChange={(e) => setRuns(e.target.value)} />
+      <TextInput label="Price (USD)" value={price} onChange={(e) => setPrice(e.target.value)} />
+      <TextInput
+        label="Effective from (blank = now)"
+        type="datetime-local"
+        value={effectiveFrom}
+        onChange={(e) => setEffectiveFrom(e.target.value)}
+      />
+      <TextInput
+        label="Effective to (blank = open-ended)"
+        type="datetime-local"
+        value={effectiveTo}
+        onChange={(e) => setEffectiveTo(e.target.value)}
+      />
+      <TextInput
+        label="Segment (blank = default)"
+        value={segment}
+        onChange={(e) => setSegment(e.target.value)}
+        hint="Free-form operator label. A version is sellable only to its own segment."
+      />
+      {formError && <Notice tone="danger">{formError}</Notice>}
+      <div>
+        <Button loading={saving} onClick={() => void create()}>
+          Create pack version
+        </Button>{" "}
+        <Button variant="secondary" onClick={() => setShow(false)}>
+          Cancel
+        </Button>
+      </div>
     </Stack>
   );
 }

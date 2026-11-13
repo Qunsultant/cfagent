@@ -426,6 +426,15 @@
  * entries (451 measured on main before this slice); the
  * delegation sequence is unchanged (same handler, same
  * position).
+ *
+ * Issue #3246 (slice 3) added two — POST
+ * /payments/agentic/commercial/runs-packs/checkout and POST
+ * /payments/agentic/commercial/runs-packs/confirm (in
+ * handleAgenticPaymentsRoutes, after the top-up routes, before
+ * the subscription-grant route, in source order) — bringing the
+ * pinned inventory to 458 entries (456 measured on the slice-1
+ * head); the delegation sequence is unchanged (same handler,
+ * same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -661,6 +670,11 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/purchase\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/top-up/checkout\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/top-up/confirm\")",
+  // Issue #3246 (slice 3): POST /payments/agentic/commercial/runs-packs/checkout and
+  // POST .../runs-packs/confirm (in handleAgenticPaymentsRoutes, after the top-up routes,
+  // before the subscription-grant route, in source order).
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/runs-packs/checkout\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/runs-packs/confirm\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/grant\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/trial\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/billing-checkout\")",

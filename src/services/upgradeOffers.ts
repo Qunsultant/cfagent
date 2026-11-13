@@ -107,6 +107,10 @@ import {
 } from "../data/approvedFreeQuotaPorts";
 import type { ReferralCreditPort } from "../data/lifecyclePorts";
 import type { BillingPolicyStore } from "../data/billingPolicyPorts";
+import type {
+  RunsPackBalancePort,
+  RunsPackVersionStore,
+} from "../data/runsPackPorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** The offer payload (§2.4): one shape, returned by both offer routes. */
@@ -126,6 +130,14 @@ export interface OfferPayload {
       name: string;
       /** Grandfathered price — what the user pays today for the version they hold. */
       heldPriceUSD: number;
+      /**
+       * Slice 3 (§3.4): the held product's CURRENT effective
+       * price for the segment — the price a new customer pays
+       * today — so the comparison's current column shows the
+       * current price instead of the held price. Null when no
+       * approved effective version resolves for the held product.
+       */
+      currentPriceUSD: number | null;
       billingPeriod: "monthly" | "annual";
       includedRuns: number;
       /** The subscription row's period end. */
@@ -249,6 +261,16 @@ export interface ResolveOfferPorts {
   quota: ApprovedFreeQuota | null;
   /** Optional: unbound reads as no referral state (no mention renders). */
   referral: ReferralCreditPort | null;
+  /**
+   * Slice 3, optional: unbound reads as no pack state — an empty
+   * runsPacks list and a zero pack balance, exactly as the offer
+   * read before packs existed. The port is bound by the route
+   * whenever AGENT_DB is bound.
+   */
+  runsPack: {
+    versions: RunsPackVersionStore;
+    balance: RunsPackBalancePort;
+  } | null;
 }
 
 export interface ResolveOfferInput {
@@ -398,13 +420,23 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
     }
   }
 
+  // Slice 3: the dedicated pack balance — read whenever the port
+  // is bound, for the coverage mirror (rule 4) and the `current`
+  // side. Unbound reads as zero, exactly as the offer read
+  // before packs existed.
+  const packRunsRemaining = ports.runsPack ? await ports.runsPack.balance.getBalance(login) : 0;
+
   // ---- Coverage mirror (rule 4): the gate's order, read-only, no consumption. ----
   // Grant + quota configured: the quota IS the bound — at the cap the gate
   // refuses with no fall-through, so coverage is exactly "room left".
   // Grant + quota unconfigured: the gate falls through to the allowance and
   // then the grant fall-through, which covers — coverage, unconditionally.
   // No grant: the Free allowance (effective Free tier only), then the
-  // coverage ternary — Subscribed + included runs, else credits >= price.
+  // coverage ternary — Subscribed + included runs, pack balance, else
+  // credits >= price. The pack branch needs the approved price too:
+  // the gate throws on an unapproved family price BEFORE the pack is
+  // read, so a pack balance covers nothing while the price is
+  // unapproved (NQ7) — the mirror must say the same.
   // Ambient relaxes this rule entirely: the compare surface renders
   // regardless of coverage.
   let hasCoverage = false;
@@ -414,6 +446,8 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
     } else if (effectiveTier === "Free" && allowanceLeft) {
       hasCoverage = true;
     } else if (effectiveTier === "Subscribed" && (account?.includedRuns ?? 0) > 0) {
+      hasCoverage = true;
+    } else if (packRunsRemaining > 0 && approvedPrice !== null) {
       hasCoverage = true;
     } else if (approvedPrice !== null && (account?.creditsUSD ?? 0) >= approvedPrice) {
       hasCoverage = true;
@@ -522,6 +556,34 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
       : [];
   const unavailableTargets = unavailable.map(({ target }) => target);
 
+  // ---- Runs packs (§3.7). ----
+  // Effective APPROVED pack versions for the segment only, one row
+  // per runs_pack product; PROPOSED pack versions never appear
+  // (they are not buyable, and the unavailable group is the plans'
+  // surface). Gated by the operator rule: runsPacksEnabled false
+  // reads as no packs. Sorted cheapest first — the pack group is a
+  // price list, not a ladder — ties by more runs, then version id.
+  const runsPacks: RunsPackOffer[] = [];
+  if (rules.runsPacksEnabled && ports.runsPack) {
+    for (const product of allProducts) {
+      if (product.kind !== "runs_pack") continue;
+      const versions = await ports.runsPack.versions.listVersions(product.id, segment);
+      const effective = resolveEffectiveVersion(versions, segment, nowMs);
+      if (!effective || effective.approvalStatus !== "approved") continue;
+      runsPacks.push({
+        productId: product.id,
+        name: product.name,
+        versionId: effective.id,
+        runs: effective.runs,
+        priceUSD: effective.priceUSD,
+        effectiveFromMs: effective.effectiveFromMs,
+      });
+    }
+    runsPacks.sort(
+      (a, b) => a.priceUSD - b.priceUSD || b.runs - a.runs || (a.versionId < b.versionId ? -1 : 1),
+    );
+  }
+
   // ---- Eligibility (§2.3), first failure wins. ----
   // Ambient is gated by rules 1–2 only: it renders regardless of
   // coverage (rule 4 relaxed), and a compare surface with only
@@ -537,7 +599,15 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
     reasonCode = "FAILURE_OFFER_SUPPRESSED";
   } else if (trigger !== "ambient" && hasCoverage) {
     reasonCode = "FAILURE_OFFER_COVERAGE_EXISTS";
-  } else if (trigger !== "ambient" && targetList.length === 0 && !input.topUpAvailable) {
+  } else if (
+    trigger !== "ambient" &&
+    targetList.length === 0 &&
+    runsPacks.length === 0 &&
+    !input.topUpAvailable
+  ) {
+    // Rule 5: a pack is a purchasable action too — an offer with
+    // packs to buy is an offer, even with no plan target and no
+    // top-up. (Ambient never reaches this rule.)
     reasonCode = "FAILURE_OFFER_NO_TARGET";
   } else if (trigger === "quota_exhausted" && quotaSettings?.atLimitAction === "stop") {
     // Rule 6: the operator's quota at-limit action is `stop` — the
@@ -575,6 +645,21 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
     }
   }
 
+  // Slice 3 (§3.4): the held product's CURRENT effective price —
+  // the price a new customer pays today for the held product's
+  // segment — resolved over APPROVED versions only (a PROPOSED
+  // version becoming effective is not a price anyone can buy).
+  // Null when no approved effective version resolves.
+  const currentHeldVersion = heldPlan
+    ? resolveEffectiveVersion(
+        (plansByProduct.get(heldPlan.productId) ?? []).filter(
+          (v) => v.approvalStatus === "approved",
+        ),
+        segment,
+        nowMs,
+      )
+    : null;
+
   const current: OfferPayload["current"] = {
     effectiveTier,
     heldPlan: heldPlan
@@ -583,6 +668,7 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
           productId: heldPlan.productId,
           name: heldPlan.name,
           heldPriceUSD: heldPlan.priceUSD,
+          currentPriceUSD: currentHeldVersion ? currentHeldVersion.priceUSD : null,
           billingPeriod: heldPlan.billingPeriod,
           includedRuns: heldPlan.includedRuns,
           periodEndMs: heldRow!.periodEndMs,
@@ -590,7 +676,7 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
         }
       : null,
     includedRunsRemaining: account?.includedRuns ?? 0,
-    packRunsRemaining: 0,
+    packRunsRemaining,
     creditsUSD: account?.creditsUSD ?? 0,
     freeRunsRemaining,
     segment,
@@ -624,7 +710,7 @@ export async function resolveOffer(input: ResolveOfferInput): Promise<OfferPaylo
     targets: targetList,
     downgradeTargets,
     unavailableTargets,
-    runsPacks: [],
+    runsPacks,
     mentions: { referral: referralMention, freeAccess: null },
     perRun:
       family && approvedPrice !== null && catalogueEntry

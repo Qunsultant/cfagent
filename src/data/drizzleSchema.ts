@@ -1021,6 +1021,63 @@ export const agentOfferSuppressions = sqliteTable(
 );
 
 /**
+ * Runs-pack versions (#3246 slice 3, migration 0063): one row per
+ * pack version — the approval-gated (runs, price) terms for a
+ * runs_pack product. This schema MAPS the table; DDL authority
+ * lives in migration 0063.
+ */
+export const agentRunsPackVersions = sqliteTable("agent_runs_pack_versions", {
+  id: text("id").primaryKey(),
+  productId: text("product_id").notNull(),
+  version: integer("version").notNull(),
+  segment: text("segment").notNull(),
+  runs: integer("runs").notNull(),
+  priceUSD: real("price_usd").notNull(),
+  approvalStatus: text("approval_status").notNull(),
+  approvedBy: text("approved_by"),
+  approvedAtMs: integer("approved_at_ms"),
+  active: integer("active").notNull().default(1),
+  effectiveFromMs: integer("effective_from_ms").notNull(),
+  effectiveToMs: integer("effective_to_ms"),
+  createdAtMs: integer("created_at_ms").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Runs-pack balances (#3246 slice 3, migration 0063): one row per
+ * login — the dedicated pack balance. This schema MAPS the table;
+ * DDL authority lives in migration 0063.
+ */
+export const agentRunsPackBalances = sqliteTable("agent_runs_pack_balances", {
+  login: text("login").primaryKey(),
+  runsRemaining: integer("runs_remaining").notNull().default(0),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Runs-pack drafts (#3246 slice 3, migration 0063): one row per
+ * pack checkout — the mint/confirm binding. This schema MAPS the
+ * table; DDL authority lives in migration 0063.
+ */
+export const agentRunsPackDrafts = sqliteTable("agent_runs_pack_drafts", {
+  id: text("id").primaryKey(),
+  userLogin: text("user_login").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  email: text("email").notNull(),
+  versionId: text("version_id").notNull(),
+  productId: text("product_id").notNull(),
+  runs: integer("runs").notNull(),
+  priceUSD: real("price_usd").notNull(),
+  rail: text("rail").notNull(),
+  status: text("status").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  creditedAtMs: integer("credited_at_ms"),
+  paymentIntentId: text("payment_intent_id"),
+  checkoutSessionId: text("checkout_session_id"),
+  challengeNonce: text("challenge_nonce"),
+});
+
+/**
  * Per-customer version moves (#3289 §3.8, migration 0058): one
  * row per customer moved — the audit that answers "what
  * happened to customer X". bulkMoveId is null for a
