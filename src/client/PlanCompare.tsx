@@ -20,7 +20,10 @@
  * the trigger before rendering the group). Unavailable (PROPOSED)
  * versions render with the proposed label and ZERO buy actions.
  * Mentions render only when the payload carries them, verbatim.
- * Runs-pack rows belong to slice 3 and are not rendered here.
+ * Slice 3: runs-pack rows render in their own group below the
+ * plans (runs + price verbatim, one Buy pack action per pack);
+ * the current row shows the held product's current effective
+ * price alongside the held price when the two differ.
  *
  * ui primitives only, token-only styling. No issue references in
  * rendered text.
@@ -34,6 +37,7 @@ import {
   isOfferPayloadView,
   type OfferPayloadView,
   type OfferTargetView,
+  type RunsPackOfferView,
   type ScreenerFamily,
 } from "./commercialApi";
 
@@ -47,10 +51,14 @@ export interface PlanChoice {
 
 export interface PlanCompareProps {
   payload: OfferPayloadView;
+  /** Slice 3: the pack the buyer picked in the compare, for the checkout badge. */
+  selectedPackVersionId?: string | null;
   /** Fired when the user chooses a plan (upgrade or downgrade). The surface owns the purchase flow. */
   onChoosePlan?: (choice: PlanChoice) => void;
   /** Fired when the user chooses to buy credits (the pay-per-run alternative). */
   onBuyCredits?: () => void;
+  /** Slice 3: fired when the user chooses a runs pack. The surface owns the purchase flow. */
+  onBuyPack?: (pack: RunsPackOfferView) => void;
 }
 
 const UNAVAILABLE_LABEL = "Proposed price — not yet approved, not buyable";
@@ -178,7 +186,23 @@ const COLUMNS = [
   { key: "action", header: "", render: (row: CompareRow) => row.action },
 ];
 
-export function PlanCompare({ payload, onChoosePlan, onBuyCredits }: PlanCompareProps) {
+/** Slice 3 — one row per runs pack: runs + price verbatim, one Buy pack action. */
+interface PackRow {
+  key: string;
+  name: React.ReactNode;
+  price: string;
+  runs: string;
+  action: React.ReactNode;
+}
+
+const PACK_COLUMNS = [
+  { key: "pack", header: "Pack", render: (row: PackRow) => row.name },
+  { key: "price", header: "Price", render: (row: PackRow) => row.price, align: "right" as const },
+  { key: "runs", header: "Runs", render: (row: PackRow) => row.runs, align: "right" as const },
+  { key: "action", header: "", render: (row: PackRow) => row.action },
+];
+
+export function PlanCompare({ payload, selectedPackVersionId, onChoosePlan, onBuyCredits, onBuyPack }: PlanCompareProps) {
   // An ineligible payload carries no targets and no actions: the
   // surface renders its fixed copy instead. This component never
   // shows an offer the payload says does not apply.
@@ -195,7 +219,15 @@ export function PlanCompare({ payload, onChoosePlan, onBuyCredits }: PlanCompare
       </>
     ),
     price: held ? (
-      <>Your price {formatUSD(held.heldPriceUSD)} / {periodLabel(held.billingPeriod)}</>
+      <>
+        Your price {formatUSD(held.heldPriceUSD)} / {periodLabel(held.billingPeriod)}
+        {held.currentPriceUSD !== null && held.currentPriceUSD !== held.heldPriceUSD && (
+          <>
+            <br />
+            Current price {formatUSD(held.currentPriceUSD)} / {periodLabel(held.billingPeriod)}
+          </>
+        )}
+      </>
     ) : (
       <>{formatUSD(0)}</>
     ),
@@ -227,6 +259,34 @@ export function PlanCompare({ payload, onChoosePlan, onBuyCredits }: PlanCompare
   );
 
   const { referral, freeAccess } = payload.mentions;
+
+  // Slice 3 — the runs-pack group: approved pack versions for
+  // the segment only (the server never sends proposed packs), in
+  // the server's cheapest-first order, runs + price verbatim.
+  // Buying a pack picks it — the hosting surface owns the mint.
+  const packRows: PackRow[] = payload.runsPacks.map((pack) => ({
+    key: `pack-${pack.versionId}`,
+    name: (
+      <>
+        {pack.name}
+        {selectedPackVersionId === pack.versionId && (
+          <>
+            {" "}
+            <Badge tone="accent">Selected from your plan comparison</Badge>
+          </>
+        )}
+      </>
+    ),
+    price: formatUSD(pack.priceUSD),
+    runs: String(pack.runs),
+    action: onBuyPack ? (
+      <Button size="sm" onClick={() => onBuyPack(pack)}>
+        Buy pack
+      </Button>
+    ) : (
+      <>—</>
+    ),
+  }));
 
   return (
     <div role="status">
@@ -275,6 +335,17 @@ export function PlanCompare({ payload, onChoosePlan, onBuyCredits }: PlanCompare
           />
         </>
       )}
+      {packRows.length > 0 && (
+        <>
+          <h4>Runs packs</h4>
+          <p>
+            A runs pack adds runs to your pack balance. Pack runs spend after your included runs and before your
+            credits, and only while the run&apos;s price is approved. A pack never changes your plan or
+            subscription.
+          </p>
+          <Table columns={PACK_COLUMNS} rows={packRows} rowKey={(row) => row.key} caption="Runs packs" />
+        </>
+      )}
       {payload.perRun && (
         <p>
           Or pay per run: {formatUSD(payload.perRun.priceUSD)} per {payload.perRun.family} run at the current
@@ -295,6 +366,10 @@ export interface AmbientOfferCompareProps {
    */
   onChoosePlan?: (choice: PlanChoice, shownAtMs: number) => void;
   onBuyCredits?: () => void;
+  /** Slice 3: fired with the chosen pack and the offer's shown instant. */
+  onBuyPack?: (pack: RunsPackOfferView, shownAtMs: number) => void;
+  /** Slice 3: the pack the buyer picked in the compare, for the checkout badge. */
+  selectedPackVersionId?: string | null;
 }
 
 /**
@@ -303,7 +378,7 @@ export interface AmbientOfferCompareProps {
  * ineligible response renders NOTHING — the hosting surface works
  * without the compare, and the compare must never degrade it.
  */
-export function AmbientOfferCompare({ family, onChoosePlan, onBuyCredits }: AmbientOfferCompareProps) {
+export function AmbientOfferCompare({ family, onChoosePlan, onBuyCredits, onBuyPack, selectedPackVersionId }: AmbientOfferCompareProps) {
   const [payload, setPayload] = useState<OfferPayloadView | null>(null);
   const [shownAtMs, setShownAtMs] = useState<number | null>(null);
 
@@ -331,8 +406,10 @@ export function AmbientOfferCompare({ family, onChoosePlan, onBuyCredits }: Ambi
   return (
     <PlanCompare
       payload={payload}
+      selectedPackVersionId={selectedPackVersionId}
       onChoosePlan={onChoosePlan ? (choice) => onChoosePlan(choice, shownAtMs) : undefined}
       onBuyCredits={onBuyCredits}
+      onBuyPack={onBuyPack ? (pack) => onBuyPack(pack, shownAtMs) : undefined}
     />
   );
 }

@@ -2376,6 +2376,70 @@ UPDATE agent_products SET rank = 1 WHERE id = 'prod-free';
 `,
 };
 
+/**
+ * Migration 0063 — runs packs (#3246 slice 3, sub-issue of #3241).
+ * - agent_runs_pack_versions: one row per pack version — the
+ *   approval-gated (runs, price) terms for a runs_pack product.
+ *   A version lands PROPOSED; only an operator approval makes
+ *   its price buyable. The version NUMBER is server-assigned
+ *   (max existing + 1 for the product+segment), mirroring the
+ *   plan versions of migration 0058.
+ * - agent_runs_pack_balances: one row per login — the dedicated
+ *   pack balance (runs_remaining). The gate spends it AFTER
+ *   subscription included runs and BEFORE credits; included
+ *   runs spend only when Subscribed, so the pack balance is
+ *   never the included-runs counter.
+ * - agent_runs_pack_drafts: one row per pack checkout — the
+ *   mint/confirm binding, mirroring the top-up drafts of
+ *   migration 0041 (draft id `pack-<uuid>` is the Stripe
+ *   client_reference_id / x402 checkout id and the replay guard).
+ * Prerequisites: 0058 (agent_products).
+ */
+export const MIGRATION_0063_RUNS_PACKS: DataMigration = {
+  version: 63,
+  name: "0063_runs_packs",
+  sql: `
+CREATE TABLE IF NOT EXISTS agent_runs_pack_versions (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  segment TEXT NOT NULL,
+  runs INTEGER NOT NULL,
+  price_usd REAL NOT NULL,
+  approval_status TEXT NOT NULL,
+  approved_by TEXT,
+  approved_at_ms INTEGER,
+  active INTEGER NOT NULL DEFAULT 1,
+  effective_from_ms INTEGER NOT NULL,
+  effective_to_ms INTEGER,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_runs_pack_balances (
+  login TEXT PRIMARY KEY,
+  runs_remaining INTEGER NOT NULL DEFAULT 0,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_runs_pack_drafts (
+  id TEXT PRIMARY KEY,
+  user_login TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  version_id TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  runs INTEGER NOT NULL,
+  price_usd REAL NOT NULL,
+  rail TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  credited_at_ms INTEGER,
+  payment_intent_id TEXT,
+  checkout_session_id TEXT,
+  challenge_nonce TEXT
+);
+`,
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -2437,6 +2501,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0060_RUN_LEDGER_OWNER,
   MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
   MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
+  MIGRATION_0063_RUNS_PACKS,
 ];
 
 function splitStatements(sqlText: string): string[] {

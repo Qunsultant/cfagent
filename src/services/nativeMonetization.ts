@@ -42,8 +42,13 @@
  *   to the paid path. Grant-covered runs never touch the
  *   counter; trial/Subscribed runs use included runs, not the
  *   counter. No counter wired = today's behavior (no free runs).
- * - Manual runs: subscription/credits first, then checkout (402).
- * - Scheduled runs: subscription/credits only, never unattended
+ * - Manual runs: subscription included runs first, then the
+ *   runs-pack balance (#3246 slice 3), then credits, then
+ *   checkout (402). A pack run is spent at decision time, and
+ *   only after price resolution (an unapproved family price
+ *   fails closed before the pack is read).
+ * - Scheduled runs: subscription included runs, pack balance,
+ *   or credits only, never unattended
  *   card, EXCEPT a one-off scheduled run authorized by a human
  *   present at submission (scheduleKind "one_off" +
  *   authorizedAtSubmission), which may checkout at submission.
@@ -90,6 +95,7 @@
 import type { PriceCatalogue, PriceFamily } from "../data/priceCataloguePorts";
 import { isUnlimitedFreeGrantActive, type UnlimitedFreeGrant } from "../data/commercialPorts";
 import { freeRunMonthKey, type FreeRunCounter } from "../data/freeRunCounterPorts";
+import type { RunsPackBalancePort } from "../data/runsPackPorts";
 import {
   approvedFreeQuotaPeriodKey,
   type ApprovedFreeQuota,
@@ -174,6 +180,20 @@ export interface NativeMonetizationConfig {
    * operator data; absence is never a reason to guess a bound.
    */
   approvedFreeQuota?: ApprovedFreeQuota | null;
+  /**
+   * Issue #3246 slice 3 — the runs-pack balance port. When wired,
+   * a pack balance covers a run AFTER subscription included runs
+   * and BEFORE credits: one pack run is consumed at decision
+   * time (a conditional decrement with an applied-check, so a
+   * concurrent double-spend is refused). When absent, no pack
+   * balance exists and the gate keeps today's behavior. Pack runs
+   * spend only after price resolution — resolveChargePricing
+   * throws on a missing/unapproved catalogue price before the
+   * pack is read — so a pack never covers a run whose family
+   * price is not approved (NQ7). Pack runs are family-agnostic
+   * (NQ6): the same balance covers any family's run.
+   */
+  runsPackBalance?: RunsPackBalancePort | null;
   /**
    * The checkout ports bundle, or null when nothing is configured.
    * Null means: no checkout can be minted and no payment can be
@@ -310,6 +330,38 @@ export class NativeMonetizationGate {
    */
   async priceFor(family: NativeScreenerFamily, segment?: string): Promise<number> {
     return (await this.resolveChargePricing(family, segment ?? "default")).priceUSD;
+  }
+
+  /**
+   * Issue #3246 slice 3 — runs-pack coverage, read at decision
+   * time. Returns "runs_pack" when one pack run was spent, null
+   * when the port is unbound or the balance is empty. A store
+   * error degrades the same way the quota store does
+   * (tech-standards §13): the failure is logged as a structured
+   * aspect event and the run falls through to credits/checkout,
+   * so a store blip never fails a run and never grants an
+   * unverified pack run. Callers invoke this only AFTER
+   * resolveChargePricing, so a pack never spends on a run whose
+   * family price is missing or unapproved (NQ7).
+   */
+  private async readPackCoverage(login: string): Promise<"runs_pack" | null> {
+    const port = this.config.runsPackBalance ?? null;
+    if (!port) return null;
+    try {
+      const consumed = await port.consumePackRun({ login });
+      return consumed.allowed ? "runs_pack" : null;
+    } catch (err) {
+      logAspectEvent({
+        aspect: "RunsPack",
+        operationName: "gate-pack-check",
+        code: "FAILURE_RUNS_PACK_UNAVAILABLE",
+        level: "warn",
+        message: "Runs-pack balance store read failed; falling through to credits/checkout (fail-closed).",
+        error: err instanceof Error ? err.message : String(err),
+        metadata: { login },
+      });
+      return null;
+    }
   }
 
   async check(run: NativeCheckInput): Promise<NativeGateDecision> {
@@ -463,15 +515,25 @@ export class NativeMonetizationGate {
     const priceUSD = pricing.priceUSD;
     const { productId, versionId } = pricing;
 
-    const coverage =
-      account.tier === "Subscribed" && account.includedRunsRemaining > 0
-        ? "subscription_included"
+    // Issue #3246 slice 3 — the runs-pack step: AFTER subscription
+    // included runs, BEFORE credits (NQ1). The included condition
+    // is evaluated once here so the pack is never read — and never
+    // spent — when included runs cover the run. The pack read
+    // happens after price resolution above, so an unapproved
+    // family price throws before any pack run is spent (NQ7).
+    const hasIncludedRuns = account.tier === "Subscribed" && account.includedRunsRemaining > 0;
+    const packCovered = !hasIncludedRuns && (await this.readPackCoverage(account.userId)) !== null;
+    const coverage = hasIncludedRuns
+      ? "subscription_included"
+      : packCovered
+        ? "runs_pack"
         : account.creditsUSD >= priceUSD
           ? "credits"
           : null;
     if (coverage) {
       if (coverage === "subscription_included") account.includedRunsRemaining -= 1;
-      else account.creditsUSD = Math.round((account.creditsUSD - priceUSD) * 100) / 100;
+      else if (coverage === "credits") account.creditsUSD = Math.round((account.creditsUSD - priceUSD) * 100) / 100;
+      // runs_pack: the run was already spent inside readPackCoverage; nothing to mutate on the account row.
       this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD, status: "paid", paidVia: coverage, productId, versionId });
       return { allowed: true, status: "paid", runRequestId: run.id, priceUSD, paidVia: coverage, productId, versionId };
     }

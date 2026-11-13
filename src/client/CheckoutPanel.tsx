@@ -77,6 +77,8 @@ import {
   getSubscriptionStatus,
   isOfferTrigger,
   listPlans,
+  packCheckout,
+  packConfirm,
   parseSymbols,
   submitRun,
   subscriptionCancel,
@@ -88,9 +90,11 @@ import {
   type CommercialAccountView,
   type OfferContext,
   type OfferTrigger,
+  type PackCheckoutView,
   type PlatformIdentityView,
   type PlanView,
   type Pricing,
+  type RunsPackOfferView,
   type ScreenerFamily,
   type SubmitResult,
   type SubscriptionStatusView,
@@ -231,6 +235,18 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   const [offerContext, setOfferContext] = React.useState<OfferContext | null>(null);
   const [preselectedPlanId, setPreselectedPlanId] = React.useState<string | null>(null);
   const offerParamsApplied = React.useRef(false);
+  // Issue #3246 slice 3 — runs-pack purchase from the ambient
+  // compare: the pack is a picked marker only (never an
+  // auto-mint); the mint/confirm pair mirrors the top-up tab.
+  const [preselectedPackVersionId, setPreselectedPackVersionId] = React.useState<string | null>(null);
+  const [pendingPack, setPendingPack] = React.useState<{ pack: RunsPackOfferView; shownAtMs: number } | null>(null);
+  const [packRail, setPackRail] = React.useState<"card" | "x402">("card");
+  const [packMint, setPackMint] = React.useState<PackCheckoutView | null>(null);
+  const [packMinting, setPackMinting] = React.useState(false);
+  const [packConfirming, setPackConfirming] = React.useState(false);
+  const [packError, setPackError] = React.useState<string | null>(null);
+  const [packDone, setPackDone] = React.useState<string | null>(null);
+  const [packProof, setPackProof] = React.useState("");
   // Quota-exhausted offer (design §5.4): set when the pay-tab
   // poller sees the quota_exhausted outcome, with the family the
   // run was submitted under.
@@ -280,13 +296,17 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
 
   // Issue #3246 — apply the offer deep-link params once, when the
   // fetched plans first arrive. Unknown or superseded plan ids
-  // and unknown triggers are ignored silently.
+  // and unknown triggers are ignored silently. The pack param is
+  // a marker only: it matches a pack row in the compare (badge),
+  // and an unknown pack id simply never matches — never a mint.
   React.useEffect(() => {
     if (offerParamsApplied.current || !plans) return;
     offerParamsApplied.current = true;
     const params = new URLSearchParams(window.location.search);
     const matched = matchPreselectedPlan(plans, params.get("plan"));
     if (matched) setPreselectedPlanId(matched.id);
+    const packParam = params.get("pack");
+    if (packParam) setPreselectedPackVersionId(packParam);
     const trigger = parseOfferTriggerParam(params.get("offer"));
     if (trigger) setOfferContext({ trigger });
   }, [plans]);
@@ -485,6 +505,83 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
   const handleCompareBuyCredits = () => {
     setOfferContext({ trigger: "ambient" });
     setTab("topup");
+  };
+
+  // Issue #3246 slice 3 — the ambient compare's pack action.
+  // Buying a pack picks the pack and records the offer context
+  // for the next mint; the mint happens only from the Create pack
+  // checkout button in the subscriptions tab below — never here,
+  // never on arrival.
+  const handleCompareBuyPack = (pack: RunsPackOfferView, shownAtMs: number) => {
+    setPendingPack({ pack, shownAtMs });
+    setPreselectedPackVersionId(pack.versionId);
+    setOfferContext({ trigger: "ambient", shownAtMs });
+  };
+
+  const handlePackMint = async () => {
+    if (!pendingPack) return;
+    setPackError(null);
+    setPackDone(null);
+    setPackMint(null);
+    if (!email.trim()) {
+      setPackError("Enter the checkout contact email.");
+      return;
+    }
+    setPackMinting(true);
+    try {
+      // Issue #3246: the offer context rides the mint call only
+      // when the pack was picked from an offer, and is cleared
+      // after the mint — a re-mint is not from the offer.
+      const context = offerContext ?? undefined;
+      const res = await packCheckout({
+        versionId: pendingPack.pack.versionId,
+        rail: packRail,
+        email: email.trim(),
+        ...(context ? { offerContext: context } : {}),
+      });
+      setOfferContext(null);
+      setPendingPack(null);
+      setPackMint(res);
+    } catch (err) {
+      setPackError(errText(err));
+    } finally {
+      setPackMinting(false);
+    }
+  };
+
+  const handlePackConfirm = async () => {
+    if (!packMint) return;
+    if (packMint.rail === "x402" && !packProof.trim()) {
+      setPackError("Paste the payment proof from your wallet or agent, then verify.");
+      return;
+    }
+    setPackConfirming(true);
+    setPackError(null);
+    try {
+      const res = await packConfirm({
+        packRequestId: packMint.packRequestId,
+        ...(packMint.rail === "card"
+          ? { checkoutSessionId: packMint.checkoutSessionId ?? undefined }
+          : { paymentProof: packProof.trim() }),
+      });
+      setPackDone(
+        `Runs pack credited: ${res.creditedRuns} runs. New pack balance: ${res.packRunsRemaining} runs.`
+      );
+      setPackMint(null);
+      setPackProof("");
+      // Refresh the read-only identity display so the header
+      // credits match; the confirm response is the authority, this
+      // is display-only.
+      try {
+        setIdentity(await getIdentity());
+      } catch {
+        // Identity refresh failure leaves the confirmed balance shown above.
+      }
+    } catch (err) {
+      setPackError(errText(err));
+    } finally {
+      setPackConfirming(false);
+    }
   };
 
   const handleBuyCheckout = async (plan: PlanView) => {
@@ -890,6 +987,8 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
               <AmbientOfferCompare
                 onChoosePlan={handleCompareChoose}
                 onBuyCredits={handleCompareBuyCredits}
+                onBuyPack={handleCompareBuyPack}
+                selectedPackVersionId={preselectedPackVersionId}
               />
               {plans && plans.length > 0 ? (
                 <Table
@@ -970,6 +1069,77 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
                 </Notice>
               )}
               {buyDone && <Notice tone="success">{buyDone}</Notice>}
+              {/* Issue #3246 slice 3 — the runs-pack purchase picked
+                  in the ambient compare above. The pack is a marker
+                  only until the operator of this panel mints it:
+                  runs + price verbatim from the offer payload, rail
+                  card by default (x402 only when offered), then the
+                  same verified-payment mint/confirm pair as top-up.
+                  A pack never changes the plan or subscription. */}
+              {pendingPack && (
+                <Notice tone="info">
+                  Runs pack: {pendingPack.pack.name} — {pendingPack.pack.runs} runs for{" "}
+                  {formatUSD(pendingPack.pack.priceUSD)}. Pack runs spend after your included runs and before your
+                  credits, and only while the run&apos;s price is approved.
+                  <div>
+                    <Select
+                      label="Payment rail"
+                      value={packRail}
+                      onChange={(e) => setPackRail(e.target.value as "card" | "x402")}
+                    >
+                      <option value="card">Card (Stripe)</option>
+                      {topUpX402Offered && <option value="x402">Crypto (x402)</option>}
+                    </Select>
+                  </div>
+                  <div>
+                    <Button variant="primary" loading={packMinting} onClick={handlePackMint}>
+                      Create pack checkout
+                    </Button>
+                  </div>
+                </Notice>
+              )}
+              {packError && <Notice tone="danger">{packError}</Notice>}
+              {packMint && (
+                <Notice tone="info">
+                  Checkout created for {packMint.runs} runs ({formatUSD(packMint.priceUSD)}) (
+                  {packMint.packRequestId}). Complete the payment, then confirm below.
+                  {packMint.rail === "card" && packMint.checkoutUrl && (
+                    <p>
+                      <a className="ui-link" href={packMint.checkoutUrl} target="_blank" rel="noreferrer">
+                        Complete payment (opens in a new tab)
+                      </a>{" "}
+                      (native checkout link for this runs pack)
+                    </p>
+                  )}
+                  {packMint.rail === "x402" && packMint.challenge && (
+                    <>
+                      <p>
+                        Crypto (x402) payment — no payment link exists for crypto. Complete the 402 payment with your
+                        wallet or agent, then paste the payment proof below.
+                      </p>
+                      <p>
+                        Network: {packMint.challenge.network} — amount: {formatUSD(packMint.challenge.amountUSD)}{" "}
+                        USDC — recipient: {packMint.challenge.recipient}
+                      </p>
+                      <TextInput
+                        label="Payment proof"
+                        hint="The proof your wallet or agent returned for this 402 payment."
+                        value={packProof}
+                        onChange={(e) => {
+                          setPackProof(e.target.value);
+                          setPackError(null);
+                        }}
+                      />
+                    </>
+                  )}
+                  <div>
+                    <Button variant="primary" loading={packConfirming} onClick={handlePackConfirm}>
+                      I have paid — verify
+                    </Button>
+                  </div>
+                </Notice>
+              )}
+              {packDone && <Notice tone="success">{packDone}</Notice>}
               {cancelableSubs.length > 0 && (
                 <Button
                   variant="danger"

@@ -556,6 +556,7 @@ describe("resolveOffer ladder and targets (#3246 §3.2/§3.3, D-1)", () => {
       planId: "plan-basic-v1",
       productId: "prod-basic",
       heldPriceUSD: 49.99,
+      currentPriceUSD: 49.99,
       billingPeriod: "monthly",
       includedRuns: 20,
       periodEndMs: NOW + DAY_MS,

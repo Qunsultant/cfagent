@@ -504,11 +504,15 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     expect(entry?.businessMessage).toMatch(/no paper trading/i);
     expect(entry?.businessMessage).toMatch(/live mode/i);
     expect(entry?.retryable).toBe(false);
-    // 136: 124 on the #3990 head (123 on the #4002 head (122 on
-    // the #3907 head + 1 FAILURE_ASYNC_JOB_ORPHANED) + 1 (#3990
+    // 141: 136 on the #3246 slice-1 head (124 on the #3990 head
+    // (123 on the #4002 head (122 on the #3907 head + 1
+    // FAILURE_ASYNC_JOB_ORPHANED) + 1 (#3990
     // FAILURE_PUBLIC_NO_PAPER_MODE)) + 12 (#3246 slice 1:
-    // SUCCESS/FAILURE_OFFER_* (10) + SUCCESS/FAILURE_PRODUCT_RANK_* (2)).
-    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(136);
+    // SUCCESS/FAILURE_OFFER_* (10) + SUCCESS/FAILURE_PRODUCT_RANK_*
+    // (2)) + 5 (#3246 slice 3: SUCCESS_RUNS_PACK_PURCHASED +
+    // FAILURE_RUNS_PACK_UNAVAILABLE + FAILURE_RUNS_PACK_NO_APPROVED_PRICE
+    // + FAILURE_RUNS_PACK_REPLAY + FAILURE_RUNS_PACK_NOT_PAID).
+    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(141);
   });
 
   it("the OAuth scopes request trading.write (the connect grant must cover placement)", () => {
