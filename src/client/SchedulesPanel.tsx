@@ -748,6 +748,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           // form, latest runs and audit trail, and opens that form when a row's
           // Edit control sends a request.
           showSchedulesSection={false}
+          // Issue #4332: the options-run columns (symbols, actionable setups) ride
+          // the one ledger, so its card is not repeated here.
+          showLatestRuns={false}
           editRequest={editRequest ?? undefined}
         />
       )}

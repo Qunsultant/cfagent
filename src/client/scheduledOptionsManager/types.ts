@@ -44,6 +44,8 @@ export interface ScheduledOptionsManagerProps {
   showSchedulesSection?: boolean;
   /** The page's Edit control: open the form for this schedule (nonce re-opens). */
   editRequest?: { scheduleId: string; nonce: number };
+  /** Issue #4332: false when the one ledger carries the options-run columns. */
+  showLatestRuns?: boolean;
 }
 
 /**

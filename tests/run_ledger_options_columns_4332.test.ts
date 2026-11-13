@@ -68,14 +68,13 @@ describe("4332-P02 a lookup, not a second row source", () => {
   });
 });
 
-describe("4332-P03 the columns land before the card leaves", () => {
-  it("the ledger carries the card's two fields; the card's removal is separate", () => {
-    // The card is still rendered: taking it out moves a documented pin
-    // (schedule_ui_s7) whose subject is that surface, and it also hosts the
-    // Edit flow for screening rows. The additive half — the columns — is what
-    // this slice proves; the removal is recorded on #4332.
-    expect(ledger).toContain('header: "Symbols"');
-    expect(manager).toContain("<LatestRunsSection");
+describe("4332-P03 the card leaves the schedules home", () => {
+  it("the panel hides it; the manager keeps it for standalone use", () => {
+    // Now that a screening row's Edit control lives on the row (#4331), hiding
+    // the card loses no control: its two unique fields are ledger columns.
+    expect(panel).toContain("showLatestRuns={false}");
+    expect(manager).toContain("{showLatestRuns && (");
+    expect(manager).toContain("showLatestRuns = true,");
   });
 });
 
