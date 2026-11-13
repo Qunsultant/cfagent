@@ -114,6 +114,11 @@ import {
   type FeedRunResult,
 } from "../../services/feedJobs";
 import {
+  FEED_JOB_TIMEOUT_KNOBS,
+  FEED_JOB_TIMEOUTS,
+  resolveFeedJobTimeoutMs,
+} from "../../services/feedJobTimeouts";
+import {
   FEED_PIPELINE_CATALOG,
   type FeedJobSurfaceView,
 } from "../../services/feedPipelineJobs";
@@ -1756,6 +1761,21 @@ export async function handleDataProviderRoutes(
                       : undefined
                   )) ??
               noAdapterVerifier(id)
+            : undefined,
+        // #4304 — the verify probe's bound, resolved from the
+        // FEED_JOB_VERIFY_MS knob (120s default) for the verify
+        // action only: an invalid knob must not break other
+        // actions, so it is resolved here and never touched
+        // otherwise. Raw Env has no index signature, hence the
+        // cast through unknown (the asyncJobs.ts idiom for
+        // reading a named knob off raw Env).
+        verifyTimeoutMs:
+          action === "verify"
+            ? resolveFeedJobTimeoutMs(
+                ctx.env as unknown as Record<string, unknown>,
+                FEED_JOB_TIMEOUT_KNOBS.verifyMs,
+                FEED_JOB_TIMEOUTS.verifyMs,
+              )
             : undefined,
         configure:
           action === "configure"
