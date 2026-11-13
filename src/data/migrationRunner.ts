@@ -32,8 +32,18 @@
  *  - Migration SQL constraint: statements are split on `;`, so a
  *    migration file must not contain a semicolon inside a string
  *    literal. All slice-0 DDL satisfies this.
+ *  - Delegation (#4282 P1): a migration's statement text lives in
+ *    exactly one place — its catalogue entries in
+ *    `src/data/schemaComponent/d1Catalogue.ts` — and each const below
+ *    assembles its `sql` from those entries via `d1MigrationSql`.
+ *    The runner still executes (version order, idempotent,
+ *    marker-last) and still owns the `_migrations` table; only the
+ *    text moved. P6e decision (recorded here): the inline seed copies
+ *    do NOT remain — every seed line's text lives only in its
+ *    catalogue entry, so P6e has nothing left to remove.
  */
 import { sql, type SQL } from "drizzle-orm";
+import { d1MigrationSql } from "./schemaComponent/d1Catalogue";
 
 export interface DataMigration {
   version: number;
@@ -57,21 +67,7 @@ export interface MigrationDb {
 export const MIGRATION_0001_AGENT_GOVERNANCE: DataMigration = {
   version: 1,
   name: "0001_agent_governance",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_governance (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  scope TEXT NOT NULL,
-  scope_id TEXT,
-  state TEXT NOT NULL,
-  set_by TEXT NOT NULL,
-  set_at_ms INTEGER NOT NULL,
-  reason TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  provenance TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_governance_tenant_scope_idx ON agent_governance (tenant_id, scope, scope_id, set_at_ms DESC);
-`,
+  sql: d1MigrationSql(1),
 };
 
 /**
@@ -87,41 +83,7 @@ CREATE INDEX IF NOT EXISTS agent_governance_tenant_scope_idx ON agent_governance
 export const MIGRATION_0002_AGENT_CHAINS_SCHEDULES: DataMigration = {
   version: 2,
   name: "0002_agent_chains_schedules",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_chains (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  workspace_id TEXT NOT NULL,
-  chain_id TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  status TEXT NOT NULL,
-  goal TEXT NOT NULL,
-  steps_json TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-  provenance_writer TEXT NOT NULL,
-  provenance_source_do TEXT NOT NULL,
-  provenance_source_version TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_chains_tenant_chain_idx ON agent_chains (tenant_id, chain_id, version DESC);
-CREATE TABLE IF NOT EXISTS agent_synthesized_schedules (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  workspace_id TEXT NOT NULL,
-  schedule_id TEXT NOT NULL,
-  chain_id TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  status TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  cron TEXT,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-  provenance_writer TEXT NOT NULL,
-  provenance_source_do TEXT NOT NULL,
-  provenance_source_version TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_synthesized_schedules_tenant_schedule_idx ON agent_synthesized_schedules (tenant_id, schedule_id, version DESC);
-`,
+  sql: d1MigrationSql(2),
 };
 
 /**
@@ -138,24 +100,7 @@ CREATE INDEX IF NOT EXISTS agent_synthesized_schedules_tenant_schedule_idx ON ag
 export const MIGRATION_0003_AGENT_SHARD_JOBS: DataMigration = {
   version: 3,
   name: "0003_agent_shard_jobs",
-  sql: `CREATE TABLE IF NOT EXISTS agent_shard_jobs (
-  tenant_id TEXT NOT NULL,
-  workspace_id TEXT NOT NULL,
-  chain_id TEXT NOT NULL,
-  job_key TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  status TEXT NOT NULL,
-  stage TEXT NOT NULL,
-  capability_id TEXT NOT NULL,
-  detail TEXT NOT NULL,
-  result_json TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-  provenance_writer TEXT NOT NULL,
-  provenance_source_do TEXT NOT NULL,
-  provenance_source_version TEXT NOT NULL,
-    PRIMARY KEY (tenant_id, chain_id, job_key, version)
-);`,
+  sql: d1MigrationSql(3),
 };
 
 /**
@@ -169,47 +114,7 @@ export const MIGRATION_0003_AGENT_SHARD_JOBS: DataMigration = {
 export const MIGRATION_0004_AGENT_AUDIT_REPORTS: DataMigration = {
   version: 4,
   name: "0004_agent_audit_reports",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_chain_audit (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  workspace_id TEXT NOT NULL,
-  chain_id TEXT,
-  event_kind TEXT NOT NULL,
-  subject_type TEXT NOT NULL,
-  subject_id TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  detail_json TEXT NOT NULL,
-  occurred_at_ms INTEGER NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-  version INTEGER NOT NULL,
-  provenance_writer TEXT NOT NULL,
-  provenance_source_do TEXT NOT NULL,
-  provenance_source_version TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_chain_audit_tenant_chain_idx ON agent_chain_audit (tenant_id, chain_id, occurred_at_ms DESC);
-CREATE INDEX IF NOT EXISTS agent_chain_audit_tenant_kind_idx ON agent_chain_audit (tenant_id, event_kind, occurred_at_ms DESC);
-CREATE TABLE IF NOT EXISTS agent_reports (
-  tenant_id TEXT NOT NULL,
-  workspace_id TEXT NOT NULL,
-  report_id TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  generation_id TEXT,
-  title TEXT NOT NULL,
-  source TEXT NOT NULL,
-  summary TEXT NOT NULL,
-  body TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-  version INTEGER NOT NULL,
-  provenance_writer TEXT NOT NULL,
-  provenance_source_do TEXT NOT NULL,
-  provenance_source_version TEXT NOT NULL,
-    PRIMARY KEY (tenant_id, report_id, version)
-);
-CREATE INDEX IF NOT EXISTS agent_reports_tenant_report_idx ON agent_reports (tenant_id, report_id, version DESC);
-`,
+  sql: d1MigrationSql(4),
 };
 
 /**
@@ -224,32 +129,7 @@ CREATE INDEX IF NOT EXISTS agent_reports_tenant_report_idx ON agent_reports (ten
 export const MIGRATION_0005_AGENT_MARKET_GRAPH: DataMigration = {
   version: 5,
   name: "0005_agent_market_graph",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_market_nodes (
-  tenant_id TEXT NOT NULL,
-  node_type TEXT NOT NULL,
-  node_key TEXT NOT NULL,
-  label TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-    PRIMARY KEY (tenant_id, node_type, node_key)
-);
-CREATE INDEX IF NOT EXISTS agent_market_nodes_tenant_type_idx ON agent_market_nodes (tenant_id, node_type, node_key);
-CREATE TABLE IF NOT EXISTS agent_market_edges (
-  tenant_id TEXT NOT NULL,
-  from_type TEXT NOT NULL,
-  from_key TEXT NOT NULL,
-  relation TEXT NOT NULL,
-  to_type TEXT NOT NULL,
-  to_key TEXT NOT NULL,
-  weight REAL NOT NULL,
-  provenance TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-    PRIMARY KEY (tenant_id, from_type, from_key, relation, to_type, to_key)
-);
-CREATE INDEX IF NOT EXISTS agent_market_edges_tenant_from_idx ON agent_market_edges (tenant_id, from_type, from_key, relation);
-`,
+  sql: d1MigrationSql(5),
 };
 
 /**
@@ -271,57 +151,7 @@ CREATE INDEX IF NOT EXISTS agent_market_edges_tenant_from_idx ON agent_market_ed
 export const MIGRATION_0006_AGENT_TELEMETRY_CALIBRATION: DataMigration = {
   version: 6,
   name: "0006_agent_telemetry_calibration",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_thesis_realizations (
-  tenant_id TEXT NOT NULL,
-  outcome_id TEXT NOT NULL,
-  thesis TEXT NOT NULL,
-  agent_key TEXT NOT NULL,
-  structure TEXT NOT NULL,
-  regime TEXT NOT NULL,
-  symbol TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  report_id TEXT,
-  chain_id TEXT,
-  predicted_direction TEXT NOT NULL,
-  realized_direction TEXT NOT NULL,
-  direction_correct INTEGER NOT NULL,
-  falsified INTEGER NOT NULL,
-  invalidated INTEGER NOT NULL,
-  pnl_estimate_per_unit REAL,
-  r_multiple REAL,
-  evaluated_at_ms INTEGER NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-    PRIMARY KEY (tenant_id, outcome_id)
-);
-CREATE INDEX IF NOT EXISTS agent_thesis_realizations_tenant_evaluated_idx ON agent_thesis_realizations (tenant_id, evaluated_at_ms DESC);
-CREATE INDEX IF NOT EXISTS agent_thesis_realizations_tenant_thesis_idx ON agent_thesis_realizations (tenant_id, thesis);
-CREATE TABLE IF NOT EXISTS agent_calibration_decisions (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  actor_key TEXT NOT NULL,
-  prompt_key TEXT NOT NULL,
-  dimension TEXT NOT NULL,
-  slice_key TEXT NOT NULL,
-  snapshot_json TEXT NOT NULL,
-  falsifying_outcome_ids_json TEXT NOT NULL,
-  calibration_note TEXT NOT NULL,
-  proposed_by TEXT NOT NULL,
-  proposed_at_ms INTEGER NOT NULL,
-  status TEXT NOT NULL,
-  decided_by TEXT,
-  decided_at_ms INTEGER,
-  applied_by TEXT,
-  applied_at_ms INTEGER,
-  prior_note TEXT,
-  superseded_by TEXT,
-  expired_by TEXT,
-  expired_at_ms INTEGER,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_calibration_decisions_tenant_actor_prompt_idx ON agent_calibration_decisions (tenant_id, actor_key, prompt_key, status);
-`,
+  sql: d1MigrationSql(6),
 };
 
 /**
@@ -334,34 +164,7 @@ CREATE INDEX IF NOT EXISTS agent_calibration_decisions_tenant_actor_prompt_idx O
 export const MIGRATION_0007_COMMERCIAL_STORE: DataMigration = {
   version: 7,
   name: "0007_commercial_store",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_commercial_accounts (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  tier TEXT NOT NULL,
-  credits_usd REAL NOT NULL,
-  included_runs INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_tenant_settings (
-  tenant_id TEXT PRIMARY KEY,
-  ads_enabled INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_credit_claims (
-  credit_run_id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  family TEXT NOT NULL,
-  amount_usd REAL NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_credit_claims_user_family_created_idx ON agent_credit_claims (user_id, family, created_at_ms);
-CREATE TABLE IF NOT EXISTS agent_credit_redemptions (
-  credit_run_id TEXT PRIMARY KEY,
-  redeemed_by_run_id TEXT NOT NULL,
-  redeemed_at_ms INTEGER NOT NULL
-);
-`,
+  sql: d1MigrationSql(7),
 };
 
 /**
@@ -378,35 +181,7 @@ CREATE TABLE IF NOT EXISTS agent_credit_redemptions (
 export const MIGRATION_0008_SUBSCRIPTIONS: DataMigration = {
   version: 8,
   name: "0008_subscriptions",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_subscriptions (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  plan_id TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  provider_payment_ref TEXT NOT NULL,
-  status TEXT NOT NULL,
-  period_start_ms INTEGER NOT NULL,
-  period_end_ms INTEGER NOT NULL,
-  canceled_at_ms INTEGER,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS agent_subscriptions_payment_ref_idx ON agent_subscriptions (provider_payment_ref);
-CREATE INDEX IF NOT EXISTS agent_subscriptions_user_created_idx ON agent_subscriptions (user_id, created_at_ms);
-CREATE TABLE IF NOT EXISTS agent_subscription_plans (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  price_usd REAL NOT NULL,
-  period_days INTEGER NOT NULL,
-  included_runs INTEGER NOT NULL,
-  active INTEGER NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-ALTER TABLE agent_commercial_accounts ADD COLUMN tier_source TEXT;
-`,
+  sql: d1MigrationSql(8),
 };
 
 /**
@@ -419,28 +194,7 @@ ALTER TABLE agent_commercial_accounts ADD COLUMN tier_source TEXT;
 export const MIGRATION_0009_JOURNAL: DataMigration = {
   version: 9,
   name: "0009_journal",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_journal_accounts (
-  code TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  type TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_journal_entries (
-  id TEXT PRIMARY KEY,
-  transaction_ref TEXT NOT NULL,
-  account_code TEXT NOT NULL,
-  debit_usd REAL NOT NULL,
-  credit_usd REAL NOT NULL,
-  currency TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  run_request_id TEXT NOT NULL,
-  family TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_journal_entries_tenant_account_idx ON agent_journal_entries (tenant_id, account_code);
-CREATE INDEX IF NOT EXISTS agent_journal_entries_ref_idx ON agent_journal_entries (transaction_ref);
-`,
+  sql: d1MigrationSql(9),
 };
 
 /**
@@ -454,14 +208,7 @@ CREATE INDEX IF NOT EXISTS agent_journal_entries_ref_idx ON agent_journal_entrie
 export const MIGRATION_0010_PAID_SUBMISSIONS: DataMigration = {
   version: 10,
   name: "0010_paid_submissions",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_paid_submissions (
-  workflow_id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  run_request_id TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-`,
+  sql: d1MigrationSql(10),
 };
 
 /**
@@ -476,13 +223,7 @@ CREATE TABLE IF NOT EXISTS agent_paid_submissions (
 export const MIGRATION_0011_PRICE_CATALOGUE: DataMigration = {
   version: 11,
   name: "0011_price_catalogue",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_price_catalogue (
-  family TEXT PRIMARY KEY,
-  price_usd REAL NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-`,
+  sql: d1MigrationSql(11),
 };
 
 /**
@@ -501,31 +242,7 @@ CREATE TABLE IF NOT EXISTS agent_price_catalogue (
 export const MIGRATION_0012_NATIVE_LEDGER: DataMigration = {
   version: 12,
   name: "0012_native_ledger",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_native_ledger_rows (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  action TEXT NOT NULL,
-  amount_usd REAL NOT NULL,
-  currency TEXT NOT NULL,
-  customer TEXT NOT NULL,
-  gateway TEXT NOT NULL,
-  gateway_ref TEXT NOT NULL,
-  status TEXT NOT NULL,
-  checkout_url TEXT NOT NULL,
-  proposer_did TEXT NOT NULL,
-  proof_signature TEXT NOT NULL,
-  note TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  family TEXT NOT NULL,
-  run_request_id TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS agent_native_ledger_rows_session_action_idx ON agent_native_ledger_rows (session_id, action);
-CREATE INDEX IF NOT EXISTS agent_native_ledger_rows_tenant_idx ON agent_native_ledger_rows (tenant_id);
-CREATE INDEX IF NOT EXISTS agent_native_ledger_rows_run_idx ON agent_native_ledger_rows (run_request_id);
-`,
+  sql: d1MigrationSql(12),
 };
 
 /**
@@ -545,10 +262,7 @@ CREATE INDEX IF NOT EXISTS agent_native_ledger_rows_run_idx ON agent_native_ledg
 export const MIGRATION_0013_SUBSCRIPTION_STRIPE_IDS: DataMigration = {
   version: 13,
   name: "0013_subscription_stripe_ids",
-  sql: `
-ALTER TABLE agent_subscriptions ADD COLUMN stripe_session_id TEXT;
-ALTER TABLE agent_subscriptions ADD COLUMN stripe_payment_intent_id TEXT;
-`,
+  sql: d1MigrationSql(13),
 };
 
 /**
@@ -575,16 +289,7 @@ ALTER TABLE agent_subscriptions ADD COLUMN stripe_payment_intent_id TEXT;
 export const MIGRATION_0014_BILLING: DataMigration = {
   version: 14,
   name: "0014_billing",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_billing_policy (
-  key TEXT PRIMARY KEY,
-  value_json TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-ALTER TABLE agent_subscriptions ADD COLUMN provider_subscription_id TEXT;
-ALTER TABLE agent_subscriptions ADD COLUMN provider_status TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS agent_subscriptions_provider_subscription_idx ON agent_subscriptions (provider_subscription_id);
-`,
+  sql: d1MigrationSql(14),
 };
 
 /**
@@ -613,43 +318,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_subscriptions_provider_subscription_idx 
 export const MIGRATION_0015_LIFECYCLE_REFERRAL: DataMigration = {
   version: 15,
   name: "0015_lifecycle_referral",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_referral_rules (
-  id TEXT PRIMARY KEY,
-  earn_amount_usd REAL NOT NULL,
-  vesting_delay_ms INTEGER NOT NULL,
-  redemption_scope TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-INSERT OR IGNORE INTO agent_referral_rules (id, earn_amount_usd, vesting_delay_ms, redemption_scope, updated_at_ms) VALUES ('default', 0.5, 604800000, 'pay-per-run', 0);
-CREATE TABLE IF NOT EXISTS agent_referral_earnings (
-  id TEXT PRIMARY KEY,
-  referrer_user_id TEXT NOT NULL,
-  referred_user_id TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  amount_usd REAL NOT NULL,
-  redeemed_amount_usd REAL NOT NULL,
-  earned_at_ms INTEGER NOT NULL,
-  vested_at_ms INTEGER NOT NULL,
-  redeemed_by_run_id TEXT,
-  redeemed_at_ms INTEGER
-);
-CREATE UNIQUE INDEX IF NOT EXISTS agent_referral_earnings_referred_idx ON agent_referral_earnings (referred_user_id);
-CREATE INDEX IF NOT EXISTS agent_referral_earnings_referrer_idx ON agent_referral_earnings (referrer_user_id, earned_at_ms);
-CREATE TABLE IF NOT EXISTS agent_notification_preferences (
-  user_id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  digest_enabled INTEGER NOT NULL,
-  welcome_enabled INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_digest_sends (
-  user_id TEXT NOT NULL,
-  day TEXT NOT NULL,
-  sent_at_ms INTEGER NOT NULL,
-  PRIMARY KEY (user_id, day)
-);
-`,
+  sql: d1MigrationSql(15),
 };
 
 /**
@@ -667,30 +336,7 @@ CREATE TABLE IF NOT EXISTS agent_digest_sends (
 export const MIGRATION_0016_AUDIT_POLICY: DataMigration = {
   version: 16,
   name: "0016_audit_policy",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_audit_policy_actions (
-  action TEXT PRIMARY KEY,
-  block_on_audit_failure INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_audit_policy_settings (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_audit_chain (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  sequence INTEGER NOT NULL,
-  action TEXT NOT NULL,
-  payload_hash TEXT NOT NULL,
-  prev_hash TEXT NOT NULL,
-  entry_hash TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_audit_chain_tenant_seq_idx ON agent_audit_chain (tenant_id, sequence);
-CREATE INDEX IF NOT EXISTS agent_audit_chain_tenant_created_idx ON agent_audit_chain (tenant_id, created_at_ms);
-`,
+  sql: d1MigrationSql(16),
 };
 
 /**
@@ -729,77 +375,7 @@ CREATE INDEX IF NOT EXISTS agent_audit_chain_tenant_created_idx ON agent_audit_c
 export const MIGRATION_0017_INTELLIGENCE_SUBSTRATE: DataMigration = {
   version: 17,
   name: "0017_intelligence_substrate",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_trace_records (
-  id TEXT PRIMARY KEY,
-  correlation_id TEXT NOT NULL,
-  causation_id TEXT,
-  acting_agent TEXT NOT NULL,
-  principal TEXT NOT NULL,
-  operation TEXT NOT NULL,
-  outcome_code TEXT NOT NULL,
-  latency_ms INTEGER,
-  cost_units REAL,
-  cost_detail_json TEXT,
-  occurred_at_ms INTEGER NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_trace_records_correlation_idx ON agent_trace_records (correlation_id, occurred_at_ms);
-CREATE INDEX IF NOT EXISTS agent_trace_records_agent_idx ON agent_trace_records (acting_agent, occurred_at_ms DESC);
-CREATE TABLE IF NOT EXISTS agent_proposals (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  summary TEXT NOT NULL,
-  proposer_agent TEXT NOT NULL,
-  principal TEXT NOT NULL,
-  state TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_proposals_state_idx ON agent_proposals (state, updated_at_ms DESC);
-CREATE TABLE IF NOT EXISTS agent_proposal_transitions (
-  id TEXT PRIMARY KEY,
-  proposal_id TEXT NOT NULL,
-  from_state TEXT,
-  to_state TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  gate_ref TEXT,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_proposal_transitions_proposal_idx ON agent_proposal_transitions (proposal_id, created_at_ms);
-CREATE TABLE IF NOT EXISTS agent_fleet_registry (
-  agent_key TEXT PRIMARY KEY,
-  class_name TEXT NOT NULL,
-  binding TEXT NOT NULL,
-  instance_scheme TEXT NOT NULL,
-  migration_tag TEXT,
-  operations_json TEXT NOT NULL,
-  identity_json TEXT,
-  do_schema_version INTEGER,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_conformance_cells (
-  agent_key TEXT NOT NULL,
-  dimension TEXT NOT NULL,
-  status TEXT NOT NULL,
-  reference TEXT,
-  updated_at_ms INTEGER NOT NULL,
-    PRIMARY KEY (agent_key, dimension)
-);
-CREATE TABLE IF NOT EXISTS agent_work_item_events (
-  source TEXT NOT NULL,
-  external_id TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  state TEXT NOT NULL,
-  actor TEXT,
-  occurred_at_ms INTEGER NOT NULL,
-  payload_digest TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-    PRIMARY KEY (source, external_id)
-);
-CREATE INDEX IF NOT EXISTS agent_work_item_events_kind_idx ON agent_work_item_events (kind, occurred_at_ms DESC);
-`,
+  sql: d1MigrationSql(17),
 };
 
 /**
@@ -819,42 +395,7 @@ CREATE INDEX IF NOT EXISTS agent_work_item_events_kind_idx ON agent_work_item_ev
 export const MIGRATION_0018_REFUNDS: DataMigration = {
   version: 18,
   name: "0018_refunds",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_refund_policy (
-  id TEXT PRIMARY KEY,
-  window_days INTEGER NOT NULL,
-  approver TEXT NOT NULL,
-  allow_partial INTEGER NOT NULL,
-  subscription_full_effect TEXT NOT NULL,
-  subscription_partial_effect TEXT NOT NULL,
-  pay_per_run_effect TEXT NOT NULL,
-  credit_effect TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_refunds (
-  id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,
-  rail TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  original_payment_ref TEXT NOT NULL,
-  subscription_id TEXT,
-  payment_intent_id TEXT,
-  family TEXT,
-  original_amount_usd REAL NOT NULL,
-  amount_usd REAL NOT NULL,
-  original_paid_at_ms INTEGER NOT NULL,
-  reason TEXT NOT NULL,
-  status TEXT NOT NULL,
-  approver_login TEXT,
-  decision_note TEXT,
-  gateway_refund_id TEXT,
-  executed_at_ms INTEGER,
-  entitlement_consequence TEXT,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-`,
+  sql: d1MigrationSql(18),
 };
 
 /**
@@ -883,51 +424,7 @@ CREATE TABLE IF NOT EXISTS agent_refunds (
 export const MIGRATION_0019_DATA_PROVIDER_PLATFORM: DataMigration = {
   version: 19,
   name: "0019_data_provider_platform",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_data_providers (
-  id TEXT PRIMARY KEY,
-  adapter_kind TEXT NOT NULL,
-  lifecycle_state TEXT NOT NULL,
-  enabled INTEGER NOT NULL DEFAULT 0,
-  precedence INTEGER NOT NULL,
-  credential_ref TEXT,
-  config_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_data_providers_precedence_idx ON agent_data_providers (precedence);
-CREATE TABLE IF NOT EXISTS agent_data_provider_routes (
-  capability TEXT PRIMARY KEY,
-  primary_provider_id TEXT NOT NULL,
-  gap_fill_provider_id TEXT,
-  min_tier TEXT NOT NULL DEFAULT 'freemium',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_data_captures (
-  id TEXT PRIMARY KEY,
-  provider_id TEXT NOT NULL,
-  capability TEXT NOT NULL,
-  request_params_json TEXT NOT NULL DEFAULT '{}',
-  run_id TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  user_login TEXT,
-  fetched_at TEXT NOT NULL,
-  status TEXT NOT NULL,
-  raw_kind TEXT,
-  raw_blob_ref TEXT,
-  raw_byte_size INTEGER,
-  raw_sha256 TEXT,
-  normalized_digest TEXT,
-  retention_class TEXT NOT NULL,
-  failure_error TEXT,
-  failure_kind TEXT,
-  failure_message TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_data_captures_run_idx ON agent_data_captures (tenant_id, run_id);
-CREATE INDEX IF NOT EXISTS agent_data_captures_provider_idx ON agent_data_captures (tenant_id, provider_id);
-`,
+  sql: d1MigrationSql(19),
 };
 
 /**
@@ -951,19 +448,7 @@ CREATE INDEX IF NOT EXISTS agent_data_captures_provider_idx ON agent_data_captur
 export const MIGRATION_0020_IV_HISTORY: DataMigration = {
   version: 20,
   name: "0020_iv_history",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_iv_history (
-  symbol TEXT NOT NULL,
-  date TEXT NOT NULL,
-  atm_iv REAL NOT NULL,
-  spot REAL NOT NULL,
-  expiry_date TEXT NOT NULL,
-  dte INTEGER NOT NULL,
-  collected_at TEXT NOT NULL,
-  PRIMARY KEY (symbol, date)
-);
-CREATE INDEX IF NOT EXISTS agent_iv_history_symbol_date_idx ON agent_iv_history (symbol, date DESC);
-`,
+  sql: d1MigrationSql(20),
 };
 
 /**
@@ -984,61 +469,7 @@ CREATE INDEX IF NOT EXISTS agent_iv_history_symbol_date_idx ON agent_iv_history 
 export const MIGRATION_0021_MARKETPLACE: DataMigration = {
   version: 21,
   name: "0021_marketplace",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_categories (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  slug TEXT NOT NULL,
-  description TEXT NOT NULL,
-  icon TEXT NOT NULL,
-  is_active INTEGER DEFAULT 1,
-  sort_order INTEGER DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_referrals (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  title TEXT NOT NULL,
-  url TEXT NOT NULL,
-  category TEXT NOT NULL,
-  reward_text TEXT NOT NULL,
-  clicks INTEGER DEFAULT 0,
-  signups INTEGER DEFAULT 0,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_ads (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  tagline TEXT NOT NULL,
-  sponsor TEXT NOT NULL,
-  badge TEXT NOT NULL,
-  url TEXT NOT NULL,
-  cta_text TEXT NOT NULL,
-  accent_color TEXT NOT NULL,
-  impressions INTEGER DEFAULT 0,
-  clicks INTEGER DEFAULT 0,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_external_ads (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  network TEXT NOT NULL,
-  placement TEXT NOT NULL,
-  title TEXT NOT NULL,
-  tagline TEXT NOT NULL,
-  cta_text TEXT NOT NULL,
-  target_url TEXT NOT NULL,
-  banner_image_url TEXT,
-  cpm_rate REAL DEFAULT 15.0,
-  cpc_rate REAL DEFAULT 1.25,
-  impressions INTEGER DEFAULT 0,
-  clicks INTEGER DEFAULT 0,
-  earnings REAL DEFAULT 0.0,
-  is_active INTEGER DEFAULT 1,
-  created_at TEXT NOT NULL
-);
-`,
+  sql: d1MigrationSql(21),
 };
 
 /**
@@ -1070,50 +501,7 @@ CREATE TABLE IF NOT EXISTS agent_external_ads (
 export const MIGRATION_0022_D1_REGULARIZATION: DataMigration = {
   version: 22,
   name: "0022_d1_regularization",
-  sql: `
-CREATE TABLE IF NOT EXISTS quote_source_setting (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  source TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS resource_sql_ops (
-  ts_ms INTEGER NOT NULL,
-  ns TEXT NOT NULL,
-  op TEXT NOT NULL,
-  rows_read INTEGER NOT NULL,
-  rows_written INTEGER NOT NULL,
-  caller TEXT,
-  trigger TEXT,
-  statement TEXT,
-  tenant_id TEXT,
-  run_id TEXT,
-  session_ref TEXT
-);
-CREATE TABLE IF NOT EXISTS resource_daily_rollups (
-  day TEXT NOT NULL,
-  ns TEXT NOT NULL,
-  op TEXT NOT NULL,
-  caller TEXT NOT NULL,
-  trigger TEXT NOT NULL,
-  ops INTEGER NOT NULL,
-  rows_read INTEGER NOT NULL,
-  rows_written INTEGER NOT NULL,
-  PRIMARY KEY (day, ns, op, caller, trigger)
-);
-CREATE TABLE IF NOT EXISTS resource_alert_state (
-  budget TEXT NOT NULL,
-  day TEXT NOT NULL,
-  alerted_at INTEGER NOT NULL,
-  delivered INTEGER NOT NULL,
-  note TEXT,
-  PRIMARY KEY (budget, day)
-);
-CREATE TABLE IF NOT EXISTS resource_comparison_reports (
-  day TEXT PRIMARY KEY,
-  generated_at INTEGER NOT NULL,
-  report_json TEXT NOT NULL
-);
-`,
+  sql: d1MigrationSql(22),
 };
 
 /**
@@ -1132,23 +520,7 @@ CREATE TABLE IF NOT EXISTS resource_comparison_reports (
 export const MIGRATION_0023_AGENT_MESH_TRACE_HOPS: DataMigration = {
   version: 23,
   name: "0023_agent_mesh_trace_hops",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_mesh_trace_hops (
-  trace_id TEXT NOT NULL,
-  span_id TEXT NOT NULL,
-  parent_span_id TEXT,
-  kind TEXT NOT NULL,
-  operation TEXT NOT NULL,
-  timestamp_ms INTEGER NOT NULL,
-  tenant_id TEXT,
-  caller TEXT,
-  agent_name TEXT,
-  job_id TEXT,
-  note TEXT,
-  PRIMARY KEY (trace_id, span_id)
-);
-CREATE INDEX IF NOT EXISTS agent_mesh_trace_hops_trace_idx ON agent_mesh_trace_hops (trace_id, timestamp_ms);
-`,
+  sql: d1MigrationSql(23),
 };
 
 /**
@@ -1167,27 +539,7 @@ CREATE INDEX IF NOT EXISTS agent_mesh_trace_hops_trace_idx ON agent_mesh_trace_h
 export const MIGRATION_0024_AGENT_MESH_EVAL_RESULTS: DataMigration = {
   version: 24,
   name: "0024_agent_mesh_eval_results",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_mesh_eval_results (
-  run_id TEXT NOT NULL,
-  task_id TEXT NOT NULL,
-  door TEXT NOT NULL,
-  class_name TEXT NOT NULL,
-  seq INTEGER NOT NULL,
-  passed INTEGER NOT NULL,
-  outcome TEXT NOT NULL,
-  refusal_code TEXT,
-  failures_json TEXT NOT NULL,
-  trace_id TEXT,
-  trace_hop_kinds_json TEXT,
-  trace_complete INTEGER,
-  facts_json TEXT NOT NULL,
-  started_at_ms INTEGER NOT NULL,
-  duration_ms INTEGER NOT NULL,
-  PRIMARY KEY (run_id, task_id)
-);
-CREATE INDEX IF NOT EXISTS agent_mesh_eval_results_task_idx ON agent_mesh_eval_results (task_id, started_at_ms);
-`,
+  sql: d1MigrationSql(24),
 };
 
 /**
@@ -1205,26 +557,7 @@ CREATE INDEX IF NOT EXISTS agent_mesh_eval_results_task_idx ON agent_mesh_eval_r
 export const MIGRATION_0025_AGENT_MESH_PROPOSALS: DataMigration = {
   version: 25,
   name: "0025_agent_mesh_proposals",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_mesh_proposals (
-  id TEXT PRIMARY KEY,
-  signal_key TEXT NOT NULL,
-  title TEXT NOT NULL,
-  problem TEXT NOT NULL,
-  proposed_change TEXT NOT NULL,
-  expected_effect TEXT NOT NULL,
-  falsification_criterion TEXT NOT NULL,
-  evidence_refs_json TEXT NOT NULL,
-  state TEXT NOT NULL,
-  bar_verdict_json TEXT,
-  filed_issue_number INTEGER,
-  filed_issue_url TEXT,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_mesh_proposals_signal_idx ON agent_mesh_proposals (signal_key, created_at_ms);
-CREATE INDEX IF NOT EXISTS agent_mesh_proposals_state_idx ON agent_mesh_proposals (state, created_at_ms);
-`,
+  sql: d1MigrationSql(25),
 };
 
 /**
@@ -1251,10 +584,7 @@ CREATE INDEX IF NOT EXISTS agent_mesh_proposals_state_idx ON agent_mesh_proposal
 export const MIGRATION_0028_TENANT_PROVIDERS: DataMigration = {
   version: 28,
   name: "0028_tenant_providers",
-  sql: `
-ALTER TABLE agent_tenant_settings ADD COLUMN data_provider_id TEXT NOT NULL DEFAULT 'etrade';
-ALTER TABLE agent_tenant_settings ADD COLUMN broker_id TEXT NOT NULL DEFAULT 'etrade';
-`,
+  sql: d1MigrationSql(28),
 };
 
 /**
@@ -1273,15 +603,7 @@ ALTER TABLE agent_tenant_settings ADD COLUMN broker_id TEXT NOT NULL DEFAULT 'et
 export const MIGRATION_0030_BILLING_CUSTOMERS: DataMigration = {
   version: 30,
   name: "0030_billing_customers",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_billing_customers (
-  user_id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  stripe_customer_id TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-`,
+  sql: d1MigrationSql(30),
 };
 
 /**
@@ -1297,58 +619,19 @@ CREATE TABLE IF NOT EXISTS agent_billing_customers (
 export const MIGRATION_0031_REFERRAL_ATTRIBUTION: DataMigration = {
   version: 31,
   name: "0031_referral_attribution",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_referral_attributions (
-  referred_user_id TEXT PRIMARY KEY,
-  referrer_user_id TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  source TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_referral_attributions_referrer_idx ON agent_referral_attributions (referrer_user_id, created_at_ms);
-`,
+  sql: d1MigrationSql(31),
 };
 
 export const MIGRATION_0032_STORE_OPERATORS: DataMigration = {
   version: 32,
   name: "0032_store_operators",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_store_operators (
-  login TEXT PRIMARY KEY,
-  added_by TEXT NOT NULL,
-  added_at_ms INTEGER NOT NULL
-);
-`,
+  sql: d1MigrationSql(32),
 };
 
 export const MIGRATION_0033_DEAD_LETTER_STORE: DataMigration = {
   version: 33,
   name: "0033_dead_letter_store",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_dead_letter_records (
-  id TEXT PRIMARY KEY,
-  queue TEXT NOT NULL,
-  reason TEXT NOT NULL,
-  message_id TEXT,
-  run_id TEXT,
-  unit_id TEXT,
-  actor_login TEXT,
-  actor_kind TEXT,
-  subscriber TEXT,
-  detail TEXT,
-  envelope_json TEXT,
-  created_at_ms INTEGER NOT NULL,
-  replayed_at_ms INTEGER,
-  replay_outcome TEXT,
-  replay_token TEXT
-);
-CREATE TABLE IF NOT EXISTS dlq_depth_state (
-  id TEXT PRIMARY KEY,
-  alerted_at_ms INTEGER,
-  depth_at_alert INTEGER,
-  claim_token TEXT
-);
-`,
+  sql: d1MigrationSql(33),
 };
 
 /**
@@ -1375,27 +658,13 @@ CREATE TABLE IF NOT EXISTS dlq_depth_state (
 export const MIGRATION_0035_DIGEST_PASS: DataMigration = {
   version: 35,
   name: "0035_digest_pass",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_digest_subscriber_emails (
-  user_id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  email TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_digest_pass_days (
-  day TEXT PRIMARY KEY,
-  ran_at_ms INTEGER NOT NULL
-);
-`,
+  sql: d1MigrationSql(35),
 };
 
 export const MIGRATION_0026_TENANT_AUTO_REFRESH: DataMigration = {
   version: 26,
   name: "0026_tenant_auto_refresh",
-  sql: `
-ALTER TABLE agent_tenant_settings ADD COLUMN auto_refresh_enabled INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE agent_tenant_settings ADD COLUMN auto_refresh_interval_s INTEGER NOT NULL DEFAULT 15;
-`,
+  sql: d1MigrationSql(26),
 };
 
 /**
@@ -1409,11 +678,7 @@ ALTER TABLE agent_tenant_settings ADD COLUMN auto_refresh_interval_s INTEGER NOT
 export const MIGRATION_0027_PRICE_CATALOGUE_APPROVAL: DataMigration = {
   version: 27,
   name: "0027_price_catalogue_approval",
-  sql: `
-ALTER TABLE agent_price_catalogue ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'proposed';
-ALTER TABLE agent_price_catalogue ADD COLUMN approved_by TEXT;
-ALTER TABLE agent_price_catalogue ADD COLUMN approved_at_ms INTEGER;
-`,
+  sql: d1MigrationSql(27),
 };
 
 /**
@@ -1429,42 +694,13 @@ ALTER TABLE agent_price_catalogue ADD COLUMN approved_at_ms INTEGER;
 export const MIGRATION_0029_PROOF_REDEMPTIONS: DataMigration = {
   version: 29,
   name: "0029_proof_redemptions",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_payment_proof_redemptions (
-  redemption_key TEXT PRIMARY KEY,
-  run_request_id TEXT NOT NULL,
-  rail TEXT NOT NULL,
-  payer TEXT,
-  redeemed_at_ms INTEGER NOT NULL
-);
-`,
+  sql: d1MigrationSql(29),
 };
 
 export const MIGRATION_0034_BREAKER_STATE: DataMigration = {
   version: 34,
   name: "0034_breaker_state",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_breaker_state (
-  provider_id TEXT PRIMARY KEY,
-  state TEXT NOT NULL,
-  consecutive_failures INTEGER NOT NULL,
-  opened_at_ms INTEGER,
-  last_failure_at_ms INTEGER,
-  total_calls INTEGER NOT NULL,
-  total_successes INTEGER NOT NULL,
-  total_failures INTEGER NOT NULL,
-  total_trips INTEGER NOT NULL,
-  total_fallbacks INTEGER NOT NULL,
-  total_rejected INTEGER NOT NULL,
-  transition_seq INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS breaker_trip_alerts (
-  transition_id TEXT PRIMARY KEY,
-  alerted_at_ms INTEGER,
-  claim_token TEXT
-);
-`,
+  sql: d1MigrationSql(34),
 };
 
 /**
@@ -1482,32 +718,13 @@ CREATE TABLE IF NOT EXISTS breaker_trip_alerts (
 export const MIGRATION_0036_REFUND_POLICY_APPROVAL: DataMigration = {
   version: 36,
   name: "0036_refund_policy_approval",
-  sql: `
-ALTER TABLE agent_refund_policy ADD COLUMN approved_kinds TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE agent_refund_policy ADD COLUMN approved_by TEXT;
-ALTER TABLE agent_refund_policy ADD COLUMN approved_at_ms INTEGER;
-`,
+  sql: d1MigrationSql(36),
 };
 
 export const MIGRATION_0037_CFPAY_CHANNEL: DataMigration = {
   version: 37,
   name: "0037_cfpay_channel",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_cfpay_channel_purchases (
-  id TEXT PRIMARY KEY,
-  user_login TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  email TEXT NOT NULL,
-  family TEXT NOT NULL,
-  expected_price_usd REAL NOT NULL,
-  status TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  fulfilled_at_ms INTEGER,
-  payment_intent_id TEXT,
-  fulfil_skipped_reason TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_cfpay_channel_user ON agent_cfpay_channel_purchases (user_login);
-`,
+  sql: d1MigrationSql(37),
 };
 
 /**
@@ -1521,7 +738,7 @@ CREATE INDEX IF NOT EXISTS idx_cfpay_channel_user ON agent_cfpay_channel_purchas
 export const MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID: DataMigration = {
   version: 38,
   name: "0038_agent_shard_jobs_workflow_run_id",
-  sql: `ALTER TABLE agent_shard_jobs ADD COLUMN workflow_run_id TEXT;`,
+  sql: d1MigrationSql(38),
 };
 
 /**
@@ -1536,17 +753,7 @@ export const MIGRATION_0038_AGENT_SHARD_JOBS_WORKFLOW_RUN_ID: DataMigration = {
 export const MIGRATION_0039_TENANT_CHANNELS: DataMigration = {
   version: 39,
   name: "0039_tenant_channels",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_tenant_channels (
-  tenant_id TEXT PRIMARY KEY,
-  email_enabled INTEGER NOT NULL DEFAULT 1,
-  slack_enabled INTEGER NOT NULL DEFAULT 1,
-  webhook_enabled INTEGER NOT NULL DEFAULT 1,
-  copilot_enabled INTEGER NOT NULL DEFAULT 1,
-  docs_enabled INTEGER NOT NULL DEFAULT 1,
-  updated_at_ms INTEGER NOT NULL
-);
-`,
+  sql: d1MigrationSql(39),
 };
 
 /**
@@ -1563,11 +770,7 @@ CREATE TABLE IF NOT EXISTS agent_tenant_channels (
 export const MIGRATION_0040_UNLIMITED_FREE_GRANT: DataMigration = {
   version: 40,
   name: "0040_unlimited_free_grant",
-  sql: `
-ALTER TABLE agent_commercial_accounts ADD COLUMN unlimited_free_granted_by TEXT;
-ALTER TABLE agent_commercial_accounts ADD COLUMN unlimited_free_reason TEXT;
-ALTER TABLE agent_commercial_accounts ADD COLUMN unlimited_free_expires_at_ms INTEGER;
-`,
+  sql: d1MigrationSql(40),
 };
 
 /**
@@ -1584,7 +787,7 @@ ALTER TABLE agent_commercial_accounts ADD COLUMN unlimited_free_expires_at_ms IN
 export const MIGRATION_0041_PLAN_TRIAL_DAYS: DataMigration = {
   version: 41,
   name: "0041_plan_trial_days",
-  sql: `ALTER TABLE agent_subscription_plans ADD COLUMN trial_days INTEGER;`,
+  sql: d1MigrationSql(41),
 };
 
 /**
@@ -1600,15 +803,7 @@ export const MIGRATION_0041_PLAN_TRIAL_DAYS: DataMigration = {
 export const MIGRATION_0042_ONBOARDING_STATE: DataMigration = {
   version: 42,
   name: "0042_onboarding_state",
-  sql: `CREATE TABLE IF NOT EXISTS agent_onboarding_state (
-  user_login TEXT PRIMARY KEY,
-  tenant_id TEXT,
-  current_step INTEGER NOT NULL DEFAULT 1,
-  completed_at_ms INTEGER,
-  trial_plan_id TEXT,
-  trial_started_at_ms INTEGER,
-  updated_at_ms INTEGER NOT NULL
-);`,
+  sql: d1MigrationSql(42),
 };
 
 /**
@@ -1627,19 +822,7 @@ export const MIGRATION_0042_ONBOARDING_STATE: DataMigration = {
 export const MIGRATION_0043_FREE_RUN_COUNTER: DataMigration = {
   version: 43,
   name: "0043_free_run_counter",
-  sql: `CREATE TABLE IF NOT EXISTS agent_free_run_allowances (
-  family TEXT PRIMARY KEY,
-  runs INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_free_run_counts (
-  user_login TEXT NOT NULL,
-  family TEXT NOT NULL,
-  month TEXT NOT NULL,
-  used INTEGER NOT NULL DEFAULT 0,
-  updated_at_ms INTEGER NOT NULL,
-  PRIMARY KEY (user_login, family, month)
-);`,
+  sql: d1MigrationSql(43),
 };
 
 /**
@@ -1657,11 +840,7 @@ CREATE TABLE IF NOT EXISTS agent_free_run_counts (
 export const MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED: DataMigration = {
   version: 44,
   name: "0044_free_run_allowance_seed",
-  sql: `INSERT OR IGNORE INTO agent_free_run_allowances (family, runs, updated_at_ms) VALUES
-  ('stock', 10, 0),
-  ('goal', 10, 0),
-  ('options', 10, 0),
-  ('strategy', 10, 0);`,
+  sql: d1MigrationSql(44),
 };
 
 /**
@@ -1677,7 +856,7 @@ export const MIGRATION_0044_FREE_RUN_ALLOWANCE_SEED: DataMigration = {
 export const MIGRATION_0045_IV_HISTORY_BROKER: DataMigration = {
   version: 45,
   name: "0045_iv_history_broker",
-  sql: `ALTER TABLE agent_iv_history ADD COLUMN broker TEXT NOT NULL DEFAULT 'etrade'`,
+  sql: d1MigrationSql(45),
 };
 
 /**
@@ -1692,34 +871,7 @@ export const MIGRATION_0045_IV_HISTORY_BROKER: DataMigration = {
 export const MIGRATION_0046_JOB_PIPELINE: DataMigration = {
   version: 46,
   name: "0046_job_pipeline",
-  sql: `CREATE TABLE IF NOT EXISTS job_pipeline_definitions (
-      job_id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      definition_json TEXT NOT NULL,
-      version INTEGER NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS job_pipeline_instances (
-      job_id TEXT PRIMARY KEY,
-      state TEXT NOT NULL,
-      desired_state TEXT NOT NULL,
-      current_run_id TEXT,
-      run_started_at TEXT,
-      run_trigger TEXT,
-      checkpoint_json TEXT,
-      stage_checkpoint_json TEXT,
-      stage_desired_json TEXT,
-      last_error TEXT,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS job_pipeline_artifacts (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      artifact_key TEXT NOT NULL,
-      value_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_job_pipeline_artifacts_run
-      ON job_pipeline_artifacts (run_id, artifact_key)`,
+  sql: d1MigrationSql(46),
 };
 
 /**
@@ -1731,26 +883,7 @@ export const MIGRATION_0046_JOB_PIPELINE: DataMigration = {
 export const MIGRATION_0047_JOB_RUN_RECORDS: DataMigration = {
   version: 47,
   name: "0047_job_run_records",
-  sql: `CREATE TABLE IF NOT EXISTS job_run_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      system TEXT NOT NULL,
-      job_id TEXT NOT NULL,
-      operation TEXT NOT NULL,
-      started TEXT NOT NULL,
-      finished TEXT NOT NULL,
-      outcome TEXT NOT NULL,
-      triggered_by TEXT NOT NULL,
-      trigger_text TEXT,
-      schedule_id TEXT,
-      async_job_id TEXT,
-      workflow_id TEXT,
-      error_text TEXT,
-      detail TEXT,
-      descriptor TEXT,
-      artifact_refs_json TEXT
-    );
-    CREATE INDEX IF NOT EXISTS job_run_records_job_idx
-      ON job_run_records (job_id, started DESC, id DESC)`,
+  sql: d1MigrationSql(47),
 };
 
 /**
@@ -1770,10 +903,7 @@ export const MIGRATION_0047_JOB_RUN_RECORDS: DataMigration = {
 export const MIGRATION_0049_PLAN_PRICE_APPROVAL: DataMigration = {
   version: 49,
   name: "0049_plan_price_approval",
-  sql: `ALTER TABLE agent_subscription_plans ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'proposed';
-ALTER TABLE agent_subscription_plans ADD COLUMN approved_by TEXT;
-ALTER TABLE agent_subscription_plans ADD COLUMN approved_at_ms INTEGER;
-UPDATE agent_subscription_plans SET approval_status = 'approved' WHERE approval_status = 'proposed';`,
+  sql: d1MigrationSql(49),
 };
 
 /**
@@ -1791,23 +921,7 @@ UPDATE agent_subscription_plans SET approval_status = 'approved' WHERE approval_
 export const MIGRATION_0048_TOP_UP_DRAFTS: DataMigration = {
   version: 48,
   name: "0048_top_up_drafts",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_top_up_drafts (
-  id TEXT PRIMARY KEY,
-  user_login TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  email TEXT NOT NULL,
-  amount_usd REAL NOT NULL,
-  rail TEXT NOT NULL,
-  status TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  credited_at_ms INTEGER,
-  payment_intent_id TEXT,
-  checkout_session_id TEXT,
-  challenge_nonce TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_top_up_user ON agent_top_up_drafts (user_login);
-`,
+  sql: d1MigrationSql(48),
 };
 
 /**
@@ -1823,17 +937,7 @@ CREATE INDEX IF NOT EXISTS idx_top_up_user ON agent_top_up_drafts (user_login);
 export const MIGRATION_0050_USER_PROFILES: DataMigration = {
   version: 50,
   name: "0050_user_profiles",
-  sql: `CREATE TABLE IF NOT EXISTS agent_user_profiles (
-  user_login TEXT PRIMARY KEY,
-  display_name TEXT,
-  phone TEXT,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_profile_idempotency_keys (
-  idempotency_key TEXT PRIMARY KEY,
-  user_login TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);`,
+  sql: d1MigrationSql(50),
 };
 
 /**
@@ -1850,21 +954,7 @@ CREATE TABLE IF NOT EXISTS agent_profile_idempotency_keys (
 export const MIGRATION_0051_JOB_ENRICHED_DATASETS: DataMigration = {
   version: 51,
   name: "0051_job_enriched_datasets",
-  sql: `CREATE TABLE IF NOT EXISTS job_enriched_datasets (
-      id TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL,
-      job_id TEXT NOT NULL,
-      feed_job_id TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      dataset TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      as_of TEXT NOT NULL,
-      rows_persisted INTEGER NOT NULL,
-      artifact_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_job_enriched_datasets_job
-      ON job_enriched_datasets (job_id, created_at DESC, id DESC)`,
+  sql: d1MigrationSql(51),
 };
 
 /**
@@ -1883,21 +973,7 @@ export const MIGRATION_0051_JOB_ENRICHED_DATASETS: DataMigration = {
 export const MIGRATION_0052_JOB_ANALYZED_DATASETS: DataMigration = {
   version: 52,
   name: "0052_job_analyzed_datasets",
-  sql: `CREATE TABLE IF NOT EXISTS job_analyzed_datasets (
-      id TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL,
-      job_id TEXT NOT NULL,
-      enrich_job_id TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      dataset TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      as_of TEXT NOT NULL,
-      rows_persisted INTEGER NOT NULL,
-      artifact_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_job_analyzed_datasets_job
-      ON job_analyzed_datasets (job_id, created_at DESC, id DESC)`,
+  sql: d1MigrationSql(52),
 };
 
 /**
@@ -1919,28 +995,7 @@ export const MIGRATION_0052_JOB_ANALYZED_DATASETS: DataMigration = {
 export const MIGRATION_0054_APPROVED_FREE_QUOTA: DataMigration = {
   version: 54,
   name: "0054_approved_free_quota",
-  sql: `CREATE TABLE IF NOT EXISTS agent_approved_free_quotas (
-  family TEXT PRIMARY KEY,
-  cap_runs INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-  updated_by TEXT
-);
-CREATE TABLE IF NOT EXISTS agent_approved_free_quota_counts (
-  tenant_id TEXT NOT NULL,
-  user_login TEXT NOT NULL,
-  family TEXT NOT NULL,
-  period TEXT NOT NULL,
-  used INTEGER NOT NULL DEFAULT 0,
-  updated_at_ms INTEGER NOT NULL,
-  PRIMARY KEY (tenant_id, user_login, family, period)
-);
-CREATE TABLE IF NOT EXISTS agent_approved_free_quota_settings (
-  id TEXT PRIMARY KEY,
-  window_kind TEXT NOT NULL,
-  at_limit_action TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-  updated_by TEXT
-);`,
+  sql: d1MigrationSql(54),
 };
 
 /**
@@ -1960,13 +1015,7 @@ CREATE TABLE IF NOT EXISTS agent_approved_free_quota_settings (
 export const MIGRATION_0055_APPROVED_FREE_QUOTA_SEED: DataMigration = {
   version: 55,
   name: "0055_approved_free_quota_seed",
-  sql: `INSERT OR IGNORE INTO agent_approved_free_quotas (family, cap_runs, updated_at_ms, updated_by) VALUES
-  ('stock', 10, 0, NULL),
-  ('goal', 10, 0, NULL),
-  ('options', 10, 0, NULL),
-  ('strategy', 10, 0, NULL);
-INSERT OR IGNORE INTO agent_approved_free_quota_settings (id, window_kind, at_limit_action, updated_at_ms, updated_by) VALUES
-  ('default', 'month', 'upgrade_or_buy_credits', 0, NULL);`,};
+  sql: d1MigrationSql(55),};
 
 /**
  * Migration 0056 — generated datasets (#3538, Pipeline J5).
@@ -1988,21 +1037,7 @@ INSERT OR IGNORE INTO agent_approved_free_quota_settings (id, window_kind, at_li
 export const MIGRATION_0056_JOB_GENERATED_DATASETS: DataMigration = {
   version: 56,
   name: "0056_job_generated_datasets",
-  sql: `CREATE TABLE IF NOT EXISTS job_generated_datasets (
-      id TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL,
-      job_id TEXT NOT NULL,
-      analyze_job_id TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      dataset TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      as_of TEXT NOT NULL,
-      rows_persisted INTEGER NOT NULL,
-      artifact_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_job_generated_datasets_job
-      ON job_generated_datasets (job_id, created_at DESC, id DESC)`,
+  sql: d1MigrationSql(56),
 };
 
 /**
@@ -2021,22 +1056,7 @@ export const MIGRATION_0056_JOB_GENERATED_DATASETS: DataMigration = {
 export const MIGRATION_0057_JOB_DELIVERY_DATASETS: DataMigration = {
   version: 57,
   name: "0057_job_delivery_datasets",
-  sql: `CREATE TABLE IF NOT EXISTS job_delivery_datasets (
-      id TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL,
-      job_id TEXT NOT NULL,
-      generate_job_id TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      dataset TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      as_of TEXT NOT NULL,
-      rows_persisted INTEGER NOT NULL,
-      input_artifact_id TEXT NOT NULL,
-      artifact_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_job_delivery_datasets_job
-      ON job_delivery_datasets (job_id, created_at DESC, id DESC)`,
+  sql: d1MigrationSql(57),
 };
 /**
  * Migration 0058 — product versions (#3289 slice 1, sub-issue of
@@ -2142,7 +1162,7 @@ export const MIGRATION_0057_JOB_DELIVERY_DATASETS: DataMigration = {
 export const MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID: DataMigration = {
   version: 61,
   name: "0061_job_pipeline_run_schedule_id",
-  sql: `ALTER TABLE job_pipeline_instances ADD COLUMN run_schedule_id TEXT;`,
+  sql: d1MigrationSql(61),
 };
 
 /**
@@ -2154,116 +1174,13 @@ export const MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID: DataMigration = {
 export const MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID: DataMigration = {
   version: 65,
   name: "0065_job_pipeline_run_async_job_id",
-  sql: `ALTER TABLE job_pipeline_instances ADD COLUMN run_async_job_id TEXT;`,
+  sql: d1MigrationSql(65),
 };
 
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_products (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  description TEXT,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-INSERT OR IGNORE INTO agent_products (id, name, kind, description, created_at_ms, updated_at_ms)
-  VALUES
-    ('prod-per-run-stock', 'stock', 'per_run', NULL, 0, 0),
-    ('prod-per-run-goal', 'goal', 'per_run', NULL, 0, 0),
-    ('prod-per-run-options', 'options', 'per_run', NULL, 0, 0),
-    ('prod-per-run-strategy', 'strategy', 'per_run', NULL, 0, 0),
-    ('prod-free', 'Free', 'subscription', NULL, 0, 0);
-INSERT OR IGNORE INTO agent_products (id, name, kind, description, created_at_ms, updated_at_ms)
-  SELECT 'prod-sub-' || lower(replace(trim(name), ' ', '-')), MIN(name), 'subscription', NULL, MIN(created_at_ms), MIN(created_at_ms)
-  FROM agent_subscription_plans
-  GROUP BY 'prod-sub-' || lower(replace(trim(name), ' ', '-'));
-ALTER TABLE agent_subscription_plans ADD COLUMN product_id TEXT NOT NULL DEFAULT '';
-ALTER TABLE agent_subscription_plans ADD COLUMN segment TEXT NOT NULL DEFAULT 'default';
-ALTER TABLE agent_subscription_plans ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE agent_subscription_plans ADD COLUMN effective_from_ms INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE agent_subscription_plans ADD COLUMN effective_to_ms INTEGER;
-ALTER TABLE agent_subscription_plans ADD COLUMN billing_period TEXT NOT NULL DEFAULT 'monthly';
-ALTER TABLE agent_subscription_plans ADD COLUMN features_json TEXT;
-ALTER TABLE agent_subscription_plans ADD COLUMN stripe_price_id TEXT;
-UPDATE agent_subscription_plans SET
-  product_id = 'prod-sub-' || lower(replace(trim(name), ' ', '-')),
-  segment = 'default',
-  version = (
-    SELECT COUNT(*) FROM agent_subscription_plans AS p2
-    WHERE 'prod-sub-' || lower(replace(trim(p2.name), ' ', '-')) = 'prod-sub-' || lower(replace(trim(agent_subscription_plans.name), ' ', '-'))
-      AND (p2.created_at_ms < agent_subscription_plans.created_at_ms OR (p2.created_at_ms = agent_subscription_plans.created_at_ms AND p2.id <= agent_subscription_plans.id))
-  ),
-  effective_from_ms = created_at_ms + (
-    SELECT COUNT(*) FROM agent_subscription_plans AS p2
-    WHERE 'prod-sub-' || lower(replace(trim(p2.name), ' ', '-')) = 'prod-sub-' || lower(replace(trim(agent_subscription_plans.name), ' ', '-'))
-      AND (p2.created_at_ms < agent_subscription_plans.created_at_ms OR (p2.created_at_ms = agent_subscription_plans.created_at_ms AND p2.id < agent_subscription_plans.id))
-  ),
-  effective_to_ms = NULL,
-  billing_period = CASE WHEN period_days = 365 THEN 'annual' ELSE 'monthly' END,
-  features_json = NULL,
-  stripe_price_id = NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS agent_subscription_plans_product_segment_version_idx ON agent_subscription_plans (product_id, segment, version);
-ALTER TABLE agent_price_catalogue RENAME TO agent_price_catalogue_legacy;
-CREATE TABLE agent_price_catalogue (
-  id TEXT PRIMARY KEY,
-  family TEXT NOT NULL,
-  price_usd REAL NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-  approval_status TEXT NOT NULL DEFAULT 'proposed',
-  approved_by TEXT,
-  approved_at_ms INTEGER,
-  product_id TEXT NOT NULL,
-  segment TEXT NOT NULL DEFAULT 'default',
-  version INTEGER NOT NULL,
-  effective_from_ms INTEGER NOT NULL,
-  effective_to_ms INTEGER
-);
-INSERT INTO agent_price_catalogue (id, family, price_usd, updated_at_ms, approval_status, approved_by, approved_at_ms, product_id, segment, version, effective_from_ms, effective_to_ms)
-  SELECT 'cat-' || family || '-default-v1', family, price_usd, updated_at_ms, approval_status, approved_by, approved_at_ms, 'prod-per-run-' || family, 'default', 1, updated_at_ms, NULL
-  FROM agent_price_catalogue_legacy;
-DROP TABLE agent_price_catalogue_legacy;
-CREATE UNIQUE INDEX IF NOT EXISTS agent_price_catalogue_product_segment_version_idx ON agent_price_catalogue (product_id, segment, version);
-ALTER TABLE agent_commercial_accounts ADD COLUMN segment TEXT NOT NULL DEFAULT 'default';
-ALTER TABLE agent_journal_entries ADD COLUMN product_id TEXT;
-ALTER TABLE agent_journal_entries ADD COLUMN version_id TEXT;
-ALTER TABLE agent_journal_entries ADD COLUMN price_usd REAL;
-ALTER TABLE agent_native_ledger_rows ADD COLUMN product_id TEXT;
-ALTER TABLE agent_native_ledger_rows ADD COLUMN version_id TEXT;
-ALTER TABLE agent_native_ledger_rows ADD COLUMN price_usd REAL;
-ALTER TABLE agent_credit_claims ADD COLUMN product_id TEXT;
-ALTER TABLE agent_credit_claims ADD COLUMN version_id TEXT;
-ALTER TABLE agent_credit_claims ADD COLUMN price_usd REAL;
-CREATE TABLE IF NOT EXISTS agent_version_moves (
-  id TEXT PRIMARY KEY,
-  bulk_move_id TEXT,
-  user_id TEXT NOT NULL,
-  product_id TEXT,
-  from_version_id TEXT,
-  to_version_id TEXT,
-  segment TEXT NOT NULL,
-  moved_by TEXT NOT NULL,
-  reason TEXT,
-  moved_at_ms INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS agent_version_moves_bulk_user_idx ON agent_version_moves (bulk_move_id, user_id);
-CREATE TABLE IF NOT EXISTS agent_bulk_moves (
-  id TEXT PRIMARY KEY,
-  product_id TEXT NOT NULL,
-  segment_scope TEXT,
-  target_version_ids_json TEXT NOT NULL,
-  moved_by TEXT NOT NULL,
-  reason TEXT,
-  status TEXT NOT NULL,
-  moved_count INTEGER NOT NULL,
-  skipped_count INTEGER NOT NULL,
-  failed_count INTEGER NOT NULL,
-  started_at_ms INTEGER NOT NULL,
-  finished_at_ms INTEGER
-);
-`,
+  sql: d1MigrationSql(58),
 };
 
 /**
@@ -2287,48 +1204,7 @@ CREATE TABLE IF NOT EXISTS agent_bulk_moves (
 export const MIGRATION_0059_RUN_LEDGER: DataMigration = {
   version: 59,
   name: "0059_run_ledger",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_async_jobs (
-  job_id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  capability TEXT NOT NULL,
-  display_name TEXT NOT NULL,
-  status TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  result_json TEXT,
-  response_status TEXT,
-  error TEXT,
-  error_code TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  started_at TEXT,
-  completed_at TEXT,
-  parent_job_id TEXT,
-  job_kind TEXT,
-  channel TEXT,
-  not_before TEXT,
-  stage TEXT,
-  chain_id TEXT,
-  stuck_alerted_at TEXT,
-  trigger TEXT,
-  triggered_by TEXT,
-  schedule_id TEXT,
-  last_activity_at TEXT,
-  projected_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_async_jobs_tenant_idx
-  ON agent_async_jobs (tenant_id, created_at DESC);
-CREATE TABLE IF NOT EXISTS agent_tenant_projection_carriers (
-  tenant_id TEXT PRIMARY KEY,
-  queues_enabled INTEGER NOT NULL,
-  orm_enabled INTEGER NOT NULL,
-  sweep_enabled INTEGER NOT NULL,
-  read_mode TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-ALTER TABLE agent_reports ADD COLUMN linked_job_run_id TEXT;
-`,
+  sql: d1MigrationSql(59),
 };
 
 /**
@@ -2348,12 +1224,7 @@ ALTER TABLE agent_reports ADD COLUMN linked_job_run_id TEXT;
 export const MIGRATION_0060_RUN_LEDGER_OWNER: DataMigration = {
   version: 60,
   name: "0060_run_ledger_owner",
-  sql: `
-ALTER TABLE agent_reports ADD COLUMN user_login TEXT;
-ALTER TABLE agent_reports ADD COLUMN body_r2_key TEXT;
-CREATE INDEX IF NOT EXISTS agent_reports_tenant_user_idx
-  ON agent_reports (tenant_id, user_login, created_at_ms DESC);
-`,
+  sql: d1MigrationSql(60),
 };
 
 /**
@@ -2375,17 +1246,7 @@ CREATE INDEX IF NOT EXISTS agent_reports_tenant_user_idx
 export const MIGRATION_0062_OFFER_SUPPRESSIONS_RANK: DataMigration = {
   version: 62,
   name: "0062_offer_suppressions_rank",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_offer_suppressions (
-  login TEXT NOT NULL,
-  trigger TEXT NOT NULL,
-  suppressed_until_ms INTEGER NOT NULL,
-  dismissed_at_ms INTEGER NOT NULL,
-  PRIMARY KEY (login, trigger)
-);
-ALTER TABLE agent_products ADD COLUMN rank INTEGER;
-UPDATE agent_products SET rank = 1 WHERE id = 'prod-free';
-`,
+  sql: d1MigrationSql(62),
 };
 
 /**
@@ -2410,46 +1271,7 @@ UPDATE agent_products SET rank = 1 WHERE id = 'prod-free';
 export const MIGRATION_0063_RUNS_PACKS: DataMigration = {
   version: 63,
   name: "0063_runs_packs",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_runs_pack_versions (
-  id TEXT PRIMARY KEY,
-  product_id TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  segment TEXT NOT NULL,
-  runs INTEGER NOT NULL,
-  price_usd REAL NOT NULL,
-  approval_status TEXT NOT NULL,
-  approved_by TEXT,
-  approved_at_ms INTEGER,
-  active INTEGER NOT NULL DEFAULT 1,
-  effective_from_ms INTEGER NOT NULL,
-  effective_to_ms INTEGER,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_runs_pack_balances (
-  login TEXT PRIMARY KEY,
-  runs_remaining INTEGER NOT NULL DEFAULT 0,
-  updated_at_ms INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_runs_pack_drafts (
-  id TEXT PRIMARY KEY,
-  user_login TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  email TEXT NOT NULL,
-  version_id TEXT NOT NULL,
-  product_id TEXT NOT NULL,
-  runs INTEGER NOT NULL,
-  price_usd REAL NOT NULL,
-  rail TEXT NOT NULL,
-  status TEXT NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  credited_at_ms INTEGER,
-  payment_intent_id TEXT,
-  checkout_session_id TEXT,
-  challenge_nonce TEXT
-);
-`,
+  sql: d1MigrationSql(63),
 };
 
 /**
@@ -2466,19 +1288,7 @@ CREATE TABLE IF NOT EXISTS agent_runs_pack_drafts (
 export const MIGRATION_0064_FREE_ACCESS_GRANTS: DataMigration = {
   version: 64,
   name: "0064_free_access_grants",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_free_access_grants (
-  id TEXT PRIMARY KEY,
-  login TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  granted_by TEXT NOT NULL,
-  granted_at_ms INTEGER NOT NULL,
-  expires_at_ms INTEGER,
-  revoked_at_ms INTEGER,
-  reason TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_free_access_grants_login_idx ON agent_free_access_grants (login);
-`,
+  sql: d1MigrationSql(64),
 };
 
 /**
@@ -2506,75 +1316,7 @@ CREATE INDEX IF NOT EXISTS agent_free_access_grants_login_idx ON agent_free_acce
 export const MIGRATION_0066_REFERRAL_CODES: DataMigration = {
   version: 66,
   name: "0066_referral_codes",
-  sql: `
-CREATE TABLE IF NOT EXISTS agent_referral_code_rules (
-  id TEXT PRIMARY KEY,
-  product_id TEXT NOT NULL,
-  issuer TEXT NOT NULL,
-  runs_per_code INTEGER NOT NULL,
-  reusable INTEGER NOT NULL,
-  expiry_days INTEGER,
-  attribution_mode TEXT NOT NULL,
-  max_redemptions_per_code INTEGER,
-  max_redemptions_per_login INTEGER,
-  global_cap INTEGER,
-  redemption_count INTEGER NOT NULL DEFAULT 0,
-  active INTEGER NOT NULL DEFAULT 0,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL,
-  UNIQUE (product_id, issuer)
-);
-CREATE TABLE IF NOT EXISTS agent_referral_codes (
-  id TEXT PRIMARY KEY,
-  code_hash TEXT NOT NULL UNIQUE,
-  display_prefix TEXT NOT NULL,
-  rule_id TEXT NOT NULL,
-  product_id TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  issuer_login TEXT NOT NULL,
-  issuer_kind TEXT NOT NULL,
-  referrer_user_id TEXT,
-  tenant_scope TEXT,
-  runs INTEGER NOT NULL,
-  reusable INTEGER NOT NULL,
-  expires_at_ms INTEGER,
-  revoked_at_ms INTEGER,
-  redemption_count INTEGER NOT NULL DEFAULT 0,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_referral_codes_rule_idx ON agent_referral_codes (rule_id);
-CREATE INDEX IF NOT EXISTS agent_referral_codes_issuer_idx ON agent_referral_codes (issuer_login);
-CREATE TABLE IF NOT EXISTS agent_code_redemptions (
-  id TEXT PRIMARY KEY,
-  code_id TEXT NOT NULL,
-  redeemer_login TEXT NOT NULL,
-  redeemer_tenant_id TEXT NOT NULL,
-  product_id TEXT NOT NULL,
-  runs_granted INTEGER NOT NULL,
-  attribution_written INTEGER NOT NULL,
-  created_at_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_code_redemptions_code_login_idx ON agent_code_redemptions (code_id, redeemer_login);
-CREATE INDEX IF NOT EXISTS agent_code_redemptions_login_idx ON agent_code_redemptions (redeemer_login, created_at_ms);
-CREATE TABLE IF NOT EXISTS agent_code_redemption_counts (
-  code_id TEXT NOT NULL,
-  redeemer_login TEXT NOT NULL,
-  redemption_count INTEGER NOT NULL DEFAULT 0,
-  updated_at_ms INTEGER NOT NULL,
-  PRIMARY KEY (code_id, redeemer_login)
-);
-CREATE TABLE IF NOT EXISTS agent_code_run_balances (
-  login TEXT PRIMARY KEY,
-  runs_remaining INTEGER NOT NULL DEFAULT 0,
-  updated_at_ms INTEGER NOT NULL
-);
-INSERT OR IGNORE INTO agent_referral_code_rules (id, product_id, issuer, runs_per_code, reusable, expiry_days, attribution_mode, max_redemptions_per_code, max_redemptions_per_login, global_cap, redemption_count, active, created_at_ms, updated_at_ms)
-  VALUES
-    ('coderule-seed-prod-per-run-stock', 'prod-per-run-stock', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),
-    ('coderule-seed-prod-per-run-goal', 'prod-per-run-goal', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),
-    ('coderule-seed-prod-per-run-options', 'prod-per-run-options', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),
-    ('coderule-seed-prod-per-run-strategy', 'prod-per-run-strategy', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0);
-`,
+  sql: d1MigrationSql(66),
 };
 
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
