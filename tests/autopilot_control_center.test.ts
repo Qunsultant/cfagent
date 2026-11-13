@@ -239,6 +239,8 @@ describe("Policy Decisions Audit (Issue #651)", () => {
     expect(row.notionalLabel).toBe("—");
     expect(row.intentLabel).toBe("—");
     expect(row.signed).toBe(false);
-    expect(row.timeLabel).toBe("");
+    // #4407: a missing timestamp renders as "—", never as an empty
+    // cell or a raw stored string.
+    expect(row.timeLabel).toBe("—");
   });
 });
