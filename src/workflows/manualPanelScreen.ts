@@ -129,7 +129,7 @@ export async function runManualPanelViaPipeline(
 
 /**
  * The compare route's form of the same run: the panel result mapped
- * back to the PipelineResult shape runPanelWithAgents returned, via
+ * back to the PipelineResult shape the retired direct panel returned, via
  * its own mapping (panelResultToPipelineResult) - the ranking code
  * reads strategies/snapshot/ranked off it unchanged.
  */

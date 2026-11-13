@@ -9,7 +9,7 @@
  */
 
 import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedStockItem } from "../types";
-import { DatabaseORM } from "../orm";
+import { DatabaseORM, type SqlStorage } from "../orm";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
@@ -55,7 +55,6 @@ import {
 } from "./screeningFlags";
 import {
   UnifiedOptionsService,
-  runPanelWithAgents,
   type PanelAgents,
   validateStrategyRequest,
   validateNoViewRequest,
@@ -96,7 +95,11 @@ import {
   memoryStageClaims,
   memoryStageStorage,
 } from "../workflows/optionsScreenWorkflow";
-import { runStrategyScreenViaEngine } from "../workflows/optionsScreenEngine";
+import {
+  optionsEngineStoresFromSql,
+  runOptionsPanelViaEngineWithAgents,
+  runStrategyScreenViaEngine,
+} from "../workflows/optionsScreenEngine";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook
@@ -530,6 +533,17 @@ export class ScheduledTasksService {
      * seam — it never selects a different engine.
      */
     private runStockScreenViaEngine?: RunStockScreenViaEngine,
+    /** Issue #4275: the host Durable Object's SQL handle, for the
+     *  scheduled firer's engine run record. Wired by the
+     *  orchestrator-side constructors that own a Durable Object
+     *  storage handle (the same storage the injected scanRunStore
+     *  is built over). Present, each scheduled panel screen
+     *  defines its strategy job and records its run durably;
+     *  absent, the firer runs over in-memory engine stores (the
+     *  #4069 accepted-absent discipline, as the scheduled scan) —
+     *  the screen still executes on the engine, only its run
+     *  record is run-duration. */
+    private engineSql?: SqlStorage,
   ) {}
 
   /**
@@ -4276,7 +4290,20 @@ export class ScheduledTasksService {
         });
         fireRequest = { ...request, expirationDteBands: bands };
       }
-      const result = await runPanelWithAgents(agents, fireRequest, snapshotOverride ? { snapshotOverride } : {});
+      // Issue #4275: the firer routes through the engine-routed
+      // panel over its pre-built agents — a scheduled screen is a
+      // strategy engine job, not a direct panel call. The snapshot
+      // override rides the classInput exactly as it rode the
+      // direct call's options, so snapshot-input mode and feed
+      // provenance are unchanged.
+      const result = await runOptionsPanelViaEngineWithAgents(agents, fireRequest, {
+        ...(snapshotOverride ? { snapshotOverride } : {}),
+        userLogin: userLogin ?? this.userLogin,
+        trigger: "scheduled",
+        runId: `options-panel:scheduled:${symbol}:${new Date().toISOString()}`,
+        engineStores: this.engineSql ? optionsEngineStoresFromSql(this.engineSql) : null,
+        queue: this.stageQueue ?? null,
+      });
       const snapshot = result.snapshot;
       // A snapshot that never loaded its chain is a failure, not
       // an empty success: the screen records why (validation

@@ -68,7 +68,7 @@ afterEach(() => {
 });
 
 describe("panelResultToPipelineResult (#3186 step 3e)", () => {
-  it("maps a panel result through runPanelWithAgents' mapping", () => {
+  it("maps a panel result through the retired direct panel's mapping", () => {
     const panel = {
       snapshot: {
         symbol: "AAPL",

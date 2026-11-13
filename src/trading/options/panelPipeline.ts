@@ -7,9 +7,11 @@
  * (RecommendationService.discoverPanel) and proved probe parity. The
  * #1256 remainder retires the class itself: its constructor + run()
  * move here VERBATIM as runPanelPipeline / runPanelWithAgents —
- * (the former was retired by rename to runPanelPipelineRetired4068
- * under #4068; its successor is runOptionsPanelViaEngine, the
- * engine-routed panel).
+ * (both since retired by rename: runPanelPipeline to
+ * runPanelPipelineRetired4068 under #4068, runPanelWithAgents to
+ * runPanelWithAgentsRetired4275 under #4275; the successor is
+ * runOptionsPanelViaEngine / runOptionsPanelViaEngineWithAgents,
+ * the engine-routed panel).
  * same kernel call, same mapping back to PipelineResult (snapshot
  * reconstructed from the kernel snapshot; strategies IS the engine
  * build result the kernel wrapped, full built set with scoreWeights
@@ -18,11 +20,13 @@
  * the kernel-passed candidates). No behavior change, so C4 probe
  * parity still holds — see tests/consolidation_c4_kernel_parity.test.ts.
  *
- * Sites that need direct agent access (the no-view scheduled path,
- * which loads a snapshot and builds no-view strategies without a
- * panel run) construct the agents struct once and pass it to both
- * runPanelWithAgents and the agent methods — exactly the fields the
- * retired class exposed as public readonly members.
+ * Sites that need direct agent access construct the agents struct
+ * once and pass it to both the engine-routed panel
+ * (runOptionsPanelViaEngineWithAgents, which takes caller-owned
+ * agents) and the agent methods — exactly the fields the retired
+ * class exposed as public readonly members. The no-view scheduled
+ * path loads a snapshot and builds no-view strategies without a
+ * panel run, through the agent methods alone.
  */
 import type { DynamicOptionsScreener } from "../optionsScreener";
 import { OptionsDataAgent, type OptionsDataSnapshot } from "./optionsDataAgent";
@@ -69,8 +73,17 @@ export interface PanelAgents {
 /**
  * Run the panel pipeline with caller-owned agents. This IS the
  * retired adapter's run() body, moved verbatim.
+ *
+ * @deprecated Issue #4275 — retired by rename: the direct panel
+ * bypass the scheduled firer called. Superseded by
+ * src/workflows/optionsScreenEngine.ts
+ * (runOptionsPanelViaEngineWithAgents), which runs the same panel
+ * through the one engine-routed workflow over caller-owned agents.
+ * This function is frozen: no production caller remains; tests that
+ * pin the panel decomposition keep calling it. Recorded in
+ * docs/architecture/transition/deprecations.md.
  */
-export async function runPanelWithAgents(
+export async function runPanelWithAgentsRetired4275(
   agents: PanelAgents,
   request: StrategyRequest,
   options: PipelineOptions = {},
@@ -135,7 +148,7 @@ export async function runPanelPipelineRetired4068(
   request: StrategyRequest,
   options: PipelineOptions = {},
 ): Promise<PipelineResult> {
-  return runPanelWithAgents(
+  return runPanelWithAgentsRetired4275(
     {
       data: new OptionsDataAgent(screener),
       risk: new StrategyRiskAgent(),

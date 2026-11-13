@@ -1855,7 +1855,10 @@ export async function handleSchedulesRoutes(
           ctx.scheduleScreenerFollowups,
           { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env },
           undefined,
-          createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).feedSnapshots, ctx.env.SCREENER_EVENTS ?? null
+          createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).feedSnapshots, ctx.env.SCREENER_EVENTS ?? null,
+          // Issue #4275: the firer's engine run record is durable
+          // in the host DO (runStockScreenViaEngine seam: none).
+          undefined, ctx.agentCtx.storage.sql
         );
         // Issue #959: validate through the shared schedule builder
         // (the service's own derivation validation still runs inside).

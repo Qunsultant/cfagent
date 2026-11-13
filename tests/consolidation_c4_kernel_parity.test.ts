@@ -17,11 +17,10 @@
  * (facade dataAgent stub — the kernel caps calibrated candidates at
  * Watchlist internally, which must NOT change the route-shape ranked
  * output). Stale quotes exercise the research_only bestTrade path.
- * NLQ + scheduled paths are covered by construction: both resolve to
- * the same panel function (UnifiedOptionsService.runStrategyPipeline
- * and scheduled runDiscoveryRequest call runPanelPipelineRetired4068 /
- * runPanelWithAgents), so function ≡ facade parity on these probes
- * is their parity too.
+ * NLQ + scheduled paths are covered by construction: both run the
+ * same kernel panel computation through the engine-routed panel (the
+ * strategy ports are the kernel's stage functions), so function ≡
+ * facade parity on these probes is their parity too.
  */
 import { describe, expect, it } from "vitest";
 import type { OptionScreenResult, ScreenedOptionContractItem } from "../src/types";
