@@ -110,6 +110,9 @@ export function ScheduledOptionsManager({
   // Issue #4329 S2 (#4331): the schedules home owns the ONE list and passes
   // false; the standalone default keeps the embedded section as before.
   showSchedulesSection = true,
+  // Issue #4332 (#4329 S3): the two fields the latest-runs card carried now ride
+  // the one ledger; the schedules home hides the card, standalone use keeps it.
+  showLatestRuns = true,
   // The page's Edit control asks this manager to open its form for a schedule
   // the hosted section used to own; the nonce lets the same id re-open.
   editRequest,
@@ -866,11 +869,13 @@ export function ScheduledOptionsManager({
       <LiveResultPreview liveResult={liveResult} thesis={thesis} onPreviewTrade={onPreviewTrade} />
 
       {/* Latest autonomous options runs (#223): persisted analysis runs, newest first. */}
-      <LatestRunsSection
-        latestRuns={latestRuns}
-        runsLoading={runsLoading}
-        runsError={runsError}
-      />
+      {showLatestRuns && (
+        <LatestRunsSection
+          latestRuns={latestRuns}
+          runsLoading={runsLoading}
+          runsError={runsError}
+        />
+      )}
 
       {/* Active Schedules Section — rendered only when the caller keeps the
           embedded list; the schedules home hosts the ONE list (#4331). */}
