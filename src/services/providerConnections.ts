@@ -17,8 +17,8 @@
  * - The connection is the credential binding: a connection id names
  *   (broker, environment, login), and it counts as bound only when a
  *   credential is available for the broker+side — the login's own
- *   pair (Alpaca key pair in the SessionStore, E*TRADE OAuth tokens)
- *   or, for Alpaca, the deployment's pair for that side (issue
+ *   pair (the session-store key pair, or OAuth tokens) or, for a
+ *   key-pair broker, the deployment's pair for that side (issue
  *   #4348: the adapter's own `resolveAlpacaPair` precedence, so a
  *   deployment-key connection is not "unbound"). No credential from
  *   either source ⇒ CONNECTION_NOT_BOUND, naming both.
@@ -59,18 +59,18 @@ import {
 } from "../security/executionContext";
 import { getStoredTokens } from "../security/etradeOAuth";
 import {
+  // Issue #4348 (S6) — credential presence follows the adapter's own
+  // precedence (a login's pair first, then the deployment's pair for the
+  // side), so a deployment whose key pair is configured binds the connection
+  // for a signed-in login. The barrel already exports it and this module
+  // already imports it statically.
+  resolveAlpacaPair,
   TradingPlatformRegistry,
   tradingTypeFor,
+  type AlpacaSide,
   type TradingEnvironment,
   type TradingType,
 } from "../trading";
-// Issue #4348 (S6) — credential presence for Alpaca is the adapter's own
-// precedence (user pair > deployment pair > none), so a deployment whose keys
-// are stored in ALPACA_* binds the connection for a signed-in login. Imported
-// from the module, not the barrel: `../trading` is on a load cycle with this
-// file (see the creation route's lazy import).
-import { resolveAlpacaPair } from "../trading/alpaca/credentialResolution";
-import type { AlpacaSide } from "../trading/alpaca/credentials";
 import {
   isBrokerId,
   type BrokerId,
@@ -171,23 +171,6 @@ function credentialSide(environment: TradingEnvironment): TradingType {
   return environment === "PROD" ? "live" : "paper";
 }
 
-/**
- * Issue #4348 (S6) — the refusal names every source that was checked, so a
- * reader knows what to do next. E*TRADE has one source (its per-user OAuth
- * tokens); Alpaca has two (the login's pair, then the deployment's pair for
- * that side), which is why one message cannot serve both.
- */
-function unboundConnectionError(
-  brokerId: BrokerId,
-  connectionId: string,
-  mode: TradingType,
-): string {
-  if (brokerId === "alpaca") {
-    return `no credential: connection ${connectionId} has no stored credential for this login and the deployment declares no Alpaca key pair for ${mode}`;
-  }
-  return `no credential: connection ${connectionId} has no stored credential for this login`;
-}
-
 async function defaultHasCredentials(
   env: Partial<Env>,
   userLogin: string,
@@ -199,11 +182,11 @@ async function defaultHasCredentials(
     // Issue #4348 (S6) — the incident: every account-scoped schedule was
     // refused with `CONNECTION_NOT_BOUND: ... has no stored credential for
     // this login` although the signed-in owner's account IS connected, with
-    // the deployment's Alpaca key pair. A connection is bound by EITHER the
-    // login's stored pair OR the deployment's pair for that side — exactly
-    // the precedence `resolveAlpacaPair` already defines for every read and
-    // every order. Asking only the per-user store answered a narrower
-    // question than "is this connection connected?".
+    // the deployment's key pair. A connection is bound by EITHER the login's
+    // stored pair OR the deployment's pair for that side — exactly the
+    // precedence `resolveAlpacaPair` already defines for every read and every
+    // order. Asking only the per-user store answered a narrower question
+    // than "is this connection connected?".
     const pair = await resolveAlpacaPair(env as Env, userLogin, side as AlpacaSide);
     return pair.source !== "none";
   }
@@ -333,7 +316,11 @@ export async function resolveScreenSelection(
     return {
       resolved: false,
       code: "CONNECTION_NOT_BOUND",
-      error: unboundConnectionError(brokerId, connectionId, mode),
+      // Issue #4348 (S6) — the refusal names every source that was checked,
+      // so a reader knows what to do next: this login's stored credential, and
+      // the deployment's own pair for the side (a deployment that declares no
+      // pair has no other source to offer).
+      error: `no credential: connection ${connectionId} has no stored credential for this login and the deployment declares no key pair for ${mode}`,
     };
   }
 
