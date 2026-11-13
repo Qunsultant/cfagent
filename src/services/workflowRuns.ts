@@ -116,6 +116,13 @@ export interface WorkflowRunStage {
   status: string;
   /** Where this stage row came from — an async job, a recorded stage transition, or a unified run record. */
   recordedBy: "job" | "stage-transition" | "unified-record" | "engine-checkpoint";
+  /**
+   * Issue #4362 — the engine job id this stage can be controlled
+   * through (present only on engine stages). The Workflow Runs row's
+   * per-stage buttons address this id; a stage with no engine job
+   * carries no buttons rather than a guess.
+   */
+  engineJobId?: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   durationMs: number | null;
@@ -1085,7 +1092,10 @@ function stageRowsForGroup(
  * — this projection never invents a clock. Nothing here is a second
  * stage-read mechanism: the views come from the job-status surface.
  */
-export function stagesFromEngineViews(views: JobStageView[]): WorkflowRunStage[] {
+export function stagesFromEngineViews(
+  views: JobStageView[],
+  engineJobId: string | null = null,
+): WorkflowRunStage[] {
   const statusFor: Record<string, string> = {
     completed: "completed",
     failed: "failed",
@@ -1106,6 +1116,7 @@ export function stagesFromEngineViews(views: JobStageView[]): WorkflowRunStage[]
       label: stageLabel(view.kind, ""),
       status,
       recordedBy: "engine-checkpoint",
+      ...(engineJobId ? { engineJobId } : {}),
       startedAt: view.startedAt,
       finishedAt: view.endedAt,
       durationMs: view.durationMs,
@@ -1245,12 +1256,13 @@ export function runFromJobs(
    * run's stage truth; absent/empty = today's job-row projection.
    */
   engineStages?: JobStageView[] | null,
+  engineJobId?: string | null,
 ): WorkflowRun {
   const main = mainJobOf(jobs);
   const family = workflowFamilyForJobs(jobs, outcome);
   const stages =
     engineStages && engineStages.length > 0
-      ? stagesFromEngineViews(engineStages)
+      ? stagesFromEngineViews(engineStages, engineJobId ?? null)
       : stageRowsForGroup(jobs, transitions);
   // Real trigger evidence wins; an "unknown" API-channel evidence is
   // the fallback, never a mask over a job that recorded a real one.
@@ -1675,7 +1687,10 @@ export function runFromJobRunRecord(
    */
   engineStages?: JobStageView[] | null,
 ): WorkflowRun {
-  const stages = engineStages && engineStages.length > 0 ? stagesFromEngineViews(engineStages) : [];
+  const stages =
+    engineStages && engineStages.length > 0
+      ? stagesFromEngineViews(engineStages, record.jobId)
+      : [];
   const status: WorkflowRunStatus =
     record.outcome === "success"
       ? "completed"
@@ -2046,11 +2061,13 @@ function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boole
   // Issue #4359 — a group's engine stages are keyed by the job id that
   // owns them; the first job in the group with views wins (a wrapper
   // group carries the bridge child that dispatched the engine run).
-  const engineStagesFor = (groupJobs: WorkflowRunJobRow[]): JobStageView[] | undefined => {
+  const engineStagesFor = (
+    groupJobs: WorkflowRunJobRow[],
+  ): { jobId: string; views: JobStageView[] } | undefined => {
     if (!input.engineStages || input.engineStages.size === 0) return undefined;
     for (const job of groupJobs) {
       const views = input.engineStages.get(job.job_id);
-      if (views && views.length > 0) return views;
+      if (views && views.length > 0) return { jobId: job.job_id, views };
     }
     return undefined;
   };
@@ -2059,13 +2076,15 @@ function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boole
   for (const [key, group] of groups) {
     const jobIds = new Set(group.jobs.map((j) => j.job_id));
     const outcome = input.outcomes.find((o) => outcomeMatchesGroup(o.id, jobIds));
+    const engine = engineStagesFor(group.jobs);
     runs.push(
       runFromJobs(
         group.jobs,
         transitionsByRun.get(key) ?? [],
         outcome,
         nowMs,
-        engineStagesFor(group.jobs),
+        engine?.views,
+        engine?.jobId ?? null,
       ),
     );
   }

@@ -18,13 +18,35 @@ import {
   type JobStatusReport,
 } from "../../services/jobStageStatus";
 
+export type JobStageOperation = "run" | "rerun" | "stop" | "resume" | "cancel";
+
+export interface JobStageControlResult {
+  jobId: string;
+  stageId: string;
+  nodePath: string;
+  operation: string;
+  state: string;
+  runId: string | null;
+}
+
 export interface JobStatusRouteContext {
   /** The engine's status view for one job id, or null when no such job exists. */
   readJobStatus: (jobId: string) => Promise<JobStatusView | null>;
+  /**
+   * Issue #4362 — drive one stage of one run. Required for the POST
+   * route; absent means the surface refuses by name rather than
+   * pretending a control happened.
+   */
+  controlJobStage?: (
+    jobId: string,
+    stage: string,
+    operation: JobStageOperation,
+  ) => Promise<JobStageControlResult>;
 }
 
 const STATUS_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/status$/;
 const STAGE_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/stages\/([^/]+)$/;
+const CONTROL_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/stages\/([^/]+)\/(run|rerun|stop|resume|cancel)$/;
 
 function decode(value: string): string {
   try {
@@ -54,6 +76,34 @@ export async function handleJobStatusRoutes(
   path: string,
   ctx: JobStatusRouteContext,
 ): Promise<Response | null> {
+  const controlMatch = request.method === "POST" ? CONTROL_PATH.exec(path) : null;
+  if (controlMatch) {
+    const jobId = decode(controlMatch[1]);
+    if (!ctx.controlJobStage) {
+      return Response.json(
+        {
+          error: `Stage control for job "${jobId}" is unavailable: this surface has no control door configured.`,
+        },
+        { status: 503 },
+      );
+    }
+    try {
+      const result = await ctx.controlJobStage(
+        jobId,
+        decode(controlMatch[2]),
+        controlMatch[3] as JobStageOperation,
+      );
+      return Response.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = /not found|unknown|not part of|ambiguous|already|not_runnable|not_stoppable|not_resumable/i.test(
+        message,
+      )
+        ? 409
+        : 503;
+      return Response.json({ error: message, jobId }, { status });
+    }
+  }
   if (request.method !== "GET") return null;
   const stageMatch = STAGE_PATH.exec(path);
   const statusMatch = stageMatch ? null : STATUS_PATH.exec(path);

@@ -390,6 +390,23 @@ export async function deleteSchedule(
   });
 }
 
+/**
+ * Issue #4362 — drive one stage of one engine run (run / rerun / stop /
+ * resume / cancel). The stage is addressed by its stage id (`job:root`),
+ * kind (`feed`) or node path; the server refuses an unknown stage by name.
+ */
+export async function controlJobStage(
+  jobId: string,
+  stage: string,
+  operation: "run" | "rerun" | "stop" | "resume" | "cancel",
+  headers?: Record<string, string>,
+): Promise<void> {
+  await api(
+    `/api/jobs/${encodeURIComponent(jobId)}/stages/${encodeURIComponent(stage)}/${operation}`,
+    { method: "POST", headers },
+  );
+}
+
 /** Cancel through the POST /api/schedules/cancel endpoint. */
 export async function cancelSchedule(
   id: string,

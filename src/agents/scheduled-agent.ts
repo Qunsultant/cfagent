@@ -124,6 +124,7 @@ import type {
   JobDefinition,
 } from "../data/jobPipelinePorts";
 import type { JobStagesRead, JobStatusView } from "../services/jobPipelineEngine";
+import { buildJobStatusReport, resolveSubJob } from "../services/jobStageStatus";
 import type { JobStageEventRecord } from "../data/jobStageEventPorts";
 import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRead";
 import { buildFeedJobRegistry } from "../services/feedJobs";
@@ -1057,6 +1058,74 @@ export class ScheduledAgent extends PortThink {
   async recordStageEvent(event: JobStageEventRecord): Promise<boolean> {
     const ctx = this.pipelineContext();
     return createScheduledAgentStageEventStore(ctx).record(event);
+  }
+
+  /**
+   * Issue #4362 — drive one stage of one stock (engine) run from the
+   * stock surface: run / rerun / stop / resume / cancel, addressed by the
+   * same stage vocabulary the status read uses (stage id, kind, or node
+   * path). The engine's own control-plane methods do the work; an unknown
+   * job or stage refuses by name with the stages that exist, and a
+   * terminal stage refuses with its current state — never a silent no-op.
+   */
+  async controlPipelineStage(
+    jobId: string,
+    stage: string,
+    operation: "run" | "rerun" | "stop" | "resume" | "cancel",
+    opts?: { userLogin?: string },
+  ): Promise<{
+    jobId: string;
+    stageId: string;
+    nodePath: string;
+    operation: string;
+    state: string;
+    runId: string | null;
+  }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    const view = await control.getJob(jobId);
+    const report = buildJobStatusReport(jobId, view);
+    const resolved = resolveSubJob(report, stage);
+    if (!resolved.ok) throw new Error(resolved.reason);
+    const nodePath = resolved.subJob.nodePath;
+    const stageId = resolved.subJob.stageId;
+    if (operation === "run" || operation === "rerun") {
+      const dispatch =
+        operation === "run"
+          ? await control.runStage(jobId, nodePath)
+          : await control.rerunStage(jobId, nodePath);
+      return {
+        jobId,
+        stageId,
+        nodePath,
+        operation,
+        state: dispatch.state,
+        runId: dispatch.runId ?? null,
+      };
+    }
+    if (operation === "resume") {
+      const dispatch = await control.resumeStage(jobId, nodePath);
+      return {
+        jobId,
+        stageId,
+        nodePath,
+        operation,
+        state: dispatch.state,
+        runId: dispatch.runId ?? null,
+      };
+    }
+    const next =
+      operation === "stop"
+        ? await control.stopStage(jobId, nodePath)
+        : await control.cancelStage(jobId, nodePath);
+    return {
+      jobId,
+      stageId,
+      nodePath,
+      operation,
+      state: next.state,
+      runId: next.currentRunId ?? null,
+    };
   }
 
   /** Issue #4360 — a run's recorded stage events, in recorded order. */

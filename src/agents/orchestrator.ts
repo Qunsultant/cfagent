@@ -80,7 +80,11 @@ import {
   createWorkflowStageScheduleAdapter,
   type WorkflowStageRegistry,
 } from "../services/workflowStageSchedule";
-import { getPipelineJobStatusViaDoor, getScheduledAgentDoor } from "./orchestrator/meshDoors";
+import {
+  controlPipelineStageViaDoor,
+  getPipelineJobStatusViaDoor,
+  getScheduledAgentDoor,
+} from "./orchestrator/meshDoors";
 import { handleJobStatusRoutes } from "./routes/jobStatus";
 import { makeRunScheduleCallback, makeScheduleAlarmsPort } from "./routes/schedules";
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
@@ -3062,6 +3066,17 @@ export class OrchestratorAgent extends PortThink {
     // outage is a 503 rather than a pretend 404.
     const statusRoute = await handleJobStatusRoutes(request, url, path, {
       readJobStatus: (engineJobId) => getPipelineJobStatusViaDoor(this.env, engineJobId),
+      // Issue #4362 — the per-stage control ops. The acting login rides
+      // the verified request header (never a body argument); the door
+      // refuses an anonymous call by name.
+      controlJobStage: (engineJobId, stage, operation) =>
+        controlPipelineStageViaDoor(
+          this.env,
+          request.headers.get("x-user-login"),
+          engineJobId,
+          stage,
+          operation,
+        ),
     });
     if (statusRoute) return statusRoute;
 

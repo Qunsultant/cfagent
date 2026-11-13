@@ -319,6 +319,23 @@ export interface ScheduledAgentDoorStub {
    */
   recordStageEvent(event: JobStageEventRecord): Promise<boolean>;
   listStageEvents(runId: string): Promise<JobStageEventRecord[]>;
+  /**
+   * Issue #4362 — drive one stage of one engine run (run / rerun / stop /
+   * resume / cancel), addressed by stage id, kind or node path.
+   */
+  controlPipelineStage(
+    jobId: string,
+    stage: string,
+    operation: "run" | "rerun" | "stop" | "resume" | "cancel",
+    opts?: { userLogin?: string },
+  ): Promise<{
+    jobId: string;
+    stageId: string;
+    nodePath: string;
+    operation: string;
+    state: string;
+    runId: string | null;
+  }>;
   stopPipelineChainStage(jobId: string, stage: string): Promise<JobInstanceRecord>;
   resumePipelineChainStage(
     jobId: string,
@@ -1258,6 +1275,31 @@ export async function getPipelineChainStatusViaDoor(
   const entry = resolvePipelineChainOrThrow(source);
   const door = getScheduledAgentDoor(env);
   return door.getPipelineChainSurfaceStatus(entry.jobId);
+}
+
+/**
+ * Issue #4362 — drive one stage of one engine run through the door. The
+ * acting login is required (the same operator gate the options stage tool
+ * uses): stage control is never anonymous.
+ */
+export async function controlPipelineStageViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  jobId: string,
+  stage: string,
+  operation: "run" | "rerun" | "stop" | "resume" | "cancel",
+): Promise<{
+  jobId: string;
+  stageId: string;
+  nodePath: string;
+  operation: string;
+  state: string;
+  runId: string | null;
+}> {
+  const login = requireActingLogin(actingLogin);
+  return getScheduledAgentDoor(env).controlPipelineStage(jobId, stage, operation, {
+    userLogin: login,
+  });
 }
 
 /**

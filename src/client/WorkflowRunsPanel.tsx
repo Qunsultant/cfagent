@@ -32,6 +32,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import "./workflowRuns.css";
+import { controlJobStage } from "./jobsApi";
 import {
   Badge,
   Button,
@@ -1063,7 +1064,7 @@ export function WorkflowRunsPanel() {
           title="Workflow run detail"
           size="xl"
         >
-          <RunDetail run={selected} />
+          <RunDetail run={selected} onStageAction={() => void loadRuns("replace", 0)} />
         </Modal>
       )}
       </PageShell>
@@ -1075,7 +1076,32 @@ export function WorkflowRunsPanel() {
  * Issue #4262 (S2) — exported so the one run ledger renders the SAME detail
  * for a folded workflow row instead of growing a second implementation.
  */
-export function RunDetail({ run }: { run: WorkflowRun }) {
+export function RunDetail({
+  run,
+  onStageAction,
+}: {
+  run: WorkflowRun;
+  /** Issue #4362 — refetch the list after a stage control action. */
+  onStageAction?: () => void;
+}) {
+  const [stageActionBusy, setStageActionBusy] = useState<string | null>(null);
+  const [stageActionError, setStageActionError] = useState<string | null>(null);
+  const runStageAction = async (
+    stage: WorkflowRunStage,
+    operation: "rerun" | "stop" | "resume",
+  ) => {
+    if (!stage.engineJobId) return;
+    setStageActionError(null);
+    setStageActionBusy(`${stage.key}:${operation}`);
+    try {
+      await controlJobStage(stage.engineJobId, stage.key, operation);
+      onStageAction?.();
+    } catch (err) {
+      setStageActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStageActionBusy(null);
+    }
+  };
   // Issue #2786 Part 3: when canonical documents exist they are the
   // authoritative doc links — the outcome's doc-kind artifacts are
   // the same files, so they are hidden here and the modal never
@@ -1254,6 +1280,42 @@ export function RunDetail({ run }: { run: WorkflowRun }) {
                 ),
               },
               {
+                key: "actions",
+                header: "Actions",
+                render: (stage: WorkflowRunStage) =>
+                  stage.engineJobId ? (
+                    <div className="workflow-runs-workflow">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        loading={stageActionBusy === `${stage.key}:rerun`}
+                        onClick={() => void runStageAction(stage, "rerun")}
+                        title="Re-run this stage from its recorded input"
+                      >
+                        Re-run
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        loading={stageActionBusy === `${stage.key}:stop`}
+                        onClick={() => void runStageAction(stage, "stop")}
+                        title="Stop this stage; the run pauses here and can resume"
+                      >
+                        Stop
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        loading={stageActionBusy === `${stage.key}:resume`}
+                        onClick={() => void runStageAction(stage, "resume")}
+                        title="Resume this stage from its checkpoint"
+                      >
+                        Resume
+                      </Button>
+                    </div>
+                  ) : null,
+              },
+              {
                 key: "what",
                 header: "What happened",
                 render: (stage: WorkflowRunStage) => (
@@ -1301,6 +1363,11 @@ export function RunDetail({ run }: { run: WorkflowRun }) {
         <section className="workflow-runs-io" aria-label="Docs run details">
           <h4 className="workflow-runs-subheading">Docs run details</h4>
           {docsLoading && <p className="workflow-runs-muted">Loading docs run details…</p>}
+          {stageActionError && (
+            <Notice tone="danger" density="compact">
+              Stage action failed: {stageActionError}
+            </Notice>
+          )}
           {docsError && !docsLoading && (
             <Notice tone="neutral" density="compact">
               Docs run details could not be loaded: {docsError}
