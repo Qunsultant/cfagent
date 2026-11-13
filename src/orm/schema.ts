@@ -14,6 +14,7 @@ export {
   SHARED_MAS_TABLES,
   SHARED_TABLE_DDL,
   ensureAuditChainColumns,
+  ensurePromotionsIndex,
   ensureSharedTable,
   ensureSharedTables,
   type SharedMasTable,

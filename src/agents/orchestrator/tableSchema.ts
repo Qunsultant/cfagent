@@ -10,7 +10,7 @@
  * async-job ports. The ensure order below is the legacy order and is
  * load-bearing (retention indexes need mas_messages/mas_events first).
  */
-import { ensureSharedTable } from "../../orm/schema";
+import { ensureSharedTable, ensurePromotionsIndex } from "../../orm/schema";
 import { ensureAsyncJobTables } from "./asyncJobs";
 import { ensureMasRetentionIndexes } from "../../services/masRetentionIndexes";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
@@ -79,6 +79,14 @@ export function ensureOrchestratorTables(sql: SqlStorage): SqlStorage {
   ensureSharedTable(sql, "mas_ads");
 
   ensureSharedTable(sql, "mas_watchlists");
+
+  // Issue #4412 (#1257 fix): mas_promotions — the #760 staged-promotion
+  // table whose lazy creation died with the #1257 retirement (638fddf9
+  // deleted stagedPromotion.ts). The active-check route SELECTs from it;
+  // without this ensure the live DO has no such table and the read 500s.
+  // Schema only — no promotion logic is resurrected.
+  ensureSharedTable(sql, "mas_promotions");
+  ensurePromotionsIndex(sql);
 
   // Seed default sponsor offers if ads table is empty.
   // Issue #2359 (#1976 step 4d): the count + inserts serve
