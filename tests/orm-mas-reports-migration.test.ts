@@ -30,6 +30,24 @@ const LEGACY_MAS_REPORTS_COLS = [
   { name: "created_at", type: "TEXT", pk: 0 },
 ] as Array<{ name: string; type: string; pk: number }>;
 
+// Issue #4412: the exact #760 mas_promotions columns (catalogue entry
+// schema.orm.mas_promotions.create_table in
+// src/data/schemaComponent/ormCatalogue.ts). initializeSchema() creates
+// this table (ensureSharedTable) immediately before its candidate index
+// (ensurePromotionsIndex), so real SQLite sees the columns; the double's
+// schema map must too, or its strict CREATE INDEX check throws
+// "no such column: candidate_id" on every init.
+const MAS_PROMOTIONS_COLS = [
+  { name: "id", type: "TEXT", pk: 1 },
+  { name: "candidate_id", type: "TEXT", pk: 0 },
+  { name: "stage", type: "TEXT", pk: 0 },
+  { name: "stage_started_at", type: "TEXT", pk: 0 },
+  { name: "baseline_json", type: "TEXT", pk: 0 },
+  { name: "applied_json", type: "TEXT", pk: 0 },
+  { name: "last_check_json", type: "TEXT", pk: 0 },
+  { name: "created_at", type: "TEXT", pk: 0 },
+] as Array<{ name: string; type: string; pk: number }>;
+
 type SchemaMap = Map<string, Array<{ name: string; type: string; pk: number }>>;
 
 class LegacyMasReportsSql extends MockSqlStorage {
@@ -49,6 +67,12 @@ class LegacyMasReportsSql extends MockSqlStorage {
     schema.set(
       "mas_reports",
       LEGACY_MAS_REPORTS_COLS.map((c) => ({ ...c }))
+    );
+    // Issue #4412: initializeSchema() creates mas_promotions before its
+    // index, so the double models it too (see MAS_PROMOTIONS_COLS).
+    schema.set(
+      "mas_promotions",
+      MAS_PROMOTIONS_COLS.map((c) => ({ ...c }))
     );
     this.exec(
       "INSERT INTO mas_reports (id, run_id, title, source, summary, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

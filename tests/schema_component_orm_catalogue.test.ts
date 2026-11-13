@@ -92,6 +92,8 @@ const ORM_STATEMENT_SHA256: Record<string, string> = {
     "d1e45f58b918782a42844360638df5e37b475971fa7fca481c1e4d6596db3a77",
   "schema.orm.mas_transactions.create_table":
     "6f43ab16095951528bbf784b783972a42f8b384121dcd62c0a82fb8cbd1205b0",
+  "schema.orm.mas_promotions.create_table":
+    "7fb0e867c8891cb42a0f3abd99356b6243b104d66c839672ed6f39e3968d5ef5",
   "schema.orm.mas_events.alter_table_add_column_previous_event_hash":
     "9023001ed24d883d5009321d097984444b4a3ef732ecd483b2eeacbe6dcefb3d",
   "schema.orm.mas_events.alter_table_add_column_event_hash":
@@ -122,6 +124,8 @@ const ORM_STATEMENT_SHA256: Record<string, string> = {
     "02d02f32fdd8806de25d59e50690446684fc9c4ead6e7d62cca62aedebe12fbc",
   "schema.index.job_run_records.create_index_job_run_records_recent_idx":
     "d6b0db67c1df36730a3685431968a9ba486a8a5e972aa9652c220add27bafd5a",
+  "schema.index.mas_promotions.create_index_idx_promotions_candidate":
+    "d1774d012a9898a740590ca8cc96bcb92383106e31b361e7b5d0aa5976082fca",
 };
 
 const FIXTURE_PATH = path.join(
@@ -143,11 +147,11 @@ class RecordingSqlStorage extends MockSqlStorage {
 }
 
 describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => {
-  it("catalogues all 22 ORM/index statements: 12 CREATE TABLE + 2 ALTER TABLE + 8 CREATE INDEX", () => {
+  it("catalogues all 24 ORM/index statements: 13 CREATE TABLE + 2 ALTER TABLE + 9 CREATE INDEX", () => {
     const catalogue = buildOrmCatalogue();
-    expect(ORM_CATALOGUE_ENTRIES.length).toBe(22);
-    expect(catalogue.size()).toBe(22);
-    expect(catalogue.byKind("schema").length).toBe(22);
+    expect(ORM_CATALOGUE_ENTRIES.length).toBe(24);
+    expect(catalogue.size()).toBe(24);
+    expect(catalogue.byKind("schema").length).toBe(24);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -167,27 +171,27 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(12);
-    expect(verbs.get("CREATE INDEX")).toBe(8);
+    expect(verbs.get("CREATE TABLE")).toBe(13);
+    expect(verbs.get("CREATE INDEX")).toBe(9);
     expect(verbs.get("ALTER TABLE")).toBe(2);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(ORM_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(22);
+    expect(codes.size).toBe(24);
     for (const entry of ORM_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
     // Planes: ORM tables on "orm", indexes on "index".
     expect(
       ORM_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length,
-    ).toBe(14);
+    ).toBe(15);
     expect(
       ORM_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length,
-    ).toBe(8);
+    ).toBe(9);
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(ORM_STATEMENT_SHA256).length).toBe(22);
+    expect(Object.keys(ORM_STATEMENT_SHA256).length).toBe(24);
     for (const entry of ORM_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")
@@ -199,8 +203,8 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
   it("equality pin: the catalogue builds the base ORM + index schema exactly", async () => {
     const catalogue = buildOrmCatalogue();
     const expected = expectedOrmModel();
-    expect(Object.keys(expected.tables).length).toBe(12);
-    expect(Object.keys(expected.indexes).length).toBe(8);
+    expect(Object.keys(expected.tables).length).toBe(13);
+    expect(Object.keys(expected.indexes).length).toBe(9);
     const { diff, report } = await runEqualityCheck(catalogue, expected);
     expect(report).toBe(
       "schema diff: no differences — the catalogue-built schema equals the expected schema",
@@ -244,18 +248,18 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
     ]);
   });
 
-  it("DatabaseORM.initializeSchema executes exactly the catalogue CREATEs for its 12 tables", () => {
+  it("DatabaseORM.initializeSchema executes exactly the catalogue CREATEs for its 13 tables", () => {
     const rec = new RecordingSqlStorage();
     const orm = new DatabaseORM(rec);
     orm.initializeSchema("orm-catalogue-pin");
     const creates = rec.queries.filter((q) =>
       q.trim().startsWith("CREATE TABLE"),
     );
-    // 7 shared + 5 ORM-only from the catalogue; mas_reports stays in
+    // 8 shared + 5 ORM-only from the catalogue; mas_reports stays in
     // its service (issue #389) and is the only other CREATE here.
     const catalogueCreates = creates.filter((q) => !q.includes("mas_reports"));
-    expect(catalogueCreates).toHaveLength(12);
-    expect(new Set(catalogueCreates).size).toBe(12);
+    expect(catalogueCreates).toHaveLength(13);
+    expect(new Set(catalogueCreates).size).toBe(13);
     for (const sql of catalogueCreates) {
       expect(
         ORM_CATALOGUE_ENTRIES.some((e) => e.statement === sql),

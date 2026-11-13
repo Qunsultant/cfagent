@@ -340,6 +340,51 @@
       ],
       "constraints": {}
     },
+    "mas_promotions": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "candidate_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stage",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stage_started_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "baseline_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "applied_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "last_check_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
     "mas_categories": {
       "columns": [
         {
@@ -689,6 +734,14 @@
         "session_id",
         "type",
         "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_promotions_candidate": {
+      "table": "mas_promotions",
+      "columns": [
+        "candidate_id",
+        "created_at"
       ],
       "unique": false
     },

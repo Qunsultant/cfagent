@@ -11,7 +11,7 @@
  * module every consumer imports while the catalogue is the single
  * home for the text.
  *
- * These seven tables used to be defined TWICE with byte-identical DDL:
+ * These eight tables used to be defined TWICE with byte-identical DDL:
  * in DatabaseORM.initializeSchema() (src/orm/index.ts) and in
  * OrchestratorAgent.ensureTables() (src/agents/orchestrator.ts). With
  * CREATE TABLE IF NOT EXISTS semantics the first definition to run wins
@@ -28,7 +28,7 @@
  *  - OrchestratorAgent (wrangler ORCHESTRATOR_AGENT binding, exported as
  *    SearchAgent): getOrm() runs ensureTables() AND
  *    DatabaseORM.initializeSchema() — the ONLY production call site of
- *    initializeSchema. Its instances are guaranteed all seven shared
+ *    initializeSchema. Its instances are guaranteed all eight shared
  *    tables plus the five ORM-only tables below.
  *  - ORM-only tables (DDL stays in orm/index.ts initializeSchema, its
  *    only definition): mas_categories, mas_external_ads,
@@ -55,10 +55,11 @@
 import type { SqlStorage } from "./repositoryPorts";
 import {
   ormAuditChainAlterSql,
+  ormIndexSql,
   ormTableSql,
 } from "./schemaComponent/ormCatalogue";
 
-/** The seven mas_* tables shared by the ORM and the orchestrator. */
+/** The eight mas_* tables shared by the ORM and the orchestrator. */
 export const SHARED_MAS_TABLES = [
   "mas_messages",
   "mas_events",
@@ -67,6 +68,9 @@ export const SHARED_MAS_TABLES = [
   "mas_ads",
   "mas_watchlists",
   "mas_transactions",
+  // Issue #4412: mas_promotions, restored so the #1257 active-check
+  // route reads a real table (its DDL is a catalogue entry, above).
+  "mas_promotions",
 ] as const;
 
 export type SharedMasTable = (typeof SHARED_MAS_TABLES)[number];
@@ -96,11 +100,23 @@ export const SHARED_TABLE_DDL: Readonly<Record<SharedMasTable, string>> = {
   mas_ads: ormTableSql("mas_ads"),
   mas_watchlists: ormTableSql("mas_watchlists"),
   mas_transactions: ormTableSql("mas_transactions"),
+  mas_promotions: ormTableSql("mas_promotions"),
 };
 
 /** Create one shared table (IF NOT EXISTS) from the canonical DDL. */
 export function ensureSharedTable(sql: SqlStorage, table: SharedMasTable): void {
   sql.exec(SHARED_TABLE_DDL[table]);
+}
+
+/**
+ * Issue #4412: the mas_promotions candidate index, a separate exec
+ * from the table (one statement per exec), matching #760's two exec
+ * calls. The index DDL is a catalogue entry
+ * (schema.index.mas_promotions.create_index_idx_promotions_candidate),
+ * reached here through ormIndexSql — no DDL literal in this module.
+ */
+export function ensurePromotionsIndex(sql: SqlStorage): void {
+  sql.exec(ormIndexSql("idx_promotions_candidate"));
 }
 
 /**
