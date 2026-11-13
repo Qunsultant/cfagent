@@ -119,23 +119,19 @@ describe("4331-P04 counts per kind", () => {
   });
 });
 
-describe("4331-P05 one list on the page", () => {
-  it("the panel lists every schedule — no screening-only exclusion", () => {
-    // (#4329 S2) The old split rendered screening callbacks in the options
-    // manager and everything else in a second table.
-    expect(panel).not.toContain("SCREENING_CALLBACKS.has(s.callback)");
-    expect(panel).toContain("const allSchedules = schedules;");
-    expect(panel).not.toContain("Other Durable Schedules");
-    expect(panel).toContain("Every durable schedule, one row each");
-  });
-
-  it("the options manager keeps its form but not its own list", () => {
-    expect(panel).toContain("showSchedulesSection={false}");
-    expect(manager).toContain("{showSchedulesSection && (");
-  });
-
-  it("the filter bar is the configured set, in order", () => {
+describe("4331-P05 one vocabulary for the page", () => {
+  it("the filter bar is the configured set, in order, with live counts", () => {
     expect(panel).toContain("resolveScheduleListFilters()");
     expect(panel).toContain("SCHEDULE_LIST_FILTER_LABELS[id]");
+    expect(panel).toContain("countSchedulesByKind(allSchedules)");
+  });
+
+  it("the hosted section keeps the friendly titles the one table will reuse", () => {
+    // The physical one-list merge is still open (#4331): the hosted section also
+    // owns the screening rows' Edit flow, so folding it must move that flow too.
+    // What landed here is the vocabulary + one classifier + the friendly name —
+    // a row reads "Strategy Discovery · No-view", never the raw callback.
+    expect(panel).toContain("scheduleTitle(s as unknown as ScheduledTaskItem)");
+    expect(panel).toContain("SCREENING_CALLBACKS.has(s.callback)");
   });
 });

@@ -838,9 +838,15 @@ describe("Schedules home stage-schedule rows (issue #3121 #3310)", () => {
         stageId: "job:0",
       }),
     ).toBe("two-child · job:0");
+    // Issue #4329 S2 (#4331): a known callback names its catalog job
+    // ("Stock Market Screen"), as the hosted sections did; an unknown one still
+    // falls back to the callback itself — never to invented text.
     expect(
       scheduleDisplayName({ id: "s-1", type: "cron", callback: "autonomousMarketScreen" }),
-    ).toBe("autonomousMarketScreen");
+    ).toBe("Stock Market Screen");
+    expect(
+      scheduleDisplayName({ id: "s-2", type: "cron", callback: "mysteryJob" }),
+    ).toBe("mysteryJob");
     expect(categorizeSchedule({ id: "stage-1", type: "cron", callback: "runWorkflowStage", kind: "workflow-stage", jobId: "two-child", stageId: "job:0" })).toBe("system");
   });
 });

@@ -88,6 +88,8 @@ type ScheduleGroup = ScheduleListFilter;
  *  existing importers. */
 export { FREQUENCY_PRESETS } from "./scheduledOptionsManager/format";
 import { ScheduledOptionsManager } from "./ScheduledOptionsManager";
+import { scheduleTitle } from "./scheduledOptionsManager/scheduleDetail";
+import type { ScheduledTaskItem } from "./scheduledOptionsManager/types";
 import {
   SCHEDULE_LIST_FILTER_LABELS,
   resolveScheduleListFilters,
@@ -203,7 +205,11 @@ export function scheduleDisplayName(s: ScheduleItem): string {
     return s.stageId ? `${s.jobId} · ${s.stageId}` : s.jobId;
   }
   if (s.kind === "ticker-push") return "Ticker push";
-  return s.callback;
+  // Issue #4329 S2 (#4331): the one list keeps the friendly title the hosted
+  // sections used, so a screening row reads "Strategy Discovery · No-view"
+  // rather than the raw callback. Unknown callbacks fall through to the
+  // callback itself, exactly as before.
+  return scheduleTitle(s as unknown as ScheduledTaskItem);
 }
 
 /** Last-push rendering for a ticker-push row (never a fabricated time). */
@@ -363,10 +369,13 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     }
   }, [focusScheduleId, loading, schedules]);
 
-  // Issue #4329 S2 (#4331): ONE list. Every durable schedule is a row here —
-  // the screening callbacks included — and the options manager renders its
-  // form, latest runs and audit trail without an embedded list of its own.
-  const allSchedules = schedules;
+  // Issue #4329 S2 (#4331): the FILTER vocabulary is one vocabulary for the
+  // page (config/scheduleListModes.ts) and the classifier is one classifier.
+  // The physical one-list merge is still open: the hosted section also owns
+  // the screening rows' Edit flow, so folding it into this table must move
+  // that flow with it (recorded on #4331). Until then the table keeps
+  // carrying the callbacks the hosted section does not.
+  const allSchedules = schedules.filter((s) => !SCREENING_CALLBACKS.has(s.callback));
 
   // Filter by the active kind (issue #4329 S2): "all" is the unfiltered list.
   const filtered = allSchedules.filter(
@@ -717,7 +726,6 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           refreshSignal={refreshSignal}
           // Issue #4331: the one list is the table below; this manager keeps
           // its form, latest runs and audit trail.
-          showSchedulesSection={false}
         />
       )}
 
@@ -734,7 +742,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         <section className="sched-section-card">
           <header className="sched-section-header">
             <h4>
-              <span aria-hidden="true">🗂️</span> Schedules
+              <span aria-hidden="true">🗂️</span> Other Durable Schedules
               <span className="sched-count-pill">{filtered.length} Shown</span>
             </h4>
             {loading && <span className="schedule-row-muted">Refreshing…</span>}
@@ -745,7 +753,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             rowKey={(s) => s.id}
             rowClassName="schedule-item-card"
             rowTitle={(s) => `${s.id} · ${s.callback}`}
-            caption="Every durable schedule, one row each"
+            caption="Durable schedules outside the screening kinds"
             containerClassName="sched-table-scroll"
             empty={<p className="sched-table-status">No schedules in this group.</p>}
           />
