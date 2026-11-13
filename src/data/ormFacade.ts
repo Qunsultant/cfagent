@@ -45,7 +45,7 @@ import {
   type CanonicalStoreResult,
 } from "../services/scheduledReports";
 import type { IndexEnv } from "../services/reportSemanticIndex";
-import { ensureSharedTable, ensureAuditChainColumns } from "./ormSchema";
+import { ensureSharedTable, ensureAuditChainColumns, ensurePromotionsIndex } from "./ormSchema";
 import {
   createDoAdRepository,
   createDoCategoryRepository,
@@ -248,7 +248,7 @@ export class DatabaseORM {
 
   /**
    * Initializes all SQLite tables and seeds initial data using the ORM.
-   * The seven shared mas_* tables are created from the canonical DDL in
+   * The eight shared mas_* tables are created from the canonical DDL in
    * ./ormSchema (issue #782) — do not re-add their DDL here.
    */
   initializeSchema(sessionId: string): void {
@@ -392,6 +392,13 @@ export class DatabaseORM {
         contract_count INTEGER NOT NULL DEFAULT 0
       )
     `);
+
+    // 12. Promotions Table (issue #4412, #1257 fix): the #760
+    // staged-promotion table, restored through the canonical shared
+    // DDL after the #1257 retirement deleted its only creation path.
+    // Schema only — no promotion logic is resurrected.
+    ensureSharedTable(this.sql, "mas_promotions");
+    ensurePromotionsIndex(this.sql);
 
     // Seed Categories if table is empty
     if (this.categories.count() === 0) {

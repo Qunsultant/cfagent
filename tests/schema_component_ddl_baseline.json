@@ -2,8 +2,8 @@
   "generatedFrom": "d1a370ab6365f6a595cd36eb1ed6162aef8ad7a3",
   "generatedAt": "2026-11-13",
   "totals": {
-    "createTable": 115,
-    "createIndex": 51,
+    "createTable": 117,
+    "createIndex": 52,
     "createUniqueIndex": 2,
     "alterTable": 42
   },
@@ -399,8 +399,8 @@
       "alterTable": 2
     },
     "src/data/ormSchema.ts": {
-      "createTable": 9,
-      "createIndex": 0,
+      "createTable": 11,
+      "createIndex": 1,
       "createUniqueIndex": 0,
       "alterTable": 2
     },

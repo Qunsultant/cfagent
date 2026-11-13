@@ -7,7 +7,7 @@
  * now; src/orm/schema.ts is a §22 re-export shim. The DDL
  * strings below are byte-identical to the pre-move module.
  *
- * These seven tables used to be defined TWICE with byte-identical DDL:
+ * These eight tables used to be defined TWICE with byte-identical DDL:
  * in DatabaseORM.initializeSchema() (src/orm/index.ts) and in
  * OrchestratorAgent.ensureTables() (src/agents/orchestrator.ts). With
  * CREATE TABLE IF NOT EXISTS semantics the first definition to run wins
@@ -24,7 +24,7 @@
  *  - OrchestratorAgent (wrangler ORCHESTRATOR_AGENT binding, exported as
  *    SearchAgent): getOrm() runs ensureTables() AND
  *    DatabaseORM.initializeSchema() — the ONLY production call site of
- *    initializeSchema. Its instances are guaranteed all seven shared
+ *    initializeSchema. Its instances are guaranteed all eight shared
  *    tables plus the five ORM-only tables below.
  *  - ORM-only tables (DDL stays in orm/index.ts initializeSchema, its
  *    only definition): mas_categories, mas_external_ads,
@@ -50,7 +50,7 @@
 
 import type { SqlStorage } from "./repositoryPorts";
 
-/** The seven mas_* tables shared by the ORM and the orchestrator. */
+/** The eight mas_* tables shared by the ORM and the orchestrator. */
 export const SHARED_MAS_TABLES = [
   "mas_messages",
   "mas_events",
@@ -59,6 +59,7 @@ export const SHARED_MAS_TABLES = [
   "mas_ads",
   "mas_watchlists",
   "mas_transactions",
+  "mas_promotions",
 ] as const;
 
 export type SharedMasTable = (typeof SHARED_MAS_TABLES)[number];
@@ -166,6 +167,34 @@ const MAS_TRANSACTIONS_DDL = `
       )
     `;
 
+// Issue #4412 (#1257 fix): mas_promotions — the staged-promotion table
+// from #760 (commit e60818fb). Its DDL below is verbatim from
+// ensurePromotionsTable() in the retired src/services/stagedPromotion.ts
+// (deleted by the #1257 retirement, 638fddf9): same columns, same
+// defaults, same index, issued as two separate statements exactly as
+// #760 did. The retirement removed the only creation path, so the live
+// Orchestrator DO never got the table and the #1257 active-check route's
+// SELECT threw "no such table" (owner hit 2026-11-13: 500
+// FAILURE_PROMOTIONS_ACTIVE_CHECK_QUERY). Registering it here restores
+// the table through the canonical shared-schema mechanism — no promotion
+// logic is resurrected, and the check route is untouched.
+const MAS_PROMOTIONS_DDL = `
+      CREATE TABLE IF NOT EXISTS mas_promotions (
+        id TEXT PRIMARY KEY,
+        candidate_id TEXT NOT NULL,
+        stage TEXT NOT NULL DEFAULT 'shadow',
+        stage_started_at TEXT NOT NULL,
+        baseline_json TEXT NOT NULL DEFAULT '{}',
+        applied_json TEXT NOT NULL DEFAULT '{}',
+        last_check_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `;
+
+const MAS_PROMOTIONS_INDEX_DDL = `
+      CREATE INDEX IF NOT EXISTS idx_promotions_candidate ON mas_promotions(candidate_id, created_at)
+    `;
+
 /** Canonical DDL per shared table, byte-identical to the former copies. */
 export const SHARED_TABLE_DDL: Readonly<Record<SharedMasTable, string>> = {
   mas_messages: MAS_MESSAGES_DDL,
@@ -175,11 +204,22 @@ export const SHARED_TABLE_DDL: Readonly<Record<SharedMasTable, string>> = {
   mas_ads: MAS_ADS_DDL,
   mas_watchlists: MAS_WATCHLISTS_DDL,
   mas_transactions: MAS_TRANSACTIONS_DDL,
+  mas_promotions: MAS_PROMOTIONS_DDL,
 };
 
 /** Create one shared table (IF NOT EXISTS) from the canonical DDL. */
 export function ensureSharedTable(sql: SqlStorage, table: SharedMasTable): void {
   sql.exec(SHARED_TABLE_DDL[table]);
+}
+
+/**
+ * Issue #4412: create the mas_promotions candidate index (the second
+ * #760 statement). Separate exec, like the #760 service's two calls
+ * and the repo's adapter pattern — SqlStorage.exec takes one statement
+ * at a time, so the index never rides inside the CREATE TABLE string.
+ */
+export function ensurePromotionsIndex(sql: SqlStorage): void {
+  sql.exec(MAS_PROMOTIONS_INDEX_DDL);
 }
 
 /**

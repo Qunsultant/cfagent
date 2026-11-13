@@ -1,9 +1,9 @@
 /**
  * Issue #782 — dual-DDL drift pins (RSI-Data Tier 1, finding C2).
  *
- * The seven shared mas_* tables (mas_messages, mas_events, mas_memory,
- * mas_referrals, mas_ads, mas_watchlists, mas_transactions) used to be
- * defined TWICE with byte-identical DDL: DatabaseORM.initializeSchema()
+ * The eight shared mas_* tables (mas_messages, mas_events, mas_memory,
+ * mas_referrals, mas_ads, mas_watchlists, mas_transactions,
+ * mas_promotions) used to be defined TWICE with byte-identical DDL: DatabaseORM.initializeSchema()
  * in src/orm/index.ts and OrchestratorAgent.ensureTables() in
  * src/agents/orchestrator.ts. With CREATE TABLE IF NOT EXISTS semantics
  * the first definition to run wins per instance, so any future edit to
@@ -95,6 +95,7 @@ const SHARED_TABLES = [
   "mas_ads",
   "mas_watchlists",
   "mas_transactions",
+  "mas_promotions",
 ] as const;
 
 const ORM_ONLY_TABLES = [
@@ -209,7 +210,7 @@ function walkSrc(dir: string, out: string[] = []): string[] {
 }
 
 describe("issue #782: single-source shared mas_* schema", () => {
-  it("canonical module: src/data/ormSchema.ts exports the seven shared tables and their DDL", async () => {
+  it("canonical module: src/data/ormSchema.ts exports the eight shared tables and their DDL", async () => {
     // Dynamic import so this suite still loads against pre-change code,
     // where the module does not exist yet (the test then fails as a
     // test, not as a module load error). #2345 retarget (disclosed
@@ -283,6 +284,22 @@ describe("issue #782: single-source shared mas_* schema", () => {
         .trim();
       expect(normalizedDdlFor(ormQueries, table), `orm ${table}`).toBe(canonical);
       expect(normalizedDdlFor(orchQueries, table), `orchestrator ${table}`).toBe(canonical);
+    }
+  });
+
+  it("both initialization paths create the idx_promotions_candidate index (#4412)", () => {
+    // Issue #4412 (#1257 fix): the #760 DDL is a CREATE TABLE plus this
+    // index, issued as separate statements (the #760 service's two
+    // sql.exec calls). Both init paths must create the index, not just
+    // the table, or the effective schemas diverge by instance history.
+    const expected =
+      "CREATE INDEX IF NOT EXISTS idx_promotions_candidate ON mas_promotions(candidate_id, created_at)";
+    for (const [label, queries] of [
+      ["orm", ormPathQueries()],
+      ["orchestrator", orchestratorPathQueries()],
+    ] as const) {
+      const found = queries.some((q) => q.replace(/\s+/g, " ").trim() === expected);
+      expect(found, `${label} should create idx_promotions_candidate`).toBe(true);
     }
   });
 
