@@ -5,6 +5,7 @@ import { mapScreenError } from "./paidScreenSubmit";
 import { getDisplayUserDid } from "../agents/did";
 import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, PageSection, FieldShell, Flex, Grid, Stack, useToast } from "./components/ui";
+import { PageChromeContext } from "./components/ui/PageShell";
 import { getRoute } from "./routes";
 import { parseTabFromSearch, subscribeToRouteChanges } from "./router";
 import { readTenantProvidersState, useTenantProviders, labelForBroker, currentBrokerLabel } from "./tenantProviders";
@@ -2205,6 +2206,18 @@ export function ETradeTradingHub({
 
       {/* SUBTAB 0: AUTOPILOT CONTROL CENTER */}
       <PageShell title={shellTitle} scopeNote={shellScopeNote}>
+      {/* Issue #4167: the hub host applies "tab" chrome to every
+          sub-tab branch, so each inner PageShell renders body-only
+          and the page carries exactly one h1 — the hub shell's route
+          crumb. Without this, every panel with its own PageShell
+          (autopilot, portfolio, reports, ledger, goal-screen,
+          review, track-record, omnichannel, voice, order) rendered
+          a second h1 inside the hub's shell. The provider sits
+          INSIDE the hub's own PageShell so the hub chrome stays in
+          "page" mode; panels rendered outside the hub are untouched,
+          and OrderTicketPanel's own nested "tab" provider (its risk
+          tab) keeps working unchanged. */}
+      <PageChromeContext.Provider value="tab">
       {effectiveSubTab === "autopilot" && (
         <AutopilotControlCenter
           user={user}
@@ -2377,6 +2390,7 @@ export function ETradeTradingHub({
           handleVoiceOrderAction={handleVoiceOrderAction}
         />
       )}
+      </PageChromeContext.Provider>
       </PageShell>
 
       {/* Quote Inspection Modal */}
