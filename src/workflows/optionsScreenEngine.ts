@@ -1000,6 +1000,21 @@ export async function runOptionsScreenViaEngine(
  * stages, the same steps, the same ports — only the job identity
  * differs, so a strategy screen is visible as its own job in Workflow
  * Runs with its own pipeline record and run history.
+ *
+ * Issue #4291 — the durable path for a strategy screen is the
+ * workflow host (startStrategyScreenWorkflow in optionsWorkflowHost.ts,
+ * executed by JobPipelineWorkflow with the workflow step as the
+ * engine's journal; awaitOptionsWorkflowRun awaits settlement). This
+ * sync/in-process dispatch is KEPT, not retired, for the legs that
+ * cannot move yet: every strategy leg is blocked by a named gap —
+ * broker selection (#3960: the discovery, shard, and NLQ legs read
+ * broker-aware chain sources the residency cannot rebuild), the
+ * scan-run store + stage queue in the residency (#4453: the NLQ scan
+ * leg, the scheduled firer, and the shard executor bind one or both),
+ * and universe deps that do not travel (the firer and the evaluate
+ * route). New callers must dispatch through the host; a leg moves
+ * here only when its ports are rebuildable per invocation (see
+ * optionsStepPorts.ts) and its gap has landed.
  */
 export async function runStrategyScreenViaEngine(
   params: {
