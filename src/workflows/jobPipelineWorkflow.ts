@@ -64,7 +64,9 @@ import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import {
   createIndexMembershipService,
   createWikipediaIndexMembershipAdapter,
+  ETradeRestClient,
 } from "../trading";
+import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
 import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
 import { JobPipelineError } from "../services/jobPipelineConfig";
@@ -181,6 +183,27 @@ export function feedStepDepsForWorkflow(
 }
 
 /** Build the flow deps from the worker environment (adapter-side only). */
+export function optionsStepDepsForWorkflow(
+  env: Env,
+  stores: JobPipelineStores,
+): OptionsWorkflowStepDeps {
+  return {
+    definitions: stores.definitions,
+    artifacts: stores.artifacts,
+    env,
+    // The chain source is the tenant's broker client: tokens
+    // resolve from KV via env + login (getValidTokens), so the
+    // client is constructible in workflow residency exactly as on
+    // the host. No login ⇒ no source ⇒ the chain fetch fails
+    // honestly with the screener's no-source error, never a
+    // crash. Provider/broker selection is #3960's gap: until it
+    // lands, the workflow host fetches the tenant's broker
+    // chains, as every options leg does today.
+    chainSourceFor: (userLogin) =>
+      userLogin ? new ETradeRestClient(env, userLogin) : undefined,
+  };
+}
+
 export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   if (!env.AGENT_DB) {
     throw new JobPipelineError(
@@ -241,7 +264,13 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // (deliverJobs.ts carries the rule). The screener steps
     // compose here too (#4190, wired in #4192): the agent binds
     // the quote/history deps itself at stage time, so a screener
-    // job dispatched here executes fully in this residency.
+    // job dispatched here executes fully in this residency. The
+    // options steps compose here too (#4289): the resolving
+    // registration reads the dispatch request back out of the
+    // stored definition and rebuilds the stage ports per
+    // invocation, over the artifact-store stage storage — so an
+    // options job dispatched here executes durably, with the
+    // workflow step as the engine's journal.
     steps: createPipelineStepRegistry(
       feedStepDepsForWorkflow(env, stores),
       {
@@ -281,6 +310,10 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       // Issue #4190 (#3550 S1, wired in #4192): the screener steps compose here
       // too — the agent binds the quote/history deps itself at stage time.
       screenerStepDepsForWorkflow(env),
+      // Issue #4289: the options steps compose here too — the
+      // resolving registration, over the D1 definition + artifact
+      // stores, so an options job dispatched here executes durably.
+      optionsStepDepsForWorkflow(env, stores),
     ),
     invocation: "workflow-shard",
   };
