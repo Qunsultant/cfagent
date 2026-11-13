@@ -1,0 +1,3 @@
+### Added
+
+- Operations & service delivery (COO) platform products defined in `docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md` §12.2 (issue #4393): the COO section replaces the TBD placeholder row with the platform definition (APQC / BPMN / ITIL / Lean-ToC / SRE; capabilities and measures per platforms.md §2; owning account `docs/agentic-org/coo.md`) and a six-row product inventory — Screening and discovery engine (Recommendation Kernel, #1151), Signup → Trial onboarding flow (#3256), Monetization delivery operations (#2405), Operational process documentation (#3463), Social rewards (#3476), and Agentic platform product (#2468, closed) — with statuses as of 2026-11-13; §14.8 records the COO definition in the roadmap.

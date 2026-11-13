@@ -1614,13 +1614,54 @@ The CEO rows below were added 2026-11-11; their statuses are as of that date.
 | Back to Basics programme | A lean agentic (RSI/ASI) platform: fewer tests, components, services, interfaces, endpoints, implementations | Partial — P0 inventory/baseline done; deprecation rule canonical (gitops §22); P1–P5 not started | #2299 |
 | AOP-by-default mandate | AOP by default for all work; migrate existing hardcoding to aspects | Partial — approved/mandated; enforcement drafts only, no repo files changed; four ambiguities need owner rulings | #2363 |
 
+Operations & service delivery (COO):
+
+The Operations & service delivery platform is the COO platform —
+platforms.md §2: APQC Process Classification Framework for process
+inventory; BPMN for process models; ITIL for service management;
+Lean / Theory of Constraints for flow; SRE practices for technical
+service reliability. Its capabilities are to coordinate approved
+work; manage queues and dependencies; forecast capacity; detect
+bottlenecks; execute bounded runbooks; coordinate incidents;
+reconcile completion; and improve end-to-end delivery. It is
+measured on verified completion, cycle time, rework, service
+reliability, and recovery. The owning account is the COO charter
+(`docs/agentic-org/coo.md`): the COO coordinates execution and
+does not absorb other functions' decision authority — strategy
+and reserved decisions stay with the CEO, architecture with the
+CTO, data governance with the CDO, security assessment with the
+CISO, and commercial products with the CBO. The operational
+account of the machinery this platform runs lives in
+`docs/operations/` (runbooks for stuck runs and DLQ replay are
+the operational accounts of §6's machinery); this section states
+the product inventory and points at those documents, it does not
+restate them.
+
+Relationship to neighbouring rows, not a duplication: the CBO
+table lists the commercial products themselves (gate, prices,
+subscriptions, grants); the COO rows below are the operational
+products and the delivery programme that lands and runs them.
+The Security & trust table's "Incident substrate reliability"
+row (#3781) is the security substrate the COO coordinates
+incidents over; it is not re-described here.
+
+The COO rows below were added 2026-11-13; their statuses are as of that date.
+
+| Product | Purpose | Status | Tracking |
+| --- | --- | --- | --- |
+| Screening and discovery engine (Recommendation Kernel) | The one discovery engine: llm/quant/hybrid candidate generation, gates, pricing, falsification, bundle assembly, per-arm ledger | Live — C1–C5 landed; epic open on #1257 only (operator live check on the temp check route) | #1151; #1096 (closed) |
+| Signup → Trial onboarding flow | First-run onboarding: 5-step first run with server-side state, trial start-or-skip, brokerage connect, preferences saved | Partial — core Live; #3309 closed; #3335 open, held (identity diagnosis) | #3256 |
+| Monetization delivery operations | Operational delivery of the commercial programme: slices through 2.20 landed through the gate, Phase 2 8/9 | Partial — Phase 2 8/9, line 6 open (refund-flow evidence); 2.13 owner decision; 2.15/2.16 unfiled | #2405 (delivery plan under #2012) |
+| Operational process documentation (workflow guides) | The process taxonomy, index, and guides: deterministic, non-deterministic, and owner/HITL processes, kept refreshed | Partial — #3464 landed and closed; #3465–#3469 open | #3463 |
+| Social rewards | Reward likes, shares, subscriptions, and invite codes; ledger + caps + expiry + management UX | Partial — reward model merged (#3477); invite codes, platform slices, notifications, config, management UX open | #3476 |
+| Agentic platform product | User + product onboarding, marketing, selling, and servicing for the screener, mesh-aligned | Closed — 8/8 phases landed, final report posted; pilot/mainnet gates red by design under owning issues | #2468 (closed) |
+
 All other platforms — products not yet defined (**TBD**
 placeholder rows; no filed product issues were found for these
 platforms in the 2026-11-09 survey):
 
 | Platform | Product status |
 | --- | --- |
-| Operations & service delivery (COO) | TBD — products to be defined by the owning platform |
 | Investment & portfolio (CIO function) | TBD — products to be defined |
 | Research (Chief Research Officer / Chief Scientist function) | TBD — products to be defined |
 | Enterprise, investment & model risk (CRO function) | TBD — products to be defined |
@@ -1920,7 +1961,8 @@ owner's word, not on this document.
   Security & trust, Product & experience (CPO), Finance &
   capital (CFO), Data & knowledge (CDO), Legal &
   obligation (CLO), Business architecture & commercial
-  (CBO), and Organization & strategy (CEO) platform products
+  (CBO), Organization & strategy (CEO), and Operations &
+  service delivery (COO) platform products
   filed or partial; all other
   platforms' products undefined.
 - **Future:** every platform productized under the platform
@@ -1943,6 +1985,8 @@ owner's word, not on this document.
   products defined in §12.2 (this issue, #4062);
   the Organization & strategy (CEO) platform's products
   defined in §12.2 (this issue, #4094);
+  the Operations & service delivery (COO) platform's products
+  defined in §12.2 (this issue, #4393);
   product definition for the
   remaining platforms is **TBD**, owned by each platform.
 
