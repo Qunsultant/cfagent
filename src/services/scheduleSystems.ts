@@ -72,6 +72,9 @@ export const CREATABLE_SCHEDULE_CALLBACKS_INVENTORY = [
   "autonomousMarketScreen",
   "autonomousStrategyDiscovery",
   "autonomousGoalScreen",
+  // Issue #4366 — a job defined from the externalized spec is schedulable
+  // through the same store; the callback runs that engine job by id.
+  "runPipelineJobSchedule",
 ] as const;
 
 /** Mirrors the ids of DEFAULT_SCHEDULES in src/schedule.ts (test-pinned). */

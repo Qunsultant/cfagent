@@ -132,8 +132,12 @@ describe("POST /api/schedules/create (#111)", () => {
     // more: autonomousGoalScreen (scheduled Phase 1 goal/scenario
     // screens through the unified stack) is user-creatable through the
     // same route, with its payload validated by buildSchedulePayload.
+    // Issue #4366 deliberately grew it by one more: runPipelineJobSchedule
+    // (a job defined from the externalized spec is schedulable through the
+    // same store; the callback runs the job by id). The pin's purpose —
+    // no internal-only callback is creatable — is unchanged.
     expect([...CREATABLE_SCHEDULE_CALLBACKS].sort()).toEqual(
-      ["autonomousGoalScreen", "autonomousMarketScreen", "autonomousOptionsAnalysis", "autonomousStrategyDiscovery"].sort()
+      ["autonomousGoalScreen", "autonomousMarketScreen", "autonomousOptionsAnalysis", "autonomousStrategyDiscovery", "runPipelineJobSchedule"].sort()
     );
     // Internal-only callbacks are armed by the agent itself, never via the route.
     expect(CREATABLE_SCHEDULE_CALLBACKS as readonly string[]).not.toContain("executeAsyncJob");

@@ -114,13 +114,18 @@ describe("S0-P02 SDK timing forms (B-T2-01): four forms resolve through ctx.sche
   });
 });
 
-describe("S0-P03 creatable callbacks (B-T2-02): allow-list is exactly the four callbacks", () => {
+describe("S0-P03 creatable callbacks (B-T2-02): allow-list is the four screening callbacks plus the definition-run callback", () => {
   it("pins the live allow-list and its inventory mirror", () => {
+    // Issue #4366 grew the list by one: a job defined from the externalized
+    // spec is schedulable through the same store, and its callback runs
+    // that engine job by id. The pin's purpose — nothing internal-only is
+    // creatable — is unchanged.
     expect([...CREATABLE_SCHEDULE_CALLBACKS]).toEqual([
       "autonomousOptionsAnalysis",
       "autonomousMarketScreen",
       "autonomousStrategyDiscovery",
       "autonomousGoalScreen",
+      "runPipelineJobSchedule",
     ]);
     expect(CREATABLE_SCHEDULE_CALLBACKS_INVENTORY).toEqual([
       ...CREATABLE_SCHEDULE_CALLBACKS,
