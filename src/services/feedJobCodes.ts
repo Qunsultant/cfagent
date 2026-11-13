@@ -36,5 +36,7 @@ export const FEED_JOB_CODES = {
   fetchTimeout: "FEED_FETCH_TIMEOUT",
   captureTimeout: "FEED_CAPTURE_TIMEOUT",
   deadlineExceeded: "FEED_DEADLINE_EXCEEDED",
+  /** #4304 — the provider verify probe exceeded its named bound. */
+  verifyTimeout: "FEED_VERIFY_TIMEOUT",
 } as const;
 export type FeedJobCode = (typeof FEED_JOB_CODES)[keyof typeof FEED_JOB_CODES];
