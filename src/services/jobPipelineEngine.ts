@@ -302,18 +302,52 @@ export interface JobRunSettledInfo {
   error?: string;
 }
 
+/**
+ * Issue #4359 — the unit statuses a stage can end in. "stopped" is
+ * resumable and "never-attempted"/"queued"/"running" are not terminal,
+ * so a stage with any of those keeps its end open (no invented end).
+ */
+const TERMINAL_STAGE_UNIT_STATUSES: ReadonlySet<StageUnitCheckpoint["status"]> = new Set([
+  "completed",
+  "failed",
+  "timed_out",
+  "cancelled",
+  "retired",
+]);
+
 /** One stage of the current/last run, as the status surface shows it (#3069 surfacing). */
 export interface JobStageView {
   /** The stage id (job:<nodePath>) — the (runId, stageId) address's stage half. */
   stageId: string;
   nodePath: string;
   kind: string | null;
+  /**
+   * Issue #4359 — the stage's recorded window: the earliest unit start
+   * and the latest unit end, both read from the checkpoint. `endedAt`
+   * stays null while any unit is non-terminal (the stage is still the
+   * run's frontier); `durationMs` is null unless both stamps exist.
+   * Nothing here is estimated — the engine recorded the stamps.
+   */
+  startedAt: string | null;
+  endedAt: string | null;
+  durationMs: number | null;
   units: Array<{
     unitId: string;
     status: StageUnitCheckpoint["status"];
     attempt: number;
     error?: string;
+    /** Issue #4359 — the unit's recorded start, when it started. */
+    startedAt?: string;
+    /** Issue #4359 — the unit's recorded terminal instant, when it ended. */
+    endedAt?: string;
   }>;
+}
+
+/** Issue #4359 — the Workflow Runs stage read: the views plus the run they describe. */
+export interface JobStagesRead {
+  stages: JobStageView[];
+  /** The run id the checkpoint belongs to; null when no checkpoint is recorded. */
+  checkpointRunId: string | null;
 }
 
 export interface JobStatusView {
@@ -786,7 +820,7 @@ export class JobPipelineControl {
             units: instance.stageCheckpoint.units.map((unit) =>
               unit.status === "completed" || unit.status === "cancelled"
                 ? unit
-                : { ...unit, status: "cancelled" as const, updatedAt: this.iso() },
+                : { ...unit, status: "cancelled" as const, endedAt: this.iso(), updatedAt: this.iso() },
             ),
           }
         : null,
@@ -884,6 +918,20 @@ export class JobPipelineControl {
       latestRun: history[0],
       history,
       stages: this.stageViews(definition, instance),
+    };
+  }
+
+  /**
+   * Issue #4359 — the stage views alone: the read the Workflow Runs
+   * projection needs (definition + live instance), without the run
+   * history getJob also loads. Same projection as getJob, one rule.
+   */
+  async getJobStages(jobId: string): Promise<JobStagesRead> {
+    const definition = await this.requireDefinition(jobId);
+    const instance = await this.deps.stores.instances.getInstance(jobId);
+    return {
+      stages: this.stageViews(definition, instance),
+      checkpointRunId: instance?.stageCheckpoint?.runId ?? null,
     };
   }
 
@@ -1800,6 +1848,9 @@ export class JobPipelineControl {
           stageId: unit.stage,
           nodePath,
           kind: kinds.get(nodePath) ?? null,
+          startedAt: null,
+          endedAt: null,
+          durationMs: null,
           units: [],
         };
         byStage.set(unit.stage, view);
@@ -1809,7 +1860,33 @@ export class JobPipelineControl {
         status: unit.status,
         attempt: unit.attempt,
         ...(unit.error !== undefined ? { error: unit.error } : {}),
+        ...(unit.startedAt !== undefined ? { startedAt: unit.startedAt } : {}),
+        ...(unit.endedAt !== undefined ? { endedAt: unit.endedAt } : {}),
       });
+    }
+    // Issue #4359 — the stage's window is its units' recorded window:
+    // earliest start, latest end once every unit is terminal. Nothing
+    // is estimated; a stage still running keeps endedAt null.
+    for (const view of byStage.values()) {
+      const starts = view.units
+        .map((unit) => unit.startedAt)
+        .filter((at): at is string => typeof at === "string")
+        .sort();
+      const ends = view.units
+        .map((unit) => unit.endedAt)
+        .filter((at): at is string => typeof at === "string")
+        .sort();
+      const allTerminal = view.units.every((unit) =>
+        TERMINAL_STAGE_UNIT_STATUSES.has(unit.status),
+      );
+      const startedAt = starts[0] ?? null;
+      const endedAt = allTerminal ? (ends[ends.length - 1] ?? null) : null;
+      view.startedAt = startedAt;
+      view.endedAt = endedAt;
+      view.durationMs =
+        startedAt && endedAt
+          ? Math.max(0, Date.parse(endedAt) - Date.parse(startedAt))
+          : null;
     }
     return [...byStage.values()];
   }
@@ -2063,7 +2140,7 @@ export class JobPipelineControl {
         }
         for (const unit of ctx.ledger.units) {
           if (unit.status !== "completed" && unit.status !== "cancelled" && unit.status !== "skipped" && unit.status !== "retired") {
-            this.setEntry(ctx, { ...unit, status: "cancelled", updatedAt: this.iso() });
+            this.setEntry(ctx, { ...unit, status: "cancelled", endedAt: this.iso(), updatedAt: this.iso() });
           }
         }
         await this.persistLedger(ctx);
@@ -2245,6 +2322,9 @@ export class JobPipelineControl {
         unitId: unit.unitId,
         status: "retired",
         attempt: prior?.attempt ?? 0,
+        // Issue #4359 — retired before it ran: a real terminal instant,
+        // no start stamp (the unit never started).
+        endedAt: this.iso(),
         updatedAt: this.iso(),
       });
     }
@@ -2286,6 +2366,8 @@ export class JobPipelineControl {
           unitId: unit.unitId,
           status: "cancelled",
           attempt: prior?.attempt ?? 0,
+          // Issue #4359 — cancelled before it ran: terminal, never started.
+          endedAt: this.iso(),
           updatedAt: this.iso(),
         });
       }
@@ -2310,6 +2392,9 @@ export class JobPipelineControl {
         unitId: unit.unitId,
         status: "stopped",
         attempt: prior?.attempt ?? 0,
+        // Issue #4359 — stopped is resumable, not terminal: keep the
+        // start (when it started) and leave the end open.
+        ...(prior?.startedAt ? { startedAt: prior.startedAt } : {}),
         updatedAt: this.iso(),
       });
     }
@@ -2381,7 +2466,7 @@ export class JobPipelineControl {
         if (active.stageId !== cancelStageId) continue;
         const prior = this.entryFor(ctx.ledger, active.stageId, active.unitId);
         if (prior) {
-          this.setEntry(ctx, { ...prior, status: "cancelled", updatedAt: this.iso() });
+          this.setEntry(ctx, { ...prior, status: "cancelled", endedAt: this.iso(), updatedAt: this.iso() });
         }
       }
       await this.persistLedger(ctx);
@@ -2410,7 +2495,7 @@ export class JobPipelineControl {
         if (active.stageId !== retireStageId) continue;
         const prior = this.entryFor(ctx.ledger, active.stageId, active.unitId);
         if (prior) {
-          this.setEntry(ctx, { ...prior, status: "retired", updatedAt: this.iso() });
+          this.setEntry(ctx, { ...prior, status: "retired", endedAt: this.iso(), updatedAt: this.iso() });
         }
       }
       await this.persistLedger(ctx);
@@ -2783,6 +2868,9 @@ export class JobPipelineControl {
           unitId: unit.unitId,
           status: "running",
           attempt: (claimed?.attempt ?? 0) + 1,
+          // Issue #4359 — the unit's first start in this run; a retry
+          // keeps the original stamp so the window stays the wall clock.
+          startedAt: claimed?.startedAt ?? this.iso(),
           updatedAt: this.iso(),
           ...(resume.stepIndex > 0 || resume.itemIndex > 0
             ? { progress: { ...resume } }
@@ -2815,6 +2903,8 @@ export class JobPipelineControl {
             unitId: unit.unitId,
             status: "completed",
             attempt: done?.attempt ?? tries,
+            ...(done?.startedAt ? { startedAt: done.startedAt } : {}),
+            endedAt: this.iso(),
             updatedAt: this.iso(),
           });
           await this.persistLedger(ctx);
@@ -2833,12 +2923,15 @@ export class JobPipelineControl {
           const attemptNow =
             this.entryFor(ctx.ledger, stageId, unit.unitId)?.attempt ?? tries;
           if (error instanceof JobPipelineError && error.code === "job_stage_timed_out") {
+            const timedOut = this.entryFor(ctx.ledger, stageId, unit.unitId);
             this.setEntry(ctx, {
               stage: stageId,
               unitId: unit.unitId,
               status: "timed_out",
               attempt: attemptNow,
               error: message,
+              ...(timedOut?.startedAt ? { startedAt: timedOut.startedAt } : {}),
+              endedAt: this.iso(),
               updatedAt: this.iso(),
             });
             await this.persistLedger(ctx);
@@ -2874,12 +2967,15 @@ export class JobPipelineControl {
             );
             continue;
           }
+          const failed = this.entryFor(ctx.ledger, stageId, unit.unitId);
           this.setEntry(ctx, {
             stage: stageId,
             unitId: unit.unitId,
             status: "failed",
             attempt: attemptNow,
             error: message,
+            ...(failed?.startedAt ? { startedAt: failed.startedAt } : {}),
+            endedAt: this.iso(),
             updatedAt: this.iso(),
           });
           await this.persistLedger(ctx);

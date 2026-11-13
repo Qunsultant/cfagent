@@ -399,7 +399,13 @@ export interface PipelineChainSurfaceView {
   nextScheduledRun: string | null;
 }
 
-function aggregateStageStatus(
+/**
+ * Issue #4359 — the one stage-status roll-up: a stage's units decide its
+ * verb (any failure wins, then running, then stopped, then cancelled).
+ * Exported so the Workflow Runs projection reads the same rule instead of
+ * a second copy of it.
+ */
+export function aggregateStageStatus(
   views: JobStageView[],
 ): { status: PipelineChainStageStatus; units: number; completedUnits: number; error: string | null } {
   const units = views.flatMap((v) => v.units);

@@ -119,7 +119,7 @@ import type {
   JobInstanceRecord,
   JobScheduleConfig,
 } from "../../data/jobPipelinePorts";
-import type { JobStatusView } from "../../services/jobPipelineEngine";
+import type { JobStagesRead, JobStatusView } from "../../services/jobPipelineEngine";
 import {
   resolveFeedJob,
   type FeedJobSurfaceView,
@@ -304,6 +304,12 @@ export interface ScheduledAgentDoorStub {
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
   getPipelineChainSurfaceStatus(jobId: string): Promise<PipelineChainSurfaceView>;
   listPipelineChainSurfaceStatuses(): Promise<PipelineChainSurfaceView[]>;
+  /**
+   * Issue #4359 — the Workflow Runs stage read: one batch call for the
+   * page's engine job ids, each entry carrying the checkpoint's views
+   * and the run they describe.
+   */
+  getPipelineRunStages(jobIds: string[]): Promise<Record<string, JobStagesRead>>;
   stopPipelineChainStage(jobId: string, stage: string): Promise<JobInstanceRecord>;
   resumePipelineChainStage(
     jobId: string,

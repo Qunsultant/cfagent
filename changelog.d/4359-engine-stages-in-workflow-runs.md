@@ -1,0 +1,7 @@
+### Fixed
+
+- **Workflow Runs now shows a run's real engine stages — six of them, with start, end and duration (#4359, the [Stage visibility] programme's first fix):** a screen run reads its stages from the engine's own checkpoint through the job-status surface, so a stock screen renders **feed · enrich · analyze · store · serve · deliver** instead of the single bridge-row stage that made the incident run read "0/1 completed". Running runs show their live stages; completed runs keep them. A run with no checkpoint keeps an honest empty stage list — never a 500, never a dropped row — and another run's checkpoint is never projected onto this run's row. #autoclaw-001
+
+### Added
+
+- **Per-unit start and end are recorded at checkpoint-write time (#4359):** `StageUnitCheckpoint` gains `startedAt` (stamped when the unit starts; a retry never rewinds it) and `endedAt` (stamped on the terminal transition — completed, failed, timed_out, cancelled, retired; `stopped` is resumable and keeps its end open). `JobStageView` carries both per unit and rolls them up per stage with a `durationMs` computed from the stamps. Nothing is estimated by the surface, and the batch read is capped by configuration (`WORKFLOW_RUNS_STAGE_READ_LIMIT`).

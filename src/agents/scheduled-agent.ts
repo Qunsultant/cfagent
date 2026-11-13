@@ -122,7 +122,8 @@ import type {
   JobInstanceRecord,
   JobDefinition,
 } from "../data/jobPipelinePorts";
-import type { JobStatusView } from "../services/jobPipelineEngine";
+import type { JobStagesRead, JobStatusView } from "../services/jobPipelineEngine";
+import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRead";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import {
   buildFeedJobSurfaceView,
@@ -1020,6 +1021,30 @@ export class ScheduledAgent extends PortThink {
     const control = createScheduledAgentPipelineControl(ctx);
     await ensureScheduledAgentPipelineJobs(ctx, control);
     return control.getJob(jobId);
+  }
+
+  /**
+   * Issue #4359 — the Workflow Runs stage read: one batch call for the
+   * page's engine job ids. Same projection as getPipelineJobStatus
+   * (control.getJobStages), never a second stage-read mechanism. An
+   * unknown id is skipped, never invented into a stage list.
+   */
+  async getPipelineRunStages(jobIds: string[]): Promise<Record<string, JobStagesRead>> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    const limit = resolveWorkflowRunsStageReadLimit({
+      WORKFLOW_RUNS_STAGE_READ_LIMIT: (this.env as unknown as Record<string, string | undefined>)
+        .WORKFLOW_RUNS_STAGE_READ_LIMIT,
+    });
+    const out: Record<string, JobStagesRead> = {};
+    for (const jobId of [...new Set(jobIds)].slice(0, limit)) {
+      try {
+        out[jobId] = await control.getJobStages(jobId);
+      } catch {
+        // Not an engine job (no definition on this host): no entry.
+      }
+    }
+    return out;
   }
 
   /** Every pipeline job definition this host manages. */

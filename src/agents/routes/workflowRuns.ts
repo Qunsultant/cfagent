@@ -51,6 +51,9 @@ import {
   scheduleRunsFromItems,
 } from "../../services/workflowLifecycle";
 import { mapSagaAuditToJobs, readSagaAuditRows } from "./sagaStatus";
+import { getScheduledAgentDoor } from "../orchestrator/meshDoors";
+import { resolveWorkflowRunsStageReadLimit } from "../../config/workflowRunsStageRead";
+import type { JobStageView, JobStagesRead } from "../../services/jobPipelineEngine";
 
 export interface WorkflowRunsSql {
   exec: (query: string, ...args: unknown[]) => Iterable<unknown>;
@@ -87,6 +90,14 @@ export interface WorkflowRunsRouteContext {
    * storeErrors and never hides the other runs.
    */
   scanRunReader?: (limit: number) => Promise<ScanRunSummary[]>;
+  /**
+   * Issue #4359 — the engine's stage read for this page's runs. One
+   * batch call keyed by engine job id; each entry carries the views and
+   * the run id the checkpoint describes. Production builds this from
+   * the ScheduledAgent door (getPipelineRunStages); tests inject a map.
+   * A failing read is named in storeErrors and never hides the runs.
+   */
+  jobStageReader?: (jobIds: string[]) => Promise<Map<string, JobStagesRead>>;
 }
 
 const DEFAULT_LIMIT = 40;
@@ -536,6 +547,23 @@ export async function readScheduleItemsFromOrchestrator(env: unknown): Promise<u
   return Array.isArray(body?.schedules) ? body.schedules : [];
 }
 
+/**
+ * Issue #4359 — the page's engine stages in one call. The ScheduledAgent
+ * answers from its own pipeline store through the same projection its
+ * job-status surface serves (getPipelineRunStages → getJobStages), so the
+ * runs page and the job surfaces cannot disagree about a stage. A door
+ * that cannot answer throws; the caller names the failure in storeErrors.
+ */
+export async function readPipelineRunStagesFromScheduledAgent(
+  env: unknown,
+  jobIds: string[],
+): Promise<Map<string, JobStagesRead>> {
+  if (jobIds.length === 0) return new Map();
+  const door = getScheduledAgentDoor(env as never);
+  const body = await door.getPipelineRunStages(jobIds);
+  return new Map(Object.entries(body ?? {}));
+}
+
 export async function handleWorkflowRunsRoutes(
   request: Request,
   url: URL,
@@ -772,6 +800,9 @@ export async function handleWorkflowRunsRoutes(
   // failed D1 read is named in storeErrors and never hides the
   // other runs, exactly like the saga and schedule reads above.
   let jobRunRecordRuns: WorkflowRun[] = [];
+  // Issue #4359 — the D1 records that stay standalone (no bridge row in
+  // this window) keep their identity for the stage read below.
+  let keptJobRunRecords: JobRunRecord[] = [];
   if (ctx.env !== undefined) {
     try {
       const reader =
@@ -796,7 +827,7 @@ export async function handleWorkflowRunsRoutes(
       // standalone; unlinked records (asyncJobId null) are
       // untouched, so pre-slice rows render as today.
       keptRecords = keptRecords.filter((r) => !d1RecordLinkedToJobs(r, jobs));
-      jobRunRecordRuns = keptRecords.map(runFromJobRunRecord);
+      keptJobRunRecords = keptRecords;
     } catch (err) {
       storeErrors.jobRunRecords = err instanceof Error ? err.message : String(err);
     }
@@ -804,6 +835,49 @@ export async function handleWorkflowRunsRoutes(
     storeErrors.jobRunRecords =
       "skipped: no environment available to read the D1 job run records";
   }
+
+  // Issue #4359 — the page's engine stages, one batch call. The ids are
+  // every run row's job id (for a chat screen the bridge row IS the
+  // engine job id, #4357) plus each standalone D1 record's job id. The
+  // read is fail-soft and named: a stage read that cannot answer never
+  // hides a run, and a run with no checkpoint renders an honest empty
+  // stage list.
+  const stageReads = new Map<string, JobStagesRead>();
+  if (ctx.env !== undefined) {
+    const stageLimit = resolveWorkflowRunsStageReadLimit(
+      ctx.env as { WORKFLOW_RUNS_STAGE_READ_LIMIT?: string },
+    );
+    const stageIds = [
+      ...new Set([...jobs.map((job) => job.job_id), ...keptJobRunRecords.map((r) => r.jobId)]),
+    ].slice(0, stageLimit);
+    if (stageIds.length > 0) {
+      try {
+        const reader =
+          ctx.jobStageReader ??
+          ((ids: string[]) => readPipelineRunStagesFromScheduledAgent(ctx.env, ids));
+        for (const [jobId, read] of await reader(stageIds)) stageReads.set(jobId, read);
+      } catch (err) {
+        storeErrors.jobStages = err instanceof Error ? err.message : String(err);
+      }
+    }
+  }
+  const engineStages = new Map<string, JobStageView[]>();
+  for (const [jobId, read] of stageReads) {
+    if (read.stages.length > 0) engineStages.set(jobId, read.stages);
+  }
+  // Identity (issue #4359): a checkpoint is projected onto a standalone
+  // record only when the checkpoint's run id IS the record's engine run
+  // id (workflowId). Another run's stages are never shown under this
+  // record, and a record with no engine run id keeps an empty list.
+  const stagesForRecord = (record: JobRunRecord): JobStageView[] | null => {
+    const read = stageReads.get(record.jobId);
+    if (!read || read.stages.length === 0) return null;
+    if (!record.workflowId || read.checkpointRunId !== record.workflowId) return null;
+    return read.stages;
+  };
+  jobRunRecordRuns = keptJobRunRecords.map((record) =>
+    runFromJobRunRecord(record, stagesForRecord(record)),
+  );
 
   // Issue #4069 (Option B for options): the scanner's scan-run rows
   // join the list as their own runs — scanner legs write no canonical
@@ -867,6 +941,9 @@ export async function handleWorkflowRunsRoutes(
     reportsOnly,
     reportDocs,
     extraRuns: [...sagaRuns, ...scheduleRuns, ...jobRunRecordRuns, ...scanRuns],
+    // Issue #4359 — the engine's own stages for the grouped runs. A
+    // group with no entry keeps the job-row projection.
+    engineStages,
   });
   return Response.json({
     count: page.runs.length,
