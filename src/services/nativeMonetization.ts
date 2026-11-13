@@ -43,12 +43,13 @@
  *   counter; trial/Subscribed runs use included runs, not the
  *   counter. No counter wired = today's behavior (no free runs).
  * - Manual runs: subscription included runs first, then the
- *   runs-pack balance (#3246 slice 3), then credits, then
- *   checkout (402). A pack run is spent at decision time, and
- *   only after price resolution (an unapproved family price
- *   fails closed before the pack is read).
- * - Scheduled runs: subscription included runs, pack balance,
- *   or credits only, never unattended
+ *   code-runs balance (#3307 slice 2), then the runs-pack
+ *   balance (#3246 slice 3), then credits, then checkout (402).
+ *   A code run is spent at decision time, and only after price
+ *   resolution (an unapproved family price fails closed before
+ *   the balance is read).
+ * - Scheduled runs: subscription included runs, code-runs
+ *   balance, pack balance, or credits only, never unattended
  *   card, EXCEPT a one-off scheduled run authorized by a human
  *   present at submission (scheduleKind "one_off" +
  *   authorizedAtSubmission), which may checkout at submission.
@@ -96,6 +97,7 @@ import type { PriceCatalogue, PriceFamily } from "../data/priceCataloguePorts";
 import { isUnlimitedFreeGrantActive, type UnlimitedFreeGrant } from "../data/commercialPorts";
 import { freeRunMonthKey, type FreeRunCounter } from "../data/freeRunCounterPorts";
 import type { RunsPackBalancePort } from "../data/runsPackPorts";
+import type { CodeRunsBalancePort } from "../data/referralCodePorts";
 import {
   approvedFreeQuotaPeriodKey,
   type ApprovedFreeQuota,
@@ -194,6 +196,22 @@ export interface NativeMonetizationConfig {
    * (NQ6): the same balance covers any family's run.
    */
   runsPackBalance?: RunsPackBalancePort | null;
+  /**
+   * Issue #3307 slice 2 — the code-runs balance port. When wired,
+   * a code-runs balance covers a run AFTER subscription included
+   * runs and BEFORE the runs-pack balance: one code run is
+   * consumed at decision time (a conditional decrement with an
+   * applied-check, so a concurrent double-spend is refused).
+   * When absent, no code balance exists and the gate keeps
+   * today's behavior. Code runs spend only after price
+   * resolution — resolveChargePricing throws on a missing /
+   * unapproved catalogue price before the balance is read — so
+   * a code never covers a run whose family price is not
+   * approved (NQ7). Code runs are family-agnostic: the same
+   * balance covers any family's run. No journal entry, no
+   * money moved — a code run is a granted run, not a purchase.
+   */
+  codeRunsBalance?: CodeRunsBalancePort | null;
   /**
    * The checkout ports bundle, or null when nothing is configured.
    * Null means: no checkout can be minted and no payment can be
@@ -364,6 +382,38 @@ export class NativeMonetizationGate {
     }
   }
 
+  /**
+   * Issue #3307 slice 2 — code-runs coverage, read at decision
+   * time. Returns "code_runs" when one code run was spent, null
+   * when the port is unbound or the balance is empty. A store
+   * error degrades the same way the quota store does
+   * (tech-standards §13): the failure is logged as a structured
+   * aspect event and the run falls through to packs/credits/
+   * checkout, so a store blip never fails a run and never grants
+   * an unverified code run. Callers invoke this only AFTER
+   * resolveChargePricing, so a code never spends on a run whose
+   * family price is missing or unapproved (NQ7).
+   */
+  private async readCodeRunsCoverage(login: string): Promise<"code_runs" | null> {
+    const port = this.config.codeRunsBalance ?? null;
+    if (!port) return null;
+    try {
+      const consumed = await port.consumeCodeRun({ login });
+      return consumed.allowed ? "code_runs" : null;
+    } catch (err) {
+      logAspectEvent({
+        aspect: "ReferralCode",
+        operationName: "gate-code-runs-check",
+        code: "FAILURE_CODE_RUNS_UNAVAILABLE",
+        level: "warn",
+        message: "Code-runs balance store read failed; falling through to packs/credits/checkout (fail-closed).",
+        error: err instanceof Error ? err.message : String(err),
+        metadata: { login },
+      });
+      return null;
+    }
+  }
+
   async check(run: NativeCheckInput): Promise<NativeGateDecision> {
     const { account } = run;
     if (!account.userId || !account.email) throw new Error("Verified user id and email are required");
@@ -515,25 +565,34 @@ export class NativeMonetizationGate {
     const priceUSD = pricing.priceUSD;
     const { productId, versionId } = pricing;
 
-    // Issue #3246 slice 3 — the runs-pack step: AFTER subscription
-    // included runs, BEFORE credits (NQ1). The included condition
-    // is evaluated once here so the pack is never read — and never
-    // spent — when included runs cover the run. The pack read
-    // happens after price resolution above, so an unapproved
-    // family price throws before any pack run is spent (NQ7).
+    // Issue #3307 slice 2 — the code-runs step: AFTER subscription
+    // included runs, BEFORE the runs-pack balance (free-before-paid
+    // within the priced branches). The included condition is
+    // evaluated once here so the code balance is never read — and
+    // never spent — when included runs cover the run; the pack is
+    // never read when code runs cover it, so one run never spends
+    // two balances. The code read happens after price resolution
+    // above, so an unapproved family price throws before any code
+    // run is spent (NQ7).
     const hasIncludedRuns = account.tier === "Subscribed" && account.includedRunsRemaining > 0;
-    const packCovered = !hasIncludedRuns && (await this.readPackCoverage(account.userId)) !== null;
+    const codeCovered = !hasIncludedRuns && (await this.readCodeRunsCoverage(account.userId)) !== null;
+    const packCovered =
+      !hasIncludedRuns && !codeCovered && (await this.readPackCoverage(account.userId)) !== null;
     const coverage = hasIncludedRuns
       ? "subscription_included"
-      : packCovered
-        ? "runs_pack"
-        : account.creditsUSD >= priceUSD
-          ? "credits"
-          : null;
+      : codeCovered
+        ? "code_runs"
+        : packCovered
+          ? "runs_pack"
+          : account.creditsUSD >= priceUSD
+            ? "credits"
+            : null;
     if (coverage) {
       if (coverage === "subscription_included") account.includedRunsRemaining -= 1;
       else if (coverage === "credits") account.creditsUSD = Math.round((account.creditsUSD - priceUSD) * 100) / 100;
-      // runs_pack: the run was already spent inside readPackCoverage; nothing to mutate on the account row.
+      // code_runs / runs_pack: the run was already spent inside
+      // readCodeRunsCoverage / readPackCoverage; nothing to mutate
+      // on the account row.
       this.byRun.set(run.id, { runRequestId: run.id, userId: account.userId, tenantId: run.tenantId ?? account.tenantId, family: run.family, trigger: run.trigger, priceUSD, status: "paid", paidVia: coverage, productId, versionId });
       return { allowed: true, status: "paid", runRequestId: run.id, priceUSD, paidVia: coverage, productId, versionId };
     }

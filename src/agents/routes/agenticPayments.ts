@@ -7698,9 +7698,10 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // Issue #2657: the durable referrer→referred link #2208 named as
   // follow-up. Set-once per referred user (same referrer replays as a
   // no-op; a different referrer throws — never a silent overwrite).
-  // The route always stamps source "operator": referral-code surfaces
-  // (e.g. #2468 Phase 4 marketing) will write `code` rows through their
-  // own route later; no client input can claim a code source here.
+  // The route always stamps source "operator": referral-code
+  // redemptions write `code` rows through the redeem service
+  // directly (see POST /referral-codes/redeem); no client input
+  // can claim a code source here.
   // Attribution alone earns nothing — it only lets the submit path's
   // automatic earn trigger know whom to credit on first paid run.
   if (path.endsWith("/payments/agentic/commercial/referral/attribute") && request.method === "POST") {

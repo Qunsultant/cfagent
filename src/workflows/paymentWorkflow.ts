@@ -159,6 +159,11 @@ import {
 } from "../data/createRunsPackPorts";
 import type { RunsPackBalancePort } from "../data/runsPackPorts";
 import {
+  createReferralCodeAdapters,
+  ensureReferralCodeSchema,
+} from "../data/createReferralCodePorts";
+import type { CodeRunsBalancePort } from "../data/referralCodePorts";
+import {
   mapChargeToJournalEntries,
   mapFailureCreditToJournalEntries,
 } from "../data/journalPorts";
@@ -394,6 +399,33 @@ export class PaymentWorkflow extends ThinkWorkflow<
       });
       runsPackBalance = null;
     }
+    // Issue #3307 slice 2: the code-runs balance, wired from the
+    // same AGENT_DB binding. Best-effort like the pack balance
+    // (not fatal like the catalogue): a code adapter that cannot
+    // be ensured leaves the gate exactly as today — a code balance
+    // simply does not cover the run — so a wiring failure never
+    // fails a payment and never grants an unverified code run. No
+    // console call here: the #3515 ratchet pins this file's
+    // ceiling at 9.
+    let codeRunsBalance: CodeRunsBalancePort | null = null;
+    try {
+      const codes = createReferralCodeAdapters(this.env as { AGENT_DB?: unknown });
+      if (codes) {
+        await ensureReferralCodeSchema(codes.rules.db);
+        codeRunsBalance = codes.balances;
+      }
+    } catch (err) {
+      logAspectEvent({
+        aspect: "ReferralCode",
+        operationName: "wire-code-runs-balance",
+        code: "FAILURE_CODE_RUNS_UNAVAILABLE",
+        level: "warn",
+        message: `Code-runs balance unavailable for run ${p.runRequestId} — gate keeps today's behavior (no code coverage).`,
+        error: err instanceof Error ? err.message : String(err),
+        metadata: { runRequestId: p.runRequestId },
+      });
+      codeRunsBalance = null;
+    }
     const gate = new NativeMonetizationGate(
       {
         // Flagship feature flag "monetization" (#2043): OFF = free
@@ -409,6 +441,7 @@ export class PaymentWorkflow extends ThinkWorkflow<
         freeRunCounter,
         approvedFreeQuota,
         runsPackBalance,
+        codeRunsBalance,
         checkout: checkoutPorts,
       },
     );
@@ -649,6 +682,12 @@ export class PaymentWorkflow extends ThinkWorkflow<
           await ensureCommercialSchema(adapter.db);
           if (use.paidVia === "subscription_included") {
             await adapter.consumeIncludedRun(use.userId);
+          } else if (use.paidVia === "code_runs") {
+            // Issue #3307 slice 2: the code run was already spent
+            // at gate-decision time (consumeCodeRun, applied-check)
+            // — the workflow consumes nothing more here, exactly
+            // like the runs-pack path. No journal entry: a code
+            // run is a granted run, not a purchase.
           } else if (use.paidVia === "runs_pack") {
             // Issue #3246 slice 3: the pack run was already spent
             // at gate-decision time (consumePackRun, applied-check)

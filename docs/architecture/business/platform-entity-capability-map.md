@@ -75,6 +75,21 @@ track not started — the target in §5, not current state).
   preferences (1 : 0..1 per login, plus denormalized `tenantId`); store
   operators (login list); audit policy (global) vs audit chain
   (tenant-scoped hashes).
+- **Referral codes (#3307).** Rules (`agent_referral_code_rules`: one row
+  per product × issuer — `platform_admin` | `tenant_admin` | `user` —
+  carrying runs per code, reusability, expiry, attribution mode, caps,
+  and `active`); codes (`agent_referral_codes`: SHA-256 hash + display
+  prefix only, snapshot terms, tenant scope, revocation); redemptions
+  (`agent_code_redemptions`, the audit + idempotency record) with
+  per-(code, login) counters (`agent_code_redemption_counts`); code-runs
+  balances (`agent_code_run_balances`: one row per login,
+  family-agnostic, no expiry, no clawback). Rules are global operator
+  data (no tenant column); codes issued by a tenant admin carry a
+  tenant scope; balances are login-keyed, never tenant-partitioned.
+  The gate spends the balance after subscription included runs and
+  before runs-pack runs; a failed code-covered run issues no failure
+  credit. Codes confer runs only — never tier, never credits, never
+  a price, never access.
 
 ```mermaid
 erDiagram
@@ -87,6 +102,10 @@ erDiagram
     VERSION ||--o{ SUBSCRIPTION : "held by (planId)"
     ACCOUNT ||--o{ VERSION-MOVE : "moved, audited"
     LOGIN ||--o| NOTIFICATION-PREFS : "has at most one"
+    PRODUCT ||--o{ REFERRAL-CODE-RULE : "configures per issuer"
+    REFERRAL-CODE-RULE ||--o{ REFERRAL-CODE : "issues"
+    LOGIN ||--o| CODE-RUNS-BALANCE : "holds"
+    REFERRAL-CODE ||--o{ CODE-REDEMPTION : "redeemed as"
     TENANT-ID ||--o| TENANT-SETTINGS : "has at most one row"
     PLATFORM-CONSOLE ||--o{ ADMIN-SLICE : "hosts"
     ADMIN-SLICE }|--|| TENANT-ID : "administers (tenants slice)"

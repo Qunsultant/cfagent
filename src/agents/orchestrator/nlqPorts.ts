@@ -744,6 +744,8 @@ function paymentTerminalNote(outcome: string | null, instanceStatus: string, run
       return `payment run ${runRequestId} expired before payment completed — no screen was started and no charge was confirmed`;
     case "screener_failed_credit_issued":
       return `payment run ${runRequestId} was covered/paid but the screener failed to start — a one-time replacement-run credit was issued for it (automatic compensation is a credit, not a cash refund)`;
+    case "screener_failed_no_credit":
+      return `payment run ${runRequestId} was covered by free code runs but the screener failed to start — no replacement credit was issued, because the run was free (a code run is not a purchase)`;
     default:
       return `payment run ${runRequestId} ended (workflow status "${instanceStatus}"${outcome ? `, outcome "${outcome}"` : ""}) without starting the screen`;
   }
