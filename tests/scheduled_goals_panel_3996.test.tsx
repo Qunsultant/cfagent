@@ -111,8 +111,12 @@ function setInput(el: HTMLInputElement | HTMLSelectElement, value: string) {
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+// Issue #4333: the panel is sub-tabbed, so a tab and a control can share
+// a label ("Add goal"). "A button by text" means a control, never a tab.
 function buttonByText(text: string): HTMLButtonElement {
-  const el = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === text);
+  const el = Array.from(container.querySelectorAll("button")).find(
+    (b) => b.getAttribute("role") !== "tab" && b.textContent === text,
+  );
   if (!el) throw new Error(`button ${text} not found`);
   return el as HTMLButtonElement;
 }

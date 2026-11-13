@@ -726,7 +726,10 @@ describe("S3-P06 the goals view reads the one consolidated ledger (#3121)", () =
     expect(panel).toContain("listAllRuns");
     expect(panel).not.toContain("listGoalRuns");
     expect(panel).toContain("normalizeJobRunRecord");
-    expect(panel).toContain("ledgerLinkageCell");
+    // Issue #4333: the runs ARE the ledger's, so this section hands the
+    // reader to `kind=goal` instead of rendering the linkage cells itself.
+    expect(panel).toContain('navigateToTab("schedules", "runs", { kind: "goal" })');
+    expect(panel).not.toContain("ledgerLinkageCell");
     expect(panel).toContain("Recent goal runs");
     expect(panel).toContain("provenance not recorded");
     // The runs read is isolated: a ledger-read failure never fails
