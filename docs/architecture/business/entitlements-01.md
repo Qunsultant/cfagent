@@ -93,7 +93,7 @@ The matrix above is the **decided** model. One part of it is **not yet shipped**
 - **The counting period is a month** (owner, 2026-11-05 ~06:43 EST). The 10 runs are counted per product per calendar month; the count resets monthly.
 - **The unlimited-free grant (§5.1) overrides the cap** for an approved account: a grant-covered run consumes no free run and is never blocked by the cap. The grant is the exception mechanism for approved accounts; the 10-run cap is the default for everyone else.
 - **A Free account without a grant and with its allowance left** runs under the "Free, no grant (allowance left)" row of the matrix (§3). This resolves the conflict #3241 named (a Free account under monetization ON could not run a manual screen) **for every Free account up to the cap**, and without limit for approved accounts via the grant.
-- **Free-for-lifetime** (#3247: access free forever, any activity requires payment) is a separate filed option. Decided 2026-11-11 (owner): build it, configurable/revocable, plus a free-for-a-limited-time variant. It grants no runs by itself.
+- **Free-for-lifetime** (#3247: access free forever, any activity requires payment) is a separate filed option. Decided 2026-11-11 (owner): build it, configurable/revocable, plus a free-for-a-limited-time variant. It grants no runs by itself. Shipped as #3247 slices 1–2: the server half (migration 0064, port, grant/revoke routes, gate pin) in PR #4370, and the client half (grant/revoke UI in Platform Admin → Accounts, the offer mention, and the billing-tab line) in PR #4388.
 
 ### 4.2 Per-plan included-run counts — DECIDED: Free 10, Basic 20, Premium 30 (per product per month)
 
