@@ -184,6 +184,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Issue #4354 — the cadence column holds its sentence, and the scope column
+ * holds its value in full: both were squeezed, so a row ran to three-plus
+ * lines and the scope clipped. The table keeps its horizontal scroll. */
+.schedule-row-cadence {
+  min-width: 220px;
+}
+
+.schedule-row-scope {
+  min-width: 260px;
+}
+
 .schedule-row-summary {
   display: block;
   max-width: 320px;

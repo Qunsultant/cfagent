@@ -26,6 +26,10 @@
  *     inline-style idiom (section container, error/empty states, run
  *     rows); converting the whole panel to primitives is S5 surface
  *     work, not S3; no other inline styles added.
+ *     Issue #4353 raises SchedulesPanel 20 -> 21: the section's own
+ *     description joins its heading on one row (one more
+ *     `schedule-row-muted` occurrence; the stacked caption it replaces
+ *     was a table caption, not a class).
  *     Issue #3996 raises ScheduledGoalsPanel 28 -> 34: the new
  *     "Built-in goal" dropdown notices and the "Seed all built-in
  *     goals" section follow the panel's existing inline-style idiom
