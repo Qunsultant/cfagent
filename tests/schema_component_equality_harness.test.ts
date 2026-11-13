@@ -67,6 +67,7 @@ describe("DDL parser — real shared-table DDL (#4282 P0)", () => {
       "mas_events",
       "mas_memory",
       "mas_messages",
+      "mas_promotions",
       "mas_referrals",
       "mas_transactions",
       "mas_watchlists",
@@ -103,6 +104,18 @@ describe("DDL parser — real shared-table DDL (#4282 P0)", () => {
       "reward_text:TEXT:pk0",
       "clicks:INTEGER:pk0",
       "signups:INTEGER:pk0",
+      "created_at:TEXT:pk0",
+    ]);
+    // Issue #4412 (#1257 fix): the restored mas_promotions table, exact
+    // #760 DDL verbatim — same columns as ensurePromotionsTable() ran.
+    expect(columns("mas_promotions")).toEqual([
+      "id:TEXT:pk1",
+      "candidate_id:TEXT:pk0",
+      "stage:TEXT:pk0",
+      "stage_started_at:TEXT:pk0",
+      "baseline_json:TEXT:pk0",
+      "applied_json:TEXT:pk0",
+      "last_check_json:TEXT:pk0",
       "created_at:TEXT:pk0",
     ]);
     expect(columns("mas_transactions")).toEqual([
