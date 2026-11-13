@@ -6,8 +6,8 @@
  *    the shared scroll frame — one frame per tab, not one for the page.
  *  - 4330-P02 the frame gives BOTH axes: a long ledger scrolls vertically, a
  *    wide table horizontally.
- *  - 4330-P03 the height clamp is the Docs run-list clamp (`min(68vh, 46rem)`),
- *    so the product's long tables scroll identically.
+ *  - 4330-P03 the height comes from the shared `--panel-scroll-max-height`
+ *    token (the Docs run-list clamp), so the long tables scroll identically.
  *  - 4330-P04 the frame is a design-system utility (`ui-` class in the
  *    primitives sheet), not a bespoke page class — the interior-consistency
  *    gate (#3991) counts bespoke classes and the bespoke-CSS freeze (#3047)
@@ -47,7 +47,7 @@ describe("4330-P03 the shared viewport clamp", () => {
       primitives.indexOf(".ui-scroll-frame"),
       primitives.indexOf(".ui-scroll-frame") + 300,
     );
-    expect(rule).toContain("max-height: min(68vh, 46rem)");
+    expect(rule).toContain("max-height: var(--panel-scroll-max-height)");
     expect(rule).toContain("scrollbar-gutter: stable");
   });
 });
