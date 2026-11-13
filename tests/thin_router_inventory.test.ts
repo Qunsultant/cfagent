@@ -435,6 +435,16 @@
  * pinned inventory to 458 entries (456 measured on the slice-1
  * head); the delegation sequence is unchanged (same handler,
  * same position).
+ *
+ * Issue #3247 (slice 1) added three — POST
+ * /payments/agentic/commercial/free-access/grant, POST
+ * /payments/agentic/commercial/free-access/revoke, and GET
+ * /payments/agentic/commercial/free-access (in
+ * handleAgenticPaymentsRoutes, after the referral routes,
+ * before the lifecycle routes, in source order) — bringing the
+ * pinned inventory to 461 entries (458 measured on main
+ * before this slice); the delegation sequence is unchanged
+ * (same handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -742,6 +752,9 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/balance\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/record-earn\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/attribute\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/free-access/grant\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/free-access/revoke\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/free-access\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/preferences\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/preferences\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/lifecycle/welcome\")",

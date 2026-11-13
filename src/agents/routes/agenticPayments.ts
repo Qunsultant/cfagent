@@ -125,6 +125,11 @@ import {
   ensureFreeRunCounterSchema,
 } from "../../data/createFreeRunCounterPorts";
 import { FREE_RUN_FAMILIES } from "../../data/freeRunCounterPorts";
+import {
+  createFreeAccessGrantAdapter,
+  ensureFreeAccessGrantSchema,
+} from "../../data/createFreeAccessGrantPorts";
+import { assertFreeAccessGrantInput } from "../../data/freeAccessGrantPorts";
 import { createApprovedFreeQuotaAdapter } from "../../data/createApprovedFreeQuotaPorts";
 import {
   APPROVED_FREE_QUOTA_FAMILIES,
@@ -7202,6 +7207,172 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       return Response.json({ attribution });
     } catch (err: any) {
       return Response.json({ error: err.message || "Failed to record referral attribution" }, { status: 500 });
+    }
+  }
+
+  // Issue #3247 (sub-issue of #3241), slice 1 — free-access
+  // grant routes (operator grant/revoke; own-or-operator read).
+  // A grant is the durable, revocable record of free ACCESS for
+  // one login — it confers no tier, no included runs, and makes
+  // no run free (the gate never reads it). The grant target must
+  // have an account row (400 otherwise — the operator creates
+  // the account first, mirroring the #3244 subscription-grant
+  // route); the tenant for the audit comes from the target's
+  // account row, never from a client-supplied tenantId, and
+  // grantedBy is the session-verified operator login, never a
+  // client-supplied value. Not gated on the monetization flag:
+  // a grant is operator data, like an operator tier grant, not
+  // a purchase. No money artifacts: no checkout, no
+  // journal/ledger/claim writes.
+  const requireFreeAccessGrant = async () => {
+    const adapter = createFreeAccessGrantAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (!adapter) {
+      return Response.json({ error: "Free-access grant store unavailable: AGENT_DB is not bound." }, { status: 503 });
+    }
+    try {
+      await ensureFreeAccessGrantSchema(adapter.db);
+    } catch (err: any) {
+      return Response.json({ error: `Free-access grant store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+    }
+    return adapter;
+  };
+
+  // POST /payments/agentic/commercial/free-access/grant (operator only)
+  if (path.endsWith("/payments/agentic/commercial/free-access/grant") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        userId?: unknown; kind?: unknown; expiresAtMs?: unknown; reason?: unknown;
+      };
+      const userId = typeof body.userId === "string" ? body.userId.trim() : "";
+      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
+      // Validate before any write, so a bad grant is 400 and
+      // grants nothing. grantedBy is the session login, never
+      // read from the body; a client-supplied tenantId is
+      // ignored (never read).
+      let validated;
+      try {
+        validated = assertFreeAccessGrantInput(
+          { login: userId, kind: body.kind, expiresAtMs: body.expiresAtMs, reason: body.reason, grantedBy: login },
+          Date.now(),
+        );
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Invalid free-access grant." }, { status: 400 });
+      }
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      try {
+        await ensureCommercialSchema(store.db);
+      } catch (err: any) {
+        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const targetAccount = await store.getAccount(userId);
+      if (!targetAccount) {
+        return Response.json({ error: `No commercial account for user ${userId}. The operator creates the account first.` }, { status: 400 });
+      }
+      const grants = await requireFreeAccessGrant();
+      if (grants instanceof Response) return grants;
+      const { granted, replaced } = await grants.grant({ ...validated, nowMs: Date.now() });
+      // Audit the replace pair in order: the revoked row first,
+      // then the new grant. Audit failure follows the #3245
+      // upsert convention: synchronous ctx.audit, unguarded —
+      // a failure throws into the catch below.
+      if (replaced) {
+        ctx.audit("commercial.free_access.revoked", "payments", {
+          userId,
+          tenantId: targetAccount.tenantId,
+          revokedBy: login,
+          kind: replaced.kind,
+        });
+      }
+      ctx.audit("commercial.free_access.granted", "payments", {
+        userId,
+        tenantId: targetAccount.tenantId,
+        grantedBy: login,
+        kind: granted.kind,
+        reason: granted.reason,
+        expiresAtMs: granted.expiresAtMs,
+      });
+      return Response.json({ granted, replaced });
+    } catch (err: any) {
+      const message = err.message || "Failed to grant free access";
+      return Response.json({ error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/free-access/revoke (operator only)
+  if (path.endsWith("/payments/agentic/commercial/free-access/revoke") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { userId?: unknown; reason?: unknown };
+      const userId = typeof body.userId === "string" ? body.userId.trim() : "";
+      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
+      if (body.reason !== undefined && body.reason !== null && typeof body.reason !== "string") {
+        return Response.json({ error: "reason must be a string." }, { status: 400 });
+      }
+      // An optional reason rides the audit event only — the row
+      // carries no revoke reason.
+      const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : undefined;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      try {
+        await ensureCommercialSchema(store.db);
+      } catch (err: any) {
+        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      }
+      const targetAccount = await store.getAccount(userId);
+      if (!targetAccount) {
+        return Response.json({ error: `No commercial account for user ${userId}. The operator creates the account first.` }, { status: 400 });
+      }
+      const grants = await requireFreeAccessGrant();
+      if (grants instanceof Response) return grants;
+      const revoked = await grants.revokeActive(userId, Date.now());
+      if (!revoked) {
+        return Response.json({ error: `No active free-access grant for user ${userId}.` }, { status: 404 });
+      }
+      ctx.audit("commercial.free_access.revoked", "payments", {
+        userId,
+        tenantId: targetAccount.tenantId,
+        revokedBy: login,
+        kind: revoked.kind,
+        ...(reason !== undefined ? { reason } : {}),
+      });
+      return Response.json({ revoked });
+    } catch (err: any) {
+      const message = err.message || "Failed to revoke free access";
+      return Response.json({ error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
+    }
+  }
+
+  // GET /payments/agentic/commercial/free-access?userId= — own or operator.
+  // Mirrors GET /payments/agentic/commercial/referral/balance: the
+  // same shape for self and operator reads (it is the subject's
+  // own record). No audit event on read.
+  if (path.endsWith("/payments/agentic/commercial/free-access") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const userId = url.searchParams.get("userId") ?? "";
+      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
+      if (!canAccessAccount(login, userId)) return Response.json({ error: "Forbidden." }, { status: 403 });
+      const grants = await requireFreeAccessGrant();
+      if (grants instanceof Response) return grants;
+      const nowMs = Date.now();
+      const [active, history] = await Promise.all([
+        grants.getActiveGrant(userId, nowMs),
+        grants.listGrants(userId),
+      ]);
+      return Response.json({ userId, active, history });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to read free-access grants" }, { status: 500 });
     }
   }
 

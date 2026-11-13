@@ -1078,6 +1078,25 @@ export const agentRunsPackDrafts = sqliteTable("agent_runs_pack_drafts", {
 });
 
 /**
+ * Free-access grants (#3247 slice 1, migration 0064): one row
+ * per grant — the durable, auditable, revocable record of free
+ * access for one login. Expired and revoked rows stay as
+ * history; no tenant column (keyed by login; the audit event
+ * carries the tenant from the account row). This schema MAPS
+ * the table; DDL authority lives in migration 0064.
+ */
+export const agentFreeAccessGrants = sqliteTable("agent_free_access_grants", {
+  id: text("id").primaryKey(),
+  login: text("login").notNull(),
+  kind: text("kind").notNull(),
+  grantedBy: text("granted_by").notNull(),
+  grantedAtMs: integer("granted_at_ms").notNull(),
+  expiresAtMs: integer("expires_at_ms"),
+  revokedAtMs: integer("revoked_at_ms"),
+  reason: text("reason").notNull(),
+});
+
+/**
  * Per-customer version moves (#3289 §3.8, migration 0058): one
  * row per customer moved — the audit that answers "what
  * happened to customer X". bulkMoveId is null for a
