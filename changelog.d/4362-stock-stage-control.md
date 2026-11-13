@@ -1,0 +1,3 @@
+### Added
+
+- **A stock run's stages can be driven, not just watched (#4362):** `stock_copilot_stage_control` drives one stage of one stock (engine) run — `run`, `rerun`, `stop`, `resume`, `cancel` — addressed by stage id (`job:root`), stage kind (`feed`) or node path, through the engine's own control plane and behind the same acting-identity gate as the options tool. Workflow Runs rows carry **Re-run / Stop / Resume** on every engine stage, calling `POST /api/jobs/:jobId/stages/:stage/:operation`. An unknown job or stage refuses by name with the stages that exist, a terminal stage refuses with its current state, and after an action the row re-reads the engine so the new state is visible. #autoclaw-001

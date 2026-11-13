@@ -43,6 +43,8 @@ job at a glance, and one stage in detail:
 | `GET /api/jobs/:jobId/status` | the job's status and window, then one entry per stage (sub-job): `stageId`, `kind`, `status`, `startedAt`, `endedAt`, `durationMs`, `units`, `completedUnits`, `error` |
 | `GET /api/jobs/:jobId/stages/:stage` | one entry of the same list, addressed by stage id (`job:root`), stage kind (`feed`) or node path |
 | MCP `get_job_status` / `get_job_stage_status` | the same payloads, read from the same engine status view |
+| `POST /api/jobs/:jobId/stages/:stage/:operation` | drives one stage — `run`, `rerun`, `stop`, `resume`, `cancel` — through the engine's own control plane; the reply names the stage and the resulting state |
+| MCP `stock_copilot_stage_control` | the same control from chat: `(jobId, stage, operation)`, requiring the turn's acting identity |
 
 Both read the engine's own status view through the ScheduledAgent door — the
 same source the Workflow Runs stages use (#4359) — never a second stage source.
