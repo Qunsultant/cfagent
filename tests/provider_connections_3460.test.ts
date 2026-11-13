@@ -175,6 +175,49 @@ describe("resolveScreenSelection — fail closed, no defaults", () => {
     });
   });
 
+  // Issue #4348 (S6) — a deployment's Alpaca key pair binds the connection.
+  // The incident: schedule creation refused `CONNECTION_NOT_BOUND: no
+  // credential ... for this login` for a signed-in owner whose account is
+  // connected with the deployment keys, because the default check asked only
+  // the per-user store.
+  it("binds an Alpaca connection the deployment's key pair covers", async () => {
+    const result = await resolveScreenSelection({
+      env: {
+        ALPACA_PAPER_API_KEY: "PK-DEPLOYMENT",
+        ALPACA_PAPER_SECRET_KEY: "SK-DEPLOYMENT",
+      } as never,
+      userLogin: "owner@example.com",
+      commercial: { getTenantBrokerSelection: async () => "alpaca" },
+      readSettingRaw: () => "TEST",
+      listAccounts: async () => ["acct-1"],
+    });
+    expect(result).toEqual({
+      resolved: true,
+      selection: {
+        connectionId: "alpaca:TEST:owner@example.com",
+        brokerId: "alpaca",
+        environment: "TEST",
+        mode: "paper",
+        externalAccountId: "acct-1",
+      },
+    });
+  });
+
+  it("still refuses, naming both sources, when neither the login nor the deployment holds a pair", async () => {
+    const result = await resolveScreenSelection({
+      env: {} as never,
+      userLogin: "owner@example.com",
+      commercial: { getTenantBrokerSelection: async () => "alpaca" },
+      readSettingRaw: () => "TEST",
+      listAccounts: async () => ["acct-1"],
+    });
+    expect(result.resolved).toBe(false);
+    if (result.resolved) return;
+    expect(result.code).toBe("CONNECTION_NOT_BOUND");
+    expect(result.error).toContain("no stored credential for this login");
+    expect(result.error).toContain("the deployment declares no Alpaca key pair for paper");
+  });
+
   it("refuses CONNECTION_NOT_BOUND when no credential exists for the selection", async () => {
     const result = await resolveScreenSelection(
       readers({ hasCredentials: async () => false }),
