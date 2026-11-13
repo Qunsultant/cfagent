@@ -26,7 +26,7 @@ const HUB_FILE = "src/client/ETradeTradingHub.tsx";
 const CHAT_FILE = "src/client/Chat.tsx";
 
 /** Routes whose panel file renders <PageTemplate> today. Wave 1 extends. */
-const CONFORMING_TEMPLATE_ROUTES = ["risk-analysis", "order"];
+const CONFORMING_TEMPLATE_ROUTES = ["risk-analysis", "order", "options"];
 
 type TemplateState =
   | "template"
@@ -240,6 +240,28 @@ describe("route template gate (#3136)", () => {
     // ui/ primitives, never from a local class.
     expect(src).toContain('from "./components/ui"');
     expect(src).toContain("<CardHeader");
+    expect(src).not.toContain("<PageShell");
+  });
+
+  it("OptionsHub is conforming: title + scopeNote + children only, one PageSection, no layout CSS", () => {
+    const src = readFileSync(join(CLIENT_DIR, "OptionsHub.tsx"), "utf8");
+    // Slots used: title + scopeNote + children workspace only — no
+    // contextStrip / kpiRibbon / actionBar / queueRail props yet.
+    expect(src).toContain("<PageTemplate");
+    expect(countOccurrences(src, "<PageTemplate")).toBe(1);
+    expect(src).toContain('title="Options"');
+    expect(src).toContain("scopeNote=");
+    for (const slot of ["contextStrip=", "kpiRibbon=", "actionBar=", "queueRail="]) {
+      expect(src).not.toContain(slot);
+    }
+    // No layout CSS: no className at all, no stylesheet import.
+    expect(countOccurrences(src, "className")).toBe(0);
+    expect(src).not.toMatch(/\.css["']/);
+    // No <CardHeader requirement (Q6): the DetailCards' CardHeaders
+    // live in the panel's files, not the hub. The file keeps one
+    // <PageSection (S-U1 interior gate: sections >= 1).
+    expect(countOccurrences(src, "<PageSection")).toBe(1);
+    expect(src).toContain('from "./components/ui"');
     expect(src).not.toContain("<PageShell");
   });
 });
