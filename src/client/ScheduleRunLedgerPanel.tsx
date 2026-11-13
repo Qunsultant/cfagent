@@ -41,6 +41,12 @@ import { RunDetailsModal } from "./components/RunDetailsModal";
 import type { RunDetail as DocsRunDetail } from "./runDetails";
 import type { DocumentRow } from "./docsAndReports";
 import {
+  optionsDetailForStart,
+  optionsRunDetailsByStart,
+  type OptionsRunDetail,
+} from "./runLedgerOptionsRuns";
+import type { OptionsRunSummary } from "./scheduledOptionsManager/types";
+import {
   isMissingIdLiteral,
   normalizeJobRunRecord,
   type JobRunRecord,
@@ -150,6 +156,7 @@ function ledgerColumns(
   onJobClick: (jobId: string) => void,
   onAsyncJobClick: (asyncJobId: string) => void,
   getDocs: (jobId: string) => DocumentRow | null,
+  getOptionsDetail: (started: string) => OptionsRunDetail | null,
 ): TableColumn<JobRunRecord>[] {
   return [
   { key: "jobId", header: "Job", render: (r) => (
@@ -244,6 +251,31 @@ function ledgerColumns(
   },
   { key: "summary", header: "Summary", render: (r) => <>{runSummary(r)}</> },
   {
+    // Issue #4332 — the options-runs card's Symbols column, carried onto the
+    // ledger row it belongs to (joined by start instant); "—" when the card
+    // recorded no run at this instant.
+    key: "symbols",
+    header: "Symbols",
+    render: (r) => {
+      const detail = getOptionsDetail(r.started);
+      if (!detail) return <span title="No autonomous options record for this instant">—</span>;
+      return (
+        <span title={detail.symbols.join(", ") || "no symbols recorded"}>
+          {detail.symbols.length > 0 ? detail.symbols.length : "—"}
+        </span>
+      );
+    },
+  },
+  {
+    key: "setups",
+    header: "Actionable setups",
+    render: (r) => {
+      const detail = getOptionsDetail(r.started);
+      if (!detail) return <span title="No autonomous options record for this instant">—</span>;
+      return <span>{detail.withTrades ?? "—"}</span>;
+    },
+  },
+  {
     // Issue #4262 (S4, option A) — what the run PRODUCED, in the same row as
     // what ran. The three per-kind states are the Docs page's own component:
     // a recorded key links, a missing one is an honest dash, a recorded leg
@@ -280,6 +312,11 @@ export function ScheduleRunLedgerPanel({
   const [workflowEntries, setWorkflowEntries] = useState<WorkflowLedgerEntry[]>([]);
   // Issue #4262 (S4, option A) — the reports read: what each run PRODUCED.
   const [reportEntries, setReportEntries] = useState<ReportLedgerEntry[]>([]);
+  // Issue #4332 — the two fields the options-runs card carried (symbols,
+  // actionable setups), joined onto the ledger's own rows by start instant.
+  const [optionsDetails, setOptionsDetails] = useState<ReadonlyMap<string, OptionsRunDetail>>(
+    new Map(),
+  );
   const [docsDetailsOpen, setDocsDetailsOpen] = useState(false);
   const [docsDetail, setDocsDetail] = useState<DocsRunDetail | null>(null);
   const [docsDetailsLoading, setDocsDetailsLoading] = useState(false);
@@ -312,9 +349,21 @@ export function ScheduleRunLedgerPanel({
         // Additive: a failed reports read must not empty the ledger.
         reports = [];
       }
+      let optionRuns: OptionsRunSummary[] = [];
+      try {
+        const res = await apiFetch("/api/options/latest");
+        if (res.ok) {
+          const body = (await res.json()) as { runs?: OptionsRunSummary[] };
+          optionRuns = Array.isArray(body.runs) ? body.runs : [];
+        }
+      } catch {
+        // Additive: a failed options read leaves the two columns as "—".
+        optionRuns = [];
+      }
       setRuns(runs);
       setWorkflowEntries(attached);
       setReportEntries(reports);
+      setOptionsDetails(optionsRunDetailsByStart(optionRuns));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load run ledger");
     } finally {
@@ -394,8 +443,9 @@ export function ScheduleRunLedgerPanel({
         },
         (asyncJobId) => setSelectedAsyncJobId(asyncJobId),
         (jobId) => docsByRunId.get(jobId)?.docs ?? null,
+        (started) => optionsDetailForStart(optionsDetails, started),
       ),
-    [workflowByJobId, docsByRunId, openDocsDetails],
+    [workflowByJobId, docsByRunId, openDocsDetails, optionsDetails],
   );
 
   return (

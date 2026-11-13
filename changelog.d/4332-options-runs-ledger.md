@@ -1,0 +1,3 @@
+### Changed
+
+- **The options-runs card is folded into the one ledger (#4329 S3, #4332):** the "Latest Autonomous Options Runs" card leaves the schedules list, and the two fields it alone carried — a run's **symbols** and its **actionable setups** — are joined onto the ledger's own options rows by the recorded start instant. It is a join, not a second row source: no run is duplicated, a row with no matching record renders an honest "—", and a failed options read leaves the columns empty rather than emptying the ledger. The options manager keeps the card for standalone use (`showLatestRuns`, default true); the schedules home passes false. #autoclaw-001
