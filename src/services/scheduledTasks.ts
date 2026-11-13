@@ -1408,8 +1408,6 @@ export class ScheduledTasksService {
           await import("../features/createFeatureFlagPort")
         ).createFeatureFlagPort(this.env).isEnabled("monetization");
         if (monetizationOn) {
-          const { resolveIaaaTenant } = await import("../security/iaaaGithubEndToEnd");
-          const tenantId = resolveIaaaTenant(this.env);
           const { createPriceCatalogueAdapter, ensurePriceCatalogueSchema } =
             await import("../data/createPriceCataloguePorts");
           const priceCatalogue = createPriceCatalogueAdapter(this.env as { AGENT_DB?: unknown });
@@ -1452,6 +1450,7 @@ export class ScheduledTasksService {
             coverageForAccount,
             resolvePaidScreenAction,
             resolvePaidScreenAccount,
+            resolveTickTenant,
           } = await import("./paidScreenSubmission");
           const commercial = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
           const subscriptions = createSubscriptionAdapter(this.env as { AGENT_DB?: unknown });
@@ -1462,6 +1461,24 @@ export class ScheduledTasksService {
           }
           await ensureCommercialSchema(commercial.db);
           await ensureSubscriptionSchema(subscriptions.db);
+          // Issue #3179: the run tenant is the schedule OWNER's
+          // stored account tenant, never the deployment default —
+          // a mismatched default no longer fails owner ticks
+          // closed on the mismatch throw below. No owner row →
+          // the explicit, audited env-default fallback.
+          const tickTenant = await resolveTickTenant(commercial, {
+            userId: userLogin,
+            env: this.env,
+          });
+          const tenantId = tickTenant.tenantId;
+          if (tickTenant.usedEnvDefaultFallback) {
+            this.audit("schedule.tick_tenant_env_fallback", {
+              family: "stock",
+              userLogin,
+              tenantId,
+              reason: "no stored account row for schedule owner",
+            });
+          }
           const { account } = await resolvePaidScreenAccount(
             { commercial, subscriptions },
             { userId: userLogin, email: options.emailTo ?? "", tenantId, nowMs: Date.now() },
@@ -2053,8 +2070,6 @@ export class ScheduledTasksService {
         await import("../features/createFeatureFlagPort")
       ).createFeatureFlagPort(this.env).isEnabled("monetization");
       if (monetizationOn) {
-        const { resolveIaaaTenant } = await import("../security/iaaaGithubEndToEnd");
-        const tenantId = resolveIaaaTenant(this.env);
         const { createCommercialAdapter, ensureCommercialSchema } =
           await import("../data/createCommercialPorts");
         const { createSubscriptionAdapter, ensureSubscriptionSchema } =
@@ -2063,6 +2078,7 @@ export class ScheduledTasksService {
           coverageForAccount,
           resolvePaidScreenAction,
           resolvePaidScreenAccount,
+          resolveTickTenant,
           buildPaidScreenSubmission,
         } = await import("./paidScreenSubmission");
         const { buildGoalScreenCommand } = await import("./goalScreenWorkflowSubmission");
@@ -2131,6 +2147,26 @@ export class ScheduledTasksService {
         }
         await ensureCommercialSchema(commercial.db);
         await ensureSubscriptionSchema(subscriptions.db);
+        // Issue #3179: the run tenant is the schedule OWNER's
+        // stored account tenant, never the deployment default —
+        // a mismatched default no longer fails owner ticks
+        // closed on the mismatch throw below. No owner row →
+        // the explicit, audited env-default fallback. The
+        // resolved tenant threads into the paid command and the
+        // payment-workflow submission unchanged below.
+        const tickTenant = await resolveTickTenant(commercial, {
+          userId: userLogin,
+          env: this.env,
+        });
+        const tenantId = tickTenant.tenantId;
+        if (tickTenant.usedEnvDefaultFallback) {
+          this.audit("schedule.tick_tenant_env_fallback", {
+            family: "goal",
+            userLogin,
+            tenantId,
+            reason: "no stored account row for schedule owner",
+          });
+        }
         const { account } = await resolvePaidScreenAccount(
           { commercial, subscriptions },
           { userId: userLogin, email: options.emailTo ?? "", tenantId, nowMs: Date.now() },
@@ -2217,7 +2253,38 @@ export class ScheduledTasksService {
         await import("./goalScreenWorkflowSubmission");
       const { createObservabilitySink } =
         await import("../observability/createObservabilityPorts");
-      const { resolveIaaaTenant } = await import("../security/iaaaGithubEndToEnd");
+      // Issue #3179: the free-path command carries the owner's
+      // stored account tenant too — the tenant a schedule runs
+      // under must not depend on the monetization flag. No owner
+      // row (or an unreadable store) takes the explicit, audited
+      // env-default fallback; the free path never fails on it,
+      // and no schema write happens here (the read is best-effort
+      // against whatever the store holds).
+      const { resolveTickTenant } = await import("./paidScreenSubmission");
+      let tickTenant: { tenantId: string; usedEnvDefaultFallback: boolean };
+      let tickTenantStoreError: string | null = null;
+      try {
+        const { createCommercialAdapter } =
+          await import("../data/createCommercialPorts");
+        tickTenant = await resolveTickTenant(
+          createCommercialAdapter(this.env as { AGENT_DB?: unknown }),
+          { userId: userLogin, env: this.env },
+        );
+      } catch (err) {
+        tickTenantStoreError = err instanceof Error ? err.message : String(err);
+        tickTenant = await resolveTickTenant(null, { userId: userLogin, env: this.env });
+      }
+      if (tickTenant.usedEnvDefaultFallback) {
+        this.audit("schedule.tick_tenant_env_fallback", {
+          family: "goal",
+          userLogin,
+          tenantId: tickTenant.tenantId,
+          reason: tickTenantStoreError
+            ? "commercial account read failed"
+            : "no stored account row for schedule owner",
+          ...(tickTenantStoreError ? { error: tickTenantStoreError } : {}),
+        });
+      }
       const handle = await startGoalScreenWorkflow(
         this.env,
         buildGoalScreenCommand({
@@ -2225,7 +2292,7 @@ export class ScheduledTasksService {
           source: "scheduled-tasks",
           trigger,
           userLogin,
-          tenantId: resolveIaaaTenant(this.env),
+          tenantId: tickTenant.tenantId,
           scenario,
           scenarioSource,
           ...(options.assetClasses ? { assetClasses: options.assetClasses } : {}),
