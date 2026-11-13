@@ -57,7 +57,7 @@ vi.mock("../src/orchestrate", async (importOriginal) => {
       {
         agent: "test",
         binding: "SCHEDULED_AGENT",
-        operations: ["test.op", "index.refresh_holdings", "feed.refresh_all"],
+        operations: ["test.op", "index.refresh_holdings"],
         blurb: "",
       },
     ],
@@ -280,42 +280,12 @@ describe("3124-P02 one scan per manual trigger", () => {
     expect(goals[0].lastRun).toBe("2026-11-03T06:00:00.000Z");
   });
 
-  it("triggering a deduped feed goal costs one scan and leaves lastRun restored", async () => {
-    const { agent, kv, counting, store } = makeCountedAgent();
-    store.save(
-      goalToRecord({
-        id: "feed-goal",
-        name: "Feed refresh",
-        cron: "0 * * * *",
-        operation: "feed.refresh_all",
-        budgetCents: 1,
-        enabled: true,
-        lastRun: null,
-      } as any),
-    );
-    // A successful feed run 10 minutes ago: the feed branch dedups
-    // (skipped, no tick error, no job) and the trigger restore path
-    // runs — the path that re-read the store twice before #3124.
-    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
-    kv.set("jobRunRecords", [
-      {
-        system: "scheduled-agent-goal",
-        jobId: "feed-goal",
-        operation: "feed.refresh_all",
-        started: tenMinAgo,
-        finished: tenMinAgo,
-        outcome: "success",
-        triggeredBy: "scheduled",
-      },
-    ]);
-    counting.reset();
-    const tick = await agent.triggerGoal("feed-goal");
-    expect(tick.jobsCreated).toBe(0);
-    expect(tick.errors).toEqual([]);
-    expect(counting.counts.kindScan).toBe(1);
-    const goals = await agent.listGoals();
-    expect(goals.find((g: any) => g.id === "feed-goal")?.lastRun).toBeNull();
-  });
+  // #4306 S2: the "triggering a deduped feed goal" test lived here.
+  // Its dedup behavior was the feed branch's own 55-minute window
+  // (removed with the branch), so the test goes with the goal. The
+  // #3124 behavior it exercised — one scan per trigger, lastRun
+  // restored — is still covered by the sibling triggerGoal test
+  // above (test-goal, non-deduped path).
 });
 
 describe("3124-P03 one scan per mutation", () => {
