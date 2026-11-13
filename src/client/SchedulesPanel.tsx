@@ -161,15 +161,17 @@ export function payloadSummary(payload: any): string {
     (k) => !["userLogin", "environment", "env", "trigger"].includes(k)
   );
   if (!keys.length) return "";
-  const text = keys
-    .slice(0, 4)
+  // Issue #4354 — the scope cell shows its value IN FULL. It used to cut at
+  // 90 characters with an ellipsis, which hid the very ids an operator needs
+  // (taskId, scheduleHash). The cell wraps now; the table scrolls instead of
+  // clipping.
+  return keys
     .map((k) => {
       const v = payload[k];
       const rendered = typeof v === "object" ? "…" : String(v);
       return `${k}: ${rendered}`;
     })
     .join(" · ");
-  return text.length > 90 ? `${text.slice(0, 90)}…` : text;
 }
 
 interface SchedulesPanelProps {
@@ -472,6 +474,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     {
       key: "cadence",
       header: "Cadence",
+      // Issue #4354 — the cadence sentence and its next-run note get a column
+      // wide enough to hold them (the owner: widen the cadence column).
+      cellClassName: "schedule-row-cadence",
       render: (s) => (
         <div className="schedule-row-stack">
           <span className="schedule-row-value">{genericCadence(s)}</span>
@@ -486,6 +491,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     {
       key: "scope",
       header: "Scope",
+      // Issue #4354 — the scope value is complete and wraps inside a column
+      // wide enough for two lines.
+      cellClassName: "schedule-row-scope",
       render: (s) => {
         const payload = s.payload || {};
         const universe = payload.universe;
