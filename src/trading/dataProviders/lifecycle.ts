@@ -107,6 +107,12 @@ import type {
   ProviderConfigStore,
   ProviderConfigWrite,
 } from "../../data/providerConfigPorts";
+import { FEED_JOB_CODES } from "../../services/feedJobCodes";
+import {
+  FeedJobTimeoutError,
+  FEED_JOB_TIMEOUTS,
+  withFeedDeadline,
+} from "../../services/feedJobTimeouts";
 
 export type ProviderLifecycleAction =
   | "register"
@@ -123,7 +129,9 @@ export type ProviderLifecycleErrorCode =
   | "invalid_credential_ref"
   | "invalid_route_tier"
   | "verification_failed"
-  | "verifier_unavailable";
+  | "verifier_unavailable"
+  /** #4304 — the verify probe exceeded its named bound. */
+  | "FEED_VERIFY_TIMEOUT";
 
 /** A rejected lifecycle move. `from` is null when no record exists. */
 export class ProviderLifecycleError extends Error {
@@ -209,6 +217,15 @@ export interface ProviderRegisterInput {
 export interface ProviderTransitionDeps {
   audit?: ProviderLifecycleAuditSink;
   verifier?: ProviderVerifier;
+  /**
+   * #4304 — the verify probe's bound in milliseconds. The route
+   * resolves it from the FEED_JOB_VERIFY_MS knob; any other
+   * caller omits it and the lifecycle falls back to the
+   * recorded default (FEED_JOB_TIMEOUTS.verifyMs). An invalid
+   * value is refused by name by the race guard, never treated
+   * as no deadline.
+   */
+  verifyTimeoutMs?: number;
   configure?: ProviderConfigureInput;
   register?: ProviderRegisterInput;
 }
@@ -664,10 +681,33 @@ async function transitionProviderCore(
           `No verifier is available for provider "${providerId}"; a provider is never marked verified without a real check.`
         );
       }
+      // #4304 — the probe is raced against the named verify bound
+      // (FEED_JOB_VERIFY_MS, 120s default): a hung probe settles
+      // with FEED_VERIFY_TIMEOUT instead of sitting forever. The
+      // race is created OUTSIDE the try so an invalid bound is
+      // refused by name (withFeedDeadline's guard throws
+      // synchronously) instead of being misread as a verifier
+      // failure; the verifier is an async function, so calling it
+      // cannot throw synchronously. A timeout rejection is NOT
+      // folded into "verifier threw" — it carries the stable
+      // code, so the route response and the async-job record name
+      // the timeout exactly.
+      const verifyMs = deps.verifyTimeoutMs ?? FEED_JOB_TIMEOUTS.verifyMs;
+      const raced = withFeedDeadline(
+        (deps.verifier as ProviderVerifier)(providerId),
+        verifyMs,
+        FEED_JOB_CODES.verifyTimeout,
+      );
       let result: ProviderVerifyResult;
       try {
-        result = await (deps.verifier as ProviderVerifier)(providerId);
+        result = await raced;
       } catch (err) {
+        if (err instanceof FeedJobTimeoutError) {
+          reject(
+            "FEED_VERIFY_TIMEOUT",
+            `Verification timed out for provider "${providerId}" after ${verifyMs}ms (${FEED_JOB_CODES.verifyTimeout}).`,
+          );
+        }
         result = {
           ok: false,
           summary: `verifier threw: ${err instanceof Error ? err.message : String(err)}`,
