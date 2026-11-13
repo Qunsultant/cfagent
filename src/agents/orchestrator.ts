@@ -82,10 +82,12 @@ import {
 } from "../services/workflowStageSchedule";
 import {
   controlPipelineStageViaDoor,
+  definePipelineJobFromSpecViaDoor,
   getPipelineJobStatusViaDoor,
   getScheduledAgentDoor,
 } from "./orchestrator/meshDoors";
 import { handleJobStatusRoutes } from "./routes/jobStatus";
+import { handleJobDefinitionsRoutes } from "./routes/jobDefinitions";
 import { makeRunScheduleCallback, makeScheduleAlarmsPort } from "./routes/schedules";
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
 import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
@@ -1096,6 +1098,30 @@ export class OrchestratorAgent extends PortThink {
    * pins its presence so a future refactor cannot unwire it
    * silently again.
    */
+  /**
+   * Issue #4366 — a schedule's dispatch of one engine job
+   * (`runPipelineJobSchedule` is the schedule callback name). The job was
+   * defined from an externalized spec; this method only runs it, through
+   * the ScheduledAgent door, with the schedule's owner as the acting
+   * login. A payload without a job id throws: a dispatch never guesses.
+   */
+  async runPipelineJobSchedule(payload: unknown): Promise<void> {
+    const record =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const jobId = typeof record.jobId === "string" ? record.jobId.trim() : "";
+    if (!jobId) {
+      throw new Error(
+        "Schedule callback 'runPipelineJobSchedule' requires a jobId in its payload; none was supplied, and no job is guessed or invented.",
+      );
+    }
+    const userLogin =
+      typeof record.userLogin === "string" && record.userLogin.trim()
+        ? record.userLogin.trim()
+        : undefined;
+    const door = getScheduledAgentDoor(this.env);
+    await door.runPipelineJob(jobId, { userLogin });
+  }
+
   async handleA2A(body: unknown, origin: string): Promise<OrchestratorA2AOutcome> {
     void origin; // reserved for per-origin policy (cfpay parity); unused in v1
     this.ensureTables();
@@ -3064,6 +3090,20 @@ export class OrchestratorAgent extends PortThink {
     // Both read the engine's own status view through the ScheduledAgent
     // door (one stage source); a missing job refuses by name, a door
     // outage is a 503 rather than a pretend 404.
+    // Issue #4366 — the definition catalogue and the define half of the
+    // UX flow. The schedule half is the existing POST /api/schedules with
+    // the runPipelineJobSchedule callback.
+    const definitionsRoute = await handleJobDefinitionsRoutes(request, url, path, {
+      defineJobFromSpec: (specId, jobId) =>
+        definePipelineJobFromSpecViaDoor(
+          this.env,
+          request.headers.get("x-user-login"),
+          specId,
+          jobId,
+        ),
+    });
+    if (definitionsRoute) return definitionsRoute;
+
     const statusRoute = await handleJobStatusRoutes(request, url, path, {
       readJobStatus: (engineJobId) => getPipelineJobStatusViaDoor(this.env, engineJobId),
       // Issue #4362 — the per-stage control ops. The acting login rides

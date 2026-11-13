@@ -23,6 +23,11 @@ export const CREATABLE_SCHEDULE_CALLBACKS = [
   // Consolidation C1 (issue #1201, epic #1151 R1): goal-driven
   // screens are schedulable through the one schedule store.
   "autonomousGoalScreen",
+  // Issue #4366 — a job defined from the externalized definition spec is
+  // schedulable through the same store; the callback runs that engine job
+  // by id (the definition carries the owner params, so the payload needs
+  // only the id).
+  "runPipelineJobSchedule",
 ] as const;
 
 export const ACCOUNT_SCOPED_SCHEDULE_CALLBACKS = new Set<string>([

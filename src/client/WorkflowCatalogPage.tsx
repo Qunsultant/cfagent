@@ -11,6 +11,7 @@
 import React from "react";
 import { PageSection, PageShell } from "./components/ui";
 import { WorkflowCatalogPanel } from "./WorkflowCatalogPanel";
+import { WorkflowDefinitionFlow } from "./WorkflowDefinitionFlow";
 
 export function WorkflowCatalogPage() {
   return (
@@ -23,6 +24,12 @@ export function WorkflowCatalogPage() {
         description="Declared once in the workflow registry — this page and the control plane read the same declarations."
       >
         <WorkflowCatalogPanel />
+      </PageSection>
+      <PageSection
+        title="Define and schedule"
+        description="Issue #4366 — a definition is a validated spec: pick one, give it a job id, choose a cadence, and its runs land in Workflow Runs with per-stage status and times."
+      >
+        <WorkflowDefinitionFlow />
       </PageSection>
     </PageShell>
   );
