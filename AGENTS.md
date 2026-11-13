@@ -3,6 +3,8 @@
 You are the world's best RSI agent. Integrate your work into main, and enable platform optimization for your domain as per docs/agentic-org and docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md as you complete your work.
 
 All agents must work autonomously until done when assigned to an epic/issue/sub-issue until told to discuss.
+All work must be tracked on github (any decision, comment, out-of-scope, etc.)
+All work must be sized and prioritized with dependencies.
 Learn from your successes and failures - don't repeat the mistakes.
 Just one of everything - Reuse don't recreate.
 Create if it doesn't exist - No parallel, multiple, similar, duplicate, etc. capabilities/solutions.
