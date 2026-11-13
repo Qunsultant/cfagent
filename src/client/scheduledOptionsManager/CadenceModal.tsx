@@ -21,6 +21,11 @@ export interface CadenceModalProps {
  * screening rows had a second one. One dialog, one preset list, one
  * custom-cron field — opened by the row's Edit control.
  */
+/** A live feed runs on an interval: it has no cron phase (issue #4389). */
+function isIntervalOnly(item: ScheduledTaskItem): boolean {
+  return item.kind === "ticker-push";
+}
+
 export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceModalProps) {
   const [customCron, setCustomCron] = React.useState("");
 
@@ -69,7 +74,11 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
       <section className="sched-detail-section">
         <h3 className="sched-detail-section-title">Presets</h3>
         <div className="sched-cadence-presets">
-          {FREQUENCY_PRESETS.map((preset) => (
+          {FREQUENCY_PRESETS.filter(
+            // Issue #4389 — a feed cannot run a cron, so its dialog offers only
+            // the interval presets: no option here can be refused by the route.
+            (preset) => !isIntervalOnly(item) || preset.body.scheduleType === "interval",
+          ).map((preset) => (
             <Button
               key={preset.id}
               type="button"
@@ -85,31 +94,43 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
         </div>
       </section>
 
-      <section className="sched-detail-section">
-        <h3 className="sched-detail-section-title">Custom cron (UTC)</h3>
-        <div className="sched-cadence-custom">
-          <TextInput
-            aria-label="Custom cron expression"
-            type="text"
-            placeholder="Custom cron, e.g. 0 9 * * 1-5"
-            value={customCron}
-            onChange={(event) => setCustomCron(event.target.value)}
-          />
-          <Button
-            type="button"
-            variant="primary"
-            disabled={busy || !customCron.trim()}
-            loading={busy}
-            onClick={() => onApply(item, { scheduleType: "cron", cron: customCron.trim() })}
-          >
-            Apply cron
-          </Button>
-        </div>
-        <p className="sched-detail-note">
-          Cron runs in UTC. Presets above are the supported cadences; a custom
-          expression replaces the current cadence on save.
-        </p>
-      </section>
+      {isIntervalOnly(item) ? (
+        // Issue #4389 — the feed's dialog says why cron is absent, instead of
+        // offering a control the server refuses.
+        <section className="sched-detail-section">
+          <h3 className="sched-detail-section-title">Interval only</h3>
+          <p className="sched-detail-note">
+            The ticker push is a live feed: it runs on an interval, so there is no
+            cron expression to set. Pick an interval above.
+          </p>
+        </section>
+      ) : (
+        <section className="sched-detail-section">
+          <h3 className="sched-detail-section-title">Custom cron (UTC)</h3>
+          <div className="sched-cadence-custom">
+            <TextInput
+              aria-label="Custom cron expression"
+              type="text"
+              placeholder="Custom cron, e.g. 0 9 * * 1-5"
+              value={customCron}
+              onChange={(event) => setCustomCron(event.target.value)}
+            />
+            <Button
+              type="button"
+              variant="primary"
+              disabled={busy || !customCron.trim()}
+              loading={busy}
+              onClick={() => onApply(item, { scheduleType: "cron", cron: customCron.trim() })}
+            >
+              Apply cron
+            </Button>
+          </div>
+          <p className="sched-detail-note">
+            Cron runs in UTC. Presets above are the supported cadences; a custom
+            expression replaces the current cadence on save.
+          </p>
+        </section>
+      )}
     </Modal>
   );
 }

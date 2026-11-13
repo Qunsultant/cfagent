@@ -233,6 +233,16 @@ export class TickerAgent extends PortThink {
     return { ok: true };
   }
 
+  /**
+   * Issue #4389 — the row's Trigger Now, the same action every other row has:
+   * push to the connected clients once, immediately. A failing push surfaces
+   * (the route answers 500 with the reason) rather than pretending success.
+   */
+  async triggerTickerPush(): Promise<{ ok: true }> {
+    await this.pushTicks();
+    return { ok: true };
+  }
+
   async setTickerPushInterval(
     intervalSeconds: number,
   ): Promise<{ ok: true; intervalSeconds: number }> {

@@ -14,10 +14,11 @@
  *    recorded, and a value below the floor is refused by name.
  *  - 4352-P04 the record carries the pause (state paused) and its definition
  *    keeps the cadence and the pause across later writes.
- *  - 4352-P05 the route reaches the feed by its record id, and deleting a live
- *    feed is refused with the honest alternative.
- *  - 4352-P06 the row offers Pause/Resume and Edit frequency, keeps its health
- *    badge, and offers no Delete.
+ *  - 4352-P05 the route reaches the feed by its record id; deleting a live
+ *    feed stops it (#4389 made Delete one of the five controls).
+ *  - 4352-P06 the row offers the same button set as every other row (issue
+ *    #4389 finished the parity: Edit · Details · Trigger Now · Pause/Resume ·
+ *    Delete) and keeps its health badge.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -137,25 +138,28 @@ describe("4352-P05 the route reaches the feed by id", () => {
     expect(route).toContain("TICKER_PUSH_RECORD_ID");
   });
 
-  it("refuses deleting a live feed, naming the alternative", () => {
-    expect(route).toContain("The ticker push is a live feed, not a stored schedule");
-    expect(route).toContain("pause it instead of deleting it");
+  it("deleting a live feed stops it (the row's dialog says so)", () => {
+    // Issue #4389 — Delete is every row's control; on a feed it is the only
+    // destructive thing there is: cancel the push.
+    expect(route).toContain("await tickerPushStub().pauseTickerPush();");
+    expect(route).toContain("return Response.json({ scheduleId, cancelled: true });");
   });
 });
 
 describe("4352-P06 the row offers the controls", () => {
   const panel = source("src/client/SchedulesPanel.tsx");
 
-  it("offers Pause/Resume and Edit frequency, keeps the health badge", () => {
-    const start = panel.indexOf("// Issue #4352 — the feed is schedulable");
-    expect(start).toBeGreaterThan(-1);
-    const tickerRow = panel.slice(start, start + 1600);
-    expect(tickerRow).toContain('{s.paused ? "Resume" : "Pause"}');
-    expect(tickerRow).toContain("Edit frequency");
-    expect(tickerRow).toContain("Live feed");
-    // No Delete on a live feed: the generic Delete control (the next branch)
-    // is outside this block — there is no definition to delete.
-    expect(tickerRow).not.toContain('title="Delete this schedule"');
+  it("offers the one button set, and keeps the health badge", () => {
+    // Issue #4389 — one action cell for every kind: the feed is not a special
+    // case any more, and the health badge lives in the Schedule cell.
+    const actions = panel.slice(panel.indexOf('key: "actions"'));
+    for (const label of ["Edit", "Details", "Trigger Now", "Delete"]) {
+      expect(actions).toMatch(new RegExp(`>\\s*${label}\\s*<`));
+    }
+    expect(actions).toContain('{s.paused ? "Resume" : "Pause"}');
+    // The feed's health badge stays on the row, in the Schedule cell.
+    const scheduleCell = panel.slice(panel.indexOf('key: "schedule"'), panel.indexOf('key: "id"'));
+    expect(scheduleCell).toContain("Missed push");
   });
 
   it("the feed's id is the record id the route branches on", () => {

@@ -1,0 +1,8 @@
+### Changed
+
+- **One button set, one vocabulary, every row — the live feed included (#4389):** every schedule row now carries **Edit · Details · Trigger Now · Pause/Resume · Delete**, in that order and with those words. The ticker push's live feed loses its "Live feed" badge and its two-control exception: Edit opens its interval-only cadence dialog, Details is served by the feed's own Durable Object, Trigger Now pushes once immediately (refused, by name, while paused), and Delete stops the push — the only destructive thing a feed has — with a confirmation that says so and names Resume as the way back. #autoclaw-001
+- **The cadence dialog offers only what the row can run (#4389):** a live feed's dialog renders the interval presets alone, with one line saying why cron is absent; no cron preset, no cron field, no Apply-cron. A cron-capable row sees the dialog unchanged.
+
+### Added
+
+- **Sortable columns, a Status column, and Active/Paused filters (#4389):** every header but Actions sorts (asc → desc → asc) and announces its state through `aria-sort`; the ordering rule lives once in `src/client/tableSort.ts` — numbers numerically, strings locale-aware, blanks last, ties stable. `Active` / `Paused` is now its own column instead of a badge inside the name cell, and the toolbar gains a second filter dimension beside the kinds — **All statuses · Active · Paused** — configured through `SCHEDULE_LIST_STATUSES` and composing with the kind filter (Options + Paused).

@@ -111,7 +111,8 @@ describe("4333-P02 one row vocabulary", () => {
       "provenance",
       "actions",
     ]);
-    expect(list).toEqual(["schedule", "id", "cadence", "scope", "actions"]);
+    // Issue #4389 — the list gained its own Status column.
+    expect(list).toEqual(["schedule", "id", "cadence", "status", "scope", "actions"]);
     expect(resolveScheduleRowColumns("queue")).toEqual([
       "schedule",
       "id",

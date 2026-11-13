@@ -93,10 +93,20 @@ import { scheduleTitle } from "./scheduledOptionsManager/scheduleDetail";
 import type { ScheduledTaskItem } from "./scheduledOptionsManager/types";
 import {
   SCHEDULE_LIST_FILTER_LABELS,
+  SCHEDULE_LIST_STATUS_LABELS,
   resolveScheduleListFilters,
+  resolveScheduleListStatusFilters,
   type ScheduleListFilter,
   type ScheduleListKind,
+  type ScheduleListStatusFilter,
 } from "../config/scheduleListModes";
+import { SCHEDULE_ROW_COLUMN_LABELS } from "../config/scheduleRowModes";
+import {
+  nextTableSort,
+  sortTableRows,
+  tableSortAria,
+  type TableSort,
+} from "./tableSort";
 import { classifyScheduleKind, countSchedulesByKind } from "../services/scheduleKinds";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import { resolveScheduleRowColumns } from "../config/scheduleRowModes";
@@ -243,6 +253,10 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ScheduleGroup>("all");
+  // Issue #4389 — the list's two extra dimensions: a status filter beside the
+  // kinds, and a sort applied to the rows (never to the source array).
+  const [statusFilter, setStatusFilter] = useState<ScheduleListStatusFilter>("all");
+  const [sort, setSort] = useState<TableSort | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [focusMissing, setFocusMissing] = useState(false);
   const [refreshSignal, setRefreshSignal] = useState(0);
@@ -389,6 +403,34 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   const filtered = allSchedules.filter(
     (s) => activeTab === "all" || classifyScheduleKind(s) === activeTab,
   );
+  // Issue #4389 — the status filter composes with the kind: Options + Paused.
+  const statusFiltered = filtered.filter(
+    (s) =>
+      statusFilter === "all" ||
+      (statusFilter === "paused" ? Boolean(s.paused) : !s.paused),
+  );
+  // The one ordering rule (`src/client/tableSort.ts`): numbers numeric, strings
+  // locale-aware, blanks last, ties stable.
+  const sortValue = (s: ScheduleItem, key: string): string | number | null => {
+    switch (key) {
+      case "schedule":
+        return scheduleDisplayName(s);
+      case "id":
+        return s.id;
+      case "cadence":
+        return genericCadence(s);
+      case "status":
+        return s.paused ? 1 : 0;
+      case "scope": {
+        const payload = s.payload || {};
+        return payload.universe ?? payload.thesis ?? payloadSummary(payload);
+      }
+      default:
+        return null;
+    }
+  };
+  const rows = sortTableRows(statusFiltered, sort, sortValue);
+  const statusFilters = resolveScheduleListStatusFilters();
 
   // Count by kind (issue #4329 S2): one classifier, every configured filter.
   const kindCounts = countSchedulesByKind(allSchedules);
@@ -412,10 +454,27 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     label: `${SCHEDULE_LIST_FILTER_LABELS[id]} (${counts[id] ?? 0})`,
   }));
 
+  // Issue #4389 — a sortable header is a button that announces its own state
+  // (an arrow in the label, `aria-sort` on the cell). Actions is the one column
+  // that does not sort; a click orders the rows through `sortTableRows`.
+  const sortableHeader = (key: string, label: string) => (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={() => setSort((current) => nextTableSort(current, key))}
+      title={`Sort by ${label}`}
+    >
+      {label}
+      {sort?.key === key ? (sort.direction === "asc" ? " ▲" : " ▼") : ""}
+    </Button>
+  );
+
   const genericColumns: TableColumn<ScheduleItem>[] = [
     {
       key: "schedule",
-      header: "Schedule",
+      header: sortableHeader("schedule", SCHEDULE_ROW_COLUMN_LABELS.schedule),
+      ariaSort: tableSortAria(sort, "schedule"),
       render: (s) => (
         <div className="schedule-row-job">
           <span className="schedule-row-name">{scheduleDisplayName(s)}</span>
@@ -453,9 +512,6 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
                 Agent
               </Badge>
             ) : null}
-            <Badge tone={s.paused ? "warning" : "success"} size="xs" dot>
-              {s.paused ? "Paused" : "Active"}
-            </Badge>
             <Badge tone="neutral" size="xs" uppercase>
               {s.type}
             </Badge>
@@ -465,7 +521,8 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     },
     {
       key: "id",
-      header: "Schedule ID",
+      header: sortableHeader("id", SCHEDULE_ROW_COLUMN_LABELS.id),
+      ariaSort: tableSortAria(sort, "id"),
       render: (s) => (
         <code className="schedule-row-id" title={s.id}>
           {s.id}
@@ -474,7 +531,8 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     },
     {
       key: "cadence",
-      header: "Cadence",
+      header: sortableHeader("cadence", SCHEDULE_ROW_COLUMN_LABELS.cadence),
+      ariaSort: tableSortAria(sort, "cadence"),
       // Issue #4354 — the cadence sentence and its next-run note get a column
       // wide enough to hold them (the owner: widen the cadence column).
       cellClassName: "schedule-row-cadence",
@@ -491,7 +549,8 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     },
     {
       key: "scope",
-      header: "Scope",
+      header: sortableHeader("scope", SCHEDULE_ROW_COLUMN_LABELS.scope),
+      ariaSort: tableSortAria(sort, "scope"),
       // Issue #4354 — the scope value is complete and wraps inside a column
       // wide enough for two lines.
       cellClassName: "schedule-row-scope",
@@ -550,132 +609,91 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     },
     {
       key: "actions",
-      header: "Actions",
+      header: SCHEDULE_ROW_COLUMN_LABELS.actions,
       align: "right",
       headerClassName: "schedule-row-actions-head",
-      render: (s) => {
-        // Issue #3121 #4237 — a ticker-push row is a live feed, not a
-        // manageable schedule: pause/resume/trigger/delete/update are
-        // refused server-side, so the row offers no action buttons.
-        // A Badge (ui/ primitive) keeps the row at zero new bespoke
-        // classes — the interior ratchet counts className tokens.
-        // Issue #4352 — the feed is schedulable like any other job: the row
-        // offers Pause/Resume and its cadence. No Delete: a live feed has no
-        // definition to delete (the agent rewrites its record on the next
-        // push), so Pause is the destructive-equivalent action and says so.
-        if (s.kind === "ticker-push") {
-          return (
-            <Flex gap="1" justify="end">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => handlePauseResume(s)}
-                title={s.paused ? "Resume the live feed" : "Pause the live feed"}
-              >
-                {s.paused ? "Resume" : "Pause"}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setCadenceError(null);
-                  setCadenceTarget(s);
-                }}
-                title="Set the live feed's cadence"
-              >
-                Edit frequency
-              </Button>
-              <Badge
-                tone="neutral"
-                size="xs"
-                title="Managed by listeners — the feed runs while clients are connected"
-              >
-                Live feed
-              </Badge>
-            </Flex>
-          );
-        }
-        return (
-          <div className="schedule-row-actions">
-            {SCREENING_CALLBACKS.has(s.callback) && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setEditRequest({ scheduleId: s.id, nonce: Date.now() })}
-                title="Edit this screening schedule"
-              >
-                Edit
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setDetailsTarget(s);
-                void readDetails(s);
-              }}
-              title="Open every stored detail for this schedule"
-            >
-              Details
-            </Button>
-            <Button
-              type="button"
-              variant="accent"
-              tone="subtle"
-              size="sm"
-              disabled={!!s.paused}
-              onClick={() => handleTriggerNow(s)}
-              title={s.paused ? "Resume before triggering" : "Run this job now"}
-            >
-              Trigger Now
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => handlePauseResume(s)}
-              title={s.paused ? "Resume schedule" : "Pause schedule"}
-            >
-              {s.paused ? "Resume" : "Pause"}
-            </Button>
-            {/* Issue #2957: every generic row gets Edit frequency —
-                picking a cadence converts a one-shot to recurring (the
-                backend treats a supplied cron/interval as a timing-kind
-                switch); the modal warns one-shot rows before they pick. */}
-                        {/* Issue #4331: a screening row's cadence is edited in the options
-                manager's form (that row's Edit control), so the generic cadence
-                dialog is not offered there. */}
-            {!SCREENING_CALLBACKS.has(s.callback) && (
-  <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setCadenceError(null);
-                  setCadenceTarget(s);
-                }}
-                title="Edit this schedule's cadence"
-              >
-                Edit frequency
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="danger"
-              tone="subtle"
-              size="sm"
-              onClick={() => setDeleteTarget(s)}
-              title="Delete this schedule"
-            >
-              Delete
-            </Button>
-          </div>
-        );
-      },
+      render: (s) => (
+        // Issue #4389 — ONE button set, one vocabulary, for every kind: Edit ·
+        // Details · Trigger Now · Pause/Resume · Delete. Edit opens the row's
+        // own editor (a screening row's schedule form, whose cadence lives
+        // there; any other row's cadence dialog, interval-only for the live
+        // feed). No kind gets a shorter list and no kind gets a second word.
+        <div className="schedule-row-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              if (SCREENING_CALLBACKS.has(s.callback)) {
+                setEditRequest({ scheduleId: s.id, nonce: Date.now() });
+                return;
+              }
+              setCadenceError(null);
+              setCadenceTarget(s);
+            }}
+            title={
+              SCREENING_CALLBACKS.has(s.callback)
+                ? "Edit this schedule"
+                : "Edit this schedule's cadence"
+            }
+          >
+            Edit
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setDetailsTarget(s);
+              void readDetails(s);
+            }}
+            title="Open every stored detail for this schedule"
+          >
+            Details
+          </Button>
+          <Button
+            type="button"
+            variant="accent"
+            tone="subtle"
+            size="sm"
+            disabled={!!s.paused}
+            onClick={() => handleTriggerNow(s)}
+            title={s.paused ? "Resume before triggering" : "Run this job now"}
+          >
+            Trigger Now
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => handlePauseResume(s)}
+            title={s.paused ? "Resume schedule" : "Pause schedule"}
+          >
+            {s.paused ? "Resume" : "Pause"}
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            tone="subtle"
+            size="sm"
+            onClick={() => setDeleteTarget(s)}
+            title="Delete this schedule"
+          >
+            Delete
+          </Button>
+        </div>
+      ),
+    },
+    {
+      // Issue #4389 — status is its own column, not a badge in the name cell.
+      key: "status",
+      header: sortableHeader("status", SCHEDULE_ROW_COLUMN_LABELS.status),
+      ariaSort: tableSortAria(sort, "status"),
+      render: (s) => (
+        <Badge tone={s.paused ? "warning" : "success"} size="xs" dot>
+          {s.paused ? "Paused" : "Active"}
+        </Badge>
+      ),
     },
   ];
 
@@ -684,9 +702,14 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   // queue tables resolve: the base identity columns and this list's own
   // `scope` lead, the action column closes. A deployment can hide a column
   // from config; the order is the vocabulary's.
-  const visibleGenericColumns: TableColumn<ScheduleItem>[] = genericColumns.filter((column) =>
-    resolveScheduleRowColumns("list").includes(column.key as never),
-  );
+  // The vocabulary also fixes the ORDER: a column the deployment hides is
+  // dropped, the rest keep the shared order (status before scope, actions
+  // last), never the order this file happens to declare its factories in.
+  const listColumnOrder = resolveScheduleRowColumns("list");
+  const columnByKey = new Map(genericColumns.map((column) => [column.key, column]));
+  const visibleGenericColumns: TableColumn<ScheduleItem>[] = listColumnOrder
+    .map((key) => columnByKey.get(key))
+    .filter((column): column is TableColumn<ScheduleItem> => Boolean(column));
 
   return (
     <div className="schedules-panel">
@@ -743,6 +766,15 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           <code>{deleteTarget?.callback}</code> (<code>{deleteTarget?.id}</code>) is removed from
           the schedule store and will not fire again. This cannot be undone.
         </p>
+        {deleteTarget?.kind === "ticker-push" && (
+          // Issue #4389 — the live feed has no stored definition to remove: its
+          // record is the feed's own state, so deleting it stops the push for
+          // every connected client (Resume brings it back).
+          <p>
+            The live feed has no stored definition to remove: deleting it stops the push for
+            every connected client, and <strong>Resume</strong> brings it back.
+          </p>
+        )}
       </ConfirmModal>
 
       {userLogin && (
@@ -759,6 +791,20 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           size="sm"
           ariaLabel="Filter schedules by group"
         />
+        {/* Issue #4389 — the status dimension beside the kinds; the two compose
+            (Options + Paused). The vocabulary is configuration, like the kinds. */}
+        {statusFilters.length > 1 && (
+          <PillGroup
+            options={statusFilters.map((id) => ({
+              id,
+              label: SCHEDULE_LIST_STATUS_LABELS[id],
+            }))}
+            value={statusFilter}
+            onChange={(value) => setStatusFilter(value as ScheduleListStatusFilter)}
+            size="sm"
+            ariaLabel="Filter schedules by status"
+          />
+        )}
         <Button
           type="button"
           variant="secondary"
@@ -818,19 +864,25 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
                 caption. */}
             <h4>
               <span aria-hidden="true">🗂️</span> Schedules
-              <span className="sched-count-pill">{filtered.length} Shown</span>
+              <span className="sched-count-pill">{statusFiltered.length} Shown</span>
               <small className="schedule-row-muted">Every durable schedule, one row each</small>
             </h4>
             {loading && <span className="schedule-row-muted">Refreshing…</span>}
           </header>
           <Table
             columns={visibleGenericColumns}
-            rows={filtered}
+            rows={rows}
             rowKey={(s) => s.id}
             rowClassName="schedule-item-card"
             rowTitle={(s) => `${s.id} · ${s.callback}`}
             containerClassName="sched-table-scroll"
-            empty={<p className="sched-table-status">No schedules in this group.</p>}
+            empty={
+              <p className="sched-table-status">
+                {statusFilter === "all"
+                  ? "No schedules in this group."
+                  : `No ${SCHEDULE_LIST_STATUS_LABELS[statusFilter].toLowerCase()} schedules in this group.`}
+              </p>
+            }
           />
         </section>
       ) : null}
