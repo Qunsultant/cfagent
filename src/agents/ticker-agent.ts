@@ -104,6 +104,13 @@ export interface TickerConnectionState {
 export const TICKER_PUSH_INTERVAL_SECONDS = 5;
 
 /**
+ * Issue #4352 — the floor for an operator-set cadence. A tick faster than
+ * this would push quotes faster than the deployment's own default poll and
+ * multiply the broker calls a connected UI makes; the refusal names the floor.
+ */
+export const TICKER_PUSH_MIN_INTERVAL_SECONDS = 5;
+
+/**
  * Stale threshold default, in missed intervals (issue #4237):
  * the Schedules home shows a missed push once the last push is
  * older than this many push cadences. Owner-visible override: the
@@ -192,11 +199,72 @@ export class TickerAgent extends PortThink {
     }
   }
 
+  /** The interval an existing record carries, or null when it has none. */
+  private recordedIntervalSeconds(
+    existing: UnifiedScheduleRecord | null,
+  ): number | null {
+    if (!existing) return null;
+    const value = (existing.definition as Record<string, unknown> | undefined)
+      ?.intervalSeconds;
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+  }
+
+  /** Whether the operator paused the feed (issue #4352). */
+  private recordedPaused(existing: UnifiedScheduleRecord | null): boolean {
+    if (!existing) return false;
+    return (existing.definition as Record<string, unknown> | undefined)?.paused === true;
+  }
+
+  /**
+   * Issue #4352 — the feed is schedulable like any other job: the operator
+   * pauses it (the pause survives every start and every connection), resumes
+   * it, and sets its cadence. The three RPC methods below are the only write
+   * surface; each records the fact on the one ticker-push record.
+   */
+  async pauseTickerPush(): Promise<{ ok: true }> {
+    await this.cancelTickerPush();
+    await this.recordTickerPush({ armed: false, paused: true });
+    return { ok: true };
+  }
+
+  async resumeTickerPush(): Promise<{ ok: true }> {
+    await this.recordTickerPush({ armed: false, paused: false });
+    await this.ensureTickerPushArmed();
+    return { ok: true };
+  }
+
+  async setTickerPushInterval(
+    intervalSeconds: number,
+  ): Promise<{ ok: true; intervalSeconds: number }> {
+    const value = Number(intervalSeconds);
+    if (!Number.isFinite(value) || value < TICKER_PUSH_MIN_INTERVAL_SECONDS) {
+      throw new Error(
+        `The ticker push interval must be at least ${TICKER_PUSH_MIN_INTERVAL_SECONDS} seconds.`,
+      );
+    }
+    const rounded = Math.round(value);
+    // Re-arm at the new cadence (the SDK arms one schedule per callback).
+    await this.cancelTickerPush();
+    await this.recordTickerPush({ armed: false, intervalSeconds: rounded });
+    await this.ensureTickerPushArmed();
+    return { ok: true, intervalSeconds: rounded };
+  }
+
   /** Arm the tick schedule (idempotent per the SDK). Surfaces failures, never throws. */
   private async ensureTickerPushArmed(): Promise<void> {
     try {
+      // Issue #4352 — a paused feed is never armed, and a recorded cadence
+      // outranks the deployment default.
+      const existing = this.tickerScheduleStore()?.get(TICKER_PUSH_RECORD_ID) ?? null;
+      if (this.recordedPaused(existing)) {
+        await this.recordTickerPush({ armed: false, paused: true });
+        return;
+      }
+      const intervalSeconds =
+        this.recordedIntervalSeconds(existing) ??
+        resolveTickerPushIntervalSeconds(this.env as Env | undefined);
       const schedule = await this.scheduleEvery(
-        resolveTickerPushIntervalSeconds(this.env as Env | undefined),
+        intervalSeconds,
         TICKER_PUSH_CALLBACK,
       );
       // Issue #4237 — the armed feed adopts its one schedule record.
@@ -241,6 +309,9 @@ export class TickerAgent extends PortThink {
     armed: boolean;
     alarmId?: string | null;
     lastPushAt?: string;
+    /** Issue #4352 — the operator's pause; survive every later write. */
+    paused?: boolean;
+    intervalSeconds?: number;
   }): Promise<void> {
     try {
       const store = this.tickerScheduleStore();
@@ -250,10 +321,12 @@ export class TickerAgent extends PortThink {
       store.save(
         tickerPushScheduleToRecord(
           {
-            intervalSeconds: resolveTickerPushIntervalSeconds(
-              this.env as Env | undefined,
-            ),
+            intervalSeconds:
+              patch.intervalSeconds ??
+              this.recordedIntervalSeconds(existing ?? null) ??
+              resolveTickerPushIntervalSeconds(this.env as Env | undefined),
             armed: patch.armed,
+            ...(patch.paused !== undefined ? { paused: patch.paused } : {}),
             ...(patch.alarmId !== undefined ? { alarmId: patch.alarmId } : {}),
             ...(patch.lastPushAt !== undefined
               ? { lastPushAt: patch.lastPushAt }

@@ -88,6 +88,7 @@ import {
   pauseUnifiedSchedule,
   resumeUnifiedSchedule,
   screenScheduleToRecord,
+  TICKER_PUSH_RECORD_ID,
   tickerPushRecordToListItem,
   triggerUnifiedSchedule,
   unifiedRecordToListItem,
@@ -387,6 +388,11 @@ export async function handleSchedulesRoutes(
         storage: ctx.agentCtx.storage,
       }).unifiedSchedulesSync;
     const alarms: ScheduleAlarms = makeScheduleAlarmsPort(ctx);
+    // Issue #4352 — the ticker push is schedulable like any other job. Its
+    // record lives in the TickerAgent's own DO (ADR 0029 D-0), so pause /
+    // resume / cadence go through that host's typed RPC, not the local store.
+    const tickerPushStub = () =>
+      actorGateway.stub<TickerPushRecordStub>(ctx.env.TICKER_AGENT, TICKER_INSTANCE_NAME);
     const subpathId = (p: string): string => {
       const m = p.match(/\/schedules\/([^/]+)\//);
       if (!m) return "";
@@ -605,6 +611,18 @@ export async function handleSchedulesRoutes(
 
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
+        }
+        if (scheduleId === TICKER_PUSH_RECORD_ID) {
+          // A live feed has no definition to delete: its record IS the feed's
+          // state, and the agent re-creates it on the next push. Pause is the
+          // honest equivalent, and the refusal says so.
+          return Response.json(
+            {
+              error:
+                "The ticker push is a live feed, not a stored schedule — pause it instead of deleting it.",
+            },
+            { status: 400 },
+          );
         }
         const deleted = await deleteUnifiedSchedule({ store: unifiedStore(), alarms }, scheduleId);
         const cancelled = deleted.cancelled;
@@ -971,6 +989,12 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
+        if (scheduleId === TICKER_PUSH_RECORD_ID) {
+          await tickerPushStub().pauseTickerPush();
+          ctx.audit("schedule.paused", "orchestrator", { scheduleId, callback: "pushTicks" });
+          const paused = await readTickerPushListItem(ctx.env);
+          return Response.json({ success: true, schedule: paused });
+        }
         const result = await pauseUnifiedSchedule({ store: unifiedStore(), alarms }, scheduleId, new Date().toISOString());
         if (!result.ok) {
           return Response.json({ error: result.error }, { status: result.status });
@@ -988,6 +1012,12 @@ export async function handleSchedulesRoutes(
         const scheduleId = subpathId(path);
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
+        }
+        if (scheduleId === TICKER_PUSH_RECORD_ID) {
+          await tickerPushStub().resumeTickerPush();
+          ctx.audit("schedule.resumed", "orchestrator", { scheduleId, callback: "pushTicks" });
+          const resumedFeed = await readTickerPushListItem(ctx.env);
+          return Response.json({ success: true, schedule: resumedFeed });
         }
         const result = await resumeUnifiedSchedule(
           { store: unifiedStore(), alarms, reconcileDeclared: ctx.reconcileScheduledTasks },
@@ -1059,6 +1089,27 @@ export async function handleSchedulesRoutes(
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
         const body = (await request.json().catch(() => ({}))) as any;
+        if (scheduleId === TICKER_PUSH_RECORD_ID) {
+          // Issue #4352 — the live feed's one editable fact is its cadence,
+          // and its cadence is an interval (a live feed has no cron phase).
+          if (body?.scheduleType === "cron") {
+            return Response.json(
+              {
+                error:
+                  "The ticker push runs on an interval, not a cron expression — set an interval instead.",
+              },
+              { status: 400 },
+            );
+          }
+          const seconds = Number(body?.intervalSeconds ?? 0);
+          const applied = await tickerPushStub().setTickerPushInterval(seconds);
+          ctx.audit("schedule.updated", "orchestrator", {
+            scheduleId,
+            callback: "pushTicks",
+            intervalSeconds: applied.intervalSeconds,
+          });
+          return Response.json({ success: true, schedule: await readTickerPushListItem(ctx.env) });
+        }
         const result = await updateUnifiedSchedule(
           { store: unifiedStore(), alarms },
           scheduleId,

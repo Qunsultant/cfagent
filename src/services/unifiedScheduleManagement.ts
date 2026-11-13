@@ -270,6 +270,8 @@ export interface TickerPushRecordInput {
   alarmId?: string | null;
   lastPushAt?: string | null;
   armed: boolean;
+  /** Issue #4352 — the operator paused the feed; a pause survives every start. */
+  paused?: boolean;
 }
 
 /**
@@ -294,18 +296,26 @@ export function tickerPushScheduleToRecord(
       ? ((existing.definition as Record<string, unknown>).lastPushAt as string)
       : undefined;
   const lastPushAt = input.lastPushAt ?? prevLastPushAt;
+  // Issue #4352 — the pause is a fact of the record: a push, an idle-cancel
+  // or a restart never clears it, only a resume does.
+  const prevPaused =
+    existing?.definition !== undefined &&
+    (existing.definition as Record<string, unknown>).paused === true;
+  const paused = input.paused ?? prevPaused;
   return {
     id: TICKER_PUSH_RECORD_ID,
     kind: "ticker-push",
-    state: "active",
+    state: paused ? "paused" : "active",
     callback: "pushTicks",
     definition: {
       type: "interval",
       callback: "pushTicks",
       intervalSeconds: input.intervalSeconds,
       armed: input.armed,
+      paused,
       ...(lastPushAt !== undefined ? { lastPushAt } : {}),
     },
+    ...(paused ? { pausedAt: existing?.pausedAt ?? nowIso } : {}),
     ...(input.alarmId !== undefined && input.alarmId !== null
       ? { alarmId: input.alarmId }
       : existing?.alarmId !== undefined
