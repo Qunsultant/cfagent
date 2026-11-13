@@ -527,7 +527,7 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
  * uses, so the product's long tables scroll identically.
  */
 .ui-scroll-frame {
-  max-height: min(68vh, 46rem);
+  max-height: var(--panel-scroll-max-height);
   overflow: auto;
   scrollbar-gutter: stable;
 }

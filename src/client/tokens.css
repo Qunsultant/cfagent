@@ -93,6 +93,9 @@
   --card-padding: 1.25rem;
   --chart-max-height: min(52vh, 32rem);
   --chart-scroll-max-height: min(50vh, 26rem);
+  /* Issue #4329 S1 — the bounded scroll frame long lists and wide tables
+     share (the Docs run list uses the same clamp). */
+  --panel-scroll-max-height: min(68vh, 46rem);
 
   /* Compact options discovery controls (shared component sizing tokens) */
   --font-size-micro: 0.65rem;
