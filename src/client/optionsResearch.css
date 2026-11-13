@@ -1,3 +1,8 @@
+/* Deprecated: do not add new classes here — superseded by template
+   organisms in src/client/components/ui/ (PageTemplate, DetailCard,
+   CardHeader). This file stays imported until its live classes
+   migrate; deletion is a separate issue (no-deletion gate). */
+
 /* ==========================================================================
    AUTO OPTIONS RESEARCH & SCREENERS — PROFESSIONAL GRADE STANDARDIZED UI
    Harmonized with OptionStrat Dark Design System (var(--color-surface-sunken) / var(--color-accent))

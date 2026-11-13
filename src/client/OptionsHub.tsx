@@ -16,7 +16,7 @@ import {
   CopilotTriggerButton,
   type CapabilityTabItem,
 } from "./components/CapabilityNavBar";
-import { PageSection, TabPanel } from "./components/ui";
+import { PageSection, PageTemplate, TabPanel } from "./components/ui";
 import { ScannerPanel } from "./ScannerPanel";
 import { IvHistoryPanel } from "./IvHistoryPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -275,26 +275,31 @@ export function OptionsHub({
   ];
 
   return (
-    <PageSection>
-      <CapabilityNavBar
-        ariaLabel="Options capabilities"
-        tabs={optionsTabs}
-        activeTabId={hubTab}
-        onTabChange={handleTabChange}
-        rightContent={
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "var(--space-3)",
-              fontSize: "var(--font-size-body-sm)",
-              color: "var(--color-text-muted)",
-            }}
-          >
-            <CopilotTriggerButton label="✨ Ask Copilot" />
-          </div>
-        }
-      />
+    <PageTemplate
+      title="Options"
+      scopeNote="Screen stocks and options, scan strategies, and review research runs — nothing is submitted."
+    >
+      <PageSection>
+        <CapabilityNavBar
+          ariaLabel="Options capabilities"
+          tabs={optionsTabs}
+          activeTabId={hubTab}
+          onTabChange={handleTabChange}
+          rightContent={
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--space-3)",
+                fontSize: "var(--font-size-body-sm)",
+                color: "var(--color-text-muted)",
+              }}
+            >
+              <CopilotTriggerButton label="✨ Ask Copilot" />
+            </div>
+          }
+        />
+      </PageSection>
 
       {/* Tabbed Browsing Panels — mount on first visit, stay preserved. */}
 
@@ -383,6 +388,6 @@ export function OptionsHub({
           />
         </TabPanel>
       )}
-    </PageSection>
+    </PageTemplate>
   );
 }
