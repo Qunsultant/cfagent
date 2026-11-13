@@ -90,9 +90,17 @@ export const ALARM_SURFACE_REGISTER: readonly AlarmSurfaceEntry[] = [
   {
     file: "src/data/frameworkQueueIndexSchema.ts",
     kind: "framework-queue-index",
-    what: "The index DDL for the framework queue tables (the schema home for #2280's seek indexes).",
+    what: "The framework-queue index array for #2280's seek indexes; the index statements now live in the ORM catalogue (ormCatalogue.ts) and this module only assembles them via ormIndexSql.",
     documentedGap:
-      "Schema only; no scheduling. Kept beside the queue port family so the DDL has one home.",
+      "Schema only; no scheduling. The module documents the queue scans the indexes serve and assembles the index array from the ORM catalogue, where the DDL text has its one home.",
+    singleShot: true,
+  },
+  {
+    file: "src/data/schemaComponent/ormCatalogue.ts",
+    kind: "framework-queue-index",
+    what: "The ORM catalogue's framework-queue index entries: the index statements for cf_agents_jobs (the #2280 seek indexes), moved here from frameworkQueueIndexSchema.ts by #4282 P2a.",
+    documentedGap:
+      "Schema only; no scheduling. The catalogue is DDL text plus accessors — it executes nothing itself; the index ensure functions call the executor. The framework queue has no time index otherwise, and the owner (SDK) does not ship one.",
     singleShot: true,
   },
   {
