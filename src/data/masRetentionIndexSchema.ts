@@ -24,6 +24,7 @@
  * in tests/masRetentionIndexes.test.ts.
  */
 import type { SqlStorage } from "../orm";
+import { ormIndexSql } from "./schemaComponent/ormCatalogue";
 
 /** Exact retention-batch query for mas_messages (storageRetention.ts). */
 export const MAS_MESSAGES_RETENTION_SQL =
@@ -38,20 +39,18 @@ export const MAS_EVENTS_RETENTION_SQL =
  * tables exist — in OrchestratorAgent.ensureTables, right
  * after the mas_events table is created (mas_messages is
  * created earlier in the same method).
+ *
+ * #4282 P2a: the index SQL lives in the schema catalogue
+ * (src/data/schemaComponent/ormCatalogue.ts); this function
+ * executes the catalogue statements by name.
  */
 export function ensureMasRetentionIndexes(sql: SqlStorage): void {
-  sql.exec(
-    "CREATE INDEX IF NOT EXISTS idx_mas_messages_created ON mas_messages(created_at, id)",
-  );
-  sql.exec(
-    "CREATE INDEX IF NOT EXISTS idx_mas_events_created ON mas_events(created_at, id)",
-  );
+  sql.exec(ormIndexSql("idx_mas_messages_created"));
+  sql.exec(ormIndexSql("idx_mas_events_created"));
   // Issue #2543: the receipts read-back's session+type query
   // (WHERE session_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?)
   // walks this covering index in order instead of scanning the audit log
   // — the #1819 failure mode for a log that grows unboundedly. Same
   // idempotent shape as the retention indexes above.
-  sql.exec(
-    "CREATE INDEX IF NOT EXISTS idx_mas_events_session_type ON mas_events(session_id, type, created_at DESC)",
-  );
+  sql.exec(ormIndexSql("idx_mas_events_session_type"));
 }
