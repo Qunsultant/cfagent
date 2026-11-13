@@ -1,0 +1,2 @@
+### Added
+- Autopilot capabilities doc (`docs/architecture/agentic/autopilot-capabilities.md`, #4441): measured inventory of what Autopilot does, surfaces, reads, and writes — the 8 capabilities with file:line references, the 7 page sections with their sources, the 8-rule policy envelope, the provenance of every row, what it does not do (no schedule, no autonomous placement), the known gaps (#4407 fake data, #4408 overlap, #4409 sub-tabs, #4411 monthly schedule), and the divergence from the aspirational `copilot-autopilot.md`.
