@@ -115,6 +115,23 @@ function verdictFlag(value: number | boolean | undefined): boolean {
 }
 
 /**
+ * The one canonical Autopilot timestamp format (#4407): date + time
+ * (the #3825 precedent). Anything that cannot be parsed renders as
+ * "—" and is logged — a raw stored string must never reach the page,
+ * which is how two rows in the same table ended up in different
+ * formats.
+ */
+export function formatAutopilotTimestamp(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    console.warn("[Autopilot] Unparseable timestamp, rendering as —:", value);
+    return "—";
+  }
+  return d.toLocaleString("en-US", { hour12: true });
+}
+
+/**
  * Maps a recorded verdict (mas_policy_verdicts, via GET /autopilot) to an
  * audit-table row. Outcome precedence mirrors the engine: a verdict that may
  * execute now is Allowed; one held for human approval is Approval required;
@@ -124,11 +141,9 @@ export function mapPolicyVerdictToRow(v: PolicyVerdictRecord): PolicyVerdictRow 
   const allowed = verdictFlag(v.execution_allowed);
   const approval = verdictFlag(v.requires_approval);
   const outcome = allowed ? "allowed" : approval ? "approval_required" : "blocked";
-  const parsedTime = v.created_at ? new Date(v.created_at) : null;
-  const timeLabel =
-    parsedTime && !Number.isNaN(parsedTime.getTime())
-      ? parsedTime.toLocaleString("en-US", { hour12: true })
-      : String(v.created_at ?? "");
+  // #4407: one canonical format; an unparseable stored timestamp
+  // renders as "—", never as the raw stored string.
+  const timeLabel = formatAutopilotTimestamp(v.created_at);
   const symbol = String(v.symbol ?? "").toUpperCase();
   const intentParts = [v.action, v.quantity, symbol].filter(
     (part) => part !== undefined && part !== null && part !== ""
@@ -267,14 +282,8 @@ export function mapAuditLogToAutonomousAction(e: AuditLogRawEvent): AutonomousAc
   // read as unsigned, or the ledger cannot be trusted as evidence.
   const signature = String(payload.proofSignature || payload.signature || "");
 
-  // Formatted timestamp
-  let timestamp = e.created_at;
-  try {
-    const d = new Date(e.created_at);
-    if (!isNaN(d.getTime())) {
-      timestamp = d.toLocaleTimeString("en-US", { hour12: true });
-    }
-  } catch {}
+  // Formatted timestamp — #4407: the one canonical date+time format.
+  const timestamp = formatAutopilotTimestamp(e.created_at);
 
   return {
     id: e.id,
@@ -308,13 +317,8 @@ export function mapTradeRecordToAutonomousAction(t: TradeRecord): AutonomousActi
     status = "routed_to_approval";
   }
 
-  let timestamp = t.createdAt;
-  try {
-    const d = new Date(t.createdAt);
-    if (!isNaN(d.getTime())) {
-      timestamp = d.toLocaleTimeString("en-US", { hour12: true });
-    }
-  } catch {}
+  // #4407: the one canonical date+time format.
+  const timestamp = formatAutopilotTimestamp(t.createdAt);
 
   const priceStr = t.price ? `$${Number(t.price).toFixed(2)}` : "MKT";
 
@@ -373,51 +377,6 @@ const ACTION_STATUS_TONES: Record<string, BadgeTone> = {
   blocked: "danger",
 };
 
-const CHART_TF_DATA: Record<string, { nav: string; pnl: string; dd: string; pathD: string; areaD: string }> = {
-  "1d": {
-    nav: "$142,850.00",
-    pnl: "+$1,120.40 (+0.79%)",
-    dd: "-0.32%",
-    pathD: "M 0,160 Q 180,150 360,135 T 620,110 T 820,80 T 1000,50",
-    areaD: "M 0,220 L 0,160 Q 180,150 360,135 T 620,110 T 820,80 T 1000,50 L 1000,220 Z",
-  },
-  "1w": {
-    nav: "$142,850.00",
-    pnl: "+$3,450.00 (+2.47%)",
-    dd: "-0.85%",
-    pathD: "M 0,175 Q 160,160 320,130 T 580,120 T 780,75 T 1000,45",
-    areaD: "M 0,220 L 0,175 Q 160,160 320,130 T 580,120 T 780,75 T 1000,45 L 1000,220 Z",
-  },
-  "1m": {
-    nav: "$142,850.00",
-    pnl: "+$8,920.10 (+6.66%)",
-    dd: "-1.42%",
-    pathD: "M 0,185 Q 140,170 280,140 T 520,115 T 750,70 T 1000,35",
-    areaD: "M 0,220 L 0,185 Q 140,170 280,140 T 520,115 T 750,70 T 1000,35 L 1000,220 Z",
-  },
-  "3m": {
-    nav: "$142,850.00",
-    pnl: "+$16,400.00 (+12.96%)",
-    dd: "-2.10%",
-    pathD: "M 0,190 Q 130,175 260,145 T 500,105 T 740,65 T 1000,30",
-    areaD: "M 0,220 L 0,190 Q 130,175 260,145 T 500,105 T 740,65 T 1000,30 L 1000,220 Z",
-  },
-  "6m": {
-    nav: "$142,850.00",
-    pnl: "+$24,190.20 (+20.39%)",
-    dd: "-2.84%",
-    pathD: "M 0,190 Q 120,180 240,150 T 480,110 T 720,70 T 880,45 T 1000,25",
-    areaD: "M 0,220 L 0,190 Q 120,180 240,150 T 480,110 T 720,70 T 880,45 T 1000,25 L 1000,220 Z",
-  },
-  "ytd": {
-    nav: "$142,850.00",
-    pnl: "+$24,190.20 (+20.39%)",
-    dd: "-2.84%",
-    pathD: "M 0,190 Q 120,180 240,150 T 480,110 T 720,70 T 880,45 T 1000,25",
-    areaD: "M 0,220 L 0,190 Q 120,180 240,150 T 480,110 T 720,70 T 880,45 T 1000,25 L 1000,220 Z",
-  },
-};
-
 export function AutopilotControlCenter({
   user,
   isLiveAccount = false,
@@ -425,7 +384,6 @@ export function AutopilotControlCenter({
   onNavigateOrder,
 }: AutopilotControlCenterProps) {
   const toast = useToast();
-  const [chartTimeframe, setChartTimeframe] = useState<"1d" | "1w" | "1m" | "3m" | "6m" | "ytd">("6m");
   // Autopilot Running / Paused status
   const [isRunning, setIsRunning] = useState<boolean>(() => {
     try {
@@ -634,9 +592,8 @@ export function AutopilotControlCenter({
   // applied ref keeps a repeat arrival on the same value from
   // re-scrolling, and clears when the view leaves so a return scrolls
   // again. `view` is the shared sub-view param — no TAB_PARAM_OWNERS
-  // entry needed. Filters (actionsFilter, chartTimeframe) are NOT views
-  // and get no URL: the Job outcomes section is the page's one
-  // addressable target.
+  // entry needed. Filters (actionsFilter) are NOT views and get no URL:
+  // the Job outcomes section is the page's one addressable target.
   const appliedAutopilotViewRef = useRef<string | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -755,7 +712,7 @@ export function AutopilotControlCenter({
       const positionPct = verdict.projections?.positionPctOfNav;
       const newAction: AutonomousActionItem = {
         id: String(verdict.verdictId || `act-${Date.now()}`),
-        timestamp: new Date(verdict.evaluatedAt || Date.now()).toLocaleTimeString("en-US", { hour12: true }),
+        timestamp: formatAutopilotTimestamp(verdict.evaluatedAt || Date.now()),
         actionType: "policy_check",
         symbol: String(verdict.intents?.symbol || intents.symbol),
         summary: `Policy check (${verdict.dryRun ? "dry run" : "live"}) — ${verdict.intents?.action || intents.action} ${
@@ -789,6 +746,9 @@ export function AutopilotControlCenter({
   };
 
   const verdictRows = recentVerdicts.map(mapPolicyVerdictToRow);
+  // #4407: the signed share is computed from the recorded verdicts —
+  // never a hardcoded claim.
+  const signedVerdictCount = verdictRows.filter((r) => r.signed).length;
 
   const filteredActions = actions.filter((act) => {
     if (actionsFilter === "all") return true;
@@ -796,25 +756,29 @@ export function AutopilotControlCenter({
   });
 
   const accountLabel = isLiveAccount ? "E*TRADE Live Brokerage" : "Paper (simulated money)";
-  const activeChartData = CHART_TF_DATA[chartTimeframe] || CHART_TF_DATA["6m"];
 
   return (
     <PageShell title="Autopilot control center" scopeNote={`Autonomous execution within your written policy, on the account selected at the top: ${accountLabel}.`}>
       {/* Executive Performance Ribbon */}
+      {/* #4407: every figure here is live or "—". Portfolio NAV and
+          drawdown have no live source on this page (GET /api/autopilot
+          carries no balance; there is no equity-history source), so
+          they render as "—" rather than a generated number. */}
       <PageSection title="Executive performance">
+      <span className="ui-meta-sm">Source: GET /api/autopilot — verdict count from mas_policy_verdicts. NAV and drawdown have no live source — shown as —.</span>
       <Grid columns={4} gap="4">
         <Card>
           <Stack gap="1">
             <span className="ui-meta-sm">Portfolio NAV</span>
-            <div><strong>{activeChartData.nav}</strong></div>
-            <span className="ui-meta-sm ui-success">&uarr; {activeChartData.pnl}</span>
+            <div><strong>—</strong></div>
+            <span className="ui-meta-sm">No live NAV source</span>
           </Stack>
         </Card>
 
         <Card>
           <Stack gap="1">
             <span className="ui-meta-sm">Drawdown vs Alert</span>
-            <div><strong>{activeChartData.dd}</strong></div>
+            <div><strong>—</strong></div>
             <span className="ui-meta-sm">
               Policy Alert: {policyLimits.drawdownAlertPct.toFixed(2)}% Max
             </span>
@@ -834,90 +798,30 @@ export function AutopilotControlCenter({
         <Card>
           <Stack gap="1">
             <span className="ui-meta-sm">Risk Policy Engine</span>
-            <div><strong>{verdictRows.length || 14} Verdicts</strong></div>
-            <span className="ui-meta-sm ui-success">
-              &check; 100% W3C DID Signed
+            <div><strong>{verdictRows.length} Verdicts</strong></div>
+            <span className="ui-meta-sm">
+              {verdictRows.length > 0
+                ? `${signedVerdictCount} of ${verdictRows.length} DID-signed`
+                : "No verdicts recorded"}
             </span>
           </Stack>
         </Card>
       </Grid>
       </PageSection>
 
-      {/* Interactive Strategy Performance Curve */}
-      <PageSection title="Strategy Equity vs S&P 500 Benchmark" description="Real-time mark-to-market performance with automated risk policy bounds">
+      {/* Strategy performance — #4407: no live equity-history source
+          feeds this chart, so it renders an empty state rather than a
+          generated curve. The hardcoded chart constant, the
+          timeframe switcher, the hand-drawn benchmark path and the
+          hardcoded legend claims are removed. */}
+      <PageSection title="Strategy Equity vs S&P 500 Benchmark">
       <Card>
-        <Flex justify="end">
-          <PillGroup
-            ariaLabel="Performance timeframe"
-              options={(["1d", "1w", "1m", "3m", "6m", "ytd"] as const).map((tf) => ({ id: tf, label: tf.toUpperCase() }))}
-              value={chartTimeframe}
-              onChange={setChartTimeframe}
-            />
-        </Flex>
-
-        <div>
-          <svg viewBox="0 0 1000 220" preserveAspectRatio="none" width="100%" height="220">
-            <defs>
-              <linearGradient id="autopilotCurveGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--color-gain)" stopOpacity="0.28" />
-                <stop offset="100%" stopColor="var(--color-gain)" stopOpacity="0.00" />
-              </linearGradient>
-            </defs>
-
-            {/* Reference gridlines */}
-            <line x1="0" y1="35" x2="1000" y2="35" stroke="var(--color-border-subtle)" strokeWidth="1" strokeDasharray="4 4" />
-            <line x1="0" y1="95" x2="1000" y2="95" stroke="var(--color-border-subtle)" strokeWidth="1" strokeDasharray="4 4" />
-            <line x1="0" y1="155" x2="1000" y2="155" stroke="var(--color-border-subtle)" strokeWidth="1" strokeDasharray="4 4" />
-            <line x1="0" y1="215" x2="1000" y2="215" stroke="var(--color-border-subtle)" strokeWidth="1" />
-
-            {/* S&P 500 benchmark dashed line */}
-            <path
-              d="M 0,195 Q 150,185 300,170 T 600,145 T 850,130 T 1000,120"
-              fill="none"
-              stroke="var(--color-text-dim)"
-              strokeWidth="2"
-              strokeDasharray="6 6"
-            />
-
-            {/* Strategy Gradient Fill Area */}
-            <path d={activeChartData.areaD} fill="url(#autopilotCurveGradient)" />
-
-            {/* Strategy Glowing Stroke Line */}
-            <path
-              d={activeChartData.pathD}
-              fill="none"
-              stroke="var(--color-gain)"
-              strokeWidth="3"
-              strokeLinecap="round"
-            />
-
-            {/* Milestone Markers */}
-            <g transform="translate(480, 110)">
-              <circle r="4.5" fill="var(--color-gain)" stroke="var(--color-surface)" strokeWidth="2" />
-            </g>
-            <g transform="translate(720, 70)">
-              <circle r="4.5" fill="var(--color-gain)" stroke="var(--color-surface)" strokeWidth="2" />
-            </g>
-            <g transform="translate(1000, 25)">
-              <circle r="5.5" fill="var(--color-gain)" stroke="var(--color-surface)" strokeWidth="2" />
-            </g>
-          </svg>
-        </div>
-
-        <Flex gap="2" align="center" wrap>
-          <Flex gap="1" align="center">
-            <span className="ui-success">●</span>
-            <span>Autopilot Strategy (+20.39% Alpha)</span>
-          </Flex>
-          <Flex gap="1" align="center">
-            <span className="ui-meta">●</span>
-            <span>S&amp;P 500 Benchmark (+8.40%)</span>
-          </Flex>
-          <Flex gap="1" align="center">
-            <span className="ui-warning">●</span>
-            <span>Runtime Pre-Trade Risk Gate Active</span>
-          </Flex>
-        </Flex>
+        <EmptyState
+          framed
+          icon="📈"
+          title="No performance history recorded"
+          description="No live equity-history source feeds this chart, so no curve is shown rather than a generated one. Performance history arrives when a live equity source is wired."
+        />
       </Card>
       </PageSection>
 
@@ -926,6 +830,7 @@ export function AutopilotControlCenter({
         <PageSection>
         {/* Card 1: Autopilot Status Card */}
         <Card>
+          <span className="ui-meta-sm">Source: GET /api/autopilot — OrchestratorAgent state (run state, kill switch, limits, verdicts).</span>
           <Flex gap="1" align="center">
             <span className="ui-meta-sm">Status</span>
             {isKillSwitched && <Badge tone="danger">KILL SWITCH TRIPPED</Badge>}
@@ -989,6 +894,7 @@ export function AutopilotControlCenter({
         <PageSection title="Live policy limits">
         {/* Card 2: Live Policy Limits Card */}
         <Card>
+          <span className="ui-meta-sm">Source: GET /api/autopilot — OrchestratorAgent state; localStorage defaults only when the server has none.</span>
           <Flex justify="end">
             <Button
             variant="secondary"
@@ -1052,6 +958,7 @@ export function AutopilotControlCenter({
       <div id="autopilot-job-outcomes" className="ui-anchor">
       <PageSection title="Job outcomes">
       <Card>
+        <span className="ui-meta-sm">Source: GET /api/autopilot/jobs — mas_job_outcomes (one outcome sink); rows labeled by origin.</span>
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
             <Badge tone="neutral">{jobOutcomes.length}</Badge>
@@ -1077,14 +984,9 @@ export function AutopilotControlCenter({
               key: "time",
               header: "DATE & TIME",
               cellClassName: "time-cell",
-              render: (job) => {
-                try {
-                  const d = new Date(job.createdAt);
-                  return <>{isNaN(d.getTime()) ? job.createdAt : `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${d.toLocaleTimeString("en-US", { hour12: true })}`}</>;
-                } catch {
-                  return <>{job.createdAt}</>;
-                }
-              },
+              // #4407: one canonical date+time format; an unparseable
+              // stored timestamp renders as "—", never raw.
+              render: (job) => <>{formatAutopilotTimestamp(job.createdAt)}</>,
             },
             {
               key: "job",
@@ -1155,6 +1057,7 @@ export function AutopilotControlCenter({
       {/* Bottom Card: Recent Autonomous Actions */}
       <PageSection title="Recent autonomous actions">
       <Card>
+        <span className="ui-meta-sm">Source: GET /api/audit (mas_events) + /api/broker/orders (mas_trades). Simulated rows are labeled Sim, never live.</span>
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
             <Badge tone="neutral">{filteredActions.length}</Badge>
@@ -1211,7 +1114,7 @@ export function AutopilotControlCenter({
           columns={[
             {
               key: "time",
-              header: "TIME",
+              header: "DATE & TIME",
               cellClassName: "time-cell",
               render: (action) => (
               <>{action.timestamp}</>
@@ -1319,6 +1222,7 @@ export function AutopilotControlCenter({
       {/* Policy Decisions Audit (issue #651): recorded verdicts from mas_policy_verdicts */}
       <PageSection title="Policy decisions">
       <Card>
+        <span className="ui-meta-sm">Source: GET /api/autopilot — mas_policy_verdicts, signed by RiskPolicyEngine. Dry-run verdicts are labeled simulated.</span>
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
             <Badge tone="neutral">{verdictRows.length}</Badge>
@@ -1332,7 +1236,7 @@ export function AutopilotControlCenter({
           columns={[
             {
               key: "time",
-              header: "TIME",
+              header: "DATE & TIME",
               cellClassName: "time-cell",
               render: (row) => (
               <>{row.timeLabel}</>
