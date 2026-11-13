@@ -41,8 +41,8 @@
   },
   {
     "path": "src/client/options/optionsResearch.css",
-    "lines": 1198,
-    "reason": "grandfathered (#1337), screener deck layout (#1793)"
+    "lines": 1203,
+    "reason": "grandfathered (#1337), screener deck layout (#1793); Deprecated header added (#3139, +5 lines)"
   },
   {
     "path": "src/client/options/riskAnalysis.css",
@@ -56,8 +56,8 @@
   },
   {
     "path": "src/client/optionsResearch.css",
-    "lines": 1218,
-    "reason": "grandfathered (#1337), screener deck layout (#1793)"
+    "lines": 1223,
+    "reason": "grandfathered (#1337), screener deck layout (#1793); Deprecated header added (#3139, +5 lines)"
   },
   {
     "path": "src/client/portfolioRiskPanel.css",
