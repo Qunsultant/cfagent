@@ -520,6 +520,18 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
 
 
 /* ---------- Table ---------- */
+/* Bounded scroll frame — issue #4329 S1 (#4330).
+ *
+ * A long list or a wide table scrolls inside the frame on BOTH axes instead of
+ * being clipped by the shell. The height clamp is the same one the Docs run list
+ * uses, so the product's long tables scroll identically.
+ */
+.ui-scroll-frame {
+  max-height: min(68vh, 46rem);
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
 .ui-table {
   width: 100%;
   border-collapse: collapse;

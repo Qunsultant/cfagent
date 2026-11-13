@@ -1,0 +1,3 @@
+### Fixed
+
+- **Every Schedules sub-tab scrolls (#4329 S1, #4330):** the list, runs, goals and queue views render inside a shared `ui-scroll-frame` utility instead of being clipped by the shell, so a long ledger scrolls vertically and the twelve-column run table scrolls horizontally. The height clamp is the Docs run-list's (`min(68vh, 46rem)`), so the product's two long tables behave identically, and `scrollbar-gutter: stable` keeps the layout from jumping when the bar appears. The frame is a design-system utility rather than a page class: the interior-consistency gate counts bespoke classes and the bespoke-CSS freeze registers sheets, so one reusable primitive satisfies both and replaces what would have been a fifth page stylesheet. #autoclaw-001
