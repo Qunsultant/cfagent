@@ -235,7 +235,15 @@ describe("3123-P01 one ScheduleStore port (kinds/states census)", () => {
       // Issue #3121 #4237 — the sixth kind: the ticker-push live feed.
       "ticker-push",
     ]);
-    expect([...UNIFIED_SCHEDULE_STATES]).toEqual(["active", "paused", "disabled"]);
+    // Issue #4351 — the fourth state: a deletion's tombstone. A declared task
+    // the user deleted keeps its id here so the next declaration does not
+    // re-create it (the list never renders it).
+    expect([...UNIFIED_SCHEDULE_STATES]).toEqual([
+      "active",
+      "paused",
+      "disabled",
+      "deleted",
+    ]);
     expect(UNIFIED_SCHEDULES_TABLE).toBe("unified_schedules");
     const port = source("src/data/unifiedSchedulePorts.ts");
     for (const kind of UNIFIED_SCHEDULE_KINDS as readonly string[]) {

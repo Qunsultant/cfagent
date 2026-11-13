@@ -85,8 +85,12 @@ export type UnifiedScheduleKind = (typeof UNIFIED_SCHEDULE_KINDS)[number];
  *   or the tick skips it (goal); resume re-arms the SAME record id.
  * - disabled: deployment-disabled (worker duties while the Worker
  *   crons are OFF, #4112). Not a user pause.
+ * - deleted: the user deleted it (issue #4351). A tombstone, not a
+ *   row: it keeps the id a code declaration would otherwise
+ *   re-create, so a deleted declared task stays deleted. The list
+ *   never renders it, and it arms no alarm.
  */
-export const UNIFIED_SCHEDULE_STATES = ["active", "paused", "disabled"] as const;
+export const UNIFIED_SCHEDULE_STATES = ["active", "paused", "disabled", "deleted"] as const;
 
 export type UnifiedScheduleState = (typeof UNIFIED_SCHEDULE_STATES)[number];
 

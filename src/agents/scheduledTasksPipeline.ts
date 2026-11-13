@@ -36,6 +36,8 @@
  */
 import type { AgentContext } from "agents";
 import type { SqlStorage } from "../orm";
+import { createUnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
+import { filterUndeclaredTasks } from "../services/unifiedScheduleManagement";
 import type {
   ThinkScheduledTasks,
   ThinkScheduledTaskContext,
@@ -795,7 +797,7 @@ export async function declarePipelineTasks(
     },
   };
   await control.registerSchedules(recordingHost);
-  const tasks: ThinkScheduledTasks = {};
+  const declared: ThinkScheduledTasks = {};
   for (const spec of specs) {
     const schedule = spec.cron ?? spec.interval;
     if (!schedule) continue;
@@ -806,7 +808,7 @@ export async function declarePipelineTasks(
     // intervals) but carries them as plain strings, so the
     // narrowing happens on the whole task value here — Think
     // re-validates the schedule when it reconciles the task.
-    tasks[taskId] = {
+    declared[taskId] = {
       schedule,
       handler: async (_taskCtx: ThinkScheduledTaskContext): Promise<void> => {
         await dispatchScheduledPipelineJob(ctx, spec.jobId, spec.nodePath, taskId).catch(
@@ -820,7 +822,12 @@ export async function declarePipelineTasks(
       },
     } as ThinkScheduledTasks[string];
   }
-  return tasks;
+  // Issue #4351 — one declaration filter for every declarer: a pipeline task the
+  // user paused or deleted is not declared, so Think cancels its schedule and
+  // never arms it again. The store is this host's own (the ScheduledAgent DO),
+  // which is where the pause/delete record lands.
+  const { unifiedSchedules } = createUnifiedSchedulePorts({ sql });
+  return filterUndeclaredTasks(unifiedSchedules, declared);
 }
 
 /* ------------------------------------------------------------------ */

@@ -1495,6 +1495,25 @@ export class OrchestratorAgent extends PortThink {
     }
   }
 
+  /**
+   * Issue #4351 — re-reconcile the declared scheduled tasks after a user's
+   * pause/resume/delete changed the state the declaration reads. The schedules
+   * route calls this on resume, so a declared task the owner paused is armed
+   * again the moment they resume it. Best-effort by the same rule as every
+   * reconcile: a failure is logged, never thrown — a resume must not fail
+   * because the scheduler could not re-arm.
+   */
+  async reconcileScheduledTasks(): Promise<void> {
+    try {
+      await this.internal_reconcileScheduledTasks();
+    } catch (reconcileError) {
+      structuredLog.warn("orchestrator.declared_schedule_reconcile_failed", {
+        message: "[OrchestratorAgent] Could not reconcile the declared scheduled tasks:",
+        error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError),
+      });
+    }
+  }
+
   // Issue #2693 (#2494 Think adoption, screener slice 1): extracted
   // to ./orchestrator/scheduledTasksObserve.ts
   // (declareStrategyScanObserveTasks). OBSERVE ONLY: Think

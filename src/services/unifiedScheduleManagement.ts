@@ -70,6 +70,74 @@ export interface ScheduleAlarmLike {
   nextRun?: number;
 }
 
+/**
+ * Issue #4351 — the SDK callback a code-declared scheduled task runs under.
+ * Think arms every task `getScheduledTasks()` returns under this callback with
+ * a payload of { taskId, scheduleHash, scheduledFor }, so the payload is the
+ * ONLY place the task id appears: a declaration cannot be paused or deleted by
+ * alarm id, only by this id.
+ */
+export const DECLARED_TASK_CALLBACK = "_runDeclaredScheduledTask";
+
+/**
+ * Issue #4351 — the declared task id an alarm (or a stored record's
+ * definition) carries, or null for a schedule the user created. One reader
+ * for both shapes, so the declaration filter and the pause/delete/resume
+ * paths can never disagree about which task they mean.
+ */
+export function declaredTaskIdOf(
+  value:
+    | { callback?: unknown; payload?: unknown }
+    | { definition?: unknown }
+    | null
+    | undefined,
+): string | null {
+  if (!value || typeof value !== "object") return null;
+  const holder = value as { callback?: unknown; payload?: unknown; definition?: unknown };
+  const definition =
+    holder.definition && typeof holder.definition === "object"
+      ? (holder.definition as { callback?: unknown; payload?: unknown })
+      : holder;
+  if (definition.callback !== DECLARED_TASK_CALLBACK) return null;
+  const payload = definition.payload;
+  if (!payload || typeof payload !== "object") return null;
+  const taskId = (payload as { taskId?: unknown }).taskId;
+  return typeof taskId === "string" && taskId.trim() ? taskId : null;
+}
+
+/**
+ * Issue #4351 — the declaration filter: drop the declared tasks the user
+ * paused or deleted.
+ *
+ * Think reconciles declarations by task id. A task that disappears from
+ * `getScheduledTasks()` has its armed schedule CANCELLED
+ * (`_reconcileDeclaredScheduledTasks` prunes the rows it no longer sees), and
+ * a task that reappears is armed again. So the user's decision is expressed
+ * exactly here — one filter both declarers share — instead of hoping a re-arm
+ * preserves it. A missing store (a host without DO SQLite) declares as before;
+ * an UNREADABLE store fails closed — it may hold the user's pause, so the task
+ * is not declared, and the next reconcile with a healthy store arms it again.
+ */
+export async function filterUndeclaredTasks<T>(
+  store: Pick<UnifiedStoreLike, "get"> | null | undefined,
+  tasks: Record<string, T>,
+): Promise<Record<string, T>> {
+  if (!store) return tasks;
+  const out: Record<string, T> = {};
+  for (const [taskId, task] of Object.entries(tasks)) {
+    let record: UnifiedScheduleRecord | undefined;
+    try {
+      record = await store.get(taskId);
+    } catch {
+      // Fail closed: the store may hold the user's pause (4351's acceptance).
+      continue;
+    }
+    if (record && (record.state === "paused" || record.state === "deleted")) continue;
+    out[taskId] = task;
+  }
+  return out;
+}
+
 /** The alarms port: the Agents SDK scheduler behind an interface. */
 export interface ScheduleAlarms {
   list(): Promise<ScheduleAlarmLike[]>;
@@ -85,6 +153,14 @@ export interface ScheduleAlarms {
 export interface UnifiedManagementDeps {
   store: UnifiedStoreLike;
   alarms: ScheduleAlarms;
+  /**
+   * Issue #4351 — re-declare the code-declared scheduled tasks (the SDK's
+   * `internal_reconcileScheduledTasks`). Resuming a DECLARED task arms nothing
+   * itself: it flips the record to active and asks the declaration to
+   * re-appear, so the next reconcile arms it. Absent on hosts without a
+   * declaration; the resume then takes effect on the next wake.
+   */
+  reconcileDeclared?: (() => Promise<void>) | undefined;
 }
 
 export type UnifiedOpResult<T = UnifiedScheduleRecord> =
@@ -454,6 +530,9 @@ export async function listUnifiedScheduleItems(
   const items: Array<ReturnType<typeof unifiedRecordToListItem>> = [];
   for (const alarm of alarms) {
     const record = byAlarmId.get(alarm.id) ?? byId.get(alarm.id);
+    // Issue #4351 — a deleted schedule's tombstone hides its alarm, in the
+    // window before the next declaration prunes it.
+    if (record && record.state === "deleted") continue;
     if (record && record.kind !== "screen" && record.kind !== "workflow-stage") continue;
     if (record) {
       const item = unifiedRecordToListItem(record, alarm.nextRun);
@@ -534,13 +613,19 @@ export async function pauseUnifiedSchedule(
   if (!alarm) {
     return fail(`Schedule '${id}' not found`, 404);
   }
+  // Issue #4351 — a code-declared task is identified by its TASK id (the id
+  // `getScheduledTasks()` declares it under), not by the SDK's alarm id: the
+  // declaration filter reads the record by task id, so pausing has to store it
+  // there. A user-created schedule keeps the id the caller addressed.
+  const declaredTaskId = declaredTaskIdOf(alarm);
+  const recordId = declaredTaskId ?? id;
   const record: UnifiedScheduleRecord = existing
     ? { ...existing, state: "paused", pausedAt: nowIso, alarmId: alarm.id, updatedAt: nowIso }
     : {
         ...(isStageAlarmPayload(alarm.payload)
           ? workflowStageScheduleToRecord(alarm, nowIso)
           : screenScheduleToRecord(alarm, nowIso)),
-        id,
+        id: recordId,
         state: "paused",
         pausedAt: nowIso,
       };
@@ -564,6 +649,21 @@ export async function resumeUnifiedSchedule(
   }
   if (record.state !== "paused") {
     return fail(`Schedule '${id}' is not paused`, 404);
+  }
+  // Issue #4351 — a declared task has no timing of its own: its cadence lives
+  // in the code declaration. Resume flips the record to active and re-runs the
+  // declaration, which arms it again (Think's reconcile is the supported hook
+  // for "app-owned data getScheduledTasks() reads").
+  if (declaredTaskIdOf(record)) {
+    const resumed: UnifiedScheduleRecord = {
+      ...record,
+      state: "active",
+      pausedAt: null,
+      updatedAt: nowIso,
+    };
+    await deps.store.save(resumed);
+    await deps.reconcileDeclared?.();
+    return { ok: true, record: resumed, previousId: id };
   }
   const timing = timingFromRecordDefinition(record.definition);
   if (!timing) {
@@ -594,8 +694,27 @@ export async function deleteUnifiedSchedule(
   if (record && record.kind !== "screen" && record.kind !== "workflow-stage") {
     return { ok: true, cancelled: false };
   }
+  const alarm = record ? undefined : await deps.alarms.get(id);
   const alarmId = record?.alarmId ?? id;
   const alarmCancelled = await deps.alarms.cancel(alarmId);
+  // Issue #4351 — a code-declared task is re-created by the next boot's
+  // declaration, so deleting it cancels the alarm AND writes a tombstone under
+  // the id the declaration uses; the filter then stops declaring it. A
+  // user-created schedule has no declaration to come back, so its record is
+  // simply removed (the pre-#4351 behaviour).
+  const declaredTaskId = declaredTaskIdOf(record) ?? declaredTaskIdOf(alarm);
+  if (declaredTaskId) {
+    const nowIso = new Date().toISOString();
+    const base = record ?? screenScheduleToRecord(alarm as ScheduleAlarmLike, nowIso);
+    await deps.store.save({
+      ...base,
+      id: declaredTaskId,
+      state: "deleted",
+      alarmId: null,
+      updatedAt: nowIso,
+    });
+    return { ok: true, cancelled: true };
+  }
   let recordRemoved = false;
   if (record) recordRemoved = await deps.store.remove(id);
   return { ok: true, cancelled: alarmCancelled || recordRemoved };
@@ -617,6 +736,11 @@ export async function getUnifiedScheduleDetail(
 > {
   const alarm = await deps.alarms.get(id);
   const record = await deps.store.get(id);
+  // Issue #4351 — a tombstone is not a schedule: a deleted id is not found,
+  // even in the window before the declaration prunes its stale alarm.
+  if (record && record.state === "deleted") {
+    return fail(`Schedule '${id}' not found`, 404);
+  }
   if (alarm) {
     const owned = record && record.alarmId === id ? record : undefined;
     if (owned) {

@@ -181,6 +181,13 @@ export interface SchedulesRouteContext {
     payload?: unknown,
     options?: { idempotent?: boolean }
   ): Promise<Schedule<unknown>>;
+  /**
+   * Issue #4351 — re-declare the code-declared scheduled tasks (the SDK's
+   * `internal_reconcileScheduledTasks`), so a resumed declared task is armed
+   * again immediately instead of on the next host start. Optional: a host with
+   * no declaration reconciles nothing.
+   */
+  reconcileScheduledTasks?: () => Promise<void>;
   /** SDK interval scheduler (owner: Agent base class - was `this.scheduleEvery`). */
   scheduleEvery(
     intervalSeconds: number,
@@ -982,7 +989,11 @@ export async function handleSchedulesRoutes(
         if (!scheduleId) {
           return Response.json({ error: "Schedule ID is required" }, { status: 400 });
         }
-        const result = await resumeUnifiedSchedule({ store: unifiedStore(), alarms }, scheduleId, new Date().toISOString());
+        const result = await resumeUnifiedSchedule(
+          { store: unifiedStore(), alarms, reconcileDeclared: ctx.reconcileScheduledTasks },
+          scheduleId,
+          new Date().toISOString(),
+        );
         if (!result.ok) {
           return Response.json({ error: result.error }, { status: result.status });
         }

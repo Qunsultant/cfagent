@@ -894,6 +894,11 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     submitAsyncJob: (spec) => (deps as any).submitAsyncJob(spec),
     autonomousMarketScreen: (payload) => deps.autonomousMarketScreen(payload),
     autoRenewETradeTokens: (payload) => deps.autoRenewETradeTokens(payload),
+    // Issue #4351 — a resumed declared task must be declared again now, not
+    // on the next host start; the agent owns the SDK's reconcile hook.
+    reconcileScheduledTasks: async () => {
+      await (deps as unknown as { reconcileScheduledTasks?: () => Promise<void> }).reconcileScheduledTasks?.();
+    },
     creatableScheduleCallbacks: CREATABLE_SCHEDULE_CALLBACKS,
     accountScopedScheduleCallbacks: ACCOUNT_SCOPED_SCHEDULE_CALLBACKS,
     runScheduleCallback: makeRunScheduleCallback(deps),
