@@ -1248,6 +1248,10 @@
     },
     "autopilot": {
       "tab": "autopilot"
+    },
+    "autopilot:job-outcomes": {
+      "tab": "autopilot",
+      "view": "job-outcomes"
     }
   },
   "deepLinkSurfaces": [
@@ -1419,6 +1423,14 @@
         "playbook",
         "scenarios",
         "ai"
+      ]
+    },
+    {
+      "surface": "autopilot",
+      "page": "autopilot",
+      "param": "view",
+      "values": [
+        "job-outcomes"
       ]
     }
   ],
