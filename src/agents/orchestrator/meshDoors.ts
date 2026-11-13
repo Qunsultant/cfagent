@@ -120,6 +120,7 @@ import type {
   JobScheduleConfig,
 } from "../../data/jobPipelinePorts";
 import type { JobStagesRead, JobStatusView } from "../../services/jobPipelineEngine";
+import { JobPipelineError } from "../../services/jobPipelineConfig";
 import type { JobStageEventRecord } from "../../data/jobStageEventPorts";
 import {
   resolveFeedJob,
@@ -1257,6 +1258,24 @@ export async function getPipelineChainStatusViaDoor(
   const entry = resolvePipelineChainOrThrow(source);
   const door = getScheduledAgentDoor(env);
   return door.getPipelineChainSurfaceStatus(entry.jobId);
+}
+
+/**
+ * Issue #4361 — one engine job's status view through the ScheduledAgent
+ * door. A job the engine does not know reads null (the caller refuses by
+ * name); a door outage throws, so a caller never reports "not found" for
+ * an unreachable host.
+ */
+export async function getPipelineJobStatusViaDoor(
+  env: Env,
+  jobId: string,
+): Promise<JobStatusView | null> {
+  try {
+    return await getScheduledAgentDoor(env).getPipelineJobStatus(jobId);
+  } catch (error) {
+    if (error instanceof JobPipelineError && error.code === "job_not_found") return null;
+    throw error;
+  }
 }
 
 /** Every chain's end-to-end status, in catalog order. */

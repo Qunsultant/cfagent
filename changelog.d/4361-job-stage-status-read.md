@@ -1,0 +1,3 @@
+### Added
+
+- **Chat can answer "which stage is running, and how long did each take?" (#4361):** two reads over the engine's own status view — `GET /api/jobs/:jobId/status` returns the job plus one entry per stage (sub-job) with status, start, end, duration and unit counts, and `GET /api/jobs/:jobId/stages/:stage` returns one stage addressed by stage id (`job:root`), stage kind (`feed`) or node path. Their MCP mirrors (`get_job_status`, `get_job_stage_status`) return the same payloads from the same source. An unknown job refuses by name, an unknown or ambiguous stage refuses with the stages that exist, and a door outage is a 503 rather than a pretend 404. `get_async_job` is unchanged — its record shape carries no stages, so the new read is additive. #autoclaw-001

@@ -33,6 +33,24 @@ id: the ledger's Job column is a schedule/goal id (not an async-job
 id — `/api/jobs/<that>` 404s), while the Async job column is the
 `mas_async_jobs` row id (see [Entity reference](#entity-reference)).
 
+## The stage-status reads (#4361)
+
+Two reads answer "which stage is running, and how long did each take?" — the
+job at a glance, and one stage in detail:
+
+| Read | Returns |
+| --- | --- |
+| `GET /api/jobs/:jobId/status` | the job's status and window, then one entry per stage (sub-job): `stageId`, `kind`, `status`, `startedAt`, `endedAt`, `durationMs`, `units`, `completedUnits`, `error` |
+| `GET /api/jobs/:jobId/stages/:stage` | one entry of the same list, addressed by stage id (`job:root`), stage kind (`feed`) or node path |
+| MCP `get_job_status` / `get_job_stage_status` | the same payloads, read from the same engine status view |
+
+Both read the engine's own status view through the ScheduledAgent door — the
+same source the Workflow Runs stages use (#4359) — never a second stage source.
+An unknown job id refuses by name with a 404; an unknown or ambiguous stage
+refuses with the stages that do exist; a door outage is a 503, never a pretend
+"not found". `get_async_job` keeps its verbatim `mas_async_jobs` passthrough and
+is deliberately not widened: its record carries no stages.
+
 ## Entity relationships
 
 ```mermaid
