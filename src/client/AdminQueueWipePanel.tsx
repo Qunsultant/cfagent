@@ -30,7 +30,28 @@ import { Checkbox } from "./components/ui/Checkbox";
 import { Modal } from "./components/ui/Modal";
 import { Notice } from "./components/ui/Notice";
 import { Spinner } from "./components/ui/Spinner";
-import { Table } from "./components/ui/Table";
+import { Table, type TableColumn } from "./components/ui/Table";
+import { Badge } from "./components/ui/Badge";
+import { Flex } from "./components/ui/Flex";
+import { Stack } from "./components/ui/Stack";
+import { TabPanel, Tabs } from "./components/ui/Tabs";
+import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
+// Issue #4334 (parent #4329 S5) — the queue's sections are configuration, and
+// its rows present like the schedules tab: the same column vocabulary, the
+// same naming and cadence sentences. Reuse, not a second shape.
+import {
+  SCHEDULE_SECTION_PARAM,
+  QUEUE_SCHEDULE_SECTION_LABELS,
+  isQueueScheduleSection,
+  resolveQueueScheduleDefaultSection,
+  resolveQueueScheduleSections,
+  type QueueScheduleSection,
+} from "../config/scheduleSections";
+import {
+  SCHEDULE_ROW_COLUMN_LABELS,
+  resolveScheduleRowColumns,
+} from "../config/scheduleRowModes";
+import { cronToEnglish, scheduleDisplayName, type ScheduleItem } from "./SchedulesPanel";
 import { downloadTextFile } from "./runExport";
 import {
   type CancelAllPreview,
@@ -40,6 +61,7 @@ import {
   type ClearTableResult,
   type KvWipeRowResult,
   type QueueDump,
+  type QueueScheduleView,
   type RecreateResultItem,
   type SelectiveKvRow,
   confirmCancelAll,
@@ -114,6 +136,16 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** One Track 1 plan row, as the recreate plan returns it. */
+type TrackRow = ReturnType<typeof track1RecreatePlan>[number];
+
+/** A plan row's cadence sentence — the same words the queue dump uses. */
+function trackCadenceOf(row: TrackRow): string {
+  return String(
+    row.requestBody.cron ?? `Every ${(row.requestBody.intervalSeconds ?? 0) / 60} min`,
+  );
+}
+
 export function AdminQueueWipePanel() {
   const [dump, setDump] = useState<QueueDump | null>(null);
   const [dumpError, setDumpError] = useState<string | null>(null);
@@ -153,6 +185,118 @@ export function AdminQueueWipePanel() {
   const [selSignedOut, setSelSignedOut] = useState(false);
 
   const markerLocked = selected["kv:memberships"] === true;
+
+  // Issue #4334 — the queue's sections: each is a sub-tab with a stable
+  // `?section=` deep link (the schedules home's one section param), and the
+  // panels are retained so a previewed result survives a section switch.
+  const queueSections = useMemo<QueueScheduleSection[]>(() => resolveQueueScheduleSections(), []);
+  const { activeTab: section, handleTabChange } = useUrlSyncedTabs<QueueScheduleSection>({
+    param: SCHEDULE_SECTION_PARAM,
+    isValid: isQueueScheduleSection,
+    defaultTab: resolveQueueScheduleDefaultSection({}, queueSections),
+  });
+
+  // Issue #4334 — the dump's rows use the shared column vocabulary
+  // (schedule · id · cadence · scope · status) and the schedules list's own
+  // naming/cadence sentences, so the queue reads like every other row list.
+  const dumpRowCells: Record<string, TableColumn<QueueScheduleView>> = {
+    schedule: {
+      key: "schedule",
+      header: SCHEDULE_ROW_COLUMN_LABELS.schedule,
+      render: (row) => (
+        <Stack gap="1">
+          <span>
+            {scheduleDisplayName({ callback: row.callback, type: row.type } as ScheduleItem)}
+          </span>
+          <Flex gap="1" wrap inline as="span">
+            <Badge tone={row.paused ? "warning" : "success"} size="xs" dot>
+              {row.paused ? "Paused" : "Active"}
+            </Badge>
+            {row.type ? (
+              <Badge tone="neutral" size="xs" uppercase>
+                {row.type}
+              </Badge>
+            ) : null}
+          </Flex>
+        </Stack>
+      ),
+    },
+    id: {
+      key: "id",
+      header: SCHEDULE_ROW_COLUMN_LABELS.id,
+      render: (row) => <code title={row.id}>{row.id}</code>,
+    },
+    cadence: {
+      key: "cadence",
+      header: SCHEDULE_ROW_COLUMN_LABELS.cadence,
+      render: (row) => (
+        <Stack gap="0-5">
+          <span>{row.cron ? cronToEnglish(row.cron) : cadenceOf(row)}</span>
+          <span className="ui-meta-sm">
+            {row.cron ? row.cron : "interval"}
+            {row.nextRun ? ` · next ${row.nextRun}` : ""}
+          </span>
+        </Stack>
+      ),
+    },
+    scope: {
+      key: "scope",
+      header: SCHEDULE_ROW_COLUMN_LABELS.scope,
+      render: (row) => <span>{row.universe ?? "—"}</span>,
+    },
+    status: {
+      key: "status",
+      header: SCHEDULE_ROW_COLUMN_LABELS.status,
+      render: (row) => (
+        <Badge tone={row.paused ? "warning" : "success"} size="xs">
+          {row.paused ? "Paused" : "Active"}
+        </Badge>
+      ),
+    },
+  };
+  const dumpColumns: TableColumn<QueueScheduleView>[] = resolveScheduleRowColumns("queue")
+    .map((key) => dumpRowCells[key])
+    .filter((column): column is TableColumn<QueueScheduleView> => Boolean(column));
+
+  // The Track 1 plan table presents the same way: the schedule's name and id
+  // on the row, its cadence, its scope and its delivery.
+  const planRowCells: Record<string, TableColumn<TrackRow>> = {
+    schedule: {
+      key: "schedule",
+      header: SCHEDULE_ROW_COLUMN_LABELS.schedule,
+      render: (row) => (
+        <Stack gap="1">
+          <span>{row.label}</span>
+          <code>{String(row.requestBody.callback)}</code>
+        </Stack>
+      ),
+    },
+    cadence: {
+      key: "cadence",
+      header: SCHEDULE_ROW_COLUMN_LABELS.cadence,
+      render: (row) => <span>{trackCadenceOf(row)}</span>,
+    },
+    scope: {
+      key: "scope",
+      header: SCHEDULE_ROW_COLUMN_LABELS.scope,
+      render: (row) => (
+        <span>{String((row.requestBody.payload as Record<string, unknown>).universe ?? "—")}</span>
+      ),
+    },
+    status: {
+      key: "status",
+      header: "Delivery",
+      render: (row) => (
+        <span>{deliveryOf(row.requestBody.payload as Record<string, unknown>)}</span>
+      ),
+    },
+  };
+  const planColumns: TableColumn<TrackRow>[] = [
+    planRowCells.schedule,
+    planRowCells.cadence,
+    planRowCells.scope,
+    planRowCells.status,
+  ].filter((column): column is TableColumn<TrackRow> => Boolean(column));
 
   const toggleSelective = useCallback((id: string) => {
     if (id === "kv:marker" && markerLocked) return;
@@ -447,6 +591,20 @@ export function AdminQueueWipePanel() {
         </Notice>
       )}
 
+      <Tabs<QueueScheduleSection>
+        idBase="schedules-queue"
+        ariaLabel="Admin queue sections"
+        tabs={queueSections.map((id) => ({
+          id,
+          label: QUEUE_SCHEDULE_SECTION_LABELS[id],
+          ...(id === "queue" && dump ? { badge: dump.count } : {}),
+        }))}
+        value={section}
+        onChange={handleTabChange}
+        size="sm"
+      />
+
+      <TabPanel idBase="schedules-queue" tabId="queue" active={section === "queue"} retain>
       <h3>Queue dump</h3>
       <p className="iaaa-admin-note">
         Read before any destructive action. Refresh after a wipe to verify the queue is empty.
@@ -466,13 +624,7 @@ export function AdminQueueWipePanel() {
             {dump.count} schedule(s) · {activeCount} active · {pausedCount} paused (paused records are preserved, never deleted, by a queue wipe)
           </p>
           <Table
-            columns={[
-              { key: "callback", header: "Callback", render: (row) => row.callback },
-              { key: "id", header: "ID", render: (row) => <code>{row.id}</code> },
-              { key: "cadence", header: "Cadence", render: (row) => cadenceOf(row) },
-              { key: "universe", header: "Universe", render: (row) => row.universe ?? "—" },
-              { key: "status", header: "Status", render: (row) => (row.paused ? "Paused" : "Active") },
-            ]}
+            columns={dumpColumns}
             rows={dump.schedules}
             rowKey={(row) => row.id}
             empty={<p>No schedules in this instance queue.</p>}
@@ -480,6 +632,9 @@ export function AdminQueueWipePanel() {
         </>
       ) : null}
 
+      </TabPanel>
+
+      <TabPanel idBase="schedules-queue" tabId="cancel" active={section === "cancel"} retain>
       <h3>Cancel all schedules (queue wipe)</h3>
       <p className="iaaa-admin-note">
         Preview first: the preview lists exactly what would be cancelled and how many paused
@@ -531,6 +686,9 @@ export function AdminQueueWipePanel() {
         )}
       </Modal>
 
+      </TabPanel>
+
+      <TabPanel idBase="schedules-queue" tabId="wipe" active={section === "wipe"} retain>
       <h3>Clear a table</h3>
       <p className="iaaa-admin-note">
         Only the allowlisted tables are offered. Running jobs are never deleted (counted as
@@ -670,6 +828,9 @@ export function AdminQueueWipePanel() {
         {selExported && <p>{selExported}</p>}
       </Modal>
 
+      </TabPanel>
+
+      <TabPanel idBase="schedules-queue" tabId="recreate" active={section === "recreate"} retain>
       <h3>Recreate Track 1</h3>
       <p className="iaaa-admin-note">
         A separate explicit action, never automatic after a wipe. Review the four schedules
@@ -685,13 +846,7 @@ export function AdminQueueWipePanel() {
       ) : (
         <>
           <Table
-            columns={[
-              { key: "label", header: "Schedule", render: (row) => row.label },
-              { key: "callback", header: "Callback", render: (row) => String(row.requestBody.callback) },
-              { key: "cadence", header: "Cadence", render: (row) => String(row.requestBody.cron ?? `Every ${(row.requestBody.intervalSeconds ?? 0) / 60} min`) },
-              { key: "universe", header: "Universe", render: (row) => String((row.requestBody.payload as Record<string, unknown>).universe ?? "—") },
-              { key: "delivery", header: "Delivery", render: (row) => deliveryOf(row.requestBody.payload as Record<string, unknown>) },
-            ]}
+            columns={planColumns}
             rows={track1Plan.items}
             rowKey={(row) => row.label}
           />
@@ -725,6 +880,7 @@ export function AdminQueueWipePanel() {
           instance. This is a separate action from the wipe and only runs when you confirm here.
         </p>
       </Modal>
+      </TabPanel>
     </div>
   );
 }
