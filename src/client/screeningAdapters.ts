@@ -80,14 +80,48 @@ export function getScreeningProviders(assetClass: ScreeningAssetClass): Screenin
  * follows the tenant's configured data provider instead of assuming one
  * brand. Tenant data-provider ids are registry ids (`yahoo`), while the
  * hub's selector variants carry their own ids (`yahoo-finance`); this
- * table is the only place that translation lives. A tenant provider with
- * no hub variant (public, nasdaq, alpaca today) falls back to the first
- * available variant, exactly as an unknown selection did before.
+ * table is the only place that translation lives.
+ *
+ * Issue #4430 (S1a) — a tenant provider with no hub variant must NOT
+ * fall back to the first available variant: that silent substitution
+ * resolved to the E*TRADE endpoint for tenants whose configured broker
+ * is not E*TRADE, and the broker gate refused the run with 409
+ * FAILURE_BROKER_UNAVAILABLE. The resolver now returns "" (no
+ * selection) for a provider with no hub variant, and the hub blocks
+ * the run with the coded NO_SCREENING_PROVIDER_FOR_TENANT message
+ * instead of posting anywhere. The selection is tenant-resolved only:
+ * no broker, provider, or variant is ever substituted as a default —
+ * not even the workflow-backed variant. The user may still choose it
+ * explicitly (see YAHOO_FINANCE_VARIANT_ID), but it is never a default.
  */
 const TENANT_PROVIDER_TO_VARIANT_ID: Readonly<Record<string, string>> = {
   etrade: "etrade",
   yahoo: "yahoo-finance",
 };
+
+/** Coded block when no hub variant exists for the tenant's configured provider (#4430). */
+export const NO_SCREENING_PROVIDER_FOR_TENANT = "NO_SCREENING_PROVIDER_FOR_TENANT";
+
+/**
+ * The workflow-backed hub variant (#4430). This is the target of the
+ * USER-INVOKED switch-to-Yahoo action after a broker-gate 409 (D2's
+ * Yahoo testing option) — never a default: no resolver path returns
+ * it unless the user chose it.
+ */
+export const YAHOO_FINANCE_VARIANT_ID = "yahoo-finance";
+
+/**
+ * Message for the coded no-provider block (#4430). Names the configured
+ * data provider id as recorded — never a guessed brand — and states
+ * that no screen was started.
+ */
+export function noScreeningProviderMessage(tenantDataProviderId: string): string {
+  const configured = tenantDataProviderId ? `"${tenantDataProviderId}"` : "not configured";
+  return (
+    `${NO_SCREENING_PROVIDER_FOR_TENANT}: no screening provider is available for this tenant's ` +
+    `configured data provider (${configured}). Choose a provider in Settings — no screen was started.`
+  );
+}
 
 export function resolveInitialScreeningProviderId(
   tenantDataProviderId: string,
@@ -97,7 +131,10 @@ export function resolveInitialScreeningProviderId(
   const mapped = TENANT_PROVIDER_TO_VARIANT_ID[tenantDataProviderId];
   if (mapped && providers.some((provider) => provider.id === mapped)) return mapped;
   if (providers.some((provider) => provider.id === tenantDataProviderId)) return tenantDataProviderId;
-  return providers[0].id;
+  // #4430: no hub variant for this tenant provider — no selection.
+  // The hub blocks the run with NO_SCREENING_PROVIDER_FOR_TENANT
+  // instead of silently falling back to the first variant.
+  return "";
 }
 
 export function providerSupportsFilter(
