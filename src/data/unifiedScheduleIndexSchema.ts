@@ -21,14 +21,20 @@
  */
 import type { SqlStorage } from "../orm";
 import { UNIFIED_SCHEDULES_TABLE } from "./unifiedSchedulePorts";
+import { ormIndexSql } from "./schemaComponent/ormCatalogue";
 
 /** Exact unfiltered-list query for the unified store (doSqliteUnifiedScheduleAdapter.ts). */
 export const UNIFIED_SCHEDULES_LIST_SQL = `SELECT * FROM ${UNIFIED_SCHEDULES_TABLE} ORDER BY created_at ASC, id ASC`;
 
+/**
+ * #4282 P2a: the index SQL lives in the schema catalogue
+ * (src/data/schemaComponent/ormCatalogue.ts); this array is the same
+ * statement by name, so callers reading it see identical SQL.
+ */
 export const UNIFIED_SCHEDULE_INDEXES: Array<{ name: string; sql: string }> = [
   {
     name: "unified_schedules_created_idx",
-    sql: `CREATE INDEX IF NOT EXISTS unified_schedules_created_idx ON ${UNIFIED_SCHEDULES_TABLE} (created_at ASC, id ASC)`,
+    sql: ormIndexSql("unified_schedules_created_idx"),
   },
 ];
 
