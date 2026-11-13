@@ -171,9 +171,8 @@ export interface ReferralAttribution {
   tenantId: string;
   /**
    * How the attribution was recorded. `operator` = the operator attribution
-   * route (#2657). `code` is reserved for future referral-code surfaces
-   * (e.g. #2468 Phase 4 marketing) that write through this store; no route
-   * stamps `code` today, and the operator route always stamps `operator`
+   * route (#2657). `code` = a referral-kind code redemption (#3307), which
+   * passes `source: "code"`; the operator route always stamps `operator`
    * regardless of client input.
    */
   source: "operator" | "code";
@@ -203,6 +202,13 @@ export interface ReferralCreditPort {
     referrerUserId: string;
     referredUserId: string;
     tenantId: string;
+    /**
+     * Additive, optional (#3307): which surface recorded the
+     * attribution. Defaults to "operator" — existing callers
+     * pass nothing and their rows keep stamping "operator".
+     * A referral-kind code redemption passes "code".
+     */
+    source?: ReferralAttribution["source"];
   }): Promise<ReferralAttribution>;
   /** The attribution row for one referred user, or null when unattributed. */
   getAttribution(referredUserId: string): Promise<ReferralAttribution | null>;

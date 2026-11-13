@@ -241,9 +241,12 @@ describe("outcome catalog: run detail messages (#2608)", () => {
     // SUCCESS/FAILURE_OFFER_* (10) + SUCCESS/FAILURE_PRODUCT_RANK_*
     // (2)) + 5 (#3246 slice 3: SUCCESS_RUNS_PACK_PURCHASED +
     // FAILURE_RUNS_PACK_UNAVAILABLE + FAILURE_RUNS_PACK_NO_APPROVED_PRICE
-    // + FAILURE_RUNS_PACK_REPLAY + FAILURE_RUNS_PACK_NOT_PAID).
+    // + FAILURE_RUNS_PACK_REPLAY + FAILURE_RUNS_PACK_NOT_PAID)
+    // + 4 (#3307 slice 1: FAILURE_CODE_RUNS_UNAVAILABLE +
+    // FAILURE_REFERRAL_CODE_INVALID + FAILURE_REFERRAL_CODE_CAP_EXCEEDED
+    // + FAILURE_REFERRAL_CODE_RULE_UNAVAILABLE).
     // The count pins that no RUN_* code leaked into "outcomes".
-    expect(Object.keys(outcomes)).toHaveLength(141);
+    expect(Object.keys(outcomes)).toHaveLength(145);
     expect(Object.keys(outcomes).some((k) => k.startsWith("RUN_"))).toBe(false);
     for (const code of RUN_CODES) {
       expect(code).toMatch(/^RUN_[A-Z_]+$/);
