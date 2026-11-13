@@ -60,6 +60,7 @@ import type {
 import type { StockScreenDelivery } from "../workflows/stockScreenRunSpec";
 import type { WorkflowGoalScreenEnvelope } from "../agents/orchestrator/goalScreenDispatch";
 import { SCREENER_DEFAULT_EXECUTION_MODE } from "../config/screenerExecutionMode";
+import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 
 /** The step names a screener job's configuration references. */
 export const SCREENER_FEED_STEP = "screener.feed";
@@ -405,12 +406,22 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
     symbols,
     shards: shardTable,
   };
+  // Issue #4365 — the stage list comes from the externalized definition
+  // spec, not from a literal in this builder. The typed constants below
+  // are its projection (a parity pin holds them equal).
+  const spec = jobDefinitionSpec("screener");
   let node: JobNodeConfig | undefined;
-  for (let i = SCREENER_NODE_KINDS.length - 1; i >= 0; i--) {
-    const kind = SCREENER_NODE_KINDS[i];
+  for (let i = spec.stages.length - 1; i >= 0; i--) {
+    const stageSpec = spec.stages[i];
+    const kind = stageSpec.kind;
     const next: JobNodeConfig = {
       kind,
-      steps: [{ step: SCREENER_NODE_STEPS[kind], params }],
+      steps: [
+        {
+          step: stageSpec.step,
+          params: { ...params, ...(stageSpec.params ?? {}) },
+        },
+      ],
       processing: { shards: [...shardIds] },
       ...(node ? { children: [node] } : {}),
     };

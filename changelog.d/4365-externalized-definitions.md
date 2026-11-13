@@ -1,0 +1,4 @@
+### Added
+
+- **A job is a spec, not code (#4365):** `src/config/jobDefinitionCatalog.ts` holds the externalized definition record — id, version, stages (kind · step · per-stage parameters, sub-stages supported), execution mode and schedule defaults — validated on load. The screener's six nodes and its mode now load from that spec; the builder's stage list and mode literals are retired, and the typed constants are the spec's projection (held equal by a parity pin).
+- **Validation is fail-closed (#4365):** an empty stage list, a stage without a kind or step, an unsupported mode or a non-object spec refuses by name before any run starts; a family with no spec refuses with the ids that exist. A partially-configured definition never runs with invented values. #autoclaw-001

@@ -53,6 +53,19 @@ refuses with the stages that do exist; a door outage is a 503, never a pretend
 "not found". `get_async_job` keeps its verbatim `mas_async_jobs` passthrough and
 is deliberately not widened: its record carries no stages.
 
+## Definitions are externalized (#4365)
+
+A job is a spec, not code. `src/config/jobDefinitionCatalog.ts` holds the
+definition record — id, version, stages (kind + step + per-stage params, with
+optional sub-stages), execution mode, schedule defaults — and validates it on
+load. The screener's six nodes and its mode load from that spec; the typed
+constants in `screenerPipelineJobs.ts` are its projection, held equal by a pin.
+
+Validation is fail-closed: an empty stage list, a stage without a kind or a
+step, an unsupported mode, or a non-object spec refuses **by name** at load
+time. A partially-configured definition never runs with invented values, and a
+family with no spec refuses with the ids that exist.
+
 ## Execution mode is a run parameter (#4363)
 
 The engine's four mode axes — `concurrency` (sequential|parallel), `pacing`

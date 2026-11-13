@@ -14,16 +14,17 @@
  */
 import type { JobExecutionMode } from "../data/jobPipelinePorts";
 import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
+import { jobDefinitionSpec } from "./jobDefinitionCatalog";
 
 export const SCREENER_DEFAULT_EXECUTION_MODE_ENV_VAR = "SCREENER_DEFAULT_EXECUTION_MODE";
 
-/** The built-in family default (what every screener run used before this issue). */
-export const SCREENER_DEFAULT_EXECUTION_MODE: JobExecutionMode = {
-  concurrency: "sequential",
-  pacing: "batch",
-  delivery: "async",
-  shape: "monolith",
-};
+/**
+ * The built-in family default — read from the externalized definition spec
+ * (#4365), so the mode has ONE home and cannot drift from the catalog.
+ */
+export const SCREENER_DEFAULT_EXECUTION_MODE: JobExecutionMode = resolveExecutionMode(
+  jobDefinitionSpec("screener").executionMode ?? {},
+);
 
 export interface ScreenerExecutionModeEnv {
   SCREENER_DEFAULT_EXECUTION_MODE?: string;
