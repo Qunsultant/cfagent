@@ -91,7 +91,10 @@ describe("top-bar control uniformity (#3825)", () => {
     const panel = src(PANEL);
     expect(panel).toContain('header: "DATE & TIME"');
     const section = panel.slice(panel.indexOf('<PageSection title="Job outcomes">'));
-    expect(section).toContain('toLocaleDateString("en-US", { month: "short", day: "numeric" })');
-    expect(section).toContain('toLocaleTimeString("en-US", { hour12: true })');
+    // #4407: one canonical date+time helper (the #3825 precedent); the old
+    // two-call toLocaleDateString/toLocaleTimeString formatting is gone.
+    // The helper's date+time output is pinned in
+    // tests/autopilot_provenance_4407.test.tsx.
+    expect(section).toContain("formatAutopilotTimestamp(job.createdAt)");
   });
 });
