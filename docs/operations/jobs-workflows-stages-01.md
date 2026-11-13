@@ -53,6 +53,24 @@ refuses with the stages that do exist; a door outage is a 503, never a pretend
 "not found". `get_async_job` keeps its verbatim `mas_async_jobs` passthrough and
 is deliberately not widened: its record carries no stages.
 
+## Defining and scheduling from UX (#4366)
+
+The Workflow Catalog page carries a **Workflow definitions** section: it lists
+the externalized specs (stages, mode, version) and schedules one.
+
+- `GET /api/job-definitions` returns the catalogue.
+- `POST /api/job-definitions/:id/define` defines the engine job from the spec
+  (`{ jobId }` required; the verified owner rides the definition's stage
+  params). An invalid spec or a missing id refuses by name.
+- The schedule is then armed through the **existing**
+  `POST /api/schedules/create` with the callback `runPipelineJobSchedule` — an
+  Orchestrator host method that runs that job by id. One alarm machinery for
+  every schedule; no second scheduler.
+
+A definition created after host start is armed through that schedule row. The
+alternative — teaching the Think host to re-declare its scheduled tasks on
+definition change — is out of scope here and filed as issue #4457.
+
 ## Definitions are externalized (#4365)
 
 A job is a spec, not code. `src/config/jobDefinitionCatalog.ts` holds the

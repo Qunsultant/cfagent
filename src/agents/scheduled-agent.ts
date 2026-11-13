@@ -128,6 +128,8 @@ import { buildJobStatusReport, resolveSubJob } from "../services/jobStageStatus"
 import type { JobStageEventRecord } from "../data/jobStageEventPorts";
 import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRead";
 import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
+import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
+import { buildJobConfigFromSpec } from "../services/jobDefinitionSpecBuilder";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import {
   buildFeedJobSurfaceView,
@@ -1166,6 +1168,39 @@ export class ScheduledAgent extends PortThink {
       jobId,
       executionMode: resolved as unknown as Record<string, string>,
       appliedTo: "next-run",
+    };
+  }
+
+  /**
+   * Issue #4366 — define an engine job from the externalized definition
+   * spec. The spec is validated on load (the catalogue's own resolver),
+   * so an invalid definition refuses here, before any schedule can point
+   * at it. The resolved definition is versioned by the engine as usual.
+   */
+  async definePipelineJobFromSpec(
+    specId: string,
+    jobId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; name: string; version: number; stages: number }> {
+    const spec = jobDefinitionSpec(specId);
+    const id = typeof jobId === "string" ? jobId.trim() : "";
+    if (!id) {
+      throw new Error(
+        `Defining the "${specId}" job requires a job id — none was supplied, and one is never invented.`,
+      );
+    }
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx);
+    const owner =
+      typeof opts?.userLogin === "string" && opts.userLogin.trim()
+        ? { userLogin: opts.userLogin.trim() }
+        : {};
+    const definition = await control.defineJob(buildJobConfigFromSpec(spec, id, owner));
+    return {
+      jobId: definition.jobId,
+      name: definition.name,
+      version: definition.version,
+      stages: spec.stages.length,
     };
   }
 

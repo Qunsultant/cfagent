@@ -1,0 +1,3 @@
+### Added
+
+- **A job can be defined and scheduled from UX (#4366):** the Workflow Catalog page gains a **Workflow definitions** section — it lists the externalized specs (stages, mode, version) and schedules one. `GET /api/job-definitions` serves the catalogue; `POST /api/job-definitions/:id/define` defines the engine job from a validated spec with the owner stamped into its stage params. The schedule itself goes through the existing schedule store (`POST /api/schedules/create`) with the new `runPipelineJobSchedule` callback, which runs that job by id — one alarm machinery, no second scheduler. A definition with an invalid spec refuses by name and nothing is armed. #autoclaw-001
