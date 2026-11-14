@@ -45,8 +45,10 @@
 # and read from the default branch (the run that introduces it reads its own
 # ref and logs a warning).
 #
-# TOKEN: the workflow's own scoped GITHUB_TOKEN (pull requests: write) — no App
-# credentials are needed to mark a same-repo draft ready.
+# TOKEN: the flip needs the GitHub App token. `markPullRequestReadyForReview`
+# answers FORBIDDEN ("Resource not accessible by integration") to the workflow
+# token — the same constraint the queue call has (#4320 / #4498). The token is
+# short-lived, scoped to this repository, and used only to mark the draft ready.
 
 name: Auto-ready draft PRs
 
@@ -89,6 +91,18 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
+      - name: Create short-lived GitHub App token (flip scope)
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUTO_UPDATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTO_UPDATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: cfagent
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Read the automation config
         id: config
         env:
@@ -115,13 +129,20 @@ jobs:
 
       - name: Mark eligible drafts ready when all checks are green
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The flip is FORBIDDEN to the workflow token (#4498 / #4320); the App
+          # token is the only credential that can call the mutation.
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          APP_TOKEN_READY: ${{ steps.app-token.outputs.token != '' }}
           LABEL: ${{ steps.config.outputs.label }}
           SWEEP_LIMIT: ${{ steps.config.outputs.limit }}
           GATING: ${{ steps.config.outputs.gating }}
           EXCLUDED: ${{ steps.config.outputs.excluded }}
         run: |
           set -euo pipefail
+          if [ "$APP_TOKEN_READY" != "true" ]; then
+            echo "::error::No App token was minted, and markPullRequestReadyForReview is FORBIDDEN to the workflow token (#4498). Check AUTO_UPDATE_APP_CLIENT_ID / AUTO_UPDATE_APP_PRIVATE_KEY."
+            exit 1
+          fi
           FAILED=0
 
           # Eligible drafts: open + draft + the configured label, with the node
