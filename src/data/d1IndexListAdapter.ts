@@ -16,6 +16,7 @@ import type {
   IndexListStore,
   IndexListStoreOptions,
 } from "./indexListPorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 /** Minimal structural shape of the D1 binding this adapter needs. */
 export interface IndexListD1Db {
@@ -29,8 +30,7 @@ export interface IndexListD1Db {
   };
 }
 
-const CREATE_TABLE_SQL =
-  "CREATE TABLE IF NOT EXISTS mas_index_lists (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, index_id TEXT NOT NULL, snapshot_date TEXT NOT NULL, source TEXT NOT NULL, source_label TEXT NOT NULL, derived_from_holdings INTEGER NOT NULL, members_json TEXT NOT NULL)";
+const CREATE_TABLE_SQL = doTableSql("mas_index_lists");
 const INSERT_SQL =
   "INSERT INTO mas_index_lists (id, created_at, index_id, snapshot_date, source, source_label, derived_from_holdings, members_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 const IDS_SQL =
