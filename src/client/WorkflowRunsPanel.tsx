@@ -1086,6 +1086,36 @@ export function RunDetail({
 }) {
   const [stageActionBusy, setStageActionBusy] = useState<string | null>(null);
   const [stageActionError, setStageActionError] = useState<string | null>(null);
+  // Issue #4416: one action retries every failed shard of a chain. The run id
+  // IS the chain id for a job-chain run, so no extra lookup is needed.
+  const [chainRetryBusy, setChainRetryBusy] = useState(false);
+  const [chainRetryMessage, setChainRetryMessage] = useState<string | null>(null);
+  const canRetryChain = run.source === "job-chain" && run.status === "failed";
+  const retryChain = async () => {
+    setChainRetryMessage(null);
+    setChainRetryBusy(true);
+    try {
+      const res = await fetch(`/api/job-chains/${encodeURIComponent(run.id)}/retry`, { method: "POST" });
+      const payload = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+        retried?: unknown[];
+        untouched?: number;
+      };
+      if (!res.ok || payload.success === false) {
+        throw new Error(payload.error ?? `Chain retry failed (${res.status})`);
+      }
+      const retried = Array.isArray(payload.retried) ? payload.retried.length : 0;
+      setChainRetryMessage(
+        `Retried ${retried} failed shard${retried === 1 ? "" : "s"}; ${payload.untouched ?? 0} already finished.`,
+      );
+      onStageAction?.();
+    } catch (err) {
+      setChainRetryMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChainRetryBusy(false);
+    }
+  };
   const runStageAction = async (
     stage: WorkflowRunStage,
     operation: "rerun" | "stop" | "resume",
@@ -1155,6 +1185,17 @@ export function RunDetail({
           </div>
         </div>
         <div className="workflow-runs-detail-actions">
+          {canRetryChain && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void retryChain()}
+              loading={chainRetryBusy}
+              disabled={chainRetryBusy}
+            >
+              Retry failed shards
+            </Button>
+          )}
           <Badge tone={TRIGGER_TONE[run.trigger]} size="sm">
             {TRIGGER_LABEL[run.trigger]}
           </Badge>
@@ -1167,6 +1208,12 @@ export function RunDetail({
       {run.error && (
         <Notice tone="danger" density="compact" variant="strip" title="Recorded failure">
           {run.error}
+        </Notice>
+      )}
+
+      {chainRetryMessage && (
+        <Notice tone="info" density="compact" variant="strip" title="Chain retry">
+          {chainRetryMessage}
         </Notice>
       )}
 

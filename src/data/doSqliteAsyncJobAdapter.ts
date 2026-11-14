@@ -376,11 +376,16 @@ export class DoSqliteAsyncJobStore
     return rows[0];
   }
 
-  listSessionPayloads(sessionId: string): Array<{ job_id: string; status: string; payload_json: string }> {
+  listSessionPayloads(sessionId: string): Array<{
+    job_id: string;
+    status: string;
+    payload_json: string;
+    capability: string;
+  }> {
     return Array.from(this.sql.exec(
-      "SELECT job_id, status, payload_json FROM mas_async_jobs WHERE session_id = ?",
+      "SELECT job_id, status, payload_json, capability FROM mas_async_jobs WHERE session_id = ?",
       sessionId,
-    )) as Array<{ job_id: string; status: string; payload_json: string }>;
+    )) as Array<{ job_id: string; status: string; payload_json: string; capability: string }>;
   }
 
   chainRows(chainId: string, sessionId: string): AsyncJobChainRow[] {

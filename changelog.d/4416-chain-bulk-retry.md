@@ -1,0 +1,3 @@
+### Added
+
+- **One-action retry for a failed shard chain (#4416):** `POST /api/job-chains/<chainId>/retry` retries every failed `shard.execute` row of that chain and nothing else — completed shards are counted, never re-executed — and the retried rows keep the chain payload, so their completion re-enters the chain's advance hook instead of starting a fresh chain. The run detail in Workflow Runs shows **Retry failed shards** on a failed job-chain run and reports how many were retried and how many had already finished. The per-shard retry endpoint is unchanged and reused underneath. #autoclaw-001

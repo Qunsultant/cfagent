@@ -251,10 +251,20 @@ export class InMemoryAsyncJobStore
     };
   }
 
-  listSessionPayloads(sessionId: string): Array<{ job_id: string; status: string; payload_json: string }> {
+  listSessionPayloads(sessionId: string): Array<{
+    job_id: string;
+    status: string;
+    payload_json: string;
+    capability: string;
+  }> {
     return [...this.rows.values()]
       .filter((r) => r.session_id === sessionId)
-      .map((r) => ({ job_id: r.job_id, status: r.status, payload_json: r.payload_json as string }));
+      .map((r) => ({
+        job_id: r.job_id,
+        status: r.status,
+        payload_json: r.payload_json as string,
+        capability: r.capability as string,
+      }));
   }
 
   chainRows(chainId: string, sessionId: string): AsyncJobChainRow[] {

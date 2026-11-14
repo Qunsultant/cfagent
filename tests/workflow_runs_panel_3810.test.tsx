@@ -15,7 +15,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { WorkflowRunsPanel } from "../src/client/WorkflowRunsPanel";
+import { WorkflowRunsPanel, RunDetail } from "../src/client/WorkflowRunsPanel";
 import type { WorkflowRun } from "../src/services/workflowRuns";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -185,5 +185,36 @@ describe("WorkflowRunsPanel provenance (#3810)", () => {
     await renderPanel();
     const text = container.textContent ?? "";
     expect(text).toContain("failed");
+  });
+});
+describe("chain bulk retry affordance (#4416)", () => {
+  it("offers Retry failed shards on a failed job-chain run and calls the bulk endpoint", async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    payload = { count: 1, runs: [run({ status: "failed" })] };
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, method: init?.method });
+      if (url.includes("/api/job-chains/chain-1/retry")) {
+        return Response.json({ success: true, retried: ["a", "b"], untouched: 3, failures: [] });
+      }
+      return Response.json(payload);
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<RunDetail run={run({ status: "failed" })} />);
+    });
+    await flush();
+    const retry = [...container.querySelectorAll("button")].find((button) =>
+      (button.textContent ?? "").includes("Retry failed shards"),
+    );
+    expect(retry).toBeTruthy();
+    await act(async () => {
+      retry!.click();
+    });
+    await flush();
+    expect(calls.some((call) => call.url.includes("/api/job-chains/chain-1/retry") && call.method === "POST")).toBe(
+      true,
+    );
+    expect(container.textContent ?? "").toContain("Retried 2 failed shards");
   });
 });

@@ -1545,6 +1545,52 @@ export async function scheduleScreenerFollowups(
  * running, or completed is refused, so a stage is never delivered
  * twice by double-clicking retry.
  */
+/**
+ * Issue #4416: chain-level bulk retry. Retries every FAILED `shard.execute`
+ * row of one chain and nothing else — completed shards are never re-executed,
+ * and a shard already retried is refused by `retryAsyncJob` (409), which the
+ * caller reports rather than duplicating. The retried rows keep the chain
+ * payload, so their completion re-enters the chain's advance hook exactly as a
+ * first attempt would (no fresh chain, no lost identity).
+ */
+export async function retryFailedChainJobs(
+  ctx: AsyncJobsContext,
+  chainId: string,
+): Promise<{
+  chainId: string;
+  retried: string[];
+  untouched: number;
+  failures: Array<{ jobId: string; error: string }>;
+}> {
+  ctx.ensureTables();
+  const rows = ports(ctx).read.listSessionPayloads(ctx.sessionKey()) as unknown as Array<Record<string, unknown>>;
+  const chainOf = (row: Record<string, unknown>): string => {
+    try {
+      const payload = JSON.parse(String(row.payload_json ?? "{}")) as { chain?: { chainId?: unknown } };
+      return typeof payload?.chain?.chainId === "string" ? payload.chain.chainId : "";
+    } catch {
+      return "";
+    }
+  };
+  const shards = rows.filter(
+    (row) => row.capability === "shard.execute" && chainOf(row) === chainId,
+  );
+  const failed = shards.filter((row) => String(row.status) === "failed");
+  const untouched = shards.length - failed.length;
+  const retried: string[] = [];
+  const failures: Array<{ jobId: string; error: string }> = [];
+  for (const row of failed) {
+    const jobId = String(row.job_id ?? "");
+    if (!jobId) continue;
+    try {
+      const next = await retryAsyncJob(ctx, jobId);
+      retried.push(next.jobId);
+    } catch (err) {
+      failures.push({ jobId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return { chainId, retried, untouched, failures };
+}
 export async function retryAsyncJob(
   ctx: AsyncJobsContext,
   jobId: string,
