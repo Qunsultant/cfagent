@@ -13,13 +13,12 @@ import type {
   IndexListStore,
   IndexListStoreOptions,
 } from "./indexListPorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 const TABLE = "mas_index_lists";
 
-const CREATE_TABLE_SQL =
-  `CREATE TABLE IF NOT EXISTS ${TABLE} (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, index_id TEXT NOT NULL, snapshot_date TEXT NOT NULL, source TEXT NOT NULL, source_label TEXT NOT NULL, derived_from_holdings INTEGER NOT NULL, members_json TEXT NOT NULL)`;
-const CREATE_INDEX_SQL =
-  `CREATE INDEX IF NOT EXISTS idx_mas_index_lists_lookup ON ${TABLE} (index_id, created_at DESC)`;
+const CREATE_TABLE_SQL = doTableSql("mas_index_lists");
+const CREATE_INDEX_SQL = doIndexSql("idx_mas_index_lists_lookup");
 const INSERT_SQL =
   `INSERT INTO ${TABLE} (id, created_at, index_id, snapshot_date, source, source_label, derived_from_holdings, members_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
 const IDS_SQL =
