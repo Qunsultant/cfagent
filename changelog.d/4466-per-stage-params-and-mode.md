@@ -1,0 +1,3 @@
+### Added
+
+- **Each stage's parameters and execution mode are now settable from the definition flow (#4466):** both were already engine capabilities — `JobNodeConfig.executionMode` is a per-node override merged over the job's mode by `effectiveMode`, and `steps[].params` carries per-stage parameters — so this is the surface, not a new capability. The flow's dialog now shows a mode override per axis for every stage (default "inherit") and the parameters a stage's spec declares, and validates them before the definition exists: an unknown stage, an undeclared stage parameter, a missing required one or an unsupported mode refuses by name. `stageParams`/`stageModes` ride the define route and are bound onto the node by the one spec builder. #autoclaw-001
