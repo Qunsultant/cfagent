@@ -25,6 +25,7 @@ import {
   type IvStats,
 } from "./ivHistoryPorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 const TABLE = "mas_iv_history";
 
@@ -34,7 +35,7 @@ const CREATE_TABLE_SQL = doTableSql("mas_iv_history");
  * Best-effort by design — a second run (or a fresh table) reports "duplicate
  * column name", which is the already-applied state, not a failure.
  */
-const ALTER_ADD_BROKER_SQL = `ALTER TABLE ${TABLE} ADD COLUMN broker TEXT NOT NULL DEFAULT 'etrade'`;
+const ALTER_ADD_BROKER_SQL = remainderAlterSql("mas_iv_history", "broker");
 const CREATE_INDEX_SQL = doIndexSql("idx_mas_iv_history_symbol_date");
 const COLUMNS = `symbol, date, atm_iv, spot, expiry_date, dte, collected_at, broker`;
 const GET_SQL = `SELECT ${COLUMNS} FROM ${TABLE} WHERE symbol = ? AND date = ?`;
@@ -84,7 +85,7 @@ function normalizeSymbol(symbol: string): string {
 
 /**
  * IvHistoryStore over Durable Object SQLite. The table is ensured
- * lazily on first use (CREATE TABLE/INDEX IF NOT EXISTS), following
+ * lazily on first use (idempotent creation), following
  * the mas_opportunity_scans pattern.
  */
 export class SqlIvHistoryStore implements IvHistoryStore {
