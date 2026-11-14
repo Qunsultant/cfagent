@@ -57,25 +57,47 @@ const GATING = [
   "Auto-merge trusted PRs",
 ];
 
-describe("4444-P01 the enrollment triggers that actually fire", () => {
-  it("runs on pull_request, a 5-minute schedule and dispatch — never workflow_run", () => {
+describe("4444-P01 / 4490-P01 the enrollment triggers", () => {
+  it("runs on every gate completion, on pull_request, a backstop schedule and dispatch", () => {
     expect(enrollWorkflow).toContain("pull_request:");
     expect(enrollWorkflow).toContain("ready_for_review");
+    expect(enrollWorkflow).toContain("workflow_run:");
     expect(enrollWorkflow).toContain("schedule:");
     expect(enrollWorkflow).toContain('cron: "*/5 * * * *"');
     expect(enrollWorkflow).toContain("workflow_dispatch:");
-    // The trigger that fires before the last required check is gone as the
-    // only path; nothing reads its payload any more.
-    expect(enrollWorkflow).not.toMatch(/^\s*workflow_run:\s*$/m);
+    // The old design hung everything on one event and had no retry; the job is
+    // no longer gated on the event name.
     expect(enrollWorkflow).not.toMatch(/github\.event_name == 'workflow_run'/);
   });
 
-  it("states the corrected cause, with the evidence that corrected it", () => {
+  it("watches the gates it does not own, and never itself", () => {
+    const watch = enrollWorkflow.slice(
+      enrollWorkflow.indexOf("  workflow_run:"),
+      enrollWorkflow.indexOf("  pull_request:"),
+    );
+    for (const gate of [
+      "Continuous Integration & Test Verification",
+      "Policy Gate",
+      "CodeQL",
+      "Secret Scanning",
+    ]) {
+      expect(watch).toContain(`- "${gate}"`);
+    }
+    // Watching its own completion would recurse: this workflow is one of the
+    // five gates in the ready verdict, not one of its own triggers.
+    expect(watch).not.toContain("Auto-merge trusted PRs");
+    expect(enrollWorkflow).toContain(
+      "github.event.workflow_run.event == 'pull_request'",
+    );
+  });
+
+  it("states the corrected cause, with the evidence that corrected it twice", () => {
     expect(enrollWorkflow).toContain("#4444");
-    expect(enrollWorkflow).toContain("WHY THE SWEEP — order, not delivery");
-    expect(enrollWorkflow).toContain("DID reach a PR");
-    // The event is not the problem; the order of required checks is.
+    expect(enrollWorkflow).toContain("WHY THE TRIGGERS CHANGED TWICE (#4444 then #4490)");
+    // The event fired; the order of required checks was the problem.
     expect(enrollWorkflow).toContain('"Policy Gate" is in progress');
+    // And the retry's clock: schedules on this repo run hours apart.
+    expect(enrollWorkflow).toContain("throttles schedules on this repository");
   });
 });
 
@@ -96,19 +118,18 @@ describe("4444-P02 the sweep enrolls green, ready, labeled PRs", () => {
   });
 });
 
-describe("4444-P03 the event path uses the payload, not a branch lookup", () => {
-  it("resolves the PR by number, skips drafts, and reuses enroll()", () => {
-    expect(enrollWorkflow).toContain('gh pr view "$PR_NUMBER"');
-    // Label-gated on the event path too, not only in the sweep.
+describe("4444-P03 / 4490-P02 one decision path for every event", () => {
+  it("resolves pull_request from the payload and workflow_run by head branch", () => {
+    expect(enrollWorkflow).toContain('try_pr "$(gh pr view "$PR_NUMBER"');
+    expect(enrollWorkflow).toContain(
+      'gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH"',
+    );
+    // One try_pr(): the guards and the enrollment are not duplicated per trigger.
+    expect(enrollWorkflow).toContain("try_pr() {");
+    expect(enrollWorkflow).toContain(
+      'enroll "$(echo "$pr_json" | jq -r \'.id\')" "$number"',
+    );
     expect(enrollWorkflow).toContain('index($l) != null');
-    expect(enrollWorkflow).toContain(
-      'if [ "$(echo "$PR_JSON" | jq -r \'.isDraft\')" = "true" ]',
-    );
-    expect(enrollWorkflow).toContain(
-      'enroll "$(echo "$PR_JSON" | jq -r \'.id\')" "$PR_NUMBER"',
-    );
-    // The old head-branch resolution only worked for workflow_run payloads.
-    expect(enrollWorkflow).not.toContain('--head "$HEAD_BRANCH"');
   });
 });
 
@@ -132,7 +153,9 @@ describe("4325-P01 the ready half is a sweep on the same cadence", () => {
   it("schedules instead of waiting for the first gate, and judges per head", () => {
     expect(readyWorkflow).toContain("schedule:");
     expect(readyWorkflow).toContain('cron: "*/5 * * * *"');
-    expect(readyWorkflow).not.toMatch(/^\s*workflow_run:\s*$/m);
+    // Gate completions are the trigger (#4490); the schedule is the backstop.
+    expect(readyWorkflow).toContain("workflow_run:");
+    expect(readyWorkflow).toContain("github.event.workflow_run.event == 'pull_request'");
     expect(readyWorkflow).toContain("--label \"$LABEL\" --state open");
     expect(readyWorkflow).toContain("select(.isDraft == true)");
     // The run window is the head's own runs — a repo-wide window is pushed
@@ -171,7 +194,7 @@ describe("EXCL-P01 excluded authors (Dependabot) are never automated", () => {
     }
     expect(enrollWorkflow).toContain("AUTHOR_LOGIN");
     expect(enrollWorkflow).toContain("(excluded by config) — never enrolled.");
-    expect(enrollWorkflow).toContain("--json number,id,isDraft,author");
+    expect(enrollWorkflow).toContain("--json number,id,isDraft,author,labels");
     expect(readyWorkflow).toContain("--json number,isDraft,headRefOid,author");
   });
 });
@@ -191,9 +214,22 @@ describe("CFG-P01 one source for the label, the gating set and the limit", () =>
     }
   });
 
-  it("is not repeated as a literal in either workflow", () => {
+  it("keeps the YAML trigger lists in step with the config (pinned copies)", () => {
+    // A YAML trigger cannot read the config file, so the gate names appear in
+    // both. Pin the copies together: a new gate in the config that is not
+    // watched (or a stale name in the trigger) fails here instead of drifting.
+    const triggerList = (source: string) => {
+      const start = source.indexOf("  workflow_run:");
+      const end = source.indexOf("    types: [completed]", start);
+      return [...source.slice(start, end).matchAll(/- "([^"]+)"/g)].map((m) => m[1]);
+    };
+    // The ready half watches the whole set; the enrollment half watches the set
+    // minus itself, because watching its own completion would recurse.
+    expect(triggerList(readyWorkflow)).toEqual(config.gatingWorkflows);
+    expect(triggerList(enrollWorkflow)).toEqual(
+      config.gatingWorkflows.filter((name) => name !== "Auto-merge trusted PRs"),
+    );
     for (const workflow of [enrollWorkflow, readyWorkflow]) {
-      expect(workflow).not.toContain("Continuous Integration & Test Verification");
       expect(workflow).not.toContain("--label auto-merge");
     }
   });

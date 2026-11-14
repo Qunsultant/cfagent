@@ -41,16 +41,30 @@ const GATING = [
 ];
 
 describe("4315-P01 gating workflows", () => {
-  it("sweeps on a 5-minute cadence and reads the gating set from config", () => {
+  it("judges on every gate completion, with the sweep as a backstop (#4490)", () => {
+    expect(workflow).toContain("workflow_run:");
     expect(workflow).toContain("schedule:");
     expect(workflow).toContain('cron: "*/5 * * * *"');
-    expect(workflow).not.toMatch(/^\s*workflow_run:\s*$/m);
+    // The five gates are the trigger; the workflow never watches itself.
+    const watch = workflow.slice(
+      workflow.indexOf("  workflow_run:"),
+      workflow.indexOf("  schedule:"),
+    );
+    for (const name of GATING) expect(watch).toContain(`- "${name}"`);
+    expect(watch).not.toContain("Auto-ready draft PRs");
+    expect(workflow).toContain("github.event.workflow_run.event == 'pull_request'");
     // The set lives in one place, shared with the enrollment half.
     expect(config.gatingWorkflows).toEqual(GATING);
     expect(workflow).toContain("CONFIG_PATH: config/auto-merge.json");
     expect(workflow).toContain("contents/$CONFIG_PATH");
-    // No inline list and no literal count: the count is the array's length.
-    expect(workflow).not.toContain("Continuous Integration & Test Verification");
+    // The trigger list is a copy of the config (a YAML trigger cannot read it),
+    // pinned to the same values; the count is the array's length, never a literal.
+    const watched = workflow.slice(
+      workflow.indexOf("  workflow_run:"),
+      workflow.indexOf("    types: [completed]"),
+    );
+    const triggered = [...watched.matchAll(/- "([^"]+)"/g)].map((m) => m[1]);
+    expect(triggered).toEqual(config.gatingWorkflows);
     expect(workflow).not.toContain("length == 5");
   });
 });
