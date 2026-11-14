@@ -14,23 +14,13 @@
  * shape as the paused-schedule upsert pair.
  */
 import type { SqlStorage } from "../orm";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 import type { PendingScheduleApproval } from "../services/agentScheduleCapability";
 
 export const PENDING_SCHEDULE_APPROVALS_TABLE = "pending_schedule_approvals";
 
 function ensureTable(sql: SqlStorage): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS ${PENDING_SCHEDULE_APPROVALS_TABLE} (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      requested_by TEXT NOT NULL,
-      agent_id TEXT NOT NULL,
-      requested_at TEXT NOT NULL,
-      definition_json TEXT NOT NULL,
-      approval_reasons_json TEXT NOT NULL,
-      status TEXT NOT NULL,
-      decided_by TEXT,
-      decided_at TEXT
-    )`);
+  sql.exec(doTableSql("pending_schedule_approvals"));
 }
 
 function rowToApproval(row: Record<string, unknown>): PendingScheduleApproval {
