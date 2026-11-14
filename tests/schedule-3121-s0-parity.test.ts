@@ -39,6 +39,7 @@ import {
   resolveScheduleRunTrigger,
 } from "../src/services/jobRunRecords";
 import { JOB_RUN_RECORDS_PER_JOB_CAP, JOB_RUN_RECORDS_TABLE } from "../src/data/jobRunRecordPorts";
+import { remainderAlterSql } from "../src/data/schemaComponent/remainderCatalogue";
 import {
   MAS_EVENTS_RETENTION_DEFAULT_DAYS,
   MAS_MEMORY_RETENTION_DEFAULT_DAYS,
@@ -492,9 +493,14 @@ describe("S0-P20 follow-up chain entry (B-T4-01): scheduleScreenerFollowups brid
 
 describe("S0-P21 chain graph and recovery (B-T4-02/04): graph columns, LIMIT 100, 30-day / 2-hour bounds", () => {
   it("pins the mas_async_jobs graph columns and the recovery re-arm", () => {
+    // #4282 P3: the 12 reconciliation ALTERs moved from the adapter
+    // into the remainder catalogue (src/data/schemaComponent/
+    // remainderCatalogue.ts) — asserted at their new home. The adapter
+    // still executes them, through remainderAlterSql.
     const adapter = read("src/data/doSqliteAsyncJobAdapter.ts");
     for (const col of ["parent_job_id", "job_kind", "channel", "not_before", "stage", "chain_id"]) {
-      expect(adapter).toContain(`ADD COLUMN ${col}`);
+      expect(adapter).toContain(`remainderAlterSql("mas_async_jobs", "${col}")`);
+      expect(remainderAlterSql("mas_async_jobs", col)).toContain(`ADD COLUMN ${col}`);
     }
     expect(adapter).toContain("ORDER BY created_at ASC LIMIT 100");
     const jobs = read("src/agents/orchestrator/asyncJobs.ts");
@@ -530,10 +536,14 @@ describe("S0-P24 ledger gap (B-L-01/02/03): S1 closes B-L-01 on job_run_records;
   });
 
   it("pins mas_async_jobs as carrying no workflow column (#3810 adds trigger/schedule provenance columns)", () => {
+    // #4282 P3: the provenance ALTERs moved from the adapter into the
+    // remainder catalogue — asserted at their new home (see S0-P21).
     const adapter = read("src/data/doSqliteAsyncJobAdapter.ts");
     // #3810: the adapter gains the three provenance columns (probed migration).
     for (const col of ["trigger", "triggered_by", "schedule_id"]) {
-      expect(adapter).toContain(`ADD COLUMN ${col}`);
+      expect(adapter).toContain(`remainderAlterSql("mas_async_jobs", "${col}")`);
+      expect(remainderAlterSql("mas_async_jobs", col)).toContain(`ADD COLUMN ${col}`);
+      expect(remainderAlterSql("mas_async_jobs", col)).not.toContain("workflow_id");
     }
     expect(adapter).not.toContain("workflow_id");
   });
