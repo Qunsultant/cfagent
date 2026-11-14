@@ -30,14 +30,13 @@
  */
 import type { SqlStorage } from "./repositoryPorts";
 import type { StageClaimStore } from "../workflows/stageReportConsumer";
+import { remainderTableSql } from "./schemaComponent/remainderCatalogue";
 
 /** One row per claimed (runId, stageId) pair. */
 export const STAGE_CLAIMS_TABLE = "mas_stage_claims";
 
 export function ensureStageClaimsTable(sql: SqlStorage): void {
-  sql.exec(
-    `CREATE TABLE IF NOT EXISTS ${STAGE_CLAIMS_TABLE} (key TEXT PRIMARY KEY, claimed_at TEXT NOT NULL)`,
-  );
+  sql.exec(remainderTableSql("mas_stage_claims"));
 }
 
 /**
