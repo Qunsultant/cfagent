@@ -33,6 +33,7 @@ import {
   type InsertTerminalJobInput,
 } from "./asyncJobPorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 function rowsWritten(result: unknown): number {
   const cursor = result as { rowsWritten?: number };
@@ -70,49 +71,49 @@ export class DoSqliteAsyncJobStore
     const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_async_jobs)")) as Array<{ name?: unknown }>;
     const names = new Set(cols.map((c) => String(c?.name ?? "")));
     if (!names.has("parent_job_id")) {
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN parent_job_id TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "parent_job_id"));
     }
     if (!names.has("job_kind")) {
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN job_kind TEXT NOT NULL DEFAULT 'main'");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "job_kind"));
     }
     if (!names.has("channel")) {
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN channel TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "channel"));
     }
     if (!names.has("not_before")) {
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN not_before TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "not_before"));
     }
     if (!names.has("stage")) {
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN stage TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "stage"));
     }
     if (!names.has("chain_id")) {
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN chain_id TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "chain_id"));
     }
     if (!names.has("stuck_alerted_at")) {
       // Issue #2567: the stuck-running alert claim stamp.
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN stuck_alerted_at TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "stuck_alerted_at"));
     }
     if (!names.has("trigger")) {
       // Issue #3810: provenance stamped at submission — the trigger
       // that caused this job. NULL = the submission carried none.
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN trigger TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "trigger"));
     }
     if (!names.has("triggered_by")) {
       // Issue #3810: the trigger's actor (a login, a goal id).
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN triggered_by TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "triggered_by"));
     }
     if (!names.has("schedule_id")) {
       // Issue #3810: the originating schedule's id (NULL = not scheduled).
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN schedule_id TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "schedule_id"));
     }
     if (!names.has("last_activity_at")) {
       // Issue #3811: the executor's last-activity stamp (claim,
       // heartbeat, terminal transition). NULL on legacy rows.
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN last_activity_at TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "last_activity_at"));
     }
     if (!names.has("error_code")) {
       // Issue #3811: the coded failure (single outcome catalog),
       // NULL on rows that never failed.
-      this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN error_code TEXT");
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "error_code"));
     }
     this.sql.exec(doIndexSql("idx_mas_async_jobs_parent"));
     this.sql.exec(doIndexSql("idx_mas_async_jobs_chain"));
