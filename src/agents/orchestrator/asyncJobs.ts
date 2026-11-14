@@ -612,12 +612,20 @@ function isResumableShardChain(capability: string, payload: Record<string, unkno
   return true;
 }
 function isResumableFeedDispatch(capability: string, payload: Record<string, unknown>): boolean {
+  // Issue #4002: BOTH dispatch shapes carry a payment proof, in different
+  // places — the MCP tool under `arguments`, the HTTP feed-run route at the
+  // payload's top level. Checking only the MCP shape let a paid HTTP dispatch
+  // through the resumability gate and re-ran it with a consumed signature
+  // (the #3907 rule). Either proof refuses the re-arm.
   const args = payload.arguments;
-  const signature =
+  const toolSignature =
     args && typeof args === "object"
       ? (args as Record<string, unknown>).paymentSignature
       : undefined;
-  if (typeof signature === "string" && signature.trim() !== "") return false;
+  const routeSignature = payload.paymentSignature;
+  for (const signature of [toolSignature, routeSignature]) {
+    if (typeof signature === "string" && signature.trim() !== "") return false;
+  }
   return isFeedDispatchShape(capability, payload);
 }
 
@@ -1267,7 +1275,120 @@ export interface StaleAsyncJobSweepResult {
  * (recorded decision on #3784: mas_async_jobs rows are not J1
  * pipeline runs) and never deletes a row.
  */
-export function sweepStaleAsyncJobs(ctx: AsyncJobsContext, nowMs: number = Date.now()): StaleAsyncJobSweepResult {
+/**
+ * Issue #4002 — settle one stale FEED dispatch the way the host-start
+ * recovery does: re-arm it when the work is resumable (same cap, same
+ * retryOf/recoveryRearmOf links), then fail the original row as ORPHANED
+ * with the feed job id, the pipeline run id and the host id named.
+ *
+ * Returns false when the row is not a feed dispatch at all, so the caller
+ * keeps its own reap for every other capability. Every rule here is the
+ * shared one — the shape predicate, the resumability predicate (which
+ * refuses a consumed payment signature), the re-arm cap, the id resolvers
+ * and the message builder — so the two settle paths cannot drift apart.
+ */
+async function settleStaleFeedDispatch(
+  ctx: AsyncJobsContext,
+  row: Record<string, unknown>,
+  nowMs: number,
+): Promise<boolean> {
+  const jobId = String(row.job_id);
+  const payload = parseRowPayload(row);
+  if (!payload || !isFeedDispatchShape(String(row.capability), payload)) return false;
+  const lastActivityAt =
+    typeof row.last_activity_at === "string" && row.last_activity_at
+      ? row.last_activity_at
+      : typeof row.started_at === "string"
+        ? row.started_at
+        : null;
+  let rearmedJobId: string | undefined;
+  let rearmCount = 0;
+  if (isResumableFeedDispatch(String(row.capability), payload)) {
+    const ownRearmCount =
+      typeof payload.recoveryRearmCount === "number" ? payload.recoveryRearmCount : 0;
+    if (ownRearmCount + countRecoveryRearms(ctx, jobId) < RECOVERY_REARM_CAP) {
+      try {
+        const graph = jobGraphFields(row);
+        const submitted = await submitAsyncJob(ctx, {
+          capability: String(row.capability),
+          payload: {
+            ...payload,
+            retryOf: jobId,
+            recoveryRearmOf: jobId,
+            recoveryRearmCount: ownRearmCount + 1,
+          },
+          displayName: String(row.display_name),
+          parentJobId: graph.parentJobId,
+          jobKind: graph.jobKind,
+          channel: graph.channel,
+          stage: graph.stage,
+          chainId: graph.chainId,
+          trigger: graph.trigger ?? undefined,
+          triggeredBy: graph.triggeredBy ?? undefined,
+          scheduleId: graph.scheduleId ?? undefined,
+        } as unknown as AsyncJobSubmission);
+        rearmedJobId = submitted.jobId;
+        rearmCount = ownRearmCount + 1;
+      } catch (error) {
+        structuredLog.error("asyncJobs.sweep_stale_feed_rearm_failed", {
+          message: `[OrchestratorAgent] Stale feed-dispatch re-arm failed for job ${jobId} (reaping instead):`,
+          jobId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+  const feedJobId = resolveFeedDispatchJobId(ctx.env, String(row.capability), payload);
+  const pipelineRunId = feedJobId
+    ? await resolveFeedDispatchPipelineRunId(ctx.env, feedJobId, lastActivityAt)
+    : null;
+  const versionMetadata = (ctx.env as unknown as Record<string, unknown> | undefined)
+    ?.CF_VERSION_METADATA as { id?: unknown } | undefined;
+  const hostId = versionMetadata && typeof versionMetadata.id === "string" ? versionMetadata.id : null;
+  const message = orphanedReapMessage(lastActivityAt, rearmedJobId, {
+    feedJobId,
+    pipelineRunId,
+    hostId,
+  });
+  const written = ports(ctx).queue.reapStaleRunning(
+    jobId,
+    message,
+    new Date(nowMs).toISOString(),
+    FAILURE_ASYNC_JOB_ORPHANED_CODE,
+  );
+  if (written !== 1) return true;
+  const toolName = toolNameFromRow(row);
+  ctx.audit("async_job.failed", "orchestrator", {
+    jobId,
+    capability: String(row.capability),
+    ...(toolName ? { tool: toolName } : {}),
+    error: message,
+    errorCode: FAILURE_ASYNC_JOB_ORPHANED_CODE,
+    lastActivityAt,
+    ...(hostId ? { hostId } : {}),
+    ...(rearmedJobId ? { rearmedAs: rearmedJobId } : {}),
+    ...(feedJobId ? { feedJobId } : {}),
+    ...(pipelineRunId ? { pipelineRunId } : {}),
+    settledBy: "stale_sweep",
+  });
+  if (rearmedJobId) {
+    ctx.audit("async_job.retried", "orchestrator", {
+      jobId,
+      retryJobId: rearmedJobId,
+      capability: String(row.capability),
+      recoveredBy: "stale_sweep",
+      recoveryRearmCount: rearmCount,
+      ...(feedJobId ? { feedJobId } : {}),
+      ...(pipelineRunId ? { pipelineRunId } : {}),
+    });
+  }
+  return true;
+}
+
+export async function sweepStaleAsyncJobs(
+  ctx: AsyncJobsContext,
+  nowMs: number = Date.now(),
+): Promise<StaleAsyncJobSweepResult> {
   ctx.ensureTables();
   const rows = ports(ctx).read.listRunning(ctx.sessionKey(), STALE_SWEEP_BATCH_LIMIT) as unknown as Array<Record<string, unknown>>;
   let alerted = 0;
@@ -1278,6 +1399,18 @@ export function sweepStaleAsyncJobs(ctx: AsyncJobsContext, nowMs: number = Date.
       if (row.status !== "running" || typeof row.started_at !== "string") continue;
       const ageMs = nowMs - Date.parse(row.started_at);
       if (ageMs > STALE_RUNNING_REAP_MS && isHeartbeatStale(row, nowMs)) {
+        // Issue #4002: a stale FEED dispatch is settled by the recovery
+        // rule, not the generic unknown-outcome reap — re-armed when its
+        // work is resumable and otherwise failed as ORPHANED with the feed
+        // job id, the pipeline run id and the host named. This sweep is the
+        // path that actually met the incident's two Yahoo feed-runs (both
+        // running for 14/23 minutes, settled in one 15-minute pass at the
+        // same second), and the generic code is what made it unreadable.
+        // Every other row keeps today's reap and code.
+        if (await settleStaleFeedDispatch(ctx, row, nowMs)) {
+          reaped++;
+          continue;
+        }
         const completedAt = new Date(nowMs).toISOString();
         const written = ports(ctx).queue.reapStaleRunning(
           jobId,
