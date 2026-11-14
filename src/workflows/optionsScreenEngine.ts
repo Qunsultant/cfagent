@@ -288,12 +288,19 @@ export const COMPARISON_STEP = "comparison.run";
  * as the screen jobs. The dispatch request rides the raw config
  * exactly as the screen jobs' does (classInput.comparisonRequest),
  * so control can decode the run's shape from the stored definition.
+ *
+ * Issue #4451: the acting login rides the raw config beside the
+ * request, exactly as the screen jobs' does since #4289, so the
+ * workflow host's resolving comparison step can rebuild
+ * owner-scoped ports per invocation. Absent, the definition is
+ * byte-identical to before (the resolver ignores both fields).
  */
-export function comparisonJobDefinition(jobId: string, request?: unknown): Record<string, unknown> {
+export function comparisonJobDefinition(jobId: string, request?: unknown, userLogin?: string): Record<string, unknown> {
   return {
     jobId,
     name: `Comparison ${jobId}`,
     ...(request !== undefined ? { request } : {}),
+    ...(userLogin !== undefined ? { userLogin } : {}),
     root: {
       kind: "comparison",
       steps: [{ step: COMPARISON_STEP }],

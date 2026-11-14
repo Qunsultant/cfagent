@@ -67,6 +67,7 @@ import type {
   StrategyRequest,
   StrategyScreenFilter,
 } from "../trading";
+import type { OptionsDataSnapshot } from "../trading";
 import type { ScreenedOptionContractItem } from "../types";
 
 export const COMPARISON_PROMPT_CONTRACT_CAP = 200;
@@ -81,6 +82,49 @@ export const COMPARISON_PROMPT_CONTRACT_CAP = 200;
  */
 export const COMPARISON_KERNEL_BEGIN = "<<<UNTRUSTED_COMPARISON_CONTRACTS>>>";
 export const COMPARISON_KERNEL_END = "<<<END_UNTRUSTED_COMPARISON_CONTRACTS>>>";
+
+/**
+ * Issue #4451 — the ONE mapping from a data-agent snapshot to the
+ * kernel snapshot the comparison core reads. The panel route and
+ * the NLQ runner each carried this mapping inline (replicated
+ * "without calling discoverPanel, which would waste a full kernel
+ * run just for the snapshot"); the workflow residency's resolving
+ * comparison step is the third caller, so the mapping lives here
+ * once, and all three call sites use it. Snapshot quotes ride the
+ * mapping so the LLM builder's price source is the snapshot even
+ * where a detail carries its own bid/ask.
+ */
+export function kernelSnapshotFromDataSnapshot(s: OptionsDataSnapshot): KernelSnapshot {
+  return {
+    symbol: s.symbol,
+    contracts: s.contracts,
+    dataSource: s.dataSource,
+    chainProvenance: s.dataSource === "calibrated-demo" ? "calibrated" : "live",
+    underlyingPrice: s.contracts[0]?.underlyingPrice,
+    screen: s.screen,
+    rejections: s.rejections,
+    validationError: s.validationError,
+    quotes: Object.fromEntries(
+      s.contracts.map((c) => [c.symbol, {
+        bid: c.bid, ask: c.ask,
+        iv: c.impliedVolatility ?? null,
+        volume: c.volume ?? null,
+        openInterest: c.openInterest ?? null,
+      }]),
+    ),
+  };
+}
+
+/**
+ * Issue #4451 — the ONE comparison question, built from the
+ * strategy request. The panel route and the NLQ runner each
+ * carried this template inline; the resolving comparison step
+ * builds the same question from the stored request, so the
+ * template lives here once.
+ */
+export function buildComparisonQuestion(req: StrategyRequest): string {
+  return `What ${req.thesis ?? "directional"} option strategies on ${req.symbol} look best for a ${req.targetDate ?? "near-term"} horizon with max planned loss ${req.maxPlannedLoss ?? "the stated limit"}?`;
+}
 
 /** User prompt for generation: the question + the snapshot's contracts, compact, capped. */
 export function buildComparisonPrompt(question: string, snapshot: KernelSnapshot): string {

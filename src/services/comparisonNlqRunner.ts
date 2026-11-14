@@ -27,8 +27,8 @@
  *   engine job and the artifact carry one id.
  */
 import { DynamicOptionsScreener, OptionsDataAgent, RecommendationAgent, StrategyRiskAgent, type RiskProfile, type StrategyRequest, type StrategyScreenFilter } from "../trading";
-import { mintComparisonRunId, type ComparisonLedgerSink, type KernelSnapshot } from "./recommendationKernel";
-import { runProductionComparison, type ProductionComparisonDeps, type ProductionComparisonResult } from "./comparisonRunner";
+import { mintComparisonRunId, type ComparisonLedgerSink } from "./recommendationKernel";
+import { buildComparisonQuestion, kernelSnapshotFromDataSnapshot, runProductionComparison, type ProductionComparisonDeps, type ProductionComparisonResult } from "./comparisonRunner";
 import { runComparisonViaEngine, type OptionsEngineStores } from "../workflows/optionsScreenEngine";
 
 export interface ComparisonNlqOutcome {
@@ -67,30 +67,11 @@ export function createComparisonRunner(deps: {
       }
       const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(deps.client));
       const s = await dataAgent.loadSnapshot(input.request);
-      // Same KernelSnapshot mapping the panel route builds (see
-      // RecommendationService.discoverPanel) — replicated here
-      // rather than calling discoverPanel, which would waste a full
-      // kernel run just for the snapshot — plus snapshot quotes,
-      // so the LLM builder's price source is the snapshot even
-      // where a detail carries its own bid/ask.
-      const snapshot: KernelSnapshot = {
-        symbol: s.symbol,
-        contracts: s.contracts,
-        dataSource: s.dataSource,
-        chainProvenance: s.dataSource === "calibrated-demo" ? "calibrated" : "live",
-        underlyingPrice: s.contracts[0]?.underlyingPrice,
-        screen: s.screen,
-        rejections: s.rejections,
-        validationError: s.validationError,
-        quotes: Object.fromEntries(
-          s.contracts.map((c) => [c.symbol, {
-            bid: c.bid, ask: c.ask,
-            iv: c.impliedVolatility ?? null,
-            volume: c.volume ?? null,
-            openInterest: c.openInterest ?? null,
-          }]),
-        ),
-      };
+      // The shared snapshot mapping (comparisonRunner.ts) — the
+      // same mapping the panel route builds, without calling
+      // discoverPanel, which would waste a full kernel run just
+      // for the snapshot.
+      const snapshot = kernelSnapshotFromDataSnapshot(s);
       if ((snapshot.contracts ?? []).length === 0) {
         return {
           ok: false,
@@ -101,7 +82,7 @@ export function createComparisonRunner(deps: {
       const riskAgent = new StrategyRiskAgent();
       const recommender = new RecommendationAgent();
       const req = input.request;
-      const question = `What ${req.thesis ?? "directional"} option strategies on ${req.symbol} look best for a ${req.targetDate ?? "near-term"} horizon with max planned loss ${req.maxPlannedLoss ?? "the stated limit"}?`;
+      const question = buildComparisonQuestion(req);
       const coreArgs: ProductionComparisonDeps = {
         snapshot,
         request: req,

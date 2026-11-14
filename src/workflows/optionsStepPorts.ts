@@ -29,7 +29,12 @@
  *   serves the host path, and the host path's job record IS
  *   addressable (the start seam defines it in the D1 residency).
  * - comparisonRequest → comparison: a single engine step, not a
- *   staged pipeline (#4276) — refuse stage_port_unavailable.
+ *   staged pipeline (#4276) — refuse stage_port_unavailable for
+ *   STAGE ops. The comparison itself executes in the residency
+ *   through the resolving `comparison.run` step (#4451,
+ *   optionsPipelineJobs.ts), which rebuilds the whole comparison
+ *   per invocation; this guard refuses only the eight-stage
+ *   vocabulary applied to a comparison run.
  *
  * The rebuild's claims are fresh in-memory (a claim is per-dispatch
  * idempotency; an explicit re-run or a resumed invocation IS a new
