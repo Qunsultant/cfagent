@@ -1,0 +1,3 @@
+### Fixed
+
+- **A shard chain survives its host's death, and its dispatch is paced (#4424):** a stale running `shard.execute` row of a chain is now re-armed by the recovery sweep with its chain payload — the #4002 re-arm covered feed dispatches only, so a host death stranded the chain — and a completed shard is never re-executed because the sweep only sees `running` rows. Dispatch pacing moves to `config/shard-pacing.json` (burst cap, interval, stagger; env-overridable per #1069), so a 100-shard chain is released in a bounded burst and then at a paced interval instead of handing the whole fan-out over at once. #autoclaw-001
