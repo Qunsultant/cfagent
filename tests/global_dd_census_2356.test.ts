@@ -539,20 +539,20 @@ const PORTED_TABLES = [
  * appearing anywhere else fails the pin.
  */
 const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<string, string> }> = {
-  mas_data_providers: { layer: ["src/data/doSqliteProviderConfigAdapter.ts"] },
-  mas_data_provider_routes: { layer: ["src/data/doSqliteProviderConfigAdapter.ts"] },
-  mas_data_captures: { layer: ["src/data/doSqliteProviderCaptureAdapter.ts"] },
-  mas_opportunity_scans: { layer: ["src/data/doSqliteScanRunAdapter.ts"] },
-  mas_discovery_runs: { layer: ["src/data/doSqliteDiscoveryRunAdapter.ts"] },
-  mas_discovery_setup_runs: { layer: ["src/data/doSqliteDiscoverySetupAdapter.ts"] },
-  mas_discovery_alerts: { layer: ["src/data/doSqliteDiscoveryAlertAdapter.ts"] },
-  mas_iv_history: { layer: ["src/data/doSqliteIvHistoryAdapter.ts"] },
-  mas_strategy_profiles: { layer: ["src/data/doSqliteStrategyProfileAdapter.ts"] },
-  mas_feed_snapshots: { layer: ["src/data/doSqliteFeedSnapshotAdapter.ts"] },
+  mas_data_providers: { layer: ["src/data/doSqliteProviderConfigAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_data_provider_routes: { layer: ["src/data/doSqliteProviderConfigAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_data_captures: { layer: ["src/data/doSqliteProviderCaptureAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_opportunity_scans: { layer: ["src/data/doSqliteScanRunAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_discovery_runs: { layer: ["src/data/doSqliteDiscoveryRunAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_discovery_setup_runs: { layer: ["src/data/doSqliteDiscoverySetupAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_discovery_alerts: { layer: ["src/data/doSqliteDiscoveryAlertAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_iv_history: { layer: ["src/data/doSqliteIvHistoryAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_strategy_profiles: { layer: ["src/data/doSqliteStrategyProfileAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_feed_snapshots: { layer: ["src/data/doSqliteFeedSnapshotAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   paused_schedules: {
     // #3123: the legacy table is frozen — its only writer is the
     // deprecated adapter; live pause state lives in unified_schedules.
-    layer: ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts"],
+    layer: ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts", "src/data/schemaComponent/doCatalogue.ts"],
   },
   unified_schedules: {
     // Issue #3121 Phase 2 (#3124) — the catalogue is a layer writer
@@ -560,9 +560,9 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
     // NOT EXISTS), never a row write. #4282 P2a moved the index
     // statement from unifiedScheduleIndexSchema.ts into the ORM
     // catalogue (src/data/schemaComponent/ormCatalogue.ts).
-    layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts", "src/data/schemaComponent/ormCatalogue.ts"],
+    layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts", "src/data/schemaComponent/ormCatalogue.ts", "src/data/schemaComponent/doCatalogue.ts"],
   },
-  mas_enrichment_runs: { layer: ["src/data/doSqliteEnrichmentAdapter.ts"] },
+  mas_enrichment_runs: { layer: ["src/data/doSqliteEnrichmentAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_messages: {
     layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/schemaComponent/ormCatalogue.ts"],
   },
@@ -585,41 +585,41 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   webhook_replay_nonces: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
   mas_options_chain_cache: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
   mas_reports: { layer: ["src/data/doSqliteCanonicalReportStoreAdapter.ts"] },
-  mas_goals: { layer: ["src/data/doSqliteGoalScenarioAdapter.ts"] },
-  mas_scenarios: { layer: ["src/data/doSqliteGoalScenarioAdapter.ts"] },
-  mas_outcomes: { layer: ["src/data/doSqliteGoalScenarioAdapter.ts"] },
+  mas_goals: { layer: ["src/data/doSqliteGoalScenarioAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_scenarios: { layer: ["src/data/doSqliteGoalScenarioAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_outcomes: { layer: ["src/data/doSqliteGoalScenarioAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_job_outcomes: {
-    layer: ["src/data/doSqliteJobOutcomeAdapter.ts"],
+    layer: ["src/data/doSqliteJobOutcomeAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"],
   },
   mas_job_outcomes_meta: {
-    layer: ["src/data/doSqliteJobOutcomeAdapter.ts"],
+    layer: ["src/data/doSqliteJobOutcomeAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"],
     bypass: { "src/agents/routes/maintenance.ts": "#2489 selective wipe watermark reset" },
   },
-  mas_strategy_reviews: { layer: ["src/data/doSqliteStrategyReviewAdapter.ts"] },
-  mas_outcome_tracking: { layer: ["src/data/doSqliteOutcomeTrackingAdapter.ts"] },
-  mas_comparison_arm_outcomes: { layer: ["src/data/doSqliteComparisonLedgerAdapter.ts"] },
-  mas_screening_activity: { layer: ["src/data/doSqliteScreeningActivityAdapter.ts"] },
-  mas_challengers: { layer: ["src/data/doSqliteChallengerAdapter.ts"] },
-  mas_challenger_approvals: { layer: ["src/data/doSqliteChallengerAdapter.ts"] },
-  mas_challenger_promotions: { layer: ["src/data/doSqliteChallengerAdapter.ts"] },
-  mas_strategy_bank_active: { layer: ["src/data/doSqliteChallengerAdapter.ts"] },
-  mas_strategy_weights_v2: { layer: ["src/data/doSqliteStrategyWeightsAdapter.ts"] },
-  mas_strategy_weight_versions: { layer: ["src/data/doSqliteStrategyWeightsAdapter.ts"] },
-  mas_strategy_weight_caps: { layer: ["src/data/doSqliteStrategyPolicyAdapter.ts"] },
-  mas_strategy_gates: { layer: ["src/data/doSqliteStrategyPolicyAdapter.ts"] },
-  mas_strategy_bank_proposals: { layer: ["src/data/doSqliteReselectionAdapter.ts"] },
-  mas_adaptation_audit: { layer: ["src/data/doSqliteAdaptationAuditAdapter.ts"] },
-  mas_async_jobs: { layer: ["src/data/doSqliteAsyncJobAdapter.ts"] },
-  mas_autopilot: { layer: ["src/data/doSqliteAutopilotStateAdapter.ts"] },
-  mas_policy_verdicts: { layer: ["src/data/doSqlitePolicyVerdictAdapter.ts"] },
-  mas_report_confirmations: { layer: ["src/data/doSqliteReportConfirmationAdapter.ts"] },
-  mas_screener_presets: { layer: ["src/data/doSqliteScreenerPresetAdapter.ts"] },
-  usage_events: { layer: ["src/data/doSqliteUsageEventAdapter.ts"] },
-  research_settings: { layer: ["src/data/doSqliteResearchStoreAdapter.ts"] },
-  research_task_store: { layer: ["src/data/doSqliteResearchStoreAdapter.ts"] },
-  research_runs: { layer: ["src/data/doSqliteResearchStoreAdapter.ts"] },
-  research_evaluations: { layer: ["src/data/doSqliteResearchStoreAdapter.ts"] },
-  screen_run_locks: { layer: ["src/data/doSqliteScreenRunLockAdapter.ts"] },
+  mas_strategy_reviews: { layer: ["src/data/doSqliteStrategyReviewAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_outcome_tracking: { layer: ["src/data/doSqliteOutcomeTrackingAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_comparison_arm_outcomes: { layer: ["src/data/doSqliteComparisonLedgerAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_screening_activity: { layer: ["src/data/doSqliteScreeningActivityAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_challengers: { layer: ["src/data/doSqliteChallengerAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_challenger_approvals: { layer: ["src/data/doSqliteChallengerAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_challenger_promotions: { layer: ["src/data/doSqliteChallengerAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_strategy_bank_active: { layer: ["src/data/doSqliteChallengerAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_strategy_weights_v2: { layer: ["src/data/doSqliteStrategyWeightsAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_strategy_weight_versions: { layer: ["src/data/doSqliteStrategyWeightsAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_strategy_weight_caps: { layer: ["src/data/doSqliteStrategyPolicyAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_strategy_gates: { layer: ["src/data/doSqliteStrategyPolicyAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_strategy_bank_proposals: { layer: ["src/data/doSqliteReselectionAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_adaptation_audit: { layer: ["src/data/doSqliteAdaptationAuditAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_async_jobs: { layer: ["src/data/doSqliteAsyncJobAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_autopilot: { layer: ["src/data/doSqliteAutopilotStateAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_policy_verdicts: { layer: ["src/data/doSqlitePolicyVerdictAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_report_confirmations: { layer: ["src/data/doSqliteReportConfirmationAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_screener_presets: { layer: ["src/data/doSqliteScreenerPresetAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  usage_events: { layer: ["src/data/doSqliteUsageEventAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  research_settings: { layer: ["src/data/doSqliteResearchStoreAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  research_task_store: { layer: ["src/data/doSqliteResearchStoreAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  research_runs: { layer: ["src/data/doSqliteResearchStoreAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  research_evaluations: { layer: ["src/data/doSqliteResearchStoreAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  screen_run_locks: { layer: ["src/data/doSqliteScreenRunLockAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   // #4282 P2a: the schema authority for the ORM + index-schema
   // tables above moved from ormSchema.ts / ormFacade.ts / the
   // index-schema modules to the ORM catalogue
@@ -627,6 +627,18 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   // unchanged in kind (port + schema authority), only the file moved;
   // the authority consolidates from two files (ormSchema.ts +
   // masRetentionIndexSchema.ts) into one for mas_messages/mas_events.
+  // #4282 P2b: the schema authority for the DO tables above
+  // moved from the DO adapters into the DO catalogue
+  // (src/data/schemaComponent/doCatalogue.ts) — the writer set
+  // is unchanged in kind (port + schema authority), only the
+  // file moved. The catalogue is a DDL-only layer writer
+  // (CREATE TABLE / CREATE INDEX statements naming the table),
+  // never a row writer; the adapter still executes the
+  // statements through doTableSql / doIndexSql / doStatementSql.
+  // mas_reports is the one exception: its four catalogue
+  // entries are parameterized on ${TABLE}, so no literal table
+  // name follows a write verb and the detector does not count
+  // the catalogue as its writer.
   // #4282 P1: the schema authority for these tables moved from
   // migrationRunner.ts to the D1 catalogue
   // (src/data/schemaComponent/d1Catalogue.ts) — the writer set is
@@ -693,10 +705,16 @@ describe("global D-D census: G-7 — mas_settings (port-owned since #2390)", () 
   });
 
   it("the only DDL ensurer is the settings port's adapter", () => {
+    // #4282 P2b: the mas_settings CREATE moved from the adapter
+    // into the DO catalogue (src/data/schemaComponent/
+    // doCatalogue.ts), so the catalogue is now the SOLE file
+    // holding the statement text — the adapter still executes
+    // it, through MAS_SETTINGS_DDL. The DDL has exactly one
+    // home, as the pin requires; only the file changed.
     const re = /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+mas_settings(?![\w])/gi;
     const actual = SRC_FILES.filter((f) => re.test(STRIPPED.get(f)!)).sort();
     expect(actual).toEqual([
-      "src/data/doSqliteOrmAdapters.ts",
+      "src/data/schemaComponent/doCatalogue.ts",
     ]);
   });
 });
@@ -888,9 +906,17 @@ describe("global D-D census: step 5 — kv_store writer set (#2432)", () => {
   });
 
   it("the only DDL ensurer is the SessionStore DO's statement adapter", () => {
+    // #4282 P2b: the kv_store CREATE moved from the adapter
+    // into the DO catalogue (src/data/schemaComponent/
+    // doCatalogue.ts), so the catalogue is now the SOLE file
+    // holding the statement text — the adapter still executes
+    // it, through doTableSql. The DDL has exactly one home, as
+    // the pin requires; only the file changed.
     const re = /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+kv_store(?![\w])/gi;
     const actual = SRC_FILES.filter((f) => re.test(STRIPPED.get(f)!)).sort();
-    expect(actual).toEqual(["src/data/doSessionStoreAdapter.ts"]);
+    expect(actual).toEqual([
+      "src/data/schemaComponent/doCatalogue.ts",
+    ]);
   });
 });
 
