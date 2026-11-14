@@ -32,10 +32,15 @@ const GATING = [
 ];
 
 describe("4315-P01 gating workflows", () => {
-  it("triggers on the five gating workflows completing", () => {
-    expect(workflow).toContain("workflow_run:");
-    for (const name of GATING) expect(workflow).toContain(`- "${name}"`);
-    expect(workflow).toContain("types: [completed]");
+  it("sweeps on a 5-minute cadence — workflow_run never reached PR branches (#4325)", () => {
+    // #4325: the original `workflow_run` trigger was never delivered for
+    // PR-branch runs (every delivery was a main-branch run), so a draft never
+    // flipped. The sweep evaluates the same gating set on its own cadence.
+    expect(workflow).toContain("schedule:");
+    expect(workflow).toContain('cron: "*/5 * * * *"');
+    expect(workflow).not.toMatch(/^\s*workflow_run:\s*$/m);
+    for (const name of GATING) expect(workflow).toContain(name);
+    expect(workflow).toContain("select(length == 5)");
   });
 });
 

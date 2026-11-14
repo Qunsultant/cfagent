@@ -1033,7 +1033,7 @@ Do **not** rely on GitHub's auto-merge request to merge here, and never pass str
 - The flags make the CLI exit without enqueuing.
 - Worse, an auto-merge request records the repository's **default** merge method — SQUASH on this repo — even when the mutation asks for `mergeMethod: REBASE` (verified 2026-11-12 on a live PR: the mutation returned SQUASH). Under a rebase-only ruleset that request can never merge, so the PR sits green, `CLEAN` and unmerged (#4267, #4219, #4244, #4283, #4285, #4297, #4303).
 
-The trusted workflow (`auto-merge-trusted.yml`) therefore labels on `pull_request` and enqueues on CI completion; it creates no auto-merge request at all. A flagless `gh pr merge --auto` is the trap that produced the stall and is not a substitute for a queue entry. The queue call itself runs on a short-lived App token: `enqueuePullRequest` is FORBIDDEN to a workflow token (#4322).
+The trusted workflow (`auto-merge-trusted.yml`) therefore labels on `pull_request` and enrolls on `pull_request` (immediately, when the head is already green) plus a **5-minute sweep** of open `auto-merge` PRs — the schedule replaced `workflow_run`, which GitHub never delivers for PR-branch runs here, so green PRs sat unenrolled (#4444 / #4325 / #4346); it creates no auto-merge request at all. A flagless `gh pr merge --auto` is the trap that produced the stall and is not a substitute for a queue entry. The queue call itself runs on a short-lived App token: `enqueuePullRequest` is FORBIDDEN to a workflow token (#4322).
 
 Queue grouping (issue #4088): the queue groups at most 5 entries per group with ALLGREEN. The grouping value is an owner setting, recorded here when changed; a larger group size is tried and observed on a busy window, and reverted if a red entry blocks groups more than it helps. ALLGREEN and the required checks are unchanged by grouping.
 
@@ -1585,9 +1585,14 @@ The `auto-merge-trusted` workflow (`.github/workflows/auto-merge-trusted.yml`)
 is the default for every PR targeting `main`, including drafts and PRs that
 change workflow files (the #1894 withholding exception was removed by owner
 decision 2026-11-01, issue #2670 — see the hold-removed note below). It applies
-the `auto-merge` label to drafts and enables rebase auto-merge when they are
-marked ready for review; GitHub cannot merge a draft while it remains a
-draft. There is no author allowlist. The PR template remains focused on
+the `auto-merge` label on every `pull_request` event and **enrolls the PR in
+the merge queue** — immediately when the head is already green, and otherwise
+from a 5-minute sweep of open labeled PRs (#4444). The ready half,
+`auto-ready-drafts.yml`, is a sweep on the same cadence: a labeled draft whose
+full gating set is green is marked ready, and the next sweep enrolls it (#4325
+/ #4346). No auto-merge request is created, and nothing is merged by these
+workflows — the queue is the only merger. GitHub cannot merge a draft while it
+remains a draft. There is no author allowlist. The PR template remains focused on
 description and checklist content; the workflow applies the default label.
 
 - Hold removed (owner decision 2026-11-01, issue #2670, superseding #1894): the #1894 hold logic — withholding auto-merge for PRs touching workflow files, PRs by bot authors, PRs deleting files, and PRs marked as created automatically by Jules — is removed entirely. The workflow applies the `auto-merge` label and enables rebase auto-merge for every PR targeting `main`, including workflow-touching PRs; drafts are labeled automatically and merge only after they are marked ready. No file path is excluded from automatic labeling or merging. The safety net is the required checks (Policy Gate including its no-deletion rule, Gitleaks, Test & Build, Load Active Environment) plus merge-queue validation on the merge-group commit.
