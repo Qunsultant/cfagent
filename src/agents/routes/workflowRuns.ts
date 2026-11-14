@@ -36,15 +36,18 @@ import type { SqlStorage } from "../../orm";
 import {
   buildWorkflowRunsPage,
   d1RecordLinkedToJobs,
+  innerShardScanJobId,
   runFromJobRunRecord,
   runFromSagaChain,
   runFromScanRun,
+  stagesFromEngineViews,
   summarizeWorkflowRuns,
   type UnifiedWorkflowRunRecord,
   type WorkflowRun,
   type WorkflowRunDocuments,
   type WorkflowRunJobRow,
   type WorkflowRunOutcomeRow,
+  type WorkflowRunStage,
   type WorkflowRunStageTransition,
 } from "../../services/workflowRuns";
 import {
@@ -53,7 +56,12 @@ import {
 import { mapSagaAuditToJobs, readSagaAuditRows } from "./sagaStatus";
 import { getScheduledAgentDoor } from "../orchestrator/meshDoors";
 import { resolveWorkflowRunsStageReadLimit } from "../../config/workflowRunsStageRead";
-import type { JobStageView, JobStagesRead } from "../../services/jobPipelineEngine";
+import {
+  readStagesFromPipelineStores,
+  type JobStageView,
+  type JobStagesRead,
+} from "../../services/jobPipelineEngine";
+import { createJobPipelineStoresFromSql } from "../../data/createJobPipelinePorts";
 
 export interface WorkflowRunsSql {
   exec: (query: string, ...args: unknown[]) => Iterable<unknown>;
@@ -98,6 +106,16 @@ export interface WorkflowRunsRouteContext {
    * A failing read is named in storeErrors and never hides the runs.
    */
   jobStageReader?: (jobIds: string[]) => Promise<Map<string, JobStagesRead>>;
+  /**
+   * Issue #4420 — the inner per-symbol engine stages of this page's options
+   * feed shards, keyed by the SHARD job id. Production reads the shard
+   * host's own pipeline store (readInnerShardScanStages); tests inject a
+   * map. A shard the reader omits renders no inner block; an entry with an
+   * empty stage list renders the honest empty.
+   */
+  innerShardStageReader?: (
+    refs: Array<{ shardJobId: string; engineJobId: string }>,
+  ) => Promise<Map<string, JobStagesRead>>;
 }
 
 const DEFAULT_LIMIT = 40;
@@ -564,6 +582,36 @@ export async function readPipelineRunStagesFromScheduledAgent(
   return new Map(Object.entries(body ?? {}));
 }
 
+/**
+ * Issue #4420 — the inner engine stages of options feed shards, read from
+ * the pipeline store the shard executor wrote them to (this host's own
+ * SQLite: a shard runs on the Orchestrator, and so does this read). One
+ * projection — readStagesFromPipelineStores — shares the job-status
+ * surface's stage rule; a shard with no stored definition answered an
+ * honest empty rather than being dropped from the page.
+ */
+export async function readInnerShardScanStages(
+  sql: SqlStorage,
+  refs: Array<{ shardJobId: string; engineJobId: string }>,
+): Promise<Map<string, JobStagesRead>> {
+  const out = new Map<string, JobStagesRead>();
+  if (refs.length === 0) return out;
+  const stores = createJobPipelineStoresFromSql(sql);
+  for (const ref of refs) {
+    try {
+      const read = await readStagesFromPipelineStores(stores, ref.engineJobId);
+      out.set(ref.shardJobId, read ?? { stages: [], checkpointRunId: null });
+    } catch {
+      // A shard whose read fails keeps the page honest: the caller names
+      // the failure once (storeErrors) and the row claims no inner stages.
+      throw new Error(
+        `Inner shard stage read failed for ${ref.engineJobId}: ${ref.shardJobId}.`,
+      );
+    }
+  }
+  return out;
+}
+
 export async function handleWorkflowRunsRoutes(
   request: Request,
   url: URL,
@@ -843,10 +891,10 @@ export async function handleWorkflowRunsRoutes(
   // hides a run, and a run with no checkpoint renders an honest empty
   // stage list.
   const stageReads = new Map<string, JobStagesRead>();
+  const stageLimit = resolveWorkflowRunsStageReadLimit(
+    ctx.env as { WORKFLOW_RUNS_STAGE_READ_LIMIT?: string } | undefined,
+  );
   if (ctx.env !== undefined) {
-    const stageLimit = resolveWorkflowRunsStageReadLimit(
-      ctx.env as { WORKFLOW_RUNS_STAGE_READ_LIMIT?: string },
-    );
     const stageIds = [
       ...new Set([...jobs.map((job) => job.job_id), ...keptJobRunRecords.map((r) => r.jobId)]),
     ].slice(0, stageLimit);
@@ -864,6 +912,40 @@ export async function handleWorkflowRunsRoutes(
   const engineStages = new Map<string, JobStageView[]>();
   for (const [jobId, read] of stageReads) {
     if (read.stages.length > 0) engineStages.set(jobId, read.stages);
+  }
+  // Issue #4420 — the shard detail's inner engine stages. An options feed
+  // shard dispatches its per-symbol scan under an identity derived from its
+  // own payload, and that checkpoint is written into THIS host's SQLite (the
+  // shard executor runs here), so the read is store-direct and bounded by
+  // the same stage-read knob. Never a second stage read: the rows are the
+  // one stagesFromEngineViews projection. A shard with no checkpoint gets an
+  // empty list (rendered as an honest empty), and a failing read is named in
+  // storeErrors instead of inventing stages or hiding runs.
+  const innerShardStages = new Map<string, { jobId: string; stages: WorkflowRunStage[] }>();
+  const innerRefs = new Map<string, string>();
+  for (const job of jobs) {
+    const engineJobId = innerShardScanJobId(job);
+    if (engineJobId) innerRefs.set(job.job_id, engineJobId);
+    if (innerRefs.size >= stageLimit) break;
+  }
+  if (innerRefs.size > 0) {
+    const refs = [...innerRefs].map(([shardJobId, engineJobId]) => ({ shardJobId, engineJobId }));
+    try {
+      const reader =
+        ctx.innerShardStageReader ??
+        ((items: Array<{ shardJobId: string; engineJobId: string }>) =>
+          readInnerShardScanStages(ctx.ensureTables(), items));
+      for (const [shardJobId, read] of await reader(refs)) {
+        const engineJobId = innerRefs.get(shardJobId);
+        if (!engineJobId) continue;
+        innerShardStages.set(shardJobId, {
+          jobId: engineJobId,
+          stages: read.stages.length > 0 ? stagesFromEngineViews(read.stages) : [],
+        });
+      }
+    } catch (err) {
+      storeErrors.innerShardStages = err instanceof Error ? err.message : String(err);
+    }
   }
   // Identity (issue #4359): a checkpoint is projected onto a standalone
   // record only when the checkpoint's run id IS the record's engine run
@@ -944,6 +1026,8 @@ export async function handleWorkflowRunsRoutes(
     // Issue #4359 — the engine's own stages for the grouped runs. A
     // group with no entry keeps the job-row projection.
     engineStages,
+    // Issue #4420 — the inner shard stages the job-row projection carries.
+    innerShardStages,
   });
   return Response.json({
     count: page.runs.length,

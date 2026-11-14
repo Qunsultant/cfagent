@@ -44,6 +44,7 @@ import {
   PageShell,
   PillGroup,
   Table,
+  type TableColumn,
   TextInput,
 } from "./components/ui";
 import type {
@@ -1173,6 +1174,157 @@ export function RunDetail({
       cancelled = true;
     };
   }, [docsReportId]);
+  // Issue #4420 — ONE stage table for the run and for each shard's inner
+  // engine run. The columns are built here so the inner tables below reuse
+  // the same rendering instead of drifting from it; only the run's own table
+  // offers stage actions (an inner run has no controllable engine job).
+  const stageColumns = (withActions: boolean): TableColumn<WorkflowRunStage>[] => {
+    const columns: TableColumn<WorkflowRunStage>[] = [
+      {
+        key: "order",
+        header: "#",
+        align: "right" as const,
+        render: (stage: WorkflowRunStage) => <span className="workflow-runs-mono">{stage.order}</span>,
+      },
+      {
+        key: "stage",
+        header: "Stage",
+        render: (stage: WorkflowRunStage) => (
+          <div className="workflow-runs-workflow">
+            <span className="workflow-runs-title">{stage.label}</span>
+            <span className="workflow-runs-muted">
+              {stage.stage}
+              {stage.capability ? ` · ${stage.capability}` : ""}
+              {stage.channel ? ` · ${stage.channel}` : ""}
+            </span>
+          </div>
+        ),
+      },
+      {
+        key: "status",
+        header: "Status",
+        render: (stage: WorkflowRunStage) => (
+          <Badge tone={STAGE_TONE[stageStatus(stage)] ?? "neutral"} size="sm">
+            {stageStatus(stage)}
+          </Badge>
+        ),
+      },
+      {
+        // Issue #4421 — the durable job id, and whether this row is a
+        // retry linked to the row it repeated. Rendered with no
+        // className on purpose: the UX ratchet counts bespoke class
+        // token occurrences and must not rise (#3991).
+        key: "job",
+        header: "Job",
+        render: (stage: WorkflowRunStage) => (
+          <div>
+            {stage.jobId ? (
+              <span title={stage.jobId}>{stage.jobId}</span>
+            ) : (
+              <span>—</span>
+            )}
+            {stage.retryOf ? (
+              <span title={`A retry of job ${stage.retryOf}`}>
+                {" "}
+                Retry of <a href={`#stage-${stage.retryOf}`}>{stage.retryOf}</a>
+              </span>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        key: "recorded",
+        header: "Recorded",
+        render: (stage: WorkflowRunStage) => (
+          <span className="workflow-runs-muted">
+            {stage.recordedBy === "job"
+              ? stage.jobKind
+                ? `${stage.jobKind} job`
+                : "Job"
+              : stage.recordedBy === "engine-checkpoint"
+                ? "Engine stage"
+                : "Stage record"}
+          </span>
+        ),
+      },
+      {
+        key: "timing",
+        header: "Started / duration",
+        render: (stage: WorkflowRunStage) => (
+          <div className="workflow-runs-when">
+            <span>{formatTimestamp(stage.startedAt)}</span>
+            <span className="workflow-runs-muted">{formatDuration(stage.durationMs)}</span>
+          </div>
+        ),
+      },
+      {
+        key: "actions",
+        header: "Actions",
+        render: (stage: WorkflowRunStage) =>
+          stage.engineJobId ? (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={stageActionBusy === `${stage.key}:rerun`}
+                onClick={() => void runStageAction(stage, "rerun")}
+                title="Re-run this stage from its recorded input"
+              >
+                Re-run
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={stageActionBusy === `${stage.key}:stop`}
+                onClick={() => void runStageAction(stage, "stop")}
+                title="Stop this stage; the run pauses here and can resume"
+              >
+                Stop
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={stageActionBusy === `${stage.key}:resume`}
+                onClick={() => void runStageAction(stage, "resume")}
+                title="Resume this stage from its checkpoint"
+              >
+                Resume
+              </Button>
+            </>
+          ) : null,
+      },
+      {
+        key: "what",
+        header: "What happened",
+        render: (stage: WorkflowRunStage) => (
+          <div className="workflow-runs-what">
+            <span>{stage.detail || "No description recorded"}</span>
+            {/* Issue #4418: the pre-reap last activity rides the existing muted
+        line (no new bespoke class — the UX ratchet counts them). */}
+    {(stage.reason || stage.lastActivityAt || (stage.attempts?.length ?? 0) > 0) && (
+      <span className="workflow-runs-muted">
+        {[
+          stage.reason ? `Reason: ${stage.reason}` : null,
+          stage.lastActivityAt ? `Last activity ${stage.lastActivityAt}` : null,
+          stage.attempts?.length
+            ? `Attempts ${stage.attempts.length}: ${stage.attempts
+                .map((attempt) => `#${attempt.attempt} ${attempt.error}`)
+                .join(" · ")}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
+    )}
+            {stage.error && (
+              <span className="workflow-runs-error">{stage.error}</span>
+            )}
+          </div>
+        ),
+      },
+    ];
+    return withActions ? columns : columns.filter((column) => column.key !== "actions");
+  };
   return (
     <div className="workflow-runs-detail">
       <div className="workflow-runs-detail-header">
@@ -1292,150 +1444,7 @@ export function RunDetail({
       ) : (
         <div className="workflow-runs-stage-list">
           <Table
-            columns={[
-              {
-                key: "order",
-                header: "#",
-                align: "right" as const,
-                render: (stage: WorkflowRunStage) => <span className="workflow-runs-mono">{stage.order}</span>,
-              },
-              {
-                key: "stage",
-                header: "Stage",
-                render: (stage: WorkflowRunStage) => (
-                  <div className="workflow-runs-workflow">
-                    <span className="workflow-runs-title">{stage.label}</span>
-                    <span className="workflow-runs-muted">
-                      {stage.stage}
-                      {stage.capability ? ` · ${stage.capability}` : ""}
-                      {stage.channel ? ` · ${stage.channel}` : ""}
-                    </span>
-                  </div>
-                ),
-              },
-              {
-                key: "status",
-                header: "Status",
-                render: (stage: WorkflowRunStage) => (
-                  <Badge tone={STAGE_TONE[stageStatus(stage)] ?? "neutral"} size="sm">
-                    {stageStatus(stage)}
-                  </Badge>
-                ),
-              },
-              {
-                // Issue #4421 — the durable job id, and whether this row is a
-                // retry linked to the row it repeated. Rendered with no
-                // className on purpose: the UX ratchet counts bespoke class
-                // token occurrences and must not rise (#3991).
-                key: "job",
-                header: "Job",
-                render: (stage: WorkflowRunStage) => (
-                  <div>
-                    {stage.jobId ? (
-                      <span title={stage.jobId}>{stage.jobId}</span>
-                    ) : (
-                      <span>—</span>
-                    )}
-                    {stage.retryOf ? (
-                      <span title={`A retry of job ${stage.retryOf}`}>
-                        {" "}
-                        Retry of <a href={`#stage-${stage.retryOf}`}>{stage.retryOf}</a>
-                      </span>
-                    ) : null}
-                  </div>
-                ),
-              },
-              {
-                key: "recorded",
-                header: "Recorded",
-                render: (stage: WorkflowRunStage) => (
-                  <span className="workflow-runs-muted">
-                    {stage.recordedBy === "job"
-                      ? stage.jobKind
-                        ? `${stage.jobKind} job`
-                        : "Job"
-                      : stage.recordedBy === "engine-checkpoint"
-                        ? "Engine stage"
-                        : "Stage record"}
-                  </span>
-                ),
-              },
-              {
-                key: "timing",
-                header: "Started / duration",
-                render: (stage: WorkflowRunStage) => (
-                  <div className="workflow-runs-when">
-                    <span>{formatTimestamp(stage.startedAt)}</span>
-                    <span className="workflow-runs-muted">{formatDuration(stage.durationMs)}</span>
-                  </div>
-                ),
-              },
-              {
-                key: "actions",
-                header: "Actions",
-                render: (stage: WorkflowRunStage) =>
-                  stage.engineJobId ? (
-                    <>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        loading={stageActionBusy === `${stage.key}:rerun`}
-                        onClick={() => void runStageAction(stage, "rerun")}
-                        title="Re-run this stage from its recorded input"
-                      >
-                        Re-run
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        loading={stageActionBusy === `${stage.key}:stop`}
-                        onClick={() => void runStageAction(stage, "stop")}
-                        title="Stop this stage; the run pauses here and can resume"
-                      >
-                        Stop
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        loading={stageActionBusy === `${stage.key}:resume`}
-                        onClick={() => void runStageAction(stage, "resume")}
-                        title="Resume this stage from its checkpoint"
-                      >
-                        Resume
-                      </Button>
-                    </>
-                  ) : null,
-              },
-              {
-                key: "what",
-                header: "What happened",
-                render: (stage: WorkflowRunStage) => (
-                  <div className="workflow-runs-what">
-                    <span>{stage.detail || "No description recorded"}</span>
-                    {/* Issue #4418: the pre-reap last activity rides the existing muted
-                line (no new bespoke class — the UX ratchet counts them). */}
-            {(stage.reason || stage.lastActivityAt || (stage.attempts?.length ?? 0) > 0) && (
-              <span className="workflow-runs-muted">
-                {[
-                  stage.reason ? `Reason: ${stage.reason}` : null,
-                  stage.lastActivityAt ? `Last activity ${stage.lastActivityAt}` : null,
-                  stage.attempts?.length
-                    ? `Attempts ${stage.attempts.length}: ${stage.attempts
-                        .map((attempt) => `#${attempt.attempt} ${attempt.error}`)
-                        .join(" · ")}`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            )}
-                    {stage.error && (
-                      <span className="workflow-runs-error">{stage.error}</span>
-                    )}
-                  </div>
-                ),
-              },
-            ]}
+            columns={stageColumns(true)}
             rows={run.stages}
             rowKey={(stage) => stage.key}
             caption="Stages in execution order"
@@ -1443,6 +1452,40 @@ export function RunDetail({
             rowProps={(stage) => ({ id: `stage-${stage.key}` })}
           />
         </div>
+      )}
+
+      {/* Issue #4420 — the shard stage detail's inner per-symbol engine run:
+          the stages the shard's own scan checkpointed, rendered by the same
+          columns as the run's stages. A shard whose checkpoint is absent says
+          so — an unknown inner run is never dressed up as an empty one. */}
+      {run.stages.some((stage) => stage.innerStages) && (
+        <section aria-label="Inner engine stages of this run's shards">
+          <h4 className="workflow-runs-subheading">Inner engine stages</h4>
+          {run.stages
+            .filter((stage) => stage.innerStages)
+            .map((stage) => (
+              <div key={`inner-${stage.key}`} className="workflow-runs-stage-list">
+                <span className="workflow-runs-muted">
+                  {stage.label}
+                  {stage.jobId ? ` · ${stage.jobId}` : ""}
+                  {stage.innerJobId ? ` · ${stage.innerJobId}` : ""}
+                </span>
+                {(stage.innerStages ?? []).length === 0 ? (
+                  <Notice tone="neutral" density="compact">
+                    No inner engine checkpoint was recorded for this shard&apos;s per-symbol scan — its inner stages are
+                    unknown, not empty.
+                  </Notice>
+                ) : (
+                  <Table
+                    columns={stageColumns(false)}
+                    rows={stage.innerStages ?? []}
+                    rowKey={(inner) => `${stage.key}:${inner.key}`}
+                    caption={`Inner engine stages — ${stage.label}`}
+                  />
+                )}
+              </div>
+            ))}
+        </section>
       )}
 
       <div className="workflow-runs-io-grid">
