@@ -460,6 +460,16 @@
  * bringing the pinned inventory to 471 entries (461 measured on
  * main before this slice); the delegation sequence is unchanged
  * (same handler, same position).
+ *
+ * Issue #2846 changed no route surface, but it changed how the
+ * commercial conditions are WRITTEN: the ~80 commercial literals
+ * in handleAgenticPaymentsRoutes became catalog references
+ * (COMMERCIAL_ROUTE_SUFFIXES.<id>, `${COMMERCIAL_BARE_BASE}...`,
+ * `${commercialBarePath("<id>")}...`). The enumeration resolves
+ * those references to their literal values by parsing
+ * src/data/commercialUrlCatalog.ts as source text (see the
+ * catalog-resolution rule above conditionsIn), so the pinned
+ * inventory stays 471 entries and no coverage is lost.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -1120,9 +1130,98 @@ function routeRequestBody(orchSrc: string): string {
 
 const COND_RE = /path\.(endsWith|includes|startsWith)\("([^"]+)"\)|path === "([^"]+)"/g;
 
+// Issue #2846 — commercial route conditions are written as catalog
+// references, not literals, and the inventory enumeration resolves them
+// to the exact strings the old literals carried, so EXPECTED_INVENTORY
+// is unchanged:
+//   path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.<id>)
+//     -> the route's matchSuffix (src/data/commercialUrlCatalog.ts);
+//   path.includes(`${COMMERCIAL_BARE_BASE}<tail>`)
+//     -> COMMERCIAL_BARE_BASE + <tail>;
+//   path.includes(`${commercialBarePath("<id>")}<tail>`)
+//     -> the route's bare path + <tail>.
+// The catalog is parsed as SOURCE TEXT via the same readFileSync
+// approach this test already uses — the test never imports the catalog
+// at runtime, so a catalog that fails to parse (or an id the catalog
+// does not define) fails this test loudly instead of silently
+// shrinking the inventory. If a resolved value ever differs from its
+// old literal, that is a route change and this pin fails; it is never
+// silently absorbed.
+interface CommercialCatalog {
+  bareBase: string;
+  suffixById: Map<string, string>;
+  bareById: Map<string, string>;
+}
+
+let commercialCatalogCache: CommercialCatalog | null = null;
+
+function commercialCatalog(): CommercialCatalog {
+  if (commercialCatalogCache) return commercialCatalogCache;
+  const catalogSrc = src("data/commercialUrlCatalog.ts");
+  const bareBaseMatch = catalogSrc.match(/COMMERCIAL_BARE_BASE\s*=\s*"([^"]+)"/);
+  if (!bareBaseMatch)
+    throw new Error("COMMERCIAL_BARE_BASE must be a string literal in the URL catalog");
+  const bareBase = bareBaseMatch[1];
+  const suffixById = new Map<string, string>();
+  const bareById = new Map<string, string>();
+  for (const m of catalogSrc.matchAll(
+    /route\("([A-Za-z0-9_]+)",\s*\[[^\]]*\],\s*"([^"]+)"(?:,\s*"([^"]+)")?\)/g,
+  )) {
+    const bare = bareBase + m[2];
+    bareById.set(m[1], bare);
+    suffixById.set(m[1], m[3] ?? bare);
+  }
+  if (suffixById.size === 0)
+    throw new Error("the URL catalog must define at least one route");
+  commercialCatalogCache = { bareBase, suffixById, bareById };
+  return commercialCatalogCache;
+}
+
+function resolveCommercialRefs(text: string): string {
+  const { bareBase, suffixById, bareById } = commercialCatalog();
+  return text
+    .replace(
+      /path\.(endsWith|includes|startsWith)\(COMMERCIAL_ROUTE_SUFFIXES\.([A-Za-z0-9_]+)\)/g,
+      (_m, method, id) => {
+        const suffix = suffixById.get(id);
+        if (suffix === undefined)
+          throw new Error(`unknown COMMERCIAL_ROUTE_SUFFIXES id: ${id}`);
+        return `path.${method}("${suffix}")`;
+      },
+    )
+    .replace(/path === COMMERCIAL_ROUTE_SUFFIXES\.([A-Za-z0-9_]+)/g, (_m, id) => {
+      const suffix = suffixById.get(id);
+      if (suffix === undefined)
+        throw new Error(`unknown COMMERCIAL_ROUTE_SUFFIXES id: ${id}`);
+      return `path === "${suffix}"`;
+    })
+    .replace(
+      /path\.(endsWith|includes|startsWith)\(`\$\{COMMERCIAL_BARE_BASE\}([^`]*)`\)/g,
+      (_m, method, tail) => `path.${method}("${bareBase}${tail}")`,
+    )
+    .replace(/path === `\$\{COMMERCIAL_BARE_BASE\}([^`]*)`/g, (_m, tail) => {
+      return `path === "${bareBase}${tail}"`;
+    })
+    .replace(
+      /path\.(endsWith|includes|startsWith)\(`\$\{commercialBarePath\("([^"]+)"\)\}([^`]*)`\)/g,
+      (_m, method, id, tail) => {
+        const bare = bareById.get(id);
+        if (bare === undefined)
+          throw new Error(`unknown commercialBarePath id: ${id}`);
+        return `path.${method}("${bare}${tail}")`;
+      },
+    )
+    .replace(/path === `\$\{commercialBarePath\("([^"]+)"\)\}([^`]*)`/g, (_m, id, tail) => {
+      const bare = bareById.get(id);
+      if (bare === undefined)
+        throw new Error(`unknown commercialBarePath id: ${id}`);
+      return `path === "${bare}${tail}"`;
+    });
+}
+
 function conditionsIn(text: string): string[] {
   const out: string[] = [];
-  for (const m of text.matchAll(COND_RE))
+  for (const m of resolveCommercialRefs(text).matchAll(COND_RE))
     out.push(m[3] !== undefined ? `=== "${m[3]}"` : `${m[1]}("${m[2]}")`);
   return out;
 }
