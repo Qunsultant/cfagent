@@ -19,10 +19,15 @@
  * - request → manual (manual ports; shapeReport/deliver refuse —
  *   the delivery builders need getScreenerAgent, which neither a
  *   chat/MCP turn nor a workflow residency binds)
- * - goalPlan → goal: the ports are rebuildable, but the goal leg's
- *   job record is not addressable from a foreign host (decided-not-to,
- *   #4274) — refuse stage_port_unavailable; the goal-screen host is
- *   #4290.
+ * - goalPlan → goal: the goal leg's ports are rebuildable through
+ *   the workflow host (#4290) — the leg's shapeReport/deliver are
+ *   pure functions of their inputs (createGoalOptionsLegDelivery),
+ *   rebuilt per invocation from the goal run id the goal seam
+ *   stamps on the stored request. Chat control still refuses the
+ *   goal shape through its own inline guard (decided-not-to,
+ *   #4274): the guard below does not refuse it, because the guard
+ *   serves the host path, and the host path's job record IS
+ *   addressable (the start seam defines it in the D1 residency).
  * - comparisonRequest → comparison: a single engine step, not a
  *   staged pipeline (#4276) — refuse stage_port_unavailable.
  *
@@ -61,26 +66,27 @@ import {
   createStrategyScreenPorts,
 } from "./strategyScreenPorts";
 import { createManualOptionsCanonicalLeg } from "./optionsCanonicalLeg";
+import { createGoalOptionsLegDelivery } from "./goalOptionsLeg";
 import {
   createManualOptionsRecordBuilder,
   type ManualOptionsScreenCtx,
 } from "./manualOptionsRecordBuilder";
 
-/** The shapes whose stage ports can be rebuilt from the stored request. */
-export type OptionsRequestShape = "manual" | "panel" | "scan";
+/**
+ * The shapes whose stage ports can be rebuilt from the stored
+ * request. The goal shape joined in #4290: its ports rebuild
+ * through the workflow host from the stamped goal run id (chat
+ * control still refuses it through its own guard — #4274).
+ */
+export type OptionsRequestShape = "manual" | "panel" | "scan" | "goal";
 
 /**
- * The shape a stored request decodes to — including the goal leg,
- * which a caller can name but cannot drive an execution op for (its
- * job record is not addressable from a foreign host — decided-not-to,
- * #4274), and the comparison leg, which a caller can name but cannot
- * drive a stage op for (a comparison run is a single engine step,
- * not a staged pipeline — #4276).
+ * The shape a stored request decodes to — including the comparison
+ * leg, which a caller can name but cannot drive a stage op for (a
+ * comparison run is a single engine step, not a staged pipeline —
+ * #4276).
  */
-export type OptionsDecodedRequestShape =
-  | OptionsRequestShape
-  | "goal"
-  | "comparison";
+export type OptionsDecodedRequestShape = OptionsRequestShape | "comparison";
 
 /**
  * A named rebuild refusal. `code` is the contract (one of the
@@ -132,26 +138,27 @@ export function decodeOptionsRequestShape(
 
 /**
  * Refuse, by name, a stage that cannot be rebuilt for this shape —
- * before any execution. The goal and comparison shapes refuse for
- * every stage; the manual shape refuses shapeReport/deliver only
- * (the delivery builders need getScreenerAgent, which neither a
+ * before any execution. The comparison shape refuses for every
+ * stage; the manual shape refuses shapeReport/deliver only (the
+ * delivery builders need getScreenerAgent, which neither a
  * chat/MCP turn nor a workflow residency binds — re-dispatch from
- * the manual route instead). The plain defaults stand in during the
- * rebuild so the other six stages' ports can still be built; they
- * are never invoked for the refused stages because this guard runs
- * first.
+ * the manual route instead). The goal shape passes: its ports
+ * rebuild through the host (#4290), and the rebuild itself refuses
+ * a goal request that carries no stamped goal run id. The plain
+ * defaults stand in during the rebuild so the other six stages'
+ * ports can still be built; they are never invoked for the
+ * refused stages because this guard runs first.
+ *
+ * This guard serves the host path only. Chat control refuses the
+ * goal shape through its own inline guard (decided-not-to, #4274)
+ * before ever reaching the shared rebuild — this guard passing a
+ * goal shape does not weaken that refusal.
  */
 export function assertOptionsStageRebuildable(
   shape: OptionsDecodedRequestShape,
   stageId: string,
   runId: string,
 ): asserts shape is OptionsRequestShape {
-  if (shape === "goal") {
-    throw new OptionsStepPortsError(
-      "stage_port_unavailable",
-      `options run ${runId}: the goal leg's job record is not addressable from this host (decided-not-to, #4274) — the goal leg runs over in-memory engine stores on the ScreenerAgent DO, so no durable job exists in this host; a goal-leg stage cannot run here; the goal-screen host is #4290`,
-    );
-  }
   if (shape === "comparison") {
     throw new OptionsStepPortsError(
       "stage_port_unavailable",
@@ -185,6 +192,27 @@ export interface RebuildOptionsStepDepsInput {
 }
 
 /**
+ * The composing goal run's id from a goal-shape request — stamped
+ * on classInput.goalPlan.goalRunId by the goal seam
+ * (startGoalOptionsLegWorkflow, #4290). The leg's report section
+ * and delivery handoff stamp it, so a goal request without it
+ * cannot rebuild: refuse by name rather than attribute the leg's
+ * contribution to the wrong run (or none).
+ */
+function goalRunIdFromGoalRequest(request: unknown, runId: string): string {
+  const goalRunId = (
+    request as { classInput?: { goalPlan?: { goalRunId?: unknown } } } | null
+  )?.classInput?.goalPlan?.goalRunId;
+  if (typeof goalRunId !== "string" || goalRunId.length === 0) {
+    throw new OptionsStepPortsError(
+      "stage_port_unavailable",
+      `options run ${runId}: a goal-shape run carries no goal run id on classInput.goalPlan.goalRunId — the leg's report section and delivery handoff cannot stamp the composing run; dispatch through the goal seam (startGoalOptionsLegWorkflow, #4290), which stamps it`,
+    );
+  }
+  return goalRunId;
+}
+
+/**
  * Rebuild the step's ports for one request shape. The holders are
  * fresh (the caller reads the outcome from the engine's own record,
  * not from a per-dispatch holder); the claims are fresh in-memory;
@@ -206,7 +234,25 @@ export function rebuildOptionsStepDeps(
             storage,
             ...(input.scanRunStore ? { scanRunStore: input.scanRunStore } : {}),
           })
-        : createOptionsScreenPorts({
+        : shape === "goal"
+          ? createOptionsScreenPorts({
+              // The goal leg's ports, rebuilt per invocation from
+              // the stored request (#4290): the leg's delivery
+              // builders are pure functions of the stamped goal run
+              // id, and the screener is constructed without universe
+              // deps — discovery-mode legs (no explicit symbols)
+              // fail at the screen stage with the #1378 error, and
+              // the goal seam refuses them earlier, by name (#4473).
+              // No canonical store, matching the production leg's
+              // decided omission (#4060, #783): the composing goal
+              // run's row is the single canonical home.
+              screener: new DynamicOptionsScreener(input.chainSource),
+              storage,
+              ...createGoalOptionsLegDelivery({
+                goalRunId: goalRunIdFromGoalRequest(input.request, input.runId),
+              }),
+            })
+          : createOptionsScreenPorts({
             screener: new DynamicOptionsScreener(input.chainSource),
             storage,
             ...(input.env

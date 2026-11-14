@@ -154,7 +154,7 @@ export interface OptionsScreenPortDeps {
 export interface OptionsPipelineRequest extends PlannerInput {
   classInput: {
     request?: { filter?: unknown; pushToSlack?: boolean; slackChannel?: string; universe?: string; emailTo?: string };
-    goalPlan?: { optionsFilter?: unknown; structures?: string[]; goalId?: string };
+    goalPlan?: { optionsFilter?: unknown; structures?: string[]; goalId?: string; goalRunId?: string };
     tradeIntent?: SagaTradeIntent;
     riskLimits?: SagaRiskLimits;
     goalId?: string;
