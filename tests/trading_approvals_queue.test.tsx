@@ -23,7 +23,9 @@
  *  - an expired row shows Expired and disables Approve
  *  - a server refusal surfaces its business message, not a crash
  *  - an empty pending list renders an honest empty state
- *  - ETradeTradingHub wires the queue into the order tab (source pin)
+ *  - The Approvals page is the queue's only home (#4538): the order
+ *    tab's queueRail and the Queues page carry a link there instead,
+ *    and the hub carries no reference to the queue at all (source pin)
  *
  * Harness follows tests/pdf_report_link_honesty.test.tsx: react-dom/client
  * in jsdom, direct component renders.
@@ -217,9 +219,11 @@ describe("Issue #1327 — TradingApprovalsQueue", () => {
     expect(container.textContent || "").toContain("No pending approvals");
   });
 
-  it("ETradeTradingHub wires the queue into the order tab (source pin)", () => {
+  it("ETradeTradingHub no longer wires the queue anywhere (#4538: the Approvals page is its only home)", () => {
     const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
-    expect(hub).toContain("TradingApprovalsQueue");
+    expect(hub).not.toContain("TradingApprovalsQueue");
+    const panel = readFileSync("src/client/ApprovalsPanel.tsx", "utf8");
+    expect(panel).toContain("<TradingApprovalsQueue />");
   });
 
   it("A3-a: card states the approval contract, version, limit bound, and fee note", async () => {
