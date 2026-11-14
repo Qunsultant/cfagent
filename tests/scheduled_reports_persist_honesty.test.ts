@@ -441,6 +441,13 @@ describe("issue #876 — source pin", () => {
     // invariant is unchanged — the UNIQUE INDEX creation sits
     // inside a guarded try with the same log line — asserted
     // at its new home, the write port's DO adapter.
+    // ADAPTED for #4282 P2b: the CREATE UNIQUE INDEX text
+    // moved from the adapter into the DO catalogue
+    // (src/data/schemaComponent/doCatalogue.ts). The pin's
+    // invariant is unchanged — the creation still sits inside
+    // the same guarded try with the same log line, now as a
+    // catalogue call; the statement text is asserted at its
+    // new home, the catalogue entry.
     const adapterSrc = readFileSync(
       fileURLToPath(
         new URL("../src/data/doSqliteCanonicalReportStoreAdapter.ts", import.meta.url)
@@ -450,12 +457,36 @@ describe("issue #876 — source pin", () => {
     const start = adapterSrc.indexOf("ensureSchema(): void");
     expect(start).toBeGreaterThan(-1);
     const ensureSrc = adapterSrc.slice(start, adapterSrc.indexOf("findIdByGeneration", start));
-    const idxPos = ensureSrc.indexOf("CREATE UNIQUE INDEX");
+    const idxPos = ensureSrc.indexOf(
+      'doStatementSql("schema.index.mas_reports.create_unique_index_idx_mas_reports_generation"',
+    );
     expect(idxPos).toBeGreaterThan(-1);
     expect(ensureSrc.lastIndexOf("try {", idxPos)).toBeGreaterThan(-1);
     expect(ensureSrc.indexOf("catch (err)", idxPos)).toBeGreaterThan(idxPos);
     expect(ensureSrc).toContain("console.error");
     expect(ensureSrc).toContain("idx_mas_reports_generation");
+    const catalogueSrc = readFileSync(
+      fileURLToPath(
+        new URL("../src/data/schemaComponent/doCatalogue.ts", import.meta.url)
+      ),
+      "utf-8"
+    );
+    const entryStart = catalogueSrc.indexOf(
+      "schema.index.mas_reports.create_unique_index_idx_mas_reports_generation",
+    );
+    expect(entryStart).toBeGreaterThan(-1);
+    const stmtStart = catalogueSrc.indexOf("statement: `", entryStart);
+    const stmtEnd = catalogueSrc.indexOf("`,", stmtStart);
+    const stmt = catalogueSrc.slice(stmtStart, stmtEnd);
+    expect(stmt).toContain("CREATE UNIQUE INDEX");
+    expect(stmt).toContain("idx_mas_reports_generation");
+    // Parameterized on ${TABLE} (the mas_reports entry): the
+    // ON clause names the parameter (escaped as \${TABLE} in
+    // the catalogue source, so the stored text holds the
+    // literal), and the entry's `table` field resolves it to
+    // mas_reports.
+    expect(stmt).toContain("ON \\${TABLE}");
+    expect(catalogueSrc.slice(entryStart, stmtEnd)).toContain('table: "mas_reports"');
     // The seam keeps its public ensure door as the delegate.
     expect(src).toContain("storePorts(sql).write.ensureSchema()");
   });
