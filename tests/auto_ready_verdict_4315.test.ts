@@ -15,7 +15,8 @@
  *    query is filtered by `head_sha`, so the window is the head's own runs.
  *  - P04 it flips with `ready_for_review`, re-checks the draft flag first, and
  *    tolerates an already-ready 422.
- *  - P05 no privileged trigger, no App credentials, no PR code checkout.
+ *  - P05/4498 the flip uses the App token (the workflow token is FORBIDDEN),
+ *    and no privileged trigger or PR code checkout is introduced.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -118,12 +119,19 @@ describe("4315-P04 / 4495 the action", () => {
   });
 });
 
-describe("4315-P05 safety", () => {
-  it("uses no privileged trigger, no App credentials and no PR checkout", () => {
+describe("4315-P05 / 4498 safety and credentials", () => {
+  it("uses the App token for the flip, and never a privileged trigger or checkout", () => {
+    // markPullRequestReadyForReview is FORBIDDEN to the workflow token, the
+    // same constraint the queue call has (#4320); the App token is scoped to
+    // this repository and short-lived (#4498).
+    expect(workflow).toContain("create-github-app-token");
+    expect(workflow).toContain("permission-pull-requests: write");
+    expect(workflow).toContain(
+      "GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}",
+    );
+    expect(workflow).toContain("APP_TOKEN_READY");
+    expect(workflow).toContain("::error::No App token was minted");
     expect(workflow).not.toContain("pull_request_target");
-    expect(workflow).not.toContain("create-github-app-token");
-    expect(workflow).not.toContain("AUTO_UPDATE_APP");
     expect(workflow).not.toContain("actions/checkout");
-    expect(workflow).toContain("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}");
   });
 });
