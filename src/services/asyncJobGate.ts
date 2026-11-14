@@ -20,7 +20,7 @@
  *   item 5 are required; either alone leaves the scan.
  *
  * The index is created here (called from `OrchestratorAgent.ensureTables`,
- * right after the table's own CREATE TABLE, so no lazy-creation ordering
+ * right after the table's own creation, so no lazy-creation ordering
  * issue like the framework queue's). The gate keeps its fail-open shape:
  * a read failure still proceeds, and the screen-run lock probe above the
  * gate remains the primary guard.
