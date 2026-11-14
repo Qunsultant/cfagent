@@ -179,9 +179,15 @@ export class D1JobPipelineStores implements JobPipelineStores {
             runTrigger: row.runTrigger,
             // Issue #4357 — the join key MUST survive a re-save:
             // settle paths reload the instance from the store and
-            // stamp its terminal record from it. (runScheduleId is
-            // omitted here — an adjacent gap, not fixed in this slice.)
+            // stamp its terminal record from it.
             runAsyncJobId: row.runAsyncJobId,
+            // Issue #4427 — the schedule link MUST survive a re-save too,
+            // and must be able to LAND on a row that already exists:
+            // defineJob mints the instance before any run, so the
+            // schedule id is stamped by a later save that hits this
+            // conflict path. Omitting it here meant the stamp never
+            // landed, and resume-after-restart lost the link (#4427).
+            runScheduleId: row.runScheduleId,
             checkpointJson: row.checkpointJson,
             stageCheckpointJson: row.stageCheckpointJson,
             stageDesiredJson: row.stageDesiredJson,
