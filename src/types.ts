@@ -2824,6 +2824,8 @@ export interface ShardChainContext {
    */
   modeSource?: "pin" | "selection" | "inference";
   trigger?: "manual" | "scheduled";
+  /** Issue #4415: the schedule that dispatched the chain, when known. */
+  scheduleId?: string;
   maxItems?: number;
   timestamp: string;
   channels: AsyncJobChannel[];

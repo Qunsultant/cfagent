@@ -298,6 +298,19 @@ describe("shard planner + completeness gate on mas_async_jobs rows (issue #1355)
     expect(specs.every((spec) => spec.stage === "feed")).toBe(true);
   });
 
+  it("stamps the dispatch provenance onto every shard submission (#4415)", () => {
+    const specs = planOptionsFeedShards(chain({
+      screenType: "options",
+      options: { symbols: ["AAPL", "MSFT"] },
+      scheduleId: "sched-9",
+    }), "2026-10-24T12:00:00.000Z");
+    for (const spec of specs) {
+      expect(spec.trigger).toBe("scheduled");
+      expect(spec.triggeredBy).toBe("u1");
+      expect(spec.scheduleId).toBe("sched-9");
+    }
+  });
+
   it("plans options assembly only after every symbol is terminal", () => {
     const optionsChain = chain({
       screenType: "options",

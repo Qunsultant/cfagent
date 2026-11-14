@@ -1645,6 +1645,9 @@ export class ScheduledTasksService {
           universe: (options.universe as any) || undefined,
           provider: effectiveProviderResolved,
           trigger: options.trigger || "scheduled",
+          // Issue #4415: the dispatching schedule rides the chain, so every
+          // shard can stamp it as provenance.
+          ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
         },
         timestamp,
       );
@@ -2859,6 +2862,9 @@ export class ScheduledTasksService {
             ? { mode: chainEffectiveMode.mode, modeSource: chainEffectiveMode.modeSource }
             : {}),
           trigger: options.trigger || "scheduled",
+          // Issue #4415: the dispatching schedule rides the chain, so every
+          // shard can stamp it as provenance.
+          ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
           maxItems: symbols.length,
           timestamp,
           channels: [
