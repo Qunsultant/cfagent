@@ -4,6 +4,12 @@
  * env binding, and writes no SQL. Only the adapters (Drizzle D1,
  * in-memory) touch a store.
  *
+ * Issue #3571: validation failures are typed — the asserts throw
+ * BusinessError carrying an outcome-catalog code, never a raw
+ * Error with hand-written text (precedent: assertBillingPolicyPartial
+ * throws BusinessError). The route renders the code through the
+ * single resolver, so no raw text ever leaves the API.
+ *
  * A draft is the local binding for one top-up: the amount is bound
  * at mint (never re-read from a client at confirm), the draft id
  * (`topup-<uuid>`) is the replay guard and the Stripe
@@ -16,6 +22,8 @@
  * requirement-driven expansion (later) — there is no currency field
  * and no conversion anywhere in this slice.
  */
+
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /**
  * The top-up rail as the public API names it: "card" for the Stripe
@@ -104,14 +112,14 @@ export class TopUpClaimRefusedError extends Error {
 
 export function assertTopUpDraftStatus(value: unknown): TopUpDraftStatus {
   if (value !== "minted" && value !== "crediting" && value !== "credited") {
-    throw new Error(`Top-up draft status must be "minted", "crediting", or "credited".`);
+    throw new BusinessError("FAILURE_TOP_UP_VALIDATION");
   }
   return value;
 }
 
 export function assertTopUpRail(value: unknown): TopUpRail {
   if (value !== "card" && value !== "x402") {
-    throw new Error(`Top-up rail must be "card" or "x402".`);
+    throw new BusinessError("FAILURE_TOP_UP_VALIDATION");
   }
   return value;
 }
@@ -120,10 +128,10 @@ export function assertTopUpRail(value: unknown): TopUpRail {
 export function assertTopUpAmountUSD(value: unknown): number {
   const n = Number(value);
   if (typeof value === "string" || !Number.isFinite(n) || n <= 0) {
-    throw new Error("top-up amountUSD must be a finite positive number.");
+    throw new BusinessError("FAILURE_TOP_UP_AMOUNT_INVALID");
   }
   if (Math.round(n * 100) !== n * 100) {
-    throw new Error("top-up amountUSD must have at most two decimal places.");
+    throw new BusinessError("FAILURE_TOP_UP_AMOUNT_INVALID");
   }
   return n;
 }

@@ -5,6 +5,7 @@
  * store at all.
  */
 import { TopUpClaimRefusedError, type TopUpDraft, type TopUpDraftStore } from "./topUpPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 export class InMemoryTopUpAdapter implements TopUpDraftStore {
   private readonly rows = new Map<string, TopUpDraft>();
@@ -48,10 +49,12 @@ export class InMemoryTopUpAdapter implements TopUpDraftStore {
     update: { creditedAtMs: number; paymentIntentId: string | null; checkoutSessionId: string | null },
   ): Promise<TopUpDraft> {
     const row = this.rows.get(id);
-    if (!row) throw new Error(`Unknown top-up draft ${id}.`);
-    if (row.status === "credited") throw new Error(`Top-up ${id} is already credited.`);
-    if (row.status !== "crediting") throw new Error(`Top-up ${id} is not crediting.`);
-    const next: TopUpDraft = { ...row, status: "credited", ...update };
+    if (!row) throw new BusinessError("FAILURE_TOP_UP_NOT_FOUND");
+    if (row.status === "credited") throw new BusinessError("FAILURE_TOP_UP_REPLAY");
+    // Merely minted (never claimed): not in the crediting state
+    // markCredited requires — an invalid state transition, not a
+    // replay (it was never credited).
+    if (row.status !== "crediting") throw new BusinessError("FAILURE_TOP_UP_VALIDATION");    const next: TopUpDraft = { ...row, status: "credited", ...update };
     this.rows.set(id, next);
     return { ...next };
   }
