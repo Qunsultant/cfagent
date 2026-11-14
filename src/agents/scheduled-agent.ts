@@ -65,6 +65,10 @@ import {
   type GoalScheduleAuditEvent,
 } from "../services/consolidatedScheduling";
 import { SHARED_ORCHESTRATOR_INSTANCE, getServiceUserLogin } from "../security/serviceIdentity";
+import {
+  runAutopilotMonthlyEvaluation,
+  type AutopilotMonthlyEvaluationResult,
+} from "../services/autopilotMonthlyEvaluation";
 import { SqlUnifiedScheduleStore } from "../data/doSqliteUnifiedScheduleAdapter";
 import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
 import { goalToRecord, recordToGoal } from "../services/unifiedScheduleManagement";
@@ -381,6 +385,18 @@ export interface ScheduledAgentCronOpts {
   indexRefreshExecutor?: (
     operation: IndexRefreshOperation,
   ) => Promise<IndexListJobResult>;
+  /**
+   * #4411: injected monthly Autopilot evaluation executor (tests, or
+   * a caller that already owns an evaluate path). Absent, the branch
+   * below runs the production path: the configured service identity
+   * posts the representative dry-run intent to the OrchestratorAgent
+   * evaluate endpoint. A missing service identity or a missing
+   * ORCHESTRATOR_AGENT binding fails visibly and leaves the goal due
+   * — never a silent no-op, never a substituted identity.
+   */
+  autopilotEvaluateExecutor?: (
+    goal: ScheduledGoal,
+  ) => Promise<AutopilotMonthlyEvaluationResult>;
   /**
    * Issue #3121 Phase 2 (#3124) — single evaluation scan: a caller
    * that already loaded the goals (triggerGoal) passes its snapshot
@@ -2161,6 +2177,60 @@ export class ScheduledAgent extends PortThink {
               refreshResult.failures.length > 0
                 ? `stored ${refreshResult.artifacts.length} index lists; failed: ${refreshResult.failures.map((f) => f.index).join(", ")}`
                 : `stored ${refreshResult.artifacts.length} index lists`,
+          });
+          continue;
+        }
+
+        if (goal.operation === "autopilot.evaluate") {
+          // #4411 monthly Autopilot evaluation: executes directly
+          // through the existing POST /api/autopilot/evaluate path
+          // (the social.publish / resource.* / index.* precedent),
+          // never through createJob — createJob mints a pending
+          // descriptor and executes nothing. The catalog entry
+          // exists so addGoal accepts the operation.
+          //
+          // An injected executor wins (tests; a caller that already
+          // owns an evaluate path). Otherwise the production path
+          // resolves the configured service identity and posts the
+          // representative dry-run intent through the OrchestratorAgent
+          // stub (the postGoalScheduleAuditEvent precedent: stub
+          // fetch over https://agent.internal). A missing service
+          // identity or a missing ORCHESTRATOR_AGENT binding fails
+          // visibly and leaves the goal due (the feed job's rule);
+          // an executor throw propagates to the loop's catch below:
+          // tick error, goal stays due.
+          let evaluation: AutopilotMonthlyEvaluationResult;
+          if (opts?.autopilotEvaluateExecutor) {
+            evaluation = await opts.autopilotEvaluateExecutor(goal);
+          } else {
+            const serviceLogin = getServiceUserLogin(env);
+            let evaluateFetch: ((req: Request) => Promise<Response>) | null = null;
+            try {
+              const orchestrator = actorGateway.stub<DoStubLike>(
+                env.ORCHESTRATOR_AGENT,
+                SHARED_ORCHESTRATOR_INSTANCE,
+              );
+              evaluateFetch = (req: Request) => orchestrator.fetch(req);
+            } catch {
+              evaluateFetch = null;
+            }
+            evaluation = await runAutopilotMonthlyEvaluation({
+              serviceLogin,
+              evaluateFetch,
+            });
+          }
+          if (!evaluation.ok) {
+            tick.errors.push(`${goal.id}: ${evaluation.error}`);
+            tick.jobsSkipped++;
+            await recordGoalRun("skipped", {
+              detail: evaluation.error ?? "monthly Autopilot evaluation failed",
+            });
+            continue;
+          }
+          goal.lastRun = now.toISOString();
+          tick.jobsCreated++;
+          await recordGoalRun("success", {
+            descriptor: evaluation.descriptor ?? "monthly policy check complete",
           });
           continue;
         }

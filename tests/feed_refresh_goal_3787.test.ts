@@ -6,7 +6,7 @@
  *
  * This file used to pin the goal's firing (#3787d). It now pins the
  * removal:
- * - `feed-refresh` is absent from DEFAULT_SCHEDULES (8 goals remain).
+ * - `feed-refresh` is absent from DEFAULT_SCHEDULES (9 goals remain).
  * - Seeding an empty store does not re-add it (the seed rule seeds
  *   FROM DEFAULT_SCHEDULES, so deletion closes the re-seed path).
  * - addGoal refuses `feed.refresh_all` as an unknown operation
@@ -111,9 +111,9 @@ afterEach(() => {
 });
 
 describe("feed-refresh goal removal (#4306 S2)", () => {
-  it("DEFAULT_SCHEDULES carries no feed-refresh goal (8 goals remain)", () => {
+  it("DEFAULT_SCHEDULES carries no feed-refresh goal (9 goals remain)", () => {
     expect(DEFAULT_SCHEDULES.find((g) => g.id === "feed-refresh")).toBeUndefined();
-    expect(DEFAULT_SCHEDULES).toHaveLength(8);
+    expect(DEFAULT_SCHEDULES).toHaveLength(9);
     expect(DEFAULT_SCHEDULES.map((g) => g.id)).toEqual([
       "daily-qa-sweep",
       "opportunity-hunt",
@@ -123,6 +123,8 @@ describe("feed-refresh goal removal (#4306 S2)", () => {
       "resource-dashboard-comparison",
       "index-refresh-wikipedia",
       "index-refresh-holdings",
+      // Issue #4411: the monthly Autopilot evaluation.
+      "autopilot-monthly-evaluation",
     ]);
   });
 
@@ -131,7 +133,7 @@ describe("feed-refresh goal removal (#4306 S2)", () => {
     const agent = new ScheduledAgent(ctx as never, makeEnv() as never);
     const goals = await agent.listGoals();
     expect(goals.map((g) => g.id)).not.toContain("feed-refresh");
-    expect(goals).toHaveLength(8);
+    expect(goals).toHaveLength(9);
   });
 
   it("addGoal refuses feed.refresh_all as an unknown operation", async () => {

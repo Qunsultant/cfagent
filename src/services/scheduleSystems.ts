@@ -87,6 +87,8 @@ export const SCHEDULED_GOAL_IDS_INVENTORY = [
   "resource-dashboard-comparison",
   "index-refresh-wikipedia",
   "index-refresh-holdings",
+  // Issue #4411: the monthly Autopilot evaluation.
+  "autopilot-monthly-evaluation",
 ] as const;
 
 /** Mirrors the crons array in wrangler.jsonc (test-pinned). */

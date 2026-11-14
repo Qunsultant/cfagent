@@ -321,6 +321,11 @@ describe("goal compiler (#1441) — waves and planner prompt on the existing pat
     // #4306 S2 removes that entry with the goal: feed datasets are
     // produced by the per-job Think scheduled tasks, and the
     // `feed.refresh_all` operation is refused by addGoal.
+    // #4411 monthly Autopilot slice amends this pin: the catalog gains
+    // exactly one entry, the ScheduledAgent-owned `autopilot` marker
+    // for the monthly evaluation goal (`autopilot.evaluate`,
+    // dispatched by ScheduledAgent.onCron through the evaluate
+    // endpoint) — same precedent.
     expect(OPERATION_CATALOG.map((e) => e.agent)).toEqual([
       "search",
       "payments",
@@ -333,6 +338,7 @@ describe("goal compiler (#1441) — waves and planner prompt on the existing pat
       "social",
       "resource",
       "index",
+      "autopilot",
     ]);
   });
 });

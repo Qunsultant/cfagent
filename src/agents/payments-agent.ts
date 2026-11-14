@@ -47,7 +47,14 @@ export type { PaymentRecord } from "../payments/ledger";
 
 const GUARD_STORAGE_KEY = "budgetGuard";
 const PAYMENTS_STORAGE_KEY = "payments";
-const GUARD_ALLOWLIST = [
+/**
+ * Operations the budget check permits. ScheduledAgent runs this check
+ * for EVERY due goal before dispatch, so a goal operation missing
+ * here is skipped every tick with "operation not allowlisted" — the
+ * qa.run_sweep precedent (#1655). Exported for the #4411 pin: the
+ * monthly Autopilot evaluation must pass the real guard, not a mock.
+ */
+export const GUARD_ALLOWLIST = [
   "search.query",
   "payments.draft",
   "tasks.create",
@@ -57,6 +64,10 @@ const GUARD_ALLOWLIST = [
   "search.opportunity_hunt",
   "social.publish",
   "pipeline:social-daily",
+  // Issue #4411: the monthly Autopilot evaluation (dry-run only,
+  // spends nothing, budgetCents 1) — without this entry the goal
+  // would be skipped at every monthly tick.
+  "autopilot.evaluate",
 ];
 
 export class PaymentsAgent extends PortThink {
