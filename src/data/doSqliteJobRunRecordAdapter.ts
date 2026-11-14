@@ -17,30 +17,10 @@ import {
 } from "./jobRunRecordPorts";
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
 import { ensureJobRunRecordIndexes } from "./jobRunRecordIndexSchema";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 function ensureTable(sql: SqlStorage): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS ${JOB_RUN_RECORDS_TABLE} (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      system TEXT NOT NULL,
-      job_id TEXT NOT NULL,
-      operation TEXT NOT NULL,
-      started TEXT NOT NULL,
-      finished TEXT NOT NULL,
-      outcome TEXT NOT NULL,
-      triggered_by TEXT NOT NULL,
-      trigger_text TEXT,
-      schedule_id TEXT,
-      async_job_id TEXT,
-      workflow_id TEXT,
-      error_text TEXT,
-      detail TEXT,
-      descriptor TEXT,
-      artifact_refs_json TEXT,
-      broker_id TEXT,
-      data_provider_id TEXT,
-      mode TEXT,
-      mode_source TEXT
-    )`);
+  sql.exec(doTableSql("job_run_records"));
   // Issue #3121 S1 — the §4 consolidated-ledger columns, added when
   // missing so existing DO tables upgrade in place (the probed
   // additive-column pattern from doSqliteAsyncJobAdapter). `trigger`
@@ -78,7 +58,7 @@ function ensureTable(sql: SqlStorage): void {
   if (!names.has("mode_source")) {
     sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN mode_source TEXT`);
   }
-  sql.exec(`CREATE INDEX IF NOT EXISTS ${JOB_RUN_RECORDS_TABLE}_job_idx ON ${JOB_RUN_RECORDS_TABLE} (job_id, started DESC, id DESC)`);
+  sql.exec(doIndexSql("job_run_records_job_idx"));
   // Issue #3121 Phase 2 (#3124) — the recent-read ordering index
   // (src/data/jobRunRecordIndexSchema.ts, #2280 pattern).
   ensureJobRunRecordIndexes(sql);
