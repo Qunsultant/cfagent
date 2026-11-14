@@ -43,7 +43,6 @@ import {
   portfolioSummary,
   heroTradingType,
 } from "./brokerPortfolio";
-import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { AccountPanels } from "./AccountPanels";
 import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";

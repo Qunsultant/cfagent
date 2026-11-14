@@ -19,7 +19,6 @@ import {
   TextInput,
   WorkCard,
 } from "./components/ui";
-import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import type { ETradeOrderDraft, ETradeQuote } from "../types";
 import type { TradeAssetClass, TradeOrderContext } from "./trading/tradeOrderContext";
@@ -376,7 +375,11 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
           />
         ) : undefined
       }
-      queueRail={<TradingApprovalsQueue />}
+      queueRail={
+        <PageSection title="Pending approvals">
+          <a href="?tab=approvals">Review pending approvals on the Approvals page</a>
+        </PageSection>
+      }
     >
       <Tabs
         idBase="order-ticket"

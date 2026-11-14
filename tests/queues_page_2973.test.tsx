@@ -3,11 +3,13 @@
  * Queues page (issue #2973, nav re-org slice 5).
  *
  * The Platform Queues page composes the existing queue surfaces —
- * async jobs, the dead-letter queue, trade approvals — without
- * reimplementing any of them. Pending review stays on the Review
- * page and must NOT appear here. The DLQ had no client UI before
- * this slice; these tests pin its first surface: listing, replay,
- * and the server-side operator gate rendered as a notice.
+ * async jobs and the dead-letter queue — without reimplementing any
+ * of them. Trade approvals live on the Approvals page (#4538); this
+ * page links there from the Trade approvals section instead of
+ * rendering the queue. Pending review stays on the Review page and
+ * must NOT appear here. The DLQ had no client UI before this slice;
+ * these tests pin its first surface: listing, replay, and the
+ * server-side operator gate rendered as a notice.
  */
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -61,9 +63,6 @@ function installFetch(opts: { dlqStatus?: number; dlqAfterReplay?: unknown[] } =
     if (url === "/api/jobs?limit=30") {
       return { ok: true, status: 200, json: async () => ({ jobs: [jobRow("job-1", "Nightly screen", "completed"), jobRow("job-2", "Options scan", "failed")] }) } as Response;
     }
-    if (url === "/api/broker/orders") {
-      return { ok: true, status: 200, json: async () => ({ trades: [] }) } as Response;
-    }
     if (url === "/api/ops/dlq/records") {
       if (opts.dlqStatus === 403) {
         return { ok: false, status: 403, json: async () => ({}) } as Response;
@@ -110,13 +109,21 @@ afterEach(async () => {
 });
 
 describe("Queues page (issue #2973)", () => {
-  it("renders all three queue sections and no pending-review section", async () => {
+  it("renders the two queue sections, the Trade approvals link, and no pending-review section", async () => {
     await renderPage();
     const text = container!.textContent ?? "";
     expect(text).toContain("Async jobs");
     expect(text).toContain("Dead-letter queue");
     expect(text).toContain("Trade approvals");
     expect(text).not.toContain("Held deliveries");
+    // #4538: the queue moved to the Approvals page — this section
+    // carries a link to it instead, and the page never fetches the
+    // queue endpoint anymore.
+    const link = container!.querySelector('a[href="?tab=approvals"]');
+    expect(link).not.toBeNull();
+    expect(link!.closest("section")?.querySelector("h2")?.textContent?.trim()).toBe("Trade approvals");
+    expect(text).not.toContain("No pending approvals");
+    expect(fetchCalls.some((c) => c.url === "/api/broker/orders")).toBe(false);
   });
 
   it("shows async jobs from the jobs endpoint", async () => {

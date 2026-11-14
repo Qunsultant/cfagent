@@ -9,8 +9,10 @@
  *   through the existing no-legs path (blank BUY CALL leg, editable
  *   underlying, leg editor); without the param the equity ticket
  *   renders instead.
- * - Hub render: Pending approvals renders AFTER the ticket header in
- *   document order — the bottom of the order page, not above it.
+ * - Hub render: the Pending approvals link renders AFTER the ticket
+ *   header in document order — the bottom of the order page, not
+ *   above it. The queue itself moved to the Approvals page (#4538);
+ *   what renders here is the link to it, in the same rail position.
  *
  * Harness follows tests/etradeDisconnect2386.test.tsx: react-dom/client
  * in jsdom, stubbed fetch, ToastProvider.
@@ -132,15 +134,19 @@ describe("Order page sub-menu and layout (issue #3038)", () => {
     expect(document.body.textContent).not.toContain("Build your order");
   });
 
-  it("renders Pending approvals below the ticket, not above it", async () => {
+  it("renders the Pending approvals link below the ticket, not above it (#4538)", async () => {
     window.history.pushState(null, "", "?tab=order");
     await renderOrderPage();
-    const headings = Array.from(document.querySelectorAll("h3, h4"));
+    const headings = Array.from(document.querySelectorAll("h2, h3, h4"));
     const ticket = headings.find((h) => (h.textContent ?? "").includes("Equity / ETF Order Ticket"));
     const approvals = headings.find((h) => (h.textContent ?? "").trim() === "Pending approvals");
     expect(ticket).toBeDefined();
     expect(approvals).toBeDefined();
     // DOCUMENT_POSITION_FOLLOWING (4): approvals comes after the ticket.
     expect(ticket!.compareDocumentPosition(approvals!) & 4).toBe(4);
+    // #4538: the queue itself moved to the Approvals page — what
+    // renders here is the link to it, in the same rail position.
+    expect(document.querySelector('a[href="?tab=approvals"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain("No pending approvals");
   });
 });

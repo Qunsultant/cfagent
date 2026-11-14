@@ -147,9 +147,11 @@ describe("Issue #1705 — Approvals surface composes the existing queues", () =>
     expect(chat).toContain("<ApprovalsPanel />");
   });
 
-  it("source pin: the original queue homes are untouched", () => {
+  it("source pin: the queue's only home is the Approvals page (#4538)", () => {
     const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
-    expect(hub).toContain("TradingApprovalsQueue");
+    expect(hub).not.toContain("TradingApprovalsQueue");
+    const panel = readFileSync("src/client/ApprovalsPanel.tsx", "utf8");
+    expect(panel).toContain("<TradingApprovalsQueue />");
     const reports = readFileSync("src/client/ReportsPanel.tsx", "utf8");
     expect(reports).toContain("PendingReviewQueue");
   });
