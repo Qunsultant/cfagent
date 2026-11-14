@@ -2,7 +2,7 @@
  * #4282 P4 — schema-equality pin: all planes, one clean instance.
  *
  * What this suite pins (measured, never assumed):
- *  - the combined catalogue (D1 + DO + ORM + remainder, 401 entries)
+ *  - the combined catalogue (D1 + DO + ORM + remainder, 402 entries)
  *    builds the frozen combined model exactly: 177 tables / 102 indexes.
  *  - the frozen combined model is the deterministic union of the four
  *    per-plane fixtures, with ZERO cross-plane disagreements (column
@@ -116,11 +116,11 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(401);
-    // 401 entries resolve to 412 statements: the mas_reports generic
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(402);
+    // 402 entries resolve to 413 statements: the mas_reports generic
     // ALTER expands to 11 pairs and the confirmations generic ALTER to
     // 2, each pair one statement.
-    expect(executedStatements).toBe(412);
+    expect(executedStatements).toBe(413);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

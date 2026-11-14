@@ -70,11 +70,11 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       executor,
       uncreatable: UNCREATABLE_LAYERS,
     });
-    expect(first.summary.totalSteps).toBe(412);
-    expect(first.summary.executed).toBe(412);
+    expect(first.summary.totalSteps).toBe(413);
+    expect(first.summary.executed).toBe(413);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(412);
+    expect(first.executed).toHaveLength(413);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -204,7 +204,7 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 412 resolved steps.
+    // skipped — and the three counts sum to the 413 resolved steps.
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
@@ -212,8 +212,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(412);
-    expect(partial.summary.totalSteps).toBe(412);
+    ).toBe(413);
+    expect(partial.summary.totalSteps).toBe(413);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in
