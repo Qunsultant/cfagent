@@ -533,49 +533,13 @@ const DO_DELEGATED_FILES: string[] = [
   "data/doSqliteWorkspaceStoreAdapter.ts",
 ];
 
-/** The only inline DDL-verb lines left in the delegated files after P2b. */
-const DO_REMAINING_INLINE_DDL: string[] = [
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN parent_job_id TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN job_kind TEXT NOT NULL DEFAULT 'main'\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN channel TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN not_before TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN stage TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN chain_id TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN stuck_alerted_at TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN trigger TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN triggered_by TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN schedule_id TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN last_activity_at TEXT\");",
-  "data/doSqliteAsyncJobAdapter.ts: this.sql.exec(\"ALTER TABLE mas_async_jobs ADD COLUMN error_code TEXT\");",
-  "data/doSqliteCanonicalReportStoreAdapter.ts: sql.exec(`ALTER TABLE \${TABLE} ADD COLUMN \${column} \${type}`);",
-  "data/doSqliteCanonicalReportStoreAdapter.ts: `[scheduledReports] ensureScheduledReportsTable: CREATE UNIQUE INDEX idx_mas_reports_generation failed (duplicate (user_login, generation_id) values already stored?); continuing without it: \${err instanceof Error ? err.message : String(err)}`,",
-  "data/doSqliteIvHistoryAdapter.ts: const ALTER_ADD_BROKER_SQL = `ALTER TABLE \${TABLE} ADD COLUMN broker TEXT NOT NULL DEFAULT 'etrade'`;",
-  "data/doSqliteJobPipelineAdapter.ts: `CREATE TABLE IF NOT EXISTS \${JOB_PIPELINE_DEFINITIONS_TABLE} (",
-  "data/doSqliteJobPipelineAdapter.ts: `CREATE TABLE IF NOT EXISTS \${JOB_PIPELINE_INSTANCES_TABLE} (",
-  "data/doSqliteJobPipelineAdapter.ts: this.sql.exec(`ALTER TABLE \${JOB_PIPELINE_INSTANCES_TABLE} ADD COLUMN run_schedule_id TEXT`);",
-  "data/doSqliteJobPipelineAdapter.ts: this.sql.exec(`ALTER TABLE \${JOB_PIPELINE_INSTANCES_TABLE} ADD COLUMN run_async_job_id TEXT`);",
-  "data/doSqliteJobRunRecordAdapter.ts: sql.exec(`ALTER TABLE \${JOB_RUN_RECORDS_TABLE} ADD COLUMN trigger_text TEXT`);",
-  "data/doSqliteJobRunRecordAdapter.ts: sql.exec(`ALTER TABLE \${JOB_RUN_RECORDS_TABLE} ADD COLUMN schedule_id TEXT`);",
-  "data/doSqliteJobRunRecordAdapter.ts: sql.exec(`ALTER TABLE \${JOB_RUN_RECORDS_TABLE} ADD COLUMN async_job_id TEXT`);",
-  "data/doSqliteJobRunRecordAdapter.ts: sql.exec(`ALTER TABLE \${JOB_RUN_RECORDS_TABLE} ADD COLUMN workflow_id TEXT`);",
-  "data/doSqliteJobRunRecordAdapter.ts: sql.exec(`ALTER TABLE \${JOB_RUN_RECORDS_TABLE} ADD COLUMN broker_id TEXT`);",
-  "data/doSqliteJobRunRecordAdapter.ts: sql.exec(`ALTER TABLE \${JOB_RUN_RECORDS_TABLE} ADD COLUMN data_provider_id TEXT`);",
-  "data/doSqliteJobRunRecordAdapter.ts: sql.exec(`ALTER TABLE \${JOB_RUN_RECORDS_TABLE} ADD COLUMN mode TEXT`);",
-  "data/doSqliteJobRunRecordAdapter.ts: sql.exec(`ALTER TABLE \${JOB_RUN_RECORDS_TABLE} ADD COLUMN mode_source TEXT`);",
-  "data/doSqliteProviderCaptureAdapter.ts: `ALTER TABLE \${DATA_CAPTURE_TABLE} ADD COLUMN failure_kind TEXT`",
-  "data/doSqliteProviderCaptureAdapter.ts: `ALTER TABLE \${DATA_CAPTURE_TABLE} ADD COLUMN failure_message TEXT`",
-  "data/doSqliteProviderConfigAdapter.ts: `ALTER TABLE \${PROVIDER_ROUTING_TABLE} ADD COLUMN min_tier TEXT NOT NULL DEFAULT 'freemium'`",
-  "data/doSqliteReportConfirmationAdapter.ts: sql.exec(`ALTER TABLE mas_report_confirmations ADD COLUMN \${column} \${type}`);",
-  "data/doSqliteScanRunAdapter.ts: const ADD_USER_LOGIN_COLUMN_SQL = `ALTER TABLE \${TABLE} ADD COLUMN user_login TEXT`;",
-  "data/doSqliteScanRunAdapter.ts: const ADD_SCHEDULE_ID_COLUMN_SQL = `ALTER TABLE \${TABLE} ADD COLUMN schedule_id TEXT`;",
-  "data/doSqliteScanRunAdapter.ts: const ADD_ASYNC_JOB_ID_COLUMN_SQL = `ALTER TABLE \${TABLE} ADD COLUMN async_job_id TEXT`;",
-  "data/doSqliteScanRunAdapter.ts: const ADD_WORKFLOW_ID_COLUMN_SQL = `ALTER TABLE \${TABLE} ADD COLUMN workflow_id TEXT`;",
-  "data/doSqliteStockCopilotStoreAdapter.ts: this.sql.exec(`ALTER TABLE \${COPILOT_POSITIONS_TABLE} ADD COLUMN entry_session TEXT`);",
-  "data/doSqliteStockCopilotStoreAdapter.ts: this.sql.exec(`ALTER TABLE \${COPILOT_POSITIONS_TABLE} ADD COLUMN entry_order_type TEXT`);",
-  "data/doSqliteStockCopilotSurfaceAdapter.ts: this.sql.exec(`ALTER TABLE \${COPILOT_ACTIVITY_TABLE} ADD COLUMN session TEXT`);",
-  "data/doSqliteStockCopilotSurfaceAdapter.ts: this.sql.exec(`ALTER TABLE \${COPILOT_ACTIVITY_TABLE} ADD COLUMN mode TEXT`);",
-  "data/doSqliteStockCopilotSurfaceAdapter.ts: this.sql.exec(`ALTER TABLE \${COPILOT_ACTIVITY_TABLE} ADD COLUMN critic_verdict_json TEXT`);",
-];
+/** No inline DDL-verb lines remain in the delegated files after P3:
+ * the 40 probed/guarded reconciliation statements and the two frozen
+ * JobPipeline v1 copies moved to the remainder catalogue (#4282 P3),
+ * and the CanonicalReport log line was reworded. The list is kept (as
+ * an empty array) so a future inline statement fails this test by
+ * appearing in the diff, exactly as a non-empty list would. */
+const DO_REMAINING_INLINE_DDL: string[] = [];
 
 describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
   it("catalogues all 103 DO statements: 66 table + 36 index + 1 unique-index", () => {
@@ -788,7 +752,7 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
     ).toBe(baseTableSql);
   });
 
-  it("no inline DDL remains in the delegated files except the pinned P3 set", () => {
+  it("no inline DDL remains in the delegated files (P3 emptied the pinned set)", () => {
     const srcRoot = path.join(
       path.dirname(fileURLToPath(import.meta.url)),
       "..",
