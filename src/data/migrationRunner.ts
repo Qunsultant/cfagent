@@ -1319,6 +1319,30 @@ export const MIGRATION_0066_REFERRAL_CODES: DataMigration = {
   sql: d1MigrationSql(66),
 };
 
+/**
+ * Migration 0053 — commercial product bundles (#2781,
+ * Monetization Phase 2.15). Three tables, additive only:
+ *   agent_product_bundles — one row per operator-defined bundle
+ *     (member_product_ids is a JSON array of catalog product ids,
+ *     `family:PayPerUse`, ≥2, unique; approval columns mirror
+ *     the #3357 plan-price approval columns — a bundle is
+ *     PROPOSED until an operator approves it).
+ *   agent_bundle_purchases — one row per verified Billing
+ *     checkout; provider_subscription_id is UNIQUE (the replay
+ *     guard, mirroring agent_subscriptions).
+ *   agent_bundle_entitlements — one row per member product per
+ *     purchase; written in the SAME atomic batch as the purchase
+ *     row (no partial entitlement, ever).
+ * Number 0053: 0051/0052 are reserved for #3263 (settled
+ * assignment, 2026-11-06). No bundles are seeded: bundles exist
+ * only when an operator creates one.
+ */
+export const MIGRATION_0053_PRODUCT_BUNDLES: DataMigration = {
+  version: 53,
+  name: "0053_product_bundles",
+  sql: d1MigrationSql(53),
+};
+
 export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANCE,
   MIGRATION_0002_AGENT_CHAINS_SCHEDULES,
   MIGRATION_0003_AGENT_SHARD_JOBS,
@@ -1371,6 +1395,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0050_USER_PROFILES,
   MIGRATION_0051_JOB_ENRICHED_DATASETS,
   MIGRATION_0052_JOB_ANALYZED_DATASETS,
+  MIGRATION_0053_PRODUCT_BUNDLES,
   MIGRATION_0054_APPROVED_FREE_QUOTA,
   MIGRATION_0055_APPROVED_FREE_QUOTA_SEED,
   MIGRATION_0056_JOB_GENERATED_DATASETS,

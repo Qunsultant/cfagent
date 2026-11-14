@@ -38,6 +38,8 @@ import { OfferRulesSection } from "./OfferRulesSection";
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 import {
   buildBillingView,
+  type BillingBundleEntitlementInput,
+  type BillingBundlePurchaseInput,
   type BillingPlanInput,
   type BillingReceiptInput,
   type BillingReferralInput,
@@ -93,6 +95,16 @@ export function BillingServicingPanel() {
           ? (plansResult.value.plans as BillingPlanInput[])
           : [];
       const referral = referralResult.value as BillingReferralInput;
+      // Issue #2781: bundle purchases + entitlements ride the
+      // subscription read (additive keys); absent keys read as empty.
+      const bundlePurchases =
+        isRecord(subscriptionResult.value) && Array.isArray(subscriptionResult.value.bundlePurchases)
+          ? (subscriptionResult.value.bundlePurchases as BillingBundlePurchaseInput[])
+          : [];
+      const bundleEntitlements =
+        isRecord(subscriptionResult.value) && Array.isArray(subscriptionResult.value.bundleEntitlements)
+          ? (subscriptionResult.value.bundleEntitlements as BillingBundleEntitlementInput[])
+          : [];
       setView(
         buildBillingView({
           identity: { userLogin: identity.userLogin, tier: identity.tier },
@@ -100,6 +112,7 @@ export function BillingServicingPanel() {
           receipts,
           plans,
           referral,
+          bundles: { purchases: bundlePurchases, entitlements: bundleEntitlements },
           nowMs: Date.now(),
         }),
       );
@@ -164,6 +177,29 @@ export function BillingServicingPanel() {
                 {plan.name} — ${plan.priceUSD.toFixed(2)} / {plan.periodDays} days
               </p>
             ))}
+          </Card>
+          <Card>
+            <p>Bundle purchases ({view.bundles.activePurchaseCount} active)</p>
+            {view.bundles.purchases.length === 0 && <p>No bundle purchases recorded yet.</p>}
+            {view.bundles.purchases.map((purchase) => (
+              <p key={purchase.id}>
+                Bundle {purchase.bundleId} — {purchase.status} — period ends{" "}
+                {new Date(purchase.periodEndMs).toISOString()}
+              </p>
+            ))}
+            {view.bundles.liveEntitlementCount > 0 && (
+              <p>
+                Live member entitlements: {view.bundles.liveEntitlementCount} —{" "}
+                {view.bundles.entitlements
+                  .filter((e) => e.status === "active")
+                  .map((e) => e.productId)
+                  .join(", ")}
+              </p>
+            )}
+            <p>
+              Bundle purchases are not refundable through the refund flow — the refund decision
+              for bundles is undecided (owner decision pending).
+            </p>
           </Card>
           <Card>
             <p>Referral credits</p>

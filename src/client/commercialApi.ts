@@ -164,6 +164,63 @@ export interface SubscriptionStatusView {
   effectiveTier: string;
   current: SubscriptionView | null;
   subscriptions: SubscriptionView[];
+  /** Issue #2781: additive bundle keys (GET /subscription). */
+  bundlePurchases?: BundlePurchaseView[];
+  bundleEntitlements?: BundleEntitlementView[];
+}
+
+/**
+ * Issue #2781 (Monetization Phase 2.15) — bundle views. A bundle is
+ * a named offer of two or more listed PayPerUse products at one
+ * operator-set, owner-approved price; a purchase confers one
+ * entitlement per member product, atomically.
+ */
+export interface BundleView {
+  id: string;
+  name: string;
+  memberProductIds: string[];
+  priceUSD: number;
+  periodDays: number;
+  includedRunsPerMember: number;
+  approvalStatus: "proposed" | "approved";
+  approvedBy: string | null;
+  approvedAtMs: number | null;
+  active: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface BundlePurchaseView {
+  id: string;
+  userId: string;
+  tenantId: string;
+  bundleId: string;
+  provider: string;
+  providerPaymentRef: string;
+  stripeSessionId: string | null;
+  stripePaymentIntentId: string | null;
+  providerSubscriptionId: string | null;
+  providerStatus: string | null;
+  status: "active" | "canceled";
+  periodStartMs: number;
+  periodEndMs: number;
+  canceledAtMs: number | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface BundleEntitlementView {
+  id: string;
+  bundlePurchaseId: string;
+  userId: string;
+  tenantId: string;
+  productId: string;
+  includedRuns: number;
+  periodStartMs: number;
+  periodEndMs: number;
+  status: "active" | "canceled";
+  createdAtMs: number;
+  updatedAtMs: number;
 }
 
 export interface SubmitResult {
@@ -324,7 +381,41 @@ export const subscriptionCancel = (): Promise<{
    * value instead of asserting one timing unconditionally.
    */
   downgradeTiming: "period_end" | "immediate";
+  /** Issue #2781: bundle purchases canceled with the subscription (same timing + tenant scope). */
+  canceledBundles: Array<{ id: string; periodEndMs: number }>;
+  /** Issue #2781: true when a bundle cancel failed — the subscription cancel still stands. */
+  bundleCancelFailed: boolean;
 }> => post("/subscription/cancel", {});
+/**
+ * Issue #2781 (Monetization Phase 2.15) — product bundles. The Selling
+ * panel lists bundles, mints a bundle checkout, and fulfills it on
+ * verified payment only — the same 2.1 Billing mint → confirm-by-retrieve
+ * shape as plans. Create/approve/deactivate are operator-only.
+ */
+export const listBundles = (): Promise<{ bundles: BundleView[] }> => get<{ bundles: BundleView[] }>("/bundles");
+export const createBundle = (body: {
+  id?: string;
+  name: string;
+  memberProductIds: string[];
+  priceUSD: number;
+  periodDays: number;
+  includedRunsPerMember: number;
+}): Promise<{ bundle: BundleView; code: string; message: string; retryable: boolean }> =>
+  post("/bundles", body);
+export const approveBundle = (bundleId: string): Promise<{ bundle: BundleView; code: string; message: string; retryable: boolean }> =>
+  post("/bundles/approve", { bundleId });
+export const deactivateBundle = (bundleId: string): Promise<{ bundle: BundleView }> =>
+  post("/bundles/deactivate", { bundleId });
+export const bundleCheckout = (body: {
+  bundleId: string;
+}): Promise<{ checkoutRequestId: string; checkoutUrl: string; checkoutSessionId: string; bundle: BundleView }> =>
+  post("/subscription/bundle-checkout", body);
+export const bundlePurchase = (body: {
+  bundleId: string;
+  checkoutRequestId: string;
+  checkoutSessionId: string;
+}): Promise<{ purchase: BundlePurchaseView; entitlements: BundleEntitlementView[]; bundle: BundleView; code: string; message: string; retryable: boolean }> =>
+  post("/subscription/bundle-purchase", body);
 /**
  * Issue #3243 — start a $0 trial subscription (no payment taken).
  * The server creates a trialing row and grants the plan's

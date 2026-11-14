@@ -8,9 +8,10 @@
  * bookkeeping table is runner infrastructure (created by
  * `applyMigrations`) and is NOT catalogued.
  *
- * Contents (measured from the base runner at 534e8903): 215
- * statements — 204 schema (98 CREATE TABLE, 49 CREATE INDEX, 7
- * CREATE UNIQUE INDEX, 49 ALTER TABLE, 1 DROP TABLE) + 11 seed
+ * Contents (measured from the base runner at 534e8903, plus 0053
+ * (#2781): 221 statements — 210 schema (101 CREATE TABLE,
+ * 52 CREATE INDEX, 7 CREATE UNIQUE INDEX, 49 ALTER TABLE,
+ * 1 DROP TABLE) + 11 seed
  * (7 INSERT OR IGNORE, 1 INSERT INTO, 3 UPDATE). The filing
  * counts said ~148 + 5; the re-measurement corrects them (the
  * filing counted only CREATE lines — the runner also carries 49
@@ -2043,6 +2044,99 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.d1.agent_product_bundles.create_table",
+    plane: "d1",
+    table: "agent_product_bundles",
+    statement: `CREATE TABLE IF NOT EXISTS agent_product_bundles (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  member_product_ids TEXT NOT NULL,
+  price_usd REAL NOT NULL,
+  period_days INTEGER NOT NULL,
+  included_runs_per_member INTEGER NOT NULL,
+  approval_status TEXT NOT NULL DEFAULT 'proposed',
+  approved_by TEXT,
+  approved_at_ms INTEGER,
+  active INTEGER NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_bundle_purchases.create_table",
+    plane: "d1",
+    table: "agent_bundle_purchases",
+    statement: `CREATE TABLE IF NOT EXISTS agent_bundle_purchases (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  bundle_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  provider_payment_ref TEXT NOT NULL,
+  stripe_session_id TEXT,
+  stripe_payment_intent_id TEXT,
+  provider_subscription_id TEXT UNIQUE,
+  provider_status TEXT,
+  status TEXT NOT NULL,
+  period_start_ms INTEGER NOT NULL,
+  period_end_ms INTEGER NOT NULL,
+  canceled_at_ms INTEGER,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_bundle_entitlements.create_table",
+    plane: "d1",
+    table: "agent_bundle_entitlements",
+    statement: `CREATE TABLE IF NOT EXISTS agent_bundle_entitlements (
+  id TEXT PRIMARY KEY,
+  bundle_purchase_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  included_runs INTEGER NOT NULL,
+  period_start_ms INTEGER NOT NULL,
+  period_end_ms INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_bundle_purchases.create_index_idx_bundle_purchases_user",
+    plane: "d1",
+    table: "agent_bundle_purchases",
+    index: "idx_bundle_purchases_user",
+    statement: `CREATE INDEX IF NOT EXISTS idx_bundle_purchases_user ON agent_bundle_purchases (user_id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_bundle_entitlements.create_index_idx_bundle_entitlements_user",
+    plane: "d1",
+    table: "agent_bundle_entitlements",
+    index: "idx_bundle_entitlements_user",
+    statement: `CREATE INDEX IF NOT EXISTS idx_bundle_entitlements_user ON agent_bundle_entitlements (user_id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_bundle_entitlements.create_index_idx_bundle_entitlements_purchase",
+    plane: "d1",
+    table: "agent_bundle_entitlements",
+    index: "idx_bundle_entitlements_purchase",
+    statement: `CREATE INDEX IF NOT EXISTS idx_bundle_entitlements_purchase ON agent_bundle_entitlements (bundle_purchase_id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.agent_approved_free_quotas.create_table",
     plane: "d1",
     table: "agent_approved_free_quotas",
@@ -3112,6 +3206,14 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.job_analyzed_datasets.create_table",
     "schema.d1.job_analyzed_datasets.create_index_idx_job_analyzed_datasets_job",
   ],
+  53: [
+    "schema.d1.agent_product_bundles.create_table",
+    "schema.d1.agent_bundle_purchases.create_table",
+    "schema.d1.agent_bundle_entitlements.create_table",
+    "schema.d1.agent_bundle_purchases.create_index_idx_bundle_purchases_user",
+    "schema.d1.agent_bundle_entitlements.create_index_idx_bundle_entitlements_user",
+    "schema.d1.agent_bundle_entitlements.create_index_idx_bundle_entitlements_purchase",
+  ],
   54: [
     "schema.d1.agent_approved_free_quotas.create_table",
     "schema.d1.agent_approved_free_quota_counts.create_table",
@@ -3207,8 +3309,8 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
   ],
 };
 
-/** Migration versions in the D1 section (1–66 except 0053, which is absent). */
-export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66];
+/** Migration versions in the D1 section (1–66; 0053 added by #2781). */
+export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66];
 
 export interface D1MigrationSqlShape {
   /** Text before the first statement: "\n" or "". */
@@ -3292,6 +3394,11 @@ export const D1_MIGRATION_SQL_SHAPES: Readonly<Partial<Record<number, D1Migratio
     prefix: "",
     separator: ";\n    ",
     suffix: "",
+  },
+  53: {
+    prefix: "",
+    separator: ";\n",
+    suffix: ";",
   },
   54: {
     prefix: "",

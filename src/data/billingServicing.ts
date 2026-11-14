@@ -50,6 +50,27 @@ export interface BillingReferralInput {
   rules: { earnAmountUSD: number; vestingDelayMs: number; redemptionScope: string };
 }
 
+/** Bundle purchase row shape as GET /subscription returns it (additive keys, #2781). */
+export interface BillingBundlePurchaseInput {
+  id: string;
+  bundleId: string;
+  status: string;
+  periodStartMs: number;
+  periodEndMs: number;
+  canceledAtMs: number | null;
+}
+
+/** Bundle entitlement row shape as GET /subscription returns it (additive keys, #2781). */
+export interface BillingBundleEntitlementInput {
+  id: string;
+  bundlePurchaseId: string;
+  productId: string;
+  includedRuns: number;
+  periodStartMs: number;
+  periodEndMs: number;
+  status: string;
+}
+
 export interface BillingViewInput {
   identity: { userLogin: string; tier: string };
   subscription: BillingSubscriptionInput;
@@ -57,6 +78,13 @@ export interface BillingViewInput {
   plans: BillingPlanInput[];
   referral: BillingReferralInput;
   nowMs: number;
+  /** Issue #2781: bundle purchases + entitlements (GET /subscription
+   *  additive keys). Optional: a caller without bundle data gets an
+   *  empty bundles section, never an invented one. */
+  bundles?: {
+    purchases: BillingBundlePurchaseInput[];
+    entitlements: BillingBundleEntitlementInput[];
+  };
 }
 
 export type SubscriptionStatus = "none" | "active" | "expired";
@@ -73,6 +101,14 @@ export interface BillingView {
     totalEarnedUSD: number;
     attributedReferrer: string | null;
     rulesNote: string;
+  };
+  /** Issue #2781: bundle purchases + entitlements carried verbatim
+   *  from GET /subscription; counts are live (active + unexpired). */
+  bundles: {
+    purchases: BillingBundlePurchaseInput[];
+    entitlements: BillingBundleEntitlementInput[];
+    activePurchaseCount: number;
+    liveEntitlementCount: number;
   };
   supportSnapshot: {
     login: string;
@@ -94,6 +130,8 @@ export function buildBillingView(input: BillingViewInput): BillingView {
     periodEndISO = new Date(subscription.current.periodEndMs).toISOString();
     subscriptionStatus = subscription.current.periodEndMs > nowMs ? "active" : "expired";
   }
+  const bundlePurchases = input.bundles?.purchases ?? [];
+  const bundleEntitlements = input.bundles?.entitlements ?? [];
   return {
     tier: subscription.effectiveTier,
     subscriptionStatus,
@@ -106,6 +144,16 @@ export function buildBillingView(input: BillingViewInput): BillingView {
       totalEarnedUSD: input.referral.totalEarnedUSD,
       attributedReferrer: input.referral.attribution ? input.referral.attribution.referrerUserId : null,
       rulesNote: REFERRAL_RULES_NOTE,
+    },
+    bundles: {
+      purchases: bundlePurchases,
+      entitlements: bundleEntitlements,
+      activePurchaseCount: bundlePurchases.filter(
+        (p) => p.status === "active" && p.periodEndMs > nowMs,
+      ).length,
+      liveEntitlementCount: bundleEntitlements.filter(
+        (e) => e.status === "active" && e.periodEndMs > nowMs,
+      ).length,
     },
     supportSnapshot: {
       login: input.identity.userLogin,

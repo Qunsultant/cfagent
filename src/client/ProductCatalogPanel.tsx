@@ -41,6 +41,9 @@ import {
   type SubscriptionRowInput,
   type SellingReceipt,
   type ProductSellingEntry,
+  type BundleSellingInput,
+  type BundlePurchaseSellingInput,
+  type BundleEntitlementSellingInput,
 } from "../data/productSelling";
 import {
   errorMessageForStatus,
@@ -175,6 +178,30 @@ function sellingConfirmError(status: number): string {
   return errorMessageForStatus(status);
 }
 
+/** Issue #2781: fixed caller-facing bundle messages per HTTP status. */
+function bundleMintError(status: number): string {
+  if (status === 503) {
+    return "Bundle checkout is not configured yet (no price mapping or Stripe configuration).";
+  }
+  if (status === 403) {
+    return "Bundle purchase is disabled (the monetization flag is off).";
+  }
+  if (status === 402) {
+    return "This bundle's price is proposed, not owner-approved — it cannot be charged yet.";
+  }
+  return errorMessageForStatus(status);
+}
+
+function bundleConfirmError(status: number): string {
+  if (status === 402) {
+    return "Payment not verified — nothing activated.";
+  }
+  if (status === 409) {
+    return "This checkout was already used or does not match — nothing activated.";
+  }
+  return errorMessageForStatus(status);
+}
+
 /** Fixed caller-facing trial messages per HTTP status (#3243). */
 function trialErrorMessage(status: number): string {
   if (status === 409) {
@@ -263,9 +290,14 @@ function parsePlans(body: unknown): SellingPlanInput[] {
   }));
 }
 
-function parseSubscriptions(body: unknown): { effectiveTier: string; rows: SubscriptionRowInput[] } {
+function parseSubscriptions(body: unknown): {
+  effectiveTier: string;
+  rows: SubscriptionRowInput[];
+  bundlePurchases: BundlePurchaseSellingInput[];
+  bundleEntitlements: BundleEntitlementSellingInput[];
+} {
   if (!isRecord(body) || !Array.isArray(body.subscriptions)) {
-    return { effectiveTier: "Free", rows: [] };
+    return { effectiveTier: "Free", rows: [], bundlePurchases: [], bundleEntitlements: [] };
   }
   const rows = body.subscriptions.filter(isRecord).map((s) => ({
     id: typeof s.id === "string" ? s.id : "",
@@ -282,7 +314,50 @@ function parseSubscriptions(body: unknown): { effectiveTier: string; rows: Subsc
   return {
     effectiveTier: typeof body.effectiveTier === "string" ? body.effectiveTier : "Free",
     rows,
+    bundlePurchases: parseBundlePurchases(body),
+    bundleEntitlements: parseBundleEntitlements(body),
   };
+}
+
+/** Issue #2781: bundle offers as GET /bundles returns them. */
+function parseBundles(body: unknown): BundleSellingInput[] {
+  if (!isRecord(body) || !Array.isArray(body.bundles)) return [];
+  return body.bundles.filter(isRecord).map((b) => ({
+    id: typeof b.id === "string" ? b.id : "",
+    name: typeof b.name === "string" ? b.name : "",
+    memberProductIds: Array.isArray(b.memberProductIds)
+      ? b.memberProductIds.filter((m): m is string => typeof m === "string")
+      : [],
+    priceUSD: typeof b.priceUSD === "number" ? b.priceUSD : 0,
+    periodDays: typeof b.periodDays === "number" ? b.periodDays : 0,
+    includedRunsPerMember: typeof b.includedRunsPerMember === "number" ? b.includedRunsPerMember : 0,
+    approvalStatus: b.approvalStatus === "approved" ? "approved" : "proposed",
+    active: b.active === true,
+  }));
+}
+
+/** Issue #2781: bundle purchases as GET /subscription returns them (additive keys). */
+function parseBundlePurchases(body: unknown): BundlePurchaseSellingInput[] {
+  if (!isRecord(body) || !Array.isArray(body.bundlePurchases)) return [];
+  return body.bundlePurchases.filter(isRecord).map((p) => ({
+    id: typeof p.id === "string" ? p.id : "",
+    bundleId: typeof p.bundleId === "string" ? p.bundleId : "",
+    status: typeof p.status === "string" ? p.status : "",
+    periodStartMs: typeof p.periodStartMs === "number" ? p.periodStartMs : 0,
+    periodEndMs: typeof p.periodEndMs === "number" ? p.periodEndMs : 0,
+  }));
+}
+
+/** Issue #2781: bundle entitlements as GET /subscription returns them (additive keys). */
+function parseBundleEntitlements(body: unknown): BundleEntitlementSellingInput[] {
+  if (!isRecord(body) || !Array.isArray(body.bundleEntitlements)) return [];
+  return body.bundleEntitlements.filter(isRecord).map((e) => ({
+    id: typeof e.id === "string" ? e.id : "",
+    bundlePurchaseId: typeof e.bundlePurchaseId === "string" ? e.bundlePurchaseId : "",
+    productId: typeof e.productId === "string" ? e.productId : "",
+    status: typeof e.status === "string" ? e.status : "",
+    periodEndMs: typeof e.periodEndMs === "number" ? e.periodEndMs : 0,
+  }));
 }
 
 /**
@@ -309,6 +384,21 @@ function SellingSection({
   const [rows, setRows] = useState<SubscriptionRowInput[]>([]);
   const [plans, setPlans] = useState<SellingPlanInput[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState("");
+  // Issue #2781 — bundle state (same Selling section, never a
+  // second purchase path: bundles mint + confirm through the
+  // 2.1-style bundle checkout routes, like plans).
+  const [bundles, setBundles] = useState<BundleSellingInput[]>([]);
+  const [bundlePurchases, setBundlePurchases] = useState<BundlePurchaseSellingInput[]>([]);
+  const [bundleEntitlements, setBundleEntitlements] = useState<BundleEntitlementSellingInput[]>([]);
+  const [selectedBundleId, setSelectedBundleId] = useState("");
+  const [bundleMinted, setBundleMinted] = useState<{
+    bundleId: string;
+    checkoutRequestId: string;
+    checkoutSessionId: string;
+    checkoutUrl: string;
+  } | null>(null);
+  const [bundleActionError, setBundleActionError] = useState<string | null>(null);
+  const [bundleConfirmed, setBundleConfirmed] = useState(false);
   const [minted, setMinted] = useState<{
     planId: string;
     checkoutRequestId: string;
@@ -346,12 +436,31 @@ function SellingSection({
     const parsed = parseSubscriptions(sub.body);
     setEffectiveTier(parsed.effectiveTier);
     setRows(parsed.rows);
+    setBundlePurchases(parsed.bundlePurchases);
+    setBundleEntitlements(parsed.bundleEntitlements);
     const plansRes = await getJson(`${SELLING_BASE}/plans`);
     if (plansRes.status !== 200) throw new FirstRunApiError(plansRes.status);
     const parsedPlans = parsePlans(plansRes.body);
     setPlans(parsedPlans);
     const firstActive = parsedPlans.find((p) => p.active);
     if (firstActive) setSelectedPlanId(firstActive.id);
+    // Issue #2781: the bundles read is additive — a bundles failure
+    // shows no bundles rather than blocking the plan flow (the same
+    // best-effort direction as the subscription GET's bundle keys).
+    try {
+      const bundlesRes = await getJson(`${SELLING_BASE}/bundles`);
+      if (bundlesRes.status === 200) {
+        const parsedBundles = parseBundles(bundlesRes.body);
+        setBundles(parsedBundles);
+        // Select the first bundle, purchasable or not: a proposed
+        // bundle selected by default shows its not-purchasable
+        // reason instead of a blank selection.
+        const firstBundle = parsedBundles[0];
+        if (firstBundle) setSelectedBundleId(firstBundle.id);
+      }
+    } catch {
+      // No bundles (see above).
+    }
   }
 
   async function open() {
@@ -417,6 +526,54 @@ function SellingSection({
       setMinted(null);
     } catch {
       setActionError("Payment confirmation could not be completed. Try again later.");
+    }
+  }
+
+  // Issue #2781 — bundle mint + confirm, the same 2.1 shape as
+  // plans: mint a subscription-mode checkout, then confirm-by-retrieve.
+  async function bundleSubscribe() {
+    if (!selectedBundleId) return;
+    setBundleActionError(null);
+    setBundleConfirmed(false);
+    try {
+      const res = await postJson(`${SELLING_BASE}/subscription/bundle-checkout`, { bundleId: selectedBundleId });
+      if (res.status !== 200) {
+        setBundleActionError(bundleMintError(res.status));
+        return;
+      }
+      const checkoutRequestId = typeof res.body.checkoutRequestId === "string" ? res.body.checkoutRequestId : "";
+      const checkoutSessionId = typeof res.body.checkoutSessionId === "string" ? res.body.checkoutSessionId : "";
+      const checkoutUrl = typeof res.body.checkoutUrl === "string" ? res.body.checkoutUrl : "";
+      if (!checkoutRequestId || !checkoutSessionId || !checkoutUrl) {
+        setBundleActionError("Bundle checkout could not be created. Try again later.");
+        return;
+      }
+      setBundleMinted({ bundleId: selectedBundleId, checkoutRequestId, checkoutSessionId, checkoutUrl });
+      window.open(checkoutUrl, "_blank");
+    } catch {
+      setBundleActionError("Bundle checkout could not be created. Try again later.");
+    }
+  }
+
+  async function bundleConfirmPaid() {
+    if (!bundleMinted) return;
+    setBundleActionError(null);
+    try {
+      const res = await postJson(`${SELLING_BASE}/subscription/bundle-purchase`, {
+        bundleId: bundleMinted.bundleId,
+        checkoutRequestId: bundleMinted.checkoutRequestId,
+        checkoutSessionId: bundleMinted.checkoutSessionId,
+      });
+      if (res.status !== 200) {
+        setBundleActionError(bundleConfirmError(res.status));
+        return;
+      }
+      const identity = await fetchPlatformIdentity();
+      await load(identity.userLogin);
+      setBundleConfirmed(true);
+      setBundleMinted(null);
+    } catch {
+      setBundleActionError("Payment confirmation could not be completed. Try again later.");
     }
   }
 
@@ -507,6 +664,17 @@ function SellingSection({
           effectiveTier,
           subscriptions: rows,
           nowMs: Date.now(),
+          bundles,
+          bundlePurchases,
+          bundleEntitlements,
+          // Issue #2781: member prices by family, from the catalog
+          // rows the panel already renders (server-truth approved
+          // prices) — the derivation computes savings from these.
+          bundleMemberPrices: Object.fromEntries(
+            (products ?? [])
+              .filter((p) => p.priceUSD !== null)
+              .map((p) => [p.family, p.priceUSD as number]),
+          ),
         })
       : null;
 
@@ -516,6 +684,8 @@ function SellingSection({
   // past periodEnd means it ended. The server enforces both —
   // this is display only.
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) ?? null;
+  // Issue #2781: the selected bundle, from the derived offers.
+  const selectedBundle = selling?.bundles.find((b) => b.bundleId === selectedBundleId) ?? null;
   const trialRow = rows.find((r) => r.planId === selectedPlanId && r.provider === "trial") ?? null;
   const trialExpired = trialRow !== null && trialRow.periodEndMs <= Date.now();
 
@@ -652,6 +822,68 @@ function SellingSection({
               </Button>
             </div>
           )}
+
+          <Card>
+            <div style={sectionHeaderStyle}>
+              <h3 style={cardTitleStyle}>Product bundles</h3>
+              <p style={cardSubtitleStyle}>
+                Two or more listed pay-per-use products at one operator-set, owner-approved bundle
+                price. One verified payment confers one entitlement per member product — no partial
+                entitlement. Bundles are bought through the same Billing checkout as plans.
+              </p>
+            </div>
+            {selling.bundles.length > 0 && (
+              <div style={checkoutRowStyle}>
+                <FieldShell id="selling-bundle" label="Bundle">
+                  <Select
+                    id="selling-bundle"
+                    aria-label="Product bundle"
+                    value={selectedBundleId}
+                    onChange={(event) => setSelectedBundleId(event.target.value)}
+                  >
+                    {selling.bundles.map((bundle) => (
+                      <option key={bundle.bundleId} value={bundle.bundleId}>
+                        {bundle.name} — ${bundle.priceUSD.toFixed(2)} / {bundle.periodDays} days
+                        {bundle.savingsUSD !== null && bundle.savingsUSD > 0 ? ` (saves $${bundle.savingsUSD.toFixed(2)})` : ""}
+                        {bundle.owned ? " (owned)" : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </FieldShell>
+                {!bundleMinted && selectedBundle && selectedBundle.purchasable && (
+                  <Button variant="secondary" onClick={bundleSubscribe}>
+                    Start bundle checkout
+                  </Button>
+                )}
+              </div>
+            )}
+            {selectedBundle && !selectedBundle.purchasable && (
+              <Notice tone="neutral">{selectedBundle.notPurchasableReason}</Notice>
+            )}
+            {selectedBundle && (
+              <p style={detailMutedTextStyle}>
+                Includes {selectedBundle.includedRunsPerMember} runs per member product per period. Members: {selectedBundle.memberProductIds.join(", ")}.
+                {selectedBundle.owned && selectedBundle.liveEntitlementProductIds.length > 0
+                  ? ` Live entitlements: ${selectedBundle.liveEntitlementProductIds.join(", ")}.`
+                  : ""}
+              </p>
+            )}
+            {bundleActionError && <Notice tone="danger" title="Bundle Checkout Error">{bundleActionError}</Notice>}
+            {bundleConfirmed && <Notice tone="success" title="Bundle Activated">Bundle activated — one entitlement per member product.</Notice>}
+            {selling.bundles.length === 0 && (
+              <Notice tone="neutral">No bundles offered — an operator creates bundles; none are seeded.</Notice>
+            )}
+            {bundleMinted && (
+              <div style={mintedActionStyle}>
+                <Notice tone="info" title="Checkout In Progress">
+                  Checkout opened in a new tab. After paying, confirm below.
+                </Notice>
+                <Button variant="secondary" onClick={bundleConfirmPaid}>
+                  I have paid
+                </Button>
+              </div>
+            )}
+          </Card>
 
           <Card>
             <div style={sectionHeaderStyle}>

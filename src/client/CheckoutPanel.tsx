@@ -665,12 +665,22 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
       const res = await subscriptionCancel();
       setCancelDone(res.message);
       const plans = [...new Set(res.canceled.map((r) => r.planId))].join(", ");
+      // Issue #2781: name the bundle purchases canceled with the
+      // subscription, and say plainly when a bundle cancel failed
+      // (the subscription cancel still stands).
+      const canceledBundleCount = (res.canceledBundles ?? []).length;
+      const bundleNote =
+        canceledBundleCount > 0
+          ? ` Bundle purchases canceled: ${canceledBundleCount}.`
+          : res.bundleCancelFailed
+            ? " A bundle cancel failed — the subscription cancel still stands; an operator can retry the bundle cancel."
+            : "";
       setCancelDetail(
         res.downgradeTiming === "immediate"
-          ? `Canceled: ${plans} — access ended now.`
+          ? `Canceled: ${plans} — access ended now.${bundleNote}`
           : res.accessThroughMs
-            ? `Canceled: ${plans} — access through ${formatPeriodEnd(res.accessThroughMs)}.`
-            : `Canceled: ${plans}.`,
+            ? `Canceled: ${plans} — access through ${formatPeriodEnd(res.accessThroughMs)}.${bundleNote}`
+            : `Canceled: ${plans}.${bundleNote}`,
       );
     } catch (err) {
       setBuyError(errText(err));

@@ -170,6 +170,7 @@ import {
 } from "../../data/createNativeLedgerPorts";
 import { parseNativeRail } from "../../data/nativeLedgerPorts";
 import {
+  mapBundlePurchaseToJournalEntries,
   mapChargeToJournalEntries,
   mapRedemptionToJournalEntries,
   mapSubscriptionPurchaseToJournalEntries,
@@ -243,6 +244,15 @@ import {
   TopUpClaimRefusedError,
 } from "../../data/topUpPorts";
 import { logAspectEvent } from "../../aspects/loggingAspect";
+import {
+  createProductBundleAdapter,
+  ensureProductBundleSchema,
+} from "../../data/createProductBundlePorts";
+import type { D1ProductBundleAdapter } from "../../data/d1ProductBundleAdapter";
+import {
+  assertBundle,
+  isBundlePriceApproved,
+} from "../../data/productBundles";
 import {
   createChannelDraftAdapter,
   ensureChannelSchema,
@@ -934,6 +944,26 @@ export async function handleAgenticPaymentsRoutes(
       return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return adapter;
+  };
+  // Issue #2781 (Monetization Phase 2.15): product bundle store,
+  // same fail-closed shape as the other commercial stores: unbound
+  // AGENT_DB is a 503, never a silent fallback.
+  const requireBundles = (): D1ProductBundleAdapter | Response => {
+    const adapter = createProductBundleAdapter(ctx.env as { AGENT_DB?: unknown });
+    if (!adapter) {
+      return Response.json({ error: "Bundle store unavailable: AGENT_DB is not bound." }, { status: 503 });
+    }
+    return adapter;
+  };
+  const ensureBundleStores = async (
+    bundles: D1ProductBundleAdapter,
+  ): Promise<Response | null> => {
+    try {
+      await ensureProductBundleSchema(bundles.db);
+    } catch (err: any) {
+      return Response.json({ error: `Bundle store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+    }
+    return null;
   };
   const ensureBillingStores = async (
     policy: D1BillingPolicyAdapter,
@@ -2335,6 +2365,484 @@ export async function handleAgenticPaymentsRoutes(
     } catch (err: any) {
       const message = err.message || "Failed to deactivate plan";
       return Response.json({ ...(/No plan/.test(message) ? { code: "FAILURE_PLAN_NOT_FOUND" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /No plan/.test(message) ? 404 : 500 });
+    }
+  }
+
+  // GET /payments/agentic/commercial/bundles — active bundles any verified login may buy
+  // (Issue #2781, Monetization Phase 2.15). Read-only catalog data, same shape as GET /plans:
+  // no flag gate, no operator requirement. The panel lists these through the Selling UX.
+  if (path.endsWith("/payments/agentic/commercial/bundles") && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const bundles = requireBundles();
+      if (bundles instanceof Response) return bundles;
+      const ensured = await ensureBundleStores(bundles);
+      if (ensured) return ensured;
+      return Response.json({ bundles: await bundles.listBundles(true) });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to list bundles" }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/bundles (operator only) — create a bundle offer.
+  // Bundles are data, never code: no combination, price, or discount is ever defaulted.
+  // Every new bundle lands PROPOSED until an operator approves it through POST /bundles/approve;
+  // only an APPROVED bundle price may be charged. Members must be LISTED Phase 2 catalog
+  // products: each member family needs an APPROVED catalogue price (the same rule
+  // buildProductCatalog uses to list a product — a missing approved price is unlisted).
+  // The Stripe Price mapping lives in the billing policy (stripePriceByBundle, set through
+  // the operator billing-policy route) — never in the bundle record, never a catalogue price.
+  if (path.endsWith("/payments/agentic/commercial/bundles") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        id?: unknown; name?: unknown; memberProductIds?: unknown; priceUSD?: unknown; periodDays?: unknown; includedRunsPerMember?: unknown;
+      };
+      const bundles = requireBundles();
+      if (bundles instanceof Response) return bundles;
+      const ensured = await ensureBundleStores(bundles);
+      if (ensured) return ensured;
+      // Validate shape first (BusinessError → coded response), then the
+      // listed check against the approved catalogue prices.
+      const validated = assertBundle(body);
+      if (validated.id) {
+        const existing = await bundles.getBundle(validated.id);
+        if (existing) {
+          return Response.json({ error: `Bundle ${validated.id} already exists.` }, { status: 409 });
+        }
+      }
+      const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
+      const approvedFamilies = new Set<string>();
+      if (catalogue) {
+        try {
+          const entries = await catalogue.getAllPrices();
+          for (const e of entries) if (e.approvalStatus === "approved") approvedFamilies.add(e.family);
+        } catch {
+          // Catalogue unreadable: no member can be proven listed — refuse
+          // rather than creating a bundle whose members may not be sold.
+          return codedOutcomeResponse("FAILURE_BUNDLE_MEMBERS_INVALID");
+        }
+      }
+      const unlisted = validated.memberProductIds.filter((m) => {
+        const [family] = m.split(":");
+        return !approvedFamilies.has(family);
+      });
+      if (unlisted.length > 0) {
+        return codedOutcomeResponse("FAILURE_BUNDLE_MEMBERS_INVALID");
+      }
+      const bundle = await bundles.createBundle(validated);
+      const created = resolveOutcome("SUCCESS_BUNDLE_CREATED");
+      ctx.audit("commercial.bundle.created", "payments", {
+        code: created.code,
+        message: created.businessMessage,
+        login,
+        bundleId: bundle.id,
+        memberProductIds: bundle.memberProductIds,
+        priceUSD: bundle.priceUSD,
+      });
+      return Response.json({ bundle, code: created.code, message: created.businessMessage, retryable: created.entry?.retryable ?? false });
+    } catch (err: any) {
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      const message = err.message || "Failed to create bundle";
+      return Response.json({ error: message }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/bundles/approve (operator only) — Issue #2781: approve a
+  // bundle's price, recording the approving operator. New bundles land PROPOSED; only an APPROVED
+  // bundle price may be charged. Approving a deactivated bundle is allowed (approval is about the
+  // price, not about whether the bundle is sold); deactivation never un-approves.
+  if (path.endsWith("/payments/agentic/commercial/bundles/approve") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { bundleId?: unknown };
+      const bundleId = typeof body.bundleId === "string" ? body.bundleId : "";
+      if (!bundleId) return Response.json({ error: "bundleId is required." }, { status: 400 });
+      const bundles = requireBundles();
+      if (bundles instanceof Response) return bundles;
+      const ensured = await ensureBundleStores(bundles);
+      if (ensured) return ensured;
+      const bundle = await bundles.approveBundle(bundleId, login);
+      const approved = resolveOutcome("SUCCESS_BUNDLE_APPROVED");
+      ctx.audit("commercial.bundle.approved", "payments", {
+        code: approved.code,
+        message: approved.businessMessage,
+        login,
+        bundleId: bundle.id,
+        approvedBy: login,
+      });
+      return Response.json({ bundle, code: approved.code, message: approved.businessMessage, retryable: approved.entry?.retryable ?? false });
+    } catch (err: any) {
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      const message = err.message || "Failed to approve bundle";
+      return Response.json({ error: message }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/bundles/deactivate (operator only) — stops new purchases; existing purchases run to periodEnd.
+  if (path.endsWith("/payments/agentic/commercial/bundles/deactivate") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!isStoreOperator(login)) {
+        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { bundleId?: unknown };
+      const bundleId = typeof body.bundleId === "string" ? body.bundleId : "";
+      if (!bundleId) return Response.json({ error: "bundleId is required." }, { status: 400 });
+      const bundles = requireBundles();
+      if (bundles instanceof Response) return bundles;
+      const ensured = await ensureBundleStores(bundles);
+      if (ensured) return ensured;
+      const bundle = await bundles.deactivateBundle(bundleId);
+      ctx.audit("commercial.bundle.deactivated", "payments", { bundleId: bundle.id });
+      return Response.json({ bundle });
+    } catch (err: any) {
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      const message = err.message || "Failed to deactivate bundle";
+      return Response.json({ error: message }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/subscription/bundle-checkout — mint a subscription-mode Stripe
+  // Checkout Session for a bundle (Issue #2781, Phase 2.15). MINT ONLY: no purchase row is created
+  // here; the bundle-purchase route fulfills from a retrieved session. The price is the
+  // OPERATOR-MAPPED provider price id from the billing policy (stripePriceByBundle) — never a
+  // catalogue price, never a code constant. A missing mapping refuses with the coded 503
+  // (operator configuration gap, not a client error). Only an APPROVED bundle price may be
+  // charged; a proposed bundle refuses with the coded 402 before any provider call. The session
+  // carries fulfillment keys (userId/bundleId/tenantId) in session + provider subscription
+  // metadata; the tenant comes from the resolved identity, never the request body
+  // (same rule as the one-time checkout, #2219). An existing customer mapping is passed through
+  // so a second checkout reuses the provider customer instead of fragmenting customers.
+  if (path.endsWith("/payments/agentic/commercial/subscription/bundle-checkout") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const flag = await requireMonetization();
+      if (flag) return flag;
+      const body = (await request.json().catch(() => ({}))) as { bundleId?: unknown };
+      const bundleId = typeof body.bundleId === "string" ? body.bundleId : "";
+      if (!bundleId) return Response.json({ error: "bundleId is required." }, { status: 400 });
+      const bundles = requireBundles();
+      if (bundles instanceof Response) return bundles;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const policy = requireBillingPolicy();
+      if (policy instanceof Response) return policy;
+      const customers = requireBillingCustomers();
+      if (customers instanceof Response) return customers;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const ensuredBundle = await ensureBundleStores(bundles);
+      if (ensuredBundle) return ensuredBundle;
+      const ensuredBilling = await ensureBillingStores(policy, customers);
+      if (ensuredBilling) return ensuredBilling;
+      const bundle = await bundles.getBundle(bundleId);
+      if (!bundle) return codedOutcomeResponse("FAILURE_BUNDLE_NOT_FOUND");
+      if (!bundle.active) return codedOutcomeResponse("FAILURE_BUNDLE_NOT_ACTIVE");
+      // Issue #2781: only an APPROVED bundle price may be charged — refuse before any provider call.
+      // Fail-closed with a catalog-coded message, never a raw error string.
+      if (!isBundlePriceApproved(bundle)) {
+        return codedOutcomeResponse("FAILURE_BUNDLE_PRICE_NOT_APPROVED");
+      }
+      const policyValue = await policy.getPolicy();
+      const priceId = policyValue.stripePriceByBundle[bundle.id];
+      if (!priceId) {
+        return codedOutcomeResponse("FAILURE_BUNDLE_PRICE_UNMAPPED");
+      }
+      let identity;
+      try {
+        identity = await resolvePlatformIdentity(
+          { commercial: store, subscriptions: subs },
+          { userId: login, nowMs: Date.now() },
+        );
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+      }
+      const tenantId = identity.tenantId ?? login;
+      const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
+      if (!ports) {
+        return Response.json({ error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
+      }
+      const existingCustomer = await customers.getCustomer(login);
+      const draftId = `bbnd-${crypto.randomUUID()}`;
+      let created;
+      try {
+        created = await ports.createSubscriptionCheckout({
+          draftId,
+          priceId,
+          customerId: existingCustomer?.stripeCustomerId ?? null,
+          metadata: { userId: login, bundleId: bundle.id, tenantId },
+        });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Stripe subscription checkout could not be created." }, { status: 503 });
+      }
+      if (!created.url || !created.id) {
+        return Response.json({ error: "Stripe subscription checkout could not be created." }, { status: 503 });
+      }
+      ctx.audit("commercial.bundle.billing_checkout_created", "payments", {
+        userId: login,
+        tenantId,
+        bundleId: bundle.id,
+        checkoutRequestId: draftId,
+        checkoutSessionId: created.id,
+        stripeCustomerId: existingCustomer?.stripeCustomerId ?? null,
+      });
+      return Response.json({
+        checkoutRequestId: draftId,
+        checkoutUrl: created.url,
+        checkoutSessionId: created.id,
+        bundle: { id: bundle.id, name: bundle.name, priceUSD: bundle.priceUSD, periodDays: bundle.periodDays, includedRunsPerMember: bundle.includedRunsPerMember, memberProductIds: bundle.memberProductIds },
+      });
+    } catch (err: any) {
+      return Response.json({ error: err.message || "Failed to create bundle Billing checkout" }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/subscription/bundle-purchase — fulfill a bundle Billing
+  // checkout on VERIFIED evidence only (Issue #2781, Phase 2.15). The caller passes BOTH the
+  // route-minted draft id (checkoutRequestId, "bbnd-" prefix) and the Stripe session id
+  // (checkoutSessionId). Activation requires ALL of: session status complete, payment_status paid,
+  // client_reference_id == checkoutRequestId, metadata userId == login and bundleId == bundle,
+  // a provider subscription id and customer id present, the retrieved provider subscription's
+  // price id == the operator-mapped price id, and provider status active/trialing. The tenant is
+  // NOT checked against metadata: account creation between mint and fulfill legitimately changes
+  // the resolved tenant, and activation uses the resolved tenant (same rule as one-time). Any
+  // failure refuses (402) and activates nothing. A replay (an existing purchase for the same
+  // draft id or provider subscription id) refuses with 409. The purchase + one entitlement row
+  // per member product are written atomically — no partial entitlement, ever. A best-effort
+  // mas_transactions row (gateway stripe) surfaces the purchase in receipts, and a best-effort
+  // deferred-revenue journal entry (Dr 1000 / Cr 2100) mirrors the subscription purchase.
+  if (path.endsWith("/payments/agentic/commercial/subscription/bundle-purchase") && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      const flag = await requireMonetization();
+      if (flag) return flag;
+      const body = (await request.json().catch(() => ({}))) as { bundleId?: unknown; checkoutRequestId?: unknown; checkoutSessionId?: unknown };
+      const bundleId = typeof body.bundleId === "string" ? body.bundleId : "";
+      const checkoutRequestId = typeof body.checkoutRequestId === "string" ? body.checkoutRequestId : "";
+      const checkoutSessionId = typeof body.checkoutSessionId === "string" ? body.checkoutSessionId : "";
+      if (!bundleId) return Response.json({ error: "bundleId is required." }, { status: 400 });
+      if (!checkoutRequestId) return Response.json({ error: "checkoutRequestId is required." }, { status: 400 });
+      if (!checkoutRequestId.startsWith("bbnd-")) {
+        return Response.json({ error: "checkoutRequestId must come from the bundle checkout route." }, { status: 400 });
+      }
+      if (!checkoutSessionId) return Response.json({ error: "checkoutSessionId is required." }, { status: 400 });
+      const bundles = requireBundles();
+      if (bundles instanceof Response) return bundles;
+      const store = requireStore();
+      if (store instanceof Response) return store;
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const policy = requireBillingPolicy();
+      if (policy instanceof Response) return policy;
+      const customers = requireBillingCustomers();
+      if (customers instanceof Response) return customers;
+      const ensured = await ensureStores(store, subs);
+      if (ensured) return ensured;
+      const ensuredBundle = await ensureBundleStores(bundles);
+      if (ensuredBundle) return ensuredBundle;
+      const ensuredBilling = await ensureBillingStores(policy, customers);
+      if (ensuredBilling) return ensuredBilling;
+      const bundle = await bundles.getBundle(bundleId);
+      if (!bundle) return codedOutcomeResponse("FAILURE_BUNDLE_NOT_FOUND");
+      if (!bundle.active) return codedOutcomeResponse("FAILURE_BUNDLE_NOT_ACTIVE");
+      // Issue #2781: only an APPROVED bundle price may be charged — refuse before any provider call.
+      // Fail-closed with a catalog-coded message, never a raw error string.
+      if (!isBundlePriceApproved(bundle)) {
+        return codedOutcomeResponse("FAILURE_BUNDLE_PRICE_NOT_APPROVED");
+      }
+      const policyValue = await policy.getPolicy();
+      const priceId = policyValue.stripePriceByBundle[bundle.id];
+      if (!priceId) {
+        return codedOutcomeResponse("FAILURE_BUNDLE_PRICE_UNMAPPED");
+      }
+      let identity;
+      try {
+        identity = await resolvePlatformIdentity(
+          { commercial: store, subscriptions: subs },
+          { userId: login, nowMs: Date.now() },
+        );
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+      }
+      const tenantId = identity.tenantId ?? login;
+      const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
+      if (!ports) {
+        return Response.json({ error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
+      }
+      const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
+      if (!billing) {
+        return Response.json({ error: "Billing is not configured (Stripe)." }, { status: 503 });
+      }
+      let evidence;
+      try {
+        evidence = await ports.retrieveSubscriptionSession(checkoutSessionId);
+      } catch {
+        return Response.json({ error: "Payment verification unavailable." }, { status: 503 });
+      }
+      if (
+        evidence.status !== "complete" ||
+        evidence.paymentStatus !== "paid" ||
+        evidence.clientReferenceId !== checkoutRequestId ||
+        !evidence.subscriptionId ||
+        !evidence.customerId ||
+        evidence.metadata?.userId !== login ||
+        evidence.metadata?.bundleId !== bundle.id
+      ) {
+        return codedOutcomeResponse("FAILURE_BUNDLE_PURCHASE_NOT_PAID");
+      }
+      let provider;
+      try {
+        provider = await billing.retrieveProviderSubscription(evidence.subscriptionId);
+      } catch {
+        return Response.json({ error: "Billing subscription verification unavailable." }, { status: 503 });
+      }
+      if (provider.priceId !== priceId) {
+        return codedOutcomeResponse("FAILURE_BUNDLE_PURCHASE_NOT_PAID");
+      }
+      if (provider.status !== "active" && provider.status !== "trialing") {
+        return codedOutcomeResponse("FAILURE_BUNDLE_PURCHASE_NOT_PAID");
+      }
+      const existingMapping = await customers.getCustomer(login);
+      if (existingMapping && existingMapping.stripeCustomerId !== evidence.customerId) {
+        return Response.json(
+          { error: `Billing customer mismatch: mapped to ${existingMapping.stripeCustomerId}, session names ${evidence.customerId} (operator resolves; no bundle activated).` },
+          { status: 409 },
+        );
+      }
+      // Replay guards: the same draft id, or the same provider subscription id.
+      const replayByDraft = await bundles.findBundlePurchaseByPaymentRef(checkoutRequestId);
+      if (replayByDraft) {
+        return codedOutcomeResponse("FAILURE_BUNDLE_PURCHASE_EXISTS");
+      }
+      const existingRow = await bundles.findBundlePurchaseByProviderSubscriptionId(evidence.subscriptionId);
+      if (existingRow) {
+        return codedOutcomeResponse("FAILURE_BUNDLE_PURCHASE_EXISTS");
+      }
+      const nowMs = Date.now();
+      const periodEndMs = nowMs + bundle.periodDays * 24 * 60 * 60 * 1000;
+      let created;
+      try {
+        created = await bundles.createBundlePurchaseAtomic({
+          purchase: {
+            id: `bp-${crypto.randomUUID()}`,
+            userId: login,
+            tenantId,
+            bundleId: bundle.id,
+            providerPaymentRef: checkoutRequestId,
+            stripeSessionId: checkoutSessionId,
+            stripePaymentIntentId: null,
+            providerSubscriptionId: evidence.subscriptionId,
+            providerStatus: provider.status,
+            periodStartMs: nowMs,
+            periodEndMs,
+          },
+          entitlements: bundle.memberProductIds.map((productId) => ({
+            productId,
+            includedRuns: bundle.includedRunsPerMember,
+            periodStartMs: nowMs,
+            periodEndMs,
+          })),
+          nowMs,
+        });
+      } catch (err: any) {
+        if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+        const message = err.message || "Failed to record bundle purchase";
+        const status = /Tenant mismatch/.test(message)
+          ? 403
+          : /already|mismatch/.test(message)
+            ? 409
+            : /required|must be|not active/.test(message)
+              ? 400
+              : 500;
+        return Response.json({ error: message }, { status });
+      }
+      await customers.recordCustomer({ userId: login, tenantId, stripeCustomerId: evidence.customerId });
+      ctx.audit("commercial.bundle.billing_activated", "payments", {
+        userId: login,
+        tenantId,
+        bundleId: bundle.id,
+        purchaseId: created.purchase.id,
+        providerSubscriptionId: evidence.subscriptionId,
+        stripeCustomerId: evidence.customerId,
+        checkoutRequestId,
+        checkoutSessionId,
+        periodEndMs,
+      });
+      // Best-effort receipt row (gateway stripe) so the purchase
+      // surfaces in Billing receipts; a failure never blocks the
+      // purchase, which already activated.
+      try {
+        const orm = ctx.getOrm();
+        const nowIso = new Date().toISOString();
+        await orm.transactions.create({
+          id: `tx_${checkoutRequestId}`,
+          sessionId: login,
+          action: "agentic_payment",
+          amount: bundle.priceUSD,
+          currency: "USD",
+          customer: login,
+          gateway: "stripe",
+          gatewayRef: checkoutSessionId,
+          status: "completed",
+          proposerDid: `did:key:${login}`,
+          proofSignature: checkoutSessionId,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+      } catch (err) {
+        ctx.audit("commercial.bundle.receipt_row_failed", "payments", {
+          userId: login,
+          checkoutRequestId,
+          error: err instanceof Error ? err.message : "unknown",
+        });
+      }
+      // Same deferred-revenue journal projection as the subscription
+      // purchase (Dr 1000 / Cr 2100), best-effort, never thrown.
+      // The RECOGNITION schedule (deferred → earned over the
+      // period) is a follow-up slice and is not posted here.
+      await postJournalBestEffort(async () => {
+        const adapter = createJournalAdapter(ctx.env as { AGENT_DB?: unknown });
+        if (!adapter) return null;
+        await ensureJournalSchema(adapter.db);
+        return adapter;
+      }, mapBundlePurchaseToJournalEntries({
+        transactionRef: checkoutRequestId,
+        tenantId,
+        bundlePurchaseId: created.purchase.id,
+        amountUSD: bundle.priceUSD,
+      }));
+      const purchased = resolveOutcome("SUCCESS_BUNDLE_PURCHASED");
+      return Response.json({
+        purchase: created.purchase,
+        entitlements: created.entitlements,
+        bundle,
+        code: purchased.code,
+        message: purchased.businessMessage,
+        retryable: purchased.entry?.retryable ?? false,
+      });
+    } catch (err: any) {
+      const message = err.message || "Failed to activate bundle purchase";
+      const status = /Tenant mismatch/.test(message)
+        ? 403
+        : /already activated|already belongs|mismatch/.test(message)
+          ? 409
+          : /required|must be|not active/.test(message)
+            ? 400
+            : 500;
+      return Response.json({ error: message }, { status });
     }
   }
 
@@ -5032,7 +5540,21 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           (s) => s.status === "active" && s.periodEndMs > nowMs && !canceledIds.includes(s.id),
         );
       };
-      if (verified.length === 0) {
+      // Issue #2781: live bundle purchases in the same tenant scope are
+      // part of the cancel's dedup key — a cancel with live bundles but
+      // no live subscription still cancels the bundles (200), and a
+      // replay with neither returns 409. Nothing has been canceled yet,
+      // so a bundle-store failure throws to the outer 500, the same fail
+      // direction as a subscription-store failure.
+      const bundleAdapter = createProductBundleAdapter(ctx.env as { AGENT_DB?: unknown });
+      let liveBundlePurchases: Array<{ id: string }> = [];
+      if (bundleAdapter) {
+        await ensureProductBundleSchema(bundleAdapter.db);
+        liveBundlePurchases = (await bundleAdapter.listBundlePurchases(targetUser)).filter(
+          (p) => p.status === "active" && p.periodEndMs > nowMs && (tenantScope === "unresolved" || p.tenantId === tenantId),
+        );
+      }
+      if (verified.length === 0 && liveBundlePurchases.length === 0) {
         // Issue #3523 (standards §7.2 Idempotent Receiver): the dedup key is the set of
         // unexpired in-scope rows — a replay finds none and returns 409, never a 200 that
         // claims a cancel happened.
@@ -5126,6 +5648,38 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           (a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
         );
       }
+      // Issue #2781: cancel the live bundle purchases in the same
+      // tenant scope, following the same downgrade timing. Each row
+      // is re-read by id before the consequential execution (#3523):
+      // it must still belong to the target user, still be active +
+      // unexpired, and still be in the resolved tenant scope. A
+      // bundle failure never blocks the subscription cancel — the
+      // response + audit report the verified partial state.
+      let canceledBundles: Array<{ id: string; periodEndMs: number }> = [];
+      let bundleCancelFailed = false;
+      if (bundleAdapter) {
+        for (const p of liveBundlePurchases) {
+          try {
+            const fresh = await bundleAdapter.getBundlePurchase(p.id);
+            if (
+              !fresh ||
+              fresh.userId !== targetUser ||
+              fresh.status !== "active" ||
+              fresh.periodEndMs <= nowMs ||
+              (tenantScope === "resolved" && fresh.tenantId !== tenantId)
+            ) {
+              continue;
+            }
+            const one =
+              downgradeTiming === "immediate"
+                ? await bundleAdapter.revokeBundlePurchase(p.id, nowMs)
+                : await bundleAdapter.cancelBundlePurchase(p.id, nowMs);
+            if (one) canceledBundles.push({ id: one.id, periodEndMs: one.periodEndMs });
+          } catch {
+            bundleCancelFailed = true;
+          }
+        }
+      }
       const accessThroughMs = canceled.length > 0 ? Math.max(...canceled.map((s) => s.periodEndMs)) : null;
       const cancelCode =
         downgradeTiming === "immediate"
@@ -5150,6 +5704,8 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         remainingIds: remaining.map((s) => s.id),
         accessThroughMs,
         downgradeTiming,
+        canceledBundleIds: canceledBundles.map((b) => b.id),
+        bundleCancelFailed,
         effectiveTier: resolveEffectiveTier(identity.stored, cancelSubscriptions, Date.now()),
       });
       return Response.json({
@@ -5160,6 +5716,8 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         remaining,
         accessThroughMs,
         downgradeTiming,
+        canceledBundles,
+        bundleCancelFailed,
       });
     } catch {
       return Response.json(
@@ -5292,7 +5850,22 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         subscriptions.length > 0
           ? subscriptions.reduce((a, b) => (b.periodEndMs > a.periodEndMs ? b : a))
           : null;
-      return Response.json({ code: "SUCCESS_SUBSCRIPTION_READ", userId, effectiveTier, current, subscriptions });
+      // Issue #2781: additive bundle keys — read-only, best-effort. A
+      // missing bundle store (migration not run) reads as empty, never
+      // a failure of the subscription read; no schema ensure on a read
+      // path. The Selling derivation and the Billing tab read these.
+      let bundlePurchases: unknown[] = [];
+      let bundleEntitlements: unknown[] = [];
+      try {
+        const bundles = createProductBundleAdapter(ctx.env as { AGENT_DB?: unknown });
+        if (bundles) {
+          bundlePurchases = await bundles.listBundlePurchases(userId);
+          bundleEntitlements = await bundles.listBundleEntitlements(userId);
+        }
+      } catch {
+        // Keep empty (see above).
+      }
+      return Response.json({ code: "SUCCESS_SUBSCRIPTION_READ", userId, effectiveTier, current, subscriptions, bundlePurchases, bundleEntitlements });
     } catch (err: any) {
       return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
@@ -6848,6 +7421,29 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         await ensureRefundSchema(ports.store.db);
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
+      }
+      // Issue #2781: a bundle purchase's payment ref is never
+      // refundable through the refund flow — the refund decision
+      // for bundles is undecided (owner decision pending). Refuse
+      // with the coded 422 rather than letting the resolver treat
+      // the ref as a subscription or pay-per-run payment. A bundle
+      // store that cannot be read lets the refund flow continue —
+      // no bundle rows can exist without the table, and the operator
+      // approval step is the backstop.
+      const paymentRef = typeof body.originalPaymentRef === "string" ? body.originalPaymentRef : "";
+      if (paymentRef) {
+        try {
+          const bundles = createProductBundleAdapter(ctx.env as { AGENT_DB?: unknown });
+          if (bundles) {
+            await ensureProductBundleSchema(bundles.db);
+            const bundlePurchase = await bundles.findBundlePurchaseByPaymentRef(paymentRef);
+            if (bundlePurchase) return codedOutcomeResponse("FAILURE_BUNDLE_REFUND_UNDECIDED");
+          }
+        } catch {
+          ctx.audit("commercial.bundle.refund_check_unavailable", "payments", {
+            originalPaymentRef: paymentRef,
+          });
+        }
       }
       let resolver: ReturnType<typeof createSubscriptionPaymentResolver> | undefined;
       if (body.kind === "subscription") {

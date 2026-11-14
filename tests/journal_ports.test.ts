@@ -42,6 +42,7 @@ import {
   agentJournalEntries,
 } from "../src/data/drizzleSchema";
 import {
+  mapBundlePurchaseToJournalEntries,
   mapChargeToJournalEntries,
   mapFailureCreditToJournalEntries,
   mapRedemptionToJournalEntries,
@@ -424,6 +425,36 @@ describe("journal subscription purchase mapping (#2155 follow-up)", () => {
       postJournalBestEffort(async () => throwingPort, mapSubscriptionPurchaseToJournalEntries(input)),
     ).resolves.toBeUndefined();
     expect(purchase.status).toBe("active");
+  });
+});
+
+describe("journal bundle purchase mapping (#2781)", () => {
+  const input = {
+    transactionRef: "bbnd-draft-1",
+    tenantId: "tenant-a",
+    bundlePurchaseId: "bp-abc12345",
+    amountUSD: 0.06,
+  };
+
+  it("maps a bundle purchase to Dr 1000 / Cr 2100 with family bundle, never to revenue", () => {
+    const entries = mapBundlePurchaseToJournalEntries(input);
+    expect(entries.map((e) => [e.accountCode, e.debitUSD, e.creditUSD])).toEqual([
+      ["1000", 0.06, 0],
+      ["2100", 0, 0.06],
+    ]);
+    for (const e of entries) {
+      expect(e.transactionRef).toBe("bbnd-draft-1");
+      expect(e.tenantId).toBe("tenant-a");
+      expect(e.runRequestId).toBe("bp-abc12345");
+      expect(e.family).toBe("bundle");
+      expect(e.currency).toBe("USD");
+    }
+    expect(() => mapBundlePurchaseToJournalEntries({ ...input, amountUSD: 0 })).toThrow(
+      /positive finite/,
+    );
+    expect(() => mapBundlePurchaseToJournalEntries({ ...input, bundlePurchaseId: "" })).toThrow(
+      /bundlePurchaseId/,
+    );
   });
 });
 

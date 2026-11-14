@@ -18,8 +18,8 @@
  *  - The expected-model fixture
  *    (tests/schema_component_d1_expected_model.json): the D1 schema
  *    model built by executing the base runner's migrations, in version
- *    order, through the P0 InMemorySchemaInstance — 97 tables, 56
- *    indexes. Regenerate only with SCHEMA_D1_FIXTURE_WRITE=1 from a
+ *    order, through the P0 InMemorySchemaInstance — 100 tables, 59
+ *    indexes (97 + 3 bundle tables, 56 + 3 bundle indexes, #2781). Regenerate only with SCHEMA_D1_FIXTURE_WRITE=1 from a
  *    clean checkout, and review the refreshed fixture in the PR diff:
  *    a refresh that changes an existing table without a migration is
  *    a defect, not a cleanup (same discipline as the grep baseline).
@@ -118,6 +118,7 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   50: "817a136395d978329c4e06bbdab27a761791594383416dff75179478907996dd",
   51: "55151bada94f5fdcd779cc73cc6654377f6d8611b7a0d90a268543cdb716304d",
   52: "1943156da346419067a10fff385873edcf897eaa660891e3a40edff22bf40c74",
+  53: "acd98b0192c74ed3e3d43f0016f4cfa2cc36c0be7dc2cdd4b3cf9275c4be02f6",
   54: "b50bc0689780be4ad5e0896d0706dc0a550b46175d457329ab16a0335000aeec",
   55: "3db54166e6cfc67a2f8b3115310e1e7f8437ff391622be013d11cc1493d21970",
   56: "443b0eaf492fc13fdfaacf303218cd137fc2f6e6f5bf3bbd245a1096994a07b7",
@@ -187,6 +188,7 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   50: 2,
   51: 2,
   52: 2,
+  53: 6,
   54: 3,
   55: 2,
   56: 2,
@@ -241,9 +243,9 @@ function expectedD1Model(): SchemaModel {
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
   it("catalogues all 215 runner statements: 204 schema + 11 seed", () => {
     const catalogue = buildD1Catalogue();
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(215);
-    expect(catalogue.size()).toBe(215);
-    expect(catalogue.byKind("schema").length).toBe(204);
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(221);
+    expect(catalogue.size()).toBe(221);
+    expect(catalogue.byKind("schema").length).toBe(210);
     expect(catalogue.byKind("seed").length).toBe(11);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -268,8 +270,8 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(98);
-    expect(verbs.get("CREATE INDEX")).toBe(49);
+    expect(verbs.get("CREATE TABLE")).toBe(101);
+    expect(verbs.get("CREATE INDEX")).toBe(52);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(7);
     expect(verbs.get("ALTER TABLE")).toBe(49);
     expect(verbs.get("DROP TABLE")).toBe(1);
@@ -283,7 +285,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       .map(Number)
       .sort((a, b) => a - b);
     expect(versions).toEqual(
-      Array.from({ length: 66 }, (_, i) => i + 1).filter((v) => v !== 53),
+      Array.from({ length: 66 }, (_, i) => i + 1),
     );
     const allCodes = new Set<string>();
     for (const version of versions) {

@@ -118,6 +118,54 @@ export interface ProductSellingEntry {
   purchasePath: CatalogDisplayEntryLike["purchasePath"];
 }
 
+/** Bundle row shape as GET /bundles returns it (server truth, operator data). */
+export interface BundleSellingInput {
+  id: string;
+  name: string;
+  memberProductIds: string[];
+  priceUSD: number;
+  periodDays: number;
+  includedRunsPerMember: number;
+  approvalStatus: "proposed" | "approved";
+  active: boolean;
+}
+
+/** Bundle purchase row shape as GET /subscription returns it (additive keys, #2781). */
+export interface BundlePurchaseSellingInput {
+  id: string;
+  bundleId: string;
+  status: string;
+  periodStartMs: number;
+  periodEndMs: number;
+}
+
+/** Bundle entitlement row shape as GET /subscription returns it (additive keys, #2781). */
+export interface BundleEntitlementSellingInput {
+  id: string;
+  bundlePurchaseId: string;
+  productId: string;
+  status: string;
+  periodEndMs: number;
+}
+
+export interface BundleSellingEntry {
+  bundleId: string;
+  name: string;
+  memberProductIds: string[];
+  priceUSD: number;
+  periodDays: number;
+  includedRunsPerMember: number;
+  /** Sum of the members' approved per-run prices minus the bundle
+   *  price — null when any member price is unknown, never invented. */
+  savingsUSD: number | null;
+  purchasable: boolean;
+  notPurchasableReason: string | null;
+  /** True when a live (active, unexpired) purchase of this bundle exists. */
+  owned: boolean;
+  /** Member product ids with a live entitlement under an owned purchase. */
+  liveEntitlementProductIds: string[];
+}
+
 export interface ProductSelling {
   subscription: {
     activation: ActivationState;
@@ -130,6 +178,10 @@ export interface ProductSelling {
   products: ProductSellingEntry[];
   /** Active plans only — the panel selects from these. */
   plans: SellingPlanInput[];
+  /** Issue #2781: bundle offers, derived the same way as plans — the
+   *  panel selects from these and calls the 2.1-style bundle checkout
+   *  routes; this module only describes what may be sold. */
+  bundles: BundleSellingEntry[];
 }
 
 export const CREDITS_UNAVAILABLE_REASON =
@@ -255,6 +307,76 @@ function deriveProduct(
 }
 
 /**
+ * Issue #2781: derive one bundle offer. A bundle is purchasable
+ * only when it is active AND its price is owner-approved — a
+ * proposed price is never charged. Savings are the sum of the
+ * members' approved per-run prices (keyed by family, from the
+ * pricing route) minus the bundle price; null when any member
+ * price is unknown — never invented. `owned` is true when a live
+ * purchase of this bundle exists; live entitlements list the
+ * member products actually conferred.
+ */
+function deriveBundle(
+  bundle: BundleSellingInput,
+  memberPrices: Record<string, number>,
+  liveBundleIds: Set<string>,
+  liveEntitlementProductIds: string[],
+): BundleSellingEntry {
+  const base = {
+    bundleId: bundle.id,
+    name: bundle.name,
+    memberProductIds: [...bundle.memberProductIds],
+    priceUSD: bundle.priceUSD,
+    periodDays: bundle.periodDays,
+    includedRunsPerMember: bundle.includedRunsPerMember,
+  };
+  const owned = liveBundleIds.has(bundle.id);
+  if (!bundle.active) {
+    return {
+      ...base,
+      savingsUSD: deriveBundleSavings(bundle, memberPrices),
+      purchasable: false,
+      notPurchasableReason: "bundle is not active",
+      owned,
+      liveEntitlementProductIds,
+    };
+  }
+  if (bundle.approvalStatus !== "approved") {
+    return {
+      ...base,
+      savingsUSD: deriveBundleSavings(bundle, memberPrices),
+      purchasable: false,
+      notPurchasableReason:
+        "bundle price is proposed, not owner-approved — refusing rather than inventing a charge",
+      owned,
+      liveEntitlementProductIds,
+    };
+  }
+  return {
+    ...base,
+    savingsUSD: deriveBundleSavings(bundle, memberPrices),
+    purchasable: true,
+    notPurchasableReason: null,
+    owned,
+    liveEntitlementProductIds,
+  };
+}
+
+function deriveBundleSavings(
+  bundle: BundleSellingInput,
+  memberPrices: Record<string, number>,
+): number | null {
+  let sum = 0;
+  for (const memberId of bundle.memberProductIds) {
+    const [family] = memberId.split(":");
+    const price = memberPrices[family];
+    if (typeof price !== "number" || !Number.isFinite(price)) return null;
+    sum += price;
+  }
+  return Math.round((sum - bundle.priceUSD) * 100) / 100;
+}
+
+/**
  * Derive the selling surface from caller-supplied data. No reads, no
  * writes, no charging decisions — the caller supplies catalog rows,
  * plans, subscription state, and the clock; this function only
@@ -266,6 +388,15 @@ export function buildProductSelling(input: {
   effectiveTier: string;
   subscriptions: SubscriptionRowInput[];
   nowMs: number;
+  /** Issue #2781: bundle offers (GET /bundles), purchases +
+   *  entitlements (GET /subscription additive keys), and the
+   *  members' approved per-run prices by family (GET /pricing).
+   *  All optional: a caller without bundle data gets an empty
+   *  bundles list, never an invented one. */
+  bundles?: BundleSellingInput[];
+  bundlePurchases?: BundlePurchaseSellingInput[];
+  bundleEntitlements?: BundleEntitlementSellingInput[];
+  bundleMemberPrices?: Record<string, number>;
 }): ProductSelling {
   const activePlans = input.plans.filter((p) => p.active);
   const plansById = new Map(input.plans.map((p) => [p.id, p]));
@@ -288,6 +419,38 @@ export function buildProductSelling(input: {
       buildFunnelEvent("activation", "Subscribed", { occurredAtMs: row.periodStartMs }),
     );
   }
+  // Issue #2781: bundle offers. A purchase is live when active and
+  // its period covers now; an entitlement is live under a live
+  // purchase when active and its period covers now.
+  const liveBundleIds = new Set(
+    (input.bundlePurchases ?? [])
+      .filter((p) => p.status === "active" && p.periodEndMs > input.nowMs)
+      .map((p) => p.bundleId),
+  );
+  const livePurchaseIdsByBundle = new Map<string, Set<string>>();
+  for (const p of input.bundlePurchases ?? []) {
+    if (p.status !== "active" || p.periodEndMs <= input.nowMs) continue;
+    const set = livePurchaseIdsByBundle.get(p.bundleId) ?? new Set<string>();
+    set.add(p.id);
+    livePurchaseIdsByBundle.set(p.bundleId, set);
+  }
+  const bundles = (input.bundles ?? []).map((bundle) => {
+    const livePurchaseIds = livePurchaseIdsByBundle.get(bundle.id) ?? new Set<string>();
+    const liveEntitlementProductIds = (input.bundleEntitlements ?? [])
+      .filter(
+        (e) =>
+          livePurchaseIds.has(e.bundlePurchaseId) &&
+          e.status === "active" &&
+          e.periodEndMs > input.nowMs,
+      )
+      .map((e) => e.productId);
+    return deriveBundle(
+      bundle,
+      input.bundleMemberPrices ?? {},
+      liveBundleIds,
+      liveEntitlementProductIds,
+    );
+  });
   return {
     subscription: {
       activation: deriveActivation(input.subscriptions, input.nowMs),
@@ -299,5 +462,6 @@ export function buildProductSelling(input: {
     },
     products: input.display.map((entry) => deriveProduct(entry, activePlans)),
     plans: activePlans,
+    bundles,
   };
 }
