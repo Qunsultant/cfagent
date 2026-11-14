@@ -4,7 +4,8 @@
  * GET  /api/data-lifecycle/export (pre-wipe bundle),
  * GET  /api/data-lifecycle/bootstrap (platform check),
  * POST /api/data-lifecycle/bootstrap (platform initialize),
- * POST /api/data-lifecycle/tenant-bootstrap (preview + confirm).
+ * POST /api/data-lifecycle/tenant-bootstrap (preview + confirm),
+ * POST /api/data-lifecycle/recreate (preview + confirm, #4383).
  *
  * Operator-gated server-side (platform scope and the genesis
  * claim additionally require platform-admin); a 403 here means
@@ -282,4 +283,195 @@ export function runTenantBootstrap(
   input: TenantBootstrapInput,
 ): Promise<TenantBootstrapReport> {
   return tenantBootstrap(input, true);
+}
+
+// ---------------------------------------------------------------------------
+// Recreate (#4383)
+// ---------------------------------------------------------------------------
+
+export interface RecreateStepDescriptor {
+  code: string;
+  params: Record<string, string>;
+}
+
+export interface RecreateUncreatableLayer {
+  layer: string;
+  reason: string;
+  remedy: string;
+}
+
+export interface RecreateInstancePlan {
+  login: string;
+  selected: RecreateStepDescriptor[];
+  skipped: RecreateStepDescriptor[];
+  error?: string;
+}
+
+export interface RecreatePreview {
+  scope: CleanScope;
+  tenantId?: string;
+  confirmed: false;
+  previewToken: string;
+  d1: {
+    selected: RecreateStepDescriptor[];
+    skipped: RecreateStepDescriptor[];
+  };
+  instances: RecreateInstancePlan[];
+  uncreatableLayers: RecreateUncreatableLayer[];
+}
+
+export interface RecreateLegReport {
+  leg: string;
+  selected: string[];
+  executed: string[];
+  failed: Array<{ code: string; error: string }>;
+  skipped: string[];
+  rolledBack: string[];
+  outcome: "succeeded" | "failed";
+}
+
+export interface RecreateVerification {
+  ok: boolean;
+  failures: string[];
+  extras: unknown;
+  knownDifferences: string[];
+}
+
+export interface RecreateInstanceResult {
+  login: string;
+  report?: RecreateLegReport;
+  verification?: RecreateVerification;
+  error?: string;
+}
+
+export interface RecreateResult {
+  scope: CleanScope;
+  tenantId?: string;
+  confirmed: true;
+  d1: { report: RecreateLegReport; verification: RecreateVerification };
+  instances: RecreateInstanceResult[];
+  uncreatableLayers: RecreateUncreatableLayer[];
+  audit: LifecycleAudit;
+}
+
+function isStepDescriptor(value: unknown): value is RecreateStepDescriptor {
+  return (
+    isRecord(value) &&
+    typeof value.code === "string" &&
+    isRecord(value.params)
+  );
+}
+
+function isStepDescriptors(value: unknown): value is RecreateStepDescriptor[] {
+  return Array.isArray(value) && value.every(isStepDescriptor);
+}
+
+function isUncreatableLayers(
+  value: unknown,
+): value is RecreateUncreatableLayer[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (l) =>
+        isRecord(l) &&
+        typeof l.layer === "string" &&
+        typeof l.reason === "string" &&
+        typeof l.remedy === "string",
+    )
+  );
+}
+
+function isRecreatePreview(value: unknown): value is RecreatePreview {
+  return (
+    isRecord(value) &&
+    value.confirmed === false &&
+    typeof value.previewToken === "string" &&
+    isRecord(value.d1) &&
+    isStepDescriptors((value.d1 as Record<string, unknown>).selected) &&
+    isStepDescriptors((value.d1 as Record<string, unknown>).skipped) &&
+    Array.isArray(value.instances) &&
+    isUncreatableLayers(value.uncreatableLayers)
+  );
+}
+
+function isLegReport(value: unknown): value is RecreateLegReport {
+  return (
+    isRecord(value) &&
+    typeof value.leg === "string" &&
+    Array.isArray(value.selected) &&
+    Array.isArray(value.executed) &&
+    Array.isArray(value.failed) &&
+    Array.isArray(value.skipped) &&
+    Array.isArray(value.rolledBack) &&
+    (value.outcome === "succeeded" || value.outcome === "failed")
+  );
+}
+
+function isVerification(value: unknown): value is RecreateVerification {
+  return (
+    isRecord(value) &&
+    typeof value.ok === "boolean" &&
+    Array.isArray(value.failures) &&
+    Array.isArray(value.knownDifferences)
+  );
+}
+
+function isRecreateResult(value: unknown): value is RecreateResult {
+  return (
+    isRecord(value) &&
+    value.confirmed === true &&
+    isRecord(value.d1) &&
+    isLegReport((value.d1 as Record<string, unknown>).report) &&
+    isVerification((value.d1 as Record<string, unknown>).verification) &&
+    Array.isArray(value.instances) &&
+    isUncreatableLayers(value.uncreatableLayers) &&
+    isRecord(value.audit)
+  );
+}
+
+export async function previewRecreate(
+  scope: CleanScope,
+  tenantId?: string,
+  failedCodes?: string[],
+): Promise<RecreatePreview> {
+  const data = await send<Partial<RecreatePreview>>(
+    "/api/data-lifecycle/recreate",
+    postInit({
+      scope,
+      ...(tenantId ? { tenantId } : {}),
+      ...(failedCodes && failedCodes.length > 0 ? { failedCodes } : {}),
+    }),
+  );
+  if (!isRecreatePreview(data)) {
+    throw new Error("Unexpected recreate preview response.");
+  }
+  return data;
+}
+
+export async function confirmRecreate(input: {
+  scope: CleanScope;
+  tenantId?: string;
+  previewToken: string;
+  confirmText?: string;
+  auditConfirm: boolean;
+  failedCodes?: string[];
+}): Promise<RecreateResult> {
+  const data = await send<Partial<RecreateResult>>(
+    "/api/data-lifecycle/recreate",
+    postInit({
+      scope: input.scope,
+      ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+      confirm: true,
+      previewToken: input.previewToken,
+      ...(input.confirmText ? { confirmText: input.confirmText } : {}),
+      auditConfirm: input.auditConfirm,
+      ...(input.failedCodes && input.failedCodes.length > 0
+        ? { failedCodes: input.failedCodes }
+        : {}),
+    }),
+  );
+  if (!isRecreateResult(data)) {
+    throw new Error("Unexpected recreate result response.");
+  }
+  return data;
 }
