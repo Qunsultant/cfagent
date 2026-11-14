@@ -17,6 +17,7 @@ import {
   type RecordOutcomeInput,
   type ScenarioRecord,
 } from "./goalScenarioPorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 function newId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -80,43 +81,12 @@ export class DoSqliteGoalScenarioStore implements GoalScenarioStore {
 
   ensureTables(): void {
     const sql = this.sql;
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_goals (
-    id TEXT PRIMARY KEY,
-    user_login TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    title TEXT NOT NULL,
-    status TEXT NOT NULL,
-    source TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`);
-    sql.exec(`CREATE INDEX IF NOT EXISTS idx_mas_goals_user_status ON mas_goals(user_login, status)`);
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_scenarios (
-    id TEXT PRIMARY KEY,
-    user_login TEXT NOT NULL,
-    goal_id TEXT NOT NULL,
-    portfolio_ref_kind TEXT NOT NULL,
-    portfolio_ref TEXT,
-    shocks_json TEXT NOT NULL,
-    constraints_json TEXT NOT NULL,
-    status TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`);
-    sql.exec(`CREATE INDEX IF NOT EXISTS idx_mas_scenarios_user_goal ON mas_scenarios(user_login, goal_id)`);
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_outcomes (
-    id TEXT PRIMARY KEY,
-    user_login TEXT NOT NULL,
-    goal_id TEXT,
-    scenario_id TEXT,
-    recommendation_ref TEXT,
-    screen_run_ref TEXT,
-    kind TEXT NOT NULL,
-    metrics_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  )`);
-    sql.exec(`CREATE INDEX IF NOT EXISTS idx_mas_outcomes_user_scenario ON mas_outcomes(user_login, scenario_id)`);
+    sql.exec(doTableSql("mas_goals"));
+    sql.exec(doIndexSql("idx_mas_goals_user_status"));
+    sql.exec(doTableSql("mas_scenarios"));
+    sql.exec(doIndexSql("idx_mas_scenarios_user_goal"));
+    sql.exec(doTableSql("mas_outcomes"));
+    sql.exec(doIndexSql("idx_mas_outcomes_user_scenario"));
   }
 
   createGoal(input: CreateGoalInput): GoalRecord {
