@@ -30,6 +30,7 @@ import {
   withRetry,
 } from "../src/services/resilience";
 import { resolvePipelinePolicy } from "../src/services/pipelinePolicy";
+import { resolveShardPacing, SHARD_PACING } from "../src/config/shardPacing";
 import {
   assessFeedGate,
   planAssembleShard,
@@ -38,6 +39,7 @@ import {
   planNextFeedShard,
   planServeJob,
   planShardAdvance,
+  applyShardPacing,
   planOptionsFeedShards,
   planStoreShards,
   SHARD_RETRY_BUCKET,
@@ -750,5 +752,29 @@ describe("schedule schema + RunSummary surfacing (issues #1355, #1346)", () => {
     } as any);
     expect(row.csvKey).toBe("screener:csv:abc");
     expect(row.csvUrl).toBe("/api/screener/report.csv?key=screener%3Acsv%3Aabc");
+  });
+});
+describe("shard-chain dispatch pacing (#4424)", () => {
+  it("releases a burst of inFlightCap shards, then paces the rest by the interval", () => {
+    const specs = ["a", "b", "c", "d", "e"].map((key) => ({ key }));
+    const paced = applyShardPacing(
+      specs,
+      { inFlightCap: 3, paceIntervalMs: 2000, staggerMs: 1000 },
+      "2026-10-24T12:00:00.000Z",
+    );
+    expect(paced.map((spec) => spec.runAt)).toEqual([
+      "2026-10-24T12:00:00.000Z",
+      "2026-10-24T12:00:01.000Z",
+      "2026-10-24T12:00:02.000Z",
+      "2026-10-24T12:00:05.000Z",
+      "2026-10-24T12:00:07.000Z",
+    ]);
+  });
+
+  it("reads the knobs from config and honours the environment overrides", () => {
+    expect(SHARD_PACING).toMatchObject({ inFlightCap: 8, paceIntervalMs: 2000, staggerMs: 1000 });
+    expect(resolveShardPacing({ SHARD_CHAIN_IN_FLIGHT_CAP: "5" }).inFlightCap).toBe(5);
+    expect(resolveShardPacing({ SHARD_CHAIN_PACE_INTERVAL_MS: "750" }).paceIntervalMs).toBe(750);
+    expect(resolveShardPacing({ SHARD_CHAIN_STAGGER_MS: "nonsense" }).staggerMs).toBe(1000);
   });
 });

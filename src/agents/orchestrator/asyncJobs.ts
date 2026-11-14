@@ -585,6 +585,23 @@ function isFeedDispatchShape(capability: string, payload: Record<string, unknown
  *  dataset the run itself writes. A payload carrying a consumed
  *  paymentSignature is never resumable (the #3907 rule);
  *  anything else reaps as before. */
+/**
+ * Issue #4424: a stale `shard.execute` row is resumable when it belongs to a
+ * chain and carries no consumed payment proof — the same #3907 rule the feed
+ * dispatch uses. The sweep only sees `running` rows, so a completed shard is
+ * never selected (no re-execution); the re-arm keeps the chain payload and the
+ * chain id, so the retried shard's completion still feeds the chain's advance
+ * hook instead of stranding the chain.
+ */
+function isResumableShardChain(capability: string, payload: Record<string, unknown>): boolean {
+  if (capability !== "shard.execute") return false;
+  const chain = payload.chain;
+  const chainId = chain && typeof chain === "object" ? (chain as Record<string, unknown>).chainId : undefined;
+  if (typeof chainId !== "string" || chainId.trim() === "") return false;
+  const signature = payload.paymentSignature;
+  if (typeof signature === "string" && signature.trim() !== "") return false;
+  return true;
+}
 function isResumableFeedDispatch(capability: string, payload: Record<string, unknown>): boolean {
   const args = payload.arguments;
   const signature =
@@ -765,7 +782,11 @@ export async function recoverStaleRunningAsyncJobs(
       const isFeedDispatch = payload
         ? isFeedDispatchShape(String(row.capability), payload)
         : false;
-      if (payload && isResumableFeedDispatch(String(row.capability), payload)) {
+      if (
+        payload &&
+        (isResumableFeedDispatch(String(row.capability), payload) ||
+          isResumableShardChain(String(row.capability), payload))
+      ) {
         const ownRearmCount =
           typeof payload.recoveryRearmCount === "number" ? payload.recoveryRearmCount : 0;
         if (ownRearmCount + countRecoveryRearms(ctx, jobId) < RECOVERY_REARM_CAP) {
