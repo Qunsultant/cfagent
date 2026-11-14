@@ -185,6 +185,20 @@ export class InMemoryAsyncJobStore
     return written;
   }
 
+  appendAttempt(jobId: string, attempt: { attempt: number; error: string; at: string }): void {
+    const row = this.rows.get(jobId) as (Record<string, unknown> & { attempts_json?: string | null }) | undefined;
+    if (!row) return;
+    let list: unknown[] = [];
+    try {
+      const parsed = JSON.parse(row.attempts_json ?? "[]");
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      list = [];
+    }
+    list.push(attempt);
+    row.attempts_json = JSON.stringify(list);
+  }
+
   markStuckAlerted(jobId: string, nowIso: string): number {
     const row = this.rows.get(jobId);
     if (!row || row.status !== "running" || row.stuck_alerted_at !== null) return 0;

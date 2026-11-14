@@ -274,3 +274,36 @@ describe("stranded chain (#4419)", () => {
     expect(runs[0].stranded).toBe(false);
   });
 });
+describe("per-shard attempt history (#4417)", () => {
+  it("exposes the persisted attempts on the stage, oldest first", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "shard-1",
+          capability: "shard.execute",
+          chain_id: "chain-9",
+          stage: "feed",
+          status: "failed",
+          attempts_json: JSON.stringify([
+            { attempt: 1, error: "timeout", at: "2026-11-08T21:14:20.000Z" },
+            { attempt: 2, error: "upstream 500", at: "2026-11-08T21:14:22.000Z" },
+          ]),
+        }),
+      ],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs[0].stages[0].attempts).toHaveLength(2);
+    expect(runs[0].stages[0].attempts?.[0]).toMatchObject({ attempt: 1, error: "timeout" });
+    expect(runs[0].stages[0].attempts?.[1]).toMatchObject({ attempt: 2, error: "upstream 500" });
+  });
+
+  it("a shard with no recorded attempts reads zero, not an absent history", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [job({ job_id: "shard-2", capability: "shard.execute", chain_id: "chain-9", stage: "feed", status: "failed" })],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs[0].stages[0].attempts).toEqual([]);
+  });
+});

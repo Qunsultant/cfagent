@@ -37,7 +37,7 @@ import {
   type DataProviderPorts,
 } from "../data/buildDataProviderPorts";
 import { defaultBreakerRegistry } from "../breakers/createBreakerPorts";
-import { withRetry } from "./resilience";
+import { withRetry, type WithRetryOptions } from "./resilience";
 import {
   DynamicOptionsScreener,
   OptionsDataAgent,
@@ -64,6 +64,16 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/shardExecutors",
 });
 
+/**
+ * Issue #4417: the retry options every shard executor uses — the same opts the
+ * call passed, plus the durable attempt recorder when the host provided one.
+ */
+function retryWithHistory(deps: ShardExecutorDeps, opts: WithRetryOptions = {}): WithRetryOptions {
+  return {
+    ...opts,
+    onAttempt: (attempt, error) => deps.recordAttempt?.(attempt, error),
+  };
+}
 export interface ShardExecutorDeps {
   sql: {
     exec: (query: string, ...params: unknown[]) => Iterable<Record<string, unknown>>;
@@ -73,6 +83,11 @@ export interface ShardExecutorDeps {
   /** Durable Object storage: the blob seam + capture deps. */
   storage: any;
   createETradeService: (userLogin: string, environment?: string) => ETradeService;
+  /**
+   * Issue #4417: records one failed attempt of this shard (the async job row
+   * owns the durable history). Absent in unit callers — history is optional.
+   */
+  recordAttempt?: (attempt: number, error: unknown) => void;
   /**
    * Issue #3655: broker-aware chain-source resolver, mirroring
    * UnifiedOptionsService.resolveEngineClient (tenant broker →
@@ -251,7 +266,7 @@ async function feedNasdaq(deps: ShardExecutorDeps, chain: ShardChainContext): Pr
           .getScreenUniverse!({ runId: chain.chainId, userLogin: chain.userLogin })
           .then((r) => r.result),
       policy,
-      { label: "shard.feed.nasdaq" }
+      retryWithHistory(deps, { label: "shard.feed.nasdaq" })
     );
     return { listings };
   }
@@ -276,9 +291,7 @@ async function feedNasdaq(deps: ShardExecutorDeps, chain: ShardChainContext): Pr
     bundle.routes
   );
   const bound = bindNasdaqUniverseDeps(provider, bundle.runContext);
-  const listings = await withRetry(() => bound.fetchListings(), policy, {
-    label: "shard.feed.nasdaq",
-  });
+  const listings = await withRetry(() => bound.fetchListings(), policy, retryWithHistory(deps, { label: "shard.feed.nasdaq" }));
   return { listings };
 }
 
@@ -329,9 +342,7 @@ async function feedEtrade(
     throw new Error("Feed shard etrade blocked: the bound E*TRADE deps expose no quote fetcher.");
   }
   const fetchQuotes = quoteDeps.fetchQuotes;
-  const quotes = await withRetry(() => fetchQuotes(symbols), policy, {
-    label: "shard.feed.etrade",
-  });
+  const quotes = await withRetry(() => fetchQuotes(symbols), policy, retryWithHistory(deps, { label: "shard.feed.etrade" }));
   return { quotes };
 }
 
@@ -590,7 +601,7 @@ async function executeOptionsSymbol(
       throw new Error(result.matrix[0].skipReason || `Option chain unavailable for ${symbol}`);
     }
     return result;
-  }, policy, { label: `shard.feed.options.${symbol}` });
+  }, policy, retryWithHistory(deps, { label: `shard.feed.options.${symbol}` }));
 }
 
 async function generateAssembleOptions(
@@ -758,7 +769,7 @@ async function generateTabular(
             return generateStockTabularBytes("csv", ds as never);
           },
           policy,
-          { label: `shard.generate.${fmt}` },
+          retryWithHistory(deps, { label: `shard.generate.${fmt}` }),
         ),
       store: async ({ key, fileName, bytes, contentType }) => {
         await putReportPdf(deps.env as any, deps.storage as any, key, fileName, bytes, contentType);

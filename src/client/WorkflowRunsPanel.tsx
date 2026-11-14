@@ -1391,11 +1391,19 @@ export function RunDetail({
                     <span>{stage.detail || "No description recorded"}</span>
                     {/* Issue #4418: the pre-reap last activity rides the existing muted
                 line (no new bespoke class — the UX ratchet counts them). */}
-            {(stage.reason || stage.lastActivityAt) && (
+            {(stage.reason || stage.lastActivityAt || (stage.attempts?.length ?? 0) > 0) && (
               <span className="workflow-runs-muted">
-                {stage.reason ? `Reason: ${stage.reason}` : ""}
-                {stage.reason && stage.lastActivityAt ? " · " : ""}
-                {stage.lastActivityAt ? `Last activity ${stage.lastActivityAt}` : ""}
+                {[
+                  stage.reason ? `Reason: ${stage.reason}` : null,
+                  stage.lastActivityAt ? `Last activity ${stage.lastActivityAt}` : null,
+                  stage.attempts?.length
+                    ? `Attempts ${stage.attempts.length}: ${stage.attempts
+                        .map((attempt) => `#${attempt.attempt} ${attempt.error}`)
+                        .join(" · ")}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
             )}
                     {stage.error && (
