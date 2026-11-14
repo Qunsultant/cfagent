@@ -19,6 +19,7 @@
  */
 import type { DoTransactionStorage } from "../aspects/transactionAspect";
 import { getTransactionRunner } from "./transactionRunnerProvider";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import {
   DISCOVERY_RUN_MAX_ROWS,
   DISCOVERY_RUN_RETENTION_DAYS,
@@ -36,11 +37,8 @@ import {
 
 const TABLE = "mas_discovery_runs";
 
-const CREATE_TABLE_SQL =
-  `CREATE TABLE IF NOT EXISTS ${TABLE} (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, ` +
-  `status TEXT NOT NULL, user_login TEXT, summary_json TEXT NOT NULL, run_json TEXT NOT NULL)`;
-const CREATE_INDEX_SQL =
-  `CREATE INDEX IF NOT EXISTS idx_mas_discovery_runs_created_at ON ${TABLE} (created_at DESC)`;
+const CREATE_TABLE_SQL = doTableSql("mas_discovery_runs");
+const CREATE_INDEX_SQL = doIndexSql("idx_mas_discovery_runs_created_at");
 const INSERT_SQL =
   `INSERT INTO ${TABLE} (id, created_at, status, user_login, summary_json, run_json) VALUES (?, ?, ?, ?, ?, ?)`;
 // The visibility predicate lives in the list statement itself (issue
