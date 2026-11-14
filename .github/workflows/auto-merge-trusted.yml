@@ -1,4 +1,4 @@
-# Auto-merge trusted PRs — issue #1509; enrollment fixed in #4305 / #4313 / #4444 / #4490.
+# Auto-merge trusted PRs — issue #1509; enrollment fixed in #4305 / #4313 / #4444 / #4490 / #4501.
 #
 # WHAT: labels an eligible PR, then ENROLLS it in the merge queue once its
 # checks are green — from four triggers, event first:
@@ -255,7 +255,28 @@ jobs:
             verdict=$(echo "$state" | jq -r --arg p "$OWN_CHECK_PREFIX" '
               [ .data.node.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?
                 | select((((.name // .context) // "") | startswith($p)) | not)
-                | (.conclusion // .state // "UNKNOWN") ] as $others
+                | { name: (.name // .context // "UNKNOWN"), result: (.conclusion // .state // "UNKNOWN") }
+              ] as $ctx
+              # Dedupe by check name first (#4501): an API-created PR can run a
+              # gating workflow twice on the same head, and the earlier run is
+              # cancelled when the later starts — the rollup then carries both
+              # a SUCCESS and a CANCELLED entry for one name, and the cancelled
+              # duplicate poisoned the verdict to NOT_GREEN on every sweep
+              # (#4492 sat green-but-unenrolled; #4510 the same). A cancelled
+              # run never decides a verdict (the #3952 watcher rule): SUCCESS
+              # wins for a name if any run succeeded, then NEUTRAL, then
+              # SKIPPED; a name counts as failing only from a non-cancelled
+              # result, and a name with ONLY cancelled runs stays CANCELLED
+              # (→ NOT_GREEN, never silently green).
+              | ([$ctx[] | .name] | unique) as $names
+              | [ $names[] as $n
+                | ([$ctx[] | select(.name == $n) | .result] as $rs
+                  | if ($rs | index("SUCCESS")) then "SUCCESS"
+                    elif ($rs | index("NEUTRAL")) then "NEUTRAL"
+                    elif ($rs | index("SKIPPED")) then "SKIPPED"
+                    elif ([$rs[] | select(. != "CANCELLED")] | length) > 0 then ([$rs[] | select(. != "CANCELLED")] | .[0])
+                    else "CANCELLED" end)
+              ] as $others
               | if ($others | length) == 0 then "MISSING"
                 elif ($others | map(. == "SUCCESS" or . == "NEUTRAL" or . == "SKIPPED") | all) then "SUCCESS"
                 else "NOT_GREEN" end

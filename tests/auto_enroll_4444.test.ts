@@ -24,6 +24,11 @@
  *  - 4444-P04 retry safety: the green verdict ignores this workflow's own check
  *    runs, so a failed attempt stays visible without making the head red and
  *    blocking its own retry.
+ *  - 4501-P01 a cancelled duplicate cannot poison the verdict: the rollup is
+ *    deduped by check name before judging green (SUCCESS, then NEUTRAL, then
+ *    SKIPPED win for a name; a name counts as failing only from a
+ *    non-cancelled result; a name with only cancelled runs stays CANCELLED,
+ *    never silently green — the #3952 watcher rule).
  *  - 4325-P01 / 4346-P01 both halves are sweeps on one cadence, and both files
  *    describe the chain as implemented.
  *  - CFG-P01 config/auto-merge.json is the single source for the label, the
@@ -146,6 +151,26 @@ describe("4444-P04 retry safety: a failed attempt cannot block the next one", ()
     expect(enrollWorkflow).toContain('.conclusion // .state // "UNKNOWN"');
     // The loud failure stays (#4317).
     expect(enrollWorkflow).toContain("FAILED=1");
+  });
+});
+
+describe("4501-P01 a cancelled duplicate cannot poison the verdict", () => {
+  it("dedupes the rollup by check name before judging green", () => {
+    // An API-created PR can run a gating workflow twice on the same head;
+    // the earlier run is cancelled when the later starts, so the rollup
+    // carries both SUCCESS and CANCELLED for one name — and the cancelled
+    // duplicate used to poison the verdict to NOT_GREEN on every sweep
+    // (#4492 sat green-but-unenrolled for over an hour; #4510 the same).
+    // A cancelled run never decides a verdict (the #3952 watcher rule).
+    expect(enrollWorkflow).toContain("#4501");
+    expect(enrollWorkflow).toContain("] as $ctx");
+    expect(enrollWorkflow).toContain("unique) as $names");
+    expect(enrollWorkflow).toContain('index("SUCCESS")');
+    expect(enrollWorkflow).toContain('select(. != "CANCELLED")');
+    expect(enrollWorkflow).toContain('else "CANCELLED" end');
+    // The own-check exclusion still applies before the dedupe.
+    expect(enrollWorkflow).toContain("startswith($p)");
+    expect(enrollWorkflow).toContain('.conclusion // .state // "UNKNOWN"');
   });
 });
 
