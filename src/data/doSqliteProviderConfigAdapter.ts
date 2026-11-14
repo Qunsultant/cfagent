@@ -54,6 +54,7 @@ import {
   type ProviderConfigWrite,
   type ProviderLifecycleState,
 } from "./providerConfigPorts";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 export function ensureProviderConfigTable(sql: SqlStorage): void {
   sql.exec(doTableSql("mas_data_providers"));
@@ -219,9 +220,7 @@ export function ensureProviderRoutingTable(sql: SqlStorage): void {
     sql.exec(`PRAGMA table_info(${PROVIDER_ROUTING_TABLE})`)
   ) as any[];
   if (!columns.some((c) => c.name === "min_tier")) {
-    sql.exec(
-      `ALTER TABLE ${PROVIDER_ROUTING_TABLE} ADD COLUMN min_tier TEXT NOT NULL DEFAULT 'freemium'`
-    );
+    sql.exec(remainderAlterSql("mas_data_provider_routes", "min_tier"));
   }
 }
 
