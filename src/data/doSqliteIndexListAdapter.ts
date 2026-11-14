@@ -1,7 +1,7 @@
 /**
  * Issue #1980 — the DO-SQLite implementation of the stored
- * index-list port, in the feed-seam idiom verbatim: CREATE TABLE
- * IF NOT EXISTS + single-line statements (the MockSqlStorage
+ * index-list port, in the feed-seam idiom verbatim: idempotent creation
+ * + single-line statements (the MockSqlStorage
  * lesson — multi-line column lists silently no-op in the shared
  * mock), newest-first per index, keep-per-index prune via
  * per-row DELETEs.
