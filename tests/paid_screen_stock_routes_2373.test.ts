@@ -43,14 +43,43 @@ const storeState = vi.hoisted(() => ({
   subscriptions: [] as Array<{ periodEndMs: number }>,
   commercialBound: true,
   subscriptionsBound: true,
+  /** Stored tenant data-provider/broker selections (null = none stored). */
+  dataProviderId: null as string | null,
+  brokerId: null as string | null,
+}));
+
+const freeRunState = vi.hoisted(() => ({
+  /** Free-run allowance for the family (null = counter unbound). */
+  allowance: null as number | null,
+  used: 0,
 }));
 
 vi.mock("../src/data/createCommercialPorts", () => ({
   createCommercialAdapter: () =>
     storeState.commercialBound
-      ? { db: {}, getAccount: async () => storeState.account }
+      ? {
+          db: {},
+          getAccount: async () => storeState.account,
+          getTenantDataProviderSelection: async () => storeState.dataProviderId,
+          getTenantBrokerSelection: async () => storeState.brokerId,
+        }
       : null,
   ensureCommercialSchema: async () => {},
+}));
+
+// Issue #2373 (S1b): the seam's coverage probe reads the free-run
+// counter through the real factory (unbound without AGENT_DB), so
+// the allowance branch is pinned here with a fake counter.
+vi.mock("../src/data/createFreeRunCounterPorts", () => ({
+  createFreeRunCounterAdapter: () =>
+    freeRunState.allowance === null
+      ? null
+      : {
+          db: {},
+          getAllowance: async () => freeRunState.allowance,
+          getUsed: async () => freeRunState.used,
+        },
+  ensureFreeRunCounterSchema: async () => {},
 }));
 
 vi.mock("../src/data/createSubscriptionPorts", () => ({
@@ -217,6 +246,10 @@ function resetStore() {
   storeState.subscriptions = [];
   storeState.commercialBound = true;
   storeState.subscriptionsBound = true;
+  storeState.dataProviderId = null;
+  storeState.brokerId = null;
+  freeRunState.allowance = null;
+  freeRunState.used = 0;
 }
 
 /** A stored Subscribed row with included runs, tenant-matched. */
@@ -230,6 +263,19 @@ function coveredAccount() {
     updatedAtMs: 0,
   };
   storeState.subscriptions = [{ periodEndMs: Date.now() + 30 * 24 * 3600 * 1000 }];
+}
+
+/** A stored Free row with a live unlimited-free grant, tenant-matched. */
+function grantAccount() {
+  storeState.account = {
+    id: LOGIN,
+    tenantId: TENANT,
+    tier: "Free",
+    creditsUSD: 0,
+    includedRuns: 0,
+    unlimitedFreeGrant: { grantedBy: "operator", reason: "test grant", expiresAtMs: null },
+    updatedAtMs: 0,
+  };
 }
 
 beforeEach(() => {
@@ -266,6 +312,11 @@ describe("POST /etrade/screen under #2373 Slice A", () => {
     expect(params.email).toBe(EMAIL);
     expect(params.tenantId).toBe(TENANT);
     expect(params.account.tenantId).toBe(TENANT);
+    // Issue #2373 (S1b, F9): the tenant-resolved provider is
+    // stamped explicitly (etrade is the route's implied provider),
+    // and no broker rides when none is stored.
+    expect(params.screenerCommand.provider).toBe("etrade");
+    expect("broker" in params.screenerCommand).toBe(false);
     // The payment workflow instance id IS the run request id, and the
     // screener command it carries is the broker's command.
     expect(payment.creates[0].id).toBe(body.runRequestId);
@@ -298,7 +349,12 @@ describe("POST /etrade/screen under #2373 Slice A", () => {
     expect(payment.creates[0].params.screenerCommand.jobId).toBe(body.runRequestId);
   });
 
-  it("flag ON + async + no email → 400, no payment workflow started", async () => {
+  // Issue #2373 (S1b, gate-before-email): the 400 carries the
+  // coded checkout_email_required — the client maps by code — and
+  // only when payment is actually needed. The uncovered no-email
+  // run below proves the "payment needed" half; the covered
+  // no-email tests prove the other half.
+  it("flag ON + async + no email + uncovered → 400 checkout_email_required, no payment workflow started", async () => {
     const payment = paymentBinding();
     const { ctx } = etradeCtx(envFor(payment, true), throwingAgent());
     const res = await handleEtradeBrokerRoutes(
@@ -309,7 +365,119 @@ describe("POST /etrade/screen under #2373 Slice A", () => {
       ctx,
     );
     expect(res!.status).toBe(400);
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.code).toBe("checkout_email_required");
     expect(payment.creates).toHaveLength(0);
+  });
+
+  it("flag ON + async + no email + grant-covered → 202 with an empty checkout email, no email demanded", async () => {
+    grantAccount();
+    const payment = paymentBinding();
+    const { ctx } = etradeCtx(envFor(payment, true), throwingAgent());
+    const res = await handleEtradeBrokerRoutes(
+      req("POST", "/api/etrade/screen", { async: true }),
+      urlOf("/api/etrade/screen"),
+      "/api/etrade/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(202);
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.status).toBe("payment_started");
+    expect(payment.creates).toHaveLength(1);
+    expect(payment.creates[0].params.email).toBe("");
+  });
+
+  it("flag ON + async + no email + free-run allowance → 202 with an empty checkout email", async () => {
+    freeRunState.allowance = 10;
+    freeRunState.used = 3;
+    const payment = paymentBinding();
+    const { ctx } = etradeCtx(envFor(payment, true), throwingAgent());
+    const res = await handleEtradeBrokerRoutes(
+      req("POST", "/api/etrade/screen", { async: true }),
+      urlOf("/api/etrade/screen"),
+      "/api/etrade/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(202);
+    expect(payment.creates).toHaveLength(1);
+    expect(payment.creates[0].params.email).toBe("");
+  });
+
+  it("flag ON + async + no email + allowance exhausted → 400 checkout_email_required, no workflow started", async () => {
+    freeRunState.allowance = 10;
+    freeRunState.used = 10;
+    const payment = paymentBinding();
+    const { ctx } = etradeCtx(envFor(payment, true), throwingAgent());
+    const res = await handleEtradeBrokerRoutes(
+      req("POST", "/api/etrade/screen", { async: true }),
+      urlOf("/api/etrade/screen"),
+      "/api/etrade/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(400);
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.code).toBe("checkout_email_required");
+    expect(payment.creates).toHaveLength(0);
+  });
+
+  it("flag ON + async + no email + unbound commercial store → 400 (coverage unprovable), not 503", async () => {
+    storeState.commercialBound = false;
+    const payment = paymentBinding();
+    const { ctx } = etradeCtx(envFor(payment, true), throwingAgent());
+    const res = await handleEtradeBrokerRoutes(
+      req("POST", "/api/etrade/screen", { async: true }),
+      urlOf("/api/etrade/screen"),
+      "/api/etrade/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(400);
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.code).toBe("checkout_email_required");
+    expect(payment.creates).toHaveLength(0);
+  });
+
+  // Issue #2373 (S1b, F9): the route's implied provider must match
+  // the tenant's stored data-provider selection, or the run is
+  // refused with a coded 409 and no fallback is used.
+  it("flag ON + async + stored data provider yahoo vs etrade route → 409 FAILURE_PROVIDER_MISMATCH, no workflow started", async () => {
+    storeState.dataProviderId = "yahoo";
+    const payment = paymentBinding();
+    const { ctx } = etradeCtx(envFor(payment, true), throwingAgent());
+    const res = await handleEtradeBrokerRoutes(
+      req("POST", "/api/etrade/screen", { async: true, email: EMAIL }),
+      urlOf("/api/etrade/screen"),
+      "/api/etrade/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(409);
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.code).toBe("FAILURE_PROVIDER_MISMATCH");
+    expect(body.selectedProvider).toBe("yahoo");
+    expect(body.requestedProvider).toBe("etrade");
+    expect(payment.creates).toHaveLength(0);
+  });
+
+  it("flag ON + async + stored data provider etrade + stored broker alpaca → 202, provider etrade + broker carried as provenance", async () => {
+    storeState.dataProviderId = "etrade";
+    storeState.brokerId = "alpaca";
+    const payment = paymentBinding();
+    const { ctx } = etradeCtx(envFor(payment, true), throwingAgent());
+    const res = await handleEtradeBrokerRoutes(
+      req("POST", "/api/etrade/screen", { async: true, email: EMAIL }),
+      urlOf("/api/etrade/screen"),
+      "/api/etrade/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(202);
+    expect(payment.creates).toHaveLength(1);
+    expect(payment.creates[0].params.screenerCommand.provider).toBe("etrade");
+    expect(payment.creates[0].params.screenerCommand.broker).toBe("alpaca");
   });
 
   it("flag ON + sync (no async) → the goal route's 402, no free run", async () => {
@@ -491,7 +659,11 @@ describe("POST /market-data/screen under #2373 Slice A", () => {
     expect(payment.creates[0].params.email).toBe(EMAIL);
   });
 
-  it("flag ON + async + no email → 400, no payment workflow started", async () => {
+  // Issue #2373 (S1b, gate-before-email): see the etrade block —
+  // the 400 carries checkout_email_required only when the gate
+  // says payment is actually needed; a covered no-email run
+  // starts instead.
+  it("flag ON + async + no email + uncovered → 400 checkout_email_required, no payment workflow started", async () => {
     const payment = paymentBinding();
     const { ctx } = marketCtx(envFor(payment, true), throwingAgent());
     const res = await handleMarketDataCompareScreenRoutes(
@@ -502,6 +674,79 @@ describe("POST /market-data/screen under #2373 Slice A", () => {
       ctx,
     );
     expect(res!.status).toBe(400);
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.code).toBe("checkout_email_required");
+    expect(payment.creates).toHaveLength(0);
+  });
+
+  it("flag ON + async + no email + free-run allowance → 202 with an empty checkout email", async () => {
+    freeRunState.allowance = 10;
+    freeRunState.used = 0;
+    const payment = paymentBinding();
+    const { ctx } = marketCtx(envFor(payment, true), throwingAgent());
+    const res = await handleMarketDataCompareScreenRoutes(
+      req("POST", "/api/market-data/screen", { async: true }),
+      urlOf("/api/market-data/screen"),
+      "/api/market-data/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(202);
+    expect(payment.creates).toHaveLength(1);
+    expect(payment.creates[0].params.email).toBe("");
+    expect(payment.creates[0].params.screenerCommand.provider).toBe("yahoo");
+  });
+
+  // Issue #2373 (S1b, F9): the market-data route implies yahoo;
+  // a stored etrade selection refuses it with a coded 409.
+  it("flag ON + async + stored data provider etrade vs market-data route → 409 FAILURE_PROVIDER_MISMATCH, no workflow started", async () => {
+    storeState.dataProviderId = "etrade";
+    const payment = paymentBinding();
+    const { ctx } = marketCtx(envFor(payment, true), throwingAgent());
+    const res = await handleMarketDataCompareScreenRoutes(
+      req("POST", "/api/market-data/screen", { async: true, email: EMAIL }),
+      urlOf("/api/market-data/screen"),
+      "/api/market-data/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(409);
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.code).toBe("FAILURE_PROVIDER_MISMATCH");
+    expect(body.selectedProvider).toBe("etrade");
+    expect(body.requestedProvider).toBe("yahoo");
+    expect(payment.creates).toHaveLength(0);
+  });
+
+  it("flag ON + async + stored data provider yahoo → 202, provider yahoo carried", async () => {
+    storeState.dataProviderId = "yahoo";
+    const payment = paymentBinding();
+    const { ctx } = marketCtx(envFor(payment, true), throwingAgent());
+    const res = await handleMarketDataCompareScreenRoutes(
+      req("POST", "/api/market-data/screen", { async: true, email: EMAIL }),
+      urlOf("/api/market-data/screen"),
+      "/api/market-data/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(202);
+    expect(payment.creates).toHaveLength(1);
+    expect(payment.creates[0].params.screenerCommand.provider).toBe("yahoo");
+  });
+
+  it("flag ON + GET async=1 with no email + uncovered → 400 checkout_email_required", async () => {
+    const payment = paymentBinding();
+    const { ctx } = marketCtx(envFor(payment, true), throwingAgent());
+    const res = await handleMarketDataCompareScreenRoutes(
+      req("GET", "/api/market-data/screen?async=1"),
+      urlOf("/api/market-data/screen?async=1"),
+      "/api/market-data/screen",
+      "s",
+      ctx,
+    );
+    expect(res!.status).toBe(400);
+    const body = (await res!.json()) as Record<string, unknown>;
+    expect(body.code).toBe("checkout_email_required");
     expect(payment.creates).toHaveLength(0);
   });
 
@@ -661,6 +906,27 @@ describe("buildStockScreenWorkflowCommand (#2373 Slice A extraction)", () => {
     );
     expect(md.provider).toBe("yahoo");
     expect(md.deliver).toBe(false);
+  });
+
+  // Issue #2373 (S1b, F9): the paid seam passes the
+  // tenant-resolved provider, which wins over the spec's
+  // route-implied provider, and the stored broker rides as
+  // provenance only — never a defaulted broker.
+  it("deps.provider wins over the spec provider, and deps.brokerId rides as provenance only", () => {
+    const command = buildStockScreenWorkflowCommand(baseSpec({ provider: "yahoo" }), {
+      userLogin: LOGIN,
+      tenantId: TENANT,
+      provider: "etrade",
+      brokerId: "alpaca",
+    });
+    expect(command.provider).toBe("etrade");
+    expect(command.broker).toBe("alpaca");
+    const plain = buildStockScreenWorkflowCommand(baseSpec({ provider: "yahoo" }), {
+      userLogin: LOGIN,
+      tenantId: TENANT,
+    });
+    expect(plain.provider).toBe("yahoo");
+    expect("broker" in plain).toBe(false);
   });
 
   it("the broker's contract is preserved: async false → null, and the broker builds the same command", async () => {

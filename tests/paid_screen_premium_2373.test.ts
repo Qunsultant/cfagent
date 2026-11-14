@@ -104,13 +104,17 @@ vi.mock("mppx", () => ({
 // sync branch); a handle = the async branch's observable shape.
 const workflowFake = vi.hoisted(() => ({
   handle: null as null | { jobId: string; workflowId: string; statusUrl: string },
+  lastCommand: null as unknown,
 }));
 
 vi.mock("../src/workflows/screenerWorkflowRoutes", async (importOriginal) => {
   const orig = await importOriginal<typeof import("../src/workflows/screenerWorkflowRoutes")>();
   return {
     ...orig,
-    tryStartScreenerWorkflow: async (..._args: unknown[]) => workflowFake.handle,
+    tryStartScreenerWorkflow: async (...args: unknown[]) => {
+      workflowFake.lastCommand = args[1] ?? null;
+      return workflowFake.handle;
+    },
   };
 });
 
@@ -171,7 +175,7 @@ interface Harness {
   meterRows: (userLogin: string) => Array<{ id: string; userLogin: string; runId: string; category: string; createdAt: string }>;
 }
 
-function makeHarness(flagOn: boolean): Harness {
+function makeHarness(flagOn: boolean, opts: { tenantDataProviderId?: string } = {}): Harness {
   const meterSql = new MockSqlStorage();
   const ormSql = new MockSqlStorage();
   const orm = new DatabaseORM(ormSql);
@@ -193,6 +197,12 @@ function makeHarness(flagOn: boolean): Harness {
     // The gate reads NONE of these; varying them proves flag-independence.
     FEATURE_MONETIZATION: flagOn ? "1" : "0",
     MONETIZATION_ENABLED: flagOn ? "true" : "false",
+    // Issue #2373 (S1b, F9): the tenant data-provider selection,
+    // read by the fulfilment through the env override (the store
+    // path is pinned by the paid-seam route tests instead).
+    ...(opts.tenantDataProviderId !== undefined
+      ? { TENANT_DATA_PROVIDER_ID: opts.tenantDataProviderId }
+      : {}),
   } as unknown as Env;
   const ctx = {
     env,
@@ -256,6 +266,7 @@ beforeEach(() => {
   mppFake.mode = "verified";
   mppFake.source = undefined;
   workflowFake.handle = null;
+  workflowFake.lastCommand = null;
 });
 
 // ---------------------------------------------------------------------------
@@ -542,5 +553,116 @@ describe("stock-signals gate: tier never waives payment (#2373 Slice B)", () => 
     expect(meter.rows[0].userLogin).toBe(payerScopeId(PAYER));
     const detail = JSON.parse(meter.rows[0].detailJson ?? "{}") as any;
     expect(detail.tier).toBe("Free");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #2373 (S1b, F9): premium fulfilment resolves the tenant's stored
+// data provider instead of hardcoding "yahoo"
+// ---------------------------------------------------------------------------
+describe("stock-signals fulfilment provider resolution (#2373 S1b, F9)", () => {
+  function syncedSpec(h: Harness) {
+    const call = h.runStockScreenViaEngine.mock.calls[0]?.[0] as
+      | { spec?: { provider?: string } }
+      | undefined;
+    return call?.spec;
+  }
+
+  it("stored provider yahoo + sync → served with provider yahoo", async () => {
+    const h = makeHarness(true, { tenantDataProviderId: "yahoo" });
+    const req = stockSignalsRequest({
+      method: "GET",
+      query: "?symbols=NVDA",
+      headers: { "x-user-login": "owner-login", ...paidHeaders(PAYER, nextTxHash()) },
+    });
+    const res = await callStockSignals(h, req, "trader_session_1");
+    expect(res!.status).toBe(200);
+    expect(((await res!.json()) as any).success).toBe(true);
+    expect(syncedSpec(h)?.provider).toBe("yahoo");
+  });
+
+  it("stored provider yahoo + async → workflow command carries provider yahoo", async () => {
+    workflowFake.handle = { jobId: "job_symbols_test", workflowId: "wf_test", statusUrl: "/api/jobs/job_symbols_test" };
+    const h = makeHarness(true, { tenantDataProviderId: "yahoo" });
+    const req = stockSignalsRequest({
+      method: "POST",
+      body: { symbols: ["NVDA"], async: true },
+      headers: { "x-user-login": "owner-login", ...paidHeaders(PAYER, nextTxHash()) },
+    });
+    const res = await callStockSignals(h, req, "trader_session_1");
+    expect(res!.status).toBe(200);
+    expect(((await res!.json()) as any).async).toBe(true);
+    expect((workflowFake.lastCommand as { provider?: string } | null)?.provider).toBe("yahoo");
+  });
+
+  it("stored provider etrade + sync → served with the provider OMITTED (engine default)", async () => {
+    const h = makeHarness(true, { tenantDataProviderId: "etrade" });
+    const req = stockSignalsRequest({
+      method: "GET",
+      query: "?symbols=NVDA",
+      headers: { "x-user-login": "owner-login", ...paidHeaders(PAYER, nextTxHash()) },
+    });
+    const res = await callStockSignals(h, req, "trader_session_1");
+    expect(res!.status).toBe(200);
+    expect(((await res!.json()) as any).success).toBe(true);
+    expect(syncedSpec(h)?.provider).toBeUndefined();
+  });
+
+  it("stored provider etrade + async → workflow command omits the provider", async () => {
+    workflowFake.handle = { jobId: "job_symbols_test", workflowId: "wf_test", statusUrl: "/api/jobs/job_symbols_test" };
+    const h = makeHarness(true, { tenantDataProviderId: "etrade" });
+    const req = stockSignalsRequest({
+      method: "POST",
+      body: { symbols: ["NVDA"], async: true },
+      headers: { "x-user-login": "owner-login", ...paidHeaders(PAYER, nextTxHash()) },
+    });
+    const res = await callStockSignals(h, req, "trader_session_1");
+    expect(res!.status).toBe(200);
+    expect("provider" in ((workflowFake.lastCommand ?? {}) as Record<string, unknown>)).toBe(false);
+  });
+
+  it("no provider stored + sync → served with the provider OMITTED (engine default, not hardcoded yahoo)", async () => {
+    const h = makeHarness(true);
+    const req = stockSignalsRequest({
+      method: "GET",
+      query: "?symbols=NVDA",
+      headers: { "x-user-login": "owner-login", ...paidHeaders(PAYER, nextTxHash()) },
+    });
+    const res = await callStockSignals(h, req, "trader_session_1");
+    expect(res!.status).toBe(200);
+    expect(((await res!.json()) as any).success).toBe(true);
+    expect(syncedSpec(h)?.provider).toBeUndefined();
+  });
+
+  it("stored provider public + sync → plain refusal, no screen run, no fallback", async () => {
+    const h = makeHarness(true, { tenantDataProviderId: "public" });
+    const req = stockSignalsRequest({
+      method: "GET",
+      query: "?symbols=NVDA",
+      headers: { "x-user-login": "owner-login", ...paidHeaders(PAYER, nextTxHash()) },
+    });
+    const res = await callStockSignals(h, req, "trader_session_1");
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as any;
+    expect(body.success).toBe(false);
+    expect(body.error).toBe("The selected data provider does not serve premium stock signals.");
+    expect(h.runStockScreenViaEngine).not.toHaveBeenCalled();
+  });
+
+  it("stored provider public + async → plain refusal, no workflow started", async () => {
+    workflowFake.handle = { jobId: "job_symbols_test", workflowId: "wf_test", statusUrl: "/api/jobs/job_symbols_test" };
+    const h = makeHarness(true, { tenantDataProviderId: "public" });
+    const req = stockSignalsRequest({
+      method: "POST",
+      body: { symbols: ["NVDA"], async: true },
+      headers: { "x-user-login": "owner-login", ...paidHeaders(PAYER, nextTxHash()) },
+    });
+    const res = await callStockSignals(h, req, "trader_session_1");
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as any;
+    expect(body.success).toBe(false);
+    expect(body.error).toBe("The selected data provider does not serve premium stock signals.");
+    expect(workflowFake.lastCommand).toBeNull();
+    expect(h.runStockScreenViaEngine).not.toHaveBeenCalled();
   });
 });

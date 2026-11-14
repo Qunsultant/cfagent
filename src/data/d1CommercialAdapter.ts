@@ -414,6 +414,18 @@ export class D1CommercialAdapter implements CommercialStore {
     return typeof row.brokerId === "string" && row.brokerId !== "" ? row.brokerId : null;
   }
 
+  /** Issue #2373 (S1b, F9) — the stored data-provider selection, or null when none is stored. Mirror of getTenantBrokerSelection. */
+  async getTenantDataProviderSelection(tenantId: string): Promise<string | null> {
+    const rows = await this.db
+      .select()
+      .from(agentTenantSettings)
+      .where(eq(agentTenantSettings.tenantId, tenantId))
+      .limit(1);
+    if (rows.length === 0) return null;
+    const row = rows[0] as typeof rows[0] & { dataProviderId?: string | null };
+    return typeof row.dataProviderId === "string" && row.dataProviderId !== "" ? row.dataProviderId : null;
+  }
+
   async setTenantProviders(
     tenantId: string,
     providers: TenantProviders,

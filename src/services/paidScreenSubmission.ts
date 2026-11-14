@@ -287,6 +287,9 @@ export interface PaidScreenSubmissionInput {
  * caller seam (tenant mismatch and missing identity still throw there).
  * The runRequestId becomes the payment workflow instance id, so a retried
  * submission adopts the existing instance instead of double-starting.
+ * Issue #2373 (S1b): the email is the checkout contact, not identity —
+ * a submission with no email builds; the gate demands one only when a
+ * checkout is actually minted.
  */
 export function buildPaidScreenSubmission(
   input: PaidScreenSubmissionInput,

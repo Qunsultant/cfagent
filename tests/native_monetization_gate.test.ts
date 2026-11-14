@@ -18,6 +18,7 @@ import { X402CheckoutAdapter } from "../src/services/x402CheckoutAdapter";
 import { InMemoryCheckoutAdapter } from "../src/services/inMemoryCheckoutAdapter";
 import { InMemoryPriceCatalogueAdapter } from "../src/data/inMemoryPriceCatalogueAdapter";
 import { InMemoryFreeRunCounterAdapter } from "../src/data/inMemoryFreeRunCounterAdapter";
+import { InMemoryApprovedFreeQuotaAdapter } from "../src/data/inMemoryApprovedFreeQuotaAdapter";
 import type { PriceFamily } from "../src/data/priceCataloguePorts";
 import type { CheckoutPorts } from "../src/services/checkoutPorts";
 import {
@@ -488,5 +489,147 @@ describe("native gate: free-run counter (#3305)", () => {
       expect((await gate.check({ id: `run-${i}`, family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() })).allowed).toBe(true);
     }
     expect((await gate.check({ id: "run-3", family: "goal", trigger: "manual", nowMs: NOV, account: freeAccount() })).allowed).toBe(false);
+  });
+});
+
+describe("native gate: coverage probe + email relaxation (#2373 S1b, gate-before-email)", () => {
+  const NOV = Date.UTC(2026, 10, 15, 12, 0, 0);
+
+  function probeGate(opts: {
+    allowances?: Partial<Record<PriceFamily, number>>;
+    approved?: boolean;
+    quotaSeed?: { caps: Partial<Record<PriceFamily, number>>; settings: { windowKind: "month" | "week"; atLimitAction: "upgrade_or_buy_credits" | "stop" } };
+    noCatalogue?: boolean;
+  } = {}) {
+    const counter = new InMemoryFreeRunCounterAdapter(opts.allowances ?? { stock: 10 });
+    const quota = opts.quotaSeed ? new InMemoryApprovedFreeQuotaAdapter(opts.quotaSeed) : null;
+    const gate = new NativeMonetizationGate({
+      monetizationEnabled: true,
+      priceCatalogue: opts.noCatalogue
+        ? null
+        : new InMemoryPriceCatalogueAdapter(undefined, opts.approved === false ? undefined : { approvedBy: "test-operator" }),
+      checkout: null,
+      freeRunCounter: counter,
+      approvedFreeQuota: quota,
+    });
+    return { gate, counter, quota };
+  }
+
+  function freeAccount(overrides: Partial<NativeCommercialAccount> = {}): NativeCommercialAccount {
+    return account({ tier: "Free", ...overrides });
+  }
+
+  it("probe: a Free run under the allowance is covered via free_run_allowance and consumes nothing", async () => {
+    const { gate, counter } = probeGate();
+    const probe = await gate.probeCoverage({ account: freeAccount(), family: "stock", tenantId: "t1", nowMs: NOV });
+    expect(probe.covered).toBe(true);
+    expect(probe.via).toBe("free_run_allowance");
+    expect(probe.refusedAtLimit).toBeUndefined();
+    expect(await counter.getUsed({ login: "u1", family: "stock", month: "2026-11" })).toBe(0);
+  });
+
+  it("probe: an exhausted allowance reads as not covered, never as a refusal", async () => {
+    const { gate, counter } = probeGate();
+    for (let i = 0; i < 10; i++) {
+      await counter.consumeFreeRun({ login: "u1", family: "stock", month: "2026-11" });
+    }
+    const probe = await gate.probeCoverage({ account: freeAccount(), family: "stock", tenantId: "t1", nowMs: NOV });
+    expect(probe.covered).toBe(false);
+    expect(probe.refusedAtLimit).toBeUndefined();
+  });
+
+  it("probe: a live grant inside its quota is covered via approved_free_quota", async () => {
+    const { gate } = probeGate({
+      quotaSeed: { caps: { stock: 10 }, settings: { windowKind: "month", atLimitAction: "stop" } },
+    });
+    const granted = freeAccount({
+      unlimitedFreeGrant: { grantedBy: "op1", reason: "Owner-approved pilot account", expiresAtMs: null },
+    });
+    const probe = await gate.probeCoverage({ account: granted, family: "stock", tenantId: "t1", nowMs: NOV });
+    expect(probe.covered).toBe(true);
+    expect(probe.via).toBe("approved_free_quota");
+  });
+
+  it("probe: a live grant at the quota cap is refusedAtLimit with the gate's outcome code, never a checkout", async () => {
+    const { gate, quota } = probeGate({
+      quotaSeed: { caps: { stock: 1 }, settings: { windowKind: "month", atLimitAction: "stop" } },
+    });
+    await quota!.consumeQuotaRun({ tenantId: "t1", login: "u1", family: "stock", period: "2026-11" });
+    const granted = freeAccount({
+      unlimitedFreeGrant: { grantedBy: "op1", reason: "Owner-approved pilot account", expiresAtMs: null },
+    });
+    const probe = await gate.probeCoverage({ account: granted, family: "stock", tenantId: "t1", nowMs: NOV });
+    expect(probe.covered).toBe(false);
+    expect(probe.refusedAtLimit).toBe(true);
+    expect(probe.outcomeCode).toBe("FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED_STOP");
+    expect(probe.nextStep).toBe("stop");
+  });
+
+  it("probe: subscription included runs cover behind an approved price", async () => {
+    const { gate } = probeGate();
+    const sub = account({ tier: "Subscribed", includedRunsRemaining: 2 });
+    const probe = await gate.probeCoverage({ account: sub, family: "stock", tenantId: "t1", nowMs: NOV });
+    expect(probe.covered).toBe(true);
+    expect(probe.via).toBe("subscription_included");
+  });
+
+  it("probe: priced branches are unavailable behind a PROPOSED price, so a credits-only run reads as not covered", async () => {
+    const { gate } = probeGate({ approved: false });
+    const rich = account({ tier: "PayPerUse", creditsUSD: 5 });
+    const probe = await gate.probeCoverage({ account: rich, family: "stock", tenantId: "t1", nowMs: NOV });
+    expect(probe.covered).toBe(false);
+    expect(probe.refusedAtLimit).toBeUndefined();
+  });
+
+  it("probe: a missing catalogue never throws — the run reads as not covered", async () => {
+    const { gate } = probeGate({ noCatalogue: true });
+    const rich = account({ tier: "PayPerUse", creditsUSD: 5 });
+    await expect(
+      gate.probeCoverage({ account: rich, family: "stock", tenantId: "t1", nowMs: NOV }),
+    ).resolves.toMatchObject({ covered: false });
+  });
+
+  it("probe: prepaid credits cover behind an approved price", async () => {
+    const { gate } = probeGate();
+    const rich = account({ tier: "PayPerUse", creditsUSD: 5 });
+    const probe = await gate.probeCoverage({ account: rich, family: "stock", tenantId: "t1", nowMs: NOV });
+    expect(probe.covered).toBe(true);
+    expect(probe.via).toBe("credits");
+  });
+
+  it("check(): a covered run with NO email is allowed and mints no checkout", async () => {
+    const { client, creates } = stripeClient(() => goalEvidence());
+    const ports: CheckoutPorts = { card: new StripeCheckoutAdapter(client), x402: null };
+    const counter = new InMemoryFreeRunCounterAdapter({ stock: 10 });
+    const gate = new NativeMonetizationGate({
+      monetizationEnabled: true,
+      priceCatalogue: new InMemoryPriceCatalogueAdapter(undefined, { approvedBy: "test-operator" }),
+      checkout: ports,
+      freeRunCounter: counter,
+    });
+    const decision = await gate.check({
+      id: "run-1",
+      family: "stock",
+      trigger: "manual",
+      nowMs: NOV,
+      account: freeAccount({ email: "" }),
+    });
+    expect(decision).toMatchObject({ allowed: true, paidVia: "free_run_allowance" });
+    expect(creates).toHaveLength(0);
+    expect(await counter.getUsed({ login: "u1", family: "stock", month: "2026-11" })).toBe(1);
+  });
+
+  it("check(): an uncovered run with NO email throws at the checkout mint — never a free run, never a contactless checkout", async () => {
+    const { gate } = cardGate(() => goalEvidence());
+    await expect(
+      gate.check({ id: "run-1", family: "goal", trigger: "manual", account: account({ email: "" }) }),
+    ).rejects.toThrow(/checkout email is required/);
+  });
+
+  it("check(): a missing user id still throws (identity is the user id, not the email)", async () => {
+    const { gate } = cardGate(() => goalEvidence());
+    await expect(
+      gate.check({ id: "run-1", family: "goal", trigger: "manual", account: account({ userId: "" }) }),
+    ).rejects.toThrow(/Verified user id is required/);
   });
 });

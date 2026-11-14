@@ -169,6 +169,34 @@ export async function resolveTenantBroker(env: unknown): Promise<BrokerId> {
   return stored ?? (isBrokerId(fallback) ? fallback : "alpaca");
 }
 
+/**
+ * Issue #2373 (S1b, F9) — the PRESENCE-AWARE data-provider
+ * selection: the stored dataProviderId, or null when the tenant
+ * has selected nothing. Mirror of resolveTenantBrokerSelection
+ * (env override first, then the store, never a default): the
+ * paid seam's provider-mismatch refusal must not refuse an
+ * unconfigured tenant, so it reads through here — not through
+ * resolveTenantProviders, whose absent-row default would read
+ * as a selection. A read failure is null (not a guessed
+ * provider).
+ */
+export async function resolveTenantDataProviderSelection(env: unknown): Promise<string | null> {
+  const envOverride =
+    (env as Record<string, unknown> | null | undefined)?.TENANT_DATA_PROVIDER_ID ??
+    (env as Record<string, unknown> | null | undefined)?.DATA_PROVIDER_ID;
+  if (isDataProviderId(envOverride)) return envOverride;
+  try {
+    const { createCommercialAdapter } = await import("../data/createCommercialPorts");
+    const adapter = createCommercialAdapter(env as { AGENT_DB?: unknown });
+    if (!adapter) return null;
+    const { resolveIaaaTenant } = await import("../security/iaaaGithubEndToEnd");
+    const stored = await adapter.getTenantDataProviderSelection(resolveIaaaTenant(env as never));
+    return isDataProviderId(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Coded response for a broker surface the selected broker does not
  * implement. Never an E*TRADE error, never a silent fallback.
  * Issue #4430 (S1a): the body carries `error` with the same coded
@@ -178,6 +206,27 @@ export function brokerUnavailableResponse(brokerId: string): Response {
   const message = codedMessage("FAILURE_BROKER_UNAVAILABLE");
   return Response.json(
     { code: "FAILURE_BROKER_UNAVAILABLE", error: message, message, retryable: false, selectedBroker: brokerId },
+    { status: 409 },
+  );
+}
+
+/** Issue #2373 (S1b, F9) — coded response for a paid-seam run whose
+ * route-implied data provider differs from the tenant's stored
+ * data-provider selection. Same shape as the broker-gate 409
+ * (code + `error` carrying the coded message, so the client
+ * never drops the reason): the run is refused, no fallback
+ * provider is used, and nothing was started. */
+export function providerMismatchResponse(requestedProvider: string, selectedProvider: string): Response {
+  const message = codedMessage("FAILURE_PROVIDER_MISMATCH");
+  return Response.json(
+    {
+      code: "FAILURE_PROVIDER_MISMATCH",
+      error: message,
+      message,
+      retryable: false,
+      requestedProvider,
+      selectedProvider,
+    },
     { status: 409 },
   );
 }

@@ -24,6 +24,8 @@ type ScreenStub = (body: Record<string, unknown>) => Response;
 function installFetch(opts: {
   monetization: boolean | "fail";
   screen: ScreenStub;
+  /** Issue #2373 (S1b): the offer-compare payload for the free-run balance line, or undefined for the default `{}`. */
+  offerCompare?: Record<string, unknown>;
 }): { screenBodies: Array<Record<string, unknown>> } {
   const screenBodies: Array<Record<string, unknown>> = [];
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -31,6 +33,9 @@ function installFetch(opts: {
     if (url.includes("/api/payments/agentic/commercial/pricing")) {
       if (opts.monetization === "fail") return new Response("not found", { status: 404 });
       return Response.json({ monetizationEnabled: opts.monetization });
+    }
+    if (url.includes("/offer/compare")) {
+      return Response.json(opts.offerCompare ?? {});
     }
     if (url.includes("/api/etrade/screen")) {
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
@@ -195,5 +200,98 @@ describe("stock-hub new-screen paid run (#3239)", () => {
     expect("async" in sent).toBe(false);
     expect("email" in sent).toBe(false);
     expect(container.textContent).not.toContain("Payment started");
+  });
+});
+
+describe("stock-hub new-screen paid run, gate-before-email (#2373 S1b)", () => {
+  it("runs with NO email when monetization is ON — the gate decides coverage first, and a covered run starts", async () => {
+    const { screenBodies } = installFetch({
+      monetization: true,
+      screen: () =>
+        Response.json(
+          { status: "payment_started", runRequestId: "req-9", workflowId: "wf-9" },
+          { status: 202 },
+        ),
+    });
+    await renderNewScreen();
+    // No email filled: the run must still go out (async, no email),
+    // and the 202 payment state shows — the client never blocks on
+    // a checkout email the gate has not asked for.
+    await submitForm();
+    expect(screenBodies).toHaveLength(1);
+    expect(screenBodies[0].async).toBe(true);
+    expect("email" in screenBodies[0]).toBe(false);
+    expect(container.textContent).toContain("req-9");
+    expect(container.textContent).toContain("Payment started");
+  });
+
+  it("a 400 checkout_email_required shows the email prompt and the checkout input (the gate asked for payment)", async () => {
+    installFetch({
+      monetization: true,
+      screen: () =>
+        Response.json(
+          {
+            error: "email (checkout contact) is required when monetization is on.",
+            code: "checkout_email_required",
+          },
+          { status: 400 },
+        ),
+    });
+    await renderNewScreen();
+    await submitForm();
+    expect(container.textContent).toMatch(/Enter a checkout email/i);
+    expect(
+      container.querySelector('input[placeholder="Payment contact email"]'),
+    ).not.toBeNull();
+    const retry = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Start payment workflow"),
+    );
+    expect(retry).toBeDefined();
+  });
+
+  it("shows the remaining free runs while monetization is on", async () => {
+    installFetch({
+      monetization: true,
+      screen: () =>
+        Response.json(
+          { status: "payment_started", runRequestId: "req-10", workflowId: "wf-10" },
+          { status: 202 },
+        ),
+      offerCompare: {
+        trigger: "ambient",
+        eligible: true,
+        current: {
+          effectiveTier: "Free",
+          heldPlan: null,
+          includedRunsRemaining: 0,
+          packRunsRemaining: 0,
+          creditsUSD: 0,
+          freeRunsRemaining: 7,
+          segment: "default",
+        },
+        targets: [],
+        downgradeTargets: [],
+        unavailableTargets: [],
+        runsPacks: [],
+        mentions: { referral: null, freeAccess: null },
+        perRun: null,
+        topUp: null,
+      },
+    });
+    await renderNewScreen();
+    expect(container.textContent).toContain("7 free runs remaining this month");
+  });
+
+  it("hides the free-run line when the compare read fails", async () => {
+    installFetch({
+      monetization: true,
+      screen: () =>
+        Response.json(
+          { status: "payment_started", runRequestId: "req-11", workflowId: "wf-11" },
+          { status: 202 },
+        ),
+    });
+    await renderNewScreen();
+    expect(container.textContent).not.toContain("free runs remaining this month");
   });
 });

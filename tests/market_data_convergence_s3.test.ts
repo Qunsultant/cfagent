@@ -360,7 +360,11 @@ describe("S3 (c) — premium stock-signals: no constant confidence, pipeline-der
     expect(src).not.toContain("0.88");
     expect(src).not.toContain("YFinanceMarketScreener");
     expect(src).not.toContain("confidence: 0.");
-    expect(src).toContain('provider: "yahoo"');
+    // Issue #2373 (S1b, F9): the fulfilment provider is the
+    // tenant's stored data-provider selection, resolved per run —
+    // never a hardcoded `provider: "yahoo"` literal.
+    expect(src).not.toContain('provider: "yahoo"');
+    expect(src).toContain("resolveTenantDataProviderSelection");
     expect(src).toContain("screenScore");
   });
 
@@ -374,6 +378,11 @@ describe("S3 (c) — premium stock-signals: no constant confidence, pipeline-der
       X402_FACILITATOR_URL: "https://x402.org/facilitator",
       X402_AUTO_APPROVE_LIMIT: "0.05",
       X402_AGENT_WALLET_KEY: "test-agent-wallet-s3",
+      // Issue #2373 (S1b, F9): the tenant's stored data-provider
+      // selection is yahoo here, so the fulfilment resolves to the
+      // Yahoo provider through the tenant selection — not a
+      // hardcoded literal in the route.
+      TENANT_DATA_PROVIDER_ID: "yahoo",
     } as unknown as Env;
 
     const runScreen = vi.fn(async () => marketDataResult());

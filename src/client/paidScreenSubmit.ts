@@ -21,6 +21,46 @@ export const BROKER_UNAVAILABLE_ERROR = "FAILURE_BROKER_UNAVAILABLE";
 export const BROKER_UNAVAILABLE_MESSAGE =
   "This broker surface is not available for the selected broker. Change the broker selection in Settings.";
 
+/** The paid seam's refusal code when payment is needed but no checkout contact was supplied (#2373 S1b). */
+export const CHECKOUT_EMAIL_REQUIRED_ERROR = "checkout_email_required";
+
+/** The provider-mismatch refusal code: the route's implied provider differs from the tenant's stored data-provider selection (#2373 S1b, F9). */
+export const PROVIDER_MISMATCH_ERROR = "FAILURE_PROVIDER_MISMATCH";
+
+/** The coded business message for a provider-mismatch refusal (#2373 S1b, F9). */
+export const PROVIDER_MISMATCH_MESSAGE =
+  "The screen provider does not match the tenant's selected data provider. Change the provider selection in Settings.";
+
+/** The approved-free quota cap refusal codes: the gate refuses the run with no fall-through (#3241, surfaced by the #2373 S1b probe). */
+export const APPROVED_FREE_QUOTA_EXHAUSTED_ERROR = "FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED";
+export const APPROVED_FREE_QUOTA_EXHAUSTED_STOP_ERROR = "FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED_STOP";
+
+/** The fixed message for an approved-free quota cap refusal (#2373 S1b): payment does not help — the run is refused, not payable. */
+export const APPROVED_FREE_QUOTA_EXHAUSTED_MESSAGE =
+  "The approved-free quota for this service is exhausted for this period. Nothing runs over the allowance — try again next period.";
+
+/** True when the failure is the provider-mismatch 409 refusal, by status and code (#2373 S1b, F9). */
+export function isProviderMismatchError(status: number, error?: string, code?: string): boolean {
+  return status === 409 && (error === PROVIDER_MISMATCH_ERROR || code === PROVIDER_MISMATCH_ERROR);
+}
+
+/** True when the failure is the seam's checkout-contact 400, by status and code (#2373 S1b). */
+export function isCheckoutEmailRequiredError(status: number, error?: string, code?: string): boolean {
+  return (
+    status === 400 &&
+    (code === CHECKOUT_EMAIL_REQUIRED_ERROR ||
+      (typeof error === "string" && /checkout contact/i.test(error) && /required/i.test(error)))
+  );
+}
+
+/** True when the failure is the gate's approved-free quota cap refusal, by status and code (#2373 S1b). */
+export function isApprovedFreeQuotaExhaustedError(status: number, code?: string): boolean {
+  return (
+    status === 402 &&
+    (code === APPROVED_FREE_QUOTA_EXHAUSTED_ERROR || code === APPROVED_FREE_QUOTA_EXHAUSTED_STOP_ERROR)
+  );
+}
+
 /**
  * Read the renderable error text out of a screen error body (#4430).
  * Server bodies carry the reason under `error` or under `message`
@@ -68,34 +108,39 @@ export interface PaidScreenOptions {
 }
 
 /**
- * The paid POST body: async + checkout email ride only when monetization
- * is known ON and an email is present. Every other state returns the
- * body untouched, so flag-OFF behavior is byte-identical to today.
+ * The paid POST body: async rides whenever monetization is known
+ * ON, and the checkout email rides only when one is present
+ * (issue #2373 S1b, gate-before-email — a covered run starts
+ * with no email demanded, so the body carries async without an
+ * email and the server gate decides coverage first). Every other
+ * state returns the body untouched, so flag-OFF behavior is
+ * byte-identical to today.
  */
 export function buildPaidScreenBody(
   body: Record<string, unknown>,
   opts: PaidScreenOptions,
 ): Record<string, unknown> {
+  if (opts.monetization !== "on") return body;
   const email = opts.checkoutEmail.trim();
-  if (opts.monetization !== "on" || !email) return body;
-  return { ...body, async: true, email };
+  return email ? { ...body, async: true, email } : { ...body, async: true };
 }
 
 /**
  * The paid GET query (market-data route: async rides `async=1`, the
- * checkout contact rides `email`). Same gating as the POST body: only
- * when monetization is known ON and an email is present; the input
- * params are never mutated.
+ * checkout contact rides `email`). Same gating as the POST body:
+ * async rides whenever monetization is known ON, the email only
+ * when one is present (issue #2373 S1b); the input params are
+ * never mutated.
  */
 export function buildPaidScreenQuery(
   params: URLSearchParams,
   opts: PaidScreenOptions,
 ): URLSearchParams {
+  if (opts.monetization !== "on") return params;
   const email = opts.checkoutEmail.trim();
-  if (opts.monetization !== "on" || !email) return params;
   const next = new URLSearchParams(params);
   next.set("async", "1");
-  next.set("email", email);
+  if (email) next.set("email", email);
   return next;
 }
 
@@ -138,6 +183,18 @@ export function mapScreenError(status: number, error?: string, code?: string): s
       "Switch the hub provider to Yahoo Finance to run this screen through the workflow instead."
     );
   }
+  // Issue #2373 (S1b, F9): the provider-mismatch 409 maps to its
+  // coded business message — never the generic 409 text, never the
+  // raw code.
+  if (isProviderMismatchError(status, raw, code)) {
+    return PROVIDER_MISMATCH_MESSAGE;
+  }
+  // Issue #2373 (S1b): the approved-free quota cap refusal is a
+  // refusal, not a payment prompt — payment does not help, so it
+  // maps to its own fixed message, never the generic 402 text.
+  if (isApprovedFreeQuotaExhaustedError(status, code)) {
+    return APPROVED_FREE_QUOTA_EXHAUSTED_MESSAGE;
+  }
   // Any 402 on a screen route is the paid seam's refusal: the seam is
   // the only 402 producer there, whatever body rides with it.
   if (status === 402 || raw === MONETIZATION_WORKFLOW_ERROR) {
@@ -146,7 +203,10 @@ export function mapScreenError(status: number, error?: string, code?: string): s
       "Start the run through the payment workflow (Stock Hub → Run a new screen) — no screen has started yet."
     );
   }
-  if (raw && /checkout contact/i.test(raw) && /required/i.test(raw)) {
+  // Issue #2373 (S1b): the seam demands the checkout contact only
+  // when the gate says payment is actually needed — by code, or by
+  // the message the server still carries for it.
+  if (isCheckoutEmailRequiredError(status, raw, code)) {
     return "Enter a checkout email to run this paid screen.";
   }
   if (raw && isBareCode(raw)) {

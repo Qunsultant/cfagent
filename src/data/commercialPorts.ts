@@ -341,6 +341,17 @@ export interface CommercialStore {
    * an explicitly stored etrade selection.
    */
   getTenantBrokerSelection(tenantId: string): Promise<string | null>;
+  /**
+   * Issue #2373 (S1b, F9) — the tenant's STORED data-provider
+   * selection, or null when no data-provider selection is stored
+   * (no settings row, or a row whose dataProviderId is empty).
+   * The mirror of getTenantBrokerSelection: getTenantProviders
+   * applies the platform default, so a caller that must tell
+   * "no selection stored" apart from an explicitly stored one
+   * (the paid seam's provider-mismatch refusal must not refuse
+   * an unconfigured tenant) reads through here instead.
+   */
+  getTenantDataProviderSelection(tenantId: string): Promise<string | null>;
   setTenantProviders(
     tenantId: string,
     providers: TenantProviders,

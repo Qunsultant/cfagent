@@ -275,7 +275,14 @@ describe("buildPaidScreenSubmission (#2186)", () => {
   });
 
   it("missing identity fails closed", () => {
-    expect(() => buildPaidScreenSubmission({ ...input, email: "" })).toThrow();
     expect(() => buildPaidScreenSubmission({ ...input, userId: "" })).toThrow();
+    expect(() => buildPaidScreenSubmission({ ...input, tenantId: "" })).toThrow();
+  });
+
+  // Issue #2373 (S1b, gate-before-email): the email is the checkout
+  // contact, not identity — a covered run submits with no email and
+  // the gate demands one only when a checkout is actually minted.
+  it("missing email no longer throws at build", () => {
+    expect(() => buildPaidScreenSubmission({ ...input, email: "" })).not.toThrow();
   });
 });
