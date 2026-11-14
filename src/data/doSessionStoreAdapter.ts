@@ -27,6 +27,7 @@
  * #CDO-mha7
  */
 import { runDoSchemaMigration } from "./doSchemaMarker";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 /** Parameterized statement templates (placeholders only, never bound values). */
 export const STMT_POINT_GET =
@@ -100,13 +101,7 @@ export class DoSessionStoreAdapter {
   ensureSchema(): void {
     const sql = this.resolveSql();
     sql.exec(
-      `CREATE TABLE IF NOT EXISTS kv_store (
-         ns TEXT NOT NULL,
-         key TEXT NOT NULL,
-         value TEXT NOT NULL,
-         expires_at INTEGER,
-         PRIMARY KEY (ns, key)
-       )`,
+      doTableSql("kv_store"),
     );
     runDoSchemaMigration(
       {
