@@ -195,7 +195,7 @@ describe("EXCL-P01 excluded authors (Dependabot) are never automated", () => {
     expect(enrollWorkflow).toContain("AUTHOR_LOGIN");
     expect(enrollWorkflow).toContain("(excluded by config) — never enrolled.");
     expect(enrollWorkflow).toContain("--json number,id,isDraft,author,labels");
-    expect(readyWorkflow).toContain("--json number,isDraft,headRefOid,author");
+    expect(readyWorkflow).toContain("--json number,id,isDraft,headRefOid,author");
   });
 });
 describe("CFG-P01 one source for the label, the gating set and the limit", () => {

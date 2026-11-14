@@ -99,11 +99,22 @@ describe("4315-P03 the verdict", () => {
   });
 });
 
-describe("4315-P04 the action", () => {
-  it("flips with ready_for_review and tolerates already-ready", () => {
-    expect(workflow).toContain("/ready_for_review");
-    expect(workflow).toContain("STILL_DRAFT=$(gh api");
-    expect(workflow).toContain("probably already ready");
+describe("4315-P04 / 4495 the action", () => {
+  it("flips via GraphQL and fails loudly when the PR is still a draft", () => {
+    // REST `POST /pulls/{n}/ready_for_review` answers 404 on this repository,
+    // and the old catch-all hid it behind a green run (#4495).
+    expect(workflow).toContain("markPullRequestReadyForReview");
+    expect(workflow).not.toContain("pulls/$PR/ready_for_review");
+    expect(workflow).not.toContain("probably already ready");
+    expect(workflow).toContain("STILL_DRAFT=$(gh api graphql");
+    expect(workflow).toContain("::error::Could not mark PR #$PR ready");
+    expect(workflow).toContain("FAILED=1");
+  });
+
+  it("groups runs per head branch, so a main completion cannot cancel one", () => {
+    expect(workflow).toContain(
+      "group: auto-ready-${{ github.event.workflow_run.head_branch || 'sweep' }}",
+    );
   });
 });
 

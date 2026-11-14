@@ -31,6 +31,15 @@
 # decides a verdict, a missing run is pending, never green. Marking ready merges
 # NOTHING by itself: the merge queue re-validates every requirement.
 #
+# FLIP (#4495): `markPullRequestReadyForReview` (GraphQL). The REST endpoint
+# `POST /pulls/{n}/ready_for_review` answers 404 on this repository even for an
+# owner token, and the old catch-all reported the failure as "probably already
+# ready — continuing", so a green run could sit behind a draft that never
+# flipped (#4317 class). A flip that leaves the PR as a draft now fails the run.
+#
+# CONCURRENCY: grouped per head branch, so a main-branch completion cannot
+# supersede and cancel a PR's pending evaluation.
+#
 # CONFIG: `config/auto-merge.json` is the single source for the label, the
 # gating workflow set and the sweep limit, shared with `auto-merge-trusted.yml`
 # and read from the default branch (the run that introduces it reads its own
@@ -64,7 +73,9 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: auto-ready-sweep
+  # Per head branch: a main-branch completion must not supersede and cancel a
+  # PR's pending evaluation (#4495). A sweep is one subject of its own.
+  group: auto-ready-${{ github.event.workflow_run.head_branch || 'sweep' }}
   cancel-in-progress: false
 
 env:
@@ -111,23 +122,24 @@ jobs:
           EXCLUDED: ${{ steps.config.outputs.excluded }}
         run: |
           set -euo pipefail
+          FAILED=0
 
-          # Eligible drafts: open + draft + the configured label, with the head
-          # SHA each one is judged on. `gh pr list` paginates to the limit.
+          # Eligible drafts: open + draft + the configured label, with the node
+          # id (for the GraphQL flip) and the head SHA each one is judged on.
           PRS=$(gh pr list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open \
-            --limit "$SWEEP_LIMIT" --json number,isDraft,headRefOid,author)
+            --limit "$SWEEP_LIMIT" --json number,id,isDraft,headRefOid,author)
           # Excluded authors (Dependabot) are never flipped ready — owner rule,
           # 2026-11-14; the list lives in config/auto-merge.json.
           DRAFTS=$(printf '%s' "$PRS" | jq -r --argjson ex "$EXCLUDED" '
             .[] | select(.isDraft == true)
             | select(([(.author.login // ""), (.author.name // "")] | any(. as $a | ($ex | index($a)) != null)) | not)
-            | "\(.number)\t\(.headRefOid)"')
+            | "\(.number)\t\(.id)\t\(.headRefOid)"')
           if [ -z "$DRAFTS" ]; then
             echo "No eligible draft PRs."
             exit 0
           fi
 
-          while IFS=$'\t' read -r PR HEAD_SHA; do
+          while IFS=$'\t' read -r PR PR_ID HEAD_SHA; do
             [ -n "$PR" ] || continue
 
             # Full required set green on this head? (watcher verdict logic:
@@ -148,16 +160,42 @@ jobs:
               continue
             fi
 
-            # Re-check the draft flag immediately before the POST; tolerate a
-            # 422 (already ready — a human flipped it meanwhile).
-            STILL_DRAFT=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.draft')
+            # Re-check the draft flag immediately before the flip: a human may
+            # have flipped it meanwhile, in which case there is nothing to do.
+            STILL_DRAFT=$(gh api graphql -F id="$PR_ID" -f query='
+              query($id: ID!) { node(id: $id) { ... on PullRequest { isDraft } } }
+            ' --jq '.data.node.isDraft')
             if [ "$STILL_DRAFT" != "true" ]; then
               echo "PR #$PR is no longer a draft — skipping."
               continue
             fi
-            if gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$PR/ready_for_review" --silent; then
+            # GraphQL, not REST: POST /pulls/{n}/ready_for_review answers 404 on
+            # this repository, even for an owner token (#4495). A failure is
+            # loud unless the PR is already ready — the old "probably already
+            # ready — continuing" is what let the draft stay draft behind a
+            # green run (#4317 class, #4321, #4325).
+            if OUT=$(gh api graphql -F id="$PR_ID" -f query='
+              mutation($id: ID!) {
+                markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                  pullRequest { isDraft }
+                }
+              }
+            ' 2>&1); then
               echo "Marked PR #$PR ready for review; the enrollment workflow queues it."
             else
-              echo "Could not mark PR #$PR ready (probably already ready) — continuing."
+              AFTER=$(gh api graphql -F id="$PR_ID" -f query='
+                query($id: ID!) { node(id: $id) { ... on PullRequest { isDraft } } }
+              ' --jq '.data.node.isDraft' 2>/dev/null || echo unknown)
+              if [ "$AFTER" = "false" ]; then
+                echo "PR #$PR is already ready — nothing to do."
+              else
+                echo "::error::Could not mark PR #$PR ready (draft=$AFTER): $OUT"
+                FAILED=1
+              fi
             fi
           done <<< "$DRAFTS"
+
+          if [ "$FAILED" != "0" ]; then
+            echo "::error::At least one draft could not be flipped — see the errors above."
+            exit 1
+          fi
