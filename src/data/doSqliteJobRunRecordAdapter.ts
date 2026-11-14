@@ -2,7 +2,7 @@
  * Issue #2964 — the DO-SQLite implementation of the job-run-record
  * port (orchestrator-schedule runs). Mirrors the paused-schedule
  * adapter's shape (issue #2337): the table is ensured lazily on
- * every operation (CREATE TABLE IF NOT EXISTS), rows map through
+ * every operation (idempotent creation), rows map through
  * rowToRecord, and record() inserts then prunes that job to the
  * per-job cap so the table cannot grow without bound on the
  * free tier. All sql.exec sites live here, inside src/data/ —
@@ -18,6 +18,7 @@ import {
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
 import { ensureJobRunRecordIndexes } from "./jobRunRecordIndexSchema";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 function ensureTable(sql: SqlStorage): void {
   sql.exec(doTableSql("job_run_records"));
@@ -31,32 +32,32 @@ function ensureTable(sql: SqlStorage): void {
   ) as Array<{ name?: unknown }>;
   const names = new Set(cols.map((c) => String(c?.name ?? "")));
   if (!names.has("trigger_text")) {
-    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN trigger_text TEXT`);
+    sql.exec(remainderAlterSql("job_run_records", "trigger_text"));
   }
   if (!names.has("schedule_id")) {
-    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN schedule_id TEXT`);
+    sql.exec(remainderAlterSql("job_run_records", "schedule_id"));
   }
   if (!names.has("async_job_id")) {
-    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN async_job_id TEXT`);
+    sql.exec(remainderAlterSql("job_run_records", "async_job_id"));
   }
   if (!names.has("workflow_id")) {
-    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN workflow_id TEXT`);
+    sql.exec(remainderAlterSql("job_run_records", "workflow_id"));
   }
   // Issue #3655 — broker + data-provider + mode provenance columns,
   // added when missing so existing DO tables upgrade in place.
   if (!names.has("broker_id")) {
-    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN broker_id TEXT`);
+    sql.exec(remainderAlterSql("job_run_records", "broker_id"));
   }
   if (!names.has("data_provider_id")) {
-    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN data_provider_id TEXT`);
+    sql.exec(remainderAlterSql("job_run_records", "data_provider_id"));
   }
   if (!names.has("mode")) {
-    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN mode TEXT`);
+    sql.exec(remainderAlterSql("job_run_records", "mode"));
   }
   // Issue #3655 (effective mode): the resolver source rides the row
   // with the mode, so a pinned-live run is visible as such.
   if (!names.has("mode_source")) {
-    sql.exec(`ALTER TABLE ${JOB_RUN_RECORDS_TABLE} ADD COLUMN mode_source TEXT`);
+    sql.exec(remainderAlterSql("job_run_records", "mode_source"));
   }
   sql.exec(doIndexSql("job_run_records_job_idx"));
   // Issue #3121 Phase 2 (#3124) — the recent-read ordering index
