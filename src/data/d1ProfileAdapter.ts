@@ -40,7 +40,7 @@ export function createD1ProfileDb(d1: D1Database): ProfileDb {
 /**
  * Idempotent schema-ensure: applies migration 0050 (the
  * agent_user_profiles table + the agent_profile_idempotency_keys
- * table). Re-ensure is a no-op (CREATE TABLE IF NOT EXISTS plus
+ * table). Re-ensure is a no-op (idempotent creation plus
  * the migration marker), so a later ensure never overwrites a
  * stored profile.
  */
