@@ -1,0 +1,3 @@
+### Fixed
+
+- **D1 instance re-saves keep the schedule link (#4427):** the D1 job-pipeline instance upsert's `onConflictDoUpdate` set omitted `runScheduleId`, so a schedule id stamped after the row already existed never landed — `defineJob` mints the instance before any run, and the scheduled dispatch then saves into the conflict path. The column is now in the set beside `runAsyncJobId`, so a scheduled run keeps its schedule identity across re-saves and a resume after a host restart no longer loses it. The other two residencies (DO SQLite, in-memory) had no hand-maintained set to omit it from; the pin asserts the neighbours in the same set stay intact. #autoclaw-001

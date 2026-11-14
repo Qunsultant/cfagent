@@ -272,3 +272,31 @@ describe("schema ↔ migration agreement (the foundation drift pin)", () => {
     expect(pragmaColumns("job_run_records")).toEqual(mappingColumns(jobRunRecords));
   });
 });
+
+describe("4427-P01 the D1 instance upsert keeps the schedule link", () => {
+  it("keeps a schedule id stamped after the row already exists", async () => {
+    const mock = new MockD1Database();
+    const stores = new D1JobPipelineStores(createD1JobPipelineDb(mock as any));
+    await ensureJobPipelineSchema(createD1JobPipelineDb(mock as any));
+
+    // defineJob mints the instance first — no run, so no schedule link yet.
+    await stores.instances.saveInstance({ ...INSTANCE, runScheduleId: null, state: "idle" });
+
+    // A scheduled dispatch then saves the same instance carrying the schedule
+    // that fired it. This is the conflict path: if the upsert set omits the
+    // column, the stamp never lands and resume-after-restart loses the link.
+    await stores.instances.saveInstance({
+      ...INSTANCE,
+      runScheduleId: "sched-4427",
+      state: "running",
+      updatedAt: "2026-11-14T00:00:00.000Z",
+    });
+
+    const read = await stores.instances.getInstance("feed-nasdaq");
+    expect(read?.runScheduleId).toBe("sched-4427");
+    // Neighbours in the same upsert set stay intact.
+    expect(read?.runAsyncJobId).toBe("bridge-1");
+    expect(read?.state).toBe("running");
+    expect(read?.currentRunId).toBe("run-1");
+  });
+});
