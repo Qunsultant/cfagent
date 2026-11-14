@@ -122,8 +122,11 @@ describe("trading hub shell composition (#4167)", () => {
   it("the autopilot page carries exactly one h1 — the hub shell, not the panel's", async () => {
     await mountHub("autopilot");
     expect(h1s()).toEqual(["Autopilot"]);
-    // The panel still renders — only its chrome collapsed.
-    expect(container.textContent).toContain("Executive performance");
+    // The panel still renders — only its chrome collapsed. The ribbon
+    // is now a KpiRibbon in the template's kpiRibbon slot (#3140), so
+    // its "Executive performance" h2 is gone; "Portfolio NAV" is the
+    // ribbon's first KPI label.
+    expect(container.textContent).toContain("Portfolio NAV");
     expect(container.textContent).toContain("Job outcomes");
   });
 

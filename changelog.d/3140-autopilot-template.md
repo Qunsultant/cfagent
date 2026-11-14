@@ -1,0 +1,2 @@
+### Changed
+- Autopilot page on PageTemplate slots (Wave 1, #3140): the executive ribbon moves into the template's kpiRibbon slot as a KpiRibbon, and the chart, policy-limits and verdict/policy cards become DetailCards with CardHeaders; the untitled Status section stays untitled until #4409. Dead autopilot styles carry scoped Deprecated headers (successor: template organisms / primitives). Zero behavior change.

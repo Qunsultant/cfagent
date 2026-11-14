@@ -11144,9 +11144,22 @@ body {
   color: var(--color-success);
 }
 
+/* Autopilot block: mixed — the dead rules below each carry their own
+   Deprecated header naming the template organism that superseded
+   them. The live table/modal rules (.autopilot-table-container,
+   .action-table-row, .time-cell, .summary-cell,
+   .autopilot-edit-limits-modal, .autopilot-killswitch-modal) are NOT
+   deprecated; do not mark them so. Deletion of dead classes is a
+   separate issue (no-deletion gate). */
+
 /* ==========================================================================
    Autopilot Control Center & Policy Limits Cards (Issue #20)
    ========================================================================== */
+
+/* Deprecated: do not add new classes here — the executive ribbon is
+   superseded by KpiRibbon in the PageTemplate kpiRibbon slot
+   (src/client/components/ui/KpiRibbon.tsx, #3140). Deletion is a
+   separate issue (no-deletion gate). */
 
 /* NextGenTP Executive Performance Ribbon */
 .autopilot-executive-ribbon {
@@ -11166,6 +11179,10 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Deprecated: do not add new classes here — the chart card is
+   superseded by DetailCard (src/client/components/ui/DetailCard.tsx,
+   #3140). Deletion is a separate issue (no-deletion gate). */
 
 /* NextGenTP Chart Card */
 .autopilot-chart-card {
@@ -11299,6 +11316,12 @@ body {
 .autopilot-card:hover {
   border-color: var(--color-border-medium);
 }
+
+/* Deprecated: do not add new classes here — the status card's
+   bespoke surface classes have no component use; the Status section
+   renders a plain Card primitive in src/client/components/ui/. The
+   section itself stays untitled in #3140 and is named in #4409.
+   Deletion is a separate issue (no-deletion gate). */
 
 /* Status Card */
 .autopilot-status-card {
@@ -11448,6 +11471,10 @@ body {
   padding-top: 0.85rem;
 }
 
+/* Deprecated: do not add new classes here — the limits card is
+   superseded by DetailCard (src/client/components/ui/DetailCard.tsx,
+   #3140). Deletion is a separate issue (no-deletion gate). */
+
 /* Policy Limits Card */
 .autopilot-limits-card {
   display: flex;
@@ -11500,6 +11527,10 @@ body {
   align-items: center;
   gap: 0.35rem;
 }
+
+/* Deprecated: do not add new classes here — the actions card is
+   superseded by DetailCard (src/client/components/ui/DetailCard.tsx,
+   #3140). Deletion is a separate issue (no-deletion gate). */
 
 /* Recent Autonomous Actions Card */
 .autopilot-actions-card {
@@ -11620,6 +11651,12 @@ body {
   border: 1px solid var(--color-border-subtle);
 }
 
+/* Deprecated: do not add new classes here — .autopilot-actions-table
+   (and its th/td rules) is superseded by the Table primitive in
+   src/client/components/ui/; the live .autopilot-table-container,
+   .action-table-row, .time-cell and .summary-cell rules below stay.
+   Deletion is a separate issue (no-deletion gate). */
+
 .autopilot-actions-table {
   width: 100%;
   border-collapse: collapse;
@@ -11661,6 +11698,12 @@ body {
   gap: 0.5rem;
 }
 
+/* Deprecated: do not add new classes here — .action-summary-text,
+   .symbol-cell .symbol-pill and .attestation-cell
+   .did-signature-badge (and its :hover) have no component use; the
+   cells render through the Table primitive's cellClassName props.
+   Deletion is a separate issue (no-deletion gate). */
+
 .action-summary-text {
   color: var(--color-text-secondary);
   font-weight: 500;
@@ -11687,6 +11730,11 @@ body {
   color: var(--color-success-text);
   border-color: var(--color-success-border);
 }
+
+/* Deprecated: do not add new classes here — the bespoke empty state
+   is superseded by the EmptyState primitive in
+   src/client/components/ui/. Deletion is a separate issue
+   (no-deletion gate). */
 
 /* Empty State */
 .autopilot-empty-state {
@@ -11728,6 +11776,12 @@ body {
   width: 90%;
   box-shadow: var(--shadow-lg);
 }
+
+/* Deprecated: do not add new classes here — .form-group-grid,
+   .modal-actions-row, .modal-right-actions, .btn-save-limits and
+   .btn-cancel have no component use; the modals render through the
+   Modal primitive and ui/ form primitives. Deletion is a separate
+   issue (no-deletion gate). */
 
 .form-group-grid {
   display: grid;
