@@ -1,0 +1,3 @@
+### Fixed
+
+- **Auto-ready's flip works, and a failed flip fails the run (#4495):** the workflow flipped drafts with `POST /pulls/{n}/ready_for_review`, which answers 404 on this repository even for an owner token — and the step logged "probably already ready — continuing", leaving a green run behind a draft that never flipped. The flip now uses the `markPullRequestReadyForReview` GraphQL mutation, re-reads the draft flag on failure, and fails loudly when the PR is still a draft. Runs are also grouped per head branch, so a main-branch completion can no longer cancel a PR's pending evaluation. #autoclaw-001
