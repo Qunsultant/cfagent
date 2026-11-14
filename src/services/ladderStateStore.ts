@@ -15,6 +15,7 @@
  */
 
 import type { SqlStorage } from "../orm";
+import { remainderTableSql } from "../data/schemaComponent/remainderCatalogue";
 
 export interface StoredLadderRung {
   rungIndex: number;
@@ -47,9 +48,7 @@ export function createSqlLadderStateStore(sql: SqlStorage): LadderStateStore {
   const ensure = () => {
     if (ensured) return;
     try {
-      sql.exec(
-        "CREATE TABLE IF NOT EXISTS mas_ladder_states (ladder_id TEXT PRIMARY KEY, symbol TEXT, entry_mode TEXT, spec_json TEXT, plan_json TEXT, placed_json TEXT, committed_notional REAL, stopped_by TEXT, created_at TEXT, updated_at TEXT)",
-      );
+      sql.exec(remainderTableSql("mas_ladder_states"));
       ensured = true;
     } catch {
       // A store that cannot create its table fails loud on the next save.
