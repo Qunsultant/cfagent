@@ -3338,6 +3338,17 @@ export function buildD1Catalogue(): SchemaCatalogue {
 export const D1_CATALOGUE: SchemaCatalogue = buildD1Catalogue();
 
 /**
+ * The table statement for one D1 table, byte-identical to the base.
+ * Added in P3 for the D1 adapters that delegate to existing entries
+ * (d1QuoteSourceAdapter, d1ResourceUsageAdapter,
+ * d1ResourceRollupAdapter) — the entries themselves are P1's, this
+ * accessor only reads them.
+ */
+export function d1TableSql(table: string): string {
+  return D1_CATALOGUE.get(`schema.d1.${table}.create_table`).statement;
+}
+
+/**
  * Assemble one migration's sql from its catalogue codes,
  * byte-identical to the base runner's inline string (the shape
  * table carries the per-migration whitespace deviations).
