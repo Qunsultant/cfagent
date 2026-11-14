@@ -4,8 +4,8 @@
  * over the host Durable Object's own SQLite.
  *
  * Mirrors the paused-schedule adapter's shape (issue #2337): the
- * table is ensured lazily on every operation (CREATE TABLE IF NOT
- * EXISTS), rows map through rowToRecord, and save() is a DELETE +
+ * table is ensured lazily on every operation (idempotent creation,
+ * rows map through rowToRecord, and save() is a DELETE +
  * INSERT upsert pair. All sql.exec sites live here, inside
  * src/data/ — never above the layer (global D-D census surface 1).
  *
