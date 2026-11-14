@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { AGENT_DIDS } from "../../agents/did";
 import { subscribeToRouteChanges } from "../router";
-import { EmptyState, Table, Badge, Button, Card, Flex, Grid, PillGroup, TextInput, Select, Notice, PageSection, PageShell, Stack, type BadgeTone, Modal, useToast } from "./ui";
+import { EmptyState, Table, Badge, Button, Card, DetailCard, Flex, Grid, KpiRibbon, PillGroup, TextInput, Select, Notice, PageSection, PageTemplate, Stack, type BadgeTone, Modal, useToast } from "./ui";
 import { BRAND } from "../branding";
 import { normalizeAutopilotLimits, type AutopilotPolicyLimits } from "../../services/riskPolicyEngine";
 import type { TradeRecord } from "../../types";
@@ -760,56 +760,44 @@ export function AutopilotControlCenter({
   const accountLabel = isLiveAccount ? "E*TRADE Live Brokerage" : "Paper (simulated money)";
 
   return (
-    <PageShell title="Autopilot control center" scopeNote={`Autonomous execution within your written policy, on the account selected at the top: ${accountLabel}.`}>
-      {/* Executive Performance Ribbon */}
-      {/* #4407: every figure here is live or "—". Portfolio NAV and
-          drawdown have no live source on this page (GET /api/autopilot
-          carries no balance; there is no equity-history source), so
-          they render as "—" rather than a generated number. */}
-      <PageSection title="Executive performance">
-      <span className="ui-meta-sm">Source: GET /api/autopilot — verdict count from mas_policy_verdicts. NAV and drawdown have no live source — shown as —.</span>
-      <Grid columns={4} gap="4">
-        <Card>
-          <Stack gap="1">
-            <span className="ui-meta-sm">Portfolio NAV</span>
-            <div><strong>—</strong></div>
-            <span className="ui-meta-sm">No live NAV source</span>
-          </Stack>
-        </Card>
-
-        <Card>
-          <Stack gap="1">
-            <span className="ui-meta-sm">Drawdown vs Alert</span>
-            <div><strong>—</strong></div>
-            <span className="ui-meta-sm">
-              Policy Alert: {policyLimits.drawdownAlertPct.toFixed(2)}% Max
-            </span>
-          </Stack>
-        </Card>
-
-        <Card>
-          <Stack gap="1">
-            <span className="ui-meta-sm">Cash Reserve Target</span>
-            <div><strong>{policyLimits.cashReservePct.toFixed(2)}%</strong></div>
-            <span className="ui-meta-sm ui-success">
-              &check; Protected Capital Floor
-            </span>
-          </Stack>
-        </Card>
-
-        <Card>
-          <Stack gap="1">
-            <span className="ui-meta-sm">Risk Policy Engine</span>
-            <div><strong>{verdictRows.length} Verdicts</strong></div>
-            <span className="ui-meta-sm">
-              {verdictRows.length > 0
-                ? `${signedVerdictCount} of ${verdictRows.length} DID-signed`
-                : "No verdicts recorded"}
-            </span>
-          </Stack>
-        </Card>
-      </Grid>
-      </PageSection>
+    <PageTemplate
+      title="Autopilot control center"
+      scopeNote={`Autonomous execution within your written policy, on the account selected at the top: ${accountLabel}.`}
+      kpiRibbon={
+        <>
+          {/* Executive Performance Ribbon — #4407: every figure here is
+              live or "—". Portfolio NAV and drawdown have no live source
+              on this page (GET /api/autopilot carries no balance; there
+              is no equity-history source), so they render as "—" rather
+              than a generated number. */}
+          <span className="ui-meta-sm">Source: GET /api/autopilot — verdict count from mas_policy_verdicts. NAV and drawdown have no live source — shown as —.</span>
+          <KpiRibbon
+            items={[
+              { label: "Portfolio NAV", value: "—", sub: "No live NAV source" },
+              {
+                label: "Drawdown vs Alert",
+                value: "—",
+                sub: `Policy Alert: ${policyLimits.drawdownAlertPct.toFixed(2)}% Max`,
+              },
+              {
+                label: "Cash Reserve Target",
+                value: `${policyLimits.cashReservePct.toFixed(2)}%`,
+                sub: "✓ Protected Capital Floor",
+                subTone: "success",
+              },
+              {
+                label: "Risk Policy Engine",
+                value: `${verdictRows.length} Verdicts`,
+                sub:
+                  verdictRows.length > 0
+                    ? `${signedVerdictCount} of ${verdictRows.length} DID-signed`
+                    : "No verdicts recorded",
+              },
+            ]}
+          />
+        </>
+      }
+    >
 
       {/* Strategy performance — #4407: no live equity-history source
           feeds this chart, so it renders an empty state rather than a
@@ -817,14 +805,14 @@ export function AutopilotControlCenter({
           timeframe switcher, the hand-drawn benchmark path and the
           hardcoded legend claims are removed. */}
       <PageSection title="Strategy Equity vs S&P 500 Benchmark">
-      <Card>
+      <DetailCard>
         <EmptyState
           framed
           icon="📈"
           title="No performance history recorded"
           description="No live equity-history source feeds this chart, so no curve is shown rather than a generated one. Performance history arrives when a live equity source is wired."
         />
-      </Card>
+      </DetailCard>
       </PageSection>
 
       {/* Top 2-Card Institutional Grid */}
@@ -895,9 +883,9 @@ export function AutopilotControlCenter({
 
         <PageSection title="Live policy limits">
         {/* Card 2: Live Policy Limits Card */}
-        <Card>
-          <span className="ui-meta-sm">Source: GET /api/autopilot — OrchestratorAgent state; localStorage defaults only when the server has none.</span>
-          <Flex justify="end">
+        <DetailCard
+          belowSubtitle={<span className="ui-meta-sm">Source: GET /api/autopilot — OrchestratorAgent state; localStorage defaults only when the server has none.</span>}
+          meta={
             <Button
             variant="secondary"
               onClick={() => {
@@ -908,8 +896,8 @@ export function AutopilotControlCenter({
             >
               ⚙️ Edit limits
             </Button>
-          </Flex>
-
+          }
+        >
           <Grid columns={3} gap="2">
             <Stack gap="1">
               <span className="ui-meta-sm">Max position</span>
@@ -947,7 +935,7 @@ export function AutopilotControlCenter({
               ✓ Enforced at runtime by <strong>RiskPolicyEngine</strong> &amp; <strong>W3C Agent DID</strong>
             </span>
           </div>
-        </Card>
+        </DetailCard>
         </PageSection>
       </Grid>
 
@@ -959,8 +947,9 @@ export function AutopilotControlCenter({
           scroll lands the section under the sticky chrome. */}
       <div id="autopilot-job-outcomes" className="ui-anchor">
       <PageSection title="Job outcomes">
-      <Card>
-        <span className="ui-meta-sm">Source: GET /api/autopilot/jobs — mas_job_outcomes (one outcome sink); rows labeled by origin.</span>
+      <DetailCard
+        belowSubtitle={<span className="ui-meta-sm">Source: GET /api/autopilot/jobs — mas_job_outcomes (one outcome sink); rows labeled by origin.</span>}
+      >
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
             <Badge tone="neutral">{jobOutcomes.length}</Badge>
@@ -1052,14 +1041,15 @@ export function AutopilotControlCenter({
             />
           )}
         />
-      </Card>
+      </DetailCard>
       </PageSection>
       </div>
 
       {/* Bottom Card: Recent Autonomous Actions */}
       <PageSection title="Recent autonomous actions">
-      <Card>
-        <span className="ui-meta-sm">Source: GET /api/audit (mas_events) + /api/broker/orders (mas_trades). Simulated rows are labeled Sim, never live.</span>
+      <DetailCard
+        belowSubtitle={<span className="ui-meta-sm">Source: GET /api/audit (mas_events) + /api/broker/orders (mas_trades). Simulated rows are labeled Sim, never live.</span>}
+      >
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
             <Badge tone="neutral">{filteredActions.length}</Badge>
@@ -1218,13 +1208,14 @@ export function AutopilotControlCenter({
             />
           )}
         />
-      </Card>
+      </DetailCard>
       </PageSection>
 
       {/* Policy Decisions Audit (issue #651): recorded verdicts from mas_policy_verdicts */}
       <PageSection title="Policy decisions">
-      <Card>
-        <span className="ui-meta-sm">Source: GET /api/autopilot — mas_policy_verdicts, signed by RiskPolicyEngine. Dry-run verdicts are labeled simulated. Scheduled dry-run checks come from the monthly Autopilot evaluation schedule (Schedules home).</span>
+      <DetailCard
+        belowSubtitle={<span className="ui-meta-sm">Source: GET /api/autopilot — mas_policy_verdicts, signed by RiskPolicyEngine. Dry-run verdicts are labeled simulated. Scheduled dry-run checks come from the monthly Autopilot evaluation schedule (Schedules home).</span>}
+      >
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
             <Badge tone="neutral">{verdictRows.length}</Badge>
@@ -1305,7 +1296,7 @@ export function AutopilotControlCenter({
             />
           )}
         />
-      </Card>
+      </DetailCard>
       </PageSection>
 
       {/* Edit Policy Limits Modal */}
@@ -1518,6 +1509,6 @@ export function AutopilotControlCenter({
             </Flex>
                   </Modal>
       )}
-    </PageShell>
+    </PageTemplate>
   );
 }

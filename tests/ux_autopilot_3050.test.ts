@@ -13,10 +13,12 @@ function src(p: string): string {
 }
 
 describe("autopilot shell composition (#3050)", () => {
-  it("AutopilotControlCenter renders one PageShell with the seven sections", () => {
+  it("AutopilotControlCenter renders one PageTemplate with the six sections and the kpiRibbon slot", () => {
     const panel = src(PANEL);
-    expect(panel).toContain('<PageShell title="Autopilot control center"');
-    expect(panel).toContain('<PageSection title="Executive performance">');
+    expect(panel).toContain('<PageTemplate');
+    expect(panel).toContain('title="Autopilot control center"');
+    expect(panel).toContain("kpiRibbon=");
+    expect(panel).toContain("<KpiRibbon");
     expect(panel).toContain(
       '<PageSection title="Strategy Equity vs S&P 500 Benchmark"',
     );

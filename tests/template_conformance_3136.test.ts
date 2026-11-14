@@ -26,7 +26,7 @@ const HUB_FILE = "src/client/ETradeTradingHub.tsx";
 const CHAT_FILE = "src/client/Chat.tsx";
 
 /** Routes whose panel file renders <PageTemplate> today. Wave 1 extends. */
-const CONFORMING_TEMPLATE_ROUTES = ["risk-analysis", "order", "options"];
+const CONFORMING_TEMPLATE_ROUTES = ["risk-analysis", "order", "options", "autopilot"];
 
 type TemplateState =
   | "template"
@@ -262,6 +262,37 @@ describe("route template gate (#3136)", () => {
     // <PageSection (S-U1 interior gate: sections >= 1).
     expect(countOccurrences(src, "<PageSection")).toBe(1);
     expect(src).toContain('from "./components/ui"');
+    expect(src).not.toContain("<PageShell");
+  });
+
+  it("AutopilotControlCenter is conforming: title + scopeNote + kpiRibbon slot + six PageSections, no layout CSS", () => {
+    const src = readFileSync(
+      join(CLIENT_DIR, "components", "AutopilotControlCenter.tsx"),
+      "utf8",
+    );
+    // Slots used: title + scopeNote + kpiRibbon — the executive
+    // ribbon was rewired into the slot as a KpiRibbon in #3140
+    // round 2; contextStrip / actionBar / queueRail are not used.
+    expect(src).toContain("<PageTemplate");
+    expect(countOccurrences(src, "<PageTemplate")).toBe(1);
+    expect(src).toContain('title="Autopilot control center"');
+    expect(src).toContain("scopeNote=");
+    expect(src).toContain("kpiRibbon=");
+    expect(src).toContain("<KpiRibbon");
+    for (const slot of ["contextStrip=", "actionBar=", "queueRail="]) {
+      expect(src).not.toContain(slot);
+    }
+    // No layout CSS: no stylesheet import. classNames stay (37):
+    // token utilities (ui-meta-sm et al) plus the live autopilot
+    // table/modal classes — interiors are unchanged in this slice,
+    // so no className count is asserted here (S-U1 owns interiors).
+    // The chart, limits and verdict/policy cards are DetailCards
+    // (Q6 analog: DetailCard renders its own CardHeader, so no
+    // standalone "<CardHeader" assertion here).
+    expect(src).toContain("<DetailCard");
+    expect(countOccurrences(src, "<PageSection")).toBe(6);
+    expect(src).not.toMatch(/\.css["']/);
+    expect(src).toContain('from "./ui"');
     expect(src).not.toContain("<PageShell");
   });
 });
