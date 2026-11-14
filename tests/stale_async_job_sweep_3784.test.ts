@@ -128,7 +128,7 @@ describe("stale async-job sweep (#3784)", () => {
     const h = makeHarness();
     seedRow(h.db, { jobId: "job-stuck-1", startedAt: isoAgo(45 * MIN) });
 
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 1, alerted: 1, reaped: 0 });
     // Delivery is fire-and-forget off the sweep path.
     await vi.waitFor(() => expect(h.alerts).toHaveLength(1));
@@ -150,7 +150,7 @@ describe("stale async-job sweep (#3784)", () => {
     const startedAt = isoAgo(3 * 60 * MIN);
     seedRow(h.db, { jobId: "job-ancient", startedAt });
 
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 1, alerted: 0, reaped: 1 });
     await new Promise((r) => setTimeout(r, 25));
     expect(h.alerts).toHaveLength(0);
@@ -178,7 +178,7 @@ describe("stale async-job sweep (#3784)", () => {
     const h = makeHarness();
     seedRow(h.db, { jobId: "job-young", startedAt: isoAgo(5 * MIN) });
 
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 1, alerted: 0, reaped: 0 });
     await new Promise((r) => setTimeout(r, 25));
     expect(h.alerts).toHaveLength(0);
@@ -190,9 +190,9 @@ describe("stale async-job sweep (#3784)", () => {
     const h = makeHarness();
     seedRow(h.db, { jobId: "job-stuck-2", startedAt: isoAgo(45 * MIN) });
 
-    expect(sweepStaleAsyncJobs(h.ctx)).toEqual({ examined: 1, alerted: 1, reaped: 0 });
+    expect(await sweepStaleAsyncJobs(h.ctx)).toEqual({ examined: 1, alerted: 1, reaped: 0 });
     await vi.waitFor(() => expect(h.alerts).toHaveLength(1));
-    expect(sweepStaleAsyncJobs(h.ctx)).toEqual({ examined: 1, alerted: 0, reaped: 0 });
+    expect(await sweepStaleAsyncJobs(h.ctx)).toEqual({ examined: 1, alerted: 0, reaped: 0 });
     await new Promise((r) => setTimeout(r, 25));
     expect(h.alerts).toHaveLength(1);
     expect(
@@ -206,7 +206,7 @@ describe("stale async-job sweep (#3784)", () => {
     seedRow(h.db, { jobId: "job-no-alert", startedAt: isoAgo(45 * MIN) });
     seedRow(h.db, { jobId: "job-still-reaped", startedAt: isoAgo(3 * 60 * MIN) });
 
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 2, alerted: 0, reaped: 1 });
     await new Promise((r) => setTimeout(r, 25));
     expect(h.alerts).toHaveLength(0);
@@ -219,7 +219,7 @@ describe("stale async-job sweep (#3784)", () => {
     seedRow(h.db, { jobId: "job-bad-clock", startedAt: "not-a-date" });
     seedRow(h.db, { jobId: "job-stuck-3", startedAt: isoAgo(45 * MIN) });
 
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 2, alerted: 1, reaped: 0 });
     await vi.waitFor(() => expect(h.alerts).toHaveLength(1));
     expect(rowStatus(h.db, "job-bad-clock").status).toBe("running");
@@ -231,7 +231,7 @@ describe("stale async-job sweep (#3784)", () => {
     seedRow(h.db, { jobId: "job-stuck-4", startedAt: isoAgo(45 * MIN) });
     seedRow(h.db, { jobId: "job-ancient-2", startedAt: isoAgo(3 * 60 * MIN) });
 
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 3, alerted: 1, reaped: 1 });
     await vi.waitFor(() => expect(h.alerts).toHaveLength(1));
     expect(rowStatus(h.db, "job-young-2").status).toBe("running");
@@ -247,7 +247,7 @@ describe("listRunning query plan (#3784)", () => {
       .join(" | ");
   }
 
-  it("seeks on an index, never scans the table", () => {
+  it("seeks on an index, never scans the table", async () => {
     const db = new DatabaseSync(":memory:");
     db.exec(BASE_DDL);
     ensureAsyncJobGraphColumns(makeSql(db) as never);
@@ -260,7 +260,7 @@ describe("listRunning query plan (#3784)", () => {
     expect(planned).not.toContain("SCAN mas_async_jobs");
   });
 
-  it("returns only the session's running rows, oldest first, capped at the limit", () => {
+  it("returns only the session's running rows, oldest first, capped at the limit", async () => {
     const db = new DatabaseSync(":memory:");
     const sql = makeSql(db);
     sql.exec(BASE_DDL);
