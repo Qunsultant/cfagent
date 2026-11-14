@@ -537,6 +537,12 @@ function measure(): Map<string, number> {
  * "yahoo" row does not move (hardcoded literals removed as fast as
  * the resolved-provider comparisons arrive). Totals move
  * 1183/9334 -> 1183/9336.
+ * Baseline update (#4282 P3, 2026-11-14): the IvHistory broker
+ * DEFAULT 'etrade' ALTER moved to the remainder catalogue — the
+ * adapter row drops 2->1 and a new INTEGRATION row
+ * `remainderCatalogue.ts / etrade / 1` is added at the end of the
+ * baseline. Totals move 1183/9336 -> 1184/9336 (one new row, lines
+ * unchanged: -1 on the adapter, +1 on the catalogue).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -1041,7 +1047,11 @@ const BASELINE: Array<[string, string, number]> = [
   // CREATE TABLE line (broker DEFAULT 'etrade') moved to the DO
   // catalogue (row below); the 2 remaining lines are the ALTER
   // const that stays inline until P3 and the pre-#3326 comment.
-  ["src/data/doSqliteIvHistoryAdapter.ts", "etrade", 2],
+  // #4282 P3: the count drops 2 -> 1 — the ALTER const (broker
+  // DEFAULT 'etrade') moved to the remainder catalogue (row at the
+  // end of this baseline); the 1 remaining line is the pre-#3326
+  // comment (E*TRADE chains).
+  ["src/data/doSqliteIvHistoryAdapter.ts", "etrade", 1],
   ["src/data/doSqliteProviderConfigAdapter.ts", "etrade", 9],
   ["src/data/doTokenFamilyAdapter.ts", "etrade", 5],
   ["src/data/drizzleSchema.ts", "etrade", 5],
@@ -1842,6 +1852,12 @@ const BASELINE: Array<[string, string, number]> = [
   // from the IvHistory adapter; neutralizing it would falsify
   // the schema.
   ["src/data/schemaComponent/doCatalogue.ts", "etrade", 1],
+  // #4282 P3 INTEGRATION: the remainder catalogue carries the 1
+  // moved DEFAULT 'etrade' line (mas_iv_history broker ALTER).
+  // Same disposition as the DO catalogue row above: a data-bearing
+  // schema default, reproduced byte-identically from the IvHistory
+  // adapter; neutralizing it would falsify the schema.
+  ["src/data/schemaComponent/remainderCatalogue.ts", "etrade", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
