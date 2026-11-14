@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiFetch, DEFAULT_ASYNC_JOB_POLL_CONFIG } from "../src/client/apiFetch";
+import {
+  apiFetch,
+  ApiFetchTimeoutError,
+  DEFAULT_ASYNC_JOB_POLL_CONFIG,
+  isApiFetchTimeoutError,
+} from "../src/client/apiFetch";
 
 describe("apiFetch async job compatibility", () => {
   afterEach(() => {
@@ -98,5 +103,101 @@ describe("apiFetch async job compatibility", () => {
     expect(body.statusUrl).toBe("/api/jobs/job-3");
     expect(typeof body.error).toBe("string");
     expect(nativeFetch.mock.calls.length).toBeGreaterThan(2);
+  });
+});
+
+describe("apiFetch opt-in request timeout (#4513)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** A fetch implementation that never answers unless its signal aborts, like a hung request. */
+  function hangUntilAborted(_input: unknown, init?: RequestInit): Promise<Response> {
+    return new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        "abort",
+        () => reject(new DOMException("The operation was aborted.", "AbortError")),
+        { once: true },
+      );
+    });
+  }
+
+  it("rejects with ApiFetchTimeoutError when the initial fetch never returns", async () => {
+    vi.stubGlobal("fetch", vi.fn(hangUntilAborted));
+
+    const started = Date.now();
+    const error = await apiFetch("/api/example", undefined, undefined, { timeoutMs: 25 }).catch(
+      (err: unknown) => err,
+    );
+
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(error).toBeInstanceOf(ApiFetchTimeoutError);
+    expect((error as ApiFetchTimeoutError).timeoutMs).toBe(25);
+    expect(isApiFetchTimeoutError(error)).toBe(true);
+    expect(isApiFetchTimeoutError(new Error("other"))).toBe(false);
+  });
+
+  it("rejects with ApiFetchTimeoutError when a 202 status poll never returns", async () => {
+    const nativeFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { jobId: "job-t", status: "queued", statusUrl: "/api/jobs/job-t" },
+          { status: 202 },
+        ),
+      )
+      .mockImplementation(hangUntilAborted);
+    vi.stubGlobal("fetch", nativeFetch);
+
+    const error = await apiFetch(
+      "/api/example",
+      undefined,
+      { initialDelayMs: 10, maxDelayMs: 10 },
+      { timeoutMs: 25 },
+    ).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ApiFetchTimeoutError);
+    expect(nativeFetch.mock.calls.length).toBe(2);
+  });
+
+  it("returns the response when a slow fetch completes within the timeout", async () => {
+    const nativeFetch = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", nativeFetch);
+
+    const response = await apiFetch("/api/example", undefined, undefined, { timeoutMs: 1_000 });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    const init = nativeFetch.mock.calls[0][1] as RequestInit | undefined;
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("passes no timeout signal when the caller does not opt in", async () => {
+    const nativeFetch = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", nativeFetch);
+
+    await apiFetch("/api/example");
+
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+    const init = nativeFetch.mock.calls[0][1] as RequestInit | undefined;
+    expect(init?.signal).toBeUndefined();
+  });
+
+  it("still honors a caller signal that aborts before the timeout", async () => {
+    const controller = new AbortController();
+    const nativeFetch = vi.fn(hangUntilAborted);
+    vi.stubGlobal("fetch", nativeFetch);
+
+    const pending = apiFetch("/api/example", { signal: controller.signal }, undefined, {
+      timeoutMs: 1_000,
+    }).catch((err: unknown) => err);
+    controller.abort();
+    const error = await pending;
+
+    expect(error).not.toBeInstanceOf(ApiFetchTimeoutError);
+    expect(error).toBeInstanceOf(DOMException);
   });
 });
