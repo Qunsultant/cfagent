@@ -50,7 +50,8 @@
 #
 # CONFIG: `config/auto-merge.json` is the single source for the label, the
 # gating workflow set and the sweep limit. It is read from the default branch,
-# so a pull request cannot widen its own eligibility.
+# so a pull request cannot widen its own eligibility; the one exception is the
+# run that introduces the file, which reads its own ref and logs a warning.
 #
 # SAFETY: no checkout, no PR code execution. The App token is short-lived,
 # scoped to this one repository, and used only for the queue call. The
@@ -82,6 +83,8 @@ concurrency:
 
 env:
   CONFIG_PATH: config/auto-merge.json
+  # Used only while the config has not reached the default branch (bootstrap).
+  FALLBACK_REF: ${{ github.event.pull_request.head.sha || github.sha }}
   # Every job name starts with this prefix, so the enrollment verdict can
   # ignore this workflow's own check runs: a failed attempt must stay visible
   # (#4317) without turning the head red and blocking its own retry.
@@ -99,7 +102,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          config=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH" --jq '.content' | base64 -d)
+          # Default branch first: a pull request must not be able to change the
+          # rules it is judged by. Bootstrap exception: until this file has
+          # merged, the default branch does not carry it, so the run's own ref is
+          # read with a loud warning. After the merge the fallback never fires.
+          config=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH" --jq '.content' 2>/dev/null | base64 -d || true)
+          if [ -z "$config" ]; then
+            echo "::warning::$CONFIG_PATH is not on the default branch yet; reading $FALLBACK_REF (bootstrap only)."
+            config=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH?ref=$FALLBACK_REF" --jq '.content' | base64 -d)
+          fi
           jq -e '.label and .sweepLimit and (.gatingWorkflows | length > 0)' <<<"$config" >/dev/null \
             || { echo "::error::$CONFIG_PATH is missing label, sweepLimit or gatingWorkflows"; exit 1; }
           echo "label=$(jq -r '.label' <<<"$config")" >> "$GITHUB_OUTPUT"
@@ -135,7 +146,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          config=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH" --jq '.content' | base64 -d)
+          # Default branch first: a pull request must not be able to change the
+          # rules it is judged by. Bootstrap exception: until this file has
+          # merged, the default branch does not carry it, so the run's own ref is
+          # read with a loud warning. After the merge the fallback never fires.
+          config=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH" --jq '.content' 2>/dev/null | base64 -d || true)
+          if [ -z "$config" ]; then
+            echo "::warning::$CONFIG_PATH is not on the default branch yet; reading $FALLBACK_REF (bootstrap only)."
+            config=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH?ref=$FALLBACK_REF" --jq '.content' | base64 -d)
+          fi
           jq -e '.label and .sweepLimit and (.gatingWorkflows | length > 0)' <<<"$config" >/dev/null \
             || { echo "::error::$CONFIG_PATH is missing label, sweepLimit or gatingWorkflows"; exit 1; }
           echo "label=$(jq -r '.label' <<<"$config")" >> "$GITHUB_OUTPUT"
