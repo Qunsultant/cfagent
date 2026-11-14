@@ -61,8 +61,11 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // PRAGMA-guarded ALTER (same precedent: check + ALTER).
   ["src/data/ormFacade.ts", 17],
   // 4 at 3a; 5 since #4412 added the mas_promotions index exec
-  // (sql.exec(MAS_PROMOTIONS_INDEX_DDL) in ensurePromotionsIndex()).
-  ["src/data/ormSchema.ts", 5],
+  // (sql.exec(MAS_PROMOTIONS_INDEX_DDL) in ensurePromotionsIndex());
+  // 8 since #3182 added the mas_transactions tenant column's
+  // PRAGMA-guarded ALTER (PRAGMA table_info check + ALTER + tenant
+  // index, same #2178 precedent as the audit chain columns above).
+  ["src/data/ormSchema.ts", 8],
   ["src/data/d1MarketplaceAdapter.ts", 0],
   ["src/data/inMemoryOrmAdapters.ts", 0],
   ["src/data/inMemoryMarketplaceAdapter.ts", 0],

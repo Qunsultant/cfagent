@@ -336,6 +336,11 @@
           "name": "updated_at",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -758,6 +763,13 @@
       "columns": [
         "started DESC",
         "id DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_transactions_tenant_id": {
+      "table": "mas_transactions",
+      "columns": [
+        "tenant_id"
       ],
       "unique": false
     }

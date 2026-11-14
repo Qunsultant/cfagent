@@ -45,7 +45,7 @@ import {
   type CanonicalStoreResult,
 } from "../services/scheduledReports";
 import type { IndexEnv } from "../services/reportSemanticIndex";
-import { ensureSharedTable, ensureAuditChainColumns, ensurePromotionsIndex } from "./ormSchema";
+import { ensureSharedTable, ensureAuditChainColumns, ensurePromotionsIndex, ensureTransactionTenantColumn } from "./ormSchema";
 import { ormTableSql } from "./schemaComponent/ormCatalogue";
 import {
   createDoAdRepository,
@@ -267,6 +267,8 @@ export class DatabaseORM {
 
     // 5. Transactions Table
     ensureSharedTable(this.sql, "mas_transactions");
+    // Issue #3182: tenant column on pre-existing tables.
+    ensureTransactionTenantColumn(this.sql);
 
     // 6. Messages Table
     ensureSharedTable(this.sql, "mas_messages");

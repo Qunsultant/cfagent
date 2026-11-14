@@ -727,6 +727,9 @@ export class DraftPaymentCommand implements IMcpToolCommand<{
       note: description,
       createdAt: now,
       updatedAt: now,
+      // Issue #3182: see the payments-subagent draft — a draft moves
+      // no money and no tenant is resolvable at draft time.
+      tenantId: null,
     });
 
     // Issue #932: record this instance as the draft's owner so a gateway

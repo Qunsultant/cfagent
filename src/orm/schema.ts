@@ -17,5 +17,6 @@ export {
   ensurePromotionsIndex,
   ensureSharedTable,
   ensureSharedTables,
+  ensureTransactionTenantColumn,
   type SharedMasTable,
 } from "../data/ormSchema";

@@ -604,12 +604,22 @@ export async function handleAgenticPaymentsRoutes(
         checkoutId?: unknown;
         claimTxHash?: unknown;
         paymentIntentId?: unknown;
+        tenantId?: unknown;
       };
       const kind = body.kind === "credit" ? "credit" : body.kind === "charge" ? "charge" : "";
       const runRequestId = typeof body.runRequestId === "string" ? body.runRequestId.trim() : "";
       const userId = typeof body.userId === "string" ? body.userId.trim() : "";
       const family = typeof body.family === "string" ? body.family.trim() : "";
       const priceUSD = Number(body.priceUSD);
+      // Issue #3182: the workflow's resolved tenant, threaded with the
+      // rest of the row inputs; absent (older caller) means unattributed
+      // (NULL), never invented. Like userId/family, it arrives only
+      // through the internal ledger-owner channel, never from an
+      // external caller.
+      const tenantId =
+        typeof body.tenantId === "string" && body.tenantId.trim()
+          ? body.tenantId.trim()
+          : undefined;
       if (!kind || !runRequestId || !userId || !family || !Number.isFinite(priceUSD) || priceUSD <= 0) {
         return Response.json(
           { error: "kind (charge|credit), runRequestId, userId, family and a positive priceUSD are required" },
@@ -635,8 +645,9 @@ export async function handleAgenticPaymentsRoutes(
               claimTxHash: typeof body.claimTxHash === "string" ? body.claimTxHash : undefined,
               paymentIntentId:
                 typeof body.paymentIntentId === "string" ? body.paymentIntentId : undefined,
+              tenantId,
             })
-          : buildCfpayCreditTransaction({ runRequestId, userId, family, priceUSD });
+          : buildCfpayCreditTransaction({ runRequestId, userId, family, priceUSD, tenantId });
       orm.transactions.create(tx);
       ctx.audit("payments_cfpay.recorded", "payments", {
         transactionId: tx.id,
@@ -4729,6 +4740,9 @@ export async function handleAgenticPaymentsRoutes(
         proofSignature: draft.id,
         createdAt: nowIso,
         updatedAt: nowIso,
+        // Issue #3182: the draft's tenant, resolved server-side from
+        // the verified session at checkout mint (never client input).
+        tenantId: draft.tenantId,
       });
     } catch (err) {
       ctx.audit("commercial.channel.receipt_row_failed", "payments", {
