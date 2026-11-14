@@ -13,6 +13,7 @@ import { DatabaseORM, type SqlStorage } from "../orm";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
+import { resolveShardPacing } from "../config/shardPacing";
 import { actorGateway } from "./cloudflareActorGateway";
 import { createMessagingPorts } from "../messaging/createMessagingPorts";
 import { toScreenerEnvelope } from "../messaging/screenerEventEnvelope";
@@ -2825,7 +2826,10 @@ export class ScheduledTasksService {
         if (!this.shardSubmit) {
           throw new Error("Sharded options runs require the async-job submission port; configure the host or run the scan directly.");
         }
-        const { planOptionsFeedShards } = await import("./shardJobs");
+        const { applyShardPacing, planOptionsFeedShards } = await import("./shardJobs");
+        // Issue #4424: the chain dispatch is paced by the externalized config
+        // (burst cap + interval), not by a hardcoded stagger alone.
+        const shardPacing = resolveShardPacing(this.env as unknown as Record<string, unknown>);
         // Issue Qunsultant/cfagent#488: the chain's email channel follows the
         // same resolution as direct delivery — run > stored user > env.
         const resolvedEmailTo = resolveEmailDestination({
@@ -2879,7 +2883,7 @@ export class ScheduledTasksService {
           stageChain: options.stageChain,
           // A one-second not-before interval spaces independent Worker
           // invocations. Each invocation receives its own chain-fetch budget.
-          staggerMs: 1_000,
+          staggerMs: shardPacing.staggerMs,
           options: {
             symbols,
             thesis: targetThesis,
@@ -2902,7 +2906,7 @@ export class ScheduledTasksService {
         };
         // The per-symbol job owns its event-calendar request too; do not
         // fan out 100 calendar lookups in this scheduling invocation.
-        const specs = planOptionsFeedShards(chain, timestamp);
+        const specs = applyShardPacing(planOptionsFeedShards(chain, timestamp), shardPacing, timestamp);
         const submitted: string[] = [];
         for (const spec of specs) submitted.push((await this.shardSubmit(spec)).jobId);
         this.audit("options.sharded_chain_submitted", { chainId, universe: chain.universe, symbols: symbols.length, jobs: submitted.length, scope: describeReportScope(reportScope), theses: reportScope.theses, strategies: reportScope.strategyScope === "all" ? "all" : scopeStrategies, warnings: reportScope.warnings, brokerId: chainBrokerId, dataProviderId: chainTenantProviders.dataProviderId, ...(chain.mode ? { mode: chain.mode } : {}), ...(chain.modeSource ? { modeSource: chain.modeSource } : {}) });

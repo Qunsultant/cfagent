@@ -23,6 +23,7 @@ import {
   getAsyncJob,
   retryAsyncJob,
   retryFailedChainJobs,
+  recoverStaleRunningAsyncJobs,
   submitAsyncJob,
   type AsyncJobsContext,
 } from "../src/agents/orchestrator/asyncJobs";
@@ -243,5 +244,48 @@ describe("chain-level bulk retry (#4416)", () => {
     }>;
     const retriedOf = rows.map((row) => (JSON.parse(row.payload_json) as { retryOf?: string }).retryOf);
     expect(retriedOf.sort()).toEqual([failedA.jobId, failedB.jobId].sort());
+  });
+});
+describe("shard-chain re-arm after host death (#4424)", () => {
+  it("re-arms a stale running shard of a chain, never a completed one", async () => {
+    const { db, ctx } = makeHarness();
+    const shard = (symbol: string): AsyncJobSubmission =>
+      ({
+        capability: "shard.execute",
+        payload: {
+          shard: { stage: "feed", key: symbol },
+          chain: { chainId: "chain-9", userLogin: "venus", trigger: "scheduled" },
+        },
+        chainId: "chain-9",
+      }) as unknown as AsyncJobSubmission;
+    const stale = await submitAsyncJob(ctx, shard("AAPL"));
+    const done = await submitAsyncJob(ctx, shard("MSFT"));
+    const stamp = "2020-01-01T00:00:00.000Z";
+    db.prepare(
+      "UPDATE mas_async_jobs SET status = 'running', started_at = ?, last_activity_at = ? WHERE job_id = ?",
+    ).run(stamp, stamp, stale.jobId);
+    db.prepare("UPDATE mas_async_jobs SET status = 'completed' WHERE job_id = ?").run(done.jobId);
+
+    const result = await recoverStaleRunningAsyncJobs(ctx);
+    expect(result.rearmed).toBe(1);
+
+    const rows = db
+      .prepare("SELECT payload_json FROM mas_async_jobs WHERE payload_json LIKE '%recoveryRearmOf%'")
+      .all() as Array<{ payload_json: string }>;
+    expect(rows).toHaveLength(1);
+    const rearmed = JSON.parse(rows[0].payload_json) as {
+      retryOf?: string;
+      recoveryRearmOf?: string;
+      chain?: { chainId?: string };
+    };
+    expect(rearmed.recoveryRearmOf).toBe(stale.jobId);
+    expect(rearmed.retryOf).toBe(stale.jobId);
+    // The chain identity rides the re-arm, so the advance hook still assembles.
+    expect(rearmed.chain?.chainId).toBe("chain-9");
+    // The completed shard was never a sweep candidate: no re-arm names it.
+    const forDone = db
+      .prepare("SELECT COUNT(*) AS n FROM mas_async_jobs WHERE payload_json LIKE ?")
+      .get(`%recoveryRearmOf":"${done.jobId}"%`) as { n: number };
+    expect(forDone.n).toBe(0);
   });
 });
