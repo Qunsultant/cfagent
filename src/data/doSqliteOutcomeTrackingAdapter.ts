@@ -21,6 +21,7 @@ import {
   type StartOutcomeTrackingInput,
   type TrackingEvent,
 } from "./outcomeTrackingPorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 import type { TrackRecord } from "../services/researchTrackRecord";
 
 export class DoSqliteOutcomeTrackingStore implements OutcomeTrackingStore {
@@ -30,15 +31,7 @@ export class DoSqliteOutcomeTrackingStore implements OutcomeTrackingStore {
   ) {}
 
   ensureTable(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS ${OUTCOME_TRACKING_TABLE} (
-    id TEXT PRIMARY KEY,
-    user_login TEXT NOT NULL,
-    recommendation_ref TEXT NOT NULL,
-    seq INTEGER NOT NULL,
-    event_kind TEXT NOT NULL,
-    event_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  )`);
+    this.sql.exec(doTableSql("mas_outcome_tracking"));
   }
 
   private readEvents(userLogin: string): TrackingEvent[] {
