@@ -30,6 +30,7 @@ import type { EventLogPort } from "./eventLogPorts";
 import type { MemoryPort } from "./memoryPorts";
 import type { MessagePort } from "./messagePorts";
 import { ChainedAuditRepository, Repository } from "./ormRepositoryCore";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 import type { SqlStorage } from "./repositoryPorts";
 import type {
   SettingsPort,
@@ -38,8 +39,7 @@ import type {
 
 /** The mas_settings DDL — its single home is this adapter's
  *  ensureSchema (step 4g, G-7 ruling). */
-export const MAS_SETTINGS_DDL =
-  "CREATE TABLE IF NOT EXISTS mas_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)";
+export const MAS_SETTINGS_DDL = doTableSql("mas_settings");
 import type {
   TransactionCompletionFields,
   TransactionLedgerPort,
