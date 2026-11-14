@@ -288,6 +288,26 @@ export class InMemoryAsyncJobStore
       }));
   }
 
+  /** Issue #4423 — the recorded attempt count per chain row. */
+  chainAttemptCounts(chainId: string, sessionId: string): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const row of this.rows.values()) {
+      if (row.chain_id !== chainId || row.session_id !== sessionId) continue;
+      const value = (row as { attempts_json?: string | null }).attempts_json;
+      let count = 0;
+      if (value) {
+        try {
+          const parsed = JSON.parse(value);
+          count = Array.isArray(parsed) ? parsed.length : 0;
+        } catch {
+          count = 0;
+        }
+      }
+      counts.set(row.job_id, count);
+    }
+    return counts;
+  }
+
   chainRows(chainId: string, sessionId: string): AsyncJobChainRow[] {
     return [...this.rows.values()]
       .filter((r) => r.chain_id === chainId && r.session_id === sessionId)

@@ -303,6 +303,13 @@ export interface AsyncJobReadPort {
   /** A chain's rows in creation order (planner + overlay). */
   chainRows(chainId: string, sessionId: string): AsyncJobChainRow[];
   /** The workflow-runs surface's full rows, newest first. */
+  /**
+   * Issue #4423 — the failed-attempt count each of a chain's rows persisted
+   * (#4417), by job id. A store whose table predates the attempts column
+   * answers an empty map (nothing recorded), never a throw: the chain read
+   * must not fail because an old table has no history to read.
+   */
+  chainAttemptCounts(chainId: string, sessionId: string): Map<string, number>;
   workflowRunRows(sessionId: string, limit: number): AsyncJobWorkflowRow[];
   /** Issue #3784: the stale sweep's scan — the session's `running`
    *  rows, oldest first, capped at `limit`. The (session_id,
