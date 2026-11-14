@@ -22,12 +22,12 @@ import { WorkflowsHub } from "./WorkflowsHub";
 import { WorkflowCatalogPage } from "./WorkflowCatalogPage";
 import { WorkflowRunsPanel } from "./WorkflowRunsPanel";
 import { AgentsPanel } from "./AgentsPanel";
-import { ProductCatalogPanel } from "./ProductCatalogPanel";
+import { ProductHub } from "./ProductHub";
 import { BillingServicingPanel } from "./BillingServicingPanel";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
 import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
-import { navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
+import { legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
 import { legacySchedulesRedirect } from "./schedulesHomeView";
 import { SchedulesHome } from "./SchedulesHome";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
@@ -92,6 +92,11 @@ export function Chat({ user }: { user: User }) {
       if (typeof window !== "undefined") {
         const redirect = legacySchedulesRedirect(window.location.search);
         if (redirect) replaceToTab(redirect.tab, redirect.view, redirect.params);
+        // Issue #4530: a retired product-domain address is replaced
+        // by its Product Hub tab the same way, so the old address
+        // never renders a surface.
+        const productRedirect = legacyProductRedirect(window.location.search);
+        if (productRedirect) replaceToTab(productRedirect.tab, productRedirect.view);
       }
     };
     applyRoute();
@@ -1440,9 +1445,12 @@ export function Chat({ user }: { user: User }) {
     schedules: (
       <SchedulesHome userLogin={user.login} onPreviewTrade={handleSchedulesPreviewTrade} />
     ),
-    products: (
-      <ErrorBoundary label="Products">
-        <ProductCatalogPanel />
+    // Issue #4530: the Product Hub is the ONLY place for
+    // product-domain URLs — the standalone products entry retired
+    // (its addresses redirect to the hub tabs).
+    "product-hub": (
+      <ErrorBoundary label="Product Hub">
+        <ProductHub />
       </ErrorBoundary>
     ),
     billing: (

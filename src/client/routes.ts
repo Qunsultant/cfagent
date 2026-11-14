@@ -14,6 +14,8 @@
  *   Platform Admin was added as the 34th id (navOrder 27) as a real page.
  *   Products was added as the 35th id (navOrder 28) as a real page.
  *   Billing was added as the 36th id (navOrder 29) as a real page.
+ *   Issue #4530 retired the Products route into the Product Hub, which
+ *   took its navOrder 28 slot as the 37th id.
  * - `navEntry` is present only for the 30 entries that render in the nav.
  *   Its `navOrder` reproduces the historical sidebar/top-strip order, so
  *   deriving NAVIGATION_ITEMS from this table changes nothing visible.

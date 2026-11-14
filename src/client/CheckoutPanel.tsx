@@ -978,7 +978,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
               </Notice>
               <Notice tone="info">
                 Provider-managed (Billing) subscriptions are purchased from the{" "}
-                <a href="?tab=products">Products catalog</a>. This panel buys native subscriptions — and cancels
+                <a href="?tab=product-hub&view=products">Products catalog</a>. This panel buys native subscriptions — and cancels
                 subscriptions of either kind.
               </Notice>
               {subStatus && (

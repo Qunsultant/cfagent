@@ -116,6 +116,45 @@ export function buildSearchWithView(currentSearch: string, view: string): string
   return serialized ? `?${serialized}` : "";
 }
 
+export interface LegacyProductRedirect {
+  tab: string;
+  view?: string;
+}
+
+/**
+ * Issue #4530 — the redirect for a retired product-domain address, or
+ * null when the URL is not one. The caller replaces the URL with the
+ * target; a null means "leave the URL alone". The hub is the ONLY place
+ * for product-domain URLs: the standalone products page and the
+ * platform-admin products / free-runs sections moved into it. Billing,
+ * Checkout, Payments, Orders, and every other address are untouched.
+ */
+export function legacyProductRedirect(search: string): LegacyProductRedirect | null {
+  const params = new URLSearchParams(search);
+  const tab = params.get("tab") ?? "";
+  const view = params.get("view") ?? "";
+  if (tab === "products") {
+    if (view === "selling-options") return { tab: "product-hub", view: "selling-options" };
+    if (view === "marketing-draft-preview") return { tab: "product-hub", view: "marketing-draft-preview" };
+    return { tab: "product-hub", view: "products" };
+  }
+  if (tab === "platform-admin" && view === "products") {
+    return { tab: "product-hub", view: "admin-products" };
+  }
+  if (tab === "platform-admin" && view === "free-runs") {
+    return { tab: "product-hub", view: "free-runs" };
+  }
+  // The legacy platform-admin:<section> form (parseTabFromSearch maps
+  // it to platform-admin, so the tab param itself names the section).
+  if (tab === "platform-admin:products") {
+    return { tab: "product-hub", view: "admin-products" };
+  }
+  if (tab === "platform-admin:free-runs") {
+    return { tab: "product-hub", view: "free-runs" };
+  }
+  return null;
+}
+
 /**
  * Navigate to a tab: resolve (unknown ids fall back), skip when already
  * there (no duplicate history entries for re-clicking the active item),
