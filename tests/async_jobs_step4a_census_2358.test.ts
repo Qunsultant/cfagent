@@ -109,6 +109,11 @@ describe("step-4a family census (#2358)", () => {
     // still executes the statements through doTableSql /
     // doIndexSql. The writer set is the adapter + the
     // statement's home.
+    // #4282 P3: the adapter's 12 reconciliation ALTERs moved
+    // into the remainder catalogue (src/data/schemaComponent/
+    // remainderCatalogue.ts) — same disposition: a DDL-only
+    // writer, executed by the adapter through
+    // remainderAlterSql. The writer set gains that home.
     const WRITER = /(INSERT INTO|UPDATE|DELETE FROM|CREATE TABLE IF NOT EXISTS|CREATE INDEX IF NOT EXISTS \w+ ON|ALTER TABLE)\s+(?:IF NOT EXISTS \w+ ON\s+)?mas_async_jobs/;
     const writers: string[] = [];
     const walk = (dir: string): void => {
@@ -124,6 +129,7 @@ describe("step-4a family census (#2358)", () => {
     expect(writers).toEqual([
       "src/data/doSqliteAsyncJobAdapter.ts",
       "src/data/schemaComponent/doCatalogue.ts",
+      "src/data/schemaComponent/remainderCatalogue.ts",
     ]);
   });
 
