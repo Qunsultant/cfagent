@@ -56,6 +56,7 @@ import {
   type StrategyCandidate,
 } from "./index";
 import {
+  optionsEngineStoresFromSql,
   runOptionsPanelViaEngine,
   runOptionsPlainScreenViaEngine,
   runOptionsScanViaEngine,
@@ -900,6 +901,14 @@ export class UnifiedOptionsService {
               minRewardRisk: req.minRewardRisk ?? 1.5,
             },
             userLogin: this.userLogin,
+            // Issue #4398: the #4276 pattern — the discovery SQL
+            // seam is the engine stores' handle (the narrow shape
+            // is SqlStorage itself, no cast), so the run's panel
+            // expressions record durably in the host DO and a later
+            // per-stage control action can address them. The guard
+            // above refuses when the seam is absent, so the handle
+            // is present here; an unwired host never reaches this.
+            engineStores: optionsEngineStoresFromSql(this.discoverySql),
             // Issue #18: a resolved profile biases pick selection
             // by its allowed strategy types (ranking only — the
             // "all" sentinel prefers nothing in particular).

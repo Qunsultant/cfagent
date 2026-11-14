@@ -1,0 +1,2 @@
+### Added
+- Unified discovery action threaded with engine stores (#4398): when the host wires the discovery SQL seam, the unified discovery action passes engine stores built over that handle into the discovery run (the #4276 pattern), so its panel expressions are engine jobs with durable run records addressable by per-stage control. Discovery semantics unchanged; an unwired host still fails honestly.
