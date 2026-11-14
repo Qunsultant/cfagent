@@ -79,8 +79,12 @@ describe("Product Hub nav (#4530)", () => {
     expect(deepLinkHref(deepLinkForNavNode("product-hub", "selling-options"))).toBe(
       "?tab=product-hub&view=selling-options",
     );
+    // #4530: the marketing preview is a NESTED sub-tab of the hub's
+    // Products tab, so the deep link names that tab and carries the
+    // sub-tab on the hub's own `productTab` param — never on `view`,
+    // which belongs to the hub.
     expect(deepLinkHref(deepLinkForNavNode("product-hub", "marketing-draft-preview"))).toBe(
-      "?tab=product-hub&view=marketing-draft-preview",
+      "?tab=product-hub&view=products&productTab=marketing-draft-preview",
     );
     expect(deepLinkHref(deepLinkForNavNode("product-hub", "admin-products"))).toBe(
       "?tab=product-hub&view=admin-products",

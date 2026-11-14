@@ -1158,7 +1158,8 @@
     },
     "product-hub:marketing-draft-preview": {
       "tab": "product-hub",
-      "view": "marketing-draft-preview"
+      "view": "products",
+      "params": { "productTab": "marketing-draft-preview" }
     },
     "product-hub:admin-products": {
       "tab": "product-hub",
