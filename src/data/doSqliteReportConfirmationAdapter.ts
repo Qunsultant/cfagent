@@ -18,6 +18,7 @@ import type {
   ReportConfirmationPort,
   ReportConfirmationRow,
 } from "./orchestratorTablePorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 /** Add a column to the table when it is missing (additive migration). */
 function ensureColumn(
@@ -38,19 +39,7 @@ export class DoSqliteReportConfirmationStore implements ReportConfirmationPort {
   constructor(private readonly sql: OrchestratorTableSqlExecutor) {}
 
   ensureSchema(): void {
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_report_confirmations (
-        id TEXT PRIMARY KEY,
-        kind TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        decided_at TEXT,
-        decided_by TEXT,
-        report_id TEXT,
-        created_by TEXT
-      )
-    `);
+    this.sql.exec(doTableSql("mas_report_confirmations"));
     // Additive migrations for tables created before issue #308
     // (report_id) and before issue #2664 (created_by). One helper
     // keeps the file's storage-exec census count unchanged.
