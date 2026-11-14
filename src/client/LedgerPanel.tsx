@@ -20,6 +20,8 @@ import {
   ledgerBrokerId,
   ledgerBrokerLabel,
   ledgerBrokerTabs,
+  ledgerMode,
+  ledgerModeLabel,
   nextLedgerSort,
   sortLedgerRows,
   type LedgerSort,
@@ -40,6 +42,11 @@ import type { RiskSubject } from "./options/riskManagementEngine";
  * every tab, and sortable data columns. Rows without a recorded broker
  * resolve to the legacy broker (see ledgerTable.ts); the Risk action
  * column is an action, not data, and stays unsorted.
+ *
+ * Slice 2 adds the Mode column: the live/paper mode stamped on the
+ * draft at preview time. Rows recorded before the stamp carry no mode
+ * and render as unknown ("—"), never guessed from the current
+ * selection (see ledgerTable.ts).
  */
 interface LedgerPanelProps {
   orders: TradeRecord[];
@@ -112,6 +119,7 @@ export function LedgerPanel({ orders, ordersLoading, fetchOrders, setRiskSubject
       { key: "total", header: header("Total Value", "totalValue"), ariaSort: ariaSort("totalValue"), render: (ord) => <>{ord.totalValue != null && Number.isFinite(Number(ord.totalValue)) ? `$${Number(ord.totalValue).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</> },
       { key: "status", header: header("Status", "status"), ariaSort: ariaSort("status"), render: (ord) => <Badge tone={String(ord.status) === "completed" ? "success" : String(ord.status) === "authorized" ? "accent" : "neutral"}>{ord.status.toUpperCase()}</Badge> },
       { key: "broker", header: header("Broker", "broker"), ariaSort: ariaSort("broker"), render: (ord) => <>{ledgerBrokerLabel(ord)}</> },
+      { key: "mode", header: header("Mode", "mode"), ariaSort: ariaSort("mode"), render: (ord) => { const mode = ledgerMode(ord); return mode === null ? <>—</> : <Badge tone={mode === "live" ? "warning" : "success"}>{ledgerModeLabel(ord)}</Badge>; } },
       { key: "ref", header: header("Broker Ref", "orderRef"), ariaSort: ariaSort("orderRef"), render: (ord) => <code>{ord.orderRef || "—"}</code> },
       { key: "did", header: header("Proposer DID", "proposerDid"), ariaSort: ariaSort("proposerDid"), render: (ord) => <code title={ord.proposerDid}>{ord.proposerDid.replace("did:agent:openaimp:", "")}</code> },
       { key: "date", header: header("Date & Time", "createdAt"), ariaSort: ariaSort("createdAt"), render: (ord) => <span>{new Date(ord.createdAt).toLocaleString()}</span> },

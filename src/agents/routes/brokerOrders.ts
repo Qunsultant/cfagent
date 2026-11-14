@@ -88,6 +88,17 @@ function cancelPortForBroker(
 }
 
 /**
+ * Issue #3937 / #4532 (slice 2): the live/paper mode for a trade,
+ * from the resolved trading environment (TEST is paper, PROD is
+ * live). One derivation for every use in this file — the scoped
+ * cancel ledger and the preview stamp below — so the two can never
+ * disagree about what a trade's mode is.
+ */
+function modeFromEnvironment(requestedEnv: "TEST" | "PROD" | undefined): "live" | "paper" {
+  return requestedEnv === "PROD" ? "live" : "paper";
+}
+
+/**
  * Issue #3937: the ledger identity for a scoped cancel on a broker other
  * than the service-port broker — its own broker id, with the mode from
  * the resolved trading environment (TEST is paper, PROD is live).
@@ -95,7 +106,7 @@ function cancelPortForBroker(
  * not use this.
  */
 function scopedCancelLedger(broker: string, requestedEnv: "TEST" | "PROD" | undefined): { broker: string; mode: "live" | "paper" } {
-  return { broker, mode: requestedEnv === "PROD" ? "live" : "paper" };
+  return { broker, mode: modeFromEnvironment(requestedEnv) };
 }
 
 /**
@@ -120,18 +131,25 @@ function isRoutedBroker(value: unknown): value is RoutedBroker {
  * it from the draft fields, using the same mapping the E*TRADE
  * platform uses. A failure here fails the preview: an unstamped
  * draft must never reach the approvals queue.
+ *
+ * Issue #4532 (slice 2): the mode is stamped alongside the broker,
+ * from the resolved trading environment of this preview. A draft
+ * re-previewed under another environment takes the new mode — the
+ * stamp records the environment the draft was last previewed under,
+ * which is the environment it would execute in.
  */
 function ensureDraftStored(
   ctx: BrokerOrderRouteContext,
   sessionId: string,
   preview: any,
   broker: RoutedBroker,
+  mode: "live" | "paper",
 ): void {
   const orm = ctx.getOrm();
   if (!orm?.trades) return;
   const existing = orm.trades.findById(preview.orderId);
   if (existing) {
-    orm.trades.update(preview.orderId, { broker, updatedAt: new Date().toISOString() });
+    orm.trades.update(preview.orderId, { broker, mode, updatedAt: new Date().toISOString() });
     return;
   }
   orm.trades.create({
@@ -150,6 +168,7 @@ function ensureDraftStored(
     proofSignature: preview.proofSignature,
     previewNotes: preview.previewNotes ?? preview.previewMessage,
     broker,
+    mode,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -231,7 +250,7 @@ export async function handleBrokerOrderRoutes(
         optionLegs,
         strategyNetDebit: body.strategyNetDebit !== undefined ? Number(body.strategyNetDebit) : undefined,
       });
-      ensureDraftStored(ctx, sessionId, preview, broker);
+      ensureDraftStored(ctx, sessionId, preview, broker, modeFromEnvironment(requestedEnv));
       return await completeEtradeOrderPreview({
         ctx,
         sessionId,

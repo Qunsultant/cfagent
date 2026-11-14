@@ -5,8 +5,8 @@
  *
  * What this suite pins (measured from the base tree dd6df86a, never
  * from the delegated code):
- *  - the catalogue holds all 52 remainder statements (8 table, 2
- *    index, 40 reconciliation, 1 drop, 1 seed-form), each valid, each
+ *  - the catalogue holds all 53 remainder statements (8 table, 2
+ *    index, 41 reconciliation, 1 drop, 1 seed-form), each valid, each
  *    byte-identical to the base (sha256 pin), each reachable by code.
  *  - the catalogue builds the base remainder schema exactly: the
  *    expected-model fixture
@@ -143,6 +143,7 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.mas_stage_claims.create_table": "260b5e4d5df573a31723f53ede6f6dd025d06df56981e236ca294c05aedeb628",
   "schema.orm.mas_trades.alter_table_add_column_broker": "7834d9e5f79d40b95e2ee560baa78516e2408e4661665a95cad45ab0faf6c112",
   "schema.orm.mas_trades.alter_table_add_column_price_source": "29e11de70b4fe0a986f306027d5c806afe1dd7313633500a73890e225ad27bfa",
+  "schema.orm.mas_trades.alter_table_add_column_mode": "38442d5e5ceb505bfa7e876ce69f8b2be9cfe1f9b48b84a2528075306109b70b",
   "schema.do.stock_copilot_activity.alter_table_add_column_critic_verdict_json": "64dd279747ad9a77a808e5e63c8baf21307acfbcde00195e6ec01064095f1134",
   "schema.do.stock_copilot_activity.alter_table_add_column_mode": "5eb025894bfc9a3e47c888234122af4170214d0ed31da66e373f3d126a7a670b",
   "schema.do.stock_copilot_activity.alter_table_add_column_session": "a5f1dc8ac6e137f026e2611705c21a32be485279d86c5f774575e319a6aee161",
@@ -433,11 +434,11 @@ const P3_DELEGATED_FILES = [
 ];
 
 describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)", () => {
-  it("catalogues all 51 remainder statements: 8 table + 2 index + 39 alter + 1 drop + 1 seed-form", () => {
+  it("catalogues all 53 remainder statements: 8 table + 2 index + 41 alter + 1 drop + 1 seed-form", () => {
     const catalogue = buildRemainderCatalogue();
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(52);
-    expect(catalogue.size()).toBe(52);
-    expect(catalogue.byKind("schema").length).toBe(51);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(53);
+    expect(catalogue.size()).toBe(53);
+    expect(catalogue.byKind("schema").length).toBe(52);
     expect(catalogue.byKind("seed").length).toBe(1);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -462,20 +463,20 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
     }
     expect(verbs.get("CREATE TABLE")).toBe(8);
     expect(verbs.get("CREATE INDEX")).toBe(2);
-    expect(verbs.get("ALTER TABLE")).toBe(40);
+    expect(verbs.get("ALTER TABLE")).toBe(41);
     expect(verbs.get("DROP INDEX")).toBe(1);
     expect(verbs.get("INSERT OR REPLACE")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(REMAINDER_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(52);
+    expect(codes.size).toBe(53);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
-    // Planes: do 44, d1 1, orm 2, index 3, route 1.
+    // Planes: do 45, d1 1, orm 3, index 3, route 1.
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(45);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "d1").length).toBe(1);
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(2);
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(3);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length).toBe(3);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "route").length).toBe(1);
     // Exactly the four parameterized entries, with their parameters.
@@ -564,7 +565,7 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(52);
+    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(53);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")

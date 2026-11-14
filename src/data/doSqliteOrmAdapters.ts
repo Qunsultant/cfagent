@@ -197,6 +197,7 @@ export const TRADE_COLUMN_MAP = {
   expirationScheduleId: "expiration_schedule_id",
   broker: "broker",
   priceSourceJson: "price_source",
+  mode: "mode",
   createdAt: "created_at",
   updatedAt: "updated_at",
 } as const;

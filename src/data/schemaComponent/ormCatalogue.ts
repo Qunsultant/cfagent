@@ -20,9 +20,9 @@
  * never counted the 2 audit-chain ALTERs that
  * ensureAuditChainColumns executes.
  *
- * NOT catalogued here: the 2 guarded ALTERs
+ * NOT catalogued here: the 3 guarded ALTERs
  * on mas_trades in ormFacade.initializeSchema (broker,
- * price_source) live in the remainder catalogue (#4282 P3);
+ * price_source, mode) live in the remainder catalogue (#4282 P3);
  * the mas_reports DDL lives in the DO catalogue
  * (doCatalogue.ts, parameterized on the table name), ensured
  * only by DoSqliteCanonicalReportStore.ensureSchema (issue #389
@@ -322,6 +322,7 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
         expiration_schedule_id TEXT,
         broker TEXT,
         price_source TEXT,
+        mode TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )

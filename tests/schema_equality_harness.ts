@@ -67,7 +67,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** sha256 of tests/schema_component_combined_expected_model.json as seeded. */
 export const COMBINED_FIXTURE_SHA256 =
-  "4b304be5aae61c270cfb36c3bba4dca18ece94311e3466f952bb3a82af885dbd";
+  "fc12f6f78b9279950a160706bb724d10551b721994d7e00f0a2033b1dd437380";
 
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [

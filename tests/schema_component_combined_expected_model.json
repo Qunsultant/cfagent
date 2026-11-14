@@ -8033,6 +8033,11 @@
           "pk": 0
         },
         {
+          "name": "mode",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
           "name": "created_at",
           "type": "TEXT",
           "pk": 0
