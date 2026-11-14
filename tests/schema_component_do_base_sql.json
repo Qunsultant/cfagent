@@ -1,0 +1,590 @@
+{
+  "captures": [
+    {
+      "adapter": "DoSqliteAdaptationAuditStore",
+      "file": "doSqliteAdaptationAuditAdapter.ts",
+      "trigger": "ensureTable()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_adaptation_audit (\n    id TEXT PRIMARY KEY,\n    actor TEXT NOT NULL,\n    subject TEXT NOT NULL,\n    parameter TEXT NOT NULL,\n    before_value TEXT NOT NULL,\n    after_value TEXT NOT NULL,\n    delta REAL,\n    rationale TEXT NOT NULL,\n    data_window TEXT NOT NULL,\n    status TEXT NOT NULL DEFAULT 'applied',\n    block_reason TEXT,\n    created_at TEXT NOT NULL DEFAULT (datetime('now'))\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_adaptation_audit_subject ON mas_adaptation_audit(subject, created_at)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteAnalyzedDatasetStore",
+      "file": "doSqliteAnalyzedDatasetAdapter.ts",
+      "trigger": "ensureSchema() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_analyzed_datasets (\n      id TEXT PRIMARY KEY,\n      created_at TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      enrich_job_id TEXT NOT NULL,\n      source_id TEXT NOT NULL,\n      dataset TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      status TEXT NOT NULL,\n      as_of TEXT NOT NULL,\n      rows_persisted INTEGER NOT NULL,\n      artifact_json TEXT NOT NULL\n    )",
+        "CREATE INDEX IF NOT EXISTS idx_job_analyzed_datasets_job\n      ON job_analyzed_datasets (job_id, created_at DESC, id DESC)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteAsyncJobStore",
+      "file": "doSqliteAsyncJobAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_async_jobs (\n        job_id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        capability TEXT NOT NULL,\n        display_name TEXT NOT NULL,\n        status TEXT NOT NULL,\n        payload_json TEXT NOT NULL,\n        result_json TEXT,\n        response_status INTEGER,\n        error TEXT,\n        created_at TEXT NOT NULL,\n        updated_at TEXT NOT NULL,\n        started_at TEXT,\n        completed_at TEXT\n      )\n    ",
+        "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_session_created ON mas_async_jobs(session_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_status_created ON mas_async_jobs(status, created_at)",
+        "PRAGMA table_info(mas_async_jobs)",
+        "ALTER TABLE mas_async_jobs ADD COLUMN parent_job_id TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN job_kind TEXT NOT NULL DEFAULT 'main'",
+        "ALTER TABLE mas_async_jobs ADD COLUMN channel TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN not_before TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN stage TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN chain_id TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN stuck_alerted_at TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN trigger TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN triggered_by TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN schedule_id TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN last_activity_at TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN error_code TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_parent ON mas_async_jobs(parent_job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_chain ON mas_async_jobs(chain_id)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteAutopilotStateStore",
+      "file": "doSqliteAutopilotStateAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_autopilot (\n        key TEXT PRIMARY KEY,\n        value TEXT NOT NULL,\n        updated_at TEXT NOT NULL\n      )\n    "
+      ]
+    },
+    {
+      "adapter": "DoSqliteCanonicalReportStore",
+      "file": "doSqliteCanonicalReportStoreAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_reports (\n    id TEXT PRIMARY KEY,\n    run_id TEXT NOT NULL,\n    title TEXT NOT NULL,\n    source TEXT NOT NULL,\n    summary TEXT NOT NULL,\n    body TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    generation_id TEXT\n  )",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN run_id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN title TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN source TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN summary TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN body TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN created_at TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN generation_id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN user_login TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN body_r2_key TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN fanout_outcome TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_mas_reports_created ON mas_reports (created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_reports_user ON mas_reports (user_login)",
+        "PRAGMA index_info(idx_mas_reports_generation)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_mas_reports_generation ON mas_reports (user_login, generation_id)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteChallengerStore",
+      "file": "doSqliteChallengerAdapter.ts",
+      "trigger": "ensureTables()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_challengers (\n    id TEXT PRIMARY KEY,\n    user_login TEXT NOT NULL,\n    kind TEXT NOT NULL,\n    title TEXT NOT NULL,\n    regime TEXT,\n    spec_json TEXT NOT NULL,\n    criteria_json TEXT NOT NULL,\n    eval_set_version TEXT NOT NULL,\n    source_proposal_id TEXT,\n    status TEXT NOT NULL,\n    evaluation_json TEXT,\n    created_by TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  )",
+        "CREATE TABLE IF NOT EXISTS mas_challenger_approvals (\n    id TEXT PRIMARY KEY,\n    challenger_id TEXT NOT NULL,\n    user_login TEXT NOT NULL,\n    approver TEXT NOT NULL,\n    decision TEXT NOT NULL,\n    created_at TEXT NOT NULL\n  )",
+        "CREATE TABLE IF NOT EXISTS mas_challenger_promotions (\n    id TEXT PRIMARY KEY,\n    challenger_id TEXT NOT NULL,\n    user_login TEXT NOT NULL,\n    action TEXT NOT NULL,\n    prior_json TEXT NOT NULL,\n    applied_json TEXT NOT NULL,\n    weights_version INTEGER,\n    actor TEXT NOT NULL,\n    reason TEXT,\n    created_at TEXT NOT NULL\n  )",
+        "CREATE TABLE IF NOT EXISTS mas_strategy_bank_active (\n    id TEXT PRIMARY KEY,\n    user_login TEXT NOT NULL,\n    version INTEGER NOT NULL,\n    strategies_json TEXT NOT NULL,\n    challenger_id TEXT,\n    created_at TEXT NOT NULL\n  )"
+      ]
+    },
+    {
+      "adapter": "DoSqliteComparisonLedgerStore",
+      "file": "doSqliteComparisonLedgerAdapter.ts",
+      "trigger": "ensureTable()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_comparison_arm_outcomes (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, arm TEXT NOT NULL, candidate_id TEXT NOT NULL, structure TEXT NOT NULL, symbol TEXT NOT NULL, status TEXT NOT NULL, provenance TEXT NOT NULL, created_at TEXT NOT NULL)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteDeliveryDatasetStore",
+      "file": "doSqliteDeliveryDatasetAdapter.ts",
+      "trigger": "ensureSchema() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_delivery_datasets (\n      id TEXT PRIMARY KEY,\n      created_at TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      generate_job_id TEXT NOT NULL,\n      source_id TEXT NOT NULL,\n      dataset TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      status TEXT NOT NULL,\n      as_of TEXT NOT NULL,\n      rows_persisted INTEGER NOT NULL,\n      input_artifact_id TEXT NOT NULL,\n      artifact_json TEXT NOT NULL\n    )",
+        "CREATE INDEX IF NOT EXISTS idx_job_delivery_datasets_job\n      ON job_delivery_datasets (job_id, created_at DESC, id DESC)"
+      ]
+    },
+    {
+      "adapter": "SqlDiscoveryAlertStore",
+      "file": "doSqliteDiscoveryAlertAdapter.ts",
+      "trigger": "ensure() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_discovery_alerts (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, scope_key TEXT NOT NULL, symbol TEXT NOT NULL, thesis TEXT NOT NULL, score REAL NOT NULL, day TEXT NOT NULL, evidence TEXT NOT NULL, fired_signals TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(scope_key, symbol, thesis, day))"
+      ]
+    },
+    {
+      "adapter": "SqlDiscoveryRunStore",
+      "file": "doSqliteDiscoveryRunAdapter.ts",
+      "trigger": "ensure() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_discovery_runs (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, user_login TEXT, summary_json TEXT NOT NULL, run_json TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_discovery_runs_created_at ON mas_discovery_runs (created_at DESC)"
+      ]
+    },
+    {
+      "adapter": "SqlDiscoverySetupStore",
+      "file": "doSqliteDiscoverySetupAdapter.ts",
+      "trigger": "ensure() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_discovery_setup_runs (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, scope_key TEXT NOT NULL, user_login TEXT, run_json TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_discovery_setup_runs_created_at ON mas_discovery_setup_runs (created_at DESC)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteEnrichedDatasetStore",
+      "file": "doSqliteEnrichedDatasetAdapter.ts",
+      "trigger": "ensureSchema() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_enriched_datasets (\n      id TEXT PRIMARY KEY,\n      created_at TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      feed_job_id TEXT NOT NULL,\n      source_id TEXT NOT NULL,\n      dataset TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      status TEXT NOT NULL,\n      as_of TEXT NOT NULL,\n      rows_persisted INTEGER NOT NULL,\n      artifact_json TEXT NOT NULL\n    )",
+        "CREATE INDEX IF NOT EXISTS idx_job_enriched_datasets_job\n      ON job_enriched_datasets (job_id, created_at DESC, id DESC)"
+      ]
+    },
+    {
+      "adapter": "SqlEnrichmentStore",
+      "file": "doSqliteEnrichmentAdapter.ts",
+      "trigger": "ensureTables()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_enrichment_runs (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, job_id TEXT NOT NULL, stage TEXT NOT NULL, record_json TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_enrichment_runs_job ON mas_enrichment_runs (job_id, stage, created_at DESC)"
+      ]
+    },
+    {
+      "adapter": "SqlFeedSnapshotStore",
+      "file": "doSqliteFeedSnapshotAdapter.ts",
+      "trigger": "ensureTables() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_feed_snapshots (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, user_login TEXT NOT NULL, symbol TEXT NOT NULL, as_of TEXT NOT NULL, data_source TEXT NOT NULL, snapshot_json TEXT NOT NULL, load_params_json TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_feed_snapshots_lookup ON mas_feed_snapshots (user_login, symbol, created_at DESC)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteGeneratedDatasetStore",
+      "file": "doSqliteGeneratedDatasetAdapter.ts",
+      "trigger": "ensureSchema() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_generated_datasets (\n      id TEXT PRIMARY KEY,\n      created_at TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      analyze_job_id TEXT NOT NULL,\n      source_id TEXT NOT NULL,\n      dataset TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      status TEXT NOT NULL,\n      as_of TEXT NOT NULL,\n      rows_persisted INTEGER NOT NULL,\n      artifact_json TEXT NOT NULL\n    )",
+        "CREATE INDEX IF NOT EXISTS idx_job_generated_datasets_job\n      ON job_generated_datasets (job_id, created_at DESC, id DESC)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteGoalScenarioStore",
+      "file": "doSqliteGoalScenarioAdapter.ts",
+      "trigger": "ensureTables()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_goals (\n    id TEXT PRIMARY KEY,\n    user_login TEXT NOT NULL,\n    kind TEXT NOT NULL,\n    title TEXT NOT NULL,\n    status TEXT NOT NULL,\n    source TEXT NOT NULL,\n    payload_json TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_mas_goals_user_status ON mas_goals(user_login, status)",
+        "CREATE TABLE IF NOT EXISTS mas_scenarios (\n    id TEXT PRIMARY KEY,\n    user_login TEXT NOT NULL,\n    goal_id TEXT NOT NULL,\n    portfolio_ref_kind TEXT NOT NULL,\n    portfolio_ref TEXT,\n    shocks_json TEXT NOT NULL,\n    constraints_json TEXT NOT NULL,\n    status TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_mas_scenarios_user_goal ON mas_scenarios(user_login, goal_id)",
+        "CREATE TABLE IF NOT EXISTS mas_outcomes (\n    id TEXT PRIMARY KEY,\n    user_login TEXT NOT NULL,\n    goal_id TEXT,\n    scenario_id TEXT,\n    recommendation_ref TEXT,\n    screen_run_ref TEXT,\n    kind TEXT NOT NULL,\n    metrics_json TEXT NOT NULL,\n    created_at TEXT NOT NULL\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_mas_outcomes_user_scenario ON mas_outcomes(user_login, scenario_id)"
+      ]
+    },
+    {
+      "adapter": "SqlIndexListStore",
+      "file": "doSqliteIndexListAdapter.ts",
+      "trigger": "ensureTables() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_index_lists (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, index_id TEXT NOT NULL, snapshot_date TEXT NOT NULL, source TEXT NOT NULL, source_label TEXT NOT NULL, derived_from_holdings INTEGER NOT NULL, members_json TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_index_lists_lookup ON mas_index_lists (index_id, created_at DESC)"
+      ]
+    },
+    {
+      "adapter": "SqlIvHistoryStore",
+      "file": "doSqliteIvHistoryAdapter.ts",
+      "trigger": "ensure() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_iv_history (symbol TEXT NOT NULL, date TEXT NOT NULL, atm_iv REAL NOT NULL, spot REAL NOT NULL, expiry_date TEXT NOT NULL, dte INTEGER NOT NULL, collected_at TEXT NOT NULL, broker TEXT NOT NULL DEFAULT 'etrade', PRIMARY KEY (symbol, date))",
+        "ALTER TABLE mas_iv_history ADD COLUMN broker TEXT NOT NULL DEFAULT 'etrade'",
+        "CREATE INDEX IF NOT EXISTS idx_mas_iv_history_symbol_date ON mas_iv_history (symbol, date DESC)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteJobOutcomeStore",
+      "file": "doSqliteJobOutcomeAdapter.ts",
+      "trigger": "ensureTables()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_job_outcomes (id TEXT PRIMARY KEY, kind TEXT, trigger TEXT, status TEXT, scanned INTEGER, matched INTEGER, coded_error TEXT, report_url TEXT, pdf_key TEXT, xlsx_key TEXT, csv_key TEXT, delivery_json TEXT, origin TEXT, created_at TEXT)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_job_outcomes_created ON mas_job_outcomes(created_at DESC)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteJobOutcomeStore.maybePrune",
+      "file": "doSqliteJobOutcomeAdapter.ts",
+      "trigger": "maybePrune(0) \u2014 non-ensure path: ensureMetaTable()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_job_outcomes_meta (k TEXT PRIMARY KEY, v TEXT)",
+        "SELECT v FROM mas_job_outcomes_meta WHERE k = 'pruned_at'",
+        "CREATE TABLE IF NOT EXISTS mas_job_outcomes (id TEXT PRIMARY KEY, kind TEXT, trigger TEXT, status TEXT, scanned INTEGER, matched INTEGER, coded_error TEXT, report_url TEXT, pdf_key TEXT, xlsx_key TEXT, csv_key TEXT, delivery_json TEXT, origin TEXT, created_at TEXT)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_job_outcomes_created ON mas_job_outcomes(created_at DESC)",
+        "SELECT COUNT(*) AS count FROM mas_job_outcomes",
+        "DELETE FROM mas_job_outcomes WHERE created_at < ?",
+        "SELECT COUNT(*) AS count FROM mas_job_outcomes",
+        "SELECT COUNT(*) AS count FROM mas_job_outcomes",
+        "INSERT OR REPLACE INTO mas_job_outcomes_meta (k, v) VALUES ('pruned_at', ?)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteJobPipelineStores",
+      "file": "doSqliteJobPipelineAdapter.ts",
+      "trigger": "ensureSchema() [private, legacy]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_pipeline_definitions (\n      job_id TEXT PRIMARY KEY,\n      name TEXT NOT NULL,\n      definition_json TEXT NOT NULL,\n      version INTEGER NOT NULL,\n      updated_at TEXT NOT NULL\n    )",
+        "CREATE TABLE IF NOT EXISTS job_pipeline_instances (\n      job_id TEXT PRIMARY KEY,\n      state TEXT NOT NULL,\n      desired_state TEXT NOT NULL,\n      current_run_id TEXT,\n      run_started_at TEXT,\n      run_trigger TEXT,\n      run_schedule_id TEXT,\n      run_async_job_id TEXT,\n      checkpoint_json TEXT,\n      stage_checkpoint_json TEXT,\n      stage_desired_json TEXT,\n      last_error TEXT,\n      updated_at TEXT NOT NULL\n    )",
+        "CREATE TABLE IF NOT EXISTS job_pipeline_artifacts (\n      id TEXT PRIMARY KEY,\n      run_id TEXT NOT NULL,\n      artifact_key TEXT NOT NULL,\n      value_json TEXT NOT NULL\n    )",
+        "CREATE INDEX IF NOT EXISTS idx_job_pipeline_artifacts_run\n      ON job_pipeline_artifacts (run_id, artifact_key)",
+        "PRAGMA table_info(job_pipeline_instances)",
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_schedule_id TEXT",
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_async_job_id TEXT"
+      ]
+    },
+    {
+      "adapter": "SqlJobRunRecordStore",
+      "file": "doSqliteJobRunRecordAdapter.ts",
+      "trigger": "listRecent(10)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_run_records (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      system TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      operation TEXT NOT NULL,\n      started TEXT NOT NULL,\n      finished TEXT NOT NULL,\n      outcome TEXT NOT NULL,\n      triggered_by TEXT NOT NULL,\n      trigger_text TEXT,\n      schedule_id TEXT,\n      async_job_id TEXT,\n      workflow_id TEXT,\n      error_text TEXT,\n      detail TEXT,\n      descriptor TEXT,\n      artifact_refs_json TEXT,\n      broker_id TEXT,\n      data_provider_id TEXT,\n      mode TEXT,\n      mode_source TEXT\n    )",
+        "PRAGMA table_info(job_run_records)",
+        "ALTER TABLE job_run_records ADD COLUMN trigger_text TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN schedule_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN async_job_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN workflow_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN broker_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN data_provider_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN mode TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN mode_source TEXT",
+        "CREATE INDEX IF NOT EXISTS job_run_records_job_idx ON job_run_records (job_id, started DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS job_run_records_recent_idx ON job_run_records (started DESC, id DESC)",
+        "SELECT * FROM job_run_records\n        ORDER BY started DESC, id DESC\n        LIMIT ?"
+      ]
+    },
+    {
+      "adapter": "DoSqliteSettingsAdapter",
+      "file": "doSqliteOrmAdapters.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteOutcomeTrackingStore",
+      "file": "doSqliteOutcomeTrackingAdapter.ts",
+      "trigger": "ensureTable()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_outcome_tracking (\n    id TEXT PRIMARY KEY,\n    user_login TEXT NOT NULL,\n    recommendation_ref TEXT NOT NULL,\n    seq INTEGER NOT NULL,\n    event_kind TEXT NOT NULL,\n    event_json TEXT NOT NULL,\n    created_at TEXT NOT NULL\n  )"
+      ]
+    },
+    {
+      "adapter": "SqlPausedScheduleStore",
+      "file": "doSqlitePausedScheduleAdapter.deprecated.ts",
+      "trigger": "list()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS paused_schedules (\n      id TEXT PRIMARY KEY,\n      callback TEXT NOT NULL,\n      payload_json TEXT,\n      sched_type TEXT NOT NULL,\n      cron TEXT,\n      interval_seconds INTEGER,\n      time INTEGER,\n      delay_seconds INTEGER,\n      paused_at TEXT NOT NULL\n    )",
+        "SELECT * FROM paused_schedules ORDER BY paused_at ASC"
+      ]
+    },
+    {
+      "adapter": "SqlPendingScheduleApprovalStore",
+      "file": "doSqlitePendingScheduleApprovalsAdapter.ts",
+      "trigger": "loadAll()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS pending_schedule_approvals (\n      id TEXT PRIMARY KEY,\n      kind TEXT NOT NULL,\n      requested_by TEXT NOT NULL,\n      agent_id TEXT NOT NULL,\n      requested_at TEXT NOT NULL,\n      definition_json TEXT NOT NULL,\n      approval_reasons_json TEXT NOT NULL,\n      status TEXT NOT NULL,\n      decided_by TEXT,\n      decided_at TEXT\n    )",
+        "SELECT * FROM pending_schedule_approvals ORDER BY requested_at ASC"
+      ]
+    },
+    {
+      "adapter": "DoSqlitePolicyVerdictStore",
+      "file": "doSqlitePolicyVerdictAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_policy_verdicts (\n        id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        symbol TEXT NOT NULL,\n        action TEXT NOT NULL,\n        quantity REAL NOT NULL,\n        notional REAL,\n        mode TEXT NOT NULL,\n        dry_run INTEGER NOT NULL DEFAULT 0,\n        passed INTEGER NOT NULL,\n        execution_allowed INTEGER NOT NULL,\n        requires_approval INTEGER NOT NULL,\n        binding_rule TEXT,\n        detail TEXT NOT NULL,\n        limits_json TEXT NOT NULL,\n        projections_json TEXT NOT NULL,\n        findings_json TEXT NOT NULL,\n        signature TEXT NOT NULL,\n        signing_key_id TEXT NOT NULL,\n        proposer_did TEXT NOT NULL,\n        authorizer_did TEXT NOT NULL,\n        created_at TEXT NOT NULL\n      )\n    ",
+        "CREATE INDEX IF NOT EXISTS idx_mas_policy_verdicts_created ON mas_policy_verdicts(created_at DESC)"
+      ]
+    },
+    {
+      "adapter": "ensureCaptureTable",
+      "file": "doSqliteProviderCaptureAdapter.ts",
+      "trigger": "ensureCaptureTable(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_data_captures (\n    id TEXT PRIMARY KEY,\n    provider_id TEXT NOT NULL,\n    capability TEXT NOT NULL,\n    request_params_json TEXT NOT NULL DEFAULT '{}',\n    run_id TEXT NOT NULL,\n    tenant_id TEXT NOT NULL,\n    user_login TEXT,\n    fetched_at TEXT NOT NULL,\n    status TEXT NOT NULL,\n    raw_kind TEXT,\n    raw_blob_ref TEXT,\n    raw_byte_size INTEGER,\n    raw_sha256 TEXT,\n    normalized_digest TEXT,\n    retention_class TEXT NOT NULL,\n    failure_error TEXT,\n    failure_kind TEXT,\n    failure_message TEXT,\n    created_at TEXT NOT NULL\n  )",
+        "PRAGMA table_info(mas_data_captures)",
+        "ALTER TABLE mas_data_captures ADD COLUMN failure_kind TEXT",
+        "ALTER TABLE mas_data_captures ADD COLUMN failure_message TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_mas_data_captures_run ON mas_data_captures(tenant_id, run_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_data_captures_provider ON mas_data_captures(tenant_id, provider_id)"
+      ]
+    },
+    {
+      "adapter": "ensureProviderConfigTable",
+      "file": "doSqliteProviderConfigAdapter.ts",
+      "trigger": "ensureProviderConfigTable(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_data_providers (\n    id TEXT PRIMARY KEY,\n    adapter_kind TEXT NOT NULL,\n    lifecycle_state TEXT NOT NULL,\n    enabled INTEGER NOT NULL DEFAULT 0,\n    precedence INTEGER NOT NULL,\n    credential_ref TEXT,\n    config_json TEXT NOT NULL DEFAULT '{}',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_mas_data_providers_precedence ON mas_data_providers(precedence)"
+      ]
+    },
+    {
+      "adapter": "ensureProviderRoutingTable",
+      "file": "doSqliteProviderConfigAdapter.ts",
+      "trigger": "ensureProviderRoutingTable(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_data_provider_routes (\n    capability TEXT PRIMARY KEY,\n    primary_provider_id TEXT NOT NULL,\n    gap_fill_provider_id TEXT,\n    min_tier TEXT NOT NULL DEFAULT 'freemium',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  )",
+        "PRAGMA table_info(mas_data_provider_routes)",
+        "ALTER TABLE mas_data_provider_routes ADD COLUMN min_tier TEXT NOT NULL DEFAULT 'freemium'"
+      ]
+    },
+    {
+      "adapter": "DoSqliteReportConfirmationStore",
+      "file": "doSqliteReportConfirmationAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_report_confirmations (\n        id TEXT PRIMARY KEY,\n        kind TEXT NOT NULL,\n        payload_json TEXT NOT NULL,\n        status TEXT NOT NULL,\n        created_at TEXT NOT NULL,\n        decided_at TEXT,\n        decided_by TEXT,\n        report_id TEXT,\n        created_by TEXT\n      )\n    ",
+        "PRAGMA table_info(mas_report_confirmations)",
+        "ALTER TABLE mas_report_confirmations ADD COLUMN report_id TEXT",
+        "PRAGMA table_info(mas_report_confirmations)",
+        "ALTER TABLE mas_report_confirmations ADD COLUMN created_by TEXT"
+      ]
+    },
+    {
+      "adapter": "DoSqliteResearchSettingsStore",
+      "file": "doSqliteResearchStoreAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS research_settings (\n      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL\n    )"
+      ]
+    },
+    {
+      "adapter": "DoSqliteResearchTaskStore",
+      "file": "doSqliteResearchStoreAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS research_task_store (\n      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL\n    )"
+      ]
+    },
+    {
+      "adapter": "DoSqliteResearchRunStore",
+      "file": "doSqliteResearchStoreAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS research_runs (\n      run_id TEXT PRIMARY KEY, trigger TEXT NOT NULL, user_login TEXT NOT NULL,\n      created_at TEXT NOT NULL, rules_version TEXT NOT NULL, status TEXT NOT NULL,\n      ideas_count INTEGER NOT NULL, report_json TEXT NOT NULL\n    )"
+      ]
+    },
+    {
+      "adapter": "DoSqliteResearchEvaluationStore",
+      "file": "doSqliteResearchStoreAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS research_evaluations (\n      id TEXT PRIMARY KEY, run_id TEXT NOT NULL, evaluated_at TEXT NOT NULL,\n      evaluation_json TEXT NOT NULL\n    )"
+      ]
+    },
+    {
+      "adapter": "DoSqliteReselectionStore",
+      "file": "doSqliteReselectionAdapter.ts",
+      "trigger": "ensureTable()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_strategy_bank_proposals (\n    id TEXT PRIMARY KEY,\n    user_login TEXT NOT NULL,\n    regime TEXT NOT NULL,\n    proposal_json TEXT NOT NULL,\n    created_at TEXT NOT NULL DEFAULT (datetime('now'))\n  )"
+      ]
+    },
+    {
+      "adapter": "SqlScanRunStore",
+      "file": "doSqliteScanRunAdapter.ts",
+      "trigger": "ensure() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_opportunity_scans (id TEXT PRIMARY KEY, generated_at TEXT NOT NULL, mode TEXT NOT NULL, model_version TEXT NOT NULL, user_login TEXT, schedule_id TEXT, async_job_id TEXT, workflow_id TEXT, summary_json TEXT NOT NULL, result_json TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_opportunity_scans_generated_at ON mas_opportunity_scans (generated_at DESC)",
+        "PRAGMA table_info(mas_opportunity_scans)",
+        "ALTER TABLE mas_opportunity_scans ADD COLUMN user_login TEXT",
+        "ALTER TABLE mas_opportunity_scans ADD COLUMN schedule_id TEXT",
+        "ALTER TABLE mas_opportunity_scans ADD COLUMN async_job_id TEXT",
+        "ALTER TABLE mas_opportunity_scans ADD COLUMN workflow_id TEXT"
+      ]
+    },
+    {
+      "adapter": "DoSqliteScreenRunLock",
+      "file": "doSqliteScreenRunLockAdapter.ts",
+      "trigger": "ensureSchema() [legacy]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS screen_run_locks (\n      user_login TEXT NOT NULL,\n      universe TEXT NOT NULL,\n      token TEXT NOT NULL,\n      started_at INTEGER NOT NULL,\n      PRIMARY KEY (user_login, universe)\n    )"
+      ]
+    },
+    {
+      "adapter": "DoSqliteScreenerPresetStore",
+      "file": "doSqliteScreenerPresetAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_screener_presets (\n        id TEXT PRIMARY KEY,\n        user_login TEXT NOT NULL,\n        name TEXT NOT NULL,\n        asset_class TEXT NOT NULL,\n        criteria_json TEXT NOT NULL,\n        created_at TEXT NOT NULL,\n        updated_at TEXT NOT NULL\n      )\n    "
+      ]
+    },
+    {
+      "adapter": "DoSqliteScreeningActivityStore",
+      "file": "doSqliteScreeningActivityAdapter.ts",
+      "trigger": "ensureTable()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_screening_activity (\n    id TEXT PRIMARY KEY,\n    user_login TEXT NOT NULL,\n    kind TEXT NOT NULL,\n    summary TEXT NOT NULL,\n    detail_json TEXT,\n    ref_id TEXT,\n    actor TEXT,\n    created_at TEXT NOT NULL\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_screening_activity_user ON mas_screening_activity (user_login, created_at DESC)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteStockCopilotPositionStore",
+      "file": "doSqliteStockCopilotStoreAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS stock_copilot_positions (\n        id TEXT PRIMARY KEY,\n        user_login TEXT NOT NULL,\n        symbol TEXT NOT NULL,\n        strategy TEXT NOT NULL,\n        quantity REAL NOT NULL,\n        entry_price REAL NOT NULL,\n        stop_price REAL NOT NULL,\n        target_price REAL NOT NULL,\n        broker_order_ref TEXT NOT NULL,\n        status TEXT NOT NULL,\n        opened_at TEXT NOT NULL,\n        closed_at TEXT,\n        exit_broker_order_ref TEXT,\n        exit_price REAL,\n        exit_reason TEXT,\n        entry_session TEXT,\n        entry_order_type TEXT\n      )",
+        "PRAGMA table_info(stock_copilot_positions)",
+        "ALTER TABLE stock_copilot_positions ADD COLUMN entry_session TEXT",
+        "ALTER TABLE stock_copilot_positions ADD COLUMN entry_order_type TEXT"
+      ]
+    },
+    {
+      "adapter": "DoSqliteStockCopilotActivityStore",
+      "file": "doSqliteStockCopilotSurfaceAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS stock_copilot_activity (\n        id TEXT PRIMARY KEY,\n        user_login TEXT NOT NULL,\n        cycle_at TEXT NOT NULL,\n        outcome TEXT NOT NULL,\n        entries_json TEXT NOT NULL,\n        exits_json TEXT NOT NULL,\n        detail TEXT,\n        session TEXT\n      )",
+        "PRAGMA table_info(stock_copilot_activity)",
+        "ALTER TABLE stock_copilot_activity ADD COLUMN session TEXT",
+        "ALTER TABLE stock_copilot_activity ADD COLUMN mode TEXT",
+        "ALTER TABLE stock_copilot_activity ADD COLUMN critic_verdict_json TEXT"
+      ]
+    },
+    {
+      "adapter": "DoSqliteStockCopilotControlStore",
+      "file": "doSqliteStockCopilotSurfaceAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS stock_copilot_control (\n        user_login TEXT PRIMARY KEY,\n        paused INTEGER NOT NULL,\n        updated_at TEXT NOT NULL,\n        updated_by TEXT NOT NULL\n      )"
+      ]
+    },
+    {
+      "adapter": "DoSqliteStockCopilotMemoryStore",
+      "file": "doSqliteStockCopilotSurfaceAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS stock_copilot_learnings (\n        id TEXT PRIMARY KEY,\n        user_login TEXT NOT NULL,\n        cycle_id TEXT,\n        timestamp TEXT NOT NULL,\n        category TEXT NOT NULL,\n        insight TEXT NOT NULL,\n        source_verdict TEXT,\n        suggested_action TEXT\n      )"
+      ]
+    },
+    {
+      "adapter": "DoSqliteStrategyPolicyStore",
+      "file": "doSqliteStrategyPolicyAdapter.ts",
+      "trigger": "ensureTables()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_strategy_weight_caps (\n    strategy TEXT PRIMARY KEY,\n    cap REAL NOT NULL,\n    updated_at TEXT NOT NULL DEFAULT (datetime('now'))\n  )",
+        "CREATE TABLE IF NOT EXISTS mas_strategy_gates (\n    strategy TEXT PRIMARY KEY,\n    gated_off INTEGER NOT NULL DEFAULT 0,\n    updated_at TEXT NOT NULL DEFAULT (datetime('now'))\n  )"
+      ]
+    },
+    {
+      "adapter": "SqlStrategyProfileStore",
+      "file": "doSqliteStrategyProfileAdapter.ts",
+      "trigger": "ensure() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_strategy_profiles (id TEXT PRIMARY KEY, user_login TEXT NOT NULL, name TEXT NOT NULL, version INTEGER NOT NULL, spec_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_strategy_profiles_user_name ON mas_strategy_profiles (user_login, name)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteStrategyReviewStore",
+      "file": "doSqliteStrategyReviewAdapter.ts",
+      "trigger": "ensureTable()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_strategy_reviews (\n    id TEXT PRIMARY KEY,\n    symbol TEXT NOT NULL,\n    candidate_id TEXT NOT NULL,\n    label TEXT NOT NULL,\n    rank INTEGER NOT NULL,\n    rationale TEXT NOT NULL,\n    quant_status TEXT NOT NULL DEFAULT 'unverified',\n    decision TEXT NOT NULL DEFAULT 'pending',\n    decided_at TEXT,\n    created_at TEXT NOT NULL DEFAULT (datetime('now'))\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_reviews_symbol ON mas_strategy_reviews(symbol)",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_reviews_decision ON mas_strategy_reviews(decision)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteStrategyWeightsStore",
+      "file": "doSqliteStrategyWeightsAdapter.ts",
+      "trigger": "ensureTables()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_strategy_weights_v2 (\n    strategy TEXT NOT NULL,\n    regime TEXT NOT NULL,\n    weight REAL NOT NULL,\n    version INTEGER NOT NULL,\n    updated_at TEXT NOT NULL,\n    PRIMARY KEY (strategy, regime)\n  )",
+        "CREATE TABLE IF NOT EXISTS mas_strategy_weight_versions (\n    id TEXT PRIMARY KEY,\n    version INTEGER NOT NULL,\n    strategy TEXT NOT NULL,\n    regime TEXT NOT NULL,\n    before_weight REAL,\n    after_weight REAL NOT NULL,\n    signal REAL,\n    evaluated INTEGER NOT NULL DEFAULT 0,\n    win_rate_after_cost REAL,\n    avg_r_after_cost REAL,\n    actor TEXT NOT NULL,\n    rationale TEXT NOT NULL,\n    created_at TEXT NOT NULL\n  )"
+      ]
+    },
+    {
+      "adapter": "SqlUnifiedScheduleStore",
+      "file": "doSqliteUnifiedScheduleAdapter.ts",
+      "trigger": "list()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS unified_schedules (\n      id TEXT PRIMARY KEY,\n      kind TEXT NOT NULL,\n      state TEXT NOT NULL,\n      callback TEXT,\n      operation TEXT,\n      definition_json TEXT NOT NULL,\n      owner_login TEXT,\n      provenance_json TEXT,\n      alarm_id TEXT,\n      paused_at TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL\n    )",
+        "CREATE INDEX IF NOT EXISTS unified_schedules_kind_idx ON unified_schedules (kind, created_at ASC, id ASC)",
+        "CREATE INDEX IF NOT EXISTS unified_schedules_state_idx ON unified_schedules (state, created_at ASC, id ASC)",
+        "CREATE INDEX IF NOT EXISTS unified_schedules_created_idx ON unified_schedules (created_at ASC, id ASC)",
+        "SELECT * FROM unified_schedules  ORDER BY created_at ASC, id ASC"
+      ]
+    },
+    {
+      "adapter": "DoSqliteUsageEventStore",
+      "file": "doSqliteUsageEventAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS usage_events (\n      id TEXT PRIMARY KEY,\n      user_login TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      category TEXT NOT NULL,\n      created_at TEXT NOT NULL,\n      detail_json TEXT\n    )",
+        "CREATE INDEX IF NOT EXISTS idx_usage_events_user ON usage_events (user_login, created_at DESC)"
+      ]
+    },
+    {
+      "adapter": "DoSqliteUserRequestQuota",
+      "file": "doSqliteUserRequestQuotaAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS user_request_quota_charges (\n      tenant_id TEXT NOT NULL,\n      user_login TEXT NOT NULL,\n      window_kind TEXT NOT NULL,\n      window_key TEXT NOT NULL,\n      kind TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      charged_at INTEGER NOT NULL,\n      PRIMARY KEY (tenant_id, user_login, window_kind, window_key, run_id)\n    )",
+        "CREATE TABLE IF NOT EXISTS user_request_quota_overrides (\n      id TEXT NOT NULL PRIMARY KEY,\n      tenant_id TEXT NOT NULL,\n      user_login TEXT NOT NULL,\n      window_kind TEXT NOT NULL,\n      window_key TEXT NOT NULL,\n      extra_runs INTEGER NOT NULL,\n      granted_by TEXT NOT NULL,\n      reason TEXT NOT NULL,\n      created_ms INTEGER NOT NULL,\n      expires_ms INTEGER\n    )"
+      ]
+    },
+    {
+      "adapter": "ensureWorkspaceSqlSchema",
+      "file": "doSqliteWorkspaceStoreAdapter.ts",
+      "trigger": "ensureWorkspaceSqlSchema(sql)",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_agent_workspace_files (\n        user_login TEXT NOT NULL,\n        path TEXT NOT NULL,\n        content TEXT NOT NULL,\n        size INTEGER NOT NULL,\n        updated_at TEXT NOT NULL,\n        PRIMARY KEY (user_login, path)\n      )\n    "
+      ]
+    },
+    {
+      "adapter": "DoSessionStoreAdapter",
+      "file": "doSessionStoreAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS kv_store (\n         ns TEXT NOT NULL,\n         key TEXT NOT NULL,\n         value TEXT NOT NULL,\n         expires_at INTEGER,\n         PRIMARY KEY (ns, key)\n       )",
+        "CREATE TABLE IF NOT EXISTS mas_do_schema_marker (\n  id INTEGER PRIMARY KEY,\n  version INTEGER NOT NULL,\n  updated_at_ms INTEGER NOT NULL\n)",
+        "SELECT version FROM mas_do_schema_marker WHERE id = 1",
+        "CREATE TABLE IF NOT EXISTS mas_do_schema_marker (\n  id INTEGER PRIMARY KEY,\n  version INTEGER NOT NULL,\n  updated_at_ms INTEGER NOT NULL\n)",
+        "INSERT OR REPLACE INTO mas_do_schema_marker (id, version, updated_at_ms) VALUES (1, ?, ?)"
+      ]
+    },
+    {
+      "adapter": "readDoSchemaVersion",
+      "file": "doSchemaMarker.ts",
+      "trigger": "readDoSchemaVersion(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_do_schema_marker (\n  id INTEGER PRIMARY KEY,\n  version INTEGER NOT NULL,\n  updated_at_ms INTEGER NOT NULL\n)",
+        "SELECT version FROM mas_do_schema_marker WHERE id = 1"
+      ]
+    },
+    {
+      "adapter": "listAppliedDoSchemaMigrations",
+      "file": "doSchemaMigrations.ts",
+      "trigger": "listAppliedDoSchemaMigrations(sql, probe)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_schema_migrations (\n  store TEXT NOT NULL,\n  version INTEGER NOT NULL,\n  name TEXT NOT NULL,\n  applied_at_ms INTEGER NOT NULL,\n  PRIMARY KEY (store, version)\n)",
+        "SELECT version, name FROM mas_schema_migrations WHERE store = ? ORDER BY version ASC"
+      ]
+    },
+    {
+      "adapter": "JobStageEventStore",
+      "file": "doSqliteJobStageEventAdapter.ts",
+      "trigger": "listByRun()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_stage_events (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      event_key TEXT NOT NULL UNIQUE,\n      claim_key TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      stage_id TEXT NOT NULL,\n      unit_id TEXT,\n      action TEXT NOT NULL,\n      at TEXT NOT NULL,\n      started_at TEXT,\n      ended_at TEXT,\n      detail TEXT\n    )",
+        "CREATE INDEX IF NOT EXISTS idx_job_stage_events_run ON job_stage_events (run_id)",
+        "SELECT event_key, claim_key, run_id, job_id, stage_id, unit_id, action, at, started_at, ended_at, detail\n             FROM job_stage_events WHERE run_id = ? ORDER BY id ASC"
+      ]
+    }
+  ]
+}
