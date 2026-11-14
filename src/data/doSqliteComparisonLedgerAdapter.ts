@@ -12,13 +12,14 @@ import {
   type ComparisonOutcomeInput,
   type ComparisonOutcomeRow,
 } from "./comparisonLedgerPorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqliteComparisonLedgerStore implements ComparisonLedgerStore {
   constructor(private readonly sql: ComparisonLedgerSqlExecutor) {}
 
   ensureTable(): void {
     this.sql.exec(
-      "CREATE TABLE IF NOT EXISTS mas_comparison_arm_outcomes (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, arm TEXT NOT NULL, candidate_id TEXT NOT NULL, structure TEXT NOT NULL, symbol TEXT NOT NULL, status TEXT NOT NULL, provenance TEXT NOT NULL, created_at TEXT NOT NULL)",
+      doTableSql("mas_comparison_arm_outcomes"),
     );
   }
 
