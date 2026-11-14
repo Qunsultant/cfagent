@@ -4,7 +4,7 @@
  *
  * The problem this port closes: DO SQLite DDL today lives as raw
  * string queries scattered across one ensureSchema per adapter
- * (dozens of inline CREATE TABLE IF NOT EXISTS blocks), with no
+ * (dozens of inline table-creation blocks), with no
  * versioned application, no rollback, and no record of what
  * schema generation any instance is on — the scan's F-37/F-38
  * drift risk. The D1 side already has a versioned runner
