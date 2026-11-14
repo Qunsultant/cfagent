@@ -227,26 +227,43 @@ describe("4d family census: surface-1 execution sites", () => {
 
 describe("4d family census: writer sets", () => {
   it("the four orchestrator tables are written only by their new DO adapters", () => {
+    // #4282 P2b: each adapter's CREATE TABLE / CREATE INDEX
+    // statements moved into the DO catalogue
+    // (src/data/schemaComponent/doCatalogue.ts) — the catalogue
+    // is a DDL-only writer, never a row writer; each adapter
+    // still executes the statements through doTableSql /
+    // doIndexSql. The writer set is the adapter + the
+    // statement's home.
     expect(writerSet("mas_autopilot")).toEqual([
       "src/data/doSqliteAutopilotStateAdapter.ts",
+      "src/data/schemaComponent/doCatalogue.ts",
     ]);
     expect(writerSet("mas_policy_verdicts")).toEqual([
       "src/data/doSqlitePolicyVerdictAdapter.ts",
+      "src/data/schemaComponent/doCatalogue.ts",
     ]);
     expect(writerSet("mas_report_confirmations")).toEqual([
       "src/data/doSqliteReportConfirmationAdapter.ts",
+      "src/data/schemaComponent/doCatalogue.ts",
     ]);
     expect(writerSet("mas_screener_presets")).toEqual([
       "src/data/doSqliteScreenerPresetAdapter.ts",
+      "src/data/schemaComponent/doCatalogue.ts",
     ]);
   });
 
   it("the canonical-report write side and usage_events name exactly the new adapters", () => {
+    // #4282 P2b: mas_reports is unchanged — its four catalogue
+    // entries are parameterized on ${TABLE}, so no literal table
+    // name follows a write verb and the detector does not count
+    // the catalogue as its writer. usage_events gains the
+    // catalogue as its DDL-only writer (see above).
     expect(writerSet("mas_reports")).toEqual([
       "src/data/doSqliteCanonicalReportStoreAdapter.ts",
     ]);
     expect(writerSet("usage_events")).toEqual([
       "src/data/doSqliteUsageEventAdapter.ts",
+      "src/data/schemaComponent/doCatalogue.ts",
     ]);
   });
 
