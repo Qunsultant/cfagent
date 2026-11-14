@@ -43,6 +43,17 @@ import type { AgentContext } from "agents";
 import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
 import { createEvidenceSatellitePorts } from "../../data/createEvidenceSatellitePorts";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import {
+  buildCombinedCatalogue,
+  executeDoLeg,
+  expectedModelForLeg,
+  introspectSchema,
+  planForLeg,
+  resolveRecreatePlan,
+  selectSteps,
+  UNCREATABLE_LAYERS,
+  verifyRecreate,
+} from "../../data/schemaComponent/recreateRunner";
 
 export interface MaintenanceRouteContext {
   /** Durable Object agent context (owner: OrchestratorAgent). */
@@ -120,6 +131,141 @@ function handleEventsExport(
   }
 }
 
+/**
+ * POST /api/maintenance/recreate-schema: the recreate door for this
+ * instance's own store (the DO leg). The Data Lifecycle route fans
+ * out to it per login; the route never touches an instance's store
+ * directly.
+ *
+ * Body: { codes: string[], preview?: boolean } — codes are the
+ * DO-plane step codes the caller wants run. Code-only validation:
+ * every code must be a DO-plane code from the plan; an unknown
+ * code, a code from another plane, or raw SQL passed as a code is
+ * a 400 and nothing runs. The door probes its own store and
+ * selects the steps that close a diff, so a re-run is a no-op and
+ * a failed run is re-run safely (selection is diff-based).
+ *
+ * Preview ({ preview: true }): probe + select only, no execution,
+ * no audit. Execute: run the selected steps that are also in the
+ * requested codes, stop at the first failure with an honest
+ * partial report, then re-probe and verify against the DO leg's
+ * expected model. Audits once after the attempt
+ * (maintenance.schema.recreated), even when it fails.
+ *
+ * The DO leg claims no atomicity: the aspect's DO backend refuses
+ * async work and the executor is async, so a failed run leaves
+ * the steps that already ran in place — the report says so.
+ */
+async function handleRecreateSchema(
+  request: Request,
+  ctx: MaintenanceRouteContext,
+): Promise<Response> {
+  const plan = resolveRecreatePlan();
+  const legPlan = planForLeg(plan, "do");
+  const catalogue = buildCombinedCatalogue();
+  const doPlaneCodes = new Set(legPlan.steps.map((s) => s.code));
+  try {
+    const body = (await request.json().catch(() => ({}))) as any;
+    const codes = body.codes;
+    if (!Array.isArray(codes)) {
+      return Response.json(
+        { error: "codes must be an array of DO-plane step codes" },
+        { status: 400 },
+      );
+    }
+    // An empty code list is a legitimate no-op execute (the route's
+    // fan-out sends the selected codes, and a healthy instance
+    // selects none): the door still probes and verifies, and
+    // returns an empty report.
+    for (const code of codes) {
+      if (typeof code !== "string" || !doPlaneCodes.has(code)) {
+        return Response.json(
+          {
+            error: `Unknown or not DO-plane code: ${code}. Only DO-plane step codes from the recreate plan are accepted; raw SQL is never accepted.`,
+          },
+          { status: 400 },
+        );
+      }
+    }
+    const sql = ctx.agentCtx.storage.sql;
+    const exec = (sql as { exec: (q: string) => Iterable<unknown> }).exec;
+    const probe = {
+      query: async (query: string) =>
+        Array.from(exec(query)) as Array<Record<string, unknown>>,
+    };
+    const executor = {
+      exec: (statement: string) => {
+        exec(statement);
+      },
+    };
+    const actual = await introspectSchema(probe);
+    const selected = selectSteps(legPlan, actual, []);
+    // Step descriptors (code + params), not bare codes: the generic
+    // column-add steps share one code and differ only by params, so
+    // a bare code list cannot tell them apart — and the route's
+    // preview detail shows each step's code with its params.
+    const describe = (s: { code: string; params: Record<string, string> }) => ({
+      code: s.code,
+      params: s.params,
+    });
+    const selectedSteps = [...selected.schema, ...selected.seeds].sort(
+      (a, b) => a.order - b.order,
+    );
+    const selectedKeys = new Set(
+      selectedSteps.map((s) => `${s.code}|${JSON.stringify(s.params)}`),
+    );
+    const skippedSteps = legPlan.steps.filter(
+      (s) => !selectedKeys.has(`${s.code}|${JSON.stringify(s.params)}`),
+    );
+
+    if (body.preview === true) {
+      return Response.json({
+        preview: true,
+        leg: "do",
+        selected: selectedSteps.map(describe),
+        skipped: skippedSteps.map(describe),
+        uncreatableLayers: UNCREATABLE_LAYERS,
+      });
+    }
+
+    const requested = new Set(codes as string[]);
+    const toExecute = selectedSteps.filter((s) => requested.has(s.code));
+    const notRequested = selectedSteps.filter(
+      (s) => !requested.has(s.code),
+    );
+    const report = await executeDoLeg(executor, catalogue, toExecute);
+    const after = await introspectSchema(probe);
+    const verification = verifyRecreate(
+      expectedModelForLeg(plan, "do"),
+      after,
+    );
+    ctx.audit("maintenance.schema.recreated", "orchestrator", {
+      leg: "do",
+      outcome: report.outcome,
+      executed: report.executed.length,
+      failed: report.failed.map((f) => f.code),
+    });
+    return Response.json({
+      preview: false,
+      leg: "do",
+      planned: selectedSteps.map(describe),
+      notRequested: notRequested.map(describe),
+      report,
+      verification: {
+        ok: verification.ok,
+        failures: verification.failures,
+        extras: verification.extras,
+        knownDifferences: verification.knownDifferences,
+      },
+    });
+  } catch (err: unknown) {
+    return Response.json(
+      { error: err instanceof Error ? err.message : "Failed to recreate schema" },
+      { status: 500 },
+    );
+  }
+}
+
 export async function handleMaintenanceRoutes(
   request: Request,
   url: URL,
@@ -129,6 +275,12 @@ export async function handleMaintenanceRoutes(
 ): Promise<Response | null> {
   if (path.endsWith("/maintenance/events-export") && request.method === "GET") {
     return handleEventsExport(ctx);
+  }
+  if (
+    path.endsWith("/maintenance/recreate-schema") &&
+    request.method === "POST"
+  ) {
+    return handleRecreateSchema(request, ctx);
   }
   if (
     !path.endsWith("/maintenance/clear-table") ||
