@@ -479,6 +479,14 @@
  * src/data/commercialUrlCatalog.ts as source text (see the
  * catalog-resolution rule above conditionsIn), so the pinned
  * inventory stays 471 entries and no coverage is lost.
+ *
+ * Issue #4383 added two — POST /maintenance/recreate-schema (in
+ * handleMaintenanceRoutes, before /maintenance/clear-table in
+ * source order) and POST /data-lifecycle/recreate (in
+ * handleDataLifecycleRoutes, after /data-lifecycle/tenant-bootstrap
+ * in source order) — bringing the pinned inventory to 479 entries
+ * (477 measured on the slice base); the delegation sequence is
+ * unchanged (same handlers, same positions).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -1051,6 +1059,7 @@ const EXPECTED_INVENTORY = [
   "handleScreenerResearchRoutes :: endsWith(\"/screening/goal-screen\")",
   "handleScreenerResearchRoutes :: endsWith(\"/screening/backtest\")",
   "handleMaintenanceRoutes :: endsWith(\"/maintenance/events-export\")",
+  "handleMaintenanceRoutes :: endsWith(\"/maintenance/recreate-schema\")",
   "handleMaintenanceRoutes :: endsWith(\"/maintenance/clear-table\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/tokens\")",
   "handleServiceUserRoutes :: includes(\"/admin/service-user/tokens/\")",
@@ -1074,6 +1083,7 @@ const EXPECTED_INVENTORY = [
   "handleDataLifecycleRoutes :: endsWith(\"/data-lifecycle/bootstrap\")",
   "handleDataLifecycleRoutes :: endsWith(\"/data-lifecycle/bootstrap\")",
   "handleDataLifecycleRoutes :: endsWith(\"/data-lifecycle/tenant-bootstrap\")",
+  "handleDataLifecycleRoutes :: endsWith(\"/data-lifecycle/recreate\")",
   "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/export\")",
   "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/import\")",
   "handleOrchestratorMigrationRoutes :: endsWith(\"/admin/orchestrator-migration/migrate\")",
