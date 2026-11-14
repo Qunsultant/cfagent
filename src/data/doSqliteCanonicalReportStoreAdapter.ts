@@ -24,6 +24,7 @@ import type {
   InsertCanonicalReportRow,
 } from "./canonicalReportStorePorts";
 import { doStatementSql } from "./schemaComponent/doCatalogue";
+import { remainderStatementSql } from "./schemaComponent/remainderCatalogue";
 
 const TABLE = "mas_reports";
 const HIT_COLUMNS =
@@ -40,7 +41,13 @@ function ensureColumn(
   ) as Array<{ name?: unknown }>;
   const names = cols.map((c) => String(c?.name ?? ""));
   if (!names.includes(column)) {
-    sql.exec(`ALTER TABLE ${TABLE} ADD COLUMN ${column} ${type}`);
+    sql.exec(
+      remainderStatementSql("schema.do.mas_reports.alter_table_add_column", {
+        TABLE,
+        column,
+        type,
+      }),
+    );
   }
 }
 
@@ -57,7 +64,7 @@ export class DoSqliteCanonicalReportStore
     this.sql.exec(doStatementSql("schema.do.mas_reports.create_table", { TABLE }));
     // Issue #876: reconcile EVERY expected column additively, not
     // just the newest ones (see the legacy ensure's note: column
-    // order in CREATE TABLE is unchanged — reconciliation only
+    // order in the table definition is unchanged — reconciliation only
     // appends what is missing, with the plain TEXT type).
     ensureColumn(this.sql, "id", "TEXT");
     ensureColumn(this.sql, "run_id", "TEXT");
@@ -116,7 +123,11 @@ export class DoSqliteCanonicalReportStore
       generationIndexCols.join(",") !== "user_login,generation_id"
     ) {
       try {
-        this.sql.exec(`DROP INDEX idx_mas_reports_generation`);
+        this.sql.exec(
+          remainderStatementSql("schema.index.mas_reports.drop_index_idx_mas_reports_generation", {
+            TABLE,
+          }),
+        );
       } catch (err) {
         console.error(
           `[scheduledReports] ensureScheduledReportsTable: DROP INDEX idx_mas_reports_generation (pre-#2398 global shape) failed; continuing: ${err instanceof Error ? err.message : String(err)}`,
@@ -135,7 +146,7 @@ export class DoSqliteCanonicalReportStore
       );
     } catch (err) {
       console.error(
-        `[scheduledReports] ensureScheduledReportsTable: CREATE UNIQUE INDEX idx_mas_reports_generation failed (duplicate (user_login, generation_id) values already stored?); continuing without it: ${err instanceof Error ? err.message : String(err)}`,
+        `[scheduledReports] ensureScheduledReportsTable: unique-index creation for idx_mas_reports_generation failed (duplicate (user_login, generation_id) values already stored?); continuing without it: ${err instanceof Error ? err.message : String(err)}`,
         err
       );
     }
