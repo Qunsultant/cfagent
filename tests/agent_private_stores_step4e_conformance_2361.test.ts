@@ -326,14 +326,20 @@ describe("conformance 4e: source-scan pins (the census deltas, local form)", () 
       expect(text).not.toContain(fragment);
     }
     const adapter = read("../src/data/doSqliteScreenRunLockAdapter.ts");
+    // The DML still lives in the adapter; the CREATE moved in
+    // #4282 P2b to the DO catalogue
+    // (src/data/schemaComponent/doCatalogue.ts), which the
+    // adapter reads through doTableSql("screen_run_locks").
     for (const fragment of [
       "INSERT INTO screen_run_locks",
       "UPDATE screen_run_locks",
       "DELETE FROM screen_run_locks",
-      "CREATE TABLE IF NOT EXISTS screen_run_locks",
     ]) {
       expect(adapter).toContain(fragment);
     }
+    expect(adapter).toContain('doTableSql("screen_run_locks")');
+    const catalogue = read("../src/data/schemaComponent/doCatalogue.ts");
+    expect(catalogue).toContain("CREATE TABLE IF NOT EXISTS screen_run_locks");
   });
 
   it("the mas_learnings read in screener-agent.ts is untouched (audit R-1 fence)", () => {
