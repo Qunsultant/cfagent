@@ -90,6 +90,7 @@ import {
 export type { SqlStorage } from "./repositoryPorts";
 export type { RepositoryQueryOptions as QueryOptions } from "./repositoryPorts";
 import type { SqlStorage } from "./repositoryPorts";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 export interface TableMetadata {
   name: string;
@@ -299,16 +300,16 @@ export class DatabaseORM {
     this.sql.exec(ormTableSql("mas_trades"));
 
     // Issue #3089: broker stamp on stored drafts. Pre-existing tables
-    // lack the column (CREATE TABLE IF NOT EXISTS never alters), so
+    // lack the column (idempotent creation never alters), so
     // guard the ALTER with a PRAGMA check — the #308 generation_id
     // precedent: an unguarded DDL change throws on every schema init
     // for tables that predate it.
-    // #4282 P3 owns these two guarded ALTERs (broker, price_source):
-    // they stay inline here until the reconciliation catalogue lands.
+    // #4282 P3: the two guarded reconciliations (broker,
+    // price_source) ride the remainder catalogue.
     {
       const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
       if (!cols.some((c) => c.name === "broker")) {
-        this.sql.exec("ALTER TABLE mas_trades ADD COLUMN broker TEXT");
+        this.sql.exec(remainderAlterSql("mas_trades", "broker"));
       }
     }
 
@@ -318,7 +319,7 @@ export class DatabaseORM {
     {
       const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
       if (!cols.some((c) => c.name === "price_source")) {
-        this.sql.exec("ALTER TABLE mas_trades ADD COLUMN price_source TEXT");
+        this.sql.exec(remainderAlterSql("mas_trades", "price_source"));
       }
     }
 
