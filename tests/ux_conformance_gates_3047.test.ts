@@ -265,7 +265,9 @@ const CONFORMING_ROUTES: Record<string, string> = {
   "options-flows": "src/client/options/flows/OptionsFlowsHub.tsx",
   "options-screener": "src/client/OptionsScreenerPage.tsx",
   "platform-admin": "src/client/PlatformAdminPage.tsx",
-  products: "src/client/ProductCatalogPanel.tsx",
+  // Issue #4530: the products route retired into the Product Hub —
+  // the hub page carries the shell now, not the catalog panel.
+  "product-hub": "src/client/ProductHub.tsx",
   "payment-assurance": "src/client/PaymentWorkflowAssurance.tsx",
   checkout: "src/client/CheckoutPanel.tsx",
   research: "src/client/MarketDataResearchHub.tsx",
@@ -338,7 +340,9 @@ const EXPECTED_TAB_CONTENT_KEYS = [
   "options-screener",
   "platform-admin",
   "workflow-catalog",
-  "products",
+  // Issue #4530: the products TAB_CONTENT entry retired into the
+  // product-hub entry (the hub renders the catalog panel).
+  "product-hub",
   "billing",
   "payment-assurance",
   "checkout",
@@ -435,6 +439,9 @@ const CONFORMING_INTERIORS: string[] = [
   "src/client/ETradeTradingHub.tsx",
   "src/client/WorkflowsHub.tsx",
   "src/client/MarketDataResearchHub.tsx",
+  // Issue #4530: the Product Hub page (PageTemplate + PageSection,
+  // primitives only).
+  "src/client/ProductHub.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):
@@ -452,6 +459,8 @@ const INTERIOR_SURFACE_FILES: string[] = [
   "src/client/OptionsScreenerPage.tsx",
   "src/client/PlatformAdminPage.tsx",
   "src/client/ProductCatalogPanel.tsx",
+  // Issue #4530: the Product Hub page (route file).
+  "src/client/ProductHub.tsx",
   "src/client/PaymentWorkflowAssurance.tsx",
   "src/client/CheckoutPanel.tsx",
   "src/client/MarketDataResearchHub.tsx",
