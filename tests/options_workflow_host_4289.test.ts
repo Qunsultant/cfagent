@@ -13,9 +13,13 @@
  * re-uses journaled step results instead of re-executing stages.
  *
  * These tests prove the composition, the per-invocation rebuild, the
- * durable storage, the named refusals (goal / comparison / manual
- * shapeReport+deliver / missing request), the start seam, and a run
- * surviving a pause + resume from the journal.
+ * durable storage, the named refusals (goal without a stamped goal
+ * run id / comparison / manual shapeReport+deliver / missing
+ * request), the start seam, and a run surviving a pause + resume
+ * from the journal. (#4290 made the goal shape rebuildable through
+ * the host; the goal refusal pinned here is the rebuild's refusal
+ * of an unstamped goal request, not the guard's — the guard's goal
+ * refusal is gone, and chat control's stands on #4274.)
  */
 import { describe, expect, it } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
@@ -295,9 +299,11 @@ describe("options workflow host (#4289)", () => {
 
   it("refuses unrebuildable shapes and manual delivery stages by name, before any execution", () => {
     for (const stage of OPTIONS_PIPELINE_STAGES) {
-      expect(() => assertOptionsStageRebuildable("goal", stage, "r1")).toThrowError(
-        expect.objectContaining({ code: "stage_port_unavailable" }),
-      );
+      // #4290: the goal shape rebuilds through the host — the guard
+      // passes it, and the rebuild refuses a goal request with no
+      // stamped goal run id. Chat control still refuses the goal
+      // shape through its own guard (#4274).
+      expect(() => assertOptionsStageRebuildable("goal", stage, "r1")).not.toThrow();
       expect(() => assertOptionsStageRebuildable("comparison", stage, "r1")).toThrowError(
         expect.objectContaining({ code: "stage_port_unavailable" }),
       );
@@ -464,7 +470,7 @@ describe("options workflow host (#4289)", () => {
     }
   });
 
-  it("refuses a goal-shape run by name through the flow", async () => {
+  it("refuses a goal-shape run without a stamped goal run id by name through the flow", async () => {
     const stores = createInMemoryJobPipelineStores();
     const deps = hostFlowDeps(stores, hostStepDeps(stores));
     const runId = "options-host:goal:1";
@@ -481,8 +487,11 @@ describe("options workflow host (#4289)", () => {
       stage.units.map((unit) => unit.error ?? ""),
     );
     // The engine records the refusal's message on the failed unit
-    // (the code is pinned at the throw level, below).
-    expect(errors.some((error) => error.includes("decided-not-to, #4274"))).toBe(true);
+    // (the code is pinned at the throw level, below). #4290: the
+    // goal shape rebuilds through the host, but the rebuild needs
+    // the goal run id the goal seam stamps on the request — this
+    // request carries none, so the first stage refuses by name.
+    expect(errors.some((error) => error.includes("goalRunId"))).toBe(true);
   });
 
   it("refuses a comparison-shape run by name through the flow", async () => {

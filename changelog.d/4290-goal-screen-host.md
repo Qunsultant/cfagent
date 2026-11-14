@@ -1,0 +1,2 @@
+### Added
+- Goal-screen ThinkWorkflow host (#4290): the goal options leg runs inside the durable workflow host — the shared rebuild gains a goal branch (the leg's pure delivery builders, rebuilt per invocation from the goal run id stamped on the stored request), and `startGoalOptionsLegWorkflow` dispatches under the options job identity with dispatch-time refusals (non-goal shape, missing goal run id, discovery-mode legs until #4473). Chat control still refuses the goal shape per #4274; no production leg moves (cutover blocked by #3960, #4473, binding reachability).
