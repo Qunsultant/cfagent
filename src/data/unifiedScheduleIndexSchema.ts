@@ -41,7 +41,7 @@ export const UNIFIED_SCHEDULE_INDEXES: Array<{ name: string; sql: string }> = [
 /**
  * Create the unified-schedule indexes (idempotent). Call from the
  * adapter's ensureTable, after the table exists. Additive only
- * (CREATE INDEX IF NOT EXISTS); no table is altered and no row is
+ * (idempotent index creation); no table is altered and no row is
  * deleted.
  */
 export function ensureUnifiedScheduleIndexes(sql: SqlStorage): void {
