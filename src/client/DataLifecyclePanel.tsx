@@ -514,7 +514,6 @@ function TenantBootstrapCard() {
     } finally {
       setBusy(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, founderLogin, claimGenesis]);
 
   const onRun = useCallback(async () => {
@@ -531,7 +530,6 @@ function TenantBootstrapCard() {
     } finally {
       setBusy(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, founderLogin, claimGenesis]);
 
   const shown = result ?? preview;
