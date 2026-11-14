@@ -8,6 +8,7 @@
  */
 import type { SchemaMigrationMode } from "../config/schemaMigrationModes";
 import { applyDoSchemaMigrations } from "./doSchemaMigrations";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 import type { DoSchemaMigration } from "../ports/schemaMigration";
 import {
   SCREEN_RUN_LOCK_STALE_MS,
@@ -23,13 +24,7 @@ type Row = Record<string, unknown>;
  * ensureSchema branch and the managed migration below run this
  * exact statement, so the two modes can never drift apart.
  */
-const SCREEN_RUN_LOCK_TABLE_DDL = `CREATE TABLE IF NOT EXISTS screen_run_locks (
-      user_login TEXT NOT NULL,
-      universe TEXT NOT NULL,
-      token TEXT NOT NULL,
-      started_at INTEGER NOT NULL,
-      PRIMARY KEY (user_login, universe)
-    )`;
+const SCREEN_RUN_LOCK_TABLE_DDL = doTableSql("screen_run_locks");
 
 /**
  * #1767 (parent #1717): the screen-run-lock store's first
