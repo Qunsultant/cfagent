@@ -44,6 +44,7 @@ import {
   type RecordCaptureInput,
   type RecordFetchFailureInput,
 } from "./providerCapturePorts";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 export function ensureCaptureTable(sql: SqlStorage): void {
   sql.exec(doTableSql("mas_data_captures"));
@@ -55,14 +56,10 @@ export function ensureCaptureTable(sql: SqlStorage): void {
     sql.exec(`PRAGMA table_info(${DATA_CAPTURE_TABLE})`)
   ) as any[];
   if (!captureColumns.some((c) => c.name === "failure_kind")) {
-    sql.exec(
-      `ALTER TABLE ${DATA_CAPTURE_TABLE} ADD COLUMN failure_kind TEXT`
-    );
+    sql.exec(remainderAlterSql("mas_data_captures", "failure_kind"));
   }
   if (!captureColumns.some((c) => c.name === "failure_message")) {
-    sql.exec(
-      `ALTER TABLE ${DATA_CAPTURE_TABLE} ADD COLUMN failure_message TEXT`
-    );
+    sql.exec(remainderAlterSql("mas_data_captures", "failure_message"));
   }
   sql.exec(
     doIndexSql("idx_mas_data_captures_run")
