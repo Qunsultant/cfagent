@@ -24,6 +24,7 @@ import type { SqlStorage } from "../orm";
 import type { SchemaMigrationMode } from "../config/schemaMigrationModes";
 import type { DoSchemaMigration } from "../ports/schemaMigration";
 import { applyDoSchemaMigrations } from "./doSchemaMigrations";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import { Repository } from "./ormRepositoryCore";
 import type { jobGeneratedDatasets } from "./drizzleSchema";
 import {
@@ -60,22 +61,9 @@ export const GENERATED_DATASET_COLUMNS: Record<keyof GeneratedDatasetRow & strin
  * same shapes for D1 — the two modes and the two residencies
  * can never drift apart.
  */
-export const GENERATED_DATASETS_DDL = `CREATE TABLE IF NOT EXISTS ${GENERATED_DATASETS_TABLE} (
-      id TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL,
-      job_id TEXT NOT NULL,
-      analyze_job_id TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      dataset TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      as_of TEXT NOT NULL,
-      rows_persisted INTEGER NOT NULL,
-      artifact_json TEXT NOT NULL
-    )`;
+export const GENERATED_DATASETS_DDL = doTableSql("job_generated_datasets");
 
-export const GENERATED_DATASETS_INDEX_DDL = `CREATE INDEX IF NOT EXISTS idx_job_generated_datasets_job
-      ON ${GENERATED_DATASETS_TABLE} (job_id, created_at DESC, id DESC)`;
+export const GENERATED_DATASETS_INDEX_DDL = doIndexSql("idx_job_generated_datasets_job");
 
 /**
  * The store's first framework migration: v1 is the table
