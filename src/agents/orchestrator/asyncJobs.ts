@@ -1403,7 +1403,7 @@ export async function sweepStaleAsyncJobs(
         // rule, not the generic unknown-outcome reap — re-armed when its
         // work is resumable and otherwise failed as ORPHANED with the feed
         // job id, the pipeline run id and the host named. This sweep is the
-        // path that actually met the incident's two Yahoo feed-runs (both
+        // path that actually met the incident's two provider feed-runs (both
         // running for 14/23 minutes, settled in one 15-minute pass at the
         // same second), and the generic code is what made it unreadable.
         // Every other row keeps today's reap and code.
