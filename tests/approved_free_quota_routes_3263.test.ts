@@ -386,6 +386,8 @@ describe("approved-free quota routes (#3263)", () => {
     const res = await call(ctx, "GET", "/payments/agentic/commercial/submission-status?workflowId=wf-1", "u1");
     expect(res?.status).toBe(200);
     expect(await res?.json()).toEqual({
+      // Issue #2846: commercial responses carry a resolving `code`.
+      code: "SUCCESS_SUBMISSION_STATUS_READ",
       workflowId: "wf-1",
       status: "complete",
       outcome: "quota_exhausted",
