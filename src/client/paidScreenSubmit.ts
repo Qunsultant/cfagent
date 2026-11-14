@@ -14,6 +14,51 @@
 /** The server seam's refusal code for a sync screen under monetization ON. */
 export const MONETIZATION_WORKFLOW_ERROR = "monetization_enabled_workflow_required";
 
+/** The broker gate's refusal code for a surface the selected broker does not implement (#4430). */
+export const BROKER_UNAVAILABLE_ERROR = "FAILURE_BROKER_UNAVAILABLE";
+
+/** The coded business message for a broker-unavailable refusal (#4430). */
+export const BROKER_UNAVAILABLE_MESSAGE =
+  "This broker surface is not available for the selected broker. Change the broker selection in Settings.";
+
+/**
+ * Read the renderable error text out of a screen error body (#4430).
+ * Server bodies carry the reason under `error` or under `message`
+ * (the 409 broker-gate body carried `message` only, so call sites
+ * that read `error` alone dropped the real reason). `code` alone is
+ * a bare machine label and is never returned as the message here —
+ * callers that need the code read it from the body themselves.
+ */
+export function readScreenErrorText(data: unknown): string | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const record = data as Record<string, unknown>;
+  if (typeof record.error === "string" && record.error.trim() !== "") return record.error;
+  if (typeof record.message === "string" && record.message.trim() !== "") return record.message;
+  return undefined;
+}
+
+/** True when the failure is the broker gate's 409 refusal, by status and code (#4430). */
+export function isBrokerUnavailableError(status: number, error?: string, code?: string): boolean {
+  return status === 409 && (error === BROKER_UNAVAILABLE_ERROR || code === BROKER_UNAVAILABLE_ERROR);
+}
+
+/**
+ * Map a screen error body to its UI message (#4430). Reads `error`
+ * or `message` (whichever the body carries) and the `code`, so the
+ * 409 broker refusal maps to its business message instead of the
+ * generic 409 text at every call site.
+ */
+export function mapScreenErrorFromBody(
+  status: number,
+  data: unknown,
+): string {
+  const code =
+    data && typeof data === "object" && typeof (data as Record<string, unknown>).code === "string"
+      ? ((data as Record<string, unknown>).code as string)
+      : undefined;
+  return mapScreenError(status, readScreenErrorText(data), code);
+}
+
 /** Monetization flag as the client knows it. "unknown" = the pricing read failed. */
 export type MonetizationState = "on" | "off" | "unknown";
 
@@ -81,8 +126,18 @@ function isBareCode(value: string): boolean {
  * be a machine label, never a message, so it maps to a fixed status
  * message. A raw server code is never returned.
  */
-export function mapScreenError(status: number, error?: string): string {
+export function mapScreenError(status: number, error?: string, code?: string): string {
   const raw = (error ?? "").trim();
+  // Issue #4430: the broker gate's 409 refusal maps to its coded
+  // business message plus the switch-to-workflow-variant remediation — the
+  // workflow-backed variant runs the screen without the broker gate.
+  // Never the generic 409 text, never the raw code.
+  if (isBrokerUnavailableError(status, raw, code)) {
+    return (
+      `${BROKER_UNAVAILABLE_MESSAGE} ` +
+      "Switch the hub provider to Yahoo Finance to run this screen through the workflow instead."
+    );
+  }
   // Any 402 on a screen route is the paid seam's refusal: the seam is
   // the only 402 producer there, whatever body rides with it.
   if (status === 402 || raw === MONETIZATION_WORKFLOW_ERROR) {

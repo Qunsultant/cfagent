@@ -170,10 +170,14 @@ export async function resolveTenantBroker(env: unknown): Promise<BrokerId> {
 }
 
 /** Coded response for a broker surface the selected broker does not
- * implement. Never an E*TRADE error, never a silent fallback. */
+ * implement. Never an E*TRADE error, never a silent fallback.
+ * Issue #4430 (S1a): the body carries `error` with the same coded
+ * message as `message` — the client reads `error`, and without it
+ * the real reason was dropped for the generic 409 text. */
 export function brokerUnavailableResponse(brokerId: string): Response {
+  const message = codedMessage("FAILURE_BROKER_UNAVAILABLE");
   return Response.json(
-    { code: "FAILURE_BROKER_UNAVAILABLE", message: codedMessage("FAILURE_BROKER_UNAVAILABLE"), retryable: false, selectedBroker: brokerId },
+    { code: "FAILURE_BROKER_UNAVAILABLE", error: message, message, retryable: false, selectedBroker: brokerId },
     { status: 409 },
   );
 }

@@ -100,6 +100,16 @@ describe("broker unavailable code", () => {
     expect(String(body.message)).not.toContain("oauth_problem");
     expect(String(body.message)).not.toContain("E*TRADE");
   });
+
+  it("brokerUnavailableResponse carries `error` with the same coded message (#4430)", async () => {
+    // The client reads `error`; without it the real reason was dropped
+    // for the generic 409 text. The value is the coded message, never
+    // a raw code or an upstream string.
+    const res = brokerUnavailableResponse("public");
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe(body.message);
+    expect(String(body.error)).toContain("Change the broker selection in Settings.");
+  });
 });
 
 describe("resolveTenantBroker fail-open", () => {

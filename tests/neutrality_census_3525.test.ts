@@ -505,6 +505,36 @@ function measure(): Map<string, number> {
  * shared rebuild module carries no brand row, and the count falls
  * back when provider selection (#3960) replaces the direct binding.
  * Totals move 1178/9324 -> 1179/9326.
+ * Baseline update (#4430, 2026-11-13): the hub's broker-gate 409 offers a
+ * user-invoked switch to the workflow-backed variant, so two user-facing
+ * labels name the provider they switch to — the switch button in
+ * StockHub.tsx and the 409 remediation message in paidScreenSubmit.ts —
+ * dispositioned PLATFORM (S2 client copy: the action's label names the
+ * provider it switches to, so the user can choose knowingly; the label
+ * is the action's subject, not framing). The variant's registry id is
+ * named verbatim in its own module (screeningAdapters.ts/yahoo 3->4),
+ * dispositioned INTEGRATION — a data-bearing identifier, the #3911
+ * precedent (an id named verbatim is baselined, its prose neutralized,
+ * never the id rewritten). The surrounding prose was neutralized
+ * instead (the switch-action comments, the 409-refusal comments'
+ * provider names), and the two E*TRADE comment lines retire outright,
+ * leaving StockHub.tsx/etrade and screeningAdapters.ts/etrade at their
+ * seed counts. 2 new rows + 1 raise. (The header's last recorded
+ * totals were stale: counted 1181 rows / 9333 lines before this change.)
+ * Totals move 1181/9333 -> 1183/9334.
+ * Baseline repair (#4442, 2026-11-13): the autopilot capabilities
+ * inventory (docs/architecture/agentic/autopilot-capabilities.md,
+ * landed on main as c179492) names the providers its gates integrate
+ * — the etrade rows are data-bearing identifiers (the route file
+ * names etradeBrokerAutopilot.ts / etradeBrokerOrders.ts, the legacy
+ * /api/etrade/* path) and the balance-fetch provenance line (E*TRADE /
+ * Alpaca) — dispositioned INTEGRATION, the #3761 mcp-server-inventory
+ * precedent (an inventory names the providers its servers integrate;
+ * provenance naming of the serving integration). The doc landed via a
+ * docs-only PR, so the census pin never ran on it in CI and main
+ * carried the two un-baselined rows; this repair records them here so
+ * the pin is green on main again. 2 new rows, no raise.
+ * Totals move 1183/9334 -> 1185/9340.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -670,6 +700,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/StockCopilotPanel.tsx", "alpaca", 3],
   ["src/client/StockCriteriaPanel.tsx", "etrade", 1],
   ["src/client/StockHub.tsx", "etrade", 1],
+  // #4430 PLATFORM (S2 client copy): the switch-action button label names
+  // the provider it switches to — the user must know the target.
+  ["src/client/StockHub.tsx", "yahoo", 1],
   ["src/client/VoicePanel.tsx", "etrade", 3],
   ["src/client/WorkflowsHub.tsx", "alpaca", 14],
   ["src/client/WorkflowsHub.tsx", "etrade", 21],
@@ -700,6 +733,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/options/StrategyDiscoveryPanel.tsx", "etrade", 19],
   ["src/client/options/flows/OptionsFlowsHub.tsx", "etrade", 3],
   ["src/client/options/serverDiscovery.ts", "etrade", 1],
+  // #4430 PLATFORM (S2 client copy): the 409 remediation message names the
+  // provider it tells the user to switch to — the message is the action.
+  ["src/client/paidScreenSubmit.ts", "yahoo", 1],
   ["src/client/scheduledOptionsManager/systemJobs.ts", "etrade", 3],
   ["src/client/workflowsFaqData.ts", "etrade", 1],
   ["src/client/workflowsFaqData.ts", "yahoo", 1],
@@ -717,6 +753,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/adr/0019-enrichment-yahoo-alpaca.md", "alpaca", 17],
   ["docs/architecture/adr/0019-enrichment-yahoo-alpaca.md", "yahoo", 18],
   ["docs/architecture/agentic/agent-capabilities.md", "alpaca", 1],
+  // #4442 INTEGRATION: the autopilot capabilities inventory names the
+  // providers its gates integrate (route identifiers + balance-fetch
+  // provenance) — the #3761 mcp-server-inventory precedent.
+  ["docs/architecture/agentic/autopilot-capabilities.md", "alpaca", 1],
+  ["docs/architecture/agentic/autopilot-capabilities.md", "etrade", 5],
   ["docs/architecture/agentic/job-system.md", "alpaca", 6],
   ["docs/architecture/agentic/job-system.md", "nasdaq", 2],
   ["docs/architecture/agentic/job-system.md", "yahoo", 2],
@@ -952,7 +993,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/screeningAdapters.ts", "alpaca", 1],
   ["src/client/screeningAdapters.ts", "etrade", 1],
   ["src/client/screeningAdapters.ts", "nasdaq", 1],
-  ["src/client/screeningAdapters.ts", "yahoo", 3],
+  // #4430 INTEGRATION: the workflow-backed variant's registry id
+  // ("yahoo-finance") named verbatim — a data-bearing identifier.
+  ["src/client/screeningAdapters.ts", "yahoo", 4],
   ["src/client/stockCopilotApi.ts", "alpaca", 1],
   ["src/client/styles.css", "alpaca", 8],
   ["src/client/styles.css", "etrade", 79],
