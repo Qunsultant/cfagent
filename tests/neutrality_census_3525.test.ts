@@ -997,7 +997,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/data/dataProviderPortsProvider.ts", "etrade", 1],
   ["src/data/discoveryRunPorts.ts", "alpaca", 2],
   ["src/data/discoveryRunPorts.ts", "etrade", 7],
-  ["src/data/doSqliteIvHistoryAdapter.ts", "etrade", 3],
+  // #4282 P2b: the IvHistory etrade count drops 3 -> 2 — the
+  // CREATE TABLE line (broker DEFAULT 'etrade') moved to the DO
+  // catalogue (row below); the 2 remaining lines are the ALTER
+  // const that stays inline until P3 and the pre-#3326 comment.
+  ["src/data/doSqliteIvHistoryAdapter.ts", "etrade", 2],
   ["src/data/doSqliteProviderConfigAdapter.ts", "etrade", 9],
   ["src/data/doTokenFamilyAdapter.ts", "etrade", 5],
   ["src/data/drizzleSchema.ts", "etrade", 5],
@@ -1792,6 +1796,12 @@ const BASELINE: Array<[string, string, number]> = [
   // left test:pins red on main).
   ["docs/architecture/agentic/autopilot-capabilities.md", "etrade", 5],
   ["docs/architecture/agentic/autopilot-capabilities.md", "alpaca", 1],
+  // #4282 P2b INTEGRATION: the DO catalogue carries the 1 moved
+  // DEFAULT 'etrade' line (mas_iv_history broker). It is a
+  // data-bearing schema default, reproduced byte-identically
+  // from the IvHistory adapter; neutralizing it would falsify
+  // the schema.
+  ["src/data/schemaComponent/doCatalogue.ts", "etrade", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
