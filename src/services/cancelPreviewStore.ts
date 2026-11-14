@@ -17,6 +17,7 @@
  */
 
 import type { SqlStorage } from "../orm";
+import { remainderTableSql } from "../data/schemaComponent/remainderCatalogue";
 
 export const CANCEL_ALL_PREVIEW_TTL_MS = 120_000;
 
@@ -40,9 +41,7 @@ export function createSqlCancelPreviewStore(sql: SqlStorage): CancelPreviewStore
   const ensure = () => {
     if (ensured) return;
     try {
-      sql.exec(
-        "CREATE TABLE IF NOT EXISTS mas_cancel_previews (token TEXT PRIMARY KEY, ids_json TEXT, created_at TEXT, expires_at TEXT, used_at TEXT)",
-      );
+      sql.exec(remainderTableSql("mas_cancel_previews"));
       ensured = true;
     } catch {
       // A store that cannot create its table still fails loud on save/find.
