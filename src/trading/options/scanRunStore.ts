@@ -26,8 +26,8 @@
  *
  * Two implementations of ScanRunStore live behind the port:
  * SqlScanRunStore over Durable Object SQLite — the
- * OrchestratorAgent calls this.ensureTable via its own CREATE TABLE
- * IF NOT EXISTS for mas_policy_verdicts, and its storage handle
+ * OrchestratorAgent calls this.ensureTable via its own table creation
+ * for mas_policy_verdicts, and its storage handle
  * reaches the same SQLite database — and an in-memory implementation
  * with identical semantics, for tests and for contexts with no
  * Durable Object storage handle.
