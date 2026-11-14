@@ -155,6 +155,13 @@ export interface WorkflowRunStage {
    * run, so the row claims nothing about one.
    */
   innerStages?: WorkflowRunStage[];
+  /**
+   * Issue #4422: what this shard recorded about its symbol — verdict, skip
+   * reason, target, fit gate, and the quoted best candidate per strategy
+   * type. Absent on a row that recorded no scan matrix (never an invented
+   * symbol). The fetched chain itself is not retained; the panel says so.
+   */
+  symbolEvidence?: ShardSymbolEvidence;
   /** Human description (the job's display name, or the transition summary). */
   detail: string | null;
   /** Why a skipped/held/failed stage ended that way, when recorded. */
@@ -444,6 +451,16 @@ export interface BuildWorkflowRunsInput {
 
 const SECRET_KEY = /(secret|token|password|passwd|authorization|cookie|api[-_]?key|private[-_]?key|credential|session[-_]?key)/i;
 const MAX_STRING = 240;
+/**
+ * Issue #4422 — the per-symbol evidence bounds. A shard records one matrix row
+ * (its symbol) with one cell per strategy type, and each cell's best candidate
+ * carries one leg per side; the view trims both lists so a deep chain never
+ * bloats a page, and it names what it trimmed (`strategyTypeCount`) instead of
+ * dropping it silently.
+ */
+const MAX_EVIDENCE_STRATEGIES = 12;
+const MAX_EVIDENCE_LEGS = 8;
+const MAX_EVIDENCE_REASONS = 6;
 const MAX_DEPTH = 3;
 const MAX_KEYS = 16;
 const MAX_ARRAY = 6;
@@ -1105,6 +1122,144 @@ export function innerShardScanJobId(job: WorkflowRunJobRow): string | null {
   return shardScanJobId(chainId, symbol);
 }
 
+/** Issue #4422 — one quoted leg of a recorded best candidate. */
+export interface ShardLegEvidence {
+  side: string;
+  optionType: string;
+  quantity: number;
+  strike: number | null;
+  expirationDate: string | null;
+  entryPrice: number | null;
+  bid: number | null;
+  ask: number | null;
+  impliedVolatility: number | null;
+  openInterest: number | null;
+  volume: number | null;
+}
+
+/** Issue #4422 — one strategy type's recorded fit for the shard's symbol. */
+export interface ShardStrategyEvidence {
+  strategyType: string;
+  evaluatedCount: number;
+  passedCount: number;
+  rejectedCount: number;
+  rejectionReasons: Array<{ reason: string; count: number }>;
+  best: {
+    label: string;
+    expirationDate: string | null;
+    netDebit: number | null;
+    maxLoss: number | null;
+    maxProfit: number | null;
+    maxProfitUnbounded: boolean;
+    probabilityOfProfit: number | null;
+    legs: ShardLegEvidence[];
+    legCount: number;
+  } | null;
+}
+
+/**
+ * Issue #4422 — what one options feed shard recorded about its symbol.
+ *
+ * This is the RECORDED evidence, not the fetched chain: the shard keeps its
+ * scan result (verdict, skip reason, target, fit gate, one cell per strategy
+ * type, and the quoted legs of each cell's best candidate), and the full
+ * fetched chain — every strike of every expiry — is not persisted at all.
+ * The view says that where the owner looks; it never presents derived rows as
+ * a raw chain, and never invents a symbol the record does not name.
+ */
+export interface ShardSymbolEvidence {
+  symbol: string;
+  verdict: string;
+  skipReason: string | null;
+  targetPrice: number | null;
+  targetSource: string | null;
+  targetEmUnits: number | null;
+  gateBucket: string | null;
+  gateReasons: string[];
+  strategies: ShardStrategyEvidence[];
+  /** Every strategy type the record held, before the render cap. */
+  strategyTypeCount: number;
+}
+
+function legEvidence(value: unknown, cap: number): { legs: ShardLegEvidence[]; legCount: number } {
+  const rows = Array.isArray(value) ? value : [];
+  const legs = rows.slice(0, cap).map((row) => {
+    const leg = asObject(row) ?? {};
+    return {
+      side: typeof leg.side === "string" ? leg.side : "",
+      optionType: typeof leg.optionType === "string" ? leg.optionType : "",
+      quantity: num(leg.quantity) ?? 0,
+      strike: num(leg.strike),
+      expirationDate: str(leg.expirationDate),
+      entryPrice: num(leg.entryPrice),
+      bid: num(leg.bid),
+      ask: num(leg.ask),
+      impliedVolatility: num(leg.impliedVolatility),
+      openInterest: num(leg.openInterest),
+      volume: num(leg.volume),
+    };
+  });
+  return { legs, legCount: rows.length };
+}
+
+/**
+ * Issue #4422 — the per-symbol evidence a shard's recorded result carries.
+ * Null when the record holds no matrix row (a job that never reached the
+ * scan, or a non-scan shard): the row then claims nothing about a symbol.
+ */
+export function shardSymbolEvidence(job: WorkflowRunJobRow): ShardSymbolEvidence | null {
+  if (job.capability !== "shard.execute") return null;
+  const result = parseObject(job.result_json);
+  if (!result) return null;
+  const matrix = Array.isArray(result.matrix) ? result.matrix : [];
+  const row = asObject(matrix[0]);
+  if (!row) return null;
+  const symbol = str(row.symbol);
+  if (!symbol) return null;
+  const cells = Array.isArray(row.cells) ? row.cells.map((cell) => asObject(cell)).filter(Boolean) : [];
+  const strategies: ShardStrategyEvidence[] = cells
+    .slice(0, MAX_EVIDENCE_STRATEGIES)
+    .map((cell) => {
+      const best = asObject(cell!.best);
+      const reasons = asObject(cell!.rejectionReasons) ?? {};
+      return {
+        strategyType: str(cell!.strategyType) ?? "",
+        evaluatedCount: num(cell!.evaluatedCount) ?? 0,
+        passedCount: num(cell!.passedCount) ?? 0,
+        rejectedCount: num(cell!.rejectedCount) ?? 0,
+        rejectionReasons: Object.entries(reasons)
+          .slice(0, MAX_EVIDENCE_REASONS)
+          .map(([reason, count]) => ({ reason, count: num(count) ?? 0 })),
+        best: best
+          ? {
+              label: str(best.label) ?? "",
+              expirationDate: str(best.expirationDate),
+              netDebit: num(best.netDebit),
+              maxLoss: num(best.maxLoss),
+              maxProfit: num(best.maxProfit),
+              maxProfitUnbounded: best.maxProfitUnbounded === true,
+              probabilityOfProfit: num(best.probabilityOfProfit),
+              ...legEvidence(best.legs, MAX_EVIDENCE_LEGS),
+            }
+          : null,
+      };
+    });
+  return {
+    symbol,
+    verdict: str(row.verdict) ?? "",
+    skipReason: str(row.skipReason),
+    targetPrice: num(row.targetPrice),
+    targetSource: str(row.targetSource),
+    targetEmUnits: num(row.targetEmUnits),
+    gateBucket: str(row.gateBucket),
+    gateReasons: Array.isArray(row.gateReasons)
+      ? row.gateReasons.filter((reason: unknown): reason is string => typeof reason === "string").slice(0, MAX_EVIDENCE_REASONS)
+      : [],
+    strategies,
+    strategyTypeCount: cells.length,
+  };
+}
+
 function stageRowsForGroup(
   jobs: WorkflowRunJobRow[],
   transitions: WorkflowRunStageTransition[],
@@ -1137,6 +1292,7 @@ function stageRowsForGroup(
         : null;
     const errorCode = str(job.error_code);
     const inner = innerShardStages?.get(job.job_id);
+    const evidence = shardSymbolEvidence(job);
     stages.push({
       key: job.job_id,
       order: stages.length + 1,
@@ -1152,6 +1308,7 @@ function stageRowsForGroup(
       jobId: job.job_id,
       retryOf: retryOfJob(job),
       ...(inner ? { innerJobId: inner.jobId, innerStages: inner.stages } : {}),
+      ...(evidence ? { symbolEvidence: evidence } : {}),
       detail: job.display_name || null,
       reason: matchedTransition?.reason ?? resultReason ?? (errorCode ? codedMessage(errorCode) : null),
       error: codedStageError(job),

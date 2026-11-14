@@ -48,6 +48,7 @@ import {
   TextInput,
 } from "./components/ui";
 import type {
+  ShardStrategyEvidence,
   WorkflowRun,
   WorkflowRunStage,
   WorkflowRunStatus,
@@ -1077,6 +1078,67 @@ export function WorkflowRunsPanel() {
  * Issue #4262 (S2) — exported so the one run ledger renders the SAME detail
  * for a folded workflow row instead of growing a second implementation.
  */
+/** Issue #4422 — one rendered row of the per-symbol evidence table. */
+interface EvidenceRow {
+  key: string;
+  symbol: string;
+  verdict: string;
+  skipReason: string | null;
+  targetPrice: number | null;
+  targetSource: string | null;
+  targetEmUnits: number | null;
+  gateBucket: string | null;
+  gateReasons: string[];
+  strategyType: string;
+  evaluatedCount: number;
+  passedCount: number;
+  rejectedCount: number;
+  rejectionReasons: Array<{ reason: string; count: number }>;
+  best: ShardStrategyEvidence["best"];
+}
+
+/**
+ * Issue #4422 — every shard's recorded evidence, flattened to one row per
+ * strategy type. A symbol with no evaluated strategy type (skipped, or a
+ * chain that yielded no candidate) still gets one row: its verdict and skip
+ * reason ARE its evidence, and dropping the row would hide the answer to
+ * "why was no data retrieved?".
+ */
+function symbolEvidenceRows(run: WorkflowRun): EvidenceRow[] {
+  const rows: EvidenceRow[] = [];
+  for (const stage of run.stages) {
+    const evidence = stage.symbolEvidence;
+    if (!evidence) continue;
+    const base = {
+      symbol: evidence.symbol,
+      verdict: evidence.verdict,
+      skipReason: evidence.skipReason,
+      targetPrice: evidence.targetPrice,
+      targetSource: evidence.targetSource,
+      targetEmUnits: evidence.targetEmUnits,
+      gateBucket: evidence.gateBucket,
+      gateReasons: evidence.gateReasons,
+    };
+    if (evidence.strategies.length === 0) {
+      rows.push({
+        ...base,
+        key: `${stage.key}:symbol`,
+        strategyType: "",
+        evaluatedCount: 0,
+        passedCount: 0,
+        rejectedCount: 0,
+        rejectionReasons: [],
+        best: null,
+      });
+      continue;
+    }
+    evidence.strategies.forEach((strategy, index) => {
+      rows.push({ ...base, ...strategy, key: `${stage.key}:${strategy.strategyType}:${index}` });
+    });
+  }
+  return rows;
+}
+
 export function RunDetail({
   run,
   onStageAction,
@@ -1485,6 +1547,122 @@ export function RunDetail({
                 />
               ),
             )}
+        </PageSection>
+      )}
+
+      {/* Issue #4422 — what each shard recorded about its symbol. The full
+          fetched chain is not persisted; the record holds the verdict, skip
+          reason, fit gate, and the quoted best candidate per strategy type.
+          The notice states that limit where the owner looks for the chain, so
+          an absent chain is never read as "nothing was fetched". Primitives
+          only: no bespoke class is added to the interior ratchet. */}
+      {run.stages.some((stage) => stage.symbolEvidence) && (
+        <PageSection title="Per-symbol evidence">
+          <Notice tone="neutral" density="compact">
+            The full fetched chain (every strike of every expiry) is not retained. A shard records its per-symbol
+            verdict and, for each strategy type, the quoted contracts of its best candidate — those are shown here. The
+            assembled report is the full-data surface.
+          </Notice>
+          <Table
+            columns={[
+              {
+                key: "symbol",
+                header: "Symbol",
+                render: (row: EvidenceRow) => <span>{row.symbol}</span>,
+              },
+              {
+                key: "verdict",
+                header: "Verdict",
+                render: (row: EvidenceRow) => (
+                  <div>
+                    <span>{row.verdict || "Not recorded"}</span>
+                    {row.skipReason ? <div>{`Skipped: ${row.skipReason}`}</div> : null}
+                  </div>
+                ),
+              },
+              {
+                key: "target",
+                header: "Target",
+                render: (row: EvidenceRow) => (
+                  <div>
+                    <span>{row.targetPrice ?? "Not recorded"}</span>
+                    {row.targetEmUnits !== null ? <div>{`${row.targetEmUnits} EM units`}</div> : null}
+                    {row.targetSource ? <div>{row.targetSource}</div> : null}
+                  </div>
+                ),
+              },
+              {
+                key: "gate",
+                header: "Fit gate",
+                render: (row: EvidenceRow) => (
+                  <div>
+                    <span>{row.gateBucket ?? "Not judged"}</span>
+                    {row.gateReasons.length > 0 ? <div>{row.gateReasons.join(" · ")}</div> : null}
+                  </div>
+                ),
+              },
+              {
+                key: "strategy",
+                header: "Strategy type",
+                render: (row: EvidenceRow) => <span>{row.strategyType || "—"}</span>,
+              },
+              {
+                key: "counts",
+                header: "Evaluated / passed / rejected",
+                render: (row: EvidenceRow) =>
+                  row.strategyType ? (
+                    <div>
+                      <span>{`${row.evaluatedCount} / ${row.passedCount} / ${row.rejectedCount}`}</span>
+                      {row.rejectionReasons.length > 0 ? (
+                        <div>{row.rejectionReasons.map((r) => `${r.reason} ×${r.count}`).join(" · ")}</div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span>No strategy type was evaluated</span>
+                  ),
+              },
+              {
+                key: "best",
+                header: "Best candidate",
+                render: (row: EvidenceRow) =>
+                  row.best ? (
+                    <div>
+                      <span>{row.best.label || "Candidate"}</span>
+                      <div>{row.best.expirationDate ?? "Expiry not recorded"}</div>
+                      <div>
+                        {`Debit ${row.best.netDebit ?? "—"} · Loss ${row.best.maxLoss ?? "—"} · Profit ${
+                          row.best.maxProfitUnbounded ? "unbounded" : (row.best.maxProfit ?? "—")
+                        } · POP ${row.best.probabilityOfProfit ?? "—"}`}
+                      </div>
+                    </div>
+                  ) : (
+                    <span>No candidate recorded</span>
+                  ),
+              },
+              {
+                key: "legs",
+                header: "Quoted legs",
+                render: (row: EvidenceRow) =>
+                  row.best && row.best.legs.length > 0 ? (
+                    <div>
+                      {row.best.legs.map((leg, index) => (
+                        <div key={`${row.key}-leg-${index}`}>
+                          {`${leg.side} ${leg.quantity} ${leg.optionType} ${leg.strike ?? ""} ${leg.expirationDate ?? ""} @ ${leg.entryPrice ?? "—"} (bid ${leg.bid ?? "—"} / ask ${leg.ask ?? "—"} · IV ${leg.impliedVolatility ?? "—"} · OI ${leg.openInterest ?? "—"} · vol ${leg.volume ?? "—"})`}
+                        </div>
+                      ))}
+                      {row.best.legCount > row.best.legs.length ? (
+                        <div>{`${row.best.legCount - row.best.legs.length} more leg(s) recorded`}</div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span>No legs recorded</span>
+                  ),
+              },
+            ]}
+            rows={symbolEvidenceRows(run)}
+            rowKey={(row) => row.key}
+            caption="Per-symbol evidence each shard recorded"
+          />
         </PageSection>
       )}
 
