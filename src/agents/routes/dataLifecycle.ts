@@ -9,6 +9,7 @@
  *   GET  /api/data-lifecycle/bootstrap          platform check
  *   POST /api/data-lifecycle/bootstrap          platform initialize
  *   POST /api/data-lifecycle/tenant-bootstrap   preview / confirm
+ *   POST /api/data-lifecycle/recreate           preview / confirm (#4383)
  *
  * (Paths are the DO-internal spellings: src/server.ts strips the
  * /api prefix when forwarding.)
@@ -146,6 +147,20 @@ import { createWiredAuditStore } from "../../security/iaaaAuditStore";
 import { SESSION_STORE_SCHEMA_VERSION } from "../../security/sessionStore";
 import type { KvLike } from "../../security/kvResilience";
 import type { Env } from "../../types";
+import {
+  buildCombinedCatalogue,
+  d1SchemaProbe,
+  executeD1Leg,
+  expectedModelForLeg,
+  introspectSchema,
+  planForLeg,
+  resolveRecreatePlan,
+  selectSteps,
+  UNCREATABLE_LAYERS,
+  verifyRecreate,
+  type LegReport,
+  type RecreateStep,
+} from "../../data/schemaComponent/recreateRunner";
 
 // ---------------------------------------------------------------------------
 // Context + seams
@@ -2006,6 +2021,421 @@ async function handleTenantBootstrap(
 }
 
 // ---------------------------------------------------------------------------
+// Recreate (#4383): rebuild the schema on the D1 leg and the per-login
+// DO legs, following the clean-state preview → confirm → audit contract.
+// ---------------------------------------------------------------------------
+
+/** The KV key holding the last recreate report for a scope. */
+export function lastRecreateKey(
+  scope: "tenant" | "platform",
+  tenantId: string | null,
+): string {
+  return `data-lifecycle:recreate:last:${scope}:${tenantId ?? "platform"}`;
+}
+
+interface RecreateStepDescriptor {
+  code: string;
+  params: Record<string, string>;
+}
+
+interface RecreateInstancePlan {
+  login: string;
+  selected: RecreateStepDescriptor[];
+  skipped: RecreateStepDescriptor[];
+  error?: string;
+}
+
+interface RecreateInstanceResult {
+  login: string;
+  report?: LegReport;
+  verification?: {
+    ok: boolean;
+    failures: string[];
+    extras: unknown;
+    knownDifferences: string[];
+  };
+  error?: string;
+}
+
+interface RecreateEnumeration {
+  d1Selected: RecreateStep[];
+  d1Skipped: RecreateStep[];
+  instances: RecreateInstancePlan[];
+  logins: string[];
+  previewToken: string;
+}
+
+async function recreatePreviewTokenFor(
+  scope: "tenant" | "platform",
+  tenantId: string | null,
+  failedCodes: string[],
+  d1SelectedCodes: string[],
+  instances: RecreateInstancePlan[],
+): Promise<string> {
+  return sha256Hex(
+    JSON.stringify({
+      scope,
+      tenantId,
+      failedCodes: [...failedCodes].sort(),
+      d1: d1SelectedCodes,
+      instances: instances.map((i) => [
+        i.login,
+        i.selected.map((s) => s.code),
+        ...(i.error ? [i.error] : []),
+      ]),
+    }),
+  );
+}
+
+async function enumerateRecreate(
+  ctx: DataLifecycleRouteContext,
+  stores: ResolvedStores,
+  scope: "tenant" | "platform",
+  tenantId: string | null,
+  callerLogin: string,
+  failedCodes: string[],
+): Promise<RecreateEnumeration | Response> {
+  const d1 = ctx.env.AGENT_DB;
+  if (!d1) {
+    return jsonError(
+      "AGENT_DB is not bound, so the D1 leg cannot be probed; the recreate is unavailable, not faked.",
+      503,
+    );
+  }
+  const plan = resolveRecreatePlan();
+  const memberships = await allMemberships(stores);
+  let logins: string[] = [];
+  if (scope === "tenant" && tenantId !== null) {
+    const resolved = await resolveLoginsForTenant(stores, memberships, tenantId);
+    logins = resolved.resolvedLogins;
+  } else {
+    const union = new Set<string>();
+    for (const tid of listTenantIds(memberships)) {
+      const resolved = await resolveLoginsForTenant(stores, memberships, tid);
+      for (const login of resolved.resolvedLogins) union.add(login);
+    }
+    union.add(callerLogin);
+    logins = [...union];
+  }
+
+  // D1 leg: probe the bound store and select the closing steps.
+  const d1Plan = planForLeg(plan, "d1");
+  const d1Actual = await introspectSchema(d1SchemaProbe(d1 as never));
+  const d1Selected = selectSteps(d1Plan, d1Actual, failedCodes);
+  const d1SelectedSteps = [...d1Selected.schema, ...d1Selected.seeds].sort(
+    (a, b) => a.order - b.order,
+  );
+  const d1SelectedKeys = new Set(
+    d1SelectedSteps.map((s) => `${s.code}|${JSON.stringify(s.params)}`),
+  );
+  const d1SkippedSteps = d1Plan.steps.filter(
+    (s) => !d1SelectedKeys.has(`${s.code}|${JSON.stringify(s.params)}`),
+  );
+
+  // DO legs: preview fan-out to the maintenance door per login.
+  const doPlaneCodes = planForLeg(plan, "do").steps.map((s) => s.code);
+  const instances: RecreateInstancePlan[] = [];
+  for (const login of logins) {
+    const stub = defaultInstanceStub(ctx, login);
+    if (!stub) {
+      instances.push({
+        login,
+        selected: [],
+        skipped: [],
+        error: "instance unavailable",
+      });
+      continue;
+    }
+    const res = await forward(
+      stub,
+      "/maintenance/recreate-schema",
+      {
+        method: "POST",
+        body: JSON.stringify({ codes: doPlaneCodes, preview: true }),
+      },
+      login,
+      callerLogin,
+      tenantId,
+    );
+    if (!res.ok) {
+      instances.push({
+        login,
+        selected: [],
+        skipped: [],
+        error: res.error ?? bodyError(res.body, res.status),
+      });
+      continue;
+    }
+    const selected = (
+      Array.isArray(res.body.selected) ? res.body.selected : []
+    ) as RecreateStepDescriptor[];
+    const skipped = (
+      Array.isArray(res.body.skipped) ? res.body.skipped : []
+    ) as RecreateStepDescriptor[];
+    instances.push({ login, selected, skipped });
+  }
+
+  return {
+    d1Selected: d1SelectedSteps,
+    d1Skipped: d1SkippedSteps,
+    instances,
+    logins,
+    previewToken: await recreatePreviewTokenFor(
+      scope,
+      tenantId,
+      failedCodes,
+      d1SelectedSteps.map((s) => s.code),
+      instances,
+    ),
+  };
+}
+
+interface RecreateBody {
+  scope?: unknown;
+  tenantId?: unknown;
+  confirm?: unknown;
+  confirmText?: unknown;
+  auditConfirm?: unknown;
+  previewToken?: unknown;
+  failedCodes?: unknown;
+}
+
+async function handleRecreate(
+  request: Request,
+  ctx: DataLifecycleRouteContext,
+): Promise<Response> {
+  const operator = await resolveOperator(request, ctx);
+  if (operator instanceof Response) return operator;
+  const stores = resolveStores(ctx);
+  const body = (await request.json().catch(() => null)) as RecreateBody | null;
+  if (!body || typeof body !== "object") {
+    return jsonError("A JSON body is required.", 400);
+  }
+  const parsed = parseCleanScope(body);
+  if (parsed instanceof Response) return parsed;
+  const { scope, tenantId } = parsed;
+  const failedCodes = Array.isArray(body.failedCodes)
+    ? body.failedCodes.filter((c): c is string => typeof c === "string")
+    : [];
+
+  const caller = await resolveWiredCaller(request, stores);
+  if (scope === "platform" && !caller.isPlatformAdmin) {
+    return jsonError(
+      "Forbidden: platform recreate requires a platform-admin membership.",
+      403,
+    );
+  }
+  if (scope === "tenant" && tenantId !== null) {
+    if (!(await tenantIsKnown(stores, tenantId))) {
+      return jsonError(`Unknown tenant: ${tenantId}.`, 404);
+    }
+  }
+
+  const enumeration = await enumerateRecreate(
+    ctx,
+    stores,
+    scope,
+    tenantId,
+    operator,
+    failedCodes,
+  );
+  if (enumeration instanceof Response) return enumeration;
+
+  if (body.confirm !== true) {
+    return Response.json({
+      scope,
+      ...(tenantId !== null ? { tenantId } : {}),
+      confirmed: false,
+      confirmRequired: true,
+      previewToken: enumeration.previewToken,
+      d1: {
+        selected: enumeration.d1Selected.map((s) => ({
+          code: s.code,
+          params: s.params,
+        })),
+        skipped: enumeration.d1Skipped.map((s) => ({
+          code: s.code,
+          params: s.params,
+        })),
+      },
+      instances: enumeration.instances,
+      uncreatableLayers: UNCREATABLE_LAYERS,
+    });
+  }
+
+  // Confirm gates, in order: the preview binding (409), then the
+  // typed confirmations (400). A failed gate executes nothing.
+  if (
+    typeof body.previewToken !== "string" ||
+    body.previewToken !== enumeration.previewToken
+  ) {
+    return jsonError(
+      "Preview token mismatch: the scope changed since the preview, or no preview was taken. Re-run the preview and confirm against what it shows.",
+      409,
+    );
+  }
+  if (scope === "platform" && body.confirmText !== "CLEAN PLATFORM") {
+    return jsonError(
+      "Platform recreate requires confirmText: \"CLEAN PLATFORM\".",
+      400,
+    );
+  }
+  if (body.auditConfirm !== true) {
+    return jsonError(
+      "Recreate rebuilds schema in member instances and requires auditConfirm: true.",
+      400,
+    );
+  }
+
+  // Execute: the D1 leg first, then the DO fan-out per login. The
+  // legs are independent stores, so a D1 failure does not skip the
+  // DO legs — each leg reports its own outcome and the response
+  // carries the partial truth.
+  const plan = resolveRecreatePlan();
+  const catalogue = buildCombinedCatalogue();
+  const d1 = ctx.env.AGENT_DB!;
+  let d1Report: LegReport;
+  let d1Verification: {
+    ok: boolean;
+    failures: string[];
+    extras: unknown;
+    knownDifferences: string[];
+  };
+  try {
+    d1Report = await executeD1Leg(
+      d1 as never,
+      catalogue,
+      enumeration.d1Selected,
+    );
+  } catch (err) {
+    d1Report = {
+      leg: "d1",
+      selected: enumeration.d1Selected.map((s) => s.code),
+      executed: [],
+      failed: [
+        {
+          code: "schema.recreate.d1",
+          error: err instanceof Error ? err.message : String(err),
+        },
+      ],
+      skipped: [],
+      rolledBack: enumeration.d1Selected.map((s) => s.code),
+      outcome: "failed",
+    };
+  }
+  const d1After = await introspectSchema(d1SchemaProbe(d1 as never));
+  const d1Verified = verifyRecreate(
+    expectedModelForLeg(plan, "d1"),
+    d1After,
+  );
+  d1Verification = {
+    ok: d1Verified.ok,
+    failures: d1Verified.failures,
+    extras: d1Verified.extras,
+    knownDifferences: d1Verified.knownDifferences,
+  };
+
+  const instanceResults: RecreateInstanceResult[] = [];
+  for (const instancePlan of enumeration.instances) {
+    if (instancePlan.error !== undefined) {
+      instanceResults.push({
+        login: instancePlan.login,
+        error: instancePlan.error,
+      });
+      continue;
+    }
+    const stub = defaultInstanceStub(ctx, instancePlan.login);
+    if (!stub) {
+      instanceResults.push({
+        login: instancePlan.login,
+        error: "instance unavailable",
+      });
+      continue;
+    }
+    const codes = [...new Set(instancePlan.selected.map((s) => s.code))];
+    const res = await forward(
+      stub,
+      "/maintenance/recreate-schema",
+      { method: "POST", body: JSON.stringify({ codes }) },
+      instancePlan.login,
+      operator,
+      tenantId,
+    );
+    if (!res.ok) {
+      instanceResults.push({
+        login: instancePlan.login,
+        error: res.error ?? bodyError(res.body, res.status),
+      });
+      continue;
+    }
+    const report = res.body.report as LegReport | undefined;
+    const verification = res.body.verification as
+      | RecreateInstanceResult["verification"]
+      | undefined;
+    if (!report || !verification) {
+      instanceResults.push({
+        login: instancePlan.login,
+        error: "instance answered without a report",
+      });
+      continue;
+    }
+    instanceResults.push({
+      login: instancePlan.login,
+      report,
+      verification,
+    });
+  }
+
+  const allOk =
+    d1Report.outcome === "succeeded" &&
+    d1Verification.ok &&
+    instanceResults.every(
+      (r) =>
+        r.error === undefined &&
+        r.report?.outcome === "succeeded" &&
+        r.verification?.ok === true,
+    );
+
+  const result = {
+    scope,
+    ...(tenantId !== null ? { tenantId } : {}),
+    confirmed: true,
+    d1: { report: d1Report, verification: d1Verification },
+    instances: instanceResults,
+    uncreatableLayers: UNCREATABLE_LAYERS,
+  };
+  await stores.kv.put(
+    lastRecreateKey(scope, tenantId),
+    JSON.stringify(result),
+  );
+
+  const audit = await auditOperation(ctx, stores, {
+    action: "data-lifecycle.recreate",
+    tenantId: tenantId ?? stores.iaaaTenantId,
+    actorLogin: operator,
+    actorInternalUserId: caller.internalUserId,
+    succeeded: allOk,
+    funnelPayload: {
+      scope,
+      ...(tenantId !== null ? { tenantId } : {}),
+      d1: {
+        outcome: d1Report.outcome,
+        executed: d1Report.executed.length,
+        failed: d1Report.failed.map((f) => f.code),
+      },
+      instances: instanceResults.map((r) => ({
+        login: r.login,
+        outcome: r.report?.outcome ?? "error",
+        executed: r.report?.executed.length ?? 0,
+        ...(r.error ? { error: r.error } : {}),
+      })),
+    },
+  });
+
+  return Response.json({ ...result, audit });
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
 
@@ -2036,6 +2466,9 @@ export async function handleDataLifecycleRoutes(
   }
   if (path.endsWith("/data-lifecycle/tenant-bootstrap") && request.method === "POST") {
     return handleTenantBootstrap(request, ctx);
+  }
+  if (path.endsWith("/data-lifecycle/recreate") && request.method === "POST") {
+    return handleRecreate(request, ctx);
   }
   return null;
 }
