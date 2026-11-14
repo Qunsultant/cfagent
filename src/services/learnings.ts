@@ -7,6 +7,8 @@
  * the history of what the agent believed and when stays auditable.
  */
 
+import { remainderIndexSql, remainderTableSql } from "../data/schemaComponent/remainderCatalogue";
+
 export interface Learning {
   id: string;
   domain: string;
@@ -19,18 +21,9 @@ export interface Learning {
 }
 
 export function ensureLearningsTable(sql: any): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS mas_learnings (
-    id TEXT PRIMARY KEY,
-    domain TEXT NOT NULL,
-    observation TEXT NOT NULL,
-    evidence_refs TEXT NOT NULL DEFAULT '[]',
-    confidence REAL NOT NULL DEFAULT 0.5,
-    source TEXT NOT NULL DEFAULT 'reflection',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    superseded_by TEXT
-  )`);
-  sql.exec(`CREATE INDEX IF NOT EXISTS idx_learnings_domain ON mas_learnings(domain)`);
-  sql.exec(`CREATE INDEX IF NOT EXISTS idx_learnings_active ON mas_learnings(superseded_by)`);
+  sql.exec(remainderTableSql("mas_learnings"));
+  sql.exec(remainderIndexSql("idx_learnings_domain"));
+  sql.exec(remainderIndexSql("idx_learnings_active"));
 }
 
 /** Write a new learning. Returns its id. */
