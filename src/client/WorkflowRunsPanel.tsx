@@ -1211,6 +1211,13 @@ export function RunDetail({
         </Notice>
       )}
 
+      {run.stranded && (
+        <Notice tone="warning" density="compact" variant="strip" title="Stranded chain">
+          Every feed shard failed and no downstream stage was planned. The chain will not advance on its own — retry the failed
+          shards.
+        </Notice>
+      )}
+
       {chainRetryMessage && (
         <Notice tone="info" density="compact" variant="strip" title="Chain retry">
           {chainRetryMessage}

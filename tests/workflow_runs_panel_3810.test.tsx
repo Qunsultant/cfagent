@@ -218,3 +218,13 @@ describe("chain bulk retry affordance (#4416)", () => {
     expect(container.textContent ?? "").toContain("Retried 2 failed shards");
   });
 });
+describe("stranded chain surface (#4419)", () => {
+  it("shows the stranded notice when the chain has no downstream planned", async () => {
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<RunDetail run={run({ status: "failed", stranded: true })} />);
+    });
+    await flush();
+    expect(container.textContent ?? "").toContain("Stranded chain");
+  });
+});
