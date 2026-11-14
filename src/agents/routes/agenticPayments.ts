@@ -2585,7 +2585,7 @@ export async function handleAgenticPaymentsRoutes(
           metadata: { userId: login, bundleId: bundle.id, tenantId },
         });
       } catch (err: any) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Stripe subscription checkout could not be created." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       if (!created.url || !created.id) {
         return Response.json({ error: "Stripe subscription checkout could not be created." }, { status: 503 });
@@ -4772,7 +4772,7 @@ export async function handleAgenticPaymentsRoutes(
         return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       if (!created.url || !created.id) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Stripe subscription checkout could not be created." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       ctx.audit("commercial.subscription.billing_checkout_created", "payments", {
         userId: login,
