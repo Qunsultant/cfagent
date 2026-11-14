@@ -15,6 +15,7 @@ export * from "./catalogue";
 export * from "./d1Catalogue";
 export * from "./ormCatalogue";
 export * from "./doCatalogue";
+export * from "./remainderCatalogue";
 export * from "./executor";
 export * from "./recreatePlanner";
 export * from "./equalityHarness";
