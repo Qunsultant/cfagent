@@ -52,7 +52,7 @@ const EXPECTED_IDS = [
   "payments",
   "platform-admin",
   "portfolio",
-  "products",
+  "product-hub",
   "queues",
   "referrals",
   "reports",

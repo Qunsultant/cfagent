@@ -63,7 +63,7 @@ const EXPECTED_ORDER = [
   "endpoints",
   "docs",
   "payment-assurance",
-  "products",
+  "product-hub",
   "billing",
   "assets-hub",
 ];
