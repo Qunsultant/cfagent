@@ -23,6 +23,7 @@ import type {
   FeedDatasetStoreOptions,
 } from "./feedDatasetPorts";
 import { feedDatasetRowCount } from "./feedDatasetPorts";
+import { remainderD1TableSql } from "./schemaComponent/remainderCatalogue";
 
 /** Minimal structural shape of the D1 binding this family needs. */
 export interface FeedDatasetD1Db {
@@ -36,8 +37,7 @@ export interface FeedDatasetD1Db {
   };
 }
 
-const CREATE_TABLE_SQL =
-  "CREATE TABLE IF NOT EXISTS mas_feed_datasets (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, source_id TEXT NOT NULL, dataset TEXT NOT NULL, job_id TEXT NOT NULL, run_id TEXT NOT NULL, status TEXT NOT NULL, as_of TEXT NOT NULL, rows_persisted INTEGER NOT NULL, artifact_json TEXT NOT NULL)";
+const CREATE_TABLE_SQL = remainderD1TableSql("mas_feed_datasets");
 const INSERT_SQL =
   "INSERT INTO mas_feed_datasets (id, created_at, source_id, dataset, job_id, run_id, status, as_of, rows_persisted, artifact_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 const IDS_SQL =
