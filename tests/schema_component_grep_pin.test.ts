@@ -3,14 +3,23 @@
  *
  * The pin's rule: zero CREATE TABLE / CREATE INDEX / CREATE UNIQUE
  * INDEX / ALTER TABLE lines in src/ outside the schema component and
- * migrationRunner.ts. That is the P3 gate, not the P0 gate — on the
- * unmigrated tree the zero-tolerance form FAILS (see the red run in
+ * migrationRunner.ts — plus a fifth form, parameterized DDL: a line
+ * carrying a DDL verb AND a `${...}` placeholder (#4282 P3), so
+ * template-assembled DDL cannot slip past a verb-only pin. That is the
+ * P3 gate, not the P0 gate — on the unmigrated tree the zero-tolerance
+ * form FAILS (see the red run in
  * ~/workspace/w4282/evidence-p0/red-run-3-assertions.log: 208
  * violations), and a red test cannot ship because CI runs the full
  * suite. So this pin ships in the repo's census-pin form: it asserts
  * the violation set equals the seeded baseline exactly. Any new inline
  * DDL trips it, and P1–P3 drive the baseline to zero by updating it
  * in the migration PR — never silently, always reviewed in the diff.
+ * The fifth form was proved against the unmodified base dd6df86a
+ * before the zero refresh (evidence-p3/grep-baseline-base-dd6df86a.json:
+ * parameterizedDdl 30 across 12 files, verb totals 37/7/1/40).
+ * Parameterized DML (`INSERT ... ${table} ...`, no DDL verb) does NOT
+ * match this pin; its entry form is defined by the P3 remainder
+ * catalogue and its DML moves in P6d.
  *
  * Seeded from a CLEAN checkout of the base (d1a370ab) by:
  *   SCHEMA_DDL_BASELINE_WRITE=1 npx vitest run tests/schema_component_grep_pin.test.ts
@@ -66,6 +75,7 @@ function totalsOf(files: DdlBaselineCounts): Record<DdlPatternName, number> {
     createIndex: 0,
     createUniqueIndex: 0,
     alterTable: 0,
+    parameterizedDdl: 0,
   };
   for (const counts of Object.values(files)) {
     for (const key of Object.keys(totals) as DdlPatternName[]) {
@@ -84,15 +94,22 @@ describe("DDL grep pin — zero DDL in using code (#4282 P0)", () => {
     console.log(
       `grep-pin: violations ${violations.length} ` +
         `(createTable ${totals.createTable}, createIndex ${totals.createIndex}, ` +
-        `createUniqueIndex ${totals.createUniqueIndex}, alterTable ${totals.alterTable}); ` +
+        `createUniqueIndex ${totals.createUniqueIndex}, alterTable ${totals.alterTable}, ` +
+        `parameterizedDdl ${totals.parameterizedDdl}); ` +
         `informational DROP lines ${drops.length}; ` +
         `exempt test-fixture CREATE TABLE lines ${EXEMPT_TEST_FIXTURE_CREATE_TABLE_LINES}`,
     );
 
     if (process.env.SCHEMA_DDL_BASELINE_WRITE === "1") {
       const baseline: DdlBaseline = {
-        generatedFrom: "d1a370ab6365f6a595cd36eb1ed6162aef8ad7a3",
-        generatedAt: "2026-11-13",
+        // Provenance is the tree the scan actually measured. Pass
+        // SCHEMA_DDL_BASELINE_FROM=<full SHA> on the refresh command;
+        // the fallback is the P0 seed only so an unflagged refresh
+        // cannot silently claim a base it never measured.
+        generatedFrom:
+          process.env.SCHEMA_DDL_BASELINE_FROM ??
+          "d1a370ab6365f6a595cd36eb1ed6162aef8ad7a3",
+        generatedAt: new Date().toISOString().slice(0, 10),
         totals,
         files,
       };
