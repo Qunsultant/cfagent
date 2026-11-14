@@ -83,7 +83,7 @@ export class DoSessionStoreAdapter {
   /**
    * The generation-1 DDL plus the D-A.4 marker recording —
    * moved verbatim from the class's constructor (#2432): the
-   * CREATE TABLE stays unconditional and IF NOT EXISTS
+   * table creation stays unconditional and idempotent
    * exactly as before; the migration call only records that
    * the generation is in place (marker written last, and
    * only when the recorded version is older). The write is
