@@ -1324,21 +1324,21 @@ export function RunDetail({
               },
               {
                 // Issue #4421 — the durable job id, and whether this row is a
-                // retry linked to the row it repeated. Reuses the mono/muted
-                // spans: no new bespoke class for the UX ratchet to count.
+                // retry linked to the row it repeated. Rendered with no
+                // className on purpose: the UX ratchet counts bespoke class
+                // token occurrences and must not rise (#3991).
                 key: "job",
                 header: "Job",
                 render: (stage: WorkflowRunStage) => (
-                  <div className="workflow-runs-when">
+                  <div>
                     {stage.jobId ? (
-                      <span className="workflow-runs-mono" title={stage.jobId}>
-                        {stage.jobId}
-                      </span>
+                      <span title={stage.jobId}>{stage.jobId}</span>
                     ) : (
-                      <span className="workflow-runs-muted">—</span>
+                      <span>—</span>
                     )}
                     {stage.retryOf ? (
-                      <span className="workflow-runs-muted" title={`A retry of job ${stage.retryOf}`}>
+                      <span title={`A retry of job ${stage.retryOf}`}>
+                        {" "}
                         Retry of <a href={`#stage-${stage.retryOf}`}>{stage.retryOf}</a>
                       </span>
                     ) : null}
