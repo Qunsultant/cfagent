@@ -22,14 +22,13 @@
  */
 import type { SqlStorage } from "./repositoryPorts";
 import type { DeliverySuppressionStore } from "../workflows/screenDeliverySuppression";
+import { remainderTableSql } from "./schemaComponent/remainderCatalogue";
 
 /** One row per claimed (runId, destination) pair. */
 export const DELIVERY_CLAIMS_TABLE = "mas_delivery_claims";
 
 export function ensureDeliveryClaimsTable(sql: SqlStorage): void {
-  sql.exec(
-    `CREATE TABLE IF NOT EXISTS ${DELIVERY_CLAIMS_TABLE} (key TEXT PRIMARY KEY, claimed_at TEXT NOT NULL)`,
-  );
+  sql.exec(remainderTableSql("mas_delivery_claims"));
 }
 
 /**
