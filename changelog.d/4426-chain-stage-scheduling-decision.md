@@ -1,0 +1,3 @@
+### Changed
+
+- **Per-stage scheduling for the legacy shard chain: decided, not built (#4426).** The chain's stages are not engine nodes today, and the chain's executor is moving onto the workflow host (#4471), which already has per-stage scheduling (`JobScheduleConfig`, `POST /api/schedules/workflow-stages`). Building a chain-stage scheduler now would add a second scheduling model on the component being replaced. **ADR 0031** records the decision and routes the migration question to #4471 as an acceptance item; the stage-schedule route and the client API now state their scope (engine job stages only) and point at the ADR. Engine stage scheduling is unchanged; the Schedules home has no stage-create form to mislead (it never had one, #2329). #autoclaw-001

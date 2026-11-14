@@ -445,7 +445,14 @@ export async function createSchedule(
   );
 }
 
-/** Create a stage-schedule (POST /api/schedules/workflow-stages, #3310). No create form exists on the Schedules home (#2329) — creation is API + agent channels. */
+/**
+ * Create a stage-schedule (POST /api/schedules/workflow-stages, #3310). No
+ * create form exists on the Schedules home (#2329) — creation is API + agent
+ * channels. Scope is ENGINE job stages: a legacy shard chain's stages are not
+ * engine nodes, so they are refused by the host's registry check rather than
+ * shown as schedulable — the gap closes with the chain's cutover onto the
+ * workflow host (ADR 0031, #4426, #4471).
+ */
 export async function createStageSchedule(
   body: { jobId: string; nodePath: string; scheduleType: "cron" | "interval"; cron?: string; intervalSeconds?: number; reason?: string },
   headers?: Record<string, string>,

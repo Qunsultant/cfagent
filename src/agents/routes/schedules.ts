@@ -1163,6 +1163,11 @@ export async function handleSchedulesRoutes(
 
     // Create a stage-schedule (POST /api/schedules/workflow-stages) —
     // issue #3121 #3310: one pipeline job stage on its own schedule.
+    // Scope is ENGINE job stages, validated against the ScheduledAgent's
+    // registry: a legacy shard chain's stages are not engine nodes and are
+    // not schedulable here — that gap is mooted by the chain's cutover onto
+    // the workflow host (ADR 0031, #4426, #4471), which reuses this same
+    // per-stage scheduling.
     // The REST create has no approval gate (the caller IS the human;
     // the gate is the agent path's, per #3122's design): session-gated,
     // registry-validated via the ScheduledAgent door, audited

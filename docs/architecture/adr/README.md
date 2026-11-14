@@ -48,6 +48,7 @@ PR.
 | [0028](0028-data-provider-broker-taxonomy.md) | Data-provider/broker taxonomy split, alpaca/alpaca defaults, Public.com as a live broker: declared == servable, kind map, no-paper-mode refusal, preview-first copilot tools (#3990) | Accepted |
 | [0029](0029-unified-schedule-store.md) | One unified schedule store, one run ledger, one management path: ScheduleStore port, pause as record state, KV ledger half → DO SQLite, jobsApi convergence, five modules retired by deprecation rename (#3123) | Accepted |
 | [0030](0030-one-clock-sdk-alarms-watchdog.md) | One clock for scheduled work: SDK alarms on the agent, one Worker-cron watchdog (#4234) | Accepted |
+| [0031](0031-legacy-chain-per-stage-scheduling.md) | Legacy shard chain per-stage scheduling is mooted by the workflow-host migration: one scheduling model, chain-stage scheduling lands with #4471 (#4426) | Accepted |
 
 **Note on ADR 0004:** the number 0004 was assigned twice — to the UX token
 architecture decision and to the screener decoupling decision. Both records
