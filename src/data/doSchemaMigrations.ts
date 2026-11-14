@@ -68,19 +68,14 @@ export type {
 } from "../ports/schemaMigration";
 
 export { aggregateDoSchemaDriftReports as aggregateDoSchemaDrift };
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 /** The ledger table: owned by this module, never by a migration. */
 export const SCHEMA_MIGRATIONS_LEDGER_TABLE = "mas_schema_migrations";
 
 function ensureLedgerTable(sql: DoSchemaMigrationSql): void {
   sql.exec(
-    `CREATE TABLE IF NOT EXISTS ${SCHEMA_MIGRATIONS_LEDGER_TABLE} (
-  store TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  name TEXT NOT NULL,
-  applied_at_ms INTEGER NOT NULL,
-  PRIMARY KEY (store, version)
-)`,
+    doTableSql("mas_schema_migrations"),
   );
 }
 
