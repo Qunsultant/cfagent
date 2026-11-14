@@ -1680,7 +1680,11 @@ export function listUsageEvents(
 export function scheduledReportPdfUrl(source: string, body: unknown): string | undefined {
   try {
     const parsed: any = typeof body === "string" ? JSON.parse(body || "{}") : (body ?? {});
-    const pdfKey = parsed?.pdfKey ?? parsed?.result?.pdfKey;
+    // Issue #2091 — the sharded chain's per-format row: `{ format: "pdf", key }`.
+    // Without this the row's own PDF link never builds, so a scheduled chain
+    // run showed "—" beside a document that exists in storage.
+    const pdfKey =
+      parsed?.pdfKey ?? parsed?.result?.pdfKey ?? (parsed?.format === "pdf" ? parsed?.key : undefined);
     if (typeof pdfKey === "string" && pdfKey) {
       if (source === "screener") return `/api/screener/report.pdf?key=${encodeURIComponent(pdfKey)}`;
       if (source === "options_scanner") return `/api/options/report.pdf?key=${encodeURIComponent(pdfKey)}`;
