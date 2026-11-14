@@ -167,6 +167,10 @@ describe("CFG-P01 one source for the label, the gating set and the limit", () =>
     for (const workflow of [enrollWorkflow, readyWorkflow]) {
       expect(workflow).toContain("CONFIG_PATH: config/auto-merge.json");
       expect(workflow).toContain("contents/$CONFIG_PATH");
+      // Default branch first, with one loud bootstrap path for the run that
+      // introduces the file (#4444 landed before the file existed on main).
+      expect(workflow).toContain("FALLBACK_REF");
+      expect(workflow).toContain("::warning::$CONFIG_PATH is not on the default branch yet");
     }
   });
 
