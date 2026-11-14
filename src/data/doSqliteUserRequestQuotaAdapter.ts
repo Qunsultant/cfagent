@@ -18,32 +18,13 @@ import type {
   UserRequestQuotaProbeInput,
   UserRequestQuotaSqlExecutor,
 } from "./userRequestQuotaPorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 type Row = Record<string, unknown>;
 
-const CHARGES_DDL = `CREATE TABLE IF NOT EXISTS user_request_quota_charges (
-      tenant_id TEXT NOT NULL,
-      user_login TEXT NOT NULL,
-      window_kind TEXT NOT NULL,
-      window_key TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      charged_at INTEGER NOT NULL,
-      PRIMARY KEY (tenant_id, user_login, window_kind, window_key, run_id)
-    )`;
+const CHARGES_DDL = doTableSql("user_request_quota_charges");
 
-const OVERRIDES_DDL = `CREATE TABLE IF NOT EXISTS user_request_quota_overrides (
-      id TEXT NOT NULL PRIMARY KEY,
-      tenant_id TEXT NOT NULL,
-      user_login TEXT NOT NULL,
-      window_kind TEXT NOT NULL,
-      window_key TEXT NOT NULL,
-      extra_runs INTEGER NOT NULL,
-      granted_by TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      created_ms INTEGER NOT NULL,
-      expires_ms INTEGER
-    )`;
+const OVERRIDES_DDL = doTableSql("user_request_quota_overrides");
 
 function toOverride(row: Row): UserRequestQuotaOverride {
   return {
