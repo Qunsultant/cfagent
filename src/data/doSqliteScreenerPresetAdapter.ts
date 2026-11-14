@@ -16,22 +16,13 @@ import type {
   ScreenerPresetPort,
   ScreenerPresetRow,
 } from "./orchestratorTablePorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqliteScreenerPresetStore implements ScreenerPresetPort {
   constructor(private readonly sql: OrchestratorTableSqlExecutor) {}
 
   ensureSchema(): void {
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_screener_presets (
-        id TEXT PRIMARY KEY,
-        user_login TEXT NOT NULL,
-        name TEXT NOT NULL,
-        asset_class TEXT NOT NULL,
-        criteria_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
+    this.sql.exec(doTableSql("mas_screener_presets"));
   }
 
   listByUser(userLogin: string): ScreenerPresetRow[] {
