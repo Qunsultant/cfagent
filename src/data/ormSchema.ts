@@ -14,15 +14,18 @@
  * These eight tables used to be defined TWICE with byte-identical DDL:
  * in DatabaseORM.initializeSchema() (src/orm/index.ts) and in
  * OrchestratorAgent.ensureTables() (src/agents/orchestrator.ts). With
- * CREATE TABLE IF NOT EXISTS semantics the first definition to run wins
+ * idempotent-creation semantics, the first definition to run wins
  * per Durable Object instance, so any edit to one copy would silently
  * fork the schema by instance history. The DDL strings below are the
  * single source by code; they are byte-identical to both former copies (the
  * drift pin in tests/schema_single_source.test.ts proves the effective
  * DDL of both initialization paths equals these strings). Never define
  * a shared table's DDL anywhere else — the same lesson as mas_reports
- * (issue #389), whose DDL lives only in
- * src/services/scheduledReports.ts for the same reason.
+ * (issue #389), whose DDL text lives only in the schema catalogue
+ * (src/data/schemaComponent/doCatalogue.ts, parameterized on the
+ * table name) and is ensured only by
+ * DoSqliteCanonicalReportStore.ensureSchema in
+ * src/data/doSqliteCanonicalReportStoreAdapter.ts for the same reason.
  *
  * Per-DO schema-initialization coverage (verified on main @ bf1534c0):
  *  - OrchestratorAgent (wrangler ORCHESTRATOR_AGENT binding, exported as
@@ -122,7 +125,7 @@ export function ensurePromotionsIndex(sql: SqlStorage): void {
 
 /**
  * Issue #2178 (Q7 S1): chain columns for mas_events on tables created
- * before the columns existed. CREATE TABLE IF NOT EXISTS never
+ * before the columns existed. Idempotent creation never
  * migrates, so each missing column is added explicitly (the
  * orchestrator.ts:1115 PRAGMA-check pattern). Idempotent: a table
  * that already has the columns is untouched.
