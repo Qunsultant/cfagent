@@ -130,6 +130,12 @@ export interface WorkflowRunStage {
   durationMs: number | null;
   /** Issue #4418: the row's last heartbeat before a reap — pre-reap evidence. */
   lastActivityAt?: string | null;
+  /** Issue #4421: the durable job id this stage row stands for (NULL on a
+   *  stage recorded only as a transition or an engine checkpoint). */
+  jobId?: string | null;
+  /** Issue #4421: the job id this row retried, read from the payload the
+   *  retry stamped. NULL = an original attempt, never a guess. */
+  retryOf?: string | null;
   /** Issue #4417: the failed attempts this shard recorded, oldest first. */
   attempts?: Array<{ attempt: number; error: string; at: string }>;
   /** Human description (the job's display name, or the transition summary). */
@@ -1046,6 +1052,13 @@ function attemptsForJob(job: WorkflowRunJobRow): Array<{ attempt: number; error:
     return [];
   }
 }
+/** Issue #4421: the payload-stamped retry lineage of a job row. Only a
+ *  retry carries `retryOf`; anything else is an original attempt. */
+function retryOfJob(job: WorkflowRunJobRow): string | null {
+  const payload = parseObject(job.payload_json);
+  return typeof payload?.retryOf === "string" && payload.retryOf ? payload.retryOf : null;
+}
+
 function stageRowsForGroup(
   jobs: WorkflowRunJobRow[],
   transitions: WorkflowRunStageTransition[],
@@ -1087,6 +1100,8 @@ function stageRowsForGroup(
       durationMs: durationBetween(startedAt, completedAt),
       lastActivityAt: isoOrNull(job.last_activity_at) ?? null,
       attempts: attemptsForJob(job),
+      jobId: job.job_id,
+      retryOf: retryOfJob(job),
       detail: job.display_name || null,
       reason: matchedTransition?.reason ?? resultReason ?? (errorCode ? codedMessage(errorCode) : null),
       error: codedStageError(job),
@@ -1111,6 +1126,10 @@ function stageRowsForGroup(
       label: stageLabel(transition.stage, ""),
       status,
       recordedBy: "stage-transition",
+      // Issue #4421: a transition records the job that wrote it, so its id is
+      // evidence. It has no retry lineage of its own.
+      jobId: transition.jobId ?? null,
+      retryOf: null,
       startedAt: isoOrNull(transition.createdAt),
       finishedAt: isoOrNull(transition.createdAt),
       durationMs: null,
