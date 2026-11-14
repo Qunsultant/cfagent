@@ -276,6 +276,16 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
       numOrNull(body?.report?.result?.withTrades) ??
       (Array.isArray(body?.opportunities) ? body.opportunities.length : null);
   }
+  // Issue #2091 — the sharded options chain's store leg writes ONE canonical
+  // row PER FORMAT with `{ format, key, fileName }`, not the flat
+  // `pdfKey`/`xlsxKey`/`csvKey` body the summary's mapping was built for. Read
+  // that shape too, or a scheduled chain run's artifacts render as an
+  // unexplained all-"—" row (the exact symptom #2091 was filed for).
+  const chainFormatKey = (format: "pdf" | "xlsx" | "csv"): string | null => {
+    const rowFormat = strOrNull(body?.format);
+    const key = strOrNull(body?.key);
+    return rowFormat === format && key ? key : null;
+  };
   return {
     kind,
     id: hit.id,
@@ -300,16 +310,31 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
       if (retried === null && attempts === null) return null;
       return { retriedShards: retried ?? 0, attempts: attempts ?? 0 };
     })(),
-    pdfKey: strOrNull(body?.pdfKey) ?? strOrNull(body?.report?.result?.pdfKey),
+    pdfKey:
+      strOrNull(body?.pdfKey) ??
+      strOrNull(body?.report?.result?.pdfKey) ??
+      chainFormatKey("pdf"),
     reportUrl: scheduledReportPdfUrl(hit.source, hit.body) ?? null,
-    xlsxKey: strOrNull(body?.xlsxKey) ?? strOrNull(body?.report?.result?.xlsxKey),
+    xlsxKey:
+      strOrNull(body?.xlsxKey) ??
+      strOrNull(body?.report?.result?.xlsxKey) ??
+      chainFormatKey("xlsx"),
     xlsxUrl: (() => {
-      const k = strOrNull(body?.xlsxKey) ?? strOrNull(body?.report?.result?.xlsxKey);
+      const k =
+        strOrNull(body?.xlsxKey) ??
+        strOrNull(body?.report?.result?.xlsxKey) ??
+        chainFormatKey("xlsx");
       return k ? xlsxUrlForSource(hit.source, k) : null;
     })(),
-    csvKey: strOrNull(body?.csvKey) ?? strOrNull(body?.report?.result?.csvKey),
+    csvKey:
+      strOrNull(body?.csvKey) ??
+      strOrNull(body?.report?.result?.csvKey) ??
+      chainFormatKey("csv"),
     csvUrl: (() => {
-      const k = strOrNull(body?.csvKey) ?? strOrNull(body?.report?.result?.csvKey);
+      const k =
+        strOrNull(body?.csvKey) ??
+        strOrNull(body?.report?.result?.csvKey) ??
+        chainFormatKey("csv");
       return k ? csvUrlForSource(hit.source, k) : null;
     })(),
     pdfStatus:
