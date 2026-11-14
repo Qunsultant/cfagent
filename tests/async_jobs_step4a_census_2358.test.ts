@@ -57,8 +57,10 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // the trigger / triggered_by / schedule_id probed columns);
   // 43 after #3811 (+3: the last_activity_at + error_code column
   // migrations and the guarded heartbeat UPDATE); 45 after #4417
-  // (+2: the attempt-history SELECT + UPDATE in appendAttempt).
-  ["src/data/doSqliteAsyncJobAdapter.ts", 45],
+  // (+2: the attempt-history SELECT + UPDATE in appendAttempt); 46
+  // after #4423 (+1: the tolerant per-chain attempt-history read the
+  // Docs retry marker needs, in the adapter so the service stays at 0).
+  ["src/data/doSqliteAsyncJobAdapter.ts", 46],
   ["src/data/doSqliteJobOutcomeAdapter.ts", 13],
   ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts", 7],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],
