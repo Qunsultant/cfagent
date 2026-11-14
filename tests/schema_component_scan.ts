@@ -35,12 +35,26 @@ export const REPO_ROOT = path.resolve(
 
 export const SRC_DIR = path.join(REPO_ROOT, "src");
 
-/** DDL forms the pin enumerates (survey §1.4: all four, not just TABLE/INDEX). */
+/** DDL forms the pin enumerates (survey §1.4: all four verbs, not just TABLE/INDEX).
+ * The fifth form, parameterizedDdl, is a line carrying a DDL verb AND a
+ * `${...}` placeholder, in either order (#4282 P3): template-assembled
+ * DDL must not slip past a verb-only pin. A parameterized line matches
+ * its verb pattern too, so it produces two entries (verb +
+ * parameterizedDdl) — the per-pattern totals are not disjoint, and the
+ * baseline records both. DML placeholders (INSERT/UPDATE/DELETE with
+ * `${table}`) do NOT match: no DDL verb on the line. That DML form is
+ * out of scope for this pin; its entry shape is defined by the P3
+ * remainder catalogue and its DML moves in P6d. */
 export const DDL_PATTERNS = [
   { name: "createTable", regex: /\bCREATE TABLE\b/ },
   { name: "createIndex", regex: /\bCREATE INDEX\b/ },
   { name: "createUniqueIndex", regex: /\bCREATE UNIQUE INDEX\b/ },
   { name: "alterTable", regex: /\bALTER TABLE\b/ },
+  {
+    name: "parameterizedDdl",
+    regex:
+      /\b(?:CREATE TABLE|CREATE UNIQUE INDEX|CREATE INDEX|ALTER TABLE)\b.*\$\{[^}]*\}|\$\{[^}]*\}.*\b(?:CREATE TABLE|CREATE UNIQUE INDEX|CREATE INDEX|ALTER TABLE)\b/,
+  },
 ] as const;
 
 export type DdlPatternName = (typeof DDL_PATTERNS)[number]["name"];
@@ -139,6 +153,7 @@ export function aggregateDdlCounts(
       createIndex: 0,
       createUniqueIndex: 0,
       alterTable: 0,
+      parameterizedDdl: 0,
     };
     counts[occ.file][occ.pattern] += 1;
   }
@@ -153,6 +168,7 @@ export function countByPattern(
     createIndex: 0,
     createUniqueIndex: 0,
     alterTable: 0,
+    parameterizedDdl: 0,
   };
   for (const occ of occurrences) totals[occ.pattern] += 1;
   return totals;
