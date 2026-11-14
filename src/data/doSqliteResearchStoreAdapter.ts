@@ -18,14 +18,13 @@ import type {
   ResearchStoreSqlExecutor,
   ResearchTaskStorePort,
 } from "./researchStorePorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqliteResearchSettingsStore implements ResearchSettingsPort {
   constructor(private readonly sql: ResearchStoreSqlExecutor) {}
 
   ensureSchema(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS research_settings (
-      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
-    )`);
+    this.sql.exec(doTableSql("research_settings"));
   }
 
   get(key: string): string | null {
@@ -61,9 +60,7 @@ export class DoSqliteResearchTaskStore implements ResearchTaskStorePort {
   ensureSchema(): void {
     // Issue #577: durable task ledger store (key/value, same idiom as
     // research_settings — table is created in code, no wrangler migration).
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS research_task_store (
-      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
-    )`);
+    this.sql.exec(doTableSql("research_task_store"));
   }
 
   get(key: string): string | null {
@@ -115,11 +112,7 @@ export class DoSqliteResearchRunStore implements ResearchRunPort {
   constructor(private readonly sql: ResearchStoreSqlExecutor) {}
 
   ensureSchema(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS research_runs (
-      run_id TEXT PRIMARY KEY, trigger TEXT NOT NULL, user_login TEXT NOT NULL,
-      created_at TEXT NOT NULL, rules_version TEXT NOT NULL, status TEXT NOT NULL,
-      ideas_count INTEGER NOT NULL, report_json TEXT NOT NULL
-    )`);
+    this.sql.exec(doTableSql("research_runs"));
   }
 
   replaceRun(record: ResearchRunInsert): void {
@@ -165,10 +158,7 @@ export class DoSqliteResearchEvaluationStore implements ResearchEvaluationPort {
   constructor(private readonly sql: ResearchStoreSqlExecutor) {}
 
   ensureSchema(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS research_evaluations (
-      id TEXT PRIMARY KEY, run_id TEXT NOT NULL, evaluated_at TEXT NOT NULL,
-      evaluation_json TEXT NOT NULL
-    )`);
+    this.sql.exec(doTableSql("research_evaluations"));
   }
 
   insertEvaluation(record: ResearchEvaluationInsert): void {
