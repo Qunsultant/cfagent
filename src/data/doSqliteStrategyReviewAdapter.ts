@@ -11,26 +11,16 @@ import type {
   StrategyReviewSqlExecutor,
   StrategyReviewStore,
 } from "./strategyReviewPorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqliteStrategyReviewStore implements StrategyReviewStore {
   constructor(private readonly sql: StrategyReviewSqlExecutor) {}
 
   ensureTable(): void {
     const sql = this.sql;
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_strategy_reviews (
-    id TEXT PRIMARY KEY,
-    symbol TEXT NOT NULL,
-    candidate_id TEXT NOT NULL,
-    label TEXT NOT NULL,
-    rank INTEGER NOT NULL,
-    rationale TEXT NOT NULL,
-    quant_status TEXT NOT NULL DEFAULT 'unverified',
-    decision TEXT NOT NULL DEFAULT 'pending',
-    decided_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`);
-    sql.exec(`CREATE INDEX IF NOT EXISTS idx_strategy_reviews_symbol ON mas_strategy_reviews(symbol)`);
-    sql.exec(`CREATE INDEX IF NOT EXISTS idx_strategy_reviews_decision ON mas_strategy_reviews(decision)`);
+    sql.exec(doTableSql("mas_strategy_reviews"));
+    sql.exec(doIndexSql("idx_strategy_reviews_symbol"));
+    sql.exec(doIndexSql("idx_strategy_reviews_decision"));
   }
 
   recordCandidates(symbol: string, candidates: StrategyCandidateInput[]): void {
