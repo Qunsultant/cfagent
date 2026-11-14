@@ -1,0 +1,396 @@
+{
+  "captures": [
+    {
+      "adapter": "LearningsEnsure",
+      "file": "services/learnings.ts",
+      "trigger": "ensureLearningsTable(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_learnings (\n    id TEXT PRIMARY KEY,\n    domain TEXT NOT NULL,\n    observation TEXT NOT NULL,\n    evidence_refs TEXT NOT NULL DEFAULT '[]',\n    confidence REAL NOT NULL DEFAULT 0.5,\n    source TEXT NOT NULL DEFAULT 'reflection',\n    created_at TEXT NOT NULL DEFAULT (datetime('now')),\n    superseded_by TEXT\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_learnings_domain ON mas_learnings(domain)",
+        "CREATE INDEX IF NOT EXISTS idx_learnings_active ON mas_learnings(superseded_by)"
+      ]
+    },
+    {
+      "adapter": "CancelPreviewSave",
+      "file": "services/cancelPreviewStore.ts",
+      "trigger": "createSqlCancelPreviewStore(sql).save(...)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_cancel_previews (token TEXT PRIMARY KEY, ids_json TEXT, created_at TEXT, expires_at TEXT, used_at TEXT)",
+        "DELETE FROM mas_cancel_previews WHERE token = ?",
+        "INSERT INTO mas_cancel_previews (token, ids_json, created_at, expires_at, used_at) VALUES (?, ?, ?, ?, NULL)"
+      ]
+    },
+    {
+      "adapter": "LadderStateSave",
+      "file": "services/ladderStateStore.ts",
+      "trigger": "createSqlLadderStateStore(sql).save(...)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_ladder_states (ladder_id TEXT PRIMARY KEY, symbol TEXT, entry_mode TEXT, spec_json TEXT, plan_json TEXT, placed_json TEXT, committed_notional REAL, stopped_by TEXT, created_at TEXT, updated_at TEXT)",
+        "DELETE FROM mas_ladder_states WHERE ladder_id = ?",
+        "INSERT INTO mas_ladder_states (ladder_id, symbol, entry_mode, spec_json, plan_json, placed_json, committed_notional, stopped_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ]
+    },
+    {
+      "adapter": "DeliveryClaimsEnsure",
+      "file": "data/deliveryClaimsStore.ts",
+      "trigger": "ensureDeliveryClaimsTable(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_delivery_claims (key TEXT PRIMARY KEY, claimed_at TEXT NOT NULL)"
+      ]
+    },
+    {
+      "adapter": "StageClaimsEnsure",
+      "file": "data/stageClaimsStore.ts",
+      "trigger": "ensureStageClaimsTable(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_stage_claims (key TEXT PRIMARY KEY, claimed_at TEXT NOT NULL)"
+      ]
+    },
+    {
+      "adapter": "D1FeedDatasetEnsure",
+      "file": "data/d1FeedDatasetAdapter.ts",
+      "trigger": "ensureTable() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_feed_datasets (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, source_id TEXT NOT NULL, dataset TEXT NOT NULL, job_id TEXT NOT NULL, run_id TEXT NOT NULL, status TEXT NOT NULL, as_of TEXT NOT NULL, rows_persisted INTEGER NOT NULL, artifact_json TEXT NOT NULL)"
+      ]
+    },
+    {
+      "adapter": "D1IndexListStore",
+      "file": "data/d1IndexListAdapter.ts",
+      "trigger": "store(...)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_index_lists (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, index_id TEXT NOT NULL, snapshot_date TEXT NOT NULL, source TEXT NOT NULL, source_label TEXT NOT NULL, derived_from_holdings INTEGER NOT NULL, members_json TEXT NOT NULL)",
+        "INSERT INTO mas_index_lists (id, created_at, index_id, snapshot_date, source, source_label, derived_from_holdings, members_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "SELECT id FROM mas_index_lists WHERE index_id = ? ORDER BY created_at DESC, id DESC"
+      ]
+    },
+    {
+      "adapter": "D1QuoteSourceEnsure",
+      "file": "data/d1QuoteSourceAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS quote_source_setting (\n  id INTEGER PRIMARY KEY CHECK (id = 1),\n  source TEXT NOT NULL,\n  updated_at INTEGER NOT NULL\n)"
+      ]
+    },
+    {
+      "adapter": "D1ResourceRollupEnsure",
+      "file": "data/d1ResourceRollupAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS resource_daily_rollups (\n    day TEXT NOT NULL,\n    ns TEXT NOT NULL,\n    op TEXT NOT NULL,\n    caller TEXT NOT NULL,\n    trigger TEXT NOT NULL,\n    ops INTEGER NOT NULL,\n    rows_read INTEGER NOT NULL,\n    rows_written INTEGER NOT NULL,\n    PRIMARY KEY (day, ns, op, caller, trigger)\n  )",
+        "CREATE TABLE IF NOT EXISTS resource_alert_state (\n    budget TEXT NOT NULL,\n    day TEXT NOT NULL,\n    alerted_at INTEGER NOT NULL,\n    delivered INTEGER NOT NULL,\n    note TEXT,\n    PRIMARY KEY (budget, day)\n  )",
+        "CREATE TABLE IF NOT EXISTS resource_comparison_reports (\n    day TEXT PRIMARY KEY,\n    generated_at INTEGER NOT NULL,\n    report_json TEXT NOT NULL\n  )"
+      ]
+    },
+    {
+      "adapter": "D1ResourceUsageRecord",
+      "file": "data/d1ResourceUsageAdapter.ts",
+      "trigger": "record(...)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS resource_sql_ops (\n  ts_ms INTEGER NOT NULL,\n  ns TEXT NOT NULL,\n  op TEXT NOT NULL,\n  rows_read INTEGER NOT NULL,\n  rows_written INTEGER NOT NULL,\n  caller TEXT,\n  trigger TEXT,\n  statement TEXT,\n  tenant_id TEXT,\n  run_id TEXT,\n  session_ref TEXT\n)",
+        "INSERT INTO resource_sql_ops\n  (ts_ms, ns, op, rows_read, rows_written, caller, trigger, statement, tenant_id, run_id, session_ref)\n  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ]
+    },
+    {
+      "adapter": "OrmInitializeSchema",
+      "file": "src/orm.ts",
+      "trigger": "initializeSchema(\"p3-generator\")",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_categories (\n        id TEXT PRIMARY KEY,\n        name TEXT NOT NULL,\n        slug TEXT NOT NULL,\n        description TEXT NOT NULL,\n        icon TEXT NOT NULL,\n        is_active INTEGER DEFAULT 1,\n        sort_order INTEGER DEFAULT 0,\n        created_at TEXT NOT NULL,\n        updated_at TEXT NOT NULL\n      )\n    ",
+        "\n      CREATE TABLE IF NOT EXISTS mas_referrals (\n        id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        title TEXT NOT NULL,\n        url TEXT NOT NULL,\n        category TEXT NOT NULL,\n        reward_text TEXT NOT NULL,\n        clicks INTEGER DEFAULT 0,\n        signups INTEGER DEFAULT 0,\n        created_at TEXT NOT NULL\n      )\n    ",
+        "\n      CREATE TABLE IF NOT EXISTS mas_ads (\n        id TEXT PRIMARY KEY,\n        title TEXT NOT NULL,\n        tagline TEXT NOT NULL,\n        sponsor TEXT NOT NULL,\n        badge TEXT NOT NULL,\n        url TEXT NOT NULL,\n        cta_text TEXT NOT NULL,\n        accent_color TEXT NOT NULL,\n        impressions INTEGER DEFAULT 0,\n        clicks INTEGER DEFAULT 0,\n        created_at TEXT NOT NULL\n      )\n    ",
+        "\n      CREATE TABLE IF NOT EXISTS mas_external_ads (\n        id TEXT PRIMARY KEY,\n        name TEXT NOT NULL,\n        network TEXT NOT NULL,\n        placement TEXT NOT NULL,\n        title TEXT NOT NULL,\n        tagline TEXT NOT NULL,\n        cta_text TEXT NOT NULL,\n        target_url TEXT NOT NULL,\n        banner_image_url TEXT,\n        cpm_rate REAL DEFAULT 15.0,\n        cpc_rate REAL DEFAULT 1.25,\n        impressions INTEGER DEFAULT 0,\n        clicks INTEGER DEFAULT 0,\n        earnings REAL DEFAULT 0.0,\n        is_active INTEGER DEFAULT 1,\n        created_at TEXT NOT NULL\n      )\n    ",
+        "\n      CREATE TABLE IF NOT EXISTS mas_transactions (\n        id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        action TEXT NOT NULL,\n        amount REAL NOT NULL,\n        currency TEXT NOT NULL,\n        customer TEXT NOT NULL,\n        gateway TEXT NOT NULL,\n        gateway_ref TEXT,\n        status TEXT NOT NULL,\n        checkout_url TEXT,\n        proposer_did TEXT NOT NULL,\n        authorizer_did TEXT,\n        proof_signature TEXT,\n        note TEXT,\n        created_at TEXT NOT NULL,\n        updated_at TEXT NOT NULL,\n        tenant_id TEXT\n      )\n    ",
+        "PRAGMA table_info(mas_transactions)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_transactions_tenant_id ON mas_transactions (tenant_id)",
+        "\n      CREATE TABLE IF NOT EXISTS mas_messages (\n        id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        role TEXT NOT NULL,\n        content TEXT NOT NULL,\n        agent TEXT NOT NULL,\n        created_at TEXT NOT NULL\n      )\n    ",
+        "\n      CREATE TABLE IF NOT EXISTS mas_memory (\n        key TEXT PRIMARY KEY,\n        value TEXT NOT NULL,\n        updated_at TEXT NOT NULL\n      )\n    ",
+        "\n      CREATE TABLE IF NOT EXISTS mas_events (\n        id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        type TEXT NOT NULL,\n        agent TEXT NOT NULL,\n        payload TEXT NOT NULL,\n        created_at TEXT NOT NULL,\n        previous_event_hash TEXT,\n        event_hash TEXT\n      )\n    ",
+        "PRAGMA table_info(mas_events)",
+        "ALTER TABLE mas_events ADD COLUMN previous_event_hash TEXT",
+        "ALTER TABLE mas_events ADD COLUMN event_hash TEXT",
+        "\n      CREATE TABLE IF NOT EXISTS webhook_replay_nonces (\n        nonce TEXT PRIMARY KEY,\n        source TEXT NOT NULL,\n        created_at TEXT NOT NULL,\n        expires_at TEXT NOT NULL\n      )\n    ",
+        "CREATE TABLE IF NOT EXISTS mas_reports (\n    id TEXT PRIMARY KEY,\n    run_id TEXT NOT NULL,\n    title TEXT NOT NULL,\n    source TEXT NOT NULL,\n    summary TEXT NOT NULL,\n    body TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    generation_id TEXT\n  )",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN run_id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN title TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN source TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN summary TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN body TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN created_at TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN generation_id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN user_login TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN body_r2_key TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN fanout_outcome TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_mas_reports_created ON mas_reports (created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_reports_user ON mas_reports (user_login)",
+        "PRAGMA index_info(idx_mas_reports_generation)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_mas_reports_generation ON mas_reports (user_login, generation_id)",
+        "\n      CREATE TABLE IF NOT EXISTS mas_trades (\n        id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        symbol TEXT NOT NULL,\n        action TEXT NOT NULL,\n        order_type TEXT NOT NULL,\n        quantity REAL NOT NULL,\n        price REAL NOT NULL,\n        total_value REAL NOT NULL,\n        status TEXT NOT NULL,\n        order_ref TEXT,\n        proposer_did TEXT NOT NULL,\n        authorizer_did TEXT,\n        proof_signature TEXT NOT NULL,\n        preview_notes TEXT,\n        expiration_schedule_id TEXT,\n        broker TEXT,\n        price_source TEXT,\n        created_at TEXT NOT NULL,\n        updated_at TEXT NOT NULL\n      )\n    ",
+        "PRAGMA table_info(mas_trades)",
+        "ALTER TABLE mas_trades ADD COLUMN broker TEXT",
+        "PRAGMA table_info(mas_trades)",
+        "ALTER TABLE mas_trades ADD COLUMN price_source TEXT",
+        "\n      CREATE TABLE IF NOT EXISTS mas_watchlists (\n        id TEXT PRIMARY KEY,\n        name TEXT NOT NULL,\n        user_login TEXT NOT NULL,\n        symbols_json TEXT NOT NULL,\n        items_json TEXT,\n        source TEXT NOT NULL,\n        created_at TEXT NOT NULL,\n        updated_at TEXT NOT NULL\n      )\n    ",
+        "\n      CREATE TABLE IF NOT EXISTS mas_options_chain_cache (\n        id TEXT PRIMARY KEY,\n        symbol TEXT NOT NULL,\n        expirations_json TEXT NOT NULL,\n        chains_json TEXT NOT NULL,\n        fetched_at INTEGER NOT NULL,\n        expires_at INTEGER NOT NULL,\n        contract_count INTEGER NOT NULL DEFAULT 0\n      )\n    ",
+        "\n      CREATE TABLE IF NOT EXISTS mas_promotions (\n        id TEXT PRIMARY KEY,\n        candidate_id TEXT NOT NULL,\n        stage TEXT NOT NULL DEFAULT 'shadow',\n        stage_started_at TEXT NOT NULL,\n        baseline_json TEXT NOT NULL DEFAULT '{}',\n        applied_json TEXT NOT NULL DEFAULT '{}',\n        last_check_json TEXT,\n        created_at TEXT NOT NULL DEFAULT (datetime('now'))\n      )\n    ",
+        "CREATE INDEX IF NOT EXISTS idx_promotions_candidate ON mas_promotions(candidate_id, created_at)",
+        "SELECT COUNT(*) AS count FROM mas_categories ",
+        "INSERT INTO mas_categories (id, name, slug, description, icon, is_active, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mas_categories (id, name, slug, description, icon, is_active, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mas_categories (id, name, slug, description, icon, is_active, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mas_categories (id, name, slug, description, icon, is_active, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mas_categories (id, name, slug, description, icon, is_active, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "SELECT COUNT(*) AS count FROM mas_external_ads ",
+        "INSERT INTO mas_external_ads (id, name, network, placement, title, tagline, cta_text, target_url, banner_image_url, cpm_rate, cpc_rate, impressions, clicks, earnings, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mas_external_ads (id, name, network, placement, title, tagline, cta_text, target_url, banner_image_url, cpm_rate, cpc_rate, impressions, clicks, earnings, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mas_external_ads (id, name, network, placement, title, tagline, cta_text, target_url, banner_image_url, cpm_rate, cpc_rate, impressions, clicks, earnings, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mas_external_ads (id, name, network, placement, title, tagline, cta_text, target_url, banner_image_url, cpm_rate, cpc_rate, impressions, clicks, earnings, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "SELECT COUNT(*) AS count FROM mas_ads ",
+        "INSERT INTO mas_ads (id, title, tagline, sponsor, badge, url, cta_text, accent_color, impressions, clicks, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mas_ads (id, title, tagline, sponsor, badge, url, cta_text, accent_color, impressions, clicks, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ]
+    },
+    {
+      "adapter": "CanonicalReportEnsure",
+      "file": "data/doSqliteCanonicalReportStoreAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_reports (\n    id TEXT PRIMARY KEY,\n    run_id TEXT NOT NULL,\n    title TEXT NOT NULL,\n    source TEXT NOT NULL,\n    summary TEXT NOT NULL,\n    body TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    generation_id TEXT\n  )",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN run_id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN title TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN source TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN summary TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN body TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN created_at TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN generation_id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN user_login TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN body_r2_key TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN fanout_outcome TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_mas_reports_created ON mas_reports (created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_reports_user ON mas_reports (user_login)",
+        "PRAGMA index_info(idx_mas_reports_generation)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_mas_reports_generation ON mas_reports (user_login, generation_id)"
+      ]
+    },
+    {
+      "adapter": "CanonicalReportEnsureDrop",
+      "file": "data/doSqliteCanonicalReportStoreAdapter.ts",
+      "trigger": "ensureSchema() [wrong-shape index_info]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_reports (\n    id TEXT PRIMARY KEY,\n    run_id TEXT NOT NULL,\n    title TEXT NOT NULL,\n    source TEXT NOT NULL,\n    summary TEXT NOT NULL,\n    body TEXT NOT NULL,\n    created_at TEXT NOT NULL,\n    generation_id TEXT\n  )",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN run_id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN title TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN source TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN summary TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN body TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN created_at TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN generation_id TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN user_login TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN body_r2_key TEXT",
+        "PRAGMA table_info(mas_reports)",
+        "ALTER TABLE mas_reports ADD COLUMN fanout_outcome TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_mas_reports_created ON mas_reports (created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_reports_user ON mas_reports (user_login)",
+        "PRAGMA index_info(idx_mas_reports_generation)",
+        "DROP INDEX idx_mas_reports_generation",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_mas_reports_generation ON mas_reports (user_login, generation_id)"
+      ]
+    },
+    {
+      "adapter": "AsyncJobEnsure",
+      "file": "data/doSqliteAsyncJobAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_async_jobs (\n        job_id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        capability TEXT NOT NULL,\n        display_name TEXT NOT NULL,\n        status TEXT NOT NULL,\n        payload_json TEXT NOT NULL,\n        result_json TEXT,\n        response_status INTEGER,\n        error TEXT,\n        created_at TEXT NOT NULL,\n        updated_at TEXT NOT NULL,\n        started_at TEXT,\n        completed_at TEXT\n      )\n    ",
+        "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_session_created ON mas_async_jobs(session_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_status_created ON mas_async_jobs(status, created_at)",
+        "PRAGMA table_info(mas_async_jobs)",
+        "ALTER TABLE mas_async_jobs ADD COLUMN parent_job_id TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN job_kind TEXT NOT NULL DEFAULT 'main'",
+        "ALTER TABLE mas_async_jobs ADD COLUMN channel TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN not_before TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN stage TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN chain_id TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN stuck_alerted_at TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN trigger TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN triggered_by TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN schedule_id TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN last_activity_at TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN error_code TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_parent ON mas_async_jobs(parent_job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_chain ON mas_async_jobs(chain_id)"
+      ]
+    },
+    {
+      "adapter": "IvHistoryEnsure",
+      "file": "data/doSqliteIvHistoryAdapter.ts",
+      "trigger": "ensure() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_iv_history (symbol TEXT NOT NULL, date TEXT NOT NULL, atm_iv REAL NOT NULL, spot REAL NOT NULL, expiry_date TEXT NOT NULL, dte INTEGER NOT NULL, collected_at TEXT NOT NULL, broker TEXT NOT NULL DEFAULT 'etrade', PRIMARY KEY (symbol, date))",
+        "ALTER TABLE mas_iv_history ADD COLUMN broker TEXT NOT NULL DEFAULT 'etrade'",
+        "CREATE INDEX IF NOT EXISTS idx_mas_iv_history_symbol_date ON mas_iv_history (symbol, date DESC)"
+      ]
+    },
+    {
+      "adapter": "JobPipelineEnsure",
+      "file": "data/doSqliteJobPipelineAdapter.ts",
+      "trigger": "ensureSchema() [private, legacy]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_pipeline_definitions (\n      job_id TEXT PRIMARY KEY,\n      name TEXT NOT NULL,\n      definition_json TEXT NOT NULL,\n      version INTEGER NOT NULL,\n      updated_at TEXT NOT NULL\n    )",
+        "CREATE TABLE IF NOT EXISTS job_pipeline_instances (\n      job_id TEXT PRIMARY KEY,\n      state TEXT NOT NULL,\n      desired_state TEXT NOT NULL,\n      current_run_id TEXT,\n      run_started_at TEXT,\n      run_trigger TEXT,\n      run_schedule_id TEXT,\n      run_async_job_id TEXT,\n      checkpoint_json TEXT,\n      stage_checkpoint_json TEXT,\n      stage_desired_json TEXT,\n      last_error TEXT,\n      updated_at TEXT NOT NULL\n    )",
+        "CREATE TABLE IF NOT EXISTS job_pipeline_artifacts (\n      id TEXT PRIMARY KEY,\n      run_id TEXT NOT NULL,\n      artifact_key TEXT NOT NULL,\n      value_json TEXT NOT NULL\n    )",
+        "CREATE INDEX IF NOT EXISTS idx_job_pipeline_artifacts_run\n      ON job_pipeline_artifacts (run_id, artifact_key)",
+        "PRAGMA table_info(job_pipeline_instances)",
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_schedule_id TEXT",
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_async_job_id TEXT"
+      ]
+    },
+    {
+      "adapter": "JobPipelineMigrationV1",
+      "file": "data/doSqliteJobPipelineAdapter.ts",
+      "trigger": "JOB_PIPELINE_SCHEMA_MIGRATION.up (declaration)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_pipeline_definitions (\n      job_id TEXT PRIMARY KEY,\n      name TEXT NOT NULL,\n      definition_json TEXT NOT NULL,\n      version INTEGER NOT NULL,\n      updated_at TEXT NOT NULL\n    )",
+        "CREATE TABLE IF NOT EXISTS job_pipeline_instances (\n      job_id TEXT PRIMARY KEY,\n      state TEXT NOT NULL,\n      desired_state TEXT NOT NULL,\n      current_run_id TEXT,\n      run_started_at TEXT,\n      run_trigger TEXT,\n      checkpoint_json TEXT,\n      stage_checkpoint_json TEXT,\n      stage_desired_json TEXT,\n      last_error TEXT,\n      updated_at TEXT NOT NULL\n    )",
+        "CREATE TABLE IF NOT EXISTS job_pipeline_artifacts (\n      id TEXT PRIMARY KEY,\n      run_id TEXT NOT NULL,\n      artifact_key TEXT NOT NULL,\n      value_json TEXT NOT NULL\n    )",
+        "CREATE INDEX IF NOT EXISTS idx_job_pipeline_artifacts_run\n      ON job_pipeline_artifacts (run_id, artifact_key)"
+      ]
+    },
+    {
+      "adapter": "JobRunRecordList",
+      "file": "data/doSqliteJobRunRecordAdapter.ts",
+      "trigger": "listRecent(10)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS job_run_records (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      system TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      operation TEXT NOT NULL,\n      started TEXT NOT NULL,\n      finished TEXT NOT NULL,\n      outcome TEXT NOT NULL,\n      triggered_by TEXT NOT NULL,\n      trigger_text TEXT,\n      schedule_id TEXT,\n      async_job_id TEXT,\n      workflow_id TEXT,\n      error_text TEXT,\n      detail TEXT,\n      descriptor TEXT,\n      artifact_refs_json TEXT,\n      broker_id TEXT,\n      data_provider_id TEXT,\n      mode TEXT,\n      mode_source TEXT\n    )",
+        "PRAGMA table_info(job_run_records)",
+        "ALTER TABLE job_run_records ADD COLUMN trigger_text TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN schedule_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN async_job_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN workflow_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN broker_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN data_provider_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN mode TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN mode_source TEXT",
+        "CREATE INDEX IF NOT EXISTS job_run_records_job_idx ON job_run_records (job_id, started DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS job_run_records_recent_idx ON job_run_records (started DESC, id DESC)",
+        "SELECT * FROM job_run_records\n        ORDER BY started DESC, id DESC\n        LIMIT ?"
+      ]
+    },
+    {
+      "adapter": "ProviderCaptureEnsure",
+      "file": "data/doSqliteProviderCaptureAdapter.ts",
+      "trigger": "ensureCaptureTable(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_data_captures (\n    id TEXT PRIMARY KEY,\n    provider_id TEXT NOT NULL,\n    capability TEXT NOT NULL,\n    request_params_json TEXT NOT NULL DEFAULT '{}',\n    run_id TEXT NOT NULL,\n    tenant_id TEXT NOT NULL,\n    user_login TEXT,\n    fetched_at TEXT NOT NULL,\n    status TEXT NOT NULL,\n    raw_kind TEXT,\n    raw_blob_ref TEXT,\n    raw_byte_size INTEGER,\n    raw_sha256 TEXT,\n    normalized_digest TEXT,\n    retention_class TEXT NOT NULL,\n    failure_error TEXT,\n    failure_kind TEXT,\n    failure_message TEXT,\n    created_at TEXT NOT NULL\n  )",
+        "PRAGMA table_info(mas_data_captures)",
+        "ALTER TABLE mas_data_captures ADD COLUMN failure_kind TEXT",
+        "ALTER TABLE mas_data_captures ADD COLUMN failure_message TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_mas_data_captures_run ON mas_data_captures(tenant_id, run_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_data_captures_provider ON mas_data_captures(tenant_id, provider_id)"
+      ]
+    },
+    {
+      "adapter": "ProviderConfigEnsure",
+      "file": "data/doSqliteProviderConfigAdapter.ts",
+      "trigger": "ensureProviderConfigTable(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_data_providers (\n    id TEXT PRIMARY KEY,\n    adapter_kind TEXT NOT NULL,\n    lifecycle_state TEXT NOT NULL,\n    enabled INTEGER NOT NULL DEFAULT 0,\n    precedence INTEGER NOT NULL,\n    credential_ref TEXT,\n    config_json TEXT NOT NULL DEFAULT '{}',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_mas_data_providers_precedence ON mas_data_providers(precedence)"
+      ]
+    },
+    {
+      "adapter": "ProviderRoutingEnsure",
+      "file": "data/doSqliteProviderConfigAdapter.ts",
+      "trigger": "ensureProviderRoutingTable(sql)",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_data_provider_routes (\n    capability TEXT PRIMARY KEY,\n    primary_provider_id TEXT NOT NULL,\n    gap_fill_provider_id TEXT,\n    min_tier TEXT NOT NULL DEFAULT 'freemium',\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL\n  )",
+        "PRAGMA table_info(mas_data_provider_routes)",
+        "ALTER TABLE mas_data_provider_routes ADD COLUMN min_tier TEXT NOT NULL DEFAULT 'freemium'"
+      ]
+    },
+    {
+      "adapter": "ReportConfirmationEnsure",
+      "file": "data/doSqliteReportConfirmationAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_report_confirmations (\n        id TEXT PRIMARY KEY,\n        kind TEXT NOT NULL,\n        payload_json TEXT NOT NULL,\n        status TEXT NOT NULL,\n        created_at TEXT NOT NULL,\n        decided_at TEXT,\n        decided_by TEXT,\n        report_id TEXT,\n        created_by TEXT\n      )\n    ",
+        "PRAGMA table_info(mas_report_confirmations)",
+        "ALTER TABLE mas_report_confirmations ADD COLUMN report_id TEXT",
+        "PRAGMA table_info(mas_report_confirmations)",
+        "ALTER TABLE mas_report_confirmations ADD COLUMN created_by TEXT"
+      ]
+    },
+    {
+      "adapter": "ScanRunEnsure",
+      "file": "data/doSqliteScanRunAdapter.ts",
+      "trigger": "ensure() [private]",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS mas_opportunity_scans (id TEXT PRIMARY KEY, generated_at TEXT NOT NULL, mode TEXT NOT NULL, model_version TEXT NOT NULL, user_login TEXT, schedule_id TEXT, async_job_id TEXT, workflow_id TEXT, summary_json TEXT NOT NULL, result_json TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_mas_opportunity_scans_generated_at ON mas_opportunity_scans (generated_at DESC)",
+        "PRAGMA table_info(mas_opportunity_scans)",
+        "ALTER TABLE mas_opportunity_scans ADD COLUMN user_login TEXT",
+        "ALTER TABLE mas_opportunity_scans ADD COLUMN schedule_id TEXT",
+        "ALTER TABLE mas_opportunity_scans ADD COLUMN async_job_id TEXT",
+        "ALTER TABLE mas_opportunity_scans ADD COLUMN workflow_id TEXT"
+      ]
+    },
+    {
+      "adapter": "StockCopilotPositionEnsure",
+      "file": "data/doSqliteStockCopilotStoreAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS stock_copilot_positions (\n        id TEXT PRIMARY KEY,\n        user_login TEXT NOT NULL,\n        symbol TEXT NOT NULL,\n        strategy TEXT NOT NULL,\n        quantity REAL NOT NULL,\n        entry_price REAL NOT NULL,\n        stop_price REAL NOT NULL,\n        target_price REAL NOT NULL,\n        broker_order_ref TEXT NOT NULL,\n        status TEXT NOT NULL,\n        opened_at TEXT NOT NULL,\n        closed_at TEXT,\n        exit_broker_order_ref TEXT,\n        exit_price REAL,\n        exit_reason TEXT,\n        entry_session TEXT,\n        entry_order_type TEXT\n      )",
+        "PRAGMA table_info(stock_copilot_positions)",
+        "ALTER TABLE stock_copilot_positions ADD COLUMN entry_session TEXT",
+        "ALTER TABLE stock_copilot_positions ADD COLUMN entry_order_type TEXT"
+      ]
+    },
+    {
+      "adapter": "StockCopilotActivityEnsure",
+      "file": "data/doSqliteStockCopilotSurfaceAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "CREATE TABLE IF NOT EXISTS stock_copilot_activity (\n        id TEXT PRIMARY KEY,\n        user_login TEXT NOT NULL,\n        cycle_at TEXT NOT NULL,\n        outcome TEXT NOT NULL,\n        entries_json TEXT NOT NULL,\n        exits_json TEXT NOT NULL,\n        detail TEXT,\n        session TEXT\n      )",
+        "PRAGMA table_info(stock_copilot_activity)",
+        "ALTER TABLE stock_copilot_activity ADD COLUMN session TEXT",
+        "ALTER TABLE stock_copilot_activity ADD COLUMN mode TEXT",
+        "ALTER TABLE stock_copilot_activity ADD COLUMN critic_verdict_json TEXT"
+      ]
+    }
+  ]
+}
