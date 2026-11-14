@@ -495,7 +495,7 @@ describe("preferences/opt-out E2E verification (#2659)", () => {
     expect(((await first?.json()) as any).sent).toBe(true);
     await prefs(ctx, { userId: "u1", tenantId: "t1", digestEnabled: false });
     const second = await digestSend(ctx, ["item"]);
-    expect(((await second?.json()) as any)).toEqual({ sent: false, reason: "digest-opted-out" });
+    expect(((await second?.json()) as any)).toEqual({ sent: false, reason: "digest-opted-out", code: "FAILURE_LIFECYCLE_EMAIL_NOT_SENT" });
   });
 
   it("unsubscribe suppresses the next send", async () => {
@@ -506,7 +506,7 @@ describe("preferences/opt-out E2E verification (#2659)", () => {
     const unsub = await call(ctx, "POST", "/payments/agentic/commercial/lifecycle/unsubscribe", null, { token });
     expect(unsub?.status).toBe(200);
     const send = await digestSend(ctx, ["item"]);
-    expect(((await send?.json()) as any)).toEqual({ sent: false, reason: "digest-opted-out" });
+    expect(((await send?.json()) as any)).toEqual({ sent: false, reason: "digest-opted-out", code: "FAILURE_LIFECYCLE_EMAIL_NOT_SENT" });
   });
 
   it("a security-scoped token is a 400 at the route (security mail has no unsubscribe path)", async () => {
@@ -529,6 +529,6 @@ describe("preferences/opt-out E2E verification (#2659)", () => {
       email: "u1@example.com",
       tenantId: "t1",
     });
-    expect(((await welcome?.json()) as any)).toEqual({ sent: false, reason: "welcome-opted-out" });
+    expect(((await welcome?.json()) as any)).toEqual({ sent: false, reason: "welcome-opted-out", code: "FAILURE_LIFECYCLE_EMAIL_NOT_SENT" });
   });
 });

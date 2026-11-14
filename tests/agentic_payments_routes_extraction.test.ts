@@ -152,7 +152,7 @@ describe("handleAgenticPaymentsRoutes behavior", () => {
     hoisted.failWallet = true;
     const res = await handleAgenticPaymentsRoutes(req("GET", "/api/payments/agentic/wallet"), urlOf("/api/payments/agentic/wallet"), "/api/payments/agentic/wallet", "s", baseCtx());
     expect(res!.status).toBe(500);
-    expect(await res!.json()).toEqual({ error: "wallet boom" });
+    expect(await res!.json()).toEqual({ code: "FAILURE_UNEXPECTED_ERROR", error: "[FAILURE_UNEXPECTED_ERROR] An unexpected error occurred. Our team has been notified." });
   });
 
   it("POST /payments/agentic/wallet returns null (the wallet route is GET-only)", async () => {
@@ -164,20 +164,20 @@ describe("handleAgenticPaymentsRoutes behavior", () => {
   it("GET /payments/agentic/auto-approve-limit returns the limit and the default network", async () => {
     const res = await handleAgenticPaymentsRoutes(req("GET", "/api/payments/agentic/auto-approve-limit"), urlOf("/api/payments/agentic/auto-approve-limit"), "/api/payments/agentic/auto-approve-limit", "s", baseCtx());
     expect(res!.status).toBe(200);
-    expect(await res!.json()).toEqual({ autoApproveLimitUSD: 0.05, network: "base-sepolia" });
+    expect(await res!.json()).toEqual({ code: "SUCCESS_AUTO_APPROVE_LIMIT_READ", autoApproveLimitUSD: 0.05, network: "base-sepolia" });
   });
 
   it("GET /payments/agentic/auto-approve-limit honors the X402_NETWORK env override", async () => {
     const ctx = baseCtx({ env: { X402_NETWORK: "base" } as AgenticPaymentsRouteContext["env"] });
     const res = await handleAgenticPaymentsRoutes(req("GET", "/api/payments/agentic/auto-approve-limit"), urlOf("/api/payments/agentic/auto-approve-limit"), "/api/payments/agentic/auto-approve-limit", "s", ctx);
-    expect(await res!.json()).toEqual({ autoApproveLimitUSD: 0.05, network: "base" });
+    expect(await res!.json()).toEqual({ code: "SUCCESS_AUTO_APPROVE_LIMIT_READ", autoApproveLimitUSD: 0.05, network: "base" });
   });
 
   it("POST /payments/agentic/auto-approve-limit updates the limit and audits the change", async () => {
     const ctx = baseCtx();
     const res = await handleAgenticPaymentsRoutes(req("POST", "/api/payments/agentic/auto-approve-limit", { limitUSD: 2.5 }), urlOf("/api/payments/agentic/auto-approve-limit"), "/api/payments/agentic/auto-approve-limit", "s", ctx);
     expect(res!.status).toBe(200);
-    expect(await res!.json()).toEqual({ success: true, autoApproveLimitUSD: 2.5 });
+    expect(await res!.json()).toEqual({ code: "SUCCESS_AUTO_APPROVE_LIMIT_UPDATED", success: true, autoApproveLimitUSD: 2.5 });
     expect(hoisted.instances[0].setAutoApproveLimit).toHaveBeenCalledWith(2.5);
     expect(ctx.audit).toHaveBeenCalledWith("agentic_payment.limit_updated", "payments", { limitUSD: 2.5 });
   });
@@ -185,14 +185,14 @@ describe("handleAgenticPaymentsRoutes behavior", () => {
   it("POST /payments/agentic/auto-approve-limit accepts the `limit` alias", async () => {
     const res = await handleAgenticPaymentsRoutes(req("POST", "/api/payments/agentic/auto-approve-limit", { limit: 1 }), urlOf("/api/payments/agentic/auto-approve-limit"), "/api/payments/agentic/auto-approve-limit", "s", baseCtx());
     expect(res!.status).toBe(200);
-    expect(await res!.json()).toEqual({ success: true, autoApproveLimitUSD: 1 });
+    expect(await res!.json()).toEqual({ code: "SUCCESS_AUTO_APPROVE_LIMIT_UPDATED", success: true, autoApproveLimitUSD: 1 });
   });
 
   it("POST /payments/agentic/auto-approve-limit rejects a negative or missing limit with 400", async () => {
     const ctx = baseCtx();
     const neg = await handleAgenticPaymentsRoutes(req("POST", "/api/payments/agentic/auto-approve-limit", { limitUSD: -1 }), urlOf("/api/payments/agentic/auto-approve-limit"), "/api/payments/agentic/auto-approve-limit", "s", ctx);
     expect(neg!.status).toBe(400);
-    expect(await neg!.json()).toEqual({ error: "Invalid limitUSD. Must be non-negative number." });
+    expect(await neg!.json()).toEqual({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "Invalid limitUSD. Must be non-negative number." });
     const missing = await handleAgenticPaymentsRoutes(req("POST", "/api/payments/agentic/auto-approve-limit", {}), urlOf("/api/payments/agentic/auto-approve-limit"), "/api/payments/agentic/auto-approve-limit", "s", ctx);
     expect(missing!.status).toBe(400);
     expect(ctx.audit).not.toHaveBeenCalled();

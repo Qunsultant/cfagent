@@ -123,6 +123,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "agents/routes/payments",
 });
 
+import { COMMERCIAL_DEFAULTS } from "../../config/commercialDefaults";
 /** The subset of OrchestratorAgent surface the payments handlers need. */
 export interface PaymentsRouteContext {
   /** Worker environment (owner: OrchestratorAgent — was `this.env`). */
@@ -419,7 +420,7 @@ export async function handlePaymentsRoutes(
           const limitParam = url.searchParams.get("limit");
           const statusParam = url.searchParams.get("status");
           const out = await runRestTool("get_transactions", {
-            limit: limitParam === null ? 50 : Number(limitParam),
+            limit: limitParam === null ? COMMERCIAL_DEFAULTS.transactionsDefaultLimit : Number(limitParam),
             ...(statusParam ? { status: statusParam } : {}),
             mode: "mcp",
           }, {
@@ -438,7 +439,7 @@ export async function handlePaymentsRoutes(
         // rows + summary; the remap/summary below are idempotent over
         // them, so the route rest shape and the command rest shape are
         // identical (pinned by the #1728 test).
-        const out = (await runRestTool("get_transactions", { limit: 50, mode: "rest" }, {
+        const out = (await runRestTool("get_transactions", { limit: COMMERCIAL_DEFAULTS.transactionsDefaultLimit, mode: "rest" }, {
           orm: ctx.getOrm?.() ?? new DatabaseORM(sql),
           sessionId,
           audit: (type, agent, payload) => ctx.audit(type, agent, payload),
@@ -499,6 +500,7 @@ export async function handlePaymentsRoutes(
       return Response.json(
         {
           error: "ReceiptsLoginRequired",
+          code: "FAILURE_AUTH_NO_SESSION",
           statusCode: 401,
           message: "Receipts require a signed-in session (x-user-login).",
         },
@@ -506,26 +508,28 @@ export async function handlePaymentsRoutes(
       );
     }
     const rawLimit = url.searchParams.get("limit");
-    let limit = 50;
+    let limit = COMMERCIAL_DEFAULTS.receiptsDefaultLimit;
     if (rawLimit !== null) {
       const parsed = Number(rawLimit);
       if (!Number.isInteger(parsed) || parsed < 1) {
         return Response.json(
           {
             error: "ReceiptsInvalidLimit",
+          code: "FAILURE_COMMERCIAL_REQUEST_INVALID",
             statusCode: 400,
             message: "limit must be a positive integer.",
           },
           { status: 400 },
         );
       }
-      limit = Math.min(parsed, 100);
+      limit = Math.min(parsed, COMMERCIAL_DEFAULTS.receiptsMaxLimit);
     }
     const kindParam = url.searchParams.get("kind") ?? "all";
     if (kindParam !== "all" && kindParam !== "meter" && kindParam !== "tier" && kindParam !== "transaction") {
       return Response.json(
         {
           error: "ReceiptsInvalidKind",
+          code: "FAILURE_COMMERCIAL_REQUEST_INVALID",
           statusCode: 400,
           message: "kind must be one of meter, tier, transaction, all.",
         },
@@ -553,6 +557,7 @@ export async function handlePaymentsRoutes(
       return Response.json(
         {
           error: "ReceiptsUnavailable",
+          code: "FAILURE_RECEIPTS_UNAVAILABLE",
           statusCode: 500,
           message: "Receipts could not be read.",
         },

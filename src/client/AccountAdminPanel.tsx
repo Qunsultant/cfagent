@@ -49,6 +49,7 @@ import { UnlimitedFreeGrantSection } from "./UnlimitedFreeGrantSection";
 import { FreeAccessGrantSection } from "./FreeAccessGrantSection";
 import { AccountVersionMoveSection } from "./AccountVersionMoveSection";
 
+import { commercialPath } from "../data/commercialUrlCatalog";
 export interface AccountIdentityView {
   userLogin: string;
   tenantId: string | null;
@@ -248,7 +249,7 @@ export function AccountAdminPanel() {
     setMutating(true);
     setMutationNote("");
     try {
-      const res = await apiFetch("/api/payments/agentic/commercial/account", {
+      const res = await apiFetch(commercialPath("account"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -283,7 +284,7 @@ export function AccountAdminPanel() {
     setMutating(true);
     setMutationNote("");
     try {
-      const res = await apiFetch("/api/payments/agentic/commercial/account/credits", {
+      const res = await apiFetch(commercialPath("accountCredits"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: lookup.identity.userLogin, deltaUSD: delta }),

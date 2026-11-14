@@ -109,7 +109,7 @@ describe("GET /payments/agentic/commercial/prices (issue 2739)", () => {
       makeCtx("op1"),
     );
     expect(res?.status).toBe(200);
-    expect(await res!.json()).toEqual({ entries: ENTRIES });
+    expect(await res!.json()).toEqual({ code: "SUCCESS_PRICES_LISTED", entries: ENTRIES });
     expect(mockEnsureSchema).not.toHaveBeenCalled();
   });
 
@@ -123,6 +123,6 @@ describe("GET /payments/agentic/commercial/prices (issue 2739)", () => {
       makeCtx("op1"),
     );
     expect(res?.status).toBe(200);
-    expect(await res!.json()).toEqual({ entries: [] });
+    expect(await res!.json()).toEqual({ code: "SUCCESS_PRICES_LISTED", entries: [] });
   });
 });

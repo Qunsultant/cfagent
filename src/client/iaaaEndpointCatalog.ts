@@ -27,6 +27,7 @@
 
 import { MCP_TOOLS_CATALOG } from "./mcpEndpointsData";
 
+import { COMMERCIAL_BARE_PREFIX, PAYMENTS_API_PREFIX } from "../data/commercialUrlCatalog";
 export type ApiEndpointAuth =
   | "public"
   | "session"
@@ -1182,8 +1183,8 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     kind: "http",
     auth: "session",
     authNote: "requireAuth (401); the OPTIONS preflight is handled by the earlier CORS branch.",
-    source: "src/server.ts branch: path.startsWith /api/payments/agentic/ (+ #2787 bare commercial alias: path.startsWith /payments/agentic/commercial/)",
-    prefixes: ["/api/payments/agentic/", "/payments/agentic/commercial/"],
+    source: "src/data/commercialUrlCatalog.ts: COMMERCIAL_ROUTES is the single source of truth; dispatcher prefixes are PAYMENTS_API_PREFIX + COMMERCIAL_BARE_PREFIX",
+    prefixes: [PAYMENTS_API_PREFIX, COMMERCIAL_BARE_PREFIX],
   },
   {
     id: "premium",

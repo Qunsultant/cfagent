@@ -17,7 +17,8 @@
 import { withCsrfInit } from "./apiFetch";
 import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 
-const BASE = "/api/payments/agentic/commercial";
+import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
+const BASE = COMMERCIAL_API_BASE;
 
 export class CommercialApiError extends Error {
   readonly status: number;

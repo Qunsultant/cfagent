@@ -35,6 +35,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Notice, Select, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { codedMessage } from "../outcomes/outcomeAspects";
+import { COMMERCIAL_API_BASE, commercialPath } from "../data/commercialUrlCatalog";
 import {
   DEFAULT_SEGMENT,
   FREE_PRODUCT_ID,
@@ -239,7 +240,7 @@ function ProductRankEditor({
     setError("");
     try {
       await apiJson(
-        `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/rank`,
+        `${commercialPath("products")}/${encodeURIComponent(product.id)}/rank`,
         {
           method: "POST",
           body: JSON.stringify({ rank }),
@@ -291,7 +292,7 @@ export function ProductsSection() {
     setError("");
     try {
       const body = await apiJson<{ products: ProductEntry[] }>(
-        "/api/payments/agentic/commercial/products",
+        commercialPath("products"),
       );
       setEntries(body.products ?? []);
     } catch (err: any) {
@@ -326,7 +327,7 @@ export function ProductsSection() {
     setCreating(true);
     setCreateError("");
     try {
-      await apiJson("/api/payments/agentic/commercial/products", {
+      await apiJson(commercialPath("products"), {
         method: "POST",
         body: JSON.stringify({
           name: newName.trim(),
@@ -470,7 +471,7 @@ export function ProductsSection() {
  * never access. The plaintext of an issued code is shown ONCE,
  * in the issuing session, and never rendered again.
  */
-const REFERRAL_CODE_BASE = "/api/payments/agentic/commercial";
+const REFERRAL_CODE_BASE = COMMERCIAL_API_BASE;
 const REFERRAL_ISSUERS = ["platform_admin", "tenant_admin", "user"] as const;
 type ReferralIssuer = (typeof REFERRAL_ISSUERS)[number];
 
@@ -960,7 +961,7 @@ function ProductDetail({
     setActionError("");
     try {
       await apiJson(
-        `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/versions/${encodeURIComponent(version.id)}/approve`,
+        `${commercialPath("products")}/${encodeURIComponent(product.id)}/versions/${encodeURIComponent(version.id)}/approve`,
         { method: "POST", body: JSON.stringify({}) },
       );
       onNote(`Version v${version.version} (${version.segment}) approved.`);
@@ -977,7 +978,7 @@ function ProductDetail({
     setActionError("");
     try {
       await apiJson(
-        `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/versions/${encodeURIComponent(version.id)}/deactivate`,
+        `${commercialPath("products")}/${encodeURIComponent(product.id)}/versions/${encodeURIComponent(version.id)}/deactivate`,
         { method: "POST", body: JSON.stringify({}) },
       );
       // A pack has no holders or period: deactivation blocks new
@@ -1174,7 +1175,7 @@ function NewVersionForm({
   useEffect(() => {
     if (!show) return;
     let cancelled = false;
-    apiJson<{ policy?: { annualDiscountPct?: number } }>("/api/payments/agentic/commercial/billing-policy")
+    apiJson<{ policy?: { annualDiscountPct?: number } }>(commercialPath("billingPolicy"))
       .then((body) => {
         if (!cancelled && typeof body?.policy?.annualDiscountPct === "number") {
           setDiscountPct(body.policy.annualDiscountPct);
@@ -1238,7 +1239,7 @@ function NewVersionForm({
     setFormError("");
     try {
       const body = await apiJson<{ plan: PlanVersionView }>(
-        `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/versions`,
+        `${commercialPath("products")}/${encodeURIComponent(product.id)}/versions`,
         {
           method: "POST",
           body: JSON.stringify({
@@ -1399,7 +1400,7 @@ function NewCatalogueVersionForm({
     setFormError("");
     try {
       const body = await apiJson<{ entry: CatalogueVersionView }>(
-        "/api/payments/agentic/commercial/catalogue/versions",
+        commercialPath("catalogueVersions"),
         {
           method: "POST",
           body: JSON.stringify({
@@ -1494,7 +1495,7 @@ function BulkMovePanel({
   const loadHistory = useCallback(async () => {
     try {
       const body = await apiJson<{ bulkMoves: BulkMoveRecord[] }>(
-        `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/bulk-moves`,
+        `${commercialPath("products")}/${encodeURIComponent(product.id)}/bulk-moves`,
       );
       setHistory(body.bulkMoves ?? []);
     } catch {
@@ -1508,7 +1509,7 @@ function BulkMovePanel({
   }, [loadHistory]);
 
   const postBulkMove = async (body: Record<string, unknown>): Promise<BulkMoveResult> =>
-    apiJson<BulkMoveResult>(`/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/bulk-move`, {
+    apiJson<BulkMoveResult>(`${commercialPath("products")}/${encodeURIComponent(product.id)}/bulk-move`, {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -1560,7 +1561,7 @@ function BulkMovePanel({
     setDetail(null);
     try {
       const body = await apiJson<{ bulkMove: BulkMoveRecord; moves: VersionMoveRecord[] }>(
-        `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/bulk-moves/${encodeURIComponent(bulkMoveId)}`,
+        `${commercialPath("products")}/${encodeURIComponent(product.id)}/bulk-moves/${encodeURIComponent(bulkMoveId)}`,
       );
       setDetail(body);
     } catch (err: any) {
@@ -1779,7 +1780,7 @@ function NewRunsPackVersionForm({
     setFormError("");
     try {
       const body = await apiJson<{ version: RunsPackVersionView }>(
-        `/api/payments/agentic/commercial/products/${encodeURIComponent(product.id)}/versions`,
+        `${commercialPath("products")}/${encodeURIComponent(product.id)}/versions`,
         {
           method: "POST",
           body: JSON.stringify({

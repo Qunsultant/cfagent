@@ -50,7 +50,8 @@ import {
 import { trialEndedMessage } from "../services/trialSubscriptionActivation";
 import { csrfHeaders } from "./apiFetch";
 
-const SELLING_BASE = "/api/payments/agentic/commercial";
+import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
+const SELLING_BASE = COMMERCIAL_API_BASE;
 
 const pageWrapperStyle: React.CSSProperties = {
   padding: "var(--space-4)",

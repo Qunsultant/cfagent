@@ -136,6 +136,18 @@ export const OPERATION_CATALOG: CatalogEntry[] = [
     blurb:
       "Stored index-list refresh (issue #1980, follow-up to #1852; extended by #2962): weekly Wikipedia refresh of Dow / S&P 500 / S&P 100 / Nasdaq-100 / S&P 400 / the 11 GICS sectors and daily ETF-holdings refresh of Russell 2000 / Russell 1000 / Russell 3000, both as ScheduledAgent goals on the existing tick.",
   },
+  {
+    // #4411 monthly Autopilot evaluation is NOT an orchestrator
+    // job. ScheduledAgent executes it directly through the
+    // evaluate path (the social.publish / resource.* / index.*
+    // precedent); the catalog entry exists so addGoal accepts the
+    // operation and the dashboard can list it.
+    agent: "autopilot",
+    binding: "SCHEDULED_AGENT",
+    operations: ["autopilot.evaluate"],
+    blurb:
+      "Monthly Autopilot policy-envelope evaluation (issue #4411): a dry-run check of the live envelope against live limits and live account state, once a month, as a ScheduledAgent goal — never places orders.",
+  },
 ];
 
 export function catalogAgent(agent: string): CatalogEntry | undefined {

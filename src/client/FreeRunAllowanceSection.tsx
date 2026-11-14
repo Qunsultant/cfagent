@@ -29,6 +29,7 @@ import { Button, Notice, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { FREE_RUN_FAMILIES } from "../data/freeRunCounterPorts";
 
+import { commercialPath } from "../data/commercialUrlCatalog";
 export interface FreeRunAllowanceEntry {
   family: string;
   runs: number | null;
@@ -80,7 +81,7 @@ export function FreeRunAllowanceSection() {
     setLoading(true);
     setError("");
     try {
-      const res = await apiFetch("/api/payments/agentic/commercial/free-run-allowance");
+      const res = await apiFetch(commercialPath("freeRunAllowance"));
       const data = await readJson(res);
       if (!res.ok) {
         setError(
@@ -121,7 +122,7 @@ export function FreeRunAllowanceSection() {
       setSaving(family);
       setNote("");
       try {
-        const res = await apiFetch("/api/payments/agentic/commercial/free-run-allowance", {
+        const res = await apiFetch(commercialPath("freeRunAllowance"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ family, runs: parsed }),

@@ -15,12 +15,13 @@
  * partial read.
  */
 import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
+import { commercialPath } from "../data/commercialUrlCatalog";
 import { withCsrfInit } from "./apiFetch";
 import type { UsageBillingView as ServerUsageBillingView } from "../data/usageBilling";
 
 export type UsageBillingView = ServerUsageBillingView;
 
-const BASE = "/api/payments/agentic/commercial/usage-billing";
+const BASE = commercialPath("usageBilling");
 
 export class UsageBillingApiError extends Error {
   readonly status: number;
