@@ -22,7 +22,7 @@
  * Discovery runs are per-symbol, so the artifact is bounded, its asOf
  * is unambiguous (the snapshot's own screen.scannedAt), and a run
  * resolves one artifact per request symbol. The store follows the
- * mas_discovery_runs idiom: CREATE TABLE IF NOT EXISTS + single-line
+ * mas_discovery_runs idiom: idempotent creation + single-line
  * statements (the MockSqlStorage lesson — multi-line column lists
  * silently no-op in the shared mock).
  */
