@@ -5,21 +5,22 @@
 # a draft never reaches the queue by itself. This workflow marks an eligible
 # draft ready once its full gating set is green on the head SHA. The enrollment
 # workflow (`auto-merge-trusted.yml`) then puts it in the merge queue — the flip
-# fires `ready_for_review`, which that workflow now acts on, and its 5-minute
-# sweep is the backstop. One chain, both halves on the same cadence.
+# fires `ready_for_review`, which that workflow acts on immediately, and both
+# halves also run on every gating-workflow completion. One chain.
 #
-# WHY A SWEEP (#4325): the trigger used to be `workflow_run` on each gating
-# workflow. It does fire for PR branches — the 19:10:22Z run on 2026-11-13
-# evaluated PR #4442's head (`HEAD_BRANCH: fix/4441-autopilot-capabilities-doc`)
-# — but it judged whichever gate finished first: "Not all gating workflows are
-# green on e8ef2458", while `Policy Gate` was still in progress, and nothing
-# re-evaluated when that gate passed. The PR stayed draft. The sweep removes
-# the ordering dependency: once every gating workflow has a successful run on
-# the head, the next 5-minute pass flips it.
+# WHY THE TRIGGER MOVED TWICE (#4325, then #4490): `workflow_run` does fire for
+# PR branches — the 19:10:22Z run on 2026-11-13 evaluated PR #4442's head
+# (`HEAD_BRANCH: fix/4441-autopilot-capabilities-doc`) — but it judged whichever
+# gate finished first: "Not all gating workflows are green on e8ef2458", while
+# `Policy Gate` was still in progress, and nothing re-evaluated when that gate
+# passed. #4325 replaced it with a 5-minute sweep; on this repository that clock
+# is throttled to hours (a `*/15` workflow ran ~5x/day), so the gate completion
+# is the trigger again and the sweep is a backstop. The verdict is the whole set
+# on the head, so only the last gate to finish flips a draft.
 #
-# The run query is filtered by `head_sha`, not a repo-wide window: two
-# 5-minute sweeps push a global window out within hours, and a head with no
-# run in the window would read as pending forever.
+# The run query is filtered by `head_sha`, not a repo-wide window: the sweeps
+# push a global window out within hours, and a head with no run in the window
+# would read as pending forever.
 #
 # SCOPE: only open draft PRs carrying the configured `auto-merge` label — the
 # marker that the PR is in the automated pipeline. Human drafts without the
@@ -41,9 +42,20 @@
 name: Auto-ready draft PRs
 
 on:
+  workflow_run:
+    # Each gate completion is a chance to evaluate. The verdict needs the whole
+    # set, so only the last gate to finish flips a draft — no cron involved
+    # (#4490). Not this workflow itself: watching itself would recurse.
+    workflows:
+      - "Continuous Integration & Test Verification"
+      - "Policy Gate"
+      - "CodeQL"
+      - "Secret Scanning"
+      - "Auto-merge trusted PRs"
+    types: [completed]
   schedule:
-    # Every 5 minutes; the enrollment workflow runs on the same cadence, so a
-    # flipped draft is enrolled on the next pass (#4325 / #4346).
+    # Every 5 minutes — best-effort backstop only; this repository throttles
+    # schedules to hours (#4490).
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
@@ -63,6 +75,7 @@ env:
 jobs:
   mark-ready:
     name: Mark eligible drafts ready when all checks are green
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
       - name: Read the automation config

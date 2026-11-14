@@ -1,0 +1,3 @@
+### Fixed
+
+- **Enrollment and ready-marking follow the gate completions, not a throttled cron (#4490):** #4444's retry was a 5-minute sweep, but this repository's schedules run hours apart — 30+ minutes after that merge neither new schedule had produced a run, while a `*/15` workflow was running about five times a day. Both halves now also trigger on `workflow_run` completion of the gating workflows (PR-branch completions only, and neither workflow watches itself), with the head's whole `statusCheckRollup` as the verdict — so the last gate to finish is the one that enrolls or flips a draft. The 5-minute sweep stays as a best-effort backstop, and the YAML trigger lists are pinned to `config/auto-merge.json` so they cannot drift. #autoclaw-001

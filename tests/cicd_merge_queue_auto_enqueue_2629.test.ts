@@ -110,6 +110,6 @@ describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
 
   it("skips a draft instead of failing it — auto-ready flips drafts (#4317)", () => {
     expect(autoMergeTrustedYml).toContain("isDraft");
-    expect(autoMergeTrustedYml).toContain("is a draft; auto-ready-drafts will flip it");
+    expect(autoMergeTrustedYml).toContain("is a draft; auto-ready-drafts flips it");
   });
 });
