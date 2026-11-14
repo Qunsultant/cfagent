@@ -342,12 +342,19 @@ describe("3123-P03 pause is record state", () => {
     ]) {
       expect(liveSrcContaining(needle)).toEqual([]);
     }
-    // The ONE declared exception is the retention registry
+    // The declared exceptions are the retention registry
     // (src/privacy/privacyDsar.ts): it is keyed by table name, and
     // the legacy table still exists in deployed instances, so its
     // KEEP rule stays. That rule is a retention decision, not a
-    // live read/write path — no other live file may name the table.
+    // live read/write path — and, since #4282 P2b, the DO catalogue
+    // (src/data/schemaComponent/doCatalogue.ts), which is the
+    // statement's home: the deprecated adapter's CREATE now reads
+    // its text from the catalogue entry, so the literal lives there
+    // (the P2a precedent: the ORM catalogue is a declared literal
+    // home for unified_schedules, see 3123-P10). No other live
+    // file may name the table.
     expect(liveSrcContaining("paused_schedules")).toEqual([
+      "src/data/schemaComponent/doCatalogue.ts",
       "src/privacy/privacyDsar.ts",
     ]);
   });
@@ -595,16 +602,19 @@ describe("3123-P09 worker duties as records", () => {
 
 describe("3123-P10 before/after counts", () => {
   it("one unified table; zero live paused_schedules references; one ledger record route", () => {
-    // The table-name literal lives in exactly six declared places:
+    // The table-name literal lives in exactly seven declared places:
     // the port const (the definition), the maintenance wipe surface
     // (route + client table list, keyed by table name), the
     // retention registry (keyed by table name), and — since #4282 P2a
     // — the ORM catalogue (src/data/schemaComponent/ormCatalogue.ts),
     // whose unified-schedules index entry names the table in its
-    // `table` field. (The index-schema module it replaced referenced
-    // the table only via the UNIFIED_SCHEDULES_TABLE const, so the
-    // literal did not live there.) Adapters reference the const,
-    // never the literal.
+    // `table` field, and — since #4282 P2b — the DO catalogue
+    // (src/data/schemaComponent/doCatalogue.ts), whose
+    // unified-schedules table + index entries name the table in
+    // their `table` fields and codes. (The index-schema module the
+    // ORM entry replaced referenced the table only via the
+    // UNIFIED_SCHEDULES_TABLE const, so the literal did not live
+    // there.) Adapters reference the const, never the literal.
     const literalHomes = liveSrcFiles()
       .filter((f) =>
         readFileSync(join(REPO_ROOT, f), "utf8").includes('"unified_schedules"'),
@@ -614,6 +624,7 @@ describe("3123-P10 before/after counts", () => {
       "src/agents/routes/maintenance.ts",
       "src/client/AdminQueueWipePanel.tsx",
       "src/client/adminQueueApi.ts",
+      "src/data/schemaComponent/doCatalogue.ts",
       "src/data/schemaComponent/ormCatalogue.ts",
       "src/data/unifiedSchedulePorts.ts",
       "src/privacy/privacyDsar.ts",
@@ -622,9 +633,12 @@ describe("3123-P10 before/after counts", () => {
       "UNIFIED_SCHEDULES_TABLE",
     );
     // Zero live paused_schedules references outside the retention
-    // registry (see 3123-P09): the registry is keyed by table name
-    // and the legacy table still exists in deployed instances.
+    // registry (see 3123-P09) and the DO catalogue (see 3123-P03):
+    // the registry is keyed by table name and the legacy table still
+    // exists in deployed instances; the catalogue is the statement's
+    // home since #4282 P2b.
     expect(liveSrcContaining("paused_schedules")).toEqual([
+      "src/data/schemaComponent/doCatalogue.ts",
       "src/privacy/privacyDsar.ts",
     ]);
     expect(liveSrcContaining("/schedules/runs/record")).toEqual([
