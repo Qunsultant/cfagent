@@ -10,8 +10,8 @@ Every legacy class the order / options / autopilot layouts use, mapped to its to
 
 - **Scope:** `OrderTicketPanel.tsx`, `ETradeTradingHub.tsx`, `components/AutopilotControlCenter.tsx`, all `Options*.tsx`, all of `src/client/options/**`, and `chat/OptionsStrategyCard.tsx` — 29 files.
 - **Extraction:** `className` attributes (quoted strings and `{...}` expressions); `${...}` interpolations stripped from literal parts; lowercase string literals harvested as state classes (`"active"`, `"selected"`) — except comparison operands (`"x" ===`, `=== "x"`, `.includes("x")`), which are data values, not classes.
-- **Verification:** each used class was checked against the class selectors defined in the 9 stylesheets these layouts load (`styles.css`, `primitives.css`, `strategyDiscovery.css`, `riskAnalysis.css`, `optionsFlows.css`, `optionsResearch.css`, `optionsCard.css`, `scheduledOptions.css`, `optionsResearch.css`). 608 of 648 have a rule; 40 are referenced but defined nowhere (dead classes, listed with their own successor).
-- **Coverage pin:** `tests/template_token_tiers_3135.test.ts` re-extracts the used set and asserts every class appears in this document and the total is 648. Add a class to a layout and the pin fails until this table gains its row.
+- **Verification:** each used class was checked against the class selectors defined in the 9 stylesheets these layouts load (`styles.css`, `primitives.css`, `strategyDiscovery.css`, `riskAnalysis.css`, `optionsFlows.css`, `optionsResearch.css`, `optionsCard.css`, `scheduledOptions.css`, `optionsResearch.css`). 610 of 650 have a rule; 40 are referenced but defined nowhere (dead classes, listed with their own successor).
+- **Coverage pin:** `tests/template_token_tiers_3135.test.ts` re-extracts the used set and asserts every class appears in this document and the total is 650. Add a class to a layout and the pin fails until this table gains its row. `ui-cell-nowrap` is applied via the Table primitive's `cellClassName` prop, which the extractor does not scan — it is listed here because it is genuinely used (8 sites in AutopilotControlCenter), so this table holds 651 rows against 650 extracted classes.
 
 ## Correction to the brief
 
@@ -19,8 +19,8 @@ The #3135 discussion brief said "the three layouts reference hundreds of literal
 
 ## Summary
 
-- **648** legacy classes used by the layouts in scope.
-- **110 Token** — map to a primitive that already exists (8 of them are `ui-*` classes, already tokens).
+- **650** legacy classes used by the layouts in scope.
+- **113 Token** — map to a primitive that already exists (11 of them are `ui-*` classes, already tokens).
 - **538 Deletion candidate** — no token equivalent yet; successor is "none yet" (S-U7) except 40 dead classes whose successor is deletion itself (no rule exists, so removing the reference changes nothing).
 - **0 deletions in this slice.**
 
@@ -589,17 +589,20 @@ One table per class family (first `-`-segment). `Used by` names the files that r
 | `flows-main-layout` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
 | `flows-table-area` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
 
-### `ui-* (already tokens)` — 8 classes (8 Token, 0 deletion candidate)
+### `ui-* (already tokens)` — 11 classes (11 Token, 0 deletion candidate)
 
 | Legacy class | Disposition | Successor | Used by |
 |---|---|---|---|
-| `ui-anchor` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx |
+| `ui-cell-nowrap` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx |
 | `ui-danger` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx, ETradeTradingHub.tsx, OptionsResearchPanel.tsx |
 | `ui-footer-bar` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx |
 | `ui-footnote` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | DiscoveryRunsPanel.tsx, LlmOptionsIdeasPanel.tsx, OptionsResearchPanel.tsx, OrderTicketPanel.tsx |
 | `ui-meta` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx, DiscoveryRunsPanel.tsx, ETradeTradingHub.tsx, LlmOptionsIdeasPanel.tsx, OptionsResearchPanel.tsx, OrderTicketPanel.tsx |
 | `ui-meta-sm` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx, DiscoveryRunsPanel.tsx, ETradeTradingHub.tsx, OptionsResearchPanel.tsx |
+| `ui-single-line` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx |
 | `ui-success` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx, ETradeTradingHub.tsx, OptionsResearchPanel.tsx |
+| `ui-table-sort` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx |
+| `ui-table-sort-indicator` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx |
 | `ui-warning` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx, ETradeTradingHub.tsx |
 
 ### `bearish` — 6 classes (0 Token, 6 deletion candidate)

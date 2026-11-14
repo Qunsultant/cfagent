@@ -38,9 +38,14 @@
  * Mapping-table coverage: docs/architecture/UX/token-mapping-
  * order-options-autopilot.md must list every legacy class the three
  * layouts use (OrderTicketPanel, ETradeTradingHub,
- * AutopilotControlCenter, plus the options components), 648 classes
- * on this slice's measurement (#4168 adds `ui-anchor`, used by the
- * Job outcomes section anchor in AutopilotControlCenter). The extraction below mirrors the
+ * AutopilotControlCenter, plus the options components), 650 classes
+ * on this slice's measurement (#4409 adds `ui-single-line`,
+ * `ui-table-sort` and `ui-table-sort-indicator` to the used set, and
+ * removes the #4168 `ui-anchor` usage — the job-outcomes anchor is
+ * gone, tab selection is the navigation now. `ui-cell-nowrap` is
+ * applied via the Table primitive's `cellClassName` prop, which this
+ * extractor does not scan, so it is listed in the document but does
+ * not count toward the 650.) The extraction below mirrors the
  * generator (scripts/ in the slice's working notes): className
  * attributes, ${...} interpolations stripped from literal parts,
  * lowercase string literals harvested as state classes — except
@@ -385,7 +390,7 @@ function usedLegacyClasses(): Set<string> {
 describe("mapping table covers the order/options/autopilot legacy classes (#3135)", () => {
   it("every used legacy class appears in the mapping table", () => {
     const used = usedLegacyClasses();
-    expect(used.size).toBe(648);
+    expect(used.size).toBe(650);
     const doc = readFileSync(MAPPING_DOC, "utf8");
     const missing = [...used].filter((c) => !doc.includes(`\`${c}\``));
     expect(missing).toEqual([]);
