@@ -3,10 +3,11 @@
  * Issue #4511 — "Selling options" as a sub-tab of the Products page.
  *
  * TDD RED first: ProductCatalogPanel gains URL-synced sub-tabs
- * (param "view": "catalog" | "selling-options", default "catalog")
- * via the shared useUrlSyncedTabs hook + the Tabs/TabPanel primitives.
- * The Catalog tab holds the catalog table + Teaser rules + Marketing
- * draft preview; the Selling options tab holds the SellingSection.
+ * (param "view": "catalog" | "selling-options" | "marketing-draft-preview",
+ * default "catalog") via the shared useUrlSyncedTabs hook + the
+ * Tabs/TabPanel primitives. The Catalog tab holds the catalog table +
+ * Teaser rules; the Marketing draft preview is its own sub-tab (#4530);
+ * the Selling options tab holds the SellingSection.
  * The catalog table's Subscribe button switches to the selling-options
  * sub-tab as well as opening the selling flow. The on-demand selling
  * load contract is unchanged: no selling read happens until the user
@@ -173,5 +174,34 @@ describe("Products sub-tabs (#4511)", () => {
     await renderPanel(impl);
     expect(tabButton("Selling options").getAttribute("aria-selected")).toBe("true");
     expect(text()).toContain("Show selling options");
+  });
+
+  it("the Catalog tab still holds the Teaser rules; the marketing preview is not on it", async () => {
+    const { impl } = sellingFetch();
+    await renderPanel(impl);
+    expect(tabButton("Marketing draft preview").getAttribute("aria-selected")).toBe("false");
+    expect(text()).toContain("Teaser Rule B1");
+    expect(container.querySelector('select[aria-label="Marketing channel"]')).toBeNull();
+  });
+
+  it("Preview draft composes the draft and switches to the marketing-draft-preview sub-tab", async () => {
+    const { impl } = sellingFetch();
+    await renderPanel(impl);
+    await act(async () => {
+      buttonByText("Preview draft").click();
+    });
+    await flush();
+    expect(tabButton("Marketing draft preview").getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector('select[aria-label="Marketing channel"]')).not.toBeNull();
+    expect(text()).toContain("Draft Preview");
+  });
+
+  it("a ?view=marketing-draft-preview URL opens the marketing tab on mount", async () => {
+    window.history.pushState(null, "", "/?tab=products&view=marketing-draft-preview");
+    const { impl } = sellingFetch();
+    await renderPanel(impl);
+    expect(tabButton("Marketing draft preview").getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector('select[aria-label="Marketing channel"]')).not.toBeNull();
+    expect(text()).not.toContain("Show selling options");
   });
 });
