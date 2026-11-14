@@ -14,6 +14,7 @@ import type {
   UsageEventPort,
   UsageEventRow,
 } from "./canonicalReportStorePorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 const TABLE = "usage_events";
 
@@ -21,16 +22,9 @@ export class DoSqliteUsageEventStore implements UsageEventPort {
   constructor(private readonly sql: CanonicalReportStoreSqlExecutor) {}
 
   ensureSchema(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS ${TABLE} (
-      id TEXT PRIMARY KEY,
-      user_login TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      category TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      detail_json TEXT
-    )`);
+    this.sql.exec(doTableSql("usage_events"));
     this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_usage_events_user ON ${TABLE} (user_login, created_at DESC)`
+      doIndexSql("idx_usage_events_user")
     );
   }
 
