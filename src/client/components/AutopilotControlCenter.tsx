@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { AGENT_DIDS } from "../../agents/did";
-import { subscribeToRouteChanges } from "../router";
-import { EmptyState, Table, Badge, Button, Card, DetailCard, Flex, Grid, KpiRibbon, PillGroup, TextInput, Select, Notice, PageSection, PageTemplate, Stack, type BadgeTone, Modal, useToast } from "./ui";
+import { navigateToTab, parseViewFromSearch, subscribeToRouteChanges } from "../router";
+import { nextTableSort, sortTableRows, tableSortAria, type TableSort } from "../tableSort";
+import { EmptyState, Table, Tabs, TabPanel, Badge, Button, Card, DetailCard, Flex, Grid, KpiRibbon, PillGroup, TextInput, Select, Notice, PageSection, PageTemplate, Stack, type BadgeTone, Modal, useToast } from "./ui";
 import { BRAND } from "../branding";
 import { normalizeAutopilotLimits, type AutopilotPolicyLimits } from "../../services/riskPolicyEngine";
 import type { TradeRecord } from "../../types";
@@ -379,6 +380,171 @@ const ACTION_STATUS_TONES: Record<string, BadgeTone> = {
   blocked: "danger",
 };
 
+/**
+ * Issue #4409 — the Autopilot page's sections as sub-tabs. The KPI
+ * ribbon stays the persistent `kpiRibbon` slot (page chrome, not
+ * content): the seven #3140 blocks are six sub-tabs plus the slot.
+ * The tab label is the short name; the panel keeps the full section
+ * title (the chart's tab reads "Performance" while its panel keeps
+ * "Strategy Equity vs S&P 500 Benchmark"). `view` is the shared
+ * sub-view param (the #4168 pattern, extended from one addressable
+ * target to six); an unknown or missing view falls back to the first
+ * tab. Filters (`actionsFilter`, `chartTimeframe`) stay filters
+ * inside their sub-tab — #4369 stands.
+ */
+export const AUTOPILOT_SUB_TABS = [
+  { id: "performance", label: "Performance", title: "Strategy Equity vs S&P 500 Benchmark" },
+  { id: "status", label: "Autopilot Status", title: "Autopilot Status" },
+  { id: "limits", label: "Live policy limits", title: "Live policy limits" },
+  { id: "job-outcomes", label: "Job outcomes", title: "Job outcomes" },
+  { id: "actions", label: "Recent autonomous actions", title: "Recent autonomous actions" },
+  { id: "policy-decisions", label: "Policy decisions", title: "Policy decisions" },
+] as const;
+
+export type AutopilotSubTabId = (typeof AUTOPILOT_SUB_TABS)[number]["id"];
+
+const AUTOPILOT_VIEW_IDS = AUTOPILOT_SUB_TABS.map((t) => t.id);
+
+function isAutopilotView(value: unknown): value is AutopilotSubTabId {
+  return typeof value === "string" && (AUTOPILOT_VIEW_IDS as readonly string[]).includes(value);
+}
+
+/** The active sub-tab from the URL, defaulting to the first tab. */
+function readAutopilotViewFromUrl(): AutopilotSubTabId {
+  if (typeof window === "undefined") return "performance";
+  return (
+    (parseViewFromSearch(window.location.search, isAutopilotView) as AutopilotSubTabId | null) ??
+    "performance"
+  );
+}
+
+/**
+ * Issue #4409 — the six source lines, each a single line (the
+ * `.ui-single-line` treatment: nowrap + ellipsis, full text on
+ * hover). One constant each so the rendered text and the title=
+ * attribute can never drift apart. The jobs/actions/verdicts texts
+ * are the exact texts the issue specifies.
+ */
+export const AUTOPILOT_SOURCE_LINES = {
+  ribbon:
+    "Source: GET /api/autopilot — verdict count from mas_policy_verdicts. NAV and drawdown have no live source — shown as —.",
+  status:
+    "Source: GET /api/autopilot — OrchestratorAgent state (run state, kill switch, limits, verdicts).",
+  limits:
+    "Source: GET /api/autopilot — OrchestratorAgent state; localStorage defaults only when the server has none.",
+  jobs: "Source: GET /api/autopilot/jobs — mas_job_outcomes (one outcome sink); rows labeled by origin.",
+  actions:
+    "Source: GET /api/audit (mas_events) + /api/broker/orders (mas_trades). Simulated rows are labeled Sim, never live.",
+  verdicts:
+    "Source: GET /api/autopilot — mas_policy_verdicts, signed by RiskPolicyEngine. Dry-run verdicts are labeled simulated. Scheduled dry-run checks come from the monthly Autopilot evaluation schedule (Schedules home).",
+} as const;
+
+/**
+ * Sortable column header (#4409): the #2213 button treatment (ghost
+ * button, direction indicator, stable "Sort by" aria-label — the
+ * column's aria-sort carries the direction) over the shared
+ * `tableSort.ts` state (#4389). A click orders the rows; a second
+ * click reverses them.
+ */
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+}: {
+  label: string;
+  sortKey: string;
+  sort: TableSort<string> | null;
+  onSort: (key: string) => void;
+}) {
+  const active = sort?.key === sortKey;
+  const direction = sort?.direction === "asc" ? "ascending" : "descending";
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className={`ui-table-sort${active ? " active" : ""}`}
+      onClick={() => onSort(sortKey)}
+      title={active ? `Sorted ${direction} — click to reverse` : `Sort by ${label}`}
+      aria-label={`Sort by ${label}`}
+    >
+      <span>{label}</span>
+      <span className="ui-table-sort-indicator" aria-hidden="true">
+        {active ? (sort?.direction === "asc" ? "▲" : "▼") : "↕"}
+      </span>
+    </Button>
+  );
+}
+
+/** Epoch ms for a canonical Autopilot timestamp — null when the stored
+ * value is missing or unparseable, so empty sorts last either way. */
+function autopilotTimestampEpoch(value: string): number | null {
+  const t = new Date(value).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+/** The notional number behind a verdict row's "$1,234.56" label. */
+function verdictNotionalValue(row: PolicyVerdictRow): number | null {
+  if (row.notionalLabel === "—") return null;
+  const n = Number(row.notionalLabel.replace(/[^0-9.]/g, ""));
+  return Number.isNaN(n) ? null : n;
+}
+
+/** Sort values per table (#4409): every column sorts, through the
+ * shared `sortTableRows` — empties last in both directions. */
+function jobSortValue(job: JobOutcomeFeedItem, key: string): string | number | null {
+  switch (key) {
+    case "time":
+      return autopilotTimestampEpoch(job.createdAt);
+    case "job":
+      return JOB_OUTCOME_KIND_LABELS[job.kind] ?? job.kind;
+    case "outcome":
+      return job.status;
+    case "detail":
+      return job.codedError ?? job.origin;
+    default:
+      return null;
+  }
+}
+
+function actionSortValue(action: AutonomousActionItem, key: string): string | number | null {
+  switch (key) {
+    case "time":
+      return autopilotTimestampEpoch(action.timestamp);
+    case "action":
+      return action.summary;
+    case "asset":
+      return action.symbol;
+    case "policy":
+      return action.policyCheckRule;
+    case "status":
+      return action.status;
+    case "attestation":
+      return action.didAttestation.signature || null;
+    default:
+      return null;
+  }
+}
+
+function verdictSortValue(row: PolicyVerdictRow, key: string): string | number | null {
+  switch (key) {
+    case "time":
+      return autopilotTimestampEpoch(row.timeLabel);
+    case "intent":
+      return row.intentLabel;
+    case "notional":
+      return verdictNotionalValue(row);
+    case "outcome":
+      return row.outcomeLabel;
+    case "rule":
+      return row.ruleLabel;
+    case "detail":
+      return row.detail || null;
+    default:
+      return null;
+  }
+}
+
 export function AutopilotControlCenter({
   user,
   isLiveAccount = false,
@@ -441,6 +607,19 @@ export function AutopilotControlCenter({
   // producer's success/failure, labeled by origin.
   const [jobOutcomes, setJobOutcomes] = useState<JobOutcomeFeedItem[]>([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
+
+  // Issue #4409: the active sub-tab, driven by the shared `view` URL
+  // param (the #4168 pattern). The URL is the single source of truth:
+  // a tab click navigates (pushState + routechange) and the
+  // subscription below applies it; back/forward lands here the same
+  // way. Unknown or missing views fall back to the first tab.
+  const [activeView, setActiveView] = useState<AutopilotSubTabId>(() => readAutopilotViewFromUrl());
+
+  // One sort state per table (#4409, tableSort.ts): null keeps the
+  // fetch order; a header click orders the rows, a second reverses.
+  const [jobsSort, setJobsSort] = useState<TableSort<string> | null>(null);
+  const [actionsSort, setActionsSort] = useState<TableSort<string> | null>(null);
+  const [verdictsSort, setVerdictsSort] = useState<TableSort<string> | null>(null);
 
   // Sync isRunning to localStorage
   useEffect(() => {
@@ -587,29 +766,17 @@ export function AutopilotControlCenter({
     };
   }, [fetchLiveAutonomousActions, fetchJobOutcomes, fetchAutopilotState]);
 
-  // Issue #4168: the `?tab=autopilot&view=job-outcomes` deep link. Adopt
-  // it on mount and on every route change (nav clicks pushState while
-  // this shell-retained panel stays mounted); the focus scroll is
-  // deferred a tick, same as the #2784 options-research pattern. The
-  // applied ref keeps a repeat arrival on the same value from
-  // re-scrolling, and clears when the view leaves so a return scrolls
-  // again. `view` is the shared sub-view param — no TAB_PARAM_OWNERS
-  // entry needed. Filters (actionsFilter) are NOT views and get no URL:
-  // the Job outcomes section is the page's one addressable target.
-  const appliedAutopilotViewRef = useRef<string | null>(null);
+  // Issue #4409: adopt the `view` param on mount and on every route
+  // change (nav clicks pushState while this shell-retained panel stays
+  // mounted; back/forward dispatches popstate). This replaces the
+  // #4168 scroll adoption — the tab selection IS the navigation now,
+  // so there is nothing to scroll to. `view` is the shared sub-view
+  // param — no TAB_PARAM_OWNERS entry needed. Filters (actionsFilter)
+  // are NOT views and get no URL.
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const adoptFromUrl = () => {
-      const view = new URLSearchParams(window.location.search).get("view");
-      if (view !== "job-outcomes") {
-        appliedAutopilotViewRef.current = null;
-        return;
-      }
-      if (appliedAutopilotViewRef.current === view) return;
-      appliedAutopilotViewRef.current = view;
-      window.setTimeout(() => {
-        document.getElementById("autopilot-job-outcomes")?.scrollIntoView?.({ block: "start" });
-      }, 0);
+      setActiveView(readAutopilotViewFromUrl());
     };
     adoptFromUrl();
     return subscribeToRouteChanges(adoptFromUrl);
@@ -757,6 +924,16 @@ export function AutopilotControlCenter({
     return act.actionType === actionsFilter;
   });
 
+  // Sorted rows (#4409): the sort applies after the filter, so a
+  // filtered table still sorts its visible rows.
+  const sortedJobOutcomes = sortTableRows(jobOutcomes, jobsSort, jobSortValue);
+  const sortedActions = sortTableRows(filteredActions, actionsSort, actionSortValue);
+  const sortedVerdictRows = sortTableRows(verdictRows, verdictsSort, verdictSortValue);
+
+  const handleJobsSort = (key: string) => setJobsSort((current) => nextTableSort(current, key));
+  const handleActionsSort = (key: string) => setActionsSort((current) => nextTableSort(current, key));
+  const handleVerdictsSort = (key: string) => setVerdictsSort((current) => nextTableSort(current, key));
+
   const accountLabel = isLiveAccount ? "E*TRADE Live Brokerage" : "Paper (simulated money)";
 
   return (
@@ -770,7 +947,7 @@ export function AutopilotControlCenter({
               on this page (GET /api/autopilot carries no balance; there
               is no equity-history source), so they render as "—" rather
               than a generated number. */}
-          <span className="ui-meta-sm">Source: GET /api/autopilot — verdict count from mas_policy_verdicts. NAV and drawdown have no live source — shown as —.</span>
+          <span className="ui-meta-sm ui-single-line" title={AUTOPILOT_SOURCE_LINES.ribbon}>{AUTOPILOT_SOURCE_LINES.ribbon}</span>
           <KpiRibbon
             items={[
               { label: "Portfolio NAV", value: "—", sub: "No live NAV source" },
@@ -799,6 +976,20 @@ export function AutopilotControlCenter({
       }
     >
 
+      {/* Issue #4409: the sections are sub-tabs now, driven by the
+          shared `view` param — the tab row is the page's navigation,
+          and each panel renders only its own section (an inactive
+          TabPanel renders nothing). The KPI ribbon above is the
+          persistent slot; it is not a tab. */}
+      <Tabs
+        tabs={AUTOPILOT_SUB_TABS.map((t) => ({ id: t.id, label: t.label }))}
+        value={activeView}
+        onChange={(view) => navigateToTab("autopilot", view)}
+        ariaLabel="Autopilot sections"
+        idBase="autopilot-sections"
+      />
+
+      <TabPanel idBase="autopilot-sections" tabId="performance" active={activeView === "performance"}>
       {/* Strategy performance — #4407: no live equity-history source
           feeds this chart, so it renders an empty state rather than a
           generated curve. The hardcoded chart constant, the
@@ -814,13 +1005,14 @@ export function AutopilotControlCenter({
         />
       </DetailCard>
       </PageSection>
+      </TabPanel>
 
-      {/* Top 2-Card Institutional Grid */}
-      <Grid columns={2} gap="5">
-        <PageSection>
-        {/* Card 1: Autopilot Status Card */}
+      <TabPanel idBase="autopilot-sections" tabId="status" active={activeView === "status"}>
+      <PageSection title="Autopilot Status">
+        {/* Autopilot Status Card — #4409: the section finally has its
+            name (it lost its title in #3140). */}
         <Card>
-          <span className="ui-meta-sm">Source: GET /api/autopilot — OrchestratorAgent state (run state, kill switch, limits, verdicts).</span>
+          <span className="ui-meta-sm ui-single-line" title={AUTOPILOT_SOURCE_LINES.status}>{AUTOPILOT_SOURCE_LINES.status}</span>
           <Flex gap="1" align="center">
             <span className="ui-meta-sm">Status</span>
             {isKillSwitched && <Badge tone="danger">KILL SWITCH TRIPPED</Badge>}
@@ -879,12 +1071,17 @@ export function AutopilotControlCenter({
             risk team, blocks all new orders.
           </p>
         </Card>
-        </PageSection>
+      </PageSection>
+      </TabPanel>
 
-        <PageSection title="Live policy limits">
-        {/* Card 2: Live Policy Limits Card */}
+      <TabPanel idBase="autopilot-sections" tabId="limits" active={activeView === "limits"}>
+      <PageSection>
+        {/* Live Policy Limits Card — #4409: the title lives in the
+            DetailCard, not the PageSection, so "Edit limits" sits in
+            the same CardHeader row as the title it acts on. */}
         <DetailCard
-          belowSubtitle={<span className="ui-meta-sm">Source: GET /api/autopilot — OrchestratorAgent state; localStorage defaults only when the server has none.</span>}
+          title="Live policy limits"
+          belowSubtitle={<span className="ui-meta-sm ui-single-line" title={AUTOPILOT_SOURCE_LINES.limits}>{AUTOPILOT_SOURCE_LINES.limits}</span>}
           meta={
             <Button
             variant="secondary"
@@ -936,19 +1133,16 @@ export function AutopilotControlCenter({
             </span>
           </div>
         </DetailCard>
-        </PageSection>
-      </Grid>
+      </PageSection>
+      </TabPanel>
 
       {/* Job Outcomes (issue #1333): every job's success/failure from
           the one outcome sink, labeled by origin — not the trading
           actions feed above, but the job-truth feed. */}
-      {/* Issue #4168: the Job outcomes anchor for ?tab=autopilot&view=job-outcomes.
-          `ui-anchor` carries the token scroll-margin offset (#3367) so the
-          scroll lands the section under the sticky chrome. */}
-      <div id="autopilot-job-outcomes" className="ui-anchor">
+      <TabPanel idBase="autopilot-sections" tabId="job-outcomes" active={activeView === "job-outcomes"}>
       <PageSection title="Job outcomes">
       <DetailCard
-        belowSubtitle={<span className="ui-meta-sm">Source: GET /api/autopilot/jobs — mas_job_outcomes (one outcome sink); rows labeled by origin.</span>}
+        belowSubtitle={<span className="ui-meta-sm ui-single-line" title={AUTOPILOT_SOURCE_LINES.jobs}>{AUTOPILOT_SOURCE_LINES.jobs}</span>}
       >
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
@@ -973,7 +1167,8 @@ export function AutopilotControlCenter({
           columns={[
             {
               key: "time",
-              header: "DATE & TIME",
+              header: <SortHeader label="DATE & TIME" sortKey="time" sort={jobsSort} onSort={handleJobsSort} />,
+              ariaSort: tableSortAria(jobsSort, "time"),
               cellClassName: "time-cell",
               // #4407: one canonical date+time format; an unparseable
               // stored timestamp renders as "—", never raw.
@@ -981,7 +1176,8 @@ export function AutopilotControlCenter({
             },
             {
               key: "job",
-              header: "JOB",
+              header: <SortHeader label="JOB" sortKey="job" sort={jobsSort} onSort={handleJobsSort} />,
+              ariaSort: tableSortAria(jobsSort, "job"),
               cellClassName: "summary-cell",
               render: (job) => (
                 <>
@@ -994,8 +1190,9 @@ export function AutopilotControlCenter({
             },
             {
               key: "outcome",
-              header: "OUTCOME",
-              cellClassName: "status-cell",
+              header: <SortHeader label="OUTCOME" sortKey="outcome" sort={jobsSort} onSort={handleJobsSort} />,
+              ariaSort: tableSortAria(jobsSort, "outcome"),
+              cellClassName: "status-cell ui-cell-nowrap",
               render: (job) => (
                 <>
                   <Badge size="xs" tone={JOB_OUTCOME_STATUS_TONES[job.status] ?? "neutral"}>
@@ -1010,12 +1207,13 @@ export function AutopilotControlCenter({
             },
             {
               key: "detail",
-              header: "DETAIL",
+              header: <SortHeader label="DETAIL" sortKey="detail" sort={jobsSort} onSort={handleJobsSort} />,
+              ariaSort: tableSortAria(jobsSort, "detail"),
               cellClassName: "summary-cell",
               render: (job) => (
                 <>
                   {job.codedError ? (
-                    <span className="ui-meta-sm">{job.codedError}</span>
+                    <span className="ui-meta-sm ui-single-line" title={job.codedError}>{job.codedError}</span>
                   ) : job.reportUrl ? (
                     <a href={job.reportUrl} target="_blank" rel="noreferrer">Report</a>
                   ) : (
@@ -1028,10 +1226,11 @@ export function AutopilotControlCenter({
               ),
             },
           ]}
-          rows={jobOutcomes}
+          rows={sortedJobOutcomes}
           rowKey={(job) => job.id}
           rowClassName="action-table-row"
-          containerClassName="autopilot-table-container"
+          containerClassName="autopilot-table-container ui-scroll-frame"
+          stickyHeader
           empty={(
             <EmptyState
               framed
@@ -1043,12 +1242,13 @@ export function AutopilotControlCenter({
         />
       </DetailCard>
       </PageSection>
-      </div>
+      </TabPanel>
 
       {/* Bottom Card: Recent Autonomous Actions */}
+      <TabPanel idBase="autopilot-sections" tabId="actions" active={activeView === "actions"}>
       <PageSection title="Recent autonomous actions">
       <DetailCard
-        belowSubtitle={<span className="ui-meta-sm">Source: GET /api/audit (mas_events) + /api/broker/orders (mas_trades). Simulated rows are labeled Sim, never live.</span>}
+        belowSubtitle={<span className="ui-meta-sm ui-single-line" title={AUTOPILOT_SOURCE_LINES.actions}>{AUTOPILOT_SOURCE_LINES.actions}</span>}
       >
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
@@ -1106,7 +1306,8 @@ export function AutopilotControlCenter({
           columns={[
             {
               key: "time",
-              header: "DATE & TIME",
+              header: <SortHeader label="DATE & TIME" sortKey="time" sort={actionsSort} onSort={handleActionsSort} />,
+              ariaSort: tableSortAria(actionsSort, "time"),
               cellClassName: "time-cell",
               render: (action) => (
               <>{action.timestamp}</>
@@ -1114,13 +1315,14 @@ export function AutopilotControlCenter({
             },
             {
               key: "action",
-              header: "ACTION & TRIGGER",
+              header: <SortHeader label="ACTION & TRIGGER" sortKey="action" sort={actionsSort} onSort={handleActionsSort} />,
+              ariaSort: tableSortAria(actionsSort, "action"),
               cellClassName: "summary-cell",
               render: (action) => (
               <><Badge size="xs" uppercase tone={ACTION_TYPE_TONES[action.actionType] ?? "neutral"}>
                           {action.actionType.replace("_", " ").toUpperCase()}
                         </Badge>
-                        <span className="ui-meta-sm">{action.summary}</span>
+                        <span className="ui-meta-sm ui-single-line" title={action.summary}>{action.summary}</span>
                         {action.source && (
                           <Badge size="xs" tone={action.source === "live" ? "success" : "purple"} title={`Action origin: ${
                               action.source === "live"
@@ -1135,16 +1337,18 @@ export function AutopilotControlCenter({
             },
             {
               key: "asset",
-              header: "ASSET",
-              cellClassName: "symbol-cell",
+              header: <SortHeader label="ASSET" sortKey="asset" sort={actionsSort} onSort={handleActionsSort} />,
+              ariaSort: tableSortAria(actionsSort, "asset"),
+              cellClassName: "symbol-cell ui-cell-nowrap",
               render: (action) => (
               <><Badge size="md" tone="neutral">{action.symbol}</Badge></>
             ),
             },
             {
               key: "policy",
-              header: "POLICY CHECK",
-              cellClassName: "policy-cell",
+              header: <SortHeader label="POLICY CHECK" sortKey="policy" sort={actionsSort} onSort={handleActionsSort} />,
+              ariaSort: tableSortAria(actionsSort, "policy"),
+              cellClassName: "policy-cell ui-cell-nowrap",
               render: (action) => (
               <><Badge size="xs" tone={action.policyCheckPassed ? "success" : "danger"}>
                           {action.policyCheckPassed ? "✓" : "✕"} {action.policyCheckRule}
@@ -1153,8 +1357,9 @@ export function AutopilotControlCenter({
             },
             {
               key: "status",
-              header: "STATUS",
-              cellClassName: "status-cell",
+              header: <SortHeader label="STATUS" sortKey="status" sort={actionsSort} onSort={handleActionsSort} />,
+              ariaSort: tableSortAria(actionsSort, "status"),
+              cellClassName: "status-cell ui-cell-nowrap",
               render: (action) => (
               <><Badge size="xs" tone={ACTION_STATUS_TONES[action.status] ?? "neutral"}>
                           {action.status.replace(/_/g, " ").toUpperCase()}
@@ -1163,8 +1368,9 @@ export function AutopilotControlCenter({
             },
             {
               key: "attestation",
-              header: "DID ATTESTATION",
-              cellClassName: "attestation-cell",
+              header: <SortHeader label="DID ATTESTATION" sortKey="attestation" sort={actionsSort} onSort={handleActionsSort} />,
+              ariaSort: tableSortAria(actionsSort, "attestation"),
+              cellClassName: "attestation-cell ui-cell-nowrap",
               render: (action) => (
               <><Button
               variant="ghost"
@@ -1186,10 +1392,11 @@ export function AutopilotControlCenter({
             ),
             },
           ]}
-          rows={filteredActions}
+          rows={sortedActions}
           rowKey={(action) => action.id}
           rowClassName="action-table-row"
-          containerClassName="autopilot-table-container"
+          containerClassName="autopilot-table-container ui-scroll-frame"
+          stickyHeader
           empty={(
             <EmptyState
             framed
@@ -1210,11 +1417,13 @@ export function AutopilotControlCenter({
         />
       </DetailCard>
       </PageSection>
+      </TabPanel>
 
       {/* Policy Decisions Audit (issue #651): recorded verdicts from mas_policy_verdicts */}
+      <TabPanel idBase="autopilot-sections" tabId="policy-decisions" active={activeView === "policy-decisions"}>
       <PageSection title="Policy decisions">
       <DetailCard
-        belowSubtitle={<span className="ui-meta-sm">Source: GET /api/autopilot — mas_policy_verdicts, signed by RiskPolicyEngine. Dry-run verdicts are labeled simulated. Scheduled dry-run checks come from the monthly Autopilot evaluation schedule (Schedules home).</span>}
+        belowSubtitle={<span className="ui-meta-sm ui-single-line" title={AUTOPILOT_SOURCE_LINES.verdicts}>{AUTOPILOT_SOURCE_LINES.verdicts}</span>}
       >
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
@@ -1229,7 +1438,8 @@ export function AutopilotControlCenter({
           columns={[
             {
               key: "time",
-              header: "DATE & TIME",
+              header: <SortHeader label="DATE & TIME" sortKey="time" sort={verdictsSort} onSort={handleVerdictsSort} />,
+              ariaSort: tableSortAria(verdictsSort, "time"),
               cellClassName: "time-cell",
               render: (row) => (
               <>{row.timeLabel}</>
@@ -1237,10 +1447,11 @@ export function AutopilotControlCenter({
             },
             {
               key: "intent",
-              header: "INTENT",
+              header: <SortHeader label="INTENT" sortKey="intent" sort={verdictsSort} onSort={handleVerdictsSort} />,
+              ariaSort: tableSortAria(verdictsSort, "intent"),
               cellClassName: "summary-cell",
               render: (row) => (
-              <><span className="ui-meta-sm">{row.intentLabel}</span>
+              <><span className="ui-meta-sm ui-single-line" title={row.intentLabel}>{row.intentLabel}</span>
                         {row.modeLabel && (
                           <Badge size="xs" tone="neutral">{row.modeLabel}</Badge>
                         )}</>
@@ -1248,14 +1459,18 @@ export function AutopilotControlCenter({
             },
             {
               key: "notional",
-              header: "NOTIONAL",
+              header: <SortHeader label="NOTIONAL" sortKey="notional" sort={verdictsSort} onSort={handleVerdictsSort} />,
+              ariaSort: tableSortAria(verdictsSort, "notional"),
+              cellClassName: "ui-cell-nowrap",
               render: (row) => (
               <>{row.notionalLabel}</>
             ),
             },
             {
               key: "outcome",
-              header: "OUTCOME",
+              header: <SortHeader label="OUTCOME" sortKey="outcome" sort={verdictsSort} onSort={handleVerdictsSort} />,
+              ariaSort: tableSortAria(verdictsSort, "outcome"),
+              cellClassName: "ui-cell-nowrap",
               render: (row) => (
               <Badge size="xs" uppercase tone={row.outcomeTone}>
                           {row.outcomeLabel}
@@ -1264,17 +1479,20 @@ export function AutopilotControlCenter({
             },
             {
               key: "rule",
-              header: "BINDING RULE",
+              header: <SortHeader label="BINDING RULE" sortKey="rule" sort={verdictsSort} onSort={handleVerdictsSort} />,
+              ariaSort: tableSortAria(verdictsSort, "rule"),
+              cellClassName: "ui-cell-nowrap",
               render: (row) => (
               <>{row.ruleLabel}</>
             ),
             },
             {
               key: "detail",
-              header: "DETAIL",
+              header: <SortHeader label="DETAIL" sortKey="detail" sort={verdictsSort} onSort={handleVerdictsSort} />,
+              ariaSort: tableSortAria(verdictsSort, "detail"),
               cellClassName: "summary-cell",
               render: (row) => (
-              <><span className="ui-meta-sm">{row.detail || "—"}</span>
+              <><span className="ui-meta-sm ui-single-line" title={row.detail || "—"}>{row.detail || "—"}</span>
                         {row.signed && (
                           <Badge size="xs" tone="purple" title="Verdict carries a cryptographic attestation signature">
                             Signed
@@ -1283,10 +1501,11 @@ export function AutopilotControlCenter({
             ),
             },
           ]}
-          rows={verdictRows}
+          rows={sortedVerdictRows}
           rowKey={(row) => row.id}
           rowClassName="action-table-row"
-          containerClassName="autopilot-table-container"
+          containerClassName="autopilot-table-container ui-scroll-frame"
+          stickyHeader
           empty={(
             <EmptyState
             framed
@@ -1298,6 +1517,7 @@ export function AutopilotControlCenter({
         />
       </DetailCard>
       </PageSection>
+      </TabPanel>
 
       {/* Edit Policy Limits Modal */}
       {isEditModalOpen && (
