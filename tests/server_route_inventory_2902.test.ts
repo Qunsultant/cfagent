@@ -155,6 +155,15 @@
  *   its original position; the scanner does not see it (no path
  *   condition) and the pin does not cover it. No options behaviour
  *   change: the /api/options/flows/* block moves as a whole.
+ *
+ * Issue #2846 changed no route surface, but it changed how two
+ * dispatcher conditions are WRITTEN: the commercial family prefixes
+ * in src/server/routes/platform.ts became catalog constants
+ * (PAYMENTS_API_PREFIX, COMMERCIAL_BARE_PREFIX). The reconstruction
+ * resolves those constants to their literal values by parsing
+ * src/data/commercialUrlCatalog.ts as source text (see the
+ * catalog-resolution rule above conditionTokens), so the pinned
+ * inventory stays 150 entries and no coverage is lost.
  */
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -221,7 +230,50 @@ function regexLiterals(cond: string): string[] {
   return out;
 }
 
+let commercialPrefixesCache: Record<string, string> | null = null;
+
+function commercialPrefixes(): Record<string, string> {
+  if (commercialPrefixesCache) return commercialPrefixesCache;
+  const catalogSrc = readFileSync("src/data/commercialUrlCatalog.ts", "utf8");
+  const prefixes: Record<string, string> = {};
+  for (const name of ["PAYMENTS_API_PREFIX", "COMMERCIAL_BARE_PREFIX"]) {
+    const m = catalogSrc.match(new RegExp(`${name}\\s*=\\s*"([^"]+)"`));
+    if (!m) throw new Error(`${name} must be a string literal in the URL catalog`);
+    prefixes[name] = m[1];
+  }
+  commercialPrefixesCache = prefixes;
+  return prefixes;
+}
+
+function resolveCommercialPrefixes(cond: string): string {
+  const prefixes = commercialPrefixes();
+  let out = cond;
+  for (const [name, value] of Object.entries(prefixes)) {
+    out = out
+      .replace(
+        new RegExp(`path\\.startsWith\\(${name}\\)`, "g"),
+        `path.startsWith("${value}")`,
+      )
+      .replace(new RegExp(`path === ${name}`, "g"), `path === "${value}"`);
+  }
+  return out;
+}
+
 function conditionTokens(cond: string): string[] {
+  // Issue #2846 — the dispatcher matches the two commercial family
+  // prefixes through catalog constants, not literals:
+  //   path.startsWith(PAYMENTS_API_PREFIX)    -> "/api/payments/agentic/"
+  //   path.startsWith(COMMERCIAL_BARE_PREFIX) -> "/payments/agentic/commercial/"
+  // Resolve them to the exact strings the old literals carried, so
+  // EXPECTED_ROUTES is unchanged. The constants are parsed as SOURCE
+  // TEXT from src/data/commercialUrlCatalog.ts (the same readFileSync
+  // approach this test already uses) — the test never imports the
+  // catalog at runtime, so a catalog that fails to parse (or a
+  // constant the catalog does not define) fails this test loudly
+  // instead of silently shrinking the inventory. If a resolved value
+  // ever differs from its old literal, that is a route change and
+  // this pin fails; it is never silently absorbed.
+  cond = resolveCommercialPrefixes(cond);
   const methods = [...new Set([...cond.matchAll(/request\.method === "([A-Z]+)"/g)].map((m) => m[1]))];
   const method = methods.length ? methods.join("|") : "ANY";
   const toks: { index: number; text: string }[] = [];

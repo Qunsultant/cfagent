@@ -55,6 +55,29 @@ import { TRIGGER_ROUTES } from "../src/client/scheduledOptionsManager/systemJobs
 const root = join(__dirname, "..");
 const read = (rel: string): string => readFileSync(join(root, rel), "utf8");
 
+// Issue #2846 — the commercial cron dispatch is written as a catalog
+// call, not a literal: commercialBarePath("lifecycleDigestRunDue").
+// Resolve it to its bare path by parsing the catalog as source text
+// (the same readFileSync approach this test already uses) — the test
+// never imports the catalog at runtime, so a catalog that fails to
+// parse (or an id the catalog does not define) fails this test loudly
+// instead of silently dropping the route from the pin. If the resolved
+// value ever differs from its old literal, that is a route change and
+// this pin fails; it is never silently absorbed.
+function resolveCommercialBarePaths(text: string): string {
+  const catalogSrc = read("src/data/commercialUrlCatalog.ts");
+  const bareBase = catalogSrc.match(/COMMERCIAL_BARE_BASE\s*=\s*"([^"]+)"/)?.[1];
+  if (!bareBase)
+    throw new Error("COMMERCIAL_BARE_BASE must be a string literal in the URL catalog");
+  return text.replace(/commercialBarePath\("([^"]+)"\)/g, (_m, id) => {
+    const stem = catalogSrc.match(
+      new RegExp(`route\\("${id}",\\s*\\[[^\\]]*\\],\\s*"([^"]+)"`),
+    )?.[1];
+    if (!stem) throw new Error(`unknown commercialBarePath id: ${id}`);
+    return `"${bareBase}${stem}"`;
+  });
+}
+
 /** Monday 2026-10-26 09:00 EDT == 13:00Z (copied from tests/schedule_isdue.test.ts). */
 const MON_0900_EDT = new Date("2026-10-26T13:00:00Z");
 /** Monday 2026-10-19 21:05 UTC (copied from tests/research-schedule-guard.test.ts). */
@@ -419,7 +442,9 @@ describe("S0-P17 worker cron duties (B-T1-01/02): renewal runs either way, tick 
     // reports-index-backfill sweep, the same six-vs-seven error S5
     // corrects in §1.2.
     const server = read("src/server.ts") + read("src/server/routes/queue.ts");
-    const entries = read("src/services/consolidatedCronEntries.ts");
+    const entries = resolveCommercialBarePaths(
+      read("src/services/consolidatedCronEntries.ts"),
+    );
     expect(server).toContain("renewAllStoredETradeTokens");
     expect(server).toContain("SCHEDULED_AGENT");
     expect(entries).toContain("scheduledAgent.onCron()");
