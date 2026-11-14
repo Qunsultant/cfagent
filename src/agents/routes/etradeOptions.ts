@@ -72,14 +72,14 @@ import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
-import { type KernelSnapshot, type PanelDiscoveryResult, mintComparisonRunId } from "../../services/recommendationKernel";
+import { type PanelDiscoveryResult, mintComparisonRunId } from "../../services/recommendationKernel";
 import {
   runComparePanelViaPipeline,
   runManualPanelViaPipeline,
 } from "../../workflows/manualPanelScreen";
 import { optionsEngineStoresFromSql, runComparisonViaEngine } from "../../workflows/optionsScreenEngine";
 import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
-import { listComparisonOutcomes, runProductionComparison, type ProductionComparisonDeps, type ProductionComparisonResult } from "../../services/comparisonRunner";
+import { buildComparisonQuestion, kernelSnapshotFromDataSnapshot, listComparisonOutcomes, runProductionComparison, type ProductionComparisonDeps, type ProductionComparisonResult } from "../../services/comparisonRunner";
 import { getSymbolEventCalendar, toEventCalendarInfo } from "../../services/eventCalendar";
 import {
   handleOptionsLatestRuns,
@@ -580,25 +580,9 @@ export async function handleEtradeOptionsRoutes(
         const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(etrade.client, undefined, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage)));
         const banded = resolvePanelFetchBands(parsedDiscovery.value.request, parsedDiscovery.value.farDated);
         const s = await dataAgent.loadSnapshot(banded.request);
-        // KernelSnapshot mapping replicated without calling discoverPanel
-        const snapshot: KernelSnapshot = {
-          symbol: s.symbol,
-          contracts: s.contracts,
-          dataSource: s.dataSource,
-          chainProvenance: s.dataSource === "calibrated-demo" ? "calibrated" : "live",
-          underlyingPrice: s.contracts[0]?.underlyingPrice,
-          screen: s.screen,
-          rejections: s.rejections,
-          validationError: s.validationError,
-          quotes: Object.fromEntries(
-            s.contracts.map((c) => [c.symbol, {
-              bid: c.bid, ask: c.ask,
-              iv: c.impliedVolatility ?? null,
-              volume: c.volume ?? null,
-              openInterest: c.openInterest ?? null,
-            }]),
-          ),
-        };
+        // The shared snapshot mapping (comparisonRunner.ts), without
+        // calling discoverPanel.
+        const snapshot = kernelSnapshotFromDataSnapshot(s);
         if ((snapshot.contracts ?? []).length === 0) {
           return Response.json({
             status: "no_candidates",
@@ -613,7 +597,7 @@ export async function handleEtradeOptionsRoutes(
         const riskAgent = new StrategyRiskAgent();
         const recommender = new RecommendationAgent();
         const req = parsedDiscovery.value.request;
-        const question = `What ${req.thesis ?? "directional"} option strategies on ${req.symbol} look best for a ${req.targetDate ?? "near-term"} horizon with max planned loss ${req.maxPlannedLoss ?? "the stated limit"}?`;
+        const question = buildComparisonQuestion(req);
         const coreArgs: ProductionComparisonDeps = {
           snapshot,
           request: req,

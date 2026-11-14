@@ -46,6 +46,18 @@
  * dispatch defines today. The goal leg itself stays on the sync
  * dispatch until its cutover gaps land (#3960, #4473, binding
  * reachability); this surface is what it cuts over onto.
+ *
+ * Issue #4451 — the comparison leg's dispatch surface over this
+ * host: startComparisonWorkflow validates the comparison shape
+ * BEFORE defining anything and dispatches under the comparison job
+ * identity (`comparison:<runId>`, #4276) — the same identity the
+ * sync dispatch defines today. The resolving `comparison.run` step
+ * rebuilds the whole comparison per invocation (optionsPipelineJobs.ts).
+ * The read-back is comparison-aware: a comparison run has one
+ * stage, not eight, and writes no shapeReport. No production leg
+ * dispatches through the host yet — the comparison leg's cutover
+ * is not filed separately (see the #4451 report), and the legs
+ * stay blocked by the named gaps (#3960, #4473).
  */
 import {
   createJobPipelineStoresFromD1,
@@ -58,10 +70,14 @@ import {
 import {
   JobPipelineControl,
   type JobRunRecorder,
+  type JobStageView,
 } from "../services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import type { Env } from "../types";
 import {
+  COMPARISON_JOB_ID_PREFIX,
+  comparisonJobDefinition,
+  comparisonJobId,
   optionsScreenJobDefinition,
   optionsScreenJobId,
   optionsStageStorageFromArtifacts,
@@ -84,8 +100,11 @@ export interface StartOptionsScreenWorkflowInput {
   /** The acting login — rides the raw config beside the request. */
   userLogin?: string;
   trigger?: "manual" | "scheduled";
-  /** The job identity: the options job (default) or the strategy job (#4271). */
-  jobKind?: "options-screen" | "strategy-screen";
+  /**
+   * The job identity: the options job (default), the strategy job
+   * (#4271), or the comparison job (#4276, #4451).
+   */
+  jobKind?: "options-screen" | "strategy-screen" | "comparison";
 }
 
 /** Injectable seams: the workflow create call and the residency stores (tests inject fakes). */
@@ -117,11 +136,15 @@ export async function startOptionsScreenWorkflow(
   const jobId =
     input.jobKind === "strategy-screen"
       ? strategyScreenJobId(input.runId)
-      : optionsScreenJobId(input.runId);
+      : input.jobKind === "comparison"
+        ? comparisonJobId(input.runId)
+        : optionsScreenJobId(input.runId);
   const definition =
     input.jobKind === "strategy-screen"
       ? strategyScreenJobDefinition(jobId, input.request, input.userLogin)
-      : optionsScreenJobDefinition(jobId, input.request, input.userLogin);
+      : input.jobKind === "comparison"
+        ? comparisonJobDefinition(jobId, input.request, input.userLogin)
+        : optionsScreenJobDefinition(jobId, input.request, input.userLogin);
 
   const stores = opts.stores ?? (env.AGENT_DB ? createJobPipelineStoresFromD1(env.AGENT_DB) : null);
   if (!stores) {
@@ -203,13 +226,52 @@ export async function startStrategyScreenWorkflow(
         ? "the goal-screen host is #4290"
         : shape === "manual"
           ? "a manual-shape screen dispatches from the manual route"
-          : "a comparison run is a single engine step, not a staged pipeline (#4276)";
+          : "dispatch it through the comparison seam (startComparisonWorkflow, #4451)";
     throw new OptionsStepPortsError(
       "stage_port_unavailable",
       `strategy screen ${input.runId}: the ${shape} shape is not a strategy screen — ${home}; refusing to dispatch it under the strategy job identity`,
     );
   }
   return startOptionsScreenWorkflow(env, { ...input, jobKind: "strategy-screen" }, opts);
+}
+
+/** What one durable comparison start needs: the options-screen start, minus the job kind (pinned to comparison). */
+export type StartComparisonWorkflowInput = Omit<
+  StartOptionsScreenWorkflowInput,
+  "jobKind"
+>;
+
+/**
+ * Issue #4451 — the comparison run's start seam: the
+ * comparison-named entry point over startOptionsScreenWorkflow,
+ * pinning the comparison job identity (`comparison:<runId>`) and
+ * validating the request's shape BEFORE defining anything. A
+ * comparison run is a comparison shape; any other shape is refused
+ * synchronously by name — the caller learns at dispatch time, with
+ * no job defined and no workflow instance created, instead of
+ * watching a workflow instance fail inside. The shape decode is
+ * the shared one (optionsStepPorts.ts); the resolving step
+ * re-checks per invocation, so the two can never drift.
+ */
+export async function startComparisonWorkflow(
+  env: Env,
+  input: StartComparisonWorkflowInput,
+  opts: StartOptionsScreenWorkflowOpts = {},
+): Promise<{ instanceId: string; jobId: string }> {
+  const shape = decodeOptionsRequestShape(input.request, input.runId);
+  if (shape !== "comparison") {
+    const home =
+      shape === "panel" || shape === "scan"
+        ? "dispatch it through the strategy seam (startStrategyScreenWorkflow, #4291)"
+        : shape === "goal"
+          ? "dispatch it through the goal seam (startGoalOptionsLegWorkflow, #4290)"
+          : "a manual-shape screen dispatches from the manual route";
+    throw new OptionsStepPortsError(
+      "stage_port_unavailable",
+      `comparison run ${input.runId}: the comparison seam dispatches comparison runs only — this request decodes as the ${shape} shape; ${home}`,
+    );
+  }
+  return startOptionsScreenWorkflow(env, { ...input, jobKind: "comparison" }, opts);
 }
 
 /**
@@ -271,7 +333,7 @@ export async function startGoalOptionsLegWorkflow(
         ? "dispatch it through the strategy seam (startStrategyScreenWorkflow, #4291)"
         : shape === "manual"
           ? "a manual-shape screen dispatches from the manual route"
-          : "a comparison run is a single engine step, not a staged pipeline (#4276)";
+          : "dispatch it through the comparison seam (startComparisonWorkflow, #4451)";
     throw new OptionsStepPortsError(
       "stage_port_unavailable",
       `goal screen ${input.runId}: the goal seam dispatches goal screens only — this request decodes as the ${shape} shape; ${home}`,
@@ -327,6 +389,23 @@ export interface OptionsWorkflowRunStageView {
   error?: string;
 }
 
+/** One stage view's summary: failed when any unit failed, completed when every unit completed, else the first unit's status. */
+function toStageView(stageId: string, stage: JobStageView | undefined): OptionsWorkflowRunStageView {
+  const units = stage?.units ?? [];
+  const failed = units.find((unit) => unit.status === "failed" || unit.error);
+  const status =
+    failed !== undefined
+      ? "failed"
+      : units.length > 0 && units.every((unit) => unit.status === "completed")
+        ? "completed"
+        : (units[0]?.status ?? "pending");
+  return {
+    stageId,
+    status,
+    ...(failed?.error ? { error: failed.error } : {}),
+  };
+}
+
 /** What a caller awaiting a hosted run reads back: state, stages, and the report artifact. */
 export interface OptionsWorkflowRunView {
   jobId: string;
@@ -343,8 +422,11 @@ export interface OptionsWorkflowRunView {
 /**
  * Read a hosted run back: the instance state, one summary per
  * addressable stage, and the shapeReport artifact from the durable
- * store. Throws job_not_found (the engine's code) when no
- * definition exists in this residency.
+ * store. A comparison run (#4451) has one stage — the comparison
+ * node itself — and writes no shapeReport, so its view carries a
+ * single `comparison` stage entry and no report. Throws
+ * job_not_found (the engine's code) when no definition exists in
+ * this residency.
  */
 export async function readOptionsWorkflowRun(
   deps: { stores: JobPipelineStores; runRecorder: JobRunRecorder },
@@ -364,24 +446,27 @@ export async function readOptionsWorkflowRun(
   // settle path spreads it), so the latest run's artifacts stay
   // addressable through the adapter after completion.
   const engineRunId = view.instance?.currentRunId ?? null;
-  const stages: OptionsWorkflowRunStageView[] = OPTIONS_PIPELINE_STAGES.map((stageId) => {
-    const stage = view.stages.find((candidate) => candidate.kind === stageId);
-    const units = stage?.units ?? [];
-    const failed = units.find((unit) => unit.status === "failed" || unit.error);
-    const status =
-      failed !== undefined
-        ? "failed"
-        : units.length > 0 && units.every((unit) => unit.status === "completed")
-          ? "completed"
-          : (units[0]?.status ?? "pending");
-    return {
-      stageId,
-      status,
-      ...(failed?.error ? { error: failed.error } : {}),
-    };
-  });
+  // Issue #4451: a comparison run is one step, not an eight-stage
+  // pipeline — its view carries the single comparison node, and no
+  // shapeReport (a comparison run writes none). A comparison job
+  // whose node is not in the view yet carries no stage entries
+  // rather than eight pending ones.
+  const isComparison = jobId.startsWith(`${COMPARISON_JOB_ID_PREFIX}:`);
+  const stages: OptionsWorkflowRunStageView[] = isComparison
+    ? (() => {
+        const comparison = view.stages.find(
+          (candidate) => candidate.kind === COMPARISON_JOB_ID_PREFIX,
+        );
+        return comparison ? [toStageView(COMPARISON_JOB_ID_PREFIX, comparison)] : [];
+      })()
+    : OPTIONS_PIPELINE_STAGES.map((stageId) =>
+        toStageView(
+          stageId,
+          view.stages.find((candidate) => candidate.kind === stageId),
+        ),
+      );
   let shapeReport: unknown;
-  if (engineRunId) {
+  if (engineRunId && !isComparison) {
     const storage = optionsStageStorageFromArtifacts(deps.stores.artifacts, engineRunId);
     shapeReport = await storage.get(optionsArtifactKey(runId, "shapeReport"));
   }
