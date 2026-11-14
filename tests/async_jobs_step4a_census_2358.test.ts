@@ -102,6 +102,13 @@ describe("step-4a family census (#2358)", () => {
   });
 
   it("mas_async_jobs has exactly one writer file: its DO adapter", () => {
+    // #4282 P2b: the adapter's CREATE TABLE / CREATE INDEX
+    // statements moved into the DO catalogue
+    // (src/data/schemaComponent/doCatalogue.ts) — the catalogue
+    // is a DDL-only writer, never a row writer; the adapter
+    // still executes the statements through doTableSql /
+    // doIndexSql. The writer set is the adapter + the
+    // statement's home.
     const WRITER = /(INSERT INTO|UPDATE|DELETE FROM|CREATE TABLE IF NOT EXISTS|CREATE INDEX IF NOT EXISTS \w+ ON|ALTER TABLE)\s+(?:IF NOT EXISTS \w+ ON\s+)?mas_async_jobs/;
     const writers: string[] = [];
     const walk = (dir: string): void => {
@@ -114,7 +121,10 @@ describe("step-4a family census (#2358)", () => {
       }
     };
     walk("src");
-    expect(writers).toEqual(["src/data/doSqliteAsyncJobAdapter.ts"]);
+    expect(writers).toEqual([
+      "src/data/doSqliteAsyncJobAdapter.ts",
+      "src/data/schemaComponent/doCatalogue.ts",
+    ]);
   });
 
   it("the maintenance bypasses are closed: outcome/paused deletes live only in their adapters", () => {
