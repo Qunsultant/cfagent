@@ -1784,6 +1784,14 @@ const BASELINE: Array<[string, string, number]> = [
   // byte-identically from the runner; neutralizing them would
   // falsify the migrations.
   ["src/data/schemaComponent/d1Catalogue.ts", "etrade", 3],
+  // #4441 HISTORICAL/INTEGRATION: the measured autopilot-capabilities
+  // inventory names the broker integrations it measured (E*TRADE,
+  // Alpaca). Naming the providers IS the document's subject — the rows
+  // are accounted, not platform framing, and stay shrink-only like every
+  // other row. Added by #4476 (the #4441 PR shipped without them, which
+  // left test:pins red on main).
+  ["docs/architecture/agentic/autopilot-capabilities.md", "etrade", 5],
+  ["docs/architecture/agentic/autopilot-capabilities.md", "alpaca", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
