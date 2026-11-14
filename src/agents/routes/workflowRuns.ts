@@ -601,11 +601,11 @@ export async function readInnerShardScanStages(
     try {
       const read = await readStagesFromPipelineStores(stores, ref.engineJobId);
       out.set(ref.shardJobId, read ?? { stages: [], checkpointRunId: null });
-    } catch {
+    } catch (err) {
       // A shard whose read fails keeps the page honest: the caller names
       // the failure once (storeErrors) and the row claims no inner stages.
       throw new Error(
-        `Inner shard stage read failed for ${ref.engineJobId}: ${ref.shardJobId}.`,
+        `Inner shard stage read failed for ${ref.engineJobId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
