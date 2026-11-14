@@ -59,14 +59,16 @@ import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 const SELLING_BASE = COMMERCIAL_API_BASE;
 
 /** Issue #4511 — Products sub-tabs: the catalog view and the selling
- *  options view, URL-synced on the shared "view" param. */
-export type ProductCatalogTab = "catalog" | "selling-options";
+ *  options view, URL-synced on the shared "view" param. Issue #4530 —
+ *  the marketing draft preview is its own sub-tab. */
+export type ProductCatalogTab = "catalog" | "selling-options" | "marketing-draft-preview";
 const PRODUCT_CATALOG_TABS: TabOption<ProductCatalogTab>[] = [
   { id: "catalog", label: "Catalog" },
   { id: "selling-options", label: "Selling options" },
+  { id: "marketing-draft-preview", label: "Marketing draft preview" },
 ];
 function isProductCatalogTab(value: unknown): value is ProductCatalogTab {
-  return value === "catalog" || value === "selling-options";
+  return value === "catalog" || value === "selling-options" || value === "marketing-draft-preview";
 }
 
 const pageWrapperStyle: React.CSSProperties = {
@@ -382,7 +384,9 @@ function parseBundleEntitlements(body: unknown): BundleEntitlementSellingInput[]
  * subscription read, plans list, and the 2.1 Billing API
  * (billing-checkout mint, billing-purchase confirm-by-retrieve).
  */
-function SellingSection({
+// Issue #4530 — exported so the Product Hub can mount the selling
+// section as its own hub tab (same section, same on-demand load).
+export function SellingSection({
   products,
   openSignal,
 }: {
@@ -1165,6 +1169,9 @@ export function ProductCatalogPanel() {
                   err instanceof Error ? err.message : "draft composition failed",
                 );
               }
+              // Issue #4530 — the preview lives on its own sub-tab now;
+              // composing a draft opens that tab (the error, if any, shows there).
+              handleTabChange("marketing-draft-preview");
             }}
           >
             Preview draft
@@ -1224,51 +1231,6 @@ export function ProductCatalogPanel() {
             </Notice>
           </Card>
         </PageSection>
-        <PageSection
-          title="Marketing draft preview"
-          description="Compose channel-formatted promotional snippets directly from catalog records."
-        >
-          <div style={channelSelectWrapperStyle}>
-            <FieldShell id="marketing-channel" label="Channel">
-              <Select
-                id="marketing-channel"
-                aria-label="Marketing channel"
-                value={channel}
-                onChange={(event) =>
-                  setChannel(event.target.value as MarketingChannel)
-                }
-              >
-                <option value="facebook">Facebook</option>
-                <option value="instagram">Instagram</option>
-                <option value="threads">Threads</option>
-                <option value="slack">Slack</option>
-              </Select>
-            </FieldShell>
-          </div>
-          {previewError && (
-            <Notice tone="danger" title="Draft Composition Error">
-              {previewError}
-            </Notice>
-          )}
-          {preview && (
-            <Card>
-              <div style={cardHeaderRowStyle}>
-                <h4 style={cardTitleStyle}>Draft Preview</h4>
-                <Badge tone="accent">{channel.toUpperCase()}</Badge>
-              </div>
-              <div style={draftBoxStyle}>
-                <pre style={draftTextStyle}>{preview.text}</pre>
-              </div>
-              <Notice tone="warning" title="Publication Guardrail">
-                Draft only — not published. Publishing requires owner approval.
-              </Notice>
-              {preview.citationOmittedReason && (
-                <p style={detailMutedTextStyle}>Citation omitted: {preview.citationOmittedReason}</p>
-              )}
-              {preview.truncated && <Notice tone="neutral">Draft truncated to the channel limit.</Notice>}
-            </Card>
-          )}
-        </PageSection>
         </TabPanel>
         <TabPanel
           idBase="products"
@@ -1277,6 +1239,58 @@ export function ProductCatalogPanel() {
           retain={visitedTabs.has("selling-options")}
         >
           <SellingSection products={products} openSignal={sellingOpenRequest} />
+        </TabPanel>
+        <TabPanel
+          idBase="products"
+          tabId="marketing-draft-preview"
+          active={activeTab === "marketing-draft-preview"}
+          retain={visitedTabs.has("marketing-draft-preview")}
+        >
+          <PageSection
+            title="Marketing draft preview"
+            description="Compose channel-formatted promotional snippets directly from catalog records."
+          >
+            <div style={channelSelectWrapperStyle}>
+              <FieldShell id="marketing-channel" label="Channel">
+                <Select
+                  id="marketing-channel"
+                  aria-label="Marketing channel"
+                  value={channel}
+                  onChange={(event) =>
+                    setChannel(event.target.value as MarketingChannel)
+                  }
+                >
+                  <option value="facebook">Facebook</option>
+                  <option value="instagram">Instagram</option>
+                  <option value="threads">Threads</option>
+                  <option value="slack">Slack</option>
+                </Select>
+              </FieldShell>
+            </div>
+            {previewError && (
+              <Notice tone="danger" title="Draft Composition Error">
+                {previewError}
+              </Notice>
+            )}
+            {preview && (
+              <Card>
+                <div style={cardHeaderRowStyle}>
+                  <h4 style={cardTitleStyle}>Draft Preview</h4>
+                  <Badge tone="accent">{channel.toUpperCase()}</Badge>
+                </div>
+                <div style={draftBoxStyle}>
+                  <pre style={draftTextStyle}>{preview.text}</pre>
+                </div>
+                <Notice tone="warning" title="Publication Guardrail">
+                  Draft only — not published. Publishing requires owner approval.
+                </Notice>
+                {preview.citationOmittedReason && (
+                  <p style={detailMutedTextStyle}>Citation omitted: {preview.citationOmittedReason}</p>
+                )}
+                {preview.truncated && <Notice tone="neutral">Draft truncated to the channel limit.</Notice>}
+              </Card>
+            )}
+          </PageSection>
         </TabPanel>
       </PageShell>
     </div>

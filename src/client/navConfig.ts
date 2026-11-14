@@ -276,7 +276,15 @@ export function isNavItemOrSubItemActive(
       if (getNavGroup(currentTab) === sub.id) return true;
       if (typeof window !== "undefined") {
         const view = new URLSearchParams(window.location.search).get("view");
-        if ((currentTab === "screeners" || currentTab === "stock-hub") && view === sub.id) return true;
+        // Issue #4530: the Product Hub's sub-menu items are views of
+        // the hub tab, like the stock-hub precedent above.
+        if (
+          (currentTab === "screeners" ||
+            currentTab === "stock-hub" ||
+            currentTab === "product-hub") &&
+          view === sub.id
+        )
+          return true;
       }
       return false;
     });

@@ -372,15 +372,15 @@
       }
     },
     {
-      "id": "products",
-      "navGroup": "products",
-      "crumb": "Products",
+      "id": "product-hub",
+      "navGroup": "product-hub",
+      "crumb": "Product Hub",
       "category": "Marketing",
       "icon": "Workflows",
-      "description": "The product catalog as the Phase 2 registry records it, with Phase 3 access parity: listed products, approved prices, and purchase paths",
+      "description": "Product Hub: the product catalog, selling options, product and version configuration, and free-run allowances — one hub",
       "navEntry": {
-        "label": "Products",
-        "shortLabel": "Products",
+        "label": "Product Hub",
+        "shortLabel": "Product Hub",
         "navOrder": 28,
         "defaultVisible": true,
         "badge": "Catalog",
@@ -1043,7 +1043,7 @@
         "description": "Revenue analytics"
       }
     ],
-    "products": [
+    "product-hub": [
       {
         "id": "products",
         "label": "Products",
@@ -1061,36 +1061,25 @@
         "description": "Subscribe through the Billing checkout and see activation plus purchase receipts"
       },
       {
-        "id": "platform-admin:products",
-        "label": "Platform Admin Products",
+        "id": "marketing-draft-preview",
+        "label": "Marketing draft preview",
+        "shortLabel": "Marketing",
+        "icon": "Workflows",
+        "description": "Compose channel-formatted promotional snippets directly from catalog records."
+      },
+      {
+        "id": "admin-products",
+        "label": "Admin Products",
         "shortLabel": "Admin Products",
         "icon": "Billing",
         "description": "Product and version configuration, bulk moves"
       },
       {
-        "id": "billing",
-        "label": "Billing",
-        "shortLabel": "Billing",
-        "icon": "Billing",
-        "badge": "Billing",
-        "badgeType": "neutral",
-        "description": "Your subscription, receipts, plans, and referral-credit balance \u2014 read-only servicing"
-      },
-      {
-        "id": "checkout",
-        "label": "Checkout",
-        "shortLabel": "Checkout",
-        "icon": "Checkout",
-        "description": "Checkout"
-      },
-      {
-        "id": "payments",
-        "label": "Payments",
-        "shortLabel": "Payments",
-        "icon": "Payments",
-        "badge": "x402",
-        "badgeType": "neutral",
-        "description": "Payments"
+        "id": "free-runs",
+        "label": "Free Runs",
+        "shortLabel": "Free Runs",
+        "icon": "Runs",
+        "description": "Free-run allowance per product, per month"
       }
     ],
     "payments": [
@@ -1159,9 +1148,25 @@
       "tab": "stock-hub",
       "view": "new-screen"
     },
-    "products:selling-options": {
-      "tab": "products",
+    "product-hub:products": {
+      "tab": "product-hub",
+      "view": "products"
+    },
+    "product-hub:selling-options": {
+      "tab": "product-hub",
       "view": "selling-options"
+    },
+    "product-hub:marketing-draft-preview": {
+      "tab": "product-hub",
+      "view": "marketing-draft-preview"
+    },
+    "product-hub:admin-products": {
+      "tab": "product-hub",
+      "view": "admin-products"
+    },
+    "product-hub:free-runs": {
+      "tab": "product-hub",
+      "view": "free-runs"
     },
     "stock-hub:screeners": {
       "tab": "stock-hub",
