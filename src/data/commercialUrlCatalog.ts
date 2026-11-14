@@ -81,6 +81,15 @@ export const COMMERCIAL_ROUTES: CommercialRoute[] = [
   route("plans", ["GET", "POST"], "/plans"),
   route("plansApprove", ["POST"], "/plans/approve"),
   route("plansDeactivate", ["POST"], "/plans/deactivate"),
+  // Issue #2781 (Monetization Phase 2.15): product bundles mirror plans —
+  // same catalog rule, no literal survives. The bundle routes were written
+  // before this catalog landed; they are catalogued here so the handler
+  // matches through COMMERCIAL_ROUTE_SUFFIXES, never a literal path.
+  route("bundles", ["GET", "POST"], "/bundles"),
+  route("bundlesApprove", ["POST"], "/bundles/approve"),
+  route("bundlesDeactivate", ["POST"], "/bundles/deactivate"),
+  route("bundleCheckout", ["POST"], "/subscription/bundle-checkout"),
+  route("bundlePurchase", ["POST"], "/subscription/bundle-purchase"),
   route("subscriptionCheckout", ["POST"], "/subscription/checkout"),
   route("subscriptionPurchase", ["POST"], "/subscription/purchase"),
   route("topUpCheckout", ["POST"], "/top-up/checkout"),
