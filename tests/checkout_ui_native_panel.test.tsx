@@ -360,7 +360,9 @@ describe("checkout panel cancel-action UI (#2669)", () => {
     expect(text).toContain("Billing (Stripe)");
     expect(text).toContain("Native");
     expect(text).toContain("Provider-managed (Billing) subscriptions are purchased from the Products catalog");
-    const link = container.querySelector('a[href="?tab=products"]');
+    // Issue #4530 — the catalog link points at the Product Hub's Products
+    // tab (the standalone ?tab=products address retired and redirects).
+    const link = container.querySelector('a[href="?tab=product-hub&view=products"]');
     expect(link).not.toBeNull();
     expect(link?.textContent).toContain("Products catalog");
   });
