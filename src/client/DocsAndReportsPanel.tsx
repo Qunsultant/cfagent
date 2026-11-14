@@ -303,9 +303,27 @@ export function DocsAndReportsPanel() {
         header: <SortHeader label={SORT_LABELS.runId} sortKey="runId" sort={sort} onSort={handleSort} />,
         ariaSort: ariaSort("runId"),
         render: (row) => (
-          <code className="docs-run-id" title={row.runId}>
-            {row.runId}
-          </code>
+          <div>
+            <code className="docs-run-id" title={row.runId}>
+              {row.runId}
+            </code>
+            {/* Issue #4423 — a retried chain is ONE Docs row by design (the
+                retry is idempotent with the original), so the row itself says
+                a retry happened: how many shards were retries, and how many
+                failed attempts the chain persisted. Absent record = no
+                marker, never an invented "0 retries". */}
+            {row.retry && row.retry.retriedShards > 0 ? (
+              <div>
+                <Badge
+                  size="sm"
+                  tone="info"
+                  title={`Retried ${row.retry.retriedShards} shard(s); ${row.retry.attempts} failed attempt(s) recorded`}
+                >
+                  {`Retry ×${row.retry.retriedShards}`}
+                </Badge>
+              </div>
+            ) : null}
+          </div>
         ),
       },
       {

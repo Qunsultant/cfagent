@@ -44,6 +44,13 @@ export interface DocumentRow {
   csvUrl: string | null;
   pdfStatus: string | null;
   pdfError: string | null;
+  /**
+   * Issue #4423 — the chain's retry lineage as the run recorded it: how many
+   * shard rows are retries and how many failed attempts the chain persisted.
+   * Null when the store records none, so "no retry" and "not recorded" stay
+   * distinguishable on the row.
+   */
+  retry: { retriedShards: number; attempts: number } | null;
   /** Issue #2088: recorded leg failure state, when the run records it. */
   xlsxStatus: string | null;
   xlsxError: string | null;
@@ -125,7 +132,7 @@ export function documentRunType(
 export function toDocumentRows(
   runs: Pick<
     RunSummary,
-    "id" | "runId" | "createdAt" | "trigger" | "kind" | "source" | "runSource" | "title" | "status" | "reportUrl" | "xlsxUrl" | "csvUrl" | "xlsxStatus" | "xlsxError" | "csvStatus" | "csvError" | "pdfStatus" | "pdfError"
+    "id" | "runId" | "createdAt" | "trigger" | "kind" | "source" | "runSource" | "title" | "status" | "reportUrl" | "xlsxUrl" | "csvUrl" | "xlsxStatus" | "xlsxError" | "csvStatus" | "csvError" | "pdfStatus" | "pdfError" | "retry"
   >[],
 ): DocumentRow[] {
   const rows: DocumentRow[] = [];
@@ -142,6 +149,7 @@ export function toDocumentRows(
       runSource,
       title: String(run.title ?? ""),
       status: run.status ?? null,
+      retry: run.retry ?? null,
       pdfUrl: run.reportUrl ?? null,
       pdfStatus: run.pdfStatus ?? null,
       pdfError: run.pdfError ?? null,

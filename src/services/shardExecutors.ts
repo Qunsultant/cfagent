@@ -835,7 +835,15 @@ async function storeFormat(
     }
     throw new Error(`Store shard ${format} blocked: blob ${key} is not readable.`);
   }
-  const provenance = shardProvenanceIds(chainRows(deps, chain.chainId));
+  // Issue #4423: the chain's retry lineage rides into the report body, so the
+  // Docs row can say a retry happened. Read from the chain rows the store
+  // shard already reads — a retry row names what it repeated (#4421), and the
+  // attempt history is the one #4417 persisted. Nothing is recomputed from a
+  // clock or inferred from a timestamp.
+  const formatRows = chainRows(deps, chain.chainId);
+  const provenance = shardProvenanceIds(formatRows);
+  const retriedShards = formatRows.filter((row) => row.retryOf).length;
+  const shardAttempts = formatRows.reduce((total, row) => total + row.attempts, 0);
   const row = deps.orm.storeCanonicalReport({
     runId: `${chain.screenType === "options" ? "options" : "screener"}:${chain.chainId}`,
     generationId: `${chain.screenType === "options" ? "options" : "screener"}:${chain.chainId}:${format}`,
@@ -846,7 +854,18 @@ async function storeFormat(
     summary: chain.screenType === "options"
       ? `Sharded options screen: ${chain.options?.thesis ?? "bullish"}, ${format} report, ${provenance.length} shards.`
       : `Sharded screen: ${chain.universe}, ${format} report, ${provenance.length} shards.`,
-    body: { format, key, fileName, universe: chain.universe, thesis: chain.options?.thesis, chainId: chain.chainId, shardIds: provenance, trigger: chain.trigger ?? "scheduled" },
+    body: {
+      format,
+      key,
+      fileName,
+      universe: chain.universe,
+      thesis: chain.options?.thesis,
+      chainId: chain.chainId,
+      shardIds: provenance,
+      trigger: chain.trigger ?? "scheduled",
+      retriedShards,
+      shardAttempts,
+    },
     createdAt: chain.timestamp,
     userLogin: chain.userLogin,
   },

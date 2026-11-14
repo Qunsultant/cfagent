@@ -90,6 +90,12 @@ export interface ShardRow {
   error?: string;
   createdAt: string;
   parentJobId?: string;
+  /** Issue #4423 — the job this row retried, read from the payload the retry
+   *  paths stamp. Absent on an original attempt, never inferred. */
+  retryOf?: string;
+  /** Issue #4423 — how many failed attempts the row persisted (#4417), so the
+   *  chain's report row can say a retry happened without re-reading jobs. */
+  attempts: number;
 }
 
 /**
@@ -627,6 +633,48 @@ export function planShardAdvance(input: {
  * The row->ShardRow projection (shard-key + result parsing,
  * corrupt-tolerant) stays here: it is planner domain logic.
  */
+/**
+ * Issue #4423 — how many failed attempts each chain row persisted (#4417), by
+ * job id. Tolerant by construction: a store without the column (pre-#4417
+ * migration) or a malformed history contributes nothing.
+ */
+function attemptsByJobFor(
+  sql: { exec: (query: string, ...params: unknown[]) => Iterable<Record<string, unknown>> },
+  chainId: string,
+  sessionId: string,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = Array.from(
+      sql.exec(
+        "SELECT job_id, attempts_json FROM mas_async_jobs WHERE chain_id = ? AND session_id = ?",
+        chainId,
+        sessionId,
+      ),
+    );
+  } catch {
+    return counts;
+  }
+  for (const row of rows) {
+    const jobId = String(row.job_id ?? "");
+    if (!jobId) continue;
+    counts.set(jobId, attemptsRecorded(row.attempts_json));
+  }
+  return counts;
+}
+
+/** A malformed or absent history reads 0 recorded attempts, never a guess. */
+function attemptsRecorded(attemptsJson: unknown): number {
+  if (typeof attemptsJson !== "string" || !attemptsJson) return 0;
+  try {
+    const parsed = JSON.parse(attemptsJson);
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function chainRowsFromSql(
   sql: {
     exec: (query: string, ...params: unknown[]) => Iterable<Record<string, unknown>>;
@@ -636,13 +684,22 @@ export function chainRowsFromSql(
 ): ShardRow[] {
   const out: ShardRow[] = [];
   const rows = createAsyncJobPorts(sql as never).read.chainRows(chainId, sessionId) as unknown as Array<Record<string, unknown>>;
+  // Issue #4423 — the retry history is read SEPARATELY and tolerantly: the
+  // attempts column arrived after the base table (#4417), so a store that has
+  // not been migrated yet answers "no such column" rather than failing the
+  // whole chain read. An unreadable history is 0 recorded attempts, and the
+  // report body then records no retry — it never claims one it cannot see.
+  const attemptsByJob = attemptsByJobFor(sql, chainId, sessionId);
   for (const row of rows) {
     let shardKey: string | undefined;
+    let retryOf: string | undefined;
     try {
       const parsed = JSON.parse(String(row.payload_json ?? "{}")) as {
         shard?: { key?: unknown };
+        retryOf?: unknown;
       };
       if (typeof parsed?.shard?.key === "string") shardKey = parsed.shard.key;
+      if (typeof parsed?.retryOf === "string" && parsed.retryOf) retryOf = parsed.retryOf;
     } catch {
       shardKey = undefined;
     }
@@ -666,6 +723,8 @@ export function chainRowsFromSql(
         typeof row.parent_job_id === "string" && row.parent_job_id
           ? row.parent_job_id
           : undefined,
+      ...(retryOf ? { retryOf } : {}),
+      attempts: attemptsByJob.get(String(row.job_id)) ?? 0,
     });
   }
   return out;

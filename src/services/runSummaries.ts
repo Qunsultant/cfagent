@@ -82,6 +82,14 @@ export interface RunSummary {
    *  (canonical rows: the qualification, when present, rides in the
    *  summary text instead). */
   partial?: OptionsPartialQualification | null;
+  /**
+   * Issue #4423 — the chain's retry lineage as its canonical row recorded it:
+   * how many shard rows are retries (`retryOf`) and how many failed attempts
+   * the chain persisted (#4417). Null when the body records none (a non-chain
+   * row, or one written before the fields existed) — never 0-by-default, so
+   * "no retry" and "not recorded" stay distinguishable.
+   */
+  retry?: { retriedShards: number; attempts: number } | null;
   pdfKey: string | null;
   reportUrl: string | null;
   /** Issue #1335: stored XLSX / CSV artifact keys + download urls, when
@@ -286,6 +294,12 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
             (statusFromResultStatus(body?.result?.status) ??
             statusFromResultStatus(body?.report?.result?.status)),
     resultCount,
+    retry: (() => {
+      const retried = numOrNull(body?.retriedShards);
+      const attempts = numOrNull(body?.shardAttempts);
+      if (retried === null && attempts === null) return null;
+      return { retriedShards: retried ?? 0, attempts: attempts ?? 0 };
+    })(),
     pdfKey: strOrNull(body?.pdfKey) ?? strOrNull(body?.report?.result?.pdfKey),
     reportUrl: scheduledReportPdfUrl(hit.source, hit.body) ?? null,
     xlsxKey: strOrNull(body?.xlsxKey) ?? strOrNull(body?.report?.result?.xlsxKey),
