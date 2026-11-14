@@ -305,34 +305,46 @@ export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: Stoc
       description="Thresholds the next run filters on. A criterion left Off is omitted from the run request without clearing its value. All seven fields are applied by the screen's filter stage on both providers."
     >
     <Card>
-      {numericRow("minRsi", "Min RSI", "0–100; stocks below this RSI-14 are rejected.", { min: "0", max: "100" })}
-      {numericRow("maxRsi", "Max RSI", "0–100; stocks above this RSI-14 are rejected.", { min: "0", max: "100" })}
-      {numericRow("minVolume", "Min daily volume", "Shares; stocks below this volume are rejected.", { min: "0" })}
-      {numericRow("minMarketCapB", "Min market cap", "Billions of dollars; converted to dollars when sent.", { min: "0", step: "0.5" })}
-      {numericRow("maxPeRatio", "Max P/E", "Stocks above this P/E, or with no P/E, are rejected.", { min: "0", step: "0.1" })}
-      {selectRow("rsiFilter", "RSI band", "Oversold < 35, overbought > 70, neutral 35–70.", [
-        { value: "any", label: "Any" },
-        { value: "oversold", label: "Oversold (RSI < 35)" },
-        { value: "overbought", label: "Overbought (RSI > 70)" },
-        { value: "neutral", label: "Neutral (RSI 35–70)" },
-      ])}
-      {selectRow("momentum", "Momentum", "Breakout, pullback, or high-relative-volume pattern.", [
-        { value: "any", label: "Any" },
-        { value: "bullish_breakout", label: "Bullish breakout" },
-        { value: "bearish_pullback", label: "Bearish pullback" },
-        { value: "high_relative_volume", label: "High relative volume" },
-      ])}
+      {/*
+        Issue #2886 (S8, D3 2026-11-13): the seven criteria fields sit
+        in ONE row — a single no-wrap Flex row, one field per cell —
+        instead of seven stacked rows. The row does not wrap: on a
+        narrow viewport the fields compress rather than re-stacking.
+      */}
+      <Flex gap="2">
+        {numericRow("minRsi", "Min RSI", "0–100; stocks below this RSI-14 are rejected.", { min: "0", max: "100" })}
+        {numericRow("maxRsi", "Max RSI", "0–100; stocks above this RSI-14 are rejected.", { min: "0", max: "100" })}
+        {numericRow("minVolume", "Min daily volume", "Shares; stocks below this volume are rejected.", { min: "0" })}
+        {numericRow("minMarketCapB", "Min market cap", "Billions of dollars; converted to dollars when sent.", { min: "0", step: "0.5" })}
+        {numericRow("maxPeRatio", "Max P/E", "Stocks above this P/E, or with no P/E, are rejected.", { min: "0", step: "0.1" })}
+        {selectRow("rsiFilter", "RSI band", "Oversold < 35, overbought > 70, neutral 35–70.", [
+          { value: "any", label: "Any" },
+          { value: "oversold", label: "Oversold (RSI < 35)" },
+          { value: "overbought", label: "Overbought (RSI > 70)" },
+          { value: "neutral", label: "Neutral (RSI 35–70)" },
+        ])}
+        {selectRow("momentum", "Momentum", "Breakout, pullback, or high-relative-volume pattern.", [
+          { value: "any", label: "Any" },
+          { value: "bullish_breakout", label: "Bullish breakout" },
+          { value: "bearish_pullback", label: "Bearish pullback" },
+          { value: "high_relative_volume", label: "High relative volume" },
+        ])}
+      </Flex>
       <h4>Last run&apos;s criteria</h4>
       {lastSentFilters === null ? (
         <EmptyState title="No run yet — the criteria above apply to the next run." />
       ) : (
-        <ul>
+        // Issue #2886 (S8): the last run's criteria sit in the same
+        // one-row presentation as the fields above — one Flex row, one
+        // cell per criterion, same label/value text as the old list —
+        // not a bullet list.
+        <Flex gap="2">
           {viewRows.map((row) => (
-            <li key={row.key}>
+            <span key={row.key}>
               {row.label}: {sentDisplay(row.key, lastSentFilters)}
-            </li>
+            </span>
           ))}
-        </ul>
+        </Flex>
       )}
     </Card>
     </PageSection>

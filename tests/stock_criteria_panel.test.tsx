@@ -194,3 +194,56 @@ describe("Issue #1496 — StockCriteriaPanel", () => {
     expect(src).toContain("lastSentStockFilters");
   });
 });
+
+describe("Issue #2886 (S8) — one row of seven; last run's criteria in one row", () => {
+  it("all seven criterion fields sit in one row (D3)", () => {
+    const el = renderPanel(defaultStockCriteria);
+    // Each field's own row is a .ui-flex; all seven share ONE parent
+    // row element — the panel never stacks them vertically.
+    const fieldRows = [
+      "stock-criteria-minRsi",
+      "stock-criteria-maxRsi",
+      "stock-criteria-minVolume",
+      "stock-criteria-minMarketCapB",
+      "stock-criteria-maxPeRatio",
+      "stock-criteria-rsiFilter",
+      "stock-criteria-momentum",
+    ].map((id) => el.querySelector(`#${id}`)?.closest(".ui-flex"));
+    for (const row of fieldRows) expect(row).not.toBeNull();
+    const parents = new Set(fieldRows.map((row) => row!.parentElement));
+    expect(parents.size).toBe(1);
+    // The shared parent is itself a no-wrap flex row, not a grid.
+    const parent = [...parents][0]!;
+    expect(parent.classList.contains("ui-flex")).toBe(true);
+    expect(parent.classList.contains("wrap")).toBe(false);
+  });
+
+  it("last run's criteria sit in one row, not a bullet list", () => {
+    const el = renderPanel(defaultStockCriteria, { minRsi: 30, maxRsi: 70 });
+    expect(el.querySelector("ul")).toBeNull();
+    // Each cell carries the same "Label: value" text the old list
+    // item showed; all seven cells share ONE parent row element.
+    const cells = [
+      "Min RSI",
+      "Max RSI",
+      "Min daily volume",
+      "Min market cap",
+      "Max P/E",
+      "RSI band",
+      "Momentum",
+    ].map((label) =>
+      [...el.querySelectorAll("span")].find((s) =>
+        (s.textContent ?? "").startsWith(`${label}:`)
+      )
+    );
+    for (const cell of cells) expect(cell).not.toBeUndefined();
+    const parents = new Set(cells.map((cell) => cell!.parentElement));
+    expect(parents.size).toBe(1);
+    const parent = [...parents][0]!;
+    expect(parent.classList.contains("ui-flex")).toBe(true);
+    expect(parent.classList.contains("wrap")).toBe(false);
+    expect(el.textContent).toContain("30");
+    expect(el.textContent).toContain("70");
+    expect(el.textContent).toContain("Not set");
+  });
+});
