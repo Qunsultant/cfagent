@@ -114,6 +114,7 @@ jobs:
           jq -e '.label and .sweepLimit and (.gatingWorkflows | length > 0)' <<<"$config" >/dev/null \
             || { echo "::error::$CONFIG_PATH is missing label, sweepLimit or gatingWorkflows"; exit 1; }
           echo "label=$(jq -r '.label' <<<"$config")" >> "$GITHUB_OUTPUT"
+          echo "excluded=$(jq -c '.excludedAuthors // []' <<<"$config")" >> "$GITHUB_OUTPUT"
 
       - name: Label the PR (lane from the body hashtag)
         env:
@@ -121,8 +122,14 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BODY: ${{ github.event.pull_request.body }}
           LABEL: ${{ steps.config.outputs.label }}
+          EXCLUDED: ${{ steps.config.outputs.excluded }}
+          AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
+          if [ "$(jq -rn --arg a "$AUTHOR_LOGIN" --argjson ex "$EXCLUDED" '$ex | index($a) != null')" = "true" ]; then
+            echo "PR #$PR_NUMBER is authored by $AUTHOR_LOGIN (excluded by config) — not labelling it for automation."
+            exit 0
+          fi
           LANE_LABEL=""
           AGENT_TAG=$(echo "$PR_BODY" | grep -i -o -E '#[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9]+' | head -n 1 || true)
           if [ -n "$AGENT_TAG" ]; then
@@ -159,6 +166,7 @@ jobs:
             || { echo "::error::$CONFIG_PATH is missing label, sweepLimit or gatingWorkflows"; exit 1; }
           echo "label=$(jq -r '.label' <<<"$config")" >> "$GITHUB_OUTPUT"
           echo "limit=$(jq -r '.sweepLimit' <<<"$config")" >> "$GITHUB_OUTPUT"
+          echo "excluded=$(jq -c '.excludedAuthors // []' <<<"$config")" >> "$GITHUB_OUTPUT"
 
       - name: Create short-lived GitHub App token (queue API scope)
         id: app-token
@@ -179,6 +187,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           LABEL: ${{ steps.config.outputs.label }}
           SWEEP_LIMIT: ${{ steps.config.outputs.limit }}
+          EXCLUDED: ${{ steps.config.outputs.excluded }}
         run: |
           set -euo pipefail
           FAILED=0
@@ -272,7 +281,12 @@ jobs:
 
           if [ "$EVENT_NAME" = "pull_request" ]; then
             # One PR, resolved from the event payload — no head-branch lookup.
-            PR_JSON=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json number,id,isDraft,labels)
+            PR_JSON=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json number,id,isDraft,labels,author)
+            AUTHOR=$(echo "$PR_JSON" | jq -r '.author.login // ""')
+            if [ "$(jq -rn --arg a "$AUTHOR" --argjson ex "$EXCLUDED" '$ex | index($a) != null')" = "true" ]; then
+              echo "PR #$PR_NUMBER is authored by $AUTHOR (excluded by config) — never enrolled."
+              exit 0
+            fi
             # Enrollment is label-gated on every path. On `opened` the label job
             # may still be adding it, in which case the next sweep enrolls.
             LABELED=$(echo "$PR_JSON" | jq -r --arg l "$LABEL" '[.labels[]?.name] | index($l) != null')
@@ -292,13 +306,20 @@ jobs:
             # The label is the opt-in gate: this workflow only labels same-repo
             # PRs, and a maintainer who labels another one has opted it in.
             gh pr list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit "$SWEEP_LIMIT" \
-              --json number,id,isDraft > prs.json
+              --json number,id,isDraft,author > prs.json
             count=$(jq 'length' prs.json)
             echo "Sweep: $count open $LABEL PR(s)."
             # Process substitution, not a pipe: a pipe would run the loop in a
             # subshell and lose FAILED from the enroll calls.
             while read -r pr; do
               number=$(echo "$pr" | jq -r '.number')
+              author=$(echo "$pr" | jq -r '.author.login // ""')
+              # Owner rule (2026-11-14): Dependabot PRs are never auto-merged;
+              # the excluded list lives in config/auto-merge.json.
+              if [ "$(echo "$pr" | jq -r --argjson ex "$EXCLUDED" '[(.author.login // ""), (.author.name // "")] | any(. as $a | ($ex | index($a)) != null)')" = "true" ]; then
+                echo "PR #$number is authored by $author (excluded by config) — never enrolled."
+                continue
+              fi
               draft=$(echo "$pr" | jq -r '.isDraft')
               if [ "$draft" = "true" ]; then
                 echo "PR #$number is a draft — the ready half flips it when green."

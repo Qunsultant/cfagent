@@ -46,6 +46,7 @@ const config = JSON.parse(read("config/auto-merge.json")) as {
   label: string;
   sweepLimit: number;
   gatingWorkflows: string[];
+  excludedAuthors: string[];
 };
 
 const GATING = [
@@ -158,6 +159,22 @@ describe("4346-P01 the chain is described as implemented", () => {
   });
 });
 
+describe("EXCL-P01 excluded authors (Dependabot) are never automated", () => {
+  it("skips the excluded accounts on every path, including the label job", () => {
+    // Owner rule, 2026-11-14: Dependabot PRs need a human decision. They are
+    // not labelled for automation, not flipped ready, and not enrolled.
+    expect(config.excludedAuthors).toContain("app/dependabot");
+    for (const workflow of [enrollWorkflow, readyWorkflow]) {
+      expect(workflow).toContain("excludedAuthors");
+      expect(workflow).toContain("EXCLUDED: ${{ steps.config.outputs.excluded }}");
+      expect(workflow).toContain('--argjson ex "$EXCLUDED"');
+    }
+    expect(enrollWorkflow).toContain("AUTHOR_LOGIN");
+    expect(enrollWorkflow).toContain("(excluded by config) — never enrolled.");
+    expect(enrollWorkflow).toContain("--json number,id,isDraft,author");
+    expect(readyWorkflow).toContain("--json number,isDraft,headRefOid,author");
+  });
+});
 describe("CFG-P01 one source for the label, the gating set and the limit", () => {
   it("is a valid config both workflows read", () => {
     expect(config.label).toBe("auto-merge");
