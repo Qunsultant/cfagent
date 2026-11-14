@@ -11,6 +11,11 @@ import type { TradeRecord } from "../types";
  * broker tabs never show a blank broker. Display names always come
  * from the one broker presentation helper — this module holds no
  * broker names of its own.
+ *
+ * Mode: a row carries the live/paper mode it was previewed under.
+ * Rows recorded before that stamp carry no mode; those stay unknown
+ * ("—") — the mode is never guessed from the current selection, and
+ * sorting keeps unknown rows last in both directions.
  */
 
 /** The broker id for a stored row that carries none (see module note). */
@@ -24,6 +29,21 @@ export function ledgerBrokerId(order: TradeRecord): string {
 /** The display name for a row's broker. */
 export function ledgerBrokerLabel(order: TradeRecord): string {
   return brokerDisplayName(ledgerBrokerId(order));
+}
+
+/** The recorded trade mode, or null when the row predates the stamp. */
+export function ledgerMode(order: TradeRecord): "live" | "paper" | null {
+  return order.mode === "live" || order.mode === "paper" ? order.mode : null;
+}
+
+/**
+ * The mode cell: "Live" or "Paper" for a stamped row, "—" when the
+ * row carries no mode. A missing mode is shown as unknown, never
+ * guessed from the current selection.
+ */
+export function ledgerModeLabel(order: TradeRecord): string {
+  const mode = ledgerMode(order);
+  return mode === null ? "—" : mode === "live" ? "Live" : "Paper";
 }
 
 /** One per-broker tab: the broker id plus its display name. */
@@ -54,6 +74,7 @@ export type LedgerSortKey =
   | "totalValue"
   | "status"
   | "broker"
+  | "mode"
   | "orderRef"
   | "proposerDid"
   | "createdAt";
@@ -82,6 +103,7 @@ const SORT_DEFAULT_DIRECTION: Record<LedgerSortKey, LedgerSortDirection> = {
   totalValue: "desc",
   status: "asc",
   broker: "asc",
+  mode: "asc",
   orderRef: "asc",
   proposerDid: "asc",
   createdAt: "desc",
@@ -111,6 +133,8 @@ function ledgerSortValue(order: TradeRecord, key: LedgerSortKey): SortValue {
     }
     case "broker":
       return ledgerBrokerLabel(order);
+    case "mode":
+      return ledgerMode(order);
     case "orderRef":
       return order.orderRef || null;
     default:

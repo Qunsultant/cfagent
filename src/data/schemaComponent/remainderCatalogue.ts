@@ -483,6 +483,14 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.orm.mas_trades.alter_table_add_column_mode",
+    plane: "orm",
+    table: "mas_trades",
+    statement: `ALTER TABLE mas_trades ADD COLUMN mode TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.stock_copilot_activity.alter_table_add_column_critic_verdict_json",
     plane: "do",
     table: "stock_copilot_activity",

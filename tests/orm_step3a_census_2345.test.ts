@@ -59,7 +59,9 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // PRAGMA-guarded ALTER (PRAGMA table_info check + ALTER).
   // 17 since #3782 added the mas_trades price_source column's
   // PRAGMA-guarded ALTER (same precedent: check + ALTER).
-  ["src/data/ormFacade.ts", 17],
+  // 19 since #4532 added the mas_trades mode column's
+  // PRAGMA-guarded ALTER (same precedent: check + ALTER).
+  ["src/data/ormFacade.ts", 19],
   // 4 at 3a; 5 since #4412 added the mas_promotions index exec
   // (sql.exec(MAS_PROMOTIONS_INDEX_DDL) in ensurePromotionsIndex());
   // 8 since #3182 added the mas_transactions tenant column's

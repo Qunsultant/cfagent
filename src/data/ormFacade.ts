@@ -304,8 +304,8 @@ export class DatabaseORM {
     // guard the ALTER with a PRAGMA check — the #308 generation_id
     // precedent: an unguarded DDL change throws on every schema init
     // for tables that predate it.
-    // #4282 P3: the two guarded reconciliations (broker,
-    // price_source) ride the remainder catalogue.
+    // #4282 P3: the three guarded reconciliations (broker,
+    // price_source, mode) ride the remainder catalogue.
     {
       const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
       if (!cols.some((c) => c.name === "broker")) {
@@ -320,6 +320,17 @@ export class DatabaseORM {
       const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
       if (!cols.some((c) => c.name === "price_source")) {
         this.sql.exec(remainderAlterSql("mas_trades", "price_source"));
+      }
+    }
+
+    // Issue #4532 (slice 2): live/paper mode on stored drafts,
+    // stamped at preview time from the resolved trading environment.
+    // Same guarded-ALTER precedent as broker above — pre-existing
+    // tables lack the column, and legacy rows keep NULL.
+    {
+      const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
+      if (!cols.some((c) => c.name === "mode")) {
+        this.sql.exec(remainderAlterSql("mas_trades", "mode"));
       }
     }
 

@@ -110,7 +110,7 @@ const ORM_STATEMENT_SHA256: Record<string, string> = {
   "schema.orm.webhook_replay_nonces.create_table":
     "6c097641c5a146633087861629801f82c6dea5e8f2bb80eb6f8db5988f14663a",
   "schema.orm.mas_trades.create_table":
-    "d0be11fa5cf5c95b1d0ce0ed0379bf2c8bcbac22203fb62011e9b2f50f7fc0b9",
+    "815001c97cc3220831489978c6c28e604645427f4dd36cd6602dc9e73155f497",
   "schema.orm.mas_options_chain_cache.create_table":
     "564070bddebdf12b90ef3a0401524f3ec234f83177e17e1cdafbc15a1d32e359",
   "schema.index.cf_agents_jobs.create_index_idx_cf_agents_jobs_time":
@@ -273,7 +273,7 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
         sql.slice(0, 60),
       ).toBe(true);
     }
-    // #4282 P3: the 2 guarded mas_trades reconciliations moved to the
+    // #4282 P3: the 3 guarded mas_trades reconciliations moved to the
     // remainder catalogue (they are no longer inline — they resolve
     // through remainderAlterSql). The only ALTERs initializeSchema
     // still executes inline are the 11 mas_reports reconciliation
@@ -297,6 +297,7 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
     expect(masTradesCatalogue).toEqual([
       "ALTER TABLE mas_trades ADD COLUMN broker TEXT",
       "ALTER TABLE mas_trades ADD COLUMN price_source TEXT",
+      "ALTER TABLE mas_trades ADD COLUMN mode TEXT",
     ]);
     expect(masReportsInline).toHaveLength(11);
     expect(inlineAlters).toHaveLength(11);

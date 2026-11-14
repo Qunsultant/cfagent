@@ -26,6 +26,8 @@ import {
   ledgerBrokerId,
   ledgerBrokerLabel,
   ledgerBrokerTabs,
+  ledgerMode,
+  ledgerModeLabel,
   nextLedgerSort,
   sortLedgerRows,
 } from "../src/client/ledgerTable";
@@ -90,6 +92,23 @@ describe("ledgerBrokerId / ledgerBrokerLabel / ledgerBrokerTabs", () => {
   });
 });
 
+// --- pure mode resolution ----------------------------------------------------
+
+describe("ledgerMode / ledgerModeLabel", () => {
+  it("returns the recorded mode, and labels it Live or Paper", () => {
+    expect(ledgerMode(order({ mode: "live" }))).toBe("live");
+    expect(ledgerModeLabel(order({ mode: "live" }))).toBe("Live");
+    expect(ledgerMode(order({ mode: "paper" }))).toBe("paper");
+    expect(ledgerModeLabel(order({ mode: "paper" }))).toBe("Paper");
+  });
+
+  it("treats a row with no recorded mode as unknown, never guessed", () => {
+    expect(ledgerMode(order({ mode: undefined }))).toBeNull();
+    expect(ledgerModeLabel(order({ mode: undefined }))).toBe("—");
+    expect(ledgerMode(order({}))).toBeNull();
+  });
+});
+
 // --- pure sorting ------------------------------------------------------------
 
 describe("sortLedgerRows", () => {
@@ -105,8 +124,8 @@ describe("sortLedgerRows", () => {
 
   it("sorts every data column in both directions", () => {
     const rows = [
-      order({ id: "b", symbol: "MSFT", action: "SELL", quantity: 5, price: 200, totalValue: 1000, status: "submitted", broker: "etrade", orderRef: "ref-b", proposerDid: "did:agent:openaimp:zebra", createdAt: "2026-11-13T10:00:00.000Z" }),
-      order({ id: "a", symbol: "AAPL", action: "BUY", quantity: 20, price: 100, totalValue: 2000, status: "executed", broker: "alpaca", orderRef: "ref-a", proposerDid: "did:agent:openaimp:apple", createdAt: "2026-11-14T10:00:00.000Z" }),
+      order({ id: "b", symbol: "MSFT", action: "SELL", quantity: 5, price: 200, totalValue: 1000, status: "submitted", broker: "etrade", mode: "paper", orderRef: "ref-b", proposerDid: "did:agent:openaimp:zebra", createdAt: "2026-11-13T10:00:00.000Z" }),
+      order({ id: "a", symbol: "AAPL", action: "BUY", quantity: 20, price: 100, totalValue: 2000, status: "executed", broker: "alpaca", mode: "live", orderRef: "ref-a", proposerDid: "did:agent:openaimp:apple", createdAt: "2026-11-14T10:00:00.000Z" }),
     ];
     const by = (key: Parameters<typeof sortLedgerRows>[1]["key"], dir: "asc" | "desc") =>
       sortLedgerRows(rows, { key, dir }).map((r) => r.id);
@@ -127,6 +146,9 @@ describe("sortLedgerRows", () => {
     // Broker sorts by display label: Alpaca before E*TRADE.
     expect(by("broker", "asc")).toEqual(["a", "b"]);
     expect(by("broker", "desc")).toEqual(["b", "a"]);
+    // Mode sorts Live before Paper ascending.
+    expect(by("mode", "asc")).toEqual(["a", "b"]);
+    expect(by("mode", "desc")).toEqual(["b", "a"]);
     expect(by("orderRef", "asc")).toEqual(["a", "b"]);
     expect(by("orderRef", "desc")).toEqual(["b", "a"]);
     expect(by("proposerDid", "asc")).toEqual(["a", "b"]);
@@ -173,6 +195,18 @@ describe("sortLedgerRows", () => {
       "good-date",
       "bad-date",
     ]);
+    const noMode = [
+      order({ id: "no-mode", mode: undefined }),
+      order({ id: "has-mode", mode: "live" }),
+    ];
+    expect(sortLedgerRows(noMode, { key: "mode", dir: "asc" }).map((r) => r.id)).toEqual([
+      "has-mode",
+      "no-mode",
+    ]);
+    expect(sortLedgerRows(noMode, { key: "mode", dir: "desc" }).map((r) => r.id)).toEqual([
+      "has-mode",
+      "no-mode",
+    ]);
   });
 
   it("breaks ties deterministically: newest first, then row id descending", () => {
@@ -190,6 +224,7 @@ describe("sortLedgerRows", () => {
     expect(nextLedgerSort({ key: "symbol", dir: "asc" }, "price")).toEqual({ key: "price", dir: "desc" });
     expect(nextLedgerSort({ key: "symbol", dir: "asc" }, "quantity")).toEqual({ key: "quantity", dir: "desc" });
     expect(nextLedgerSort({ key: "symbol", dir: "asc" }, "broker")).toEqual({ key: "broker", dir: "asc" });
+    expect(nextLedgerSort({ key: "symbol", dir: "asc" }, "mode")).toEqual({ key: "mode", dir: "asc" });
     expect(nextLedgerSort({ key: "symbol", dir: "asc" }, "createdAt")).toEqual({ key: "createdAt", dir: "desc" });
   });
 });
@@ -391,6 +426,36 @@ describe("LedgerPanel sorting", () => {
     expect(setRiskSubject).toHaveBeenCalledWith(
       expect.objectContaining({ title: "BUY 5x MSFT", underlyingSymbol: "MSFT" }),
     );
+  });
+});
+
+describe("LedgerPanel mode column", () => {
+  const rows = [
+    order({ id: "ord-paper", symbol: "MSFT", broker: "alpaca", mode: "paper", createdAt: "2026-11-14T10:00:00.000Z" }),
+    order({ id: "ord-live", symbol: "AAPL", broker: "etrade", mode: "live", createdAt: "2026-11-13T10:00:00.000Z" }),
+    order({ id: "ord-legacy", symbol: "TSLA", broker: undefined, mode: undefined, createdAt: "2026-11-12T10:00:00.000Z" }),
+  ];
+
+  const modeCells = () =>
+    [...container.querySelectorAll("tbody tr")].map((tr) => (tr.children[8]?.textContent ?? "").trim());
+
+  it("shows the mode column on every tab, legacy rows unknown", async () => {
+    await renderPanel(rows);
+    expect(headerCell("Mode").textContent ?? "").toContain("Mode");
+    // Default order is newest first: paper, live, legacy.
+    expect(modeCells()).toEqual(["Paper", "Live", "—"]);
+    await click(tabByLabel("Alpaca"));
+    expect(modeCells()).toEqual(["Paper"]);
+  });
+
+  it("sorts by Mode on header click, unknown rows last in either direction", async () => {
+    await renderPanel(rows);
+    await click(headerButton("Mode"));
+    expect(rowIds()).toEqual(["ord-live", "ord-paper", "ord-legacy"]);
+    expect(headerCell("Mode").getAttribute("aria-sort")).toBe("ascending");
+    await click(headerButton("Mode"));
+    expect(rowIds()).toEqual(["ord-paper", "ord-live", "ord-legacy"]);
+    expect(headerCell("Mode").getAttribute("aria-sort")).toBe("descending");
   });
 });
 

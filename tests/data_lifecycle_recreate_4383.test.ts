@@ -374,7 +374,7 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.previewToken).toHaveLength(64);
     // D1 leg: the fresh selection (234 schema + 11 seeds).
     expect(body.d1.selected).toHaveLength(245);
-    expect(body.d1.skipped).toHaveLength(5);
+    expect(body.d1.skipped).toHaveLength(6);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

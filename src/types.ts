@@ -1202,6 +1202,10 @@ export interface TradeRecord {
    * with decodeOrderPriceSource. Absent on legacy rows (pre-#3782
    * drafts carry no provenance). */
   priceSourceJson?: string;
+  /** Issue #4532 (slice 2): live/paper mode stamped at preview time
+   * from the resolved trading environment (TEST resolves to paper,
+   * PROD to live). Absent on legacy rows — those carry no mode. */
+  mode?: "live" | "paper";
   createdAt: string;
   updatedAt: string;
 }

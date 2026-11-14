@@ -333,3 +333,71 @@ describe("broker order routes (#3089)", () => {
     expect(res).toBeNull();
   });
 });
+
+/** Issue #4532 (slice 2): the live/paper mode is stamped on the stored draft at preview time. */
+describe("preview stamps the trade mode (#4532 slice 2)", () => {
+  const prodCtx = (store: ReturnType<typeof makeStore>): BrokerOrderRouteContext =>
+    ({
+      ...baseCtx(store),
+      readSettingRaw: (key: string) => (key === "etrade:environment" ? "PROD" : null),
+    }) as BrokerOrderRouteContext;
+
+  const previewAlpaca = (ctx: BrokerOrderRouteContext) =>
+    handleBrokerOrderRoutes(
+      req("POST", "/broker/order/preview", { broker: "alpaca", symbol: "ACME", quantity: 2, orderAction: "BUY" }),
+      urlOf("/broker/order/preview"),
+      "/broker/order/preview",
+      "alice",
+      ctx,
+    );
+
+  it("preview with no stored environment (TEST default) stamps paper on the stored draft", async () => {
+    const store = makeStore();
+    const res = await previewAlpaca(baseCtx(store));
+    expect(res!.status).toBe(200);
+    const body = await res!.json();
+    const stored = store.trades.findById(body.orderId);
+    expect(stored).not.toBeNull();
+    expect((stored as Row).mode).toBe("paper");
+  });
+
+  it("preview with a stored PROD environment stamps live on the stored draft", async () => {
+    const store = makeStore();
+    const res = await previewAlpaca(prodCtx(store));
+    expect(res!.status).toBe(200);
+    const body = await res!.json();
+    const stored = store.trades.findById(body.orderId);
+    expect(stored).not.toBeNull();
+    expect((stored as Row).mode).toBe("live");
+  });
+
+  it("re-preview under another environment re-stamps the mode on the existing draft", async () => {
+    const store = makeStore([
+      { id: "alpaca_ord_1", symbol: "ACME", action: "BUY", orderType: "MARKET", quantity: 2, price: 100, totalValue: 200, status: "previewed", broker: "alpaca", mode: "paper", createdAt: "2026-11-14T00:00:00.000Z", updatedAt: "2026-11-14T00:00:00.000Z" },
+    ]);
+    const res = await previewAlpaca(prodCtx(store));
+    expect(res!.status).toBe(200);
+    const stored = store.trades.findById("alpaca_ord_1");
+    expect((stored as Row).mode).toBe("live");
+    expect((stored as Row).broker).toBe("alpaca");
+  });
+
+  it("orders listing returns the stamped mode and leaves legacy rows without one", async () => {
+    const store = makeStore([
+      { id: "d1", symbol: "ACME", action: "BUY", orderType: "MARKET", quantity: 1, price: 100, totalValue: 100, status: "previewed", broker: "alpaca", mode: "live", createdAt: "2026-11-04T00:00:00.000Z", updatedAt: "2026-11-04T00:00:00.000Z" },
+      { id: "d0", symbol: "OLD", action: "SELL", orderType: "LIMIT", quantity: 5, price: 50, totalValue: 250, status: "previewed", createdAt: "2026-11-03T00:00:00.000Z", updatedAt: "2026-11-03T00:00:00.000Z" },
+    ]);
+    const res = await handleBrokerOrderRoutes(
+      req("GET", "/broker/orders"),
+      urlOf("/broker/orders"),
+      "/broker/orders",
+      "alice",
+      baseCtx(store),
+    );
+    const body = await res!.json();
+    expect(body.count).toBe(2);
+    const byId = Object.fromEntries(body.trades.map((t: any) => [t.id, t]));
+    expect(byId.d1.mode).toBe("live");
+    expect(byId.d0.mode).toBeUndefined();
+  });
+});
