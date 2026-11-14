@@ -378,12 +378,15 @@ describe("Autopilot page names the monthly schedule as a verdict writer (#4411)"
       join(__dirname, "../src/client/components/AutopilotControlCenter.tsx"),
       "utf8",
     );
+    // #4409: the six source lines live in AUTOPILOT_SOURCE_LINES so
+    // the rendered text and the title= can never drift apart — the
+    // verdicts line is read from the constant, and the Policy
+    // decisions DetailCard is pinned to render that constant.
+    const verdictsLine = source.slice(source.indexOf("verdicts:"));
+    const line = verdictsLine.slice(0, verdictsLine.indexOf('",'));
+    expect(line).toContain("monthly Autopilot evaluation schedule");
+    expect(line).toContain("Schedules home");
     const policyDecisions = source.slice(source.indexOf('title="Policy decisions"'));
-    const sourceLine = policyDecisions.slice(
-      policyDecisions.indexOf("Source:"),
-      policyDecisions.indexOf("</span>", policyDecisions.indexOf("Source:")),
-    );
-    expect(sourceLine).toContain("monthly Autopilot evaluation schedule");
-    expect(sourceLine).toContain("Schedules home");
+    expect(policyDecisions).toContain("AUTOPILOT_SOURCE_LINES.verdicts");
   });
 });

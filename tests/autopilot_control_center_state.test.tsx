@@ -29,7 +29,11 @@ async function flush(ms = 30) {
   });
 }
 
-async function render(node: React.ReactNode) {
+async function render(node: React.ReactNode, search = "?tab=autopilot&view=status") {
+  // #4409: the Status card lives on its own sub-tab — the default
+  // view is Performance, so these tests mount the Status tab (the
+  // limits tests mount the Limits tab instead).
+  window.history.pushState(null, "", `/${search}`);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -198,7 +202,7 @@ describe("Issue #1704 — server-confirmed autopilot state", () => {
 
   it("limits failure keeps the dialog open with the draft and names the old limits", async () => {
     mockFetch("fail");
-    await render(<AutopilotControlCenter />);
+    await render(<AutopilotControlCenter />, "?tab=autopilot&view=limits");
     await act(async () => {
       buttonByText("⚙️ Edit limits")!.click();
     });
@@ -213,7 +217,7 @@ describe("Issue #1704 — server-confirmed autopilot state", () => {
 
   it("limits success closes the dialog", async () => {
     mockFetch("ok");
-    await render(<AutopilotControlCenter />);
+    await render(<AutopilotControlCenter />, "?tab=autopilot&view=limits");
     await act(async () => {
       buttonByText("⚙️ Edit limits")!.click();
     });

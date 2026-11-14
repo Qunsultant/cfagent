@@ -620,6 +620,31 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   opacity: 1;
 }
 
+/* Single-line truncation (#4409): a text span that never wraps — long
+ * content ellipsizes instead of pushing its row taller. The span is a
+ * flex item (or sits in one), so min-width: 0 lets it shrink to the
+ * space the layout gives it; title= carries the full text on hover. */
+.ui-single-line {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Single-line table cell (#4409): the cell's content never wraps to a
+ * second row; a wide column scrolls horizontally inside the frame. */
+.ui-table td.ui-cell-nowrap {
+  white-space: nowrap;
+}
+
+/* CardHeader main column (#4409): a flex item must be allowed to shrink
+ * below its content width, or a truncating source line inside it can
+ * never ellipsize — the header would overflow instead. */
+.ui-card-header-main {
+  min-width: 0;
+}
+
 /* ---------- Skeleton ---------- */
 .ui-skeleton {
   display: block;
