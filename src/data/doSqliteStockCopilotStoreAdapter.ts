@@ -15,6 +15,7 @@ import {
   type StockCopilotStoreSqlExecutor,
 } from "./stockCopilotStorePorts";
 import { doTableSql } from "./schemaComponent/doCatalogue";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 const num = (v: unknown): number => (typeof v === "number" ? v : Number(v ?? 0));
 const str = (v: unknown): string => (typeof v === "string" ? v : String(v ?? ""));
@@ -61,10 +62,10 @@ export class DoSqliteStockCopilotPositionStore
     ) as Array<{ name?: unknown }>;
     const names = new Set(cols.map((c) => String(c.name ?? "")));
     if (!names.has("entry_session")) {
-      this.sql.exec(`ALTER TABLE ${COPILOT_POSITIONS_TABLE} ADD COLUMN entry_session TEXT`);
+      this.sql.exec(remainderAlterSql("stock_copilot_positions", "entry_session"));
     }
     if (!names.has("entry_order_type")) {
-      this.sql.exec(`ALTER TABLE ${COPILOT_POSITIONS_TABLE} ADD COLUMN entry_order_type TEXT`);
+      this.sql.exec(remainderAlterSql("stock_copilot_positions", "entry_order_type"));
     }
   }
 
