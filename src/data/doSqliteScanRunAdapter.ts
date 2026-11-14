@@ -23,6 +23,7 @@
  */
 import type { DoTransactionStorage } from "../aspects/transactionAspect";
 import { getTransactionRunner } from "./transactionRunnerProvider";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import type { OpportunityScanResult } from "../trading";
 import {
   SCAN_RUN_MAX_ROWS,
@@ -41,14 +42,8 @@ import {
 
 const TABLE = "mas_opportunity_scans";
 
-const CREATE_TABLE_SQL =
-  `CREATE TABLE IF NOT EXISTS ${TABLE} (id TEXT PRIMARY KEY, generated_at TEXT NOT NULL, ` +
-  `mode TEXT NOT NULL, model_version TEXT NOT NULL, user_login TEXT, ` +
-  // Issue #3314: the §4 linkage id columns — the same column names
-  // job_run_records carries, so the join is a plain equality.
-  `schedule_id TEXT, async_job_id TEXT, workflow_id TEXT, summary_json TEXT NOT NULL, result_json TEXT NOT NULL)`;
-const CREATE_INDEX_SQL =
-  `CREATE INDEX IF NOT EXISTS idx_mas_opportunity_scans_generated_at ON ${TABLE} (generated_at DESC)`;
+const CREATE_TABLE_SQL = doTableSql("mas_opportunity_scans");
+const CREATE_INDEX_SQL = doIndexSql("idx_mas_opportunity_scans_generated_at");
 const INSERT_SQL =
   `INSERT INTO ${TABLE} (id, generated_at, mode, model_version, user_login, schedule_id, async_job_id, workflow_id, summary_json, result_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 // The visibility predicate lives in the list statement itself (issue
