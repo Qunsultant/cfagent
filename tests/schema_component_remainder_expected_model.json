@@ -453,6 +453,11 @@
           "pk": 0
         },
         {
+          "name": "attempts_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
           "name": "channel",
           "type": "TEXT",
           "pk": 0
