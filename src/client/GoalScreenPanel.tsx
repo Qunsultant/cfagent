@@ -7,6 +7,7 @@ import { startPolling } from "./polling";
 import { usePolling } from "./usePolling";
 import { isAutoRefreshEnabled } from "./autoRefresh";
 
+import { commercialPath } from "../data/commercialUrlCatalog";
 /**
  * Goal Screen panel (consolidation C1, issue #1201, epic #1151 R1).
  *
@@ -408,7 +409,7 @@ export function SagaStartSection({ userLogin }: { userLogin?: string }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/payments/agentic/commercial/pricing", {
+        const res = await fetch(commercialPath("pricing"), {
           headers: { "x-user-login": userLogin },
         });
         if (cancelled) return;

@@ -26,6 +26,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Notice, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 
+import { commercialPath } from "../data/commercialUrlCatalog";
 export interface UnlimitedFreeGrantView {
   grantedBy: string;
   reason: string;
@@ -97,7 +98,7 @@ export function UnlimitedFreeGrantSection({ userId }: { userId: string }) {
     setError("");
     try {
       const res = await apiFetch(
-        `/api/payments/agentic/commercial/account?userId=${encodeURIComponent(userId)}`,
+        `${commercialPath("account")}?userId=${encodeURIComponent(userId)}`,
       );
       const data = await readJson(res);
       if (!res.ok) {
@@ -133,7 +134,7 @@ export function UnlimitedFreeGrantSection({ userId }: { userId: string }) {
       setMutating(true);
       setNote("");
       try {
-        const res = await apiFetch("/api/payments/agentic/commercial/account", {
+        const res = await apiFetch(commercialPath("account"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

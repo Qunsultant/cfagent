@@ -35,6 +35,7 @@ import { UsageBillingSection } from "./UsageBillingSection";
 import { TopUpLimitsSection } from "./TopUpLimitsSection";
 import { ReferralCodesSection } from "./ReferralCodesSection";
 import { OfferRulesSection } from "./OfferRulesSection";
+import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 import {
   buildBillingView,
   type BillingPlanInput,
@@ -44,7 +45,7 @@ import {
   type BillingView,
 } from "../data/billingServicing";
 
-const BILLING_BASE = "/api/payments/agentic/commercial";
+const BILLING_BASE = COMMERCIAL_API_BASE;
 
 async function fetchJson(path: string): Promise<unknown> {
   const res = await globalThis.fetch(path);

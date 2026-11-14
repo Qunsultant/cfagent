@@ -533,14 +533,14 @@ describe("#1728 P-5 agentic wallet: input, validation, audit, shape", () => {
     expect(limitMcp.success).toBe(true);
     expect(limitMcp.balanceUSD).toBeDefined();
     const limitRest: any = await (await getWallet("/payments/agentic/auto-approve-limit"))!.json();
-    expect(Object.keys(limitRest).sort()).toEqual(["autoApproveLimitUSD", "network"]);
+    expect(Object.keys(limitRest).sort()).toEqual(["autoApproveLimitUSD", "code", "network"]);
 
     const postMcp: any = await (await postLimit({ limitUSD: 0.4, mode: "mcp" }))!.json();
     expect(postMcp.message).toBe("Agentic payment auto-approval limit set to $0.40 USD.");
     expect(postMcp.autoApproveLimitUSD).toBe(0.4);
     const postRest: any = await (await postLimit({ limitUSD: 0.4 }))!.json();
     expect("message" in postRest).toBe(false);
-    expect(postRest).toEqual({ success: true, autoApproveLimitUSD: 0.4 });
+    expect(postRest).toEqual({ code: "SUCCESS_AUTO_APPROVE_LIMIT_UPDATED", success: true, autoApproveLimitUSD: 0.4 });
     expect(auditMock.mock.calls.some((c: any[]) => c[0] === "agentic_payment.limit_updated")).toBe(true);
 
     const postBad = await postLimit({ limitUSD: -1, mode: "mcp" });

@@ -31,9 +31,10 @@ import { Table } from "./components/ui/Table";
 import { TextInput } from "./components/ui/TextInput";
 import { withCsrfInit } from "./apiFetch";
 
-const LIST_PATH = "/api/payments/agentic/commercial/operators";
-const ADD_PATH = "/api/payments/agentic/commercial/operators/add";
-const REMOVE_PATH = "/api/payments/agentic/commercial/operators/remove";
+import { commercialPath } from "../data/commercialUrlCatalog";
+const LIST_PATH = commercialPath("operators");
+const ADD_PATH = commercialPath("operatorsAdd");
+const REMOVE_PATH = commercialPath("operatorsRemove");
 
 const opCardContentStyle: React.CSSProperties = {
   display: "flex",

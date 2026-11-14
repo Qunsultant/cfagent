@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Notice, Select, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
+import { commercialPath } from "../data/commercialUrlCatalog";
 
 export interface FreeAccessGrantView {
   id: string;
@@ -122,7 +123,7 @@ export function FreeAccessGrantSection({ userId }: { userId: string }) {
     setError("");
     try {
       const res = await apiFetch(
-        `/api/payments/agentic/commercial/free-access?userId=${encodeURIComponent(userId)}`,
+        `${commercialPath("freeAccess")}?userId=${encodeURIComponent(userId)}`,
       );
       const data = await readJson(res);
       if (!res.ok) {
@@ -178,7 +179,7 @@ export function FreeAccessGrantSection({ userId }: { userId: string }) {
     setMutating(true);
     setNote("");
     try {
-      const res = await apiFetch("/api/payments/agentic/commercial/free-access/grant", {
+      const res = await apiFetch(commercialPath("freeAccessGrant"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, kind, expiresAtMs, reason: trimmedReason }),
@@ -207,7 +208,7 @@ export function FreeAccessGrantSection({ userId }: { userId: string }) {
     setMutating(true);
     setNote("");
     try {
-      const res = await apiFetch("/api/payments/agentic/commercial/free-access/revoke", {
+      const res = await apiFetch(commercialPath("freeAccessRevoke"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId }),

@@ -36,6 +36,7 @@ import { bearerKeyFromRequest, verifyApiKey } from "../../security/apiKeys";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { resolveSnapIdentity } from "../../config/restTwinsModes";
 
+import { COMMERCIAL_BARE_PREFIX, PAYMENTS_API_PREFIX } from "../../data/commercialUrlCatalog";
 /**
  * Slice 7 of Qunsultant/cfagent#2902 (Platform & commerce) — moves only.
  * Moved with the premium handler in handlePlatformPaymentsRoutes below
@@ -438,7 +439,7 @@ export async function handlePlatformPaymentsRoutes(request: Request, env: Env, u
     // Issue #2787: the commercial family answers its bare spelling too
     // (/payments/agentic/commercial/*), so its preflight is aliased here
     // exactly like its dispatch below.
-    if ((path.startsWith("/api/premium/") || path.startsWith("/api/payments/agentic/") || path.startsWith("/payments/agentic/commercial/")) && request.method === "OPTIONS") {
+    if ((path.startsWith("/api/premium/") || path.startsWith(PAYMENTS_API_PREFIX) || path.startsWith(COMMERCIAL_BARE_PREFIX)) && request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
           "Access-Control-Allow-Origin": "*",
@@ -468,7 +469,7 @@ export async function handlePlatformPaymentsRoutes(request: Request, env: Env, u
     // read and mutate a shared wallet (and select any user's instance
     // by asserting their login). The fallback identities are removed;
     // the only in-app caller (AgenticWalletPanel) is signed in.
-    if (path.startsWith("/api/payments/agentic/") || path.startsWith("/payments/agentic/commercial/")) {
+    if (path.startsWith(PAYMENTS_API_PREFIX) || path.startsWith(COMMERCIAL_BARE_PREFIX)) {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       const userLogin = session.githubLogin;

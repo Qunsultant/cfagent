@@ -29,8 +29,9 @@ import { fetchPlatformIdentity } from "./firstRunApi";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import { PRICE_FAMILIES, type PriceFamily } from "../data/priceCataloguePorts";
 import { perRunProductId } from "../data/productPorts";
+import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 
-const REFERRAL_CODE_BASE = "/api/payments/agentic/commercial";
+const REFERRAL_CODE_BASE = COMMERCIAL_API_BASE;
 
 interface PublicReferralCodeView {
   id: string;

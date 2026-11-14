@@ -70,6 +70,7 @@ import {
   newTraceContext,
   type ObservabilitySink,
 } from "../observability/observabilityPorts";
+import { commercialBarePath } from "../data/commercialUrlCatalog";
 
 /** The three named cron entry points. */
 export type CronEntryPointName = "tick" | "renewTokens" | "retention";
@@ -423,13 +424,10 @@ export async function runTickEntryPoint(
     // pass rides this tick. Direct dispatch: NOT observed.
     await deps.dispatchAndAwait(
       deps.orchestrator.fetch(
-        new Request(
-          "https://agent.internal/payments/agentic/commercial/lifecycle/digest/run-due",
-          {
-            method: "POST",
-            headers: dispatchHeaders(),
-          },
-        ),
+        new Request(`https://agent.internal${commercialBarePath("lifecycleDigestRunDue")}`, {
+          method: "POST",
+          headers: dispatchHeaders(),
+        }),
       ),
     );
     // Issue #1077 Phase 5b slice 1: the parallel social tick is gone.

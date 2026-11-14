@@ -18,6 +18,7 @@ import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
 import { Notice } from "./components/ui/Notice";
 import { apiFetch } from "./apiFetch";
+import { commercialPath } from "../data/commercialUrlCatalog";
 import {
   fetchUsageBilling,
   UsageBillingApiError,
@@ -76,7 +77,7 @@ function FreeAccessLine({ userLogin }: { userLogin: string }) {
     (async () => {
       try {
         const res = await apiFetch(
-          `/api/payments/agentic/commercial/free-access?userId=${encodeURIComponent(userLogin)}`,
+          `${commercialPath("freeAccess")}?userId=${encodeURIComponent(userLogin)}`,
         );
         if (!res.ok) return;
         const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
