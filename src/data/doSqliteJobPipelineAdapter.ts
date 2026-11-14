@@ -34,6 +34,7 @@ import {
   type JobInstanceRecord,
   type JobPipelineStores,
 } from "./jobPipelinePorts";
+import { remainderAlterSql, remainderFrozenTableSql } from "./schemaComponent/remainderCatalogue";
 
 type JobDefinitionRow = typeof jobPipelineDefinitions.$inferSelect;
 type JobInstanceRow = typeof jobPipelineInstances.$inferSelect;
@@ -108,26 +109,8 @@ export const JOB_PIPELINE_SCHEMA_MIGRATION: DoSchemaMigration = {
   version: 1,
   name: "0001_job_pipeline",
   up: [
-    `CREATE TABLE IF NOT EXISTS ${JOB_PIPELINE_DEFINITIONS_TABLE} (
-      job_id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      definition_json TEXT NOT NULL,
-      version INTEGER NOT NULL,
-      updated_at TEXT NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS ${JOB_PIPELINE_INSTANCES_TABLE} (
-      job_id TEXT PRIMARY KEY,
-      state TEXT NOT NULL,
-      desired_state TEXT NOT NULL,
-      current_run_id TEXT,
-      run_started_at TEXT,
-      run_trigger TEXT,
-      checkpoint_json TEXT,
-      stage_checkpoint_json TEXT,
-      stage_desired_json TEXT,
-      last_error TEXT,
-      updated_at TEXT NOT NULL
-    )`,
+    remainderFrozenTableSql("job_pipeline_definitions"),
+    remainderFrozenTableSql("job_pipeline_instances"),
     JOB_PIPELINE_ARTIFACTS_DDL,
     JOB_PIPELINE_ARTIFACTS_INDEX_DDL,
   ],
@@ -257,12 +240,12 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
     ) as Array<{ name?: unknown }>;
     const names = new Set(cols.map((c) => String(c?.name ?? "")));
     if (!names.has("run_schedule_id")) {
-      this.sql.exec(`ALTER TABLE ${JOB_PIPELINE_INSTANCES_TABLE} ADD COLUMN run_schedule_id TEXT`);
+      this.sql.exec(remainderAlterSql("job_pipeline_instances", "run_schedule_id"));
     }
     // Issue #4357 — `run_async_job_id`, the join key to the bridge
     // row that dispatched the run (same additive-column probe).
     if (!names.has("run_async_job_id")) {
-      this.sql.exec(`ALTER TABLE ${JOB_PIPELINE_INSTANCES_TABLE} ADD COLUMN run_async_job_id TEXT`);
+      this.sql.exec(remainderAlterSql("job_pipeline_instances", "run_async_job_id"));
     }
   }
 
