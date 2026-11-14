@@ -18,6 +18,7 @@ import type { SqlStorage } from "../orm";
 import type { SchemaMigrationMode } from "../config/schemaMigrationModes";
 import type { DoSchemaMigration } from "../ports/schemaMigration";
 import { applyDoSchemaMigrations } from "./doSchemaMigrations";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import { Repository } from "./ormRepositoryCore";
 import type {
   jobPipelineArtifacts,
@@ -76,39 +77,13 @@ export const JOB_PIPELINE_ARTIFACT_COLUMNS: Record<keyof JobArtifactRow & string
  * the same shapes for D1 — the two modes and the two residencies
  * can never drift apart.
  */
-export const JOB_PIPELINE_DEFINITIONS_DDL = `CREATE TABLE IF NOT EXISTS ${JOB_PIPELINE_DEFINITIONS_TABLE} (
-      job_id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      definition_json TEXT NOT NULL,
-      version INTEGER NOT NULL,
-      updated_at TEXT NOT NULL
-    )`;
+export const JOB_PIPELINE_DEFINITIONS_DDL = doTableSql("job_pipeline_definitions");
 
-export const JOB_PIPELINE_INSTANCES_DDL = `CREATE TABLE IF NOT EXISTS ${JOB_PIPELINE_INSTANCES_TABLE} (
-      job_id TEXT PRIMARY KEY,
-      state TEXT NOT NULL,
-      desired_state TEXT NOT NULL,
-      current_run_id TEXT,
-      run_started_at TEXT,
-      run_trigger TEXT,
-      run_schedule_id TEXT,
-      run_async_job_id TEXT,
-      checkpoint_json TEXT,
-      stage_checkpoint_json TEXT,
-      stage_desired_json TEXT,
-      last_error TEXT,
-      updated_at TEXT NOT NULL
-    )`;
+export const JOB_PIPELINE_INSTANCES_DDL = doTableSql("job_pipeline_instances");
 
-export const JOB_PIPELINE_ARTIFACTS_DDL = `CREATE TABLE IF NOT EXISTS ${JOB_PIPELINE_ARTIFACTS_TABLE} (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      artifact_key TEXT NOT NULL,
-      value_json TEXT NOT NULL
-    )`;
+export const JOB_PIPELINE_ARTIFACTS_DDL = doTableSql("job_pipeline_artifacts");
 
-export const JOB_PIPELINE_ARTIFACTS_INDEX_DDL = `CREATE INDEX IF NOT EXISTS idx_job_pipeline_artifacts_run
-      ON ${JOB_PIPELINE_ARTIFACTS_TABLE} (run_id, artifact_key)`;
+export const JOB_PIPELINE_ARTIFACTS_INDEX_DDL = doIndexSql("idx_job_pipeline_artifacts_run");
 
 /**
  * The pipeline store's first framework migration: v1 is the
