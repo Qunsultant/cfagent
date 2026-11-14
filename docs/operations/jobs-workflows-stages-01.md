@@ -71,6 +71,16 @@ A definition created after host start is armed through that schedule row. The
 alternative — teaching the Think host to re-declare its scheduled tasks on
 definition change — is out of scope here and filed as issue #4457.
 
+**Per-stage cadence (#4479).** A stage can carry its own cadence: the engine's
+`registerSchedules` already walks every node and arms `node.schedule`, one task
+per stage (`pipeline:<jobId>:<nodePath>`), and the flow now writes it —
+`stageSchedules` on the define route, bound to `every N minutes` or a cron
+expression. The engine's rules are enforced at validation: an enabled cadence
+needs one source, a stage takes cron **or** interval never both, and the floor
+is one minute. A stage cadence on a definition created after host start arms at
+the host's next declaration until the dynamic-declaration issue lands; the job's
+own cadence is armed immediately.
+
 **Per-stage parameters and mode (#4466).** Both were already engine
 capabilities: a node carries `executionMode` (`JobNodeConfig`, merged over the
 job's resolved mode by `effectiveMode`) and `steps[].params` (merged over the
