@@ -554,6 +554,17 @@ function measure(): Map<string, number> {
  * row, added at the end of the baseline. (The header's last recorded
  * totals were stale: counted 1187 rows / 9344 lines before this
  * change.) Totals move 1187/9344 -> 1188/9345.
+ * Baseline update (#4452, 2026-11-14): the options steps compose
+ * into the ScheduledAgent host-side registry, binding the chain
+ * source to the provider's client in
+ * optionsStepDepsForScheduledAgent — the scheduledTasksPipeline.ts
+ * etrade row moves 1 -> 3 (the pre-existing header line + the
+ * import + construction), dispositioned INTEGRATION — the binding
+ * names the provider its leg serves, which is its job (the #4289
+ * precedent in the workflow residency). The prose around it is
+ * neutralized (no brand in the comments), and the count falls
+ * back when provider selection (#3960) replaces the direct
+ * binding. Totals move 1188/9345 -> 1188/9347.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -937,7 +948,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/sandbox-agent.ts", "etrade", 7],
   ["src/agents/sandboxA2aDispatch.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "alpaca", 1],
-  ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
+  // #4452 INTEGRATION: the host-side options-step wiring binds the
+  // chain source to the provider's client (the import + construction,
+  // beside the pre-existing header line) — the #4289 precedent.
+  ["src/agents/scheduledTasksPipeline.ts", "etrade", 3],
   ["src/agents/scheduledTasksPipeline.ts", "yahoo", 1],
   ["src/agents/screener-agent.ts", "alpaca", 24],
   ["src/agents/screener-agent.ts", "etrade", 95],

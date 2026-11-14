@@ -63,6 +63,7 @@ import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
 import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";
+import { stageQueueSendFromEnv } from "../workflows/stageQueueTransport";
 import { createSqlDeliverySuppressionStore } from "../data/deliveryClaimsStore";
 import { D1IndexListStore } from "../data/d1IndexListAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
@@ -88,6 +89,7 @@ import {
   type EnrichStepDeps,
 } from "../services/enrichPipelineJobs";
 import { screenerStepDepsForScheduledAgent } from "../services/screenerPipelineJobs";
+import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
 import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
 import {
   ensureAnalyzePipelineJobs,
@@ -133,6 +135,7 @@ import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import {
   createIndexMembershipService,
   createWikipediaIndexMembershipAdapter,
+  ETradeRestClient,
 } from "../trading";
 import type { JobInstanceRecord } from "../data/jobPipelinePorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -392,6 +395,37 @@ export function deliverStepDepsForScheduledAgent(
 }
 
 /**
+ * The options-step wiring for this host residency (issue #4452):
+ * the mirror of optionsStepDepsForWorkflow, over the host's own
+ * storage. The definition + artifact stores are the DO-SQLite
+ * adapters the host control plane itself reads, so the resolving
+ * steps read the dispatch request back from the definition the
+ * host defined; the chain source is the tenant's broker client,
+ * constructible from env + login exactly as in the workflow
+ * residency (provider selection is #3960's gap — until it lands,
+ * the host fetches the tenant's broker chains, as every options
+ * leg does today); the stage-message queue is built from env.
+ * No scan-run store is bound, by the #4453 decided-not-to: the
+ * scan-run family's home is the per-login store every reader
+ * reads, not this host's own SQLite — the persist stage's named
+ * degradation is the contract.
+ */
+export function optionsStepDepsForScheduledAgent(
+  ctx: ScheduledTasksPipelineContext,
+): OptionsWorkflowStepDeps {
+  const sql = pipelineSql(ctx);
+  const stores = createJobPipelineStoresFromSql(sql);
+  return {
+    definitions: stores.definitions,
+    artifacts: stores.artifacts,
+    env: ctx.env,
+    chainSourceFor: (userLogin) =>
+      userLogin ? new ETradeRestClient(ctx.env, userLogin) : undefined,
+    queue: stageQueueSendFromEnv(ctx.env),
+  };
+}
+
+/**
  * Build the pipeline control plane over this host. The acting
  * login (when a dispatch carries one) threads into the per-login
  * provider wiring; scheduled firings pass the service login.
@@ -477,6 +511,10 @@ export function createScheduledAgentPipelineControl(
       // Issue #4190 (#3550 S1, wired in #4192): the screener steps compose here
       // too — the agent binds the quote/history deps itself at stage time.
       screenerStepDepsForScheduledAgent(ctx),
+      // Issue #4452: the options steps compose here too — the
+      // resolving registration over the host's own stores, so a
+      // host-dispatched options job executes in this residency.
+      optionsStepDepsForScheduledAgent(ctx),
     ),
     invocation: "sync",
   });
@@ -750,6 +788,11 @@ export async function startPipelineJobWorkflow(
       // Issue #4190 (#3550 S1, wired in #4192): the screener steps compose here
       // too — the agent binds the quote/history deps itself at stage time.
       screenerStepDepsForScheduledAgent(ctx),
+      // Issue #4452: the options steps compose here too, as in the
+      // host control — the same registry in both compositions.
+      // (This control only mirrors the definition; the steps never
+      // execute here, exactly as for the screener steps.)
+      optionsStepDepsForScheduledAgent(ctx),
     ),
     invocation: "workflow-shard",
   });
