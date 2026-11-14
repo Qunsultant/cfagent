@@ -110,7 +110,7 @@ import type { DoNamespaceLike } from "../data/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
-import { submitAsyncJob, recoverQueuedAsyncJobs, recoverStaleRunningAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, type AsyncJobsContext } from "./orchestrator/asyncJobs";
+import { submitAsyncJob, recoverQueuedAsyncJobs, recoverStaleRunningAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, retryFailedChainJobs, type AsyncJobsContext } from "./orchestrator/asyncJobs";
 import { watchdogMissedSchedules, type ScheduleWatchdogContext, type ScheduleWatchdogSweepResult } from "./orchestrator/scheduleWatchdog";
 import { RECORDED_SCHEDULE_CALLBACKS } from "./orchestrator/scheduleCallbacks";
 import { ensureOrchestratorTables } from "./orchestrator/tableSchema";
@@ -2029,6 +2029,11 @@ export class OrchestratorAgent extends PortThink {
     return retryAsyncJob(this.asyncJobsContext(), jobId);
   }
 
+  /** Issue #4416: one action retries every failed shard of a chain. */
+  private async retryChainJobs(chainId: string) {
+    return retryFailedChainJobs(this.asyncJobsContext(), chainId);
+  }
+
   private sessionKey(): string {
     return this.ctx.id.toString();
   }
@@ -3133,6 +3138,22 @@ export class OrchestratorAgent extends PortThink {
     // Consolidation C3 (#1277): per-stage retry — resubmit a failed
     // job (e.g. a chain's failed deliver stage) from its recorded
     // payload; upstream stages are never re-executed.
+    // Issue #4416: chain-level bulk retry — every failed shard of the chain in
+    // one action, the retried rows keeping the chain identity for the advance
+    // hook. Completed shards are counted, never re-executed.
+    const jobChainRetryMatch = path.match(/(?:^|\/api)\/job-chains\/([^/]+)\/retry$/i);
+    if (jobChainRetryMatch && request.method === "POST") {
+      try {
+        const result = await this.retryChainJobs(decodeURIComponent(jobChainRetryMatch[1]));
+        return Response.json({ success: true, ...result });
+      } catch (err: any) {
+        return Response.json(
+          { success: false, error: err?.message || "Chain retry failed." },
+          { status: 500 },
+        );
+      }
+    }
+
     const jobRetryMatch = path.match(/(?:^|\/api)\/jobs\/([0-9a-f-]{36})\/retry$/i);
     if (jobRetryMatch && request.method === "POST") {
       try {

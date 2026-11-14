@@ -22,6 +22,7 @@ import {
   ensureAsyncJobGraphColumns,
   getAsyncJob,
   retryAsyncJob,
+  retryFailedChainJobs,
   submitAsyncJob,
   type AsyncJobsContext,
 } from "../src/agents/orchestrator/asyncJobs";
@@ -210,5 +211,37 @@ describe("async-job provenance stamping (#3810)", () => {
     expect(after).toContain("schedule_id");
     // Idempotent: a second ensure is a no-op, not an error.
     ensureAsyncJobGraphColumns(sql as never);
+  });
+});
+describe("chain-level bulk retry (#4416)", () => {
+  it("retries only the chain's failed shards — completed shards and other chains untouched", async () => {
+    const { db, ctx } = makeHarness();
+    const shard = (symbol: string, chainId: string): AsyncJobSubmission =>
+      ({
+        capability: "shard.execute",
+        payload: { shard: { stage: "feed", key: symbol }, chain: { chainId, userLogin: "venus", trigger: "scheduled" } },
+        chainId,
+      }) as unknown as AsyncJobSubmission;
+    const completed = await submitAsyncJob(ctx, shard("AAPL", "chain-9"));
+    const failedA = await submitAsyncJob(ctx, shard("MSFT", "chain-9"));
+    const failedB = await submitAsyncJob(ctx, shard("NVDA", "chain-9"));
+    const otherChain = await submitAsyncJob(ctx, shard("AMZN", "chain-other"));
+    db.prepare("UPDATE mas_async_jobs SET status = 'completed' WHERE job_id = ?").run(completed.jobId);
+    db.prepare("UPDATE mas_async_jobs SET status = 'failed', error = 'boom' WHERE job_id IN (?, ?)").run(
+      failedA.jobId,
+      failedB.jobId,
+    );
+    db.prepare("UPDATE mas_async_jobs SET status = 'failed', error = 'boom' WHERE job_id = ?").run(otherChain.jobId);
+
+    const result = await retryFailedChainJobs(ctx, "chain-9");
+    expect(result.retried).toHaveLength(2);
+    expect(result.untouched).toBe(1);
+    expect(result.failures).toEqual([]);
+
+    const rows = db.prepare("SELECT payload_json FROM mas_async_jobs WHERE payload_json LIKE '%retryOf%'").all() as Array<{
+      payload_json: string;
+    }>;
+    const retriedOf = rows.map((row) => (JSON.parse(row.payload_json) as { retryOf?: string }).retryOf);
+    expect(retriedOf.sort()).toEqual([failedA.jobId, failedB.jobId].sort());
   });
 });

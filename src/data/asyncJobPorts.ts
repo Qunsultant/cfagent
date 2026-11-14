@@ -271,7 +271,13 @@ export interface AsyncJobReadPort {
     chain_id: string | null;
   } | undefined;
   /** Every row of the session, for retry's duplicate scan. */
-  listSessionPayloads(sessionId: string): Array<{ job_id: string; status: string; payload_json: string }>;
+  /** Issue #4416: capability rides along so a chain-scoped retry can select its shards. */
+  listSessionPayloads(sessionId: string): Array<{
+    job_id: string;
+    status: string;
+    payload_json: string;
+    capability: string;
+  }>;
   /** A chain's rows in creation order (planner + overlay). */
   chainRows(chainId: string, sessionId: string): AsyncJobChainRow[];
   /** The workflow-runs surface's full rows, newest first. */
