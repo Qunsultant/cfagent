@@ -26,6 +26,7 @@ import {
   type ResourceUsageEvent,
   type ResourceUsagePort,
 } from "../telemetry/resourceUsagePorts";
+import { d1TableSql } from "./schemaComponent/d1Catalogue";
 
 /** Minimal D1 surface the adapter needs (structural, so fakes can stand in). */
 export interface ResourceD1Db {
@@ -37,19 +38,7 @@ export interface ResourceD1Db {
   };
 }
 
-const CREATE_TABLE_SQL = `CREATE TABLE IF NOT EXISTS resource_sql_ops (
-  ts_ms INTEGER NOT NULL,
-  ns TEXT NOT NULL,
-  op TEXT NOT NULL,
-  rows_read INTEGER NOT NULL,
-  rows_written INTEGER NOT NULL,
-  caller TEXT,
-  trigger TEXT,
-  statement TEXT,
-  tenant_id TEXT,
-  run_id TEXT,
-  session_ref TEXT
-)`;
+const CREATE_TABLE_SQL = d1TableSql("resource_sql_ops");
 
 const INSERT_SQL = `INSERT INTO resource_sql_ops
   (ts_ms, ns, op, rows_read, rows_written, caller, trigger, statement, tenant_id, run_id, session_ref)
