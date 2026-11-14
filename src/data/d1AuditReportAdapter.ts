@@ -43,7 +43,7 @@ export async function ensureAuditReportSchema(db: D1AuditReportDb): Promise<void
   // so the ensure provides those columns too — applyMigrations
   // is _migrations-gated, so a later ensureRunLedgerTables pass
   // skips them instead of re-applying. 0059 also creates the
-  // run-ledger tables (CREATE TABLE IF NOT EXISTS); 0060 only
+  // run-ledger tables (idempotent table creation); 0060 only
   // alters agent_reports (owned by 0004) and needs no 0059
   // table. The registry still owns the versions; both ensure
   // paths converge on the same gated runner.
