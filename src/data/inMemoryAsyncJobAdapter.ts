@@ -175,7 +175,14 @@ export class InMemoryAsyncJobStore
   }
 
   reapStaleRunning(jobId: string, error: string, nowIso: string, errorCode?: string | null): number {
-    return this.failRunning(jobId, error, nowIso, errorCode ?? null);
+    // Issue #4418: preserve the pre-reap last activity (the evidence), while
+    // failRunning records the reap instant on updated_at/completed_at.
+    const row = this.rows.get(jobId);
+    if (!row || row.status !== "running") return 0;
+    const previous = row.last_activity_at;
+    const written = this.failRunning(jobId, error, nowIso, errorCode ?? null);
+    if (written === 1) row.last_activity_at = previous;
+    return written;
   }
 
   markStuckAlerted(jobId: string, nowIso: string): number {

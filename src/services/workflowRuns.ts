@@ -128,6 +128,8 @@ export interface WorkflowRunStage {
   startedAt: string | null;
   finishedAt: string | null;
   durationMs: number | null;
+  /** Issue #4418: the row's last heartbeat before a reap — pre-reap evidence. */
+  lastActivityAt?: string | null;
   /** Human description (the job's display name, or the transition summary). */
   detail: string | null;
   /** Why a skipped/held/failed stage ended that way, when recorded. */
@@ -1063,6 +1065,7 @@ function stageRowsForGroup(
       startedAt,
       finishedAt: completedAt,
       durationMs: durationBetween(startedAt, completedAt),
+      lastActivityAt: isoOrNull(job.last_activity_at) ?? null,
       detail: job.display_name || null,
       reason: matchedTransition?.reason ?? resultReason ?? (errorCode ? codedMessage(errorCode) : null),
       error: codedStageError(job),

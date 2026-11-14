@@ -289,3 +289,38 @@ describe("shard-chain re-arm after host death (#4424)", () => {
     expect(forDone.n).toBe(0);
   });
 });
+describe("orphan attribution (#4418)", () => {
+  const runningStale = (db: any, jobId: string, stamp: string) =>
+    db
+      .prepare("UPDATE mas_async_jobs SET status = 'running', started_at = ?, last_activity_at = ? WHERE job_id = ?")
+      .run(stamp, stamp, jobId);
+
+  it("preserves the pre-reap last activity and names the host the platform reports", async () => {
+    const { db, ctx } = makeHarness();
+    (ctx as unknown as { env: Record<string, unknown> }).env = { CF_VERSION_METADATA: { id: "ver-1" } };
+    const submitted = await submitAsyncJob(ctx, mcpJob({}));
+    const stamp = "2020-01-01T00:00:00.000Z";
+    runningStale(db, submitted.jobId, stamp);
+
+    await recoverStaleRunningAsyncJobs(ctx);
+    const row = db
+      .prepare("SELECT status, error, last_activity_at FROM mas_async_jobs WHERE job_id = ?")
+      .get(submitted.jobId) as { status: string; error: string; last_activity_at: string };
+    expect(row.status).toBe("failed");
+    // The reap must not overwrite the evidence it is explaining.
+    expect(row.last_activity_at).toBe(stamp);
+    expect(row.error).toContain("host ver-1");
+    expect(row.error).toContain("restart cause not reported by the platform");
+  });
+
+  it("says host unknown when the platform reports none — never invented", async () => {
+    const { db, ctx } = makeHarness();
+    const submitted = await submitAsyncJob(ctx, mcpJob({}));
+    runningStale(db, submitted.jobId, "2020-01-01T00:00:00.000Z");
+    await recoverStaleRunningAsyncJobs(ctx);
+    const row = db.prepare("SELECT error FROM mas_async_jobs WHERE job_id = ?").get(submitted.jobId) as {
+      error: string;
+    };
+    expect(row.error).toContain("host unknown");
+  });
+});
