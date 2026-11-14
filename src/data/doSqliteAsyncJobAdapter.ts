@@ -40,6 +40,17 @@ function rowsWritten(result: unknown): number {
   return typeof cursor.rowsWritten === "number" ? cursor.rowsWritten : 0;
 }
 
+/** A malformed or absent attempt history reads 0 recorded attempts. */
+function attemptsRecordedIn(attemptsJson: unknown): number {
+  if (typeof attemptsJson !== "string" || !attemptsJson) return 0;
+  try {
+    const parsed = JSON.parse(attemptsJson);
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export class DoSqliteAsyncJobStore
   implements AsyncJobQueuePort, AsyncJobReadPort, AsyncJobMaintenancePort
 {
@@ -293,6 +304,33 @@ export class DoSqliteAsyncJobStore
     Array.from(
       this.sql.exec("UPDATE mas_async_jobs SET attempts_json = ? WHERE job_id = ?", JSON.stringify(list), jobId),
     );
+  }
+
+  /**
+   * Issue #4423 — the retry history per chain row. The attempts column landed
+   * after the base table (#4417), so an unmigrated store's "no such column" is
+   * a recorded absence, not a failure of the chain read.
+   */
+  chainAttemptCounts(chainId: string, sessionId: string): Map<string, number> {
+    const counts = new Map<string, number>();
+    let rows: Array<{ job_id?: unknown; attempts_json?: unknown }>;
+    try {
+      rows = Array.from(
+        this.sql.exec(
+          "SELECT job_id, attempts_json FROM mas_async_jobs WHERE chain_id = ? AND session_id = ?",
+          chainId,
+          sessionId,
+        ),
+      ) as Array<{ job_id?: unknown; attempts_json?: unknown }>;
+    } catch {
+      return counts;
+    }
+    for (const row of rows) {
+      const jobId = String(row.job_id ?? "");
+      if (!jobId) continue;
+      counts.set(jobId, attemptsRecordedIn(row.attempts_json));
+    }
+    return counts;
   }
 
   markStuckAlerted(jobId: string, nowIso: string): number {

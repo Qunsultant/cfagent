@@ -223,8 +223,11 @@ const STEP4A_DATA_LAYER_FILES: Array<[string, number]> = [
   // trigger / triggered_by / schedule_id column migrations);
   // 43 after #3811 (+3: the last_activity_at + error_code column
   // migrations and the guarded heartbeat UPDATE); 45 after #4417
-  // (+2: the attempt-history SELECT + UPDATE in appendAttempt).
-  ["src/data/doSqliteAsyncJobAdapter.ts", 45],
+  // (+2: the attempt-history SELECT + UPDATE in appendAttempt); 46
+  // after #4423 (+1: the tolerant per-chain attempt-history read that
+  // feeds the Docs retry marker — the site lives in the adapter, never
+  // in shardJobs, which keeps zero storage-exec sites).
+  ["src/data/doSqliteAsyncJobAdapter.ts", 46],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],
   ["src/data/asyncJobPorts.ts", 0],
   ["src/data/createAsyncJobPorts.ts", 0],
