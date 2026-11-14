@@ -8,7 +8,7 @@
  * The `agents` SDK (0.24.0, the version on main) drives its
  * durable job queue from `cf_agents_jobs`, created WITHOUT
  * ROWID with `id TEXT PRIMARY KEY` and NO index on `time`
- * (zero CREATE INDEX in the SDK's lifecycle bundle). Every
+ * (zero index creation in the SDK's lifecycle bundle). Every
  * alarm runs four statements against that table:
  * - `due()`: `SELECT * FROM cf_agents_jobs WHERE time <= ? ORDER BY time ASC`
  * - `nextAlarmTime()` MIN 1: `SELECT MIN(time) FROM cf_agents_jobs WHERE exclusive = 1`
@@ -40,8 +40,8 @@
  * OrchestratorAgent.onStart, the schedule reconciliation earlier in onStart
  * forces that creation). If the table still does not exist this throws and
  * the caller catches it — a missed index is retried on the next start, and
- * a failure must never block startup. Additive only (CREATE INDEX IF NOT
- * EXISTS); no table is altered and no row is deleted, per the #2299
+ * a failure must never block startup. Additive only (idempotent index
+ * creation); no table is altered and no row is deleted, per the #2299
  * rename-never-delete rule's additive spirit for data.
  *
  * Other agent classes adopt this by calling it from their own onStart after
