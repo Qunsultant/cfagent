@@ -1457,35 +1457,35 @@ export function RunDetail({
       {/* Issue #4420 — the shard stage detail's inner per-symbol engine run:
           the stages the shard's own scan checkpointed, rendered by the same
           columns as the run's stages. A shard whose checkpoint is absent says
-          so — an unknown inner run is never dressed up as an empty one. */}
+          so — an unknown inner run is never dressed up as an empty one. The
+          section and its captions are primitives (PageSection / Table /
+          Notice), so the interior carries no bespoke class of its own. */}
       {run.stages.some((stage) => stage.innerStages) && (
-        <section aria-label="Inner engine stages of this run's shards">
-          <h4 className="workflow-runs-subheading">Inner engine stages</h4>
+        <PageSection title="Inner engine stages">
           {run.stages
             .filter((stage) => stage.innerStages)
-            .map((stage) => (
-              <div key={`inner-${stage.key}`} className="workflow-runs-stage-list">
-                <span className="workflow-runs-muted">
-                  {stage.label}
-                  {stage.jobId ? ` · ${stage.jobId}` : ""}
-                  {stage.innerJobId ? ` · ${stage.innerJobId}` : ""}
-                </span>
-                {(stage.innerStages ?? []).length === 0 ? (
-                  <Notice tone="neutral" density="compact">
-                    No inner engine checkpoint was recorded for this shard&apos;s per-symbol scan — its inner stages are
-                    unknown, not empty.
-                  </Notice>
-                ) : (
-                  <Table
-                    columns={stageColumns(false)}
-                    rows={stage.innerStages ?? []}
-                    rowKey={(inner) => `${stage.key}:${inner.key}`}
-                    caption={`Inner engine stages — ${stage.label}`}
-                  />
-                )}
-              </div>
-            ))}
-        </section>
+            .map((stage) =>
+              (stage.innerStages ?? []).length === 0 ? (
+                <Notice
+                  key={`inner-${stage.key}`}
+                  tone="neutral"
+                  density="compact"
+                  title={`${stage.label} · ${stage.innerJobId ?? "inner run"}`}
+                >
+                  No inner engine checkpoint was recorded for this shard&apos;s per-symbol scan — its inner stages are
+                  unknown, not empty.
+                </Notice>
+              ) : (
+                <Table
+                  key={`inner-${stage.key}`}
+                  columns={stageColumns(false)}
+                  rows={stage.innerStages ?? []}
+                  rowKey={(inner) => `${stage.key}:${inner.key}`}
+                  caption={`${stage.label} — ${stage.jobId ?? "shard"} · ${stage.innerJobId ?? "inner run"}`}
+                />
+              ),
+            )}
+        </PageSection>
       )}
 
       <div className="workflow-runs-io-grid">
