@@ -23,6 +23,18 @@ export interface JobStageSpec {
   step: string;
   /** Stage parameters, merged over the run's parameters. */
   params?: Record<string, unknown>;
+  /**
+   * Issue #4466 — this stage's declared parameters, surfaced by the UX so a
+   * caller can set them per stage. `params` above are the spec's own values;
+   * these describe what a caller may override.
+   */
+  parameters?: JobDefinitionParameter[];
+  /**
+   * Issue #4466 — per-stage execution-mode override. The engine already
+   * merges it over the job's resolved mode (`JobNodeConfig.executionMode` +
+   * `effectiveMode`), so this is a surface, not a new capability.
+   */
+  executionMode?: Partial<JobExecutionMode>;
   /** Nested sub-stages, when the stage composes others. */
   children?: JobStageSpec[];
 }
@@ -120,10 +132,31 @@ function resolveStage(raw: unknown, specId: string, path: string): JobStageSpec 
     ? raw.children.map((child, i) => resolveStage(child, specId, `${path}.${i}`))
     : undefined;
   const params = isRecord(raw.params) ? raw.params : undefined;
+  const parameters = Array.isArray(raw.parameters)
+    ? raw.parameters.map((param) => resolveParameter(param, specId))
+    : undefined;
+  let executionMode: Partial<JobExecutionMode> | undefined;
+  if (raw.executionMode !== undefined) {
+    try {
+      // Validate the axes and the substrate rule now; keep only what was set,
+      // so the node's override stays an override (the root supplies the rest).
+      assertExecutionModeSupported(resolveExecutionMode(raw.executionMode));
+      if (!isRecord(raw.executionMode)) {
+        throw new Error("stage executionMode must be an object.");
+      }
+      executionMode = raw.executionMode as Partial<JobExecutionMode>;
+    } catch (error) {
+      throw new Error(
+        `Job definition "${specId}" stage ${path} is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   return {
     kind,
     step,
     ...(params ? { params } : {}),
+    ...(parameters && parameters.length > 0 ? { parameters } : {}),
+    ...(executionMode ? { executionMode } : {}),
     ...(children && children.length > 0 ? { children } : {}),
   };
 }

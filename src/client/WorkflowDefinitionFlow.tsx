@@ -30,15 +30,29 @@ interface DefinitionParameter {
   options?: string[];
 }
 
+interface StageSpec {
+  kind: string;
+  step: string;
+  parameters?: DefinitionParameter[];
+  executionMode?: Record<string, string>;
+}
+
 interface DefinitionSpec {
   id: string;
   name: string;
   version: number;
   description?: string;
-  stages: Array<{ kind: string; step: string }>;
+  stages: StageSpec[];
   executionMode?: Record<string, string>;
   parameters?: DefinitionParameter[];
 }
+
+const MODE_AXES: ReadonlyArray<{ key: string; label: string; options: string[] }> = [
+  { key: "concurrency", label: "Concurrency", options: ["sequential", "parallel"] },
+  { key: "pacing", label: "Pacing", options: ["batch", "online"] },
+  { key: "delivery", label: "Delivery", options: ["sync", "async"] },
+  { key: "shape", label: "Shape", options: ["monolith", "sharded"] },
+];
 
 const CADENCES: ReadonlyArray<{ id: string; label: string; intervalSeconds: number }> = [
   { id: "15m", label: "Every 15 minutes", intervalSeconds: 15 * 60 },
@@ -54,6 +68,8 @@ export function WorkflowDefinitionFlow() {
   const [jobId, setJobId] = useState("");
   const [cadence, setCadence] = useState("1h");
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
+  const [stageModes, setStageModes] = useState<Record<string, Record<string, string>>>({});
+  const [stageParams, setStageParams] = useState<Record<string, Record<string, string>>>({});
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [scheduled, setScheduled] = useState<{ jobId: string; intervalSeconds: number } | null>(null);
@@ -91,6 +107,8 @@ export function WorkflowDefinitionFlow() {
     setJobId(jobIdForSpec(spec.id));
     setCadence("1h");
     setParamValues({});
+    setStageModes({});
+    setStageParams({});
     setActionError(null);
     setScheduled(null);
   };
@@ -107,7 +125,7 @@ export function WorkflowDefinitionFlow() {
           Accept: "application/json",
           ...csrfHeaders(),
         },
-        body: JSON.stringify({ jobId, params: paramValues }),
+        body: JSON.stringify({ jobId, params: paramValues, stageModes, stageParams }),
       });
       const definedBody = (await defined.json().catch(() => ({}))) as { error?: string };
       if (!defined.ok) {
@@ -220,6 +238,51 @@ export function WorkflowDefinitionFlow() {
                   />
                 )}
                 {param.description && <span>{param.description}</span>}
+              </div>
+            ))}
+            {(target.stages ?? []).map((stage) => (
+              <div key={`${target.id}-${stage.kind}-mode`}>
+                <span>{`${stage.kind} — execution mode`}</span>
+                {MODE_AXES.map((axis) => (
+                  <Select
+                    key={axis.key}
+                    aria-label={`${stage.kind} ${axis.label}`}
+                    value={stageModes[stage.kind]?.[axis.key] ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setStageModes((current) => {
+                        const axes = { ...(current[stage.kind] ?? {}) };
+                        if (value) axes[axis.key] = value;
+                        else delete axes[axis.key];
+                        const next = { ...current };
+                        if (Object.keys(axes).length > 0) next[stage.kind] = axes;
+                        else delete next[stage.kind];
+                        return next;
+                      });
+                    }}
+                  >
+                    <option value="">{`${axis.label}: inherit`}</option>
+                    {axis.options.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                ))}
+                {(stage.parameters ?? []).map((param) => (
+                  <TextInput
+                    key={param.name}
+                    aria-label={`${stage.kind} ${param.label}`}
+                    value={stageParams[stage.kind]?.[param.name] ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setStageParams((current) => ({
+                        ...current,
+                        [stage.kind]: { ...(current[stage.kind] ?? {}), [param.name]: value },
+                      }));
+                    }}
+                  />
+                ))}
               </div>
             ))}
             <div>

@@ -9,6 +9,13 @@
  * this function.
  */
 import type { JobDefinitionSpec, JobStageSpec } from "../config/jobDefinitionCatalog";
+import type { JobExecutionMode } from "../data/jobPipelinePorts";
+
+/** Issue #4466 — per-stage overrides the flow collects, keyed by stage kind. */
+export interface JobDefinitionPerStage {
+  params?: Record<string, Record<string, unknown>>;
+  modes?: Record<string, Partial<JobExecutionMode>>;
+}
 
 export interface RawJobConfig {
   jobId: string;
@@ -32,26 +39,31 @@ function withParams(node: Record<string, unknown>, params: Record<string, unknow
   };
 }
 
-function nodeFromStage(stage: JobStageSpec): Record<string, unknown> {
-  const children = stage.children?.length ? stage.children.map(nodeFromStage) : undefined;
+function nodeFromStage(stage: JobStageSpec, perStage: JobDefinitionPerStage): Record<string, unknown> {
+  const children = stage.children?.length
+    ? stage.children.map((child) => nodeFromStage(child, perStage))
+    : undefined;
+  const stageParams = { ...(stage.params ?? {}), ...(perStage.params?.[stage.kind] ?? {}) };
+  const mode = { ...(stage.executionMode ?? {}), ...(perStage.modes?.[stage.kind] ?? {}) };
   return {
     kind: stage.kind,
     steps: [
       {
         step: stage.step,
-        ...(stage.params ? { params: stage.params } : {}),
+        ...(Object.keys(stageParams).length > 0 ? { params: stageParams } : {}),
       },
     ],
+    ...(Object.keys(mode).length > 0 ? { executionMode: mode } : {}),
     ...(children ? { children } : {}),
   };
 }
 
-function chain(stages: JobStageSpec[]): Record<string, unknown> {
+function chain(stages: JobStageSpec[], perStage: JobDefinitionPerStage): Record<string, unknown> {
   const [head, ...rest] = stages;
-  const node = nodeFromStage(head);
+  const node = nodeFromStage(head, perStage);
   if (rest.length === 0) return node;
   const existing = Array.isArray(node.children) ? node.children : [];
-  return { ...node, children: [...existing, chain(rest)] };
+  return { ...node, children: [...existing, chain(rest, perStage)] };
 }
 
 /** The engine's raw config for one spec + one concrete job id. */
@@ -59,12 +71,13 @@ export function buildJobConfigFromSpec(
   spec: JobDefinitionSpec,
   jobId: string,
   params: Record<string, unknown> = {},
+  perStage: JobDefinitionPerStage = {},
 ): RawJobConfig {
   const schedule = spec.schedule;
   return {
     jobId,
     name: `${spec.name} (${jobId})`,
-    root: withParams(chain(spec.stages), params),
+    root: withParams(chain(spec.stages, perStage), params),
     ...(spec.executionMode
       ? { executionMode: spec.executionMode as unknown as Record<string, string> }
       : {}),

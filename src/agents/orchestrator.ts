@@ -3094,13 +3094,14 @@ export class OrchestratorAgent extends PortThink {
     // UX flow. The schedule half is the existing POST /api/schedules with
     // the runPipelineJobSchedule callback.
     const definitionsRoute = await handleJobDefinitionsRoutes(request, url, path, {
-      defineJobFromSpec: (specId, jobId, params) =>
+      defineJobFromSpec: (specId, jobId, params, overrides) =>
         definePipelineJobFromSpecViaDoor(
           this.env,
           request.headers.get("x-user-login"),
           specId,
           jobId,
           params,
+          overrides,
         ),
     });
     if (definitionsRoute) return definitionsRoute;
