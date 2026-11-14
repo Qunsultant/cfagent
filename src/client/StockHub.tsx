@@ -500,6 +500,13 @@ export function StockHub({
     setSummary("");
     try {
       const filters = {
+        // Issue #2886 (S2): criteria first — the panel's carried-over
+        // non-panel keys (extra) must never override the form's own
+        // visible fields (universe, sector, price range, trend, limit,
+        // search), which are spread after this and win on a clash.
+        // The seven panel fields never collide with the form fields,
+        // so their behaviour is unchanged by the reorder.
+        ...stockCriteriaToFilter(stockCriteria),
         universe,
         ...(sector && sector !== "ALL" ? { sector } : {}),
         ...(minScore.trim() !== "" ? { minScore: Number(minScore) } : {}),
@@ -517,8 +524,8 @@ export function StockHub({
         // Issue #1496 (#940-B): enabled panel criteria only; a toggled-off
         // criterion is absent, never sent as a null/zero the engine would
         // misread. All seven fields genuinely filter on the manual path
-        // (evaluateUniverse), on both providers.
-        ...stockCriteriaToFilter(stockCriteria),
+        // (evaluateUniverse), on both providers. (The criteria spread
+        // itself sits at the top of this literal — issue #2886 S2.)
       };
       setLastSentStockFilters(filters);
 
@@ -1328,7 +1335,11 @@ export function StockHub({
         >
           <PresetsPanel
             userLogin={userLogin}
-            currentFilter={{}}
+            // Issue #2886 (S2): the Presets tab saves the LIVE criteria
+            // (same expression as the new-screen form) — the
+            // literal {} here used to save every Presets-tab preset as
+            // an empty filter, which then loaded as "(0 criteria)".
+            currentFilter={stockCriteriaToFilter(stockCriteria)}
             // Issue #2860 (audit F3): the presets tab Apply
             // was navigate-only — the criteria the panel
             // passes up were dropped and New Screen opened

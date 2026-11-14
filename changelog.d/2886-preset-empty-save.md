@@ -1,0 +1,3 @@
+### Changed
+
+- Presets tab now saves the live stock criteria instead of an empty filter, so a preset saved there stores its criteria and loads back into the panel (#2886, S2). Empty preset saves are refused client-side (disabled Save + warning) and server-side (400) — a preset with zero criteria can no longer be stored. Loading a preset now round-trips the full filter key set: keys the criteria panel does not render (e.g. `minPrice`, `gainersOnly`, `requireSqueezeGate`) are carried through load and re-save instead of being dropped. Preset01 itself is stored empty and cannot be repaired in code — it must be deleted and re-saved after this fix.

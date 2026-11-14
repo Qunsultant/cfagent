@@ -73,6 +73,17 @@ function validatePresetInput(body: unknown):
   if (!parsed.ok) {
     return { ok: false, error: parsed.error };
   }
+  // Issue #2886 (S2): an empty preset stores nothing to load — refuse
+  // it here (the client refuses it too, but the API must not trust
+  // that). {} parses clean because every filter field is optional,
+  // and the strict schema rejects unknown keys, so zero parsed keys
+  // means an empty filter — never a dropped key.
+  if (Object.keys(parsed.value).length === 0) {
+    return {
+      ok: false,
+      error: "Preset criteria must include at least one criterion — turn on at least one criterion before saving.",
+    };
+  }
   return { ok: true, name: name.trim(), assetClass, criteria: parsed.value };
 }
 

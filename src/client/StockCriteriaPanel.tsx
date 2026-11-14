@@ -61,6 +61,18 @@ export interface StockCriteriaState {
   maxPeRatio: StockCriterionValue;
   rsiFilter: { enabled: boolean; value: RsiBand };
   momentum: { enabled: boolean; value: MomentumKind };
+  /**
+   * Issue #2886 (S2): valid filter keys the seven panel fields do
+   * not cover (e.g. minPrice, gainersOnly, requireSqueezeGate).
+   * Carried verbatim through load/save so a preset saved on either
+   * page loads identically on the other — never silently dropped.
+   * The panel never edits these keys; stockCriteriaToFilter emits
+   * them unchanged. At run time the New Screen form's own visible
+   * fields (universe, sector, price range, trend, limit, search)
+   * are spread after the criteria filter and win on a clash, so a
+   * carried-over key never silently overrides what the form shows.
+   */
+  extra: Partial<StockScreenerFilter>;
 }
 
 const off = (value: string): StockCriterionValue => ({ enabled: false, value });
@@ -73,6 +85,7 @@ export const defaultStockCriteria: StockCriteriaState = {
   maxPeRatio: off(""),
   rsiFilter: { enabled: false, value: "any" },
   momentum: { enabled: false, value: "any" },
+  extra: {},
 };
 
 function num(value: string): number | undefined {
@@ -83,7 +96,9 @@ function num(value: string): number | undefined {
 
 /** Enabled criteria only, as a StockScreenerFilter for the run request. */
 export function stockCriteriaToFilter(criteria: StockCriteriaState): StockScreenerFilter {
-  const filter: StockScreenerFilter = {};
+  // Issue #2886 (S2): carried-over non-panel keys ride first, so the
+  // seven panel fields (which the panel owns) always win on a clash.
+  const filter: StockScreenerFilter = { ...criteria.extra };
   const minRsi = criteria.minRsi.enabled ? num(criteria.minRsi.value) : undefined;
   if (minRsi !== undefined) filter.minRsi = minRsi;
   const maxRsi = criteria.maxRsi.enabled ? num(criteria.maxRsi.value) : undefined;
@@ -115,27 +130,44 @@ export function stockCriteriaToFilter(criteria: StockCriteriaState): StockScreen
  * Market cap converts back from dollars to the panel's $B unit. A saved
  * "any" band/momentum (possible via direct API writes; the panel never
  * saves "any") maps to off, since "any" means no constraint.
+ *
+ * Issue #2886 (S2): every other valid filter key rides in `extra`
+ * verbatim, so loading a preset never drops keys the panel does not
+ * render (minPrice, gainersOnly, requireSqueezeGate, ...). The panel
+ * shows only its seven fields; `extra` is invisible there but is
+ * emitted again by stockCriteriaToFilter, so a re-save keeps it.
  */
 export function stockFilterToCriteria(filter: StockScreenerFilter): StockCriteriaState {
   const numeric = (value: number | undefined): StockCriterionValue =>
     value === undefined ? { enabled: false, value: "" } : { enabled: true, value: String(value) };
+  const {
+    minRsi,
+    maxRsi,
+    minVolume,
+    minMarketCap,
+    maxPeRatio,
+    rsiFilter,
+    momentum,
+    ...extra
+  } = filter;
   return {
-    minRsi: numeric(filter.minRsi),
-    maxRsi: numeric(filter.maxRsi),
-    minVolume: numeric(filter.minVolume),
+    minRsi: numeric(minRsi),
+    maxRsi: numeric(maxRsi),
+    minVolume: numeric(minVolume),
     minMarketCapB:
-      filter.minMarketCap === undefined
+      minMarketCap === undefined
         ? { enabled: false, value: "" }
-        : { enabled: true, value: String(filter.minMarketCap / 1e9) },
-    maxPeRatio: numeric(filter.maxPeRatio),
+        : { enabled: true, value: String(minMarketCap / 1e9) },
+    maxPeRatio: numeric(maxPeRatio),
     rsiFilter:
-      filter.rsiFilter && filter.rsiFilter !== "any"
-        ? { enabled: true, value: filter.rsiFilter }
+      rsiFilter && rsiFilter !== "any"
+        ? { enabled: true, value: rsiFilter }
         : { enabled: false, value: "any" },
     momentum:
-      filter.momentum && filter.momentum !== "any"
-        ? { enabled: true, value: filter.momentum }
+      momentum && momentum !== "any"
+        ? { enabled: true, value: momentum }
         : { enabled: false, value: "any" },
+    extra,
   };
 }
 
@@ -174,9 +206,9 @@ export interface StockCriteriaPanelProps {
 }
 
 export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: StockCriteriaPanelProps) {
-  const setNumeric = (key: keyof Omit<StockCriteriaState, "rsiFilter" | "momentum">) => (value: string) =>
+  const setNumeric = (key: "minRsi" | "maxRsi" | "minVolume" | "minMarketCapB" | "maxPeRatio") => (value: string) =>
     onChange({ ...criteria, [key]: { ...criteria[key], value } });
-  const setEnabled = (key: keyof StockCriteriaState) => () =>
+  const setEnabled = (key: "minRsi" | "maxRsi" | "minVolume" | "minMarketCapB" | "maxPeRatio" | "rsiFilter" | "momentum") => () =>
     onChange({ ...criteria, [key]: { ...criteria[key], enabled: !criteria[key].enabled } });
 
   const numericRow = (
