@@ -65,6 +65,9 @@ describe("bundle selling panel (#2781)", () => {
     container?.remove();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    // Issue #4511 — the sub-tabs are URL-synced; reset the URL so a
+    // tab change in one test never leaks into the next test's mount.
+    window.history.pushState(null, "", "/");
   });
 
   function buttonByText(text: string): HTMLButtonElement {
@@ -143,8 +146,18 @@ describe("bundle selling panel (#2781)", () => {
     return { impl, seen };
   }
 
+  /** Issue #4511 — the SellingSection lives in the "Selling options"
+   *  sub-tab; open that tab before reaching the section. */
   async function openSelling(impl: (url: string, init?: RequestInit) => Promise<unknown>) {
     await renderPanel(impl);
+    await act(async () => {
+      const tab = Array.from(container.querySelectorAll('button[role="tab"]')).find((b) =>
+        (b.textContent ?? "").includes("Selling options"),
+      );
+      if (!tab) throw new Error("tab not found: Selling options");
+      (tab as HTMLButtonElement).click();
+    });
+    await flush();
     await act(async () => {
       buttonByText("Show selling options").click();
     });

@@ -306,12 +306,32 @@ describe("selling panel section (#2717)", () => {
     container?.remove();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    // Issue #4511 — the sub-tabs are URL-synced; reset the URL so a
+    // tab change in one test never leaks into the next test's mount.
+    window.history.pushState(null, "", "/");
   });
 
   function buttonByText(text: string): HTMLButtonElement {
     const found = Array.from(container.querySelectorAll("button")).find((b) => (b.textContent ?? "").includes(text));
     if (!found) throw new Error(`button not found: ${text}`);
     return found as HTMLButtonElement;
+  }
+
+  /** Issue #4511 — the SellingSection lives in the "Selling options"
+   *  sub-tab; open that tab before reaching the section. */
+  function tabButton(label: string): HTMLButtonElement {
+    const found = Array.from(container.querySelectorAll('button[role="tab"]')).find((b) =>
+      (b.textContent ?? "").includes(label),
+    );
+    if (!found) throw new Error(`tab not found: ${label}`);
+    return found as HTMLButtonElement;
+  }
+
+  async function openSellingTab() {
+    await act(async () => {
+      tabButton("Selling options").click();
+    });
+    await flush();
   }
 
   async function renderPanel(fetchImpl: (url: string, init?: RequestInit) => Promise<unknown>) {
@@ -403,6 +423,7 @@ describe("selling panel section (#2717)", () => {
     // Selling reads happen only when the user asks — Phase 4's catalog-only
     // fetch contract is untouched until then.
     expect(seen.map((s) => s.url)).toEqual(["/api/products/catalog"]);
+    await openSellingTab();
     await act(async () => {
       buttonByText("Show selling options").click();
     });
@@ -433,6 +454,7 @@ describe("selling panel section (#2717)", () => {
     };
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     await renderPanel(wrapped);
+    await openSellingTab();
     await act(async () => {
       buttonByText("Show selling options").click();
     });
@@ -455,6 +477,7 @@ describe("selling panel section (#2717)", () => {
     const { impl } = sellingFetch({ mintStatus: 503 });
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     await renderPanel(impl);
+    await openSellingTab();
     await act(async () => {
       buttonByText("Show selling options").click();
     });
@@ -477,6 +500,7 @@ describe("selling panel section (#2717)", () => {
     const { impl } = sellingFetch({ purchaseStatus: 402 });
     vi.spyOn(window, "open").mockImplementation(() => null);
     await renderPanel(impl);
+    await openSellingTab();
     await act(async () => {
       buttonByText("Show selling options").click();
     });
@@ -521,6 +545,7 @@ describe("selling panel section (#2717)", () => {
     };
     const { impl } = sellingFetch({ subscription: activeSub });
     await renderPanel(impl);
+    await openSellingTab();
     await act(async () => {
       buttonByText("Show selling options").click();
     });
@@ -533,6 +558,7 @@ describe("selling panel section (#2717)", () => {
   it("shows no manage-or-cancel link without a current subscription (#2669)", async () => {
     const { impl } = sellingFetch();
     await renderPanel(impl);
+    await openSellingTab();
     await act(async () => {
       buttonByText("Show selling options").click();
     });

@@ -35,6 +35,7 @@ import { UsageBillingSection } from "./UsageBillingSection";
 import { TopUpLimitsSection } from "./TopUpLimitsSection";
 import { ReferralCodesSection } from "./ReferralCodesSection";
 import { OfferRulesSection } from "./OfferRulesSection";
+import { PlanStripePriceSection } from "./PlanStripePriceSection";
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 import {
   buildBillingView,
@@ -215,6 +216,7 @@ export function BillingServicingPanel() {
           <ApprovedFreeQuotaSection />
           <TopUpLimitsSection />
           <OfferRulesSection />
+          <PlanStripePriceSection />
           <Card>
             <p>Support snapshot</p>
             <p>Account: {view.supportSnapshot.login}</p>

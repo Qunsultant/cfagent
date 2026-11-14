@@ -177,11 +177,60 @@ export async function setTopUpLimits(
   return assertLimits(data.policy);
 }
 
+export interface StripePriceByPlanResponse {
+  stripePriceByPlan: Record<string, string>;
+  seedNote: string;
+}
+
+/** Validate the stripePriceByPlan block shape from a policy read (the
+ *  server assert is authoritative; this only guards the render against
+ *  a half-shaped body). Mirrors the server's assertStripePriceByPlan:
+ *  an object mapping plan id to a non-empty Stripe Price id. */
+export function assertStripePriceByPlanView(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new BillingPolicyApiError(500);
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v !== "string" || !v.trim()) throw new BillingPolicyApiError(500);
+    out[k] = v;
+  }
+  return out;
+}
+
 /**
- * Issue #3246 — GET billing-policy for the offer-rules block
+ * Issue #4511 — GET billing-policy for the stripePriceByPlan block
  * (operator-only). Callers MUST NOT render the POST answer as the
  * new state: re-read after every save and render only the fresh read.
  */
+export async function getStripePriceByPlan(): Promise<StripePriceByPlanResponse> {
+  const data = await callJson(`${BASE}/billing-policy`);
+  if (!isRecord(data) || !isRecord(data.policy)) throw new BillingPolicyApiError(500);
+  return {
+    stripePriceByPlan: assertStripePriceByPlanView(data.policy.stripePriceByPlan),
+    seedNote: typeof data.seedNote === "string" ? data.seedNote : "",
+  };
+}
+
+/**
+ * Issue #4511 — POST billing-policy with the whole stripePriceByPlan
+ * block (operator-only, audited server-side). The whole block is
+ * replaced on update, the same wholesale discipline as offerRules.
+ * Returns the mapping from the POST answer, which callers MUST NOT
+ * render as the new state: the section re-reads the policy after
+ * every save.
+ */
+export async function setStripePriceByPlan(
+  mapping: Record<string, string>,
+): Promise<Record<string, string>> {
+  const data = await callJson(`${BASE}/billing-policy`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ stripePriceByPlan: mapping }),
+  });
+  if (!isRecord(data) || !isRecord(data.policy)) throw new BillingPolicyApiError(500);
+  return assertStripePriceByPlanView(data.policy.stripePriceByPlan);
+}
 export async function getOfferRules(): Promise<OfferRulesResponse> {
   const data = await callJson(`${BASE}/billing-policy`);
   if (!isRecord(data) || !isRecord(data.policy)) throw new BillingPolicyApiError(500);

@@ -1043,6 +1043,56 @@
         "description": "Revenue analytics"
       }
     ],
+    "products": [
+      {
+        "id": "products",
+        "label": "Products",
+        "shortLabel": "Products",
+        "icon": "Workflows",
+        "badge": "Catalog",
+        "badgeType": "neutral",
+        "description": "The product catalog as the Phase 2 registry records it, with Phase 3 access parity"
+      },
+      {
+        "id": "selling-options",
+        "label": "Selling options",
+        "shortLabel": "Selling",
+        "icon": "Workflows",
+        "description": "Subscribe through the Billing checkout and see activation plus purchase receipts"
+      },
+      {
+        "id": "platform-admin:products",
+        "label": "Platform Admin Products",
+        "shortLabel": "Admin Products",
+        "icon": "Billing",
+        "description": "Product and version configuration, bulk moves"
+      },
+      {
+        "id": "billing",
+        "label": "Billing",
+        "shortLabel": "Billing",
+        "icon": "Billing",
+        "badge": "Billing",
+        "badgeType": "neutral",
+        "description": "Your subscription, receipts, plans, and referral-credit balance \u2014 read-only servicing"
+      },
+      {
+        "id": "checkout",
+        "label": "Checkout",
+        "shortLabel": "Checkout",
+        "icon": "Checkout",
+        "description": "Checkout"
+      },
+      {
+        "id": "payments",
+        "label": "Payments",
+        "shortLabel": "Payments",
+        "icon": "Payments",
+        "badge": "x402",
+        "badgeType": "neutral",
+        "description": "Payments"
+      }
+    ],
     "payments": [
       {
         "id": "payments",
@@ -1108,6 +1158,10 @@
     "stock-hub:new-screen": {
       "tab": "stock-hub",
       "view": "new-screen"
+    },
+    "products:selling-options": {
+      "tab": "products",
+      "view": "selling-options"
     },
     "stock-hub:screeners": {
       "tab": "stock-hub",
