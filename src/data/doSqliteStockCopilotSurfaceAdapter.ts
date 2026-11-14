@@ -24,6 +24,7 @@ import {
   type StockCopilotStoreSqlExecutor,
 } from "./stockCopilotStorePorts";
 import { doTableSql } from "./schemaComponent/doCatalogue";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 const str = (v: unknown): string => (typeof v === "string" ? v : String(v ?? ""));
 const strOrNull = (v: unknown): string | null =>
@@ -118,14 +119,14 @@ export class DoSqliteStockCopilotActivityStore
       this.sql.exec(`PRAGMA table_info(${COPILOT_ACTIVITY_TABLE})`),
     ) as Array<{ name?: unknown }>;
     if (!cols.some((c) => String(c.name ?? "") === "session")) {
-      this.sql.exec(`ALTER TABLE ${COPILOT_ACTIVITY_TABLE} ADD COLUMN session TEXT`);
+      this.sql.exec(remainderAlterSql("stock_copilot_activity", "session"));
     }
     // #3519: execution mode & critic verdict columns
     if (!cols.some((c) => String(c.name ?? "") === "mode")) {
-      this.sql.exec(`ALTER TABLE ${COPILOT_ACTIVITY_TABLE} ADD COLUMN mode TEXT`);
+      this.sql.exec(remainderAlterSql("stock_copilot_activity", "mode"));
     }
     if (!cols.some((c) => String(c.name ?? "") === "critic_verdict_json")) {
-      this.sql.exec(`ALTER TABLE ${COPILOT_ACTIVITY_TABLE} ADD COLUMN critic_verdict_json TEXT`);
+      this.sql.exec(remainderAlterSql("stock_copilot_activity", "critic_verdict_json"));
     }
   }
 
