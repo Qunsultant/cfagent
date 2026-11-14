@@ -18,12 +18,9 @@ import {
   type QuoteSourceD1Db,
   type QuoteSourcePort,
 } from "./quoteSourcePorts";
+import { d1TableSql } from "./schemaComponent/d1Catalogue";
 
-const CREATE_SQL = `CREATE TABLE IF NOT EXISTS quote_source_setting (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  source TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
-)`;
+const CREATE_SQL = d1TableSql("quote_source_setting");
 
 const SELECT_SQL = "SELECT source FROM quote_source_setting WHERE id = 1";
 
