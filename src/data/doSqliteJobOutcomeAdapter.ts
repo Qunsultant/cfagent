@@ -16,6 +16,7 @@ import {
   type PruneJobOutcomesOptions,
   type PruneJobOutcomesResult,
 } from "./jobOutcomePorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 function rowFromRecord(r: Record<string, any>): JobOutcomeRow {
   let deliveryStates: Record<string, string> = {};
@@ -51,15 +52,15 @@ export class DoSqliteJobOutcomeStore implements JobOutcomeStore {
   constructor(private readonly sql: JobOutcomeSqlExecutor) {}
 
   ensureTables(): void {
-    this.sql.exec("CREATE TABLE IF NOT EXISTS mas_job_outcomes (id TEXT PRIMARY KEY, kind TEXT, trigger TEXT, status TEXT, scanned INTEGER, matched INTEGER, coded_error TEXT, report_url TEXT, pdf_key TEXT, xlsx_key TEXT, csv_key TEXT, delivery_json TEXT, origin TEXT, created_at TEXT)");
+    this.sql.exec(doTableSql("mas_job_outcomes"));
     // The feed orders by created_at and the prune filters on it; without this
     // index every list call scans the whole table (see #2280).
-    this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_job_outcomes_created ON mas_job_outcomes(created_at DESC)");
+    this.sql.exec(doIndexSql("idx_mas_job_outcomes_created"));
   }
 
   private ensureMetaTable(): void {
     this.sql.exec(
-      "CREATE TABLE IF NOT EXISTS mas_job_outcomes_meta (k TEXT PRIMARY KEY, v TEXT)"
+      doTableSql("mas_job_outcomes_meta")
     );
   }
 
