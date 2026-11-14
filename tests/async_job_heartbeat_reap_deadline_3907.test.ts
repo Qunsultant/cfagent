@@ -156,17 +156,17 @@ function rowStatus(db: DatabaseSync, jobId: string): { status: string; error: st
 }
 
 describe("isHeartbeatStale (#3907)", () => {
-  it("a heartbeat 1 minute ago is fresh (never stale)", () => {
+  it("a heartbeat 1 minute ago is fresh (never stale)", async () => {
     const nowMs = Date.now();
     expect(isHeartbeatStale({ last_activity_at: new Date(nowMs - MIN).toISOString(), started_at: isoAgo(3 * HOUR) }, nowMs)).toBe(false);
   });
 
-  it("a heartbeat 30 minutes ago is stale (3x the 2-min interval = 6 min)", () => {
+  it("a heartbeat 30 minutes ago is stale (3x the 2-min interval = 6 min)", async () => {
     const nowMs = Date.now();
     expect(isHeartbeatStale({ last_activity_at: new Date(nowMs - 30 * MIN).toISOString(), started_at: isoAgo(3 * HOUR) }, nowMs)).toBe(true);
   });
 
-  it("the bound is exactly three heartbeat intervals", () => {
+  it("the bound is exactly three heartbeat intervals", async () => {
     expect(HEARTBEAT_STALE_MS).toBe(6 * MIN);
     const nowMs = Date.now();
     // Exactly at the bound: silence equals the bound, not more — fresh.
@@ -174,13 +174,13 @@ describe("isHeartbeatStale (#3907)", () => {
     expect(isHeartbeatStale({ last_activity_at: new Date(nowMs - HEARTBEAT_STALE_MS - 1).toISOString(), started_at: isoAgo(3 * HOUR) }, nowMs)).toBe(true);
   });
 
-  it("a pre-heartbeat row falls back to started_at age (the #3784 backstop)", () => {
+  it("a pre-heartbeat row falls back to started_at age (the #3784 backstop)", async () => {
     const nowMs = Date.now();
     expect(isHeartbeatStale({ last_activity_at: null, started_at: isoAgo(3 * HOUR) }, nowMs)).toBe(true);
     expect(isHeartbeatStale({ last_activity_at: null, started_at: isoAgo(30 * MIN) }, nowMs)).toBe(false);
   });
 
-  it("an unparseable last_activity_at falls back to started_at, never throws", () => {
+  it("an unparseable last_activity_at falls back to started_at, never throws", async () => {
     const nowMs = Date.now();
     expect(isHeartbeatStale({ last_activity_at: "not-a-date", started_at: isoAgo(3 * HOUR) }, nowMs)).toBe(true);
     expect(isHeartbeatStale({ last_activity_at: "not-a-date", started_at: isoAgo(30 * MIN) }, nowMs)).toBe(false);
@@ -194,7 +194,7 @@ describe("heartbeat-aware sweep (#3907)", () => {
     // The incident shape: started 3h ago, heartbeat 1 minute ago.
     seedRow(h.db, { jobId: "job-live", startedAt: isoAgo(3 * HOUR), lastActivityAt: isoAgo(MIN) });
 
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     // The stuck alert still fires on started_at age (its #2567
     // contract — the heartbeat is evidence there, never a second
     // threshold); the reap must not.
@@ -219,7 +219,7 @@ describe("heartbeat-aware sweep (#3907)", () => {
       payloadJson: JSON.stringify({ toolName: "paid_options_screener", arguments: { paymentSignature: "sig" } }),
     });
 
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 1, alerted: 0, reaped: 1 });
     await new Promise((r) => setTimeout(r, 25));
     expect(h.alerts).toHaveLength(0);
@@ -245,7 +245,7 @@ describe("heartbeat-aware sweep (#3907)", () => {
     const startedAt = isoAgo(3 * HOUR);
     seedRow(h.db, { jobId: "job-legacy", startedAt, lastActivityAt: null });
 
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 1, alerted: 0, reaped: 1 });
     expect(rowStatus(h.db, "job-legacy").status).toBe("failed");
     const failed = h.audits.filter((a) => a.type === "async_job.failed");
@@ -256,7 +256,7 @@ describe("heartbeat-aware sweep (#3907)", () => {
 });
 
 describe("heartbeat-aware read-path reap (#3907)", () => {
-  it("a fresh-heartbeat row reads back as running, never reaped", () => {
+  it("a fresh-heartbeat row reads back as running, never reaped", async () => {
     const h = makeHarness();
     seedRow(h.db, { jobId: "job-live-read", startedAt: isoAgo(3 * HOUR), lastActivityAt: isoAgo(MIN) });
 
@@ -265,7 +265,7 @@ describe("heartbeat-aware read-path reap (#3907)", () => {
     expect(rowStatus(h.db, "job-live-read").status).toBe("running");
   });
 
-  it("a stale-heartbeat row reads back as failed", () => {
+  it("a stale-heartbeat row reads back as failed", async () => {
     const h = makeHarness();
     seedRow(h.db, { jobId: "job-dead-read", startedAt: isoAgo(3 * HOUR), lastActivityAt: isoAgo(30 * MIN) });
 
@@ -276,7 +276,7 @@ describe("heartbeat-aware read-path reap (#3907)", () => {
 });
 
 describe("execution deadline (#3907)", () => {
-  it("resolves the max runtime: default 90 min, env override, 0 disables, garbage falls back", () => {
+  it("resolves the max runtime: default 90 min, env override, 0 disables, garbage falls back", async () => {
     expect(resolveAsyncJobMaxRuntimeMs({})).toBe(90 * MIN);
     expect(resolveAsyncJobMaxRuntimeMs({ ASYNC_JOB_MAX_RUNTIME_MINUTES: "120" })).toBe(120 * MIN);
     expect(resolveAsyncJobMaxRuntimeMs({ ASYNC_JOB_MAX_RUNTIME_MINUTES: "0" })).toBe(0);
@@ -401,7 +401,7 @@ describe("paid-job retry guard (#3907)", () => {
 });
 
 describe("Queues-page status helpers (#3907)", () => {
-  it("asyncJobsStatusLabel: clear only when nothing active AND nothing failed", () => {
+  it("asyncJobsStatusLabel: clear only when nothing active AND nothing failed", async () => {
     expect(asyncJobsStatusLabel({ active: 0, failed: 0, error: null })).toBe("Idle / Queue clear");
     expect(asyncJobsStatusLabel({ active: 2, failed: 0, error: null })).toBe("2 tasks running");
     expect(asyncJobsStatusLabel({ active: 1, failed: 0, error: null })).toBe("1 task running");
@@ -412,7 +412,7 @@ describe("Queues-page status helpers (#3907)", () => {
     expect(asyncJobsStatusLabel({ active: 0, failed: 0, error: "Could not load async jobs." })).toBe("Could not load");
   });
 
-  it("dlqHeaderStatus: load failure never reads as Queue clear", () => {
+  it("dlqHeaderStatus: load failure never reads as Queue clear", async () => {
     expect(dlqHeaderStatus({ loading: true, error: null, count: 0 })).toBe("Loading…");
     expect(dlqHeaderStatus({ loading: false, error: "The dead-letter queue could not be loaded.", count: 0 })).toBe("Could not load");
     expect(dlqHeaderStatus({ loading: false, error: null, count: 0 })).toBe("Queue clear");

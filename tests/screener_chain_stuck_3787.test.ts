@@ -124,7 +124,7 @@ function makeSweepCtx(
 /* ------------------------------------------------------------------ */
 
 describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () => {
-  it("start inserts + claims a running row; complete settles it completed", () => {
+  it("start inserts + claims a running row; complete settles it completed", async () => {
     const { db, sql, sessionId } = makeBridgeStore();
     const ports = createAsyncJobPorts(sql as never);
     const started = bridgeRunStart(ports, {
@@ -152,7 +152,7 @@ describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () =>
     );
   });
 
-  it("fail settles a running row failed with the named error", () => {
+  it("fail settles a running row failed with the named error", async () => {
     const { db, sql, sessionId } = makeBridgeStore();
     const ports = createAsyncJobPorts(sql as never);
     bridgeRunStart(ports, {
@@ -175,7 +175,7 @@ describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () =>
     expect(String(row?.error ?? "")).toContain("ENRICH_INPUT_MISSING");
   });
 
-  it("a second start for the same job id is a no-op (never two rows, never re-claimed)", () => {
+  it("a second start for the same job id is a no-op (never two rows, never re-claimed)", async () => {
     const { db, sql, sessionId } = makeBridgeStore();
     const ports = createAsyncJobPorts(sql as never);
     const input = {
@@ -195,7 +195,7 @@ describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () =>
     expect(bridgeRow(db, input.jobId)?.status).toBe("running");
   });
 
-  it("start stamps parentJobId when provided; null by default (#4357)", () => {
+  it("start stamps parentJobId when provided; null by default (#4357)", async () => {
     const { db, sql, sessionId } = makeBridgeStore();
     const ports = createAsyncJobPorts(sql as never);
     const wrapperId = "dfbe7230-d6e5-4d2e-956f-225caafef1b1";
@@ -226,14 +226,14 @@ describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () =>
     expect(bridgeRow(db, "chain:yahoo-nasdaq100-quotes-pipeline:run-1")?.parent_job_id).toBeNull();
   });
 
-  it("complete/fail on an unknown id write nothing (guarded transitions)", () => {
+  it("complete/fail on an unknown id write nothing (guarded transitions)", async () => {
     const { sql } = makeBridgeStore();
     const ports = createAsyncJobPorts(sql as never);
     expect(bridgeRunComplete(ports, "no-such-job", "{}")).toBe(0);
     expect(bridgeRunFail(ports, "no-such-job", "boom")).toBe(0);
   });
 
-  it("the bridge payload carries no `chain` key (the already-running gate must not match it)", () => {
+  it("the bridge payload carries no `chain` key (the already-running gate must not match it)", async () => {
     const { db, sql, sessionId } = makeBridgeStore();
     const ports = createAsyncJobPorts(sql as never);
     bridgeRunStart(ports, {
@@ -311,13 +311,13 @@ describe("stalled ScreenerScreenWorkflow run (#3787a)", () => {
 
     const alerts: StuckRunAlertInfo[] = [];
     const sweepCtx = makeSweepCtx(sql, sessionId, alerts);
-    const at45 = sweepStaleAsyncJobs(sweepCtx, Date.now() + 45 * MIN);
+    const at45 = await sweepStaleAsyncJobs(sweepCtx, Date.now() + 45 * MIN);
     expect(at45).toEqual({ examined: 1, alerted: 1, reaped: 0 });
     await vi.waitFor(() => expect(alerts).toHaveLength(1));
     expect(alerts[0].jobId).toBe(bridgeId);
     expect(bridgeRow(db, bridgeId)?.status).toBe("running");
 
-    const at2h05 = sweepStaleAsyncJobs(sweepCtx, Date.now() + (2 * 60 + 5) * MIN);
+    const at2h05 = await sweepStaleAsyncJobs(sweepCtx, Date.now() + (2 * 60 + 5) * MIN);
     expect(at2h05).toEqual({ examined: 1, alerted: 0, reaped: 1 });
     const reaped = bridgeRow(db, bridgeId);
     expect(reaped?.status).toBe("failed");
@@ -759,7 +759,7 @@ describe("stalled J1–J7 pipeline-chain run (#3787b)", () => {
 
     const alerts: StuckRunAlertInfo[] = [];
     const sweepCtx = makeSweepCtx(sql, sessionId, alerts);
-    const at45 = sweepStaleAsyncJobs(sweepCtx, Date.now() + 45 * MIN);
+    const at45 = await sweepStaleAsyncJobs(sweepCtx, Date.now() + 45 * MIN);
     expect(at45).toEqual({ examined: 1, alerted: 1, reaped: 0 });
     await vi.waitFor(() => expect(alerts).toHaveLength(1));
     expect(alerts[0].jobId).toBe(String(rows[0].job_id));
@@ -834,12 +834,12 @@ describe("screening chain run with missing feed data (#3787c)", () => {
 /* ------------------------------------------------------------------ */
 
 describe("feed datasets on a schedule — goal removed (#4306 S2)", () => {
-  it("DEFAULT_SCHEDULES carries no feed-refresh goal", () => {
+  it("DEFAULT_SCHEDULES carries no feed-refresh goal", async () => {
     const goal = DEFAULT_SCHEDULES.find((g) => g.id === "feed-refresh");
     expect(goal).toBeUndefined();
   });
 
-  it("the operation catalog carries no feed.refresh_all entry, so addGoal cannot add the goal", () => {
+  it("the operation catalog carries no feed.refresh_all entry, so addGoal cannot add the goal", async () => {
     const entry = OPERATION_CATALOG.find((e) => e.operations.includes("feed.refresh_all"));
     expect(entry).toBeUndefined();
   });

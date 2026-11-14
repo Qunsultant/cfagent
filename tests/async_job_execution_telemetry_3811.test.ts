@@ -119,15 +119,18 @@ function seedRow(
     lastActivityAt?: string | null;
     errorCode?: string | null;
     stuckAlertedAt?: string | null;
+    /** Issue #4002 — the stored payload, for tests that seed a dispatch shape. */
+    payloadJson?: string;
   },
 ): void {
   ensureAsyncJobGraphColumns(makeSql(db) as never);
   db.prepare(
-    "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, created_at, updated_at, started_at, completed_at, stuck_alerted_at, last_activity_at, error_code) VALUES (?, 'owner-login-1', ?, 'Seeded run', ?, '{}', ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, created_at, updated_at, started_at, completed_at, stuck_alerted_at, last_activity_at, error_code) VALUES (?, 'owner-login-1', ?, 'Seeded run', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     row.jobId,
     row.capability ?? "mcp.tool",
     row.status ?? "running",
+    row.payloadJson ?? "{}",
     row.startedAt ?? isoAgo(19 * MIN),
     row.startedAt ?? isoAgo(19 * MIN),
     row.startedAt ?? null,
@@ -166,7 +169,7 @@ function insertQueued(
 }
 
 describe("heartbeat / last-activity storage (#3811)", () => {
-  it("claim stamps last_activity_at at the claim instant", () => {
+  it("claim stamps last_activity_at at the claim instant", async () => {
     const h = makeHarness();
     insertQueued(h, "job-claim");
     const sql = makeSql(h.db);
@@ -182,7 +185,7 @@ describe("heartbeat / last-activity storage (#3811)", () => {
     expect(typeof row.last_activity_at).toBe("string");
   });
 
-  it("heartbeat advances last_activity_at on a running row only", () => {
+  it("heartbeat advances last_activity_at on a running row only", async () => {
     const h = makeHarness();
     const sql = makeSql(h.db);
     const ports = createAsyncJobPorts(sql as never);
@@ -204,7 +207,7 @@ describe("heartbeat / last-activity storage (#3811)", () => {
     );
   });
 
-  it("terminal transitions stamp last_activity_at and the failure code", () => {
+  it("terminal transitions stamp last_activity_at and the failure code", async () => {
     const h = makeHarness();
     const sql = makeSql(h.db);
     const ports = createAsyncJobPorts(sql as never);
@@ -230,7 +233,7 @@ describe("heartbeat / last-activity storage (#3811)", () => {
     expect(done.error_code).toBeNull();
   });
 
-  it("legacy rows upgrade in place: the probed columns read NULL", () => {
+  it("legacy rows upgrade in place: the probed columns read NULL", async () => {
     const h = makeHarness();
     const sql = makeSql(h.db);
     // A table created before this slice has neither column.
@@ -250,7 +253,7 @@ describe("heartbeat / last-activity storage (#3811)", () => {
     expect(readRow(h.db, "job-legacy").last_activity_at).toBe(now);
   });
 
-  it("heartbeatAsyncJob is best-effort: it never throws the caller", () => {
+  it("heartbeatAsyncJob is best-effort: it never throws the caller", async () => {
     const h = makeHarness();
     insertQueued(h, "job-best");
     // A heartbeat on a queued row writes nothing but returns false.
@@ -263,13 +266,13 @@ describe("heartbeat / last-activity storage (#3811)", () => {
 });
 
 describe("failure-code derivation (#3811)", () => {
-  it("a BusinessError keeps its own catalog code", () => {
+  it("a BusinessError keeps its own catalog code", async () => {
     expect(resolveJobFailureCode(new BusinessError("FAILURE_QUOTE_RATE_LIMITED"))).toBe(
       "FAILURE_QUOTE_RATE_LIMITED",
     );
   });
 
-  it("a coded message keeps its leading catalog code", () => {
+  it("a coded message keeps its leading catalog code", async () => {
     expect(
       resolveJobFailureCode(
         new Error("[FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED] Delivery recipient is not allowed — recipient x"),
@@ -277,13 +280,13 @@ describe("failure-code derivation (#3811)", () => {
     ).toBe("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED");
   });
 
-  it("an uncoded throw falls back to the generic job code, never invented", () => {
+  it("an uncoded throw falls back to the generic job code, never invented", async () => {
     expect(resolveJobFailureCode(new Error("boom"))).toBe("FAILURE_ASYNC_JOB_FAILED");
     expect(resolveJobFailureCode("plain string failure")).toBe("FAILURE_ASYNC_JOB_FAILED");
     expect(resolveJobFailureCode(undefined)).toBe("FAILURE_ASYNC_JOB_FAILED");
   });
 
-  it("an unknown bracket code falls back to the generic job code", () => {
+  it("an unknown bracket code falls back to the generic job code", async () => {
     expect(resolveJobFailureCode(new Error("[NOPE_001] something"))).toBe(
       "FAILURE_ASYNC_JOB_FAILED",
     );
@@ -376,7 +379,7 @@ describe("sweep carries last-activity evidence (#3811)", () => {
       startedAt: isoAgo(40 * MIN),
       lastActivityAt: lastActivity,
     });
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 1, alerted: 1, reaped: 0 });
     // The notify hook is dispatched on a microtask (it must never
     // surface on the read path), so flush before reading the spy.
@@ -391,7 +394,7 @@ describe("sweep carries last-activity evidence (#3811)", () => {
     expect(detected?.payload.heartbeatAgeMs).toBeLessThan(39 * MIN + 60_000);
   });
 
-  it("a reaped row carries the generic failure code", () => {
+  it("a reaped row carries the generic failure code", async () => {
     const h = makeHarness();
     const lastActivity = isoAgo(3 * 60 * MIN);
     seedRow(h.db, {
@@ -399,7 +402,7 @@ describe("sweep carries last-activity evidence (#3811)", () => {
       startedAt: isoAgo(3 * 60 * MIN),
       lastActivityAt: lastActivity,
     });
-    const result = sweepStaleAsyncJobs(h.ctx);
+    const result = await sweepStaleAsyncJobs(h.ctx);
     expect(result).toEqual({ examined: 1, alerted: 0, reaped: 1 });
     const row = readRow(h.db, "job-reap");
     expect(row.status).toBe("failed");
@@ -407,6 +410,73 @@ describe("sweep carries last-activity evidence (#3811)", () => {
     const failed = h.audits.find((a) => a.type === "async_job.failed");
     expect(failed?.payload.errorCode).toBe("FAILURE_ASYNC_JOB_FAILED");
     expect(failed?.payload.lastActivityAt).toBe(lastActivity);
+  });
+});
+
+describe("stale sweep settles a feed dispatch (#4002)", () => {
+  it("re-arms a stale Yahoo feed dispatch and fails the original as ORPHANED, not generic", async () => {
+    const h = makeHarness();
+    seedRow(h.db, {
+      jobId: "feed-run-yahoo",
+      capability: "http.request",
+      // Past the reap deadline, with a stale heartbeat — the incident shape
+      // (a long-running dispatch whose executor stopped beating).
+      startedAt: isoAgo(3 * 60 * MIN),
+      lastActivityAt: isoAgo(30 * MIN),
+      payloadJson: JSON.stringify({
+        method: "POST",
+        pathAndQuery: "/data-providers/yahoo/feed-run",
+        body: { sourceId: "yahoo" },
+      }),
+    });
+
+    const result = await sweepStaleAsyncJobs(h.ctx);
+    expect(result.reaped).toBe(1);
+
+    // The original row is ORPHANED (named), never the generic unknown-outcome code.
+    const original = readRow(h.db, "feed-run-yahoo");
+    expect(original.status).toBe("failed");
+    expect(original.error_code).toBe("FAILURE_ASYNC_JOB_ORPHANED");
+
+    // Its work is re-armed with the same dispatch and the lineage links.
+    const rearmed = h.db
+      .prepare("SELECT job_id, payload_json FROM mas_async_jobs WHERE job_id != 'feed-run-yahoo'")
+      .all() as Array<{ job_id: string; payload_json: string }>;
+    expect(rearmed).toHaveLength(1);
+    const payload = JSON.parse(rearmed[0].payload_json) as Record<string, unknown>;
+    expect(payload.retryOf).toBe("feed-run-yahoo");
+    expect(payload.recoveryRearmOf).toBe("feed-run-yahoo");
+    expect(payload.pathAndQuery).toBe("/data-providers/yahoo/feed-run");
+
+    // Both the settle and the re-arm are on the record, attributed to the sweep.
+    const failed = h.audits.find((a) => a.type === "async_job.failed");
+    expect(failed?.payload.errorCode).toBe("FAILURE_ASYNC_JOB_ORPHANED");
+    expect(failed?.payload.settledBy).toBe("stale_sweep");
+    expect(failed?.payload.rearmedAs).toBe(rearmed[0].job_id);
+    const retried = h.audits.find((a) => a.type === "async_job.retried");
+    expect(retried?.payload.recoveredBy).toBe("stale_sweep");
+  });
+
+  it("never re-arms a paid feed dispatch: the x402 signature is consumed (#3907)", async () => {
+    const h = makeHarness();
+    seedRow(h.db, {
+      jobId: "feed-run-paid",
+      capability: "http.request",
+      startedAt: isoAgo(3 * 60 * MIN),
+      lastActivityAt: isoAgo(30 * MIN),
+      payloadJson: JSON.stringify({
+        method: "POST",
+        pathAndQuery: "/data-providers/yahoo/feed-run",
+        paymentSignature: "sig-consumed",
+      }),
+    });
+
+    const result = await sweepStaleAsyncJobs(h.ctx);
+    expect(result.reaped).toBe(1);
+    const rows = h.db.prepare("SELECT job_id FROM mas_async_jobs").all() as Array<{ job_id: string }>;
+    expect(rows.map((r) => r.job_id)).toEqual(["feed-run-paid"]);
+    const original = readRow(h.db, "feed-run-paid");
+    expect(original.error_code).toBe("FAILURE_ASYNC_JOB_ORPHANED");
   });
 });
 
@@ -427,7 +497,7 @@ describe("runs-view projection (#3811)", () => {
     };
   }
 
-  it("a running job shows last activity and heartbeat age", () => {
+  it("a running job shows last activity and heartbeat age", async () => {
     const run = runFromJobs(
       [
         runJob({
@@ -444,7 +514,7 @@ describe("runs-view projection (#3811)", () => {
     expect(run.heartbeatAgeMs).toBe(1 * MIN);
   });
 
-  it("a legacy running row falls back to started_at, never invented", () => {
+  it("a legacy running row falls back to started_at, never invented", async () => {
     const run = runFromJobs(
       [runJob({ job_id: "job-legacy" })],
       [],
@@ -455,7 +525,7 @@ describe("runs-view projection (#3811)", () => {
     expect(run.heartbeatAgeMs).toBe(19 * MIN);
   });
 
-  it("a failed tool run carries its coded error and stage reason", () => {
+  it("a failed tool run carries its coded error and stage reason", async () => {
     const lastActivity = isoBeforeNow(2 * MIN);
     const run = runFromJobs(
       [
@@ -481,7 +551,7 @@ describe("runs-view projection (#3811)", () => {
     expect(run.lastActivityAt).toBe(lastActivity);
   });
 
-  it("an uncoded failure keeps the raw message and the generic code", () => {
+  it("an uncoded failure keeps the raw message and the generic code", async () => {
     const run = runFromJobs(
       [
         runJob({
@@ -503,7 +573,7 @@ describe("runs-view projection (#3811)", () => {
 });
 
 describe("heartbeat interval (#3811)", () => {
-  it("ticks every two minutes, matching the #624 research-task precedent", () => {
+  it("ticks every two minutes, matching the #624 research-task precedent", async () => {
     expect(ASYNC_JOB_HEARTBEAT_MS).toBe(120_000);
   });
 });
