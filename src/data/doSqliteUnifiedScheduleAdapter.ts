@@ -30,24 +30,12 @@ import {
   type UnifiedScheduleState,
 } from "./unifiedSchedulePorts";
 import { ensureUnifiedScheduleIndexes } from "./unifiedScheduleIndexSchema";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 function ensureTable(sql: SqlStorage): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS ${UNIFIED_SCHEDULES_TABLE} (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      state TEXT NOT NULL,
-      callback TEXT,
-      operation TEXT,
-      definition_json TEXT NOT NULL,
-      owner_login TEXT,
-      provenance_json TEXT,
-      alarm_id TEXT,
-      paused_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`);
-  sql.exec(`CREATE INDEX IF NOT EXISTS ${UNIFIED_SCHEDULES_TABLE}_kind_idx ON ${UNIFIED_SCHEDULES_TABLE} (kind, created_at ASC, id ASC)`);
-  sql.exec(`CREATE INDEX IF NOT EXISTS ${UNIFIED_SCHEDULES_TABLE}_state_idx ON ${UNIFIED_SCHEDULES_TABLE} (state, created_at ASC, id ASC)`);
+  sql.exec(doTableSql(UNIFIED_SCHEDULES_TABLE));
+  sql.exec(doIndexSql(`${UNIFIED_SCHEDULES_TABLE}_kind_idx`));
+  sql.exec(doIndexSql(`${UNIFIED_SCHEDULES_TABLE}_state_idx`));
   // Issue #3121 Phase 2 (#3124) — the unfiltered-list ordering index
   // (src/data/unifiedScheduleIndexSchema.ts, #2280 pattern).
   ensureUnifiedScheduleIndexes(sql);
