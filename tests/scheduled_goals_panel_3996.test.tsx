@@ -37,6 +37,8 @@ const BUILTINS = [
   { id: "resource-dashboard-comparison", name: "SessionStore dashboard comparison", cron: "0 2 * * *", operation: "resource.dashboard_comparison", budgetCents: 1, enabled: true, timeZone: "UTC" },
   { id: "index-refresh-wikipedia", name: "Index-list refresh (Wikipedia)", cron: "0 4 * * 0", operation: "index.refresh_wikipedia", budgetCents: 1, enabled: true, timeZone: "UTC" },
   { id: "index-refresh-holdings", name: "Index-list refresh (ETF holdings)", cron: "0 3 * * *", operation: "index.refresh_holdings", budgetCents: 1, enabled: false, timeZone: "UTC" },
+  // Issue #4411: the monthly Autopilot evaluation.
+  { id: "autopilot-monthly-evaluation", name: "Autopilot monthly evaluation", cron: "0 9 1 * *", operation: "autopilot.evaluate", budgetCents: 1, enabled: true, timeZone: "UTC" },
 ];
 
 let container: HTMLDivElement;
@@ -146,11 +148,11 @@ afterEach(async () => {
 });
 
 describe("ScheduledGoalsPanel built-in goals (#3996)", () => {
-  it("dropdown lists all 8 built-ins by name and id", async () => {
+  it("dropdown lists all 9 built-ins by name and id", async () => {
     await renderPanel();
     const select = builtinSelect();
     const options = Array.from(select.options).map((o) => o.textContent ?? "");
-    expect(options).toHaveLength(9); // placeholder + 8 built-ins
+    expect(options).toHaveLength(10); // placeholder + 9 built-ins
     for (const goal of BUILTINS) {
       expect(options.some((t) => t.includes(goal.name) && t.includes(goal.id))).toBe(true);
     }
@@ -238,6 +240,7 @@ describe("ScheduledGoalsPanel built-in goals (#3996)", () => {
       "resource-dashboard-comparison",
       "index-refresh-wikipedia",
       "index-refresh-holdings",
+      "autopilot-monthly-evaluation",
     ]);
     // No duplicate is posted, and the two disabled-by-design goals seed disabled.
     expect(new Set(posted.map((p) => p.body.id)).size).toBe(posted.length);

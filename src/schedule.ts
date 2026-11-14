@@ -188,6 +188,24 @@ export const DEFAULT_SCHEDULES: ScheduledGoal[] = [
     enabled: false,
     timeZone: "UTC",
   },
+  {
+    id: "autopilot-monthly-evaluation",
+    name: "Autopilot monthly evaluation",
+    cron: "0 9 1 * *",
+    timeZone: "UTC",
+    operation: "autopilot.evaluate",
+    budgetCents: 1,
+    // Issue #4411 (sub-issue of #3121) — the one Autopilot schedule:
+    // a monthly run of the policy-envelope evaluation (dry-run only,
+    // never places orders), listed and configurable on the Schedules
+    // home. Monthly is exactly at the platform's 30-day interval cap,
+    // so no staleness threshold is attached to its outputs (#4306
+    // trap: a cadence-blind stale window would read STALE ~29.9 days
+    // out of 30). The watchdog's previousCronTickMs has no
+    // attributable tick for a monthly cron, so it never flags this
+    // schedule as missed.
+    enabled: true,
+  },
 ];
 
 /** Weekday convention: 0 = Sunday … 6 = Saturday (JS Date convention). */

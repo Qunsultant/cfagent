@@ -1224,7 +1224,7 @@ export function AutopilotControlCenter({
       {/* Policy Decisions Audit (issue #651): recorded verdicts from mas_policy_verdicts */}
       <PageSection title="Policy decisions">
       <Card>
-        <span className="ui-meta-sm">Source: GET /api/autopilot — mas_policy_verdicts, signed by RiskPolicyEngine. Dry-run verdicts are labeled simulated.</span>
+        <span className="ui-meta-sm">Source: GET /api/autopilot — mas_policy_verdicts, signed by RiskPolicyEngine. Dry-run verdicts are labeled simulated. Scheduled dry-run checks come from the monthly Autopilot evaluation schedule (Schedules home).</span>
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
             <Badge tone="neutral">{verdictRows.length}</Badge>

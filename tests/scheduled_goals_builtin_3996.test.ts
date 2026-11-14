@@ -96,9 +96,9 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
       }[];
     };
     expect(body.ok).toBe(true);
-    expect(body.goals).toHaveLength(8);
+    expect(body.goals).toHaveLength(9);
     const byId = new Map(body.goals.map((g) => [g.id, g]));
-    expect(new Set(body.goals.map((g) => g.id)).size).toBe(8);
+    expect(new Set(body.goals.map((g) => g.id)).size).toBe(9);
     expect(byId.get("daily-qa-sweep")).toMatchObject({
       name: "Daily QA sweep",
       cron: "0 6 * * *",
@@ -155,6 +155,15 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
       enabled: false,
       timeZone: "UTC",
     });
+    // Issue #4411: the monthly Autopilot evaluation.
+    expect(byId.get("autopilot-monthly-evaluation")).toMatchObject({
+      name: "Autopilot monthly evaluation",
+      cron: "0 9 1 * *",
+      operation: "autopilot.evaluate",
+      budgetCents: 1,
+      enabled: true,
+      timeZone: "UTC",
+    });
     // DEFAULT_SCHEDULES order is the seed order.
     expect(body.goals.map((g) => g.id)).toEqual([
       "daily-qa-sweep",
@@ -165,6 +174,7 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
       "resource-dashboard-comparison",
       "index-refresh-wikipedia",
       "index-refresh-holdings",
+      "autopilot-monthly-evaluation",
     ]);
   });
 });

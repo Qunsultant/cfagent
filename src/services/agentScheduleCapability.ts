@@ -105,6 +105,9 @@ export const AGENT_SCHEDULABLE_GOAL_OPERATIONS: readonly string[] = [
   "index.refresh_holdings",
   "chain.execute",
   "pipeline:*",
+  // Issue #4411: the monthly Autopilot evaluation executes at firing
+  // (dry-run policy-envelope check through the evaluate endpoint).
+  "autopilot.evaluate",
 ];
 
 /**
