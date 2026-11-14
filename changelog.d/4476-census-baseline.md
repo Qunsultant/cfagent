@@ -1,0 +1,3 @@
+### Fixed
+
+- **The neutrality census accounts for the measured-inventory rows (#4476):** the #4441 autopilot-capabilities document names the two broker integrations it measured, and the shrink-only provider-brand census requires new file×term rows to carry a disposition. The two rows are baselined with that disposition and their measured counts (5 E*TRADE, 1 Alpaca), so `test:pins` is green on `main` again and any future increase still fails. #autoclaw-001
