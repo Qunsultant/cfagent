@@ -1,0 +1,3 @@
+### Fixed
+
+- Top-up AOP conformance (#3571): every mint/confirm outcome is now catalog-coded — mint/confirm successes carry `code` + the catalog message, all 17 raw-string response sites return `{code, message, retryable}` resolved through the single outcome resolver, port/adapters throw typed `BusinessError`, structured aspect logging fires on every coded outcome, and audit payloads carry `code` + `message` (plus `checkoutSessionId` on the mint audit). Confirm now refuses cross-tenant drafts (403) when the caller's identity resolves to a different tenant than the draft. The Top up tab renders the catalog message for the mint notice and confirm success (amounts stay as data). TopUpLimitsSection / billing-policy route coding stays out of scope for a follow-up.

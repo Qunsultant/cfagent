@@ -231,10 +231,11 @@ describe("outcome catalog: run detail messages (#2608)", () => {
 
   it("carries the 18 RUN_* messages as a top-level section, never as outcome keys", () => {
     expect(Object.keys(runMessages).sort()).toEqual([...RUN_CODES].sort());
-    // 141 on the #3246 slice-3 head: 136 on the slice-1 head (124
-    // on the #3990 head (123 on the #4002 head (122 on the #3907
-    // head (121 on the #2667 rebased head (117 on main + 4 slice
-    // codes FAILURE_/SUCCESS_USAGE_BILLING_*) + 1 (#3907
+    // 155 on this branch: 146 on main 39155419 (145 on main c179492d (141 on the #3246
+    // slice-3 head: 136 on the slice-1 head (124 on the #3990 head
+    // (123 on the #4002 head (122 on the #3907 head (121 on the
+    // #2667 rebased head (117 on main + 4 slice codes
+    // FAILURE_/SUCCESS_USAGE_BILLING_*) + 1 (#3907
     // FAILURE_ASYNC_JOB_TIMEOUT)) + 1 (#4002
     // FAILURE_ASYNC_JOB_ORPHANED)) + 1 (#3990
     // FAILURE_PUBLIC_NO_PAPER_MODE)) + 12 (#3246 slice 1:
@@ -245,9 +246,14 @@ describe("outcome catalog: run detail messages (#2608)", () => {
     // + 4 (#3307 slice 1: FAILURE_CODE_RUNS_UNAVAILABLE +
     // FAILURE_REFERRAL_CODE_INVALID + FAILURE_REFERRAL_CODE_CAP_EXCEEDED
     // + FAILURE_REFERRAL_CODE_RULE_UNAVAILABLE) + 1 (#2373 S1b:
-    // FAILURE_PROVIDER_MISMATCH).
+    // FAILURE_PROVIDER_MISMATCH)) + 9 (#3571:
+    // SUCCESS_TOP_UP_CHECKOUT_CREATED, FAILURE_TOP_UP_UNAUTHORIZED,
+    // FAILURE_TOP_UP_VALIDATION, FAILURE_TOP_UP_FORBIDDEN,
+    // FAILURE_TOP_UP_NOT_FOUND, FAILURE_TOP_UP_STORE_UNAVAILABLE,
+    // FAILURE_TOP_UP_DRAFT_RECORD_FAILED,
+    // FAILURE_TOP_UP_CREDIT_MARK_FAILED, FAILURE_TOP_UP_UNEXPECTED).
     // The count pins that no RUN_* code leaked into "outcomes".
-    expect(Object.keys(outcomes)).toHaveLength(146);
+    expect(Object.keys(outcomes)).toHaveLength(155);
     expect(Object.keys(outcomes).some((k) => k.startsWith("RUN_"))).toBe(false);
     for (const code of RUN_CODES) {
       expect(code).toMatch(/^RUN_[A-Z_]+$/);

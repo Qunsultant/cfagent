@@ -226,6 +226,7 @@ import {
   resolveOutcome,
   BusinessError,
 } from "../../outcomes/outcomeAspects";
+import { logAspectEvent } from "../../aspects/loggingAspect";
 import {
   confirmChannelPurchase,
   mintChannelPurchase,
@@ -242,7 +243,6 @@ import {
   assertTopUpRail,
   TopUpClaimRefusedError,
 } from "../../data/topUpPorts";
-import { logAspectEvent } from "../../aspects/loggingAspect";
 import {
   createChannelDraftAdapter,
   ensureChannelSchema,
@@ -2710,24 +2710,50 @@ export async function handleAgenticPaymentsRoutes(
     });
   };
 
-  const topUpErrorResponse = (err: unknown): Response => {
-    if (err instanceof BusinessError) {
-      const outcome = resolveOutcome(err.code);
-      return new Response(JSON.stringify({ error: codedMessage(err.code), code: err.code }), {
-        status: outcome.entry?.httpStatus ?? 500,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    const message = err instanceof Error ? err.message : "Top-up failed.";
-    const status = /already credited/.test(message)
-      ? 409
-      : /required|must be|Unknown top-up draft/.test(message)
-        ? 400
-        : 500;
-    return new Response(JSON.stringify({ error: message }), {
-      status,
-      headers: { "content-type": "application/json" },
+  /**
+   * Issue #3571: the one coded top-up response — {code, message,
+   * retryable} with the catalog httpStatus — plus the structured
+   * aspect log for the outcome (Telemetry, 15-factor). The message
+   * is resolved from the outcome catalog, never hand-written; the
+   * aspect log makes every coded outcome observable. `extra` carries
+   * the route's own data fields (never code/message/retryable).
+   */
+  function topUpCodedResponse(
+    code: string,
+    operation: "top_up.checkout" | "top_up.confirm",
+    metadata: Record<string, unknown>,
+    extra: Record<string, unknown> = {},
+  ): Response {
+    const resolved = resolveOutcome(code);
+    const status = resolved.entry?.httpStatus ?? 500;
+    logAspectEvent({
+      aspect: "TopUp",
+      operationName: operation,
+      code: resolved.code,
+      level: status >= 500 ? "error" : status >= 400 ? "warn" : "info",
+      message: resolved.businessMessage ?? resolved.code,
+      metadata: { code: resolved.code, ...metadata },
     });
+    return Response.json(
+      {
+        ...extra,
+        code: resolved.code,
+        message: resolved.businessMessage,
+        retryable: resolved.entry?.retryable ?? false,
+      },
+      { status },
+    );
+  }
+
+  const topUpErrorResponse = (
+    err: unknown,
+    operation: "top_up.checkout" | "top_up.confirm",
+    metadata: Record<string, unknown>,
+  ): Response => {
+    if (err instanceof BusinessError) {
+      return topUpCodedResponse(err.code, operation, metadata);
+    }
+    return topUpCodedResponse("FAILURE_TOP_UP_UNEXPECTED", operation, metadata);
   };
 
   // POST /payments/agentic/commercial/top-up/checkout — mint a native checkout for a chosen amount.
@@ -2739,7 +2765,7 @@ export async function handleAgenticPaymentsRoutes(
   if (path.endsWith("/payments/agentic/commercial/top-up/checkout") && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return topUpCodedResponse("FAILURE_TOP_UP_UNAUTHORIZED", "top_up.checkout", {});
       const flag = await requireMonetization();
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as {
@@ -2749,13 +2775,15 @@ export async function handleAgenticPaymentsRoutes(
         offerContext?: unknown;
       };
       const email = typeof body.email === "string" ? body.email.trim() : "";
-      if (!email) return Response.json({ error: "email (checkout contact) is required." }, { status: 400 });
+      if (!email) {
+        return topUpCodedResponse("FAILURE_TOP_UP_VALIDATION", "top_up.checkout", { userLogin: login });
+      }
       let rail: "card" | "x402" = "card";
       if (body.rail !== undefined) {
         try {
           rail = assertTopUpRail(body.rail);
         } catch {
-          return Response.json({ error: "rail must be \"card\" or \"x402\"." }, { status: 400 });
+          return topUpCodedResponse("FAILURE_TOP_UP_VALIDATION", "top_up.checkout", { userLogin: login });
         }
       }
       let amountUSD: number;
@@ -2776,8 +2804,8 @@ export async function handleAgenticPaymentsRoutes(
       try {
         await ensureBillingPolicySchema(policy.db);
         policyValue = await policy.getPolicy();
-      } catch (err: any) {
-        return Response.json({ error: `Billing policy unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      } catch {
+        return topUpCodedResponse("FAILURE_TOP_UP_STORE_UNAVAILABLE", "top_up.checkout", { userLogin: login, rail });
       }
       if (amountUSD < policyValue.topUpMinUSD || amountUSD > policyValue.topUpMaxUSD) {
         throw new BusinessError("FAILURE_TOP_UP_AMOUNT_INVALID");
@@ -2788,8 +2816,8 @@ export async function handleAgenticPaymentsRoutes(
           { commercial: store, subscriptions: subs },
           { userId: login, nowMs: Date.now() },
         );
-      } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+      } catch {
+        return topUpCodedResponse("FAILURE_TOP_UP_STORE_UNAVAILABLE", "top_up.checkout", { userLogin: login, rail });
       }
       // #2219: the tenant comes from the resolved identity, never the request body.
       const tenantId = identity.tenantId ?? login;
@@ -2797,8 +2825,8 @@ export async function handleAgenticPaymentsRoutes(
       if (drafts instanceof Response) return drafts;
       try {
         await ensureTopUpSchema(drafts.db);
-      } catch (err: any) {
-        return Response.json({ error: `Top-up store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      } catch {
+        return topUpCodedResponse("FAILURE_TOP_UP_STORE_UNAVAILABLE", "top_up.checkout", { userLogin: login, rail });
       }
       const ports = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
       const port = ports?.[rail] ?? null;
@@ -2832,15 +2860,23 @@ export async function handleAgenticPaymentsRoutes(
           checkoutSessionId: rail === "card" ? created.checkoutId : null,
           challengeNonce: rail === "x402" ? (created.challenge?.nonce ?? null) : null,
         });
-      } catch (err: any) {
-        return Response.json({ error: "Failed to record the top-up draft." }, { status: 500 });
+      } catch {
+        return topUpCodedResponse(
+          "FAILURE_TOP_UP_DRAFT_RECORD_FAILED",
+          "top_up.checkout",
+          { userLogin: login, rail, topUpRequestId },
+        );
       }
+      const checkoutOutcome = resolveOutcome("SUCCESS_TOP_UP_CHECKOUT_CREATED");
       ctx.audit("commercial.top_up.checkout_created", "payments", {
         userId: login,
         tenantId,
         topUpRequestId,
         rail,
         amountUSD,
+        code: checkoutOutcome.code,
+        message: checkoutOutcome.businessMessage,
+        checkoutSessionId: rail === "card" ? created.checkoutId : null,
       });
       // Issue #3246: offer acceptance, audit-only — see the
       // subscription checkout mint above.
@@ -2856,25 +2892,33 @@ export async function handleAgenticPaymentsRoutes(
         });
       }
       if (rail === "card") {
-        return Response.json({
+        return topUpCodedResponse(
+          "SUCCESS_TOP_UP_CHECKOUT_CREATED",
+          "top_up.checkout",
+          { userLogin: login, rail, topUpRequestId },
+          {
+            topUpRequestId,
+            rail,
+            amountUSD,
+            checkoutUrl: created.checkoutUrl ?? null,
+            checkoutSessionId: created.checkoutId,
+          },
+        );
+      }
+      return topUpCodedResponse(
+        "SUCCESS_TOP_UP_CHECKOUT_CREATED",
+        "top_up.checkout",
+        { userLogin: login, rail, topUpRequestId },
+        {
           topUpRequestId,
           rail,
           amountUSD,
-          checkoutUrl: created.checkoutUrl ?? null,
-          checkoutSessionId: created.checkoutId,
-        });
-      }
-      return Response.json({
-        topUpRequestId,
-        rail,
-        amountUSD,
-        checkoutId: created.checkoutId,
-        challenge: created.challenge ?? null,
-      });
+          checkoutId: created.checkoutId,
+          challenge: created.challenge ?? null,
+        },
+      );
     } catch (err: any) {
-      if (err instanceof BusinessError) return topUpErrorResponse(err);
-      const message = err.message || "Failed to create top-up checkout";
-      return Response.json({ error: message }, { status: 500 });
+      return topUpErrorResponse(err, "top_up.checkout", { userLogin: commercialLogin() ?? undefined });
     }
   }
 
@@ -2892,7 +2936,7 @@ export async function handleAgenticPaymentsRoutes(
   if (path.endsWith("/payments/agentic/commercial/top-up/confirm") && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return topUpCodedResponse("FAILURE_TOP_UP_UNAUTHORIZED", "top_up.confirm", {});
       const flag = await requireMonetization();
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as {
@@ -2902,7 +2946,9 @@ export async function handleAgenticPaymentsRoutes(
         payer?: unknown;
       };
       const topUpRequestId = typeof body.topUpRequestId === "string" ? body.topUpRequestId : "";
-      if (!topUpRequestId) return Response.json({ error: "topUpRequestId is required." }, { status: 400 });
+      if (!topUpRequestId) {
+        return topUpCodedResponse("FAILURE_TOP_UP_VALIDATION", "top_up.confirm", { userLogin: login });
+      }
       const store = requireStore();
       if (store instanceof Response) return store;
       const subs = requireSubs();
@@ -2913,13 +2959,33 @@ export async function handleAgenticPaymentsRoutes(
       if (drafts instanceof Response) return drafts;
       try {
         await ensureTopUpSchema(drafts.db);
-      } catch (err: any) {
-        return Response.json({ error: `Top-up store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      } catch {
+        return topUpCodedResponse("FAILURE_TOP_UP_STORE_UNAVAILABLE", "top_up.confirm", { userLogin: login, topUpRequestId });
       }
       const draft = await drafts.getDraft(topUpRequestId);
-      if (!draft) return Response.json({ error: "Unknown top-up." }, { status: 404 });
+      if (!draft) {
+        return topUpCodedResponse("FAILURE_TOP_UP_NOT_FOUND", "top_up.confirm", { userLogin: login, topUpRequestId });
+      }
       if (draft.userLogin !== login) {
-        return Response.json({ error: "Forbidden: only the top-up owner may confirm it." }, { status: 403 });
+        return topUpCodedResponse("FAILURE_TOP_UP_FORBIDDEN", "top_up.confirm", { userLogin: login, topUpRequestId });
+      }
+      // Issue #3571: cross-tenant confirm refuses — the draft
+      // belongs to the tenant resolved at mint; a caller whose
+      // identity now resolves to a different tenant must not credit
+      // it. A null-tenant identity (no account row) skips the check,
+      // preserving the no-account mint→confirm flow. The owner check
+      // above stays first.
+      let confirmIdentity;
+      try {
+        confirmIdentity = await resolvePlatformIdentity(
+          { commercial: store, subscriptions: subs },
+          { userId: login, nowMs: Date.now() },
+        );
+      } catch {
+        return topUpCodedResponse("FAILURE_TOP_UP_STORE_UNAVAILABLE", "top_up.confirm", { userLogin: login, topUpRequestId });
+      }
+      if (confirmIdentity.tenantId && confirmIdentity.tenantId !== draft.tenantId) {
+        return topUpCodedResponse("FAILURE_TOP_UP_FORBIDDEN", "top_up.confirm", { userLogin: login, topUpRequestId });
       }
       if (draft.status !== "minted") {
         throw new BusinessError("FAILURE_TOP_UP_REPLAY");
@@ -2936,7 +3002,9 @@ export async function handleAgenticPaymentsRoutes(
           typeof body.checkoutSessionId === "string" && body.checkoutSessionId
             ? body.checkoutSessionId
             : draft.checkoutSessionId;
-        if (!sessionId) return Response.json({ error: "checkoutSessionId is required." }, { status: 400 });
+        if (!sessionId) {
+          return topUpCodedResponse("FAILURE_TOP_UP_VALIDATION", "top_up.confirm", { userLogin: login, topUpRequestId: draft.id, rail: draft.rail });
+        }
         checkoutSessionId = sessionId;
         let evidence;
         try {
@@ -2959,7 +3027,9 @@ export async function handleAgenticPaymentsRoutes(
         paymentIntentId = evidence.paymentIntentId;
       } else {
         const paymentProof = typeof body.paymentProof === "string" ? body.paymentProof : "";
-        if (!paymentProof) return Response.json({ error: "paymentProof is required." }, { status: 400 });
+        if (!paymentProof) {
+          return topUpCodedResponse("FAILURE_TOP_UP_VALIDATION", "top_up.confirm", { userLogin: login, topUpRequestId: draft.id, rail: draft.rail });
+        }
         let verdict;
         try {
           verdict = await port.verifyCryptoPayment({ paymentProof, expectedAmountUSD: draft.amountUSD });
@@ -3048,16 +3118,27 @@ export async function handleAgenticPaymentsRoutes(
         });
       } catch (err: any) {
         // The credit landed but the draft could not be marked: a loud
-        // 500 with the draft id, so an operator can reconcile from the
-        // Stripe evidence. The draft is `crediting` (claimed above), so
-        // a retry refuses 409 and cannot credit again — no double
-        // credit, but the draft never reaches `credited` and no
-        // `commercial.top_up.credited` audit fires for it; the operator
-        // reconciles from the claim audit + Stripe evidence. Never
-        // silently swallow this.
-        return Response.json({ error: `Top-up credited but the draft could not be marked: ${draft.id}.` }, { status: 500 });
+        // 500 with the draft id as a structured field (never
+        // interpolated text), so an operator can reconcile from the
+        // Stripe evidence. A retry confirm sees the credited... no —
+        // the draft is still minted, so a retry re-verifies and would
+        // credit again; the operator reconcile path is the guard (see
+        // the #3262 PR known limitations). Never silently swallow this.
+        // A typed BusinessError from the adapter (unknown draft /
+        // already credited) keeps its own coded status; only an
+        // unexpected store failure takes CREDIT_MARK_FAILED.
+        if (err instanceof BusinessError) {
+          return topUpErrorResponse(err, "top_up.confirm", { userLogin: login, topUpRequestId: draft.id, rail: draft.rail });
+        }
+        return topUpCodedResponse(
+          "FAILURE_TOP_UP_CREDIT_MARK_FAILED",
+          "top_up.confirm",
+          { userLogin: login, topUpRequestId: draft.id, rail: draft.rail },
+          { topUpRequestId: draft.id },
+        );
       }
       void marked;
+      const creditedOutcome = resolveOutcome("SUCCESS_TOP_UP_CREDITED");
       ctx.audit("commercial.top_up.credited", "payments", {
         userId: login,
         tenantId: draft.tenantId,
@@ -3066,6 +3147,8 @@ export async function handleAgenticPaymentsRoutes(
         rail: draft.rail,
         creditsUSD: credited.creditsUSD,
         paymentIntentId,
+        code: creditedOutcome.code,
+        message: creditedOutcome.businessMessage,
       });
       // Issue #2155 follow-up: project the top-up into the D1 journal
       // (Dr 1000 / Cr 2100 — prepaid credit is deferred revenue, NOT
@@ -3084,14 +3167,19 @@ export async function handleAgenticPaymentsRoutes(
         tenantId: draft.tenantId,
         amountUSD: draft.amountUSD,
       }));
-      return Response.json({
-        account: credited,
-        topUpRequestId: draft.id,
-        creditedUSD: draft.amountUSD,
-        rail: draft.rail,
-      });
+      return topUpCodedResponse(
+        "SUCCESS_TOP_UP_CREDITED",
+        "top_up.confirm",
+        { userLogin: login, topUpRequestId: draft.id, rail: draft.rail },
+        {
+          account: credited,
+          topUpRequestId: draft.id,
+          creditedUSD: draft.amountUSD,
+          rail: draft.rail,
+        },
+      );
     } catch (err: any) {
-      return topUpErrorResponse(err);
+      return topUpErrorResponse(err, "top_up.confirm", { userLogin: commercialLogin() ?? undefined });
     }
   }
 

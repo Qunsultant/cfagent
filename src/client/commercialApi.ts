@@ -362,6 +362,10 @@ export interface TopUpChallenge {
 }
 
 export interface TopUpCheckoutView {
+  /** Issue #3571: catalog-coded mint outcome (SUCCESS_TOP_UP_CHECKOUT_CREATED). */
+  code: string;
+  /** The catalog businessMessage for `code` — the one rendering, never hand-written. */
+  message: string;
   topUpRequestId: string;
   rail: "card" | "x402";
   amountUSD: number;
@@ -372,6 +376,10 @@ export interface TopUpCheckoutView {
 }
 
 export interface TopUpConfirmView {
+  /** Issue #3571: catalog-coded confirm outcome (SUCCESS_TOP_UP_CREDITED). */
+  code: string;
+  /** The catalog businessMessage for `code` — the one rendering, never hand-written. */
+  message: string;
   account: CommercialAccountView;
   topUpRequestId: string;
   creditedUSD: number;

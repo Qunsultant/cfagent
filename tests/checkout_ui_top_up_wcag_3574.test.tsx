@@ -31,6 +31,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CheckoutPanel } from "../src/client/CheckoutPanel";
+import { codedMessage } from "../src/outcomes/outcomeAspects";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -360,9 +361,18 @@ describe("top-up journey WCAG 2.2 AA (#3574)", () => {
     });
     await flush();
     const statuses = Array.from(container.querySelectorAll('[role="status"]'));
-    expect(statuses.some((s) => (s.textContent || "").includes("Top-up credited: $25.00. New credit balance: $35.00."))).toBe(
-      true,
-    );
+    // Issue #3571: the credited milestone renders the catalog message for
+    // SUCCESS_TOP_UP_CREDITED (via codedMessage) plus the amounts as data —
+    // the old hand-written "Top-up credited: $25.00. New credit balance:
+    // $35.00." sentence is gone. The pin still asserts the milestone is a
+    // status announcement carrying the credited amount and new balance.
+    expect(
+      statuses.some((s) =>
+        (s.textContent || "").includes(
+          `${codedMessage("SUCCESS_TOP_UP_CREDITED")} Credited $25.00 — new balance $35.00.`,
+        ),
+      ),
+    ).toBe(true);
     for (const input of Array.from(container.querySelectorAll("input"))) {
       expect(input.getAttribute("aria-invalid")).toBeNull();
     }

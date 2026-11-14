@@ -504,9 +504,9 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     expect(entry?.businessMessage).toMatch(/no paper trading/i);
     expect(entry?.businessMessage).toMatch(/live mode/i);
     expect(entry?.retryable).toBe(false);
-    // 141: 136 on the #3246 slice-1 head (124 on the #3990 head
-    // (123 on the #4002 head (122 on the #3907 head + 1
-    // FAILURE_ASYNC_JOB_ORPHANED) + 1 (#3990
+    // 155: 146 on main 39155419 (145 on main c179492d (141: 136 on the #3246 slice-1 head
+    // (124 on the #3990 head (123 on the #4002 head (122 on the
+    // #3907 head + 1 FAILURE_ASYNC_JOB_ORPHANED) + 1 (#3990
     // FAILURE_PUBLIC_NO_PAPER_MODE)) + 12 (#3246 slice 1:
     // SUCCESS/FAILURE_OFFER_* (10) + SUCCESS/FAILURE_PRODUCT_RANK_*
     // (2)) + 5 (#3246 slice 3: SUCCESS_RUNS_PACK_PURCHASED +
@@ -515,8 +515,9 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     // + 4 (#3307 slice 1: FAILURE_CODE_RUNS_UNAVAILABLE +
     // FAILURE_REFERRAL_CODE_INVALID + FAILURE_REFERRAL_CODE_CAP_EXCEEDED
     // + FAILURE_REFERRAL_CODE_RULE_UNAVAILABLE)
-    // + 1 (#2373 S1b: FAILURE_PROVIDER_MISMATCH).
-    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(146);
+    // + 1 (#2373 S1b: FAILURE_PROVIDER_MISMATCH) + 9 (#3571 top-up
+    // codes).
+    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(155);
   });
 
   it("the OAuth scopes request trading.write (the connect grant must cover placement)", () => {
