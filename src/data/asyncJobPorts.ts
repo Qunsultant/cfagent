@@ -51,6 +51,15 @@ import type { AsyncJobStatus } from "../types";
 export type AsyncJobSqlExecutor = SqlStorage;
 
 /** The full stored row, exactly as the table holds it. */
+export interface AsyncJobAttempt {
+  /** 1-based attempt number. */
+  attempt: number;
+  /** The attempt's error text (business message, never a stack). */
+  error: string;
+  /** When the attempt failed (ISO). */
+  at: string;
+}
+
 export interface AsyncJobStoredRow {
   job_id: string;
   session_id: string;
@@ -82,6 +91,8 @@ export interface AsyncJobStoredRow {
    *  that as "Not recorded", never invented). Probed additive
    *  columns, same migration family as the graph columns above. */
   trigger: string | null;
+  /** Issue #4417: the failed attempts, newest last — NULL/absent = no attempt recorded. */
+  attempts_json?: string | null;
   triggered_by: string | null;
   schedule_id: string | null;
   /** Issue #3811: the last instant the executor touched this row
@@ -229,6 +240,13 @@ export interface AsyncJobQueuePort {
    *  transition (status and updated_at are untouched). Returns
    *  rows written: 1 = this caller claimed the alert. */
   markStuckAlerted(jobId: string, nowIso: string): number;
+  /**
+   * Issue #4417: append one failed attempt to the row's durable attempt
+   * history (`attempts_json`). Best-effort by contract: a missing row is a
+   * no-op, and the caller never fails a shard because history could not be
+   * written.
+   */
+  appendAttempt(jobId: string, attempt: AsyncJobAttempt): void;
   /** Issue #3811: the execution heartbeat — stamps
    *  last_activity_at, guarded on still-running. NOT a lifecycle
    *  transition (status and updated_at are untouched): the

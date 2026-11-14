@@ -277,6 +277,24 @@ export class DoSqliteAsyncJobStore
     return rowsWritten(cursor);
   }
 
+  appendAttempt(jobId: string, attempt: { attempt: number; error: string; at: string }): void {
+    const rows = Array.from(
+      this.sql.exec("SELECT attempts_json FROM mas_async_jobs WHERE job_id = ?", jobId),
+    ) as Array<{ attempts_json?: string | null }>;
+    if (rows.length === 0) return;
+    let list: unknown[] = [];
+    try {
+      const parsed = JSON.parse(rows[0].attempts_json ?? "[]");
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      list = [];
+    }
+    list.push(attempt);
+    Array.from(
+      this.sql.exec("UPDATE mas_async_jobs SET attempts_json = ? WHERE job_id = ?", JSON.stringify(list), jobId),
+    );
+  }
+
   markStuckAlerted(jobId: string, nowIso: string): number {
     const cursor = this.sql.exec(
       `UPDATE mas_async_jobs SET stuck_alerted_at = ?
@@ -400,7 +418,7 @@ export class DoSqliteAsyncJobStore
 
   workflowRunRows(sessionId: string, limit: number): AsyncJobWorkflowRow[] {
     return Array.from(this.sql.exec(
-      "SELECT job_id, capability, display_name, status, payload_json, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, last_activity_at, error_code FROM mas_async_jobs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+      "SELECT * FROM mas_async_jobs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
       sessionId,
       limit,
     )) as unknown as AsyncJobWorkflowRow[];

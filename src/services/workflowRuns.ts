@@ -130,6 +130,8 @@ export interface WorkflowRunStage {
   durationMs: number | null;
   /** Issue #4418: the row's last heartbeat before a reap — pre-reap evidence. */
   lastActivityAt?: string | null;
+  /** Issue #4417: the failed attempts this shard recorded, oldest first. */
+  attempts?: Array<{ attempt: number; error: string; at: string }>;
   /** Human description (the job's display name, or the transition summary). */
   detail: string | null;
   /** Why a skipped/held/failed stage ended that way, when recorded. */
@@ -306,6 +308,8 @@ export interface WorkflowRunJobRow {
    *  or NULL while unclaimed. Carried through the route mapping
    *  so the runs view can derive the Stuck display. */
   stuck_alerted_at?: string | null;
+  /** Issue #4417: the durable attempt history (JSON array of {attempt,error,at}). */
+  attempts_json?: string | null;
   /** Issue #3810: provenance stamped at submission — the trigger
    *  that caused this job, its actor, and the originating schedule
    *  id. NULL = the submission carried none (the read model renders
@@ -1026,6 +1030,22 @@ function sortJobs(jobs: WorkflowRunJobRow[]): WorkflowRunJobRow[] {
   });
 }
 
+/** Issue #4417: parse a row's attempt history; malformed history reads empty. */
+function attemptsForJob(job: WorkflowRunJobRow): Array<{ attempt: number; error: string; at: string }> {
+  try {
+    const parsed = JSON.parse(job.attempts_json ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((row) => row && typeof row === "object")
+      .map((row) => ({
+        attempt: Number((row as Record<string, unknown>).attempt) || 0,
+        error: String((row as Record<string, unknown>).error ?? ""),
+        at: String((row as Record<string, unknown>).at ?? ""),
+      }));
+  } catch {
+    return [];
+  }
+}
 function stageRowsForGroup(
   jobs: WorkflowRunJobRow[],
   transitions: WorkflowRunStageTransition[],
@@ -1066,6 +1086,7 @@ function stageRowsForGroup(
       finishedAt: completedAt,
       durationMs: durationBetween(startedAt, completedAt),
       lastActivityAt: isoOrNull(job.last_activity_at) ?? null,
+      attempts: attemptsForJob(job),
       detail: job.display_name || null,
       reason: matchedTransition?.reason ?? resultReason ?? (errorCode ? codedMessage(errorCode) : null),
       error: codedStageError(job),

@@ -65,6 +65,12 @@ export interface WithRetryOptions {
   /** Observability hook, fired before each retry sleep. Defaults to
    *  a structured console.warn. */
   onRetry?: (event: RetryEvent) => void;
+  /**
+   * Issue #4417: fired on EVERY failed attempt (including the terminal one),
+   * so a caller can persist a durable attempt history. Best-effort: a throw
+   * from the hook never masks the attempt's own error.
+   */
+  onAttempt?: (attempt: number, error: unknown) => void;
   sleep?: (ms: number) => Promise<void>;
   rng?: () => number;
 }
@@ -155,6 +161,12 @@ export async function withRetry<T>(
       return await fn(attempt);
     } catch (err) {
       lastError = err;
+      // Issue #4417: record the failed attempt before any decision to stop.
+      try {
+        opts.onAttempt?.(attempt, err);
+      } catch {
+        // History is evidence, never a reason to fail the operation.
+      }
       if (attempt >= maxAttempts) break;
       if (opts.shouldRetry && !opts.shouldRetry(err)) break;
       // Issue #1355: Retry-After wins over policy backoff for this

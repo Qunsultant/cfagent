@@ -2359,6 +2359,19 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
               chain
             ),
           sessionId: ctx.sessionKey(),
+          // Issue #4417: persist each failed shard attempt on the job row —
+          // durable across a host restart, best-effort by contract.
+          recordAttempt: (attempt: number, error: unknown) => {
+            try {
+              family.queue.appendAttempt(jobId, {
+                attempt,
+                error: error instanceof Error ? error.message : String(error),
+                at: new Date().toISOString(),
+              });
+            } catch {
+              // History is evidence; it never fails the shard.
+            }
+          },
         },
         shardPayload
         ),

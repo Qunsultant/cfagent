@@ -104,3 +104,38 @@ describe("withRetry", () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
+describe("withRetry attempt history (#4417)", () => {
+  it("fires onAttempt for every failed attempt, including the terminal one", async () => {
+    const seen: Array<{ attempt: number; message: string }> = [];
+    const fn = vi.fn(async (attempt: number) => {
+      throw new Error(`attempt ${attempt} failed`);
+    });
+    await expect(
+      withRetry(fn, { ...policy, maxAttempts: 3 }, {
+        sleep: noSleep,
+        onAttempt: (attempt, error) => {
+          seen.push({ attempt, message: error instanceof Error ? error.message : String(error) });
+        },
+      }),
+    ).rejects.toThrow("attempt 3 failed");
+    expect(seen).toEqual([
+      { attempt: 1, message: "attempt 1 failed" },
+      { attempt: 2, message: "attempt 2 failed" },
+      { attempt: 3, message: "attempt 3 failed" },
+    ]);
+  });
+
+  it("a throwing onAttempt never masks the retry's own error", async () => {
+    const fn = vi.fn(async () => {
+      throw new Error("real failure");
+    });
+    await expect(
+      withRetry(fn, { ...policy, maxAttempts: 1 }, {
+        sleep: noSleep,
+        onAttempt: () => {
+          throw new Error("history writer exploded");
+        },
+      }),
+    ).rejects.toThrow("real failure");
+  });
+});

@@ -241,3 +241,24 @@ describe("per-stage last activity (#4418)", () => {
     expect(container.textContent ?? "").toContain("Last activity 2026-11-08T21:20:00.000Z");
   });
 });
+describe("per-shard attempt history surface (#4417)", () => {
+  it("renders the attempt count with each attempt's error", async () => {
+    root = createRoot(container);
+    const base = run({ status: "failed" });
+    const stage = {
+      ...base.stages[0],
+      attempts: [
+        { attempt: 1, error: "timeout", at: "2026-11-08T21:14:20.000Z" },
+        { attempt: 2, error: "upstream 500", at: "2026-11-08T21:14:22.000Z" },
+      ],
+    };
+    await act(async () => {
+      root.render(<RunDetail run={{ ...base, stages: [stage] }} />);
+    });
+    await flush();
+    const text = container.textContent ?? "";
+    expect(text).toContain("Attempts 2");
+    expect(text).toContain("#1 timeout");
+    expect(text).toContain("#2 upstream 500");
+  });
+});
