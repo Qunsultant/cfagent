@@ -574,11 +574,19 @@ describe("S0-P24 ledger gap (B-L-01/02/03): S1 closes B-L-01 on job_run_records;
   });
 
   it("pins mas_opportunity_scans as carrying the three §4 linkage id columns (#3314; trigger still rides summary_json)", () => {
-    const scans = read("src/data/doSqliteScanRunAdapter.ts");
-    const create = scans.slice(
-      scans.indexOf("CREATE TABLE IF NOT EXISTS"),
-      scans.indexOf(";", scans.indexOf("CREATE TABLE IF NOT EXISTS")),
-    );
+    // #4282 P2b: the CREATE TABLE text moved from the adapter
+    // into the DO catalogue (src/data/schemaComponent/
+    // doCatalogue.ts) — asserted at its new home. The adapter
+    // still executes it, through doTableSql.
+    const adapter = read("src/data/doSqliteScanRunAdapter.ts");
+    expect(adapter).toContain('doTableSql("mas_opportunity_scans")');
+    const catalogue = read("src/data/schemaComponent/doCatalogue.ts");
+    const code = "schema.do.mas_opportunity_scans.create_table";
+    const entryStart = catalogue.indexOf(code);
+    expect(entryStart).toBeGreaterThan(-1);
+    const stmtStart = catalogue.indexOf("statement: `", entryStart);
+    const stmtEnd = catalogue.indexOf("`,", stmtStart);
+    const create = catalogue.slice(stmtStart, stmtEnd);
     for (const col of ["schedule_id", "async_job_id", "workflow_id"]) {
       expect(create).toContain(col);
     }
