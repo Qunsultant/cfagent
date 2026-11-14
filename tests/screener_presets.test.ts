@@ -208,7 +208,7 @@ describe("Issue #1495 — screener presets", () => {
       await req(agent, "POST", "/screener/presets", "alice", {
         name: "A only",
         assetClass: "stocks",
-        criteria: {},
+        criteria: { minRsi: 30 },
       })
     ).json()) as any;
     expect(await listPresets(agent, "bob")).toEqual({ presets: [] });
@@ -223,7 +223,7 @@ describe("Issue #1495 — screener presets", () => {
       await req(agent, "POST", "/screener/presets", "alice", {
         name: "Doomed",
         assetClass: "stocks",
-        criteria: {},
+        criteria: { minRsi: 30 },
       })
     ).json()) as any;
     const del = await req(agent, "DELETE", `/screener/presets/${created.preset.id}`, "alice");
@@ -231,5 +231,30 @@ describe("Issue #1495 — screener presets", () => {
     expect(await listPresets(agent, "alice")).toEqual({ presets: [] });
     const missing = await req(agent, "DELETE", "/screener/presets/nope", "alice");
     expect(missing.status).toBe(404);
+  });
+});
+
+describe("Issue #2886 (S2) — empty preset saves refused server-side", () => {
+  it("rejects empty criteria {} with 400 and stores nothing", async () => {
+    const { agent } = seedAgent(makeEnv());
+    const res = await req(agent, "POST", "/screener/presets", "alice", {
+      name: "Empty",
+      assetClass: "stocks",
+      criteria: {},
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).error).toMatch(/at least one criterion/i);
+    expect(await listPresets(agent, "alice")).toEqual({ presets: [] });
+  });
+
+  it("rejects empty options criteria with 400", async () => {
+    const { agent } = seedAgent(makeEnv());
+    const res = await req(agent, "POST", "/screener/presets", "alice", {
+      name: "Empty",
+      assetClass: "options",
+      criteria: {},
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).error).toMatch(/at least one criterion/i);
   });
 });

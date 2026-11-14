@@ -51,6 +51,7 @@ import {
 } from "../src/client/ScreenerPresetManager";
 import {
   stockFilterToCriteria,
+  stockCriteriaToFilter,
   defaultStockCriteria,
 } from "../src/client/StockCriteriaPanel";
 
@@ -199,6 +200,7 @@ describe("Issue #1497 — stockFilterToCriteria", () => {
       maxPeRatio: { enabled: true, value: "25" },
       rsiFilter: { enabled: true, value: "oversold" },
       momentum: { enabled: true, value: "bullish_breakout" },
+      extra: {},
     });
   });
 
@@ -242,6 +244,7 @@ describe("Issue #1497 — ScreenerPresetManager", () => {
       maxPeRatio: { enabled: false, value: "" },
       rsiFilter: { enabled: false, value: "any" },
       momentum: { enabled: false, value: "any" },
+      extra: {},
     });
   });
 
@@ -318,5 +321,63 @@ describe("Issue #1497 — ScreenerPresetManager", () => {
     // a pattern run. The pin follows the wiring, not the name.
     expect(src).toContain("onApplyPreset={handleCriteriaChange}");
     expect(src).toContain("onChange={handleCriteriaChange}");
+  });
+});
+
+describe("Issue #2886 (S2) — empty saves refused, full filter round-trips", () => {
+  it("non-panel filter keys survive load into extra and back out again", () => {
+    const loaded = stockFilterToCriteria({
+      minRsi: 30,
+      minPrice: 5,
+      gainersOnly: true,
+      requireSqueezeGate: true,
+    });
+    expect(loaded.extra).toEqual({
+      minPrice: 5,
+      gainersOnly: true,
+      requireSqueezeGate: true,
+    });
+    // Re-saving the loaded state stores the same keys — a preset
+    // saved on either page loads identically on the other.
+    expect(stockCriteriaToFilter(loaded)).toEqual({
+      minPrice: 5,
+      gainersOnly: true,
+      requireSqueezeGate: true,
+      minRsi: 30,
+    });
+  });
+
+  it("Save is disabled and a loud notice shows when no criterion is on", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ScreenerPresetManager
+          assetClass="stocks"
+          userLogin="alice"
+          currentFilter={{}}
+          onApplyPreset={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {});
+    const save = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent === "Save preset"
+    );
+    expect(save).toBeDefined();
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    expect(container.textContent).toMatch(/no criteria are on/i);
+    await act(async () => {
+      save!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {});
+    expect(fetchCalls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("StockHub wires the Presets tab to the live criteria, not {} (source pin)", () => {
+    const src = readFileSync("src/client/StockHub.tsx", "utf8");
+    expect(src).not.toContain("currentFilter={{}}");
+    expect(src).toContain("currentFilter={stockCriteriaToFilter(stockCriteria)}");
   });
 });

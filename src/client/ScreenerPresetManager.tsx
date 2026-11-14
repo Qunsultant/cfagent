@@ -171,6 +171,13 @@ export function ScreenerPresetManager<C>({
 
   const visible = presets.filter((preset) => preset.assetClass === assetClass);
 
+  // Issue #2886 (S2): an empty current filter would save a preset
+  // with zero criteria, which loads as "(0 criteria)" — the Preset01
+  // defect. Refuse it loudly here (Save disabled + notice) and on the
+  // server (validatePresetInput rejects empty criteria); the guard in
+  // handleSave is the belt to the disabled button's braces.
+  const isEmptyFilter = Object.keys(currentFilter).length === 0;
+
   const handleLoad = async (preset: ScreenerPreset) => {
     setError("");
     setNotice("");
@@ -199,6 +206,10 @@ export function ScreenerPresetManager<C>({
   const handleSave = async () => {
     const trimmed = name.trim();
     if (trimmed === "" || saving) return;
+    if (isEmptyFilter) {
+      setError("Cannot save an empty preset — turn on at least one criterion first.");
+      return;
+    }
     setError("");
     setNotice("");
     setSaving(true);
@@ -253,6 +264,11 @@ export function ScreenerPresetManager<C>({
       </p>
       {error && <Notice tone="danger">{error}</Notice>}
       {notice && <Notice tone="success">{notice}</Notice>}
+      {isEmptyFilter && (
+        <Notice tone="warning">
+          No criteria are on — turn on at least one criterion before saving, or the preset would store nothing.
+        </Notice>
+      )}
       {loading ? (
         <p style={{ color: "var(--color-text-muted)" }}>Loading presets…</p>
       ) : error ? (
@@ -306,7 +322,7 @@ export function ScreenerPresetManager<C>({
         <Button
           type="button"
           variant="secondary"
-          disabled={name.trim() === "" || saving}
+          disabled={name.trim() === "" || saving || isEmptyFilter}
           onClick={() => void handleSave()}
         >
           Save preset
