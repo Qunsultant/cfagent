@@ -1,0 +1,3 @@
+### Added
+
+- **#4282 P4 — prove schema reproduction (#4382):** the schema-equality pin is green on a clean instance for all four planes (D1 + DO + ORM + remainder, 401 entries resolving to 412 statements, 177 tables / 102 indexes): the combined catalogue builds the frozen combined model exactly, a second recreate is a provable no-op report, tenant isolation holds under a red-team pin, and an uncoded statement cannot execute. The silent-degrade index path is reported as a recreate failure, never silently continued; the production adapter guard is tracked as follow-up #4507. The pin also characterized a real defect for P5: the P0 planner's catalogue order silently loses `idx_mas_reports_generation` — P5 must adopt the phased order before the recreate ships.
