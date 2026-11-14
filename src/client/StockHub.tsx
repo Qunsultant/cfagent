@@ -6,6 +6,8 @@ import { Skeleton, Button, Select, TextInput, Badge, Card, CardHeader, Notice, C
 import { apiFetch as fetch } from "./apiFetch";
 import {
   getScreeningProviders,
+  noScreeningProviderMessage,
+  YAHOO_FINANCE_VARIANT_ID,
   providerSupportsFilter,
   resolveInitialScreeningProviderId,
   type ScreeningAssetClass,
@@ -13,9 +15,10 @@ import {
 import { readTenantProvidersState } from "./tenantProviders";
 import {
   buildPaidScreenBody,
+  isBrokerUnavailableError,
   isMonetizationWorkflowError,
   isPaymentStarted,
-  mapScreenError,
+  mapScreenErrorFromBody,
   readMonetizationState,
   type MonetizationState,
 } from "./paidScreenSubmit";
@@ -238,11 +241,17 @@ export function StockHub({
   // Stock Hub serves stocks only; every tab here screens stocks.
   const assetClass: ScreeningAssetClass = "stocks";
   const providers = useMemo(() => getScreeningProviders(assetClass), [assetClass]);
-  // Issue #3525 S3: the initial selection follows the tenant's configured
-  // data provider (registry id -> hub variant) rather than assuming one
-  // brand; the correction effect below still repairs an invalid selection.
+  // Issue #3525 S3 + #4430 (S1a): the initial selection follows the
+  // tenant's configured data provider (registry id -> hub variant)
+  // rather than assuming one brand. The selection is tenant-resolved
+  // only — no broker or variant is ever substituted as a default. A
+  // tenant provider with no hub variant resolves to no selection, and
+  // the correction effect below must NOT repair that to the first
+  // variant — the run stays blocked with the coded
+  // NO_SCREENING_PROVIDER_FOR_TENANT message.
+  const tenantProvidersState = readTenantProvidersState();
   const [providerId, setProviderId] = useState(() =>
-    resolveInitialScreeningProviderId(readTenantProvidersState().dataProviderId, providers),
+    resolveInitialScreeningProviderId(tenantProvidersState.dataProviderId, providers),
   );
   const [symbolSearch, setSymbolSearch] = useState("");
   const [stockLimit, setStockLimit] = useState("100");
@@ -332,6 +341,9 @@ export function StockHub({
   } | null>(null);
   const [checkingPayment, setCheckingPayment] = useState(false);
   const [retryPaid, setRetryPaid] = useState(false);
+  // Issue #4430 (S1a): the switch-to-workflow-variant action after a broker-gate
+  // 409 — the workflow-backed variant runs the screen without the gate.
+  const [offerSwitchToYahoo, setOfferSwitchToYahoo] = useState(false);
   // Issue #212: latest screener runs (retained history; each run carries
   // its own trigger — manual runs are not scheduled runs).
   const [autoRuns, setAutoRuns] = useState<ScreenRun[]>([]);
@@ -407,14 +419,29 @@ export function StockHub({
   const [autoRefresh] = useAutoRefresh();
   usePolling(loadAuto, { fastMs: 60_000, idleMs: 60_000, enabled: autoRefresh.enabled });
 
+  // Issue #4430 (S1a): an invalid selection is cleared to no selection,
+  // never repaired to the first variant — that silent substitution
+  // resolved to an endpoint the tenant's configured broker does not
+  // implement, and the broker gate refused the run with 409. No selection
+  // blocks the run with the coded NO_SCREENING_PROVIDER_FOR_TENANT
+  // message (rendered below).
   useEffect(() => {
-    if (providers.length > 0 && !providers.some((provider) => provider.id === providerId)) {
-      setProviderId(providers[0]?.id || "");
+    if (providerId !== "" && providers.length > 0 && !providers.some((provider) => provider.id === providerId)) {
+      setProviderId("");
     }
   }, [providers, providerId]);
 
   const activeProvider = providers.find((provider) => provider.id === providerId);
   const endpoint = activeProvider?.endpointByAssetClass[assetClass];
+  // Issue #4430 (S1a): true when the tenant's configured provider has
+  // no hub variant — the run is blocked before any fetch, with the
+  // coded message, instead of posting to a substituted endpoint.
+  const noScreeningProvider = providers.length > 0 && !activeProvider;
+  const switchToYahoo = () => {
+    setProviderId(YAHOO_FINANCE_VARIANT_ID);
+    setOfferSwitchToYahoo(false);
+    setError("");
+  };
 
   const runScreen = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -434,6 +461,7 @@ export function StockHub({
     setError("");
     setOffer402(null);
     setRetryPaid(false);
+    setOfferSwitchToYahoo(false);
     setPaymentStarted(null);
     setPaymentCheck("");
     setPaymentLink(null);
@@ -520,6 +548,8 @@ export function StockHub({
       // raw-HTML class) must not become a parser message.
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
+        message?: string;
+        code?: string;
         status?: string;
         runRequestId?: string;
         workflowId?: string;
@@ -560,11 +590,16 @@ export function StockHub({
       }
       if (!response.ok) {
         if (isMonetizationWorkflowError(response.status, data.error)) setRetryPaid(true);
+        // Issue #4430 (S1a): a broker-gate 409 offers the switch to
+        // the workflow-backed variant instead of the generic 409 text.
+        // mapScreenErrorFromBody reads `error` or `message`, so the
+        // coded reason survives whichever field the body carries.
+        if (isBrokerUnavailableError(response.status, data.error, data.code)) setOfferSwitchToYahoo(true);
         // Issue #3246: a 402 surfaces the upgrade offer (with the
         // run request id when the body carries one) instead of the
         // bare fixed string; every other error keeps the string.
         if (response.status === 402) setOffer402({ runRequestId: data.runRequestId });
-        throw new Error(mapScreenError(response.status, data.error));
+        throw new Error(mapScreenErrorFromBody(response.status, data));
       }
       if (data.validationError) throw new Error(data.validationError);
 
@@ -997,6 +1032,11 @@ export function StockHub({
                 )}
               </Notice>
             )}
+            {noScreeningProvider && (
+              <Notice tone="warning" density="compact">
+                {noScreeningProviderMessage(tenantProvidersState.dataProviderId)}
+              </Notice>
+            )}
             <form onSubmit={(event) => void runScreen(event)}>
               <Stack gap="2">
               <Grid autoFit minColumnWidth="xs" gap="2">
@@ -1161,6 +1201,9 @@ export function StockHub({
             )}
             {retryPaid && (
               <Button onClick={() => void retryPaidScreen()} disabled={loading}>Start payment workflow</Button>
+            )}
+            {offerSwitchToYahoo && (
+              <Button onClick={() => switchToYahoo()} disabled={loading}>Switch to Yahoo Finance</Button>
             )}
             {manualResult && <ScreenerResultsView result={manualResult} />}
             {shardedResults.length > 0 && shardedResults.map((r) => (

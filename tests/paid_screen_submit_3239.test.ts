@@ -10,13 +10,17 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  BROKER_UNAVAILABLE_ERROR,
   MONETIZATION_WORKFLOW_ERROR,
   buildPaidScreenBody,
   buildPaidScreenQuery,
+  isBrokerUnavailableError,
   isMonetizationWorkflowError,
   isPaymentStarted,
   mapScreenError,
+  mapScreenErrorFromBody,
   readMonetizationState,
+  readScreenErrorText,
 } from "../src/client/paidScreenSubmit";
 
 describe("paidScreenBody (#3239)", () => {
@@ -130,6 +134,51 @@ describe("mapScreenError (#3239)", () => {
   it("falls back to a fixed status message when no error body is present", () => {
     expect(mapScreenError(500, undefined)).toMatch(/temporarily unavailable/i);
     expect(mapScreenError(500, undefined)).not.toContain("undefined");
+  });
+});
+
+describe("mapScreenError — broker-gate 409 (#4430)", () => {
+  const brokerBody = {
+    code: BROKER_UNAVAILABLE_ERROR,
+    error: "This broker surface is not available for the selected broker. Change the broker selection in Settings.",
+    message: "This broker surface is not available for the selected broker. Change the broker selection in Settings.",
+    retryable: false,
+    selectedBroker: "public",
+  };
+
+  it("maps 409 + FAILURE_BROKER_UNAVAILABLE to the business message with a switch-to-Yahoo remediation", () => {
+    const message = mapScreenErrorFromBody(409, brokerBody);
+    expect(message).toContain("This broker surface is not available for the selected broker.");
+    expect(message).toContain("Change the broker selection in Settings.");
+    expect(message).toMatch(/Switch the hub provider to Yahoo Finance/i);
+    expect(message).not.toContain("Screening request failed [HTTP 409]");
+    expect(message).not.toContain(BROKER_UNAVAILABLE_ERROR);
+  });
+
+  it("maps the 409 from a message-only body (the pre-#4430 shape, no `error` field)", () => {
+    const { error: _error, ...messageOnly } = brokerBody;
+    const message = mapScreenErrorFromBody(409, messageOnly);
+    expect(message).toContain("This broker surface is not available for the selected broker.");
+    expect(message).not.toContain("Screening request failed [HTTP 409]");
+  });
+
+  it("detects the broker refusal by status + code, not by the message text", () => {
+    expect(isBrokerUnavailableError(409, undefined, BROKER_UNAVAILABLE_ERROR)).toBe(true);
+    expect(isBrokerUnavailableError(409, BROKER_UNAVAILABLE_ERROR)).toBe(true);
+    expect(isBrokerUnavailableError(409, "something else")).toBe(false);
+    expect(isBrokerUnavailableError(500, undefined, BROKER_UNAVAILABLE_ERROR)).toBe(false);
+  });
+
+  it("reads `message` when `error` is absent, so the other call sites benefit", () => {
+    expect(readScreenErrorText({ message: "Screening request failed: upstream down" })).toBe(
+      "Screening request failed: upstream down",
+    );
+    expect(readScreenErrorText({ error: "from error", message: "from message" })).toBe("from error");
+    expect(readScreenErrorText({ code: BROKER_UNAVAILABLE_ERROR })).toBeUndefined();
+    expect(readScreenErrorText(null)).toBeUndefined();
+    expect(mapScreenErrorFromBody(500, { message: "Screening request failed: upstream down" })).toBe(
+      "Screening request failed: upstream down",
+    );
   });
 });
 

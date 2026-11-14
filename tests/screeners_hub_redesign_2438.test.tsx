@@ -21,6 +21,10 @@ import { readFileSync } from "node:fs";
 import { StockHub } from "../src/client/StockHub";
 import { ScreenersHub } from "../src/client/ScreenersHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
+import {
+  resetTenantProvidersStateForTest,
+  setTenantProvidersStateForTest,
+} from "../src/client/tenantProviders";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -164,6 +168,13 @@ async function renderOldHub() {
 }
 
 beforeEach(() => {
+  // Issue #4430 (S1a): the manual-error test submits the hub's form and
+  // expects the stubbed screen error to surface, so the hub runs under
+  // a hub-variant tenant provider (etrade -> the "etrade" variant the
+  // fetch stub serves). A no-variant tenant (the platform default,
+  // alpaca) resolves to no selection and the run is blocked before any
+  // POST — no screen error would ever surface.
+  setTenantProvidersStateForTest({ dataProviderId: "etrade" });
   stubFetch();
 });
 
@@ -175,6 +186,7 @@ afterEach(async () => {
   }
   container?.remove();
   globalThis.fetch = realFetch;
+  resetTenantProvidersStateForTest();
   vi.restoreAllMocks();
 });
 
