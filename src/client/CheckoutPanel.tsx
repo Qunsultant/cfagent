@@ -764,7 +764,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
       // sentence. Amounts stay as data after the message, not message
       // text. The guarded fallback covers a legacy body without a code.
       setTopUpDone(
-        `${codedMessage(res.code ?? "SUCCESS_TOP_UP_CREDITED")} Credited ${formatUSD(res.creditedUSD)} — new balance ${formatUSD(res.account.creditsUSD ?? 0)}.`
+        `Top-up credited: ${formatUSD(res.creditedUSD)}. New credit balance: ${formatUSD(res.account.creditsUSD ?? 0)}.`
       );
       setTopUpMint(null);
       setTopUpProof("");
