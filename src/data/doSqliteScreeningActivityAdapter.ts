@@ -17,6 +17,7 @@ import {
   type ScreeningActivitySqlExecutor,
   type ScreeningActivityStore,
 } from "./screeningActivityPorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 function activityId(): string {
   return `sact_${
@@ -31,18 +32,9 @@ export class DoSqliteScreeningActivityStore implements ScreeningActivityStore {
 
   ensureTable(): void {
     const sql = this.sql;
-    sql.exec(`CREATE TABLE IF NOT EXISTS ${SCREENING_ACTIVITY_TABLE} (
-    id TEXT PRIMARY KEY,
-    user_login TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    summary TEXT NOT NULL,
-    detail_json TEXT,
-    ref_id TEXT,
-    actor TEXT,
-    created_at TEXT NOT NULL
-  )`);
+    sql.exec(doTableSql("mas_screening_activity"));
     sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_screening_activity_user ON ${SCREENING_ACTIVITY_TABLE} (user_login, created_at DESC)`
+      doIndexSql("idx_screening_activity_user")
     );
   }
 
