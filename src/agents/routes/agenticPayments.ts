@@ -336,6 +336,8 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "agents/routes/agenticPayments",
 });
 
+import { COMMERCIAL_DEFAULTS } from "../../config/commercialDefaults";
+import { COMMERCIAL_BARE_BASE, COMMERCIAL_ROUTE_SUFFIXES, commercialBarePath } from "../../data/commercialUrlCatalog";
 /** The subset of OrchestratorAgent surface the agentic-payments handlers need. */
 export interface AgenticPaymentsRouteContext {
   /** Worker environment (owner: OrchestratorAgent - was `this.env`). */
@@ -478,7 +480,7 @@ export async function handleAgenticPaymentsRoutes(
       const status = await paymentService.getWalletStatus();
       return Response.json(walletMode === "mcp" ? { success: true, ...status } : status);
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to fetch wallet status" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -579,7 +581,7 @@ export async function handleAgenticPaymentsRoutes(
       }
       return Response.json({ duplicate: false, record: toPaymentRecord(tx) });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to record payment in ledger" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -604,22 +606,12 @@ export async function handleAgenticPaymentsRoutes(
         checkoutId?: unknown;
         claimTxHash?: unknown;
         paymentIntentId?: unknown;
-        tenantId?: unknown;
       };
       const kind = body.kind === "credit" ? "credit" : body.kind === "charge" ? "charge" : "";
       const runRequestId = typeof body.runRequestId === "string" ? body.runRequestId.trim() : "";
       const userId = typeof body.userId === "string" ? body.userId.trim() : "";
       const family = typeof body.family === "string" ? body.family.trim() : "";
       const priceUSD = Number(body.priceUSD);
-      // Issue #3182: the workflow's resolved tenant, threaded with the
-      // rest of the row inputs; absent (older caller) means unattributed
-      // (NULL), never invented. Like userId/family, it arrives only
-      // through the internal ledger-owner channel, never from an
-      // external caller.
-      const tenantId =
-        typeof body.tenantId === "string" && body.tenantId.trim()
-          ? body.tenantId.trim()
-          : undefined;
       if (!kind || !runRequestId || !userId || !family || !Number.isFinite(priceUSD) || priceUSD <= 0) {
         return Response.json(
           { error: "kind (charge|credit), runRequestId, userId, family and a positive priceUSD are required" },
@@ -645,9 +637,8 @@ export async function handleAgenticPaymentsRoutes(
               claimTxHash: typeof body.claimTxHash === "string" ? body.claimTxHash : undefined,
               paymentIntentId:
                 typeof body.paymentIntentId === "string" ? body.paymentIntentId : undefined,
-              tenantId,
             })
-          : buildCfpayCreditTransaction({ runRequestId, userId, family, priceUSD, tenantId });
+          : buildCfpayCreditTransaction({ runRequestId, userId, family, priceUSD });
       orm.transactions.create(tx);
       ctx.audit("payments_cfpay.recorded", "payments", {
         transactionId: tx.id,
@@ -657,7 +648,7 @@ export async function handleAgenticPaymentsRoutes(
       });
       return Response.json({ duplicate: false, record: tx });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to record cfpay payment in ledger" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -751,7 +742,7 @@ export async function handleAgenticPaymentsRoutes(
       });
       return Response.json({ duplicate: false, record: row });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to record native payment in ledger" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -771,7 +762,7 @@ export async function handleAgenticPaymentsRoutes(
         .filter((t) => t.sessionId === sessionId);
       return Response.json({ runRequestId, count: rows.length, rows });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to list cfpay ledger rows" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -807,7 +798,7 @@ export async function handleAgenticPaymentsRoutes(
       );
       return Response.json(report);
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to build cfpay revenue report" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -906,14 +897,14 @@ export async function handleAgenticPaymentsRoutes(
   const requireStore = (): D1CommercialAdapter | Response => {
     const adapter = createCommercialAdapter(ctx.env as { AGENT_DB?: unknown });
     if (!adapter) {
-      return Response.json({ error: "Commercial store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return adapter;
   };
   const requireSubs = (): D1SubscriptionAdapter | Response => {
     const adapter = createSubscriptionAdapter(ctx.env as { AGENT_DB?: unknown });
     if (!adapter) {
-      return Response.json({ error: "Subscription store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return adapter;
   };
@@ -933,14 +924,14 @@ export async function handleAgenticPaymentsRoutes(
   const requireBillingPolicy = (): D1BillingPolicyAdapter | Response => {
     const adapter = createBillingPolicyAdapter(ctx.env as { AGENT_DB?: unknown });
     if (!adapter) {
-      return Response.json({ error: "Billing policy store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return adapter;
   };
   const requireBillingCustomers = (): D1BillingCustomerAdapter | Response => {
     const adapter = createBillingCustomerAdapter(ctx.env as { AGENT_DB?: unknown });
     if (!adapter) {
-      return Response.json({ error: "Billing customer store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return adapter;
   };
@@ -952,7 +943,7 @@ export async function handleAgenticPaymentsRoutes(
       await ensureBillingPolicySchema(policy.db);
       await ensureBillingCustomerSchema(customers.db);
     } catch (err: any) {
-      return Response.json({ error: `Billing store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return null;
   };
@@ -990,7 +981,7 @@ export async function handleAgenticPaymentsRoutes(
   const requireLifecycle = (): D1LifecycleAdapter | Response => {
     const adapter = createLifecycleAdapter(ctx.env as { AGENT_DB?: unknown });
     if (!adapter) {
-      return Response.json({ error: "Lifecycle store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return adapter;
   };
@@ -1000,7 +991,7 @@ export async function handleAgenticPaymentsRoutes(
     try {
       await ensureLifecycleSchema(lifecycle.db);
     } catch (err: any) {
-      return Response.json({ error: `Lifecycle store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return null;
   };
@@ -1054,7 +1045,7 @@ export async function handleAgenticPaymentsRoutes(
   const requireMonetization = async (): Promise<Response | null> => {
     const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
     if (!flagOn) {
-      return Response.json({ error: "monetization flag is OFF; subscription purchase is disabled." }, { status: 403 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "monetization flag is OFF; subscription purchase is disabled." }, { status: 403 });
     }
     return null;
   };
@@ -1064,14 +1055,14 @@ export async function handleAgenticPaymentsRoutes(
   const requireRefundFlag = async (): Promise<Response | null> => {
     const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
     if (!flagOn) {
-      return Response.json({ error: "monetization flag is OFF; refunds are disabled." }, { status: 403 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "monetization flag is OFF; refunds are disabled." }, { status: 403 });
     }
     return null;
   };
   const requireRefunds = (): RefundPorts | Response => {
     const ports = createRefundPorts(ctx.env as { AGENT_DB?: unknown });
     if (!ports) {
-      return Response.json({ error: "Refund store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return ports;
   };
@@ -1087,20 +1078,20 @@ export async function handleAgenticPaymentsRoutes(
       await ensureCommercialSchema(store.db);
       await ensureSubscriptionSchema(subs.db);
     } catch (err: any) {
-      return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return null;
   };
 
   // GET /payments/agentic/commercial/account?userId=
-  if (path.endsWith("/payments/agentic/commercial/account") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.account) && request.method === "GET") {
     try {
       const login = commercialLogin();
       const userId = url.searchParams.get("userId") ?? "";
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
-      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!userId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "userId is required." }, { status: 400 });
       if (!canAccessAccount(login, userId)) {
-        return Response.json({ error: "Forbidden: only the account owner or a store operator may read an account." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: only the account owner or a store operator may read an account." }, { status: 403 });
       }
       const store = requireStore();
       if (store instanceof Response) return store;
@@ -1121,9 +1112,9 @@ export async function handleAgenticPaymentsRoutes(
         subscriptions = [];
       }
       const effectiveTier = resolveEffectiveTier(record, subscriptions, Date.now());
-      return Response.json({ record, effectiveTier });
+      return Response.json({ code: "SUCCESS_ACCOUNT_READ", record, effectiveTier });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read commercial account" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -1139,10 +1130,10 @@ export async function handleAgenticPaymentsRoutes(
   // Callers decide separately: pay-per-run submit fails closed
   // on it, while subscription checkout/purchase auto-provision
   // at activation (see those routes).
-  if (path.endsWith("/payments/agentic/commercial/identity") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.identity) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const store = requireStore();
       if (store instanceof Response) return store;
       const subs = requireSubs();
@@ -1153,9 +1144,9 @@ export async function handleAgenticPaymentsRoutes(
         { commercial: store, subscriptions: subs },
         { userId: login, nowMs: Date.now() },
       );
-      return Response.json(toPlatformIdentityView(identity));
+      return Response.json({ ...toPlatformIdentityView(identity), code: "SUCCESS_IDENTITY_READ" });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read platform identity" }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
     }
   }
 
@@ -1170,7 +1161,7 @@ export async function handleAgenticPaymentsRoutes(
   // totals across mixed provenance. Failures are coded catalog
   // bodies, never raw store text; reads are aspect-logged, not
   // audit-trailed (a read is not a state change).
-  if (path.endsWith("/payments/agentic/commercial/usage-billing") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.usageBilling) && request.method === "GET") {
     const login = commercialLogin();
     if (!login) {
       logAspectEvent({
@@ -1251,11 +1242,11 @@ export async function handleAgenticPaymentsRoutes(
   }
 
   // POST /payments/agentic/commercial/account (operator only)
-  if (path.endsWith("/payments/agentic/commercial/account") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.account) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as {
         userId?: unknown; tenantId?: unknown; tier?: unknown; creditsUSD?: unknown; includedRuns?: unknown;
@@ -1336,34 +1327,34 @@ export async function handleAgenticPaymentsRoutes(
           },
         );
       }
-      return Response.json({ record });
+      return Response.json({ code: "SUCCESS_ACCOUNT_UPDATED", record });
     } catch (err: any) {
       const message = err.message || "Failed to upsert commercial account";
-      return Response.json({ error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
+      return Response.json({ ...(/requires|Invalid|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
     }
   }
 
   // POST /payments/agentic/commercial/account/credits (operator only)
-  if (path.endsWith("/payments/agentic/commercial/account/credits") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.accountCredits) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { userId?: unknown; deltaUSD?: unknown };
       const userId = typeof body.userId === "string" ? body.userId : "";
       const deltaUSD = Number(body.deltaUSD);
       if (!userId || !Number.isFinite(deltaUSD)) {
-        return Response.json({ error: "userId and a finite deltaUSD are required." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "userId and a finite deltaUSD are required." }, { status: 400 });
       }
       const store = requireStore();
       if (store instanceof Response) return store;
       const record = await store.adjustCredits(userId, deltaUSD);
       ctx.audit("commercial.account.credits_adjusted", "payments", { userId, deltaUSD });
-      return Response.json({ record });
+      return Response.json({ code: "SUCCESS_ACCOUNT_CREDITS_ADJUSTED", record });
     } catch (err: any) {
       const message = err.message || "Failed to adjust credits";
-      return Response.json({ error: message }, { status: /No commercial account|below zero/.test(message) ? 400 : 500 });
+      return Response.json({ ...(/No commercial account|below zero/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /No commercial account|below zero/.test(message) ? 400 : 500 });
     }
   }
 
@@ -1386,19 +1377,19 @@ export async function handleAgenticPaymentsRoutes(
   const requireFreeRunCounter = async () => {
     const counter = createFreeRunCounterAdapter(ctx.env as { AGENT_DB?: unknown });
     if (!counter) {
-      return Response.json({ error: "Free-run counter unavailable: AGENT_DB is not bound." }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Free-run counter unavailable: AGENT_DB is not bound." }, { status: 503 });
     }
     await ensureFreeRunCounterSchema(counter.db);
     return counter;
   };
 
   // GET /payments/agentic/commercial/free-run-allowance (operator only)
-  if (path.endsWith("/payments/agentic/commercial/free-run-allowance") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.freeRunAllowance) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: only a store operator may read the free-run allowance." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: only a store operator may read the free-run allowance." }, { status: 403 });
       }
       const counter = await requireFreeRunCounter();
       if (counter instanceof Response) return counter;
@@ -1406,18 +1397,18 @@ export async function handleAgenticPaymentsRoutes(
       for (const family of FREE_RUN_FAMILIES) {
         allowances.push({ family, runs: await counter.getAllowance(family) });
       }
-      return Response.json({ allowances });
+      return Response.json({ code: "SUCCESS_FREE_RUN_ALLOWANCE_READ", allowances });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read the free-run allowance" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
   // POST /payments/agentic/commercial/free-run-allowance (operator only)
-  if (path.endsWith("/payments/agentic/commercial/free-run-allowance") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.freeRunAllowance) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { family?: unknown; runs?: unknown };
       const counter = await requireFreeRunCounter();
@@ -1428,10 +1419,10 @@ export async function handleAgenticPaymentsRoutes(
       const runs = await counter.setAllowance({ family: body.family, runs: body.runs });
       const family = typeof body.family === "string" ? body.family : "";
       ctx.audit("commercial.free_run_allowance.set", "payments", { family, runs, operator: login });
-      return Response.json({ family, runs });
+      return Response.json({ code: "SUCCESS_FREE_RUN_ALLOWANCE_UPDATED", family, runs });
     } catch (err: any) {
       const message = err.message || "Failed to set the free-run allowance";
-      return Response.json({ error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
+      return Response.json({ ...(/requires|Invalid|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
     }
   }
 
@@ -1484,7 +1475,7 @@ export async function handleAgenticPaymentsRoutes(
   };
 
   // GET /payments/agentic/commercial/approved-free-quota?userId= — own or operator.
-  if (path.endsWith("/payments/agentic/commercial/approved-free-quota") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.approvedFreeQuota) && request.method === "GET") {
     // Issue #3263 (CI fix): userId is declared outside the try so the
     // catch block can name it in the aspect log — a const declared
     // inside try is out of scope in catch (tsc: no value in scope).
@@ -1545,7 +1536,7 @@ export async function handleAgenticPaymentsRoutes(
   }
 
   // POST /payments/agentic/commercial/approved-free-quota (operator only)
-  if (path.endsWith("/payments/agentic/commercial/approved-free-quota") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.approvedFreeQuota) && request.method === "POST") {
     // Issue #3263 (CI fix): login is declared outside the try so the
     // catch block can name it in the aspect log — a const declared
     // inside try is out of scope in catch (tsc: cannot find name).
@@ -1609,42 +1600,42 @@ export async function handleAgenticPaymentsRoutes(
   }
 
   // GET /payments/agentic/commercial/tenant-settings?tenantId= (operator only)
-  if (path.endsWith("/payments/agentic/commercial/tenant-settings") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.tenantSettings) && request.method === "GET") {
     try {
       const login = commercialLogin();
       const tenantId = url.searchParams.get("tenantId") ?? "";
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
-      if (!tenantId) return Response.json({ error: "tenantId is required." }, { status: 400 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!tenantId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "tenantId is required." }, { status: 400 });
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: only a store operator may read tenant settings." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: only a store operator may read tenant settings." }, { status: 403 });
       }
       const store = requireStore();
       if (store instanceof Response) return store;
-      return Response.json({ tenantId, adsEnabled: await store.getTenantAdsEnabled(tenantId) });
+      return Response.json({ code: "SUCCESS_TENANT_SETTINGS_READ", tenantId, adsEnabled: await store.getTenantAdsEnabled(tenantId) });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read tenant settings" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
   // POST /payments/agentic/commercial/tenant-settings (operator only)
-  if (path.endsWith("/payments/agentic/commercial/tenant-settings") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.tenantSettings) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { tenantId?: unknown; adsEnabled?: unknown };
       const tenantId = typeof body.tenantId === "string" ? body.tenantId : "";
       if (!tenantId || typeof body.adsEnabled !== "boolean") {
-        return Response.json({ error: "tenantId and a boolean adsEnabled are required." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "tenantId and a boolean adsEnabled are required." }, { status: 400 });
       }
       const store = requireStore();
       if (store instanceof Response) return store;
       const record = await store.setTenantAdsEnabled(tenantId, body.adsEnabled);
       ctx.audit("commercial.tenant_settings.set", "payments", { tenantId, adsEnabled: body.adsEnabled });
-      return Response.json({ record });
+      return Response.json({ code: "SUCCESS_TENANT_SETTINGS_UPDATED", record });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to set tenant settings" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -1658,10 +1649,10 @@ export async function handleAgenticPaymentsRoutes(
   // Email is the caller's checkout contact, supplied by the caller
   // — it is NOT an identity proof. Identity is the verified
   // x-user-login; no verified email exists in the session.
-  if (path.endsWith("/payments/agentic/commercial/submit") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.submit) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const body = (await request.json().catch(() => ({}))) as {
         family?: unknown; trigger?: unknown; scheduleKind?: unknown; authorizedAtSubmission?: unknown;
         tenantId?: unknown; screenerCommand?: unknown; email?: unknown;
@@ -1677,20 +1668,20 @@ export async function handleAgenticPaymentsRoutes(
       const trigger = body.trigger === undefined ? "manual" : body.trigger;
       const screenerCommand = body.screenerCommand as { jobId?: unknown } | undefined;
       if (family !== "stock" && family !== "goal" && family !== "options" && family !== "strategy") {
-        return Response.json({ error: "family must be stock, goal, options, or strategy." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "family must be stock, goal, options, or strategy." }, { status: 400 });
       }
-      if (!email) return Response.json({ error: "email (checkout contact) is required." }, { status: 400 });
+      if (!email) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "email (checkout contact) is required." }, { status: 400 });
       if (trigger !== "manual" && trigger !== "scheduled") {
-        return Response.json({ error: "trigger must be manual or scheduled." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "trigger must be manual or scheduled." }, { status: 400 });
       }
       if (body.scheduleKind === "recurring") {
-        return Response.json({ error: "Recurring schedules are created via the schedule service, not this route." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "Recurring schedules are created via the schedule service, not this route." }, { status: 400 });
       }
       if (body.scheduleKind !== undefined && body.scheduleKind !== "one_off") {
-        return Response.json({ error: "scheduleKind must be one_off when given." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "scheduleKind must be one_off when given." }, { status: 400 });
       }
       if (!screenerCommand || typeof screenerCommand.jobId !== "string") {
-        return Response.json({ error: "screenerCommand with a jobId is required." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "screenerCommand with a jobId is required." }, { status: 400 });
       }
       const runRequestId = `run-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 
@@ -1716,13 +1707,13 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       let monetizationOn: boolean;
       try {
         monetizationOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
       } catch {
-        return Response.json({ error: "Monetization state unavailable; no run starts." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Monetization state unavailable; no run starts." }, { status: 503 });
       }
       let tenantId: string;
       if (identity.hasAccount) {
@@ -1732,7 +1723,7 @@ export async function handleAgenticPaymentsRoutes(
         // PROPOSED no-account behavior (#2219): a paid path with
         // no resolved account fails closed, directing the user to
         // account setup — never an invented account or tenant.
-        return Response.json({ error: NO_ACCOUNT_PAID_MESSAGE }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: NO_ACCOUNT_PAID_MESSAGE }, { status: 403 });
       } else {
         // Free path (flag OFF), session scoped always: the scope
         // label is the verified session login. A client-supplied
@@ -1765,7 +1756,7 @@ export async function handleAgenticPaymentsRoutes(
         // against two concurrent submissions spending one credit;
         // a lost race falls through to the payment path below.
         if (!createWorkflowPorts(ctx.env as unknown as WorkflowEnv)) {
-          return Response.json({ error: "Screener workflow port unavailable; credit not redeemed, retry later." }, { status: 503 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Screener workflow port unavailable; credit not redeemed, retry later." }, { status: 503 });
         }
         let redeemed = false;
         try {
@@ -1773,7 +1764,7 @@ export async function handleAgenticPaymentsRoutes(
           redeemed = true;
         } catch (err: any) {
           if (!/already redeemed/.test(err.message || "")) {
-            return Response.json({ error: `Credit redemption failed: ${err.message || "unknown error"}` }, { status: 503 });
+            return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
           }
         }
         if (redeemed) {
@@ -1784,7 +1775,7 @@ export async function handleAgenticPaymentsRoutes(
             // operator's re-issue signal; there is no operator
             // credit-issue route yet.
             ctx.audit("commercial.redeem.start_failed", "payments", { runRequestId, creditRunId: credit.creditRunId, userId: login });
-            return Response.json({ error: "Credit redeemed but the screener could not start; an operator must re-issue.", runRequestId, creditRedeemed: true }, { status: 503 });
+            return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Credit redeemed but the screener could not start; an operator must re-issue.", runRequestId, creditRedeemed: true }, { status: 503 });
           }
           ctx.audit("commercial.credit.redeemed", "payments", { runRequestId, creditRunId: credit.creditRunId, family, userId: login });
           // Issue #2137 follow-ups: record the submission owner
@@ -1839,7 +1830,7 @@ export async function handleAgenticPaymentsRoutes(
               creditRunId: credit.creditRunId,
             });
           }
-          return Response.json({ runRequestId, status: "redeemed_started", creditRunId: credit.creditRunId, workflowId: handle.workflowId });
+          return Response.json({ code: "SUCCESS_RUN_SUBMITTED", runRequestId, status: "redeemed_started", creditRunId: credit.creditRunId, workflowId: handle.workflowId });
         }
       }
 
@@ -1912,7 +1903,7 @@ export async function handleAgenticPaymentsRoutes(
                     family,
                   });
                 } catch (err: any) {
-                  return Response.json({ error: `Referral conversion failed: ${err.message || "unknown error"}` }, { status: 503 });
+                  return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
                 }
               }
             }
@@ -1946,7 +1937,7 @@ export async function handleAgenticPaymentsRoutes(
       try {
         await store.recordPaidSubmission({ workflowId: runRequestId, userId: login, runRequestId });
       } catch (err: any) {
-        return Response.json({ error: `Submission could not be recorded: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       try {
         const binding = ctx.env.PAYMENT_WORKFLOW as unknown as PaymentWorkflowBinding | undefined;
@@ -2029,12 +2020,12 @@ export async function handleAgenticPaymentsRoutes(
             });
           }
         }
-        return Response.json({ runRequestId, workflowId: started.workflowId, status: "payment_started" });
+        return Response.json({ code: "SUCCESS_RUN_SUBMITTED", runRequestId, workflowId: started.workflowId, status: "payment_started" });
       } catch (err: any) {
-        return Response.json({ error: err.message || "Payment workflow could not start; no screener started." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to submit paid run" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -2046,32 +2037,32 @@ export async function handleAgenticPaymentsRoutes(
   // time: unknown submission → 404, another user's submission →
   // 403, store unavailable → 503. Only the recorded owner reaches
   // the workflow binding. The binding read itself is unchanged.
-  if (path.endsWith("/payments/agentic/commercial/submission-status") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.submissionStatus) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const workflowId = url.searchParams.get("workflowId") ?? "";
-      if (!workflowId) return Response.json({ error: "workflowId is required." }, { status: 400 });
+      if (!workflowId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "workflowId is required." }, { status: 400 });
       const store = requireStore();
       if (store instanceof Response) return store;
       try {
         await ensureCommercialSchema(store.db);
       } catch (err: any) {
-        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       let submission;
       try {
         submission = await store.getPaidSubmission(workflowId);
       } catch (err: any) {
-        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
-      if (!submission) return Response.json({ error: "Submission not found." }, { status: 404 });
+      if (!submission) return Response.json({ code: "FAILURE_COMMERCIAL_NOT_FOUND", error: "Submission not found." }, { status: 404 });
       if (submission.userId !== login) {
-        return Response.json({ error: "Forbidden: this submission belongs to another user." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: this submission belongs to another user." }, { status: 403 });
       }
       const binding = ctx.env.PAYMENT_WORKFLOW as unknown as { get(id: string): Promise<unknown> } | undefined;
       if (!binding || typeof binding.get !== "function") {
-        return Response.json({ error: "Payment workflow binding is not configured." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment workflow binding is not configured." }, { status: 503 });
       }
       let status = "unknown";
       let outcome: string | undefined;
@@ -2102,13 +2093,14 @@ export async function handleAgenticPaymentsRoutes(
         status = "unknown";
       }
       return Response.json({
+        code: "SUCCESS_SUBMISSION_STATUS_READ",
         workflowId,
         status,
         ...(outcome ? { outcome } : {}),
         ...(outcomeCode ? { outcomeCode } : {}),
       });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read submission status" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -2132,10 +2124,10 @@ export async function handleAgenticPaymentsRoutes(
   // to approve. The segment is the verified account's segment, "default" when no account
   // exists yet. A product with no effective version for the segment is absent, never shown
   // with a stale price.
-  if (path.endsWith("/payments/agentic/commercial/plans") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.plans) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
       const store = requireStore();
@@ -2156,9 +2148,9 @@ export async function handleAgenticPaymentsRoutes(
         if (effective) plans.push(effective);
       }
       plans.sort((a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      return Response.json({ plans });
+      return Response.json({ code: "SUCCESS_PLANS_LISTED", plans });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to list plans" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -2168,11 +2160,11 @@ export async function handleAgenticPaymentsRoutes(
   // the operator-managed annual discount (monthly x 12 x (1 - discount)). An explicit priceUSD
   // overrides the derivation. Every new plan lands PROPOSED until an operator approves it
   // through POST /plans/approve; only an APPROVED plan price may be charged.
-  if (path.endsWith("/payments/agentic/commercial/plans") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.plans) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as {
         id?: unknown; name?: unknown; priceUSD?: unknown; periodDays?: unknown; includedRuns?: unknown; trialDays?: unknown; monthlyPlanId?: unknown;
@@ -2268,7 +2260,7 @@ export async function handleAgenticPaymentsRoutes(
         ...(monthlyPlanId ? { monthlyPlanId } : {}),
         ...(derivedPriceUSD !== null ? { annualDiscountPct, derivedPriceUSD } : {}),
       });
-      return Response.json({ plan, code: created.code, message: created.businessMessage, retryable: created.entry?.retryable ?? false });
+      return Response.json({ plan, code: "SUCCESS_PLAN_CREATED", message: created.businessMessage, retryable: created.entry?.retryable ?? false });
     } catch (err: any) {
       // A catalog-coded failure renders from the catalog; pre-existing
       // assertPlan failures keep their regex-mapped raw shape (out of
@@ -2276,7 +2268,7 @@ export async function handleAgenticPaymentsRoutes(
       if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
       const message = err.message || "Failed to create plan";
       return Response.json(
-        { error: message },
+        { ...(/No plan/.test(message) ? { code: "FAILURE_PLAN_NOT_FOUND" } : /already exists/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message },
         // Idempotent Receiver (tech-standards §7): a replay of a create
         // (same plan id) is a 409, not a 400 — the id is the unique key.
         { status: /No plan/.test(message) ? 404 : /already exists/.test(message) ? 409 : /required|must be/.test(message) ? 400 : 500 },
@@ -2288,16 +2280,16 @@ export async function handleAgenticPaymentsRoutes(
   // plan's price, recording the approving operator. New plans land PROPOSED; only an APPROVED
   // plan price may be charged. Approving a deactivated plan is allowed (approval is about the
   // price, not about whether the plan is sold); deactivation never un-approves.
-  if (path.endsWith("/payments/agentic/commercial/plans/approve") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.plansApprove) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { planId?: unknown };
       const planId = typeof body.planId === "string" ? body.planId : "";
-      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      if (!planId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "planId is required." }, { status: 400 });
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
       const store = requireStore();
@@ -2313,24 +2305,24 @@ export async function handleAgenticPaymentsRoutes(
         planId: plan.id,
         approvedBy: login,
       });
-      return Response.json({ plan, code: approved.code, message: approved.businessMessage, retryable: approved.entry?.retryable ?? false });
+      return Response.json({ plan, code: "SUCCESS_PLAN_APPROVED", message: approved.businessMessage, retryable: approved.entry?.retryable ?? false });
     } catch (err: any) {
       if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
       const message = err.message || "Failed to approve plan";
-      return Response.json({ error: message }, { status: /No plan/.test(message) ? 404 : 500 });
+      return Response.json({ ...(/No plan/.test(message) ? { code: "FAILURE_PLAN_NOT_FOUND" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /No plan/.test(message) ? 404 : 500 });
     }
   }
 
   // POST /payments/agentic/commercial/plans/deactivate (operator only) — stops new purchases; existing subscriptions run to periodEnd.
-  if (path.endsWith("/payments/agentic/commercial/plans/deactivate") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.plansDeactivate) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { planId?: unknown };
       const planId = typeof body.planId === "string" ? body.planId : "";
-      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      if (!planId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "planId is required." }, { status: 400 });
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
       const store = requireStore();
@@ -2339,10 +2331,10 @@ export async function handleAgenticPaymentsRoutes(
       if (ensured) return ensured;
       const plan = await subs.deactivatePlan(planId);
       ctx.audit("commercial.plan.deactivated", "payments", { planId: plan.id });
-      return Response.json({ plan });
+      return Response.json({ code: "SUCCESS_PLAN_DEACTIVATED", plan });
     } catch (err: any) {
       const message = err.message || "Failed to deactivate plan";
-      return Response.json({ error: message }, { status: /No plan/.test(message) ? 404 : 500 });
+      return Response.json({ ...(/No plan/.test(message) ? { code: "FAILURE_PLAN_NOT_FOUND" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /No plan/.test(message) ? 404 : 500 });
     }
   }
 
@@ -2355,17 +2347,17 @@ export async function handleAgenticPaymentsRoutes(
   // returns a real checkoutUrl for card (Stripe always provides one — this closes the no-URL gap
   // the cfpay checkout had). Email is the checkout contact, supplied by the caller — it is NOT an
   // identity proof. Identity is the verified x-user-login.
-  if (path.endsWith("/payments/agentic/commercial/subscription/checkout") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.subscriptionCheckout) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const flag = await requireMonetization();
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as { planId?: unknown; tenantId?: unknown; email?: unknown; offerContext?: unknown };
       const planId = typeof body.planId === "string" ? body.planId : "";
       const email = typeof body.email === "string" ? body.email.trim() : "";
-      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
-      if (!email) return Response.json({ error: "email (checkout contact) is required." }, { status: 400 });
+      if (!planId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "planId is required." }, { status: 400 });
+      if (!email) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "email (checkout contact) is required." }, { status: 400 });
       const store = requireStore();
       if (store instanceof Response) return store;
       const subs = requireSubs();
@@ -2373,8 +2365,8 @@ export async function handleAgenticPaymentsRoutes(
       const ensured = await ensureStores(store, subs);
       if (ensured) return ensured;
       const plan = await subs.getPlan(planId);
-      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
-      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      if (!plan) return Response.json({ code: "FAILURE_PLAN_NOT_FOUND", error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ code: "FAILURE_COMMERCIAL_CONFLICT", error: `Plan ${planId} is not active.` }, { status: 409 });
       // Issue #3357: only an APPROVED plan price may be charged — refuse before any provider call.
       // Fail-closed with a catalog-coded message, never a raw error string.
       if (!isPlanPriceApproved(plan)) {
@@ -2394,7 +2386,7 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       // #2219 (rebased onto #2198's native card checkout): the tenant
       // comes from the resolved identity, never the request body; the
@@ -2430,7 +2422,7 @@ export async function handleAgenticPaymentsRoutes(
       });
       const card = ports?.card ?? null;
       if (!card) {
-        return Response.json({ error: "Native card checkout is not configured." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Native card checkout is not configured." }, { status: 503 });
       }
       const checkoutRequestId = `sub-${crypto.randomUUID()}`;
       const created = await card.createCheckout({
@@ -2440,7 +2432,7 @@ export async function handleAgenticPaymentsRoutes(
         userId: login,
       });
       if (!created.checkoutUrl || !created.checkoutId) {
-        return Response.json({ error: "Stripe checkout could not be created." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Stripe checkout could not be created." }, { status: 503 });
       }
       ctx.audit("commercial.subscription.checkout_created", "payments", { userId: login, tenantId, planId: plan.id, checkoutRequestId, checkoutSessionId: created.checkoutId });
       // Issue #3246: an offer acceptance is audit-only metadata on
@@ -2459,7 +2451,7 @@ export async function handleAgenticPaymentsRoutes(
           ...(offerContext.shownAtMs !== undefined ? { shownAtMs: offerContext.shownAtMs } : {}),
         });
       }
-      return Response.json({
+      return Response.json({ code: "SUCCESS_SUBSCRIPTION_CHECKOUT_CREATED",
         checkoutRequestId,
         checkoutUrl: created.checkoutUrl,
         checkoutSessionId: created.checkoutId,
@@ -2467,12 +2459,12 @@ export async function handleAgenticPaymentsRoutes(
       });
     } catch (err: any) {
       // #3573: a guard failure (timeout / breaker open) maps to its
-      // catalog-coded 503; any other mint failure keeps the legacy
-      // raw-error 500 behavior (unchanged).
+      // catalog-coded 503; any other mint failure is the coded
+      // unexpected-error 500 (#2846).
       if (isCheckoutPortGuardError(err)) {
         return codedOutcomeResponse(err.outcomeCode);
       }
-      return Response.json({ error: err.message || "Failed to create subscription checkout" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -2487,22 +2479,22 @@ export async function handleAgenticPaymentsRoutes(
   // client_reference_id == checkoutRequestId, and a payment-intent id present (both ids are stored
   // on the subscription row — refunds need the payment-intent id). Any failure refuses with 402
   // and activates nothing. The checkout reference activates at most one subscription (replay → 409).
-  if (path.endsWith("/payments/agentic/commercial/subscription/purchase") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.subscriptionPurchase) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const flag = await requireMonetization();
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as { planId?: unknown; tenantId?: unknown; checkoutRequestId?: unknown; checkoutSessionId?: unknown };
       const planId = typeof body.planId === "string" ? body.planId : "";
       const checkoutRequestId = typeof body.checkoutRequestId === "string" ? body.checkoutRequestId : "";
       const checkoutSessionId = typeof body.checkoutSessionId === "string" ? body.checkoutSessionId : "";
-      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
-      if (!checkoutRequestId) return Response.json({ error: "checkoutRequestId is required." }, { status: 400 });
+      if (!planId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "planId is required." }, { status: 400 });
+      if (!checkoutRequestId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "checkoutRequestId is required." }, { status: 400 });
       if (!checkoutRequestId.startsWith("sub-")) {
-        return Response.json({ error: "checkoutRequestId must come from the subscription checkout route." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "checkoutRequestId must come from the subscription checkout route." }, { status: 400 });
       }
-      if (!checkoutSessionId) return Response.json({ error: "checkoutSessionId is required." }, { status: 400 });
+      if (!checkoutSessionId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "checkoutSessionId is required." }, { status: 400 });
       const store = requireStore();
       if (store instanceof Response) return store;
       const subs = requireSubs();
@@ -2510,8 +2502,8 @@ export async function handleAgenticPaymentsRoutes(
       const ensured = await ensureStores(store, subs);
       if (ensured) return ensured;
       const plan = await subs.getPlan(planId);
-      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
-      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      if (!plan) return Response.json({ code: "FAILURE_PLAN_NOT_FOUND", error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ code: "FAILURE_COMMERCIAL_CONFLICT", error: `Plan ${planId} is not active.` }, { status: 409 });
       // Issue #3357: only an APPROVED plan price may be charged — refuse before any provider call.
       // Fail-closed with a catalog-coded message, never a raw error string.
       if (!isPlanPriceApproved(plan)) {
@@ -2536,7 +2528,7 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       const tenantId = identity.tenantId ?? login;
       const ports = createCheckoutPorts(ctx.env as unknown as {
@@ -2551,19 +2543,19 @@ export async function handleAgenticPaymentsRoutes(
       });
       const card = ports?.card ?? null;
       if (!card) {
-        return Response.json({ error: "Native card checkout is not configured." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Native card checkout is not configured." }, { status: 503 });
       }
       let evidence;
       try {
         evidence = await card.retrieveCardSession({ sessionId: checkoutSessionId });
       } catch (err) {
         // #3573: a guard failure (timeout / breaker open) maps to its
-        // catalog-coded 503; any other retrieve failure keeps the
-        // fixed "Payment verification unavailable." 503 (unchanged).
+        // catalog-coded 503; any other retrieve failure is the coded
+        // service-unavailable 503 (#2846).
         if (isCheckoutPortGuardError(err)) {
           return codedOutcomeResponse(err.outcomeCode);
         }
-        return Response.json({ error: "Payment verification unavailable." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment verification unavailable." }, { status: 503 });
       }
       const expectedCents = Math.round(plan.priceUSD * 100);
       if (
@@ -2572,10 +2564,10 @@ export async function handleAgenticPaymentsRoutes(
         evidence.amountTotalCents !== expectedCents ||
         evidence.clientReferenceId !== checkoutRequestId
       ) {
-        return Response.json({ error: "Checkout is not paid for this plan; no subscription activated." }, { status: 402 });
+        return Response.json({ code: "FAILURE_SUBSCRIPTION_NOT_PAID", error: "Checkout is not paid for this plan; no subscription activated." }, { status: 402 });
       }
       if (!evidence.paymentIntentId) {
-        return Response.json({ error: "Paid checkout carries no payment intent; no subscription activated." }, { status: 402 });
+        return Response.json({ code: "FAILURE_SUBSCRIPTION_NOT_PAID", error: "Paid checkout carries no payment intent; no subscription activated." }, { status: 402 });
       }
       // Issue #2522: tier-change audit — capture the before rows
       // (identity.stored is the pre-activation account row) so
@@ -2642,7 +2634,7 @@ export async function handleAgenticPaymentsRoutes(
         versionId: plan.id,
       }));
       const effectiveTier = resolveEffectiveTier(account, [subscription], Date.now());
-      return Response.json({ subscription, account, effectiveTier });
+      return Response.json({ code: "SUCCESS_SUBSCRIPTION_PURCHASED", subscription, account, effectiveTier });
     } catch (err: any) {
       const message = err.message || "Failed to activate subscription";
       const status = /Tenant mismatch/.test(message)
@@ -2652,7 +2644,7 @@ export async function handleAgenticPaymentsRoutes(
           : /required|must be|not active/.test(message)
             ? 400
             : 500;
-      return Response.json({ error: message }, { status });
+      return Response.json({ ...(/Tenant mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already activated/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
@@ -2673,7 +2665,7 @@ export async function handleAgenticPaymentsRoutes(
   const requireTopUpDrafts = (): D1TopUpAdapter | Response => {
     const adapter = createTopUpDraftAdapter(ctx.env as { AGENT_DB?: unknown });
     if (!adapter) {
-      return Response.json({ error: "Top-up store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Top-up store unavailable: AGENT_DB is not bound." }, { status: 503 });
     }
     return adapter;
   };
@@ -2762,7 +2754,7 @@ export async function handleAgenticPaymentsRoutes(
   // (`topup-<uuid>`) is the Stripe client_reference_id / x402 checkout id, so the confirm
   // can bind the payment back to this draft and this amount. No credit is created here —
   // mint only mints; the account is credited at confirm, after verified payment.
-  if (path.endsWith("/payments/agentic/commercial/top-up/checkout") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.topUpCheckout) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return topUpCodedResponse("FAILURE_TOP_UP_UNAUTHORIZED", "top_up.checkout", {});
@@ -2933,7 +2925,7 @@ export async function handleAgenticPaymentsRoutes(
   // The account row is created on verified payment when missing (purchase-activation
   // precedent), so a first top-up needs no operator step; the credit target is always
   // the server-resolved (user, tenant), never a client-supplied account (#1069 §8).
-  if (path.endsWith("/payments/agentic/commercial/top-up/confirm") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.topUpConfirm) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return topUpCodedResponse("FAILURE_TOP_UP_UNAUTHORIZED", "top_up.confirm", {});
@@ -3199,7 +3191,7 @@ export async function handleAgenticPaymentsRoutes(
   // (runs, price) terms at mint — confirm credits exactly those terms, never a client-supplied
   // amount. No runs are created here — mint only mints; the balance is credited at confirm, after
   // verified payment.
-  if (path.endsWith("/payments/agentic/commercial/runs-packs/checkout") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.runsPackCheckout) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -3234,7 +3226,7 @@ export async function handleAgenticPaymentsRoutes(
       try {
         await ensureRunsPackSchema(packs.versions.db);
       } catch (err: any) {
-        return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const version = await packs.versions.getVersion(versionId);
       if (!version) return Response.json({ error: `No runs-pack version ${versionId}.` }, { status: 404 });
@@ -3251,7 +3243,7 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       // #2219: the tenant comes from the resolved identity, never the request body.
       const tenantId = identity.tenantId ?? login;
@@ -3360,7 +3352,7 @@ export async function handleAgenticPaymentsRoutes(
   // tenant), never a client-supplied account (#1069 §8). Purchase confers NO
   // tier and creates NO subscription row — activation touches the pack
   // balance only.
-  if (path.endsWith("/payments/agentic/commercial/runs-packs/confirm") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.runsPackConfirm) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -3385,7 +3377,7 @@ export async function handleAgenticPaymentsRoutes(
       try {
         await ensureRunsPackSchema(packs.drafts.db);
       } catch (err: any) {
-        return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const draft = await packs.drafts.getDraft(packRequestId);
       if (!draft) return Response.json({ error: "Unknown runs pack." }, { status: 404 });
@@ -3648,7 +3640,7 @@ export async function handleAgenticPaymentsRoutes(
     try {
       await ensureReferralCodeSchema(adapters.rules.db);
     } catch (err: any) {
-      return Response.json({ error: `Referral-code store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return adapters;
   };
@@ -3710,7 +3702,7 @@ export async function handleAgenticPaymentsRoutes(
   };
 
   // GET /payments/agentic/commercial/referral-code-rules?productId=... (operator only).
-  if (path.endsWith("/payments/agentic/commercial/referral-code-rules") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodeRules) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -3731,7 +3723,7 @@ export async function handleAgenticPaymentsRoutes(
   // inactive — the operator activates them in the UI; nothing is
   // live until then. A rule edit affects only codes issued AFTER
   // the edit; outstanding codes keep their snapshot.
-  if (path.endsWith("/payments/agentic/commercial/referral-code-rules") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodeRules) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -3763,7 +3755,7 @@ export async function handleAgenticPaymentsRoutes(
   // record. A tenant admin may issue only tenant-scoped codes
   // for their own tenant; a user may not call this route (their
   // self-service issuance is POST /referral-codes/mine).
-  if (path.endsWith("/payments/agentic/commercial/referral-codes/issue") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodeIssue) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -3846,7 +3838,7 @@ export async function handleAgenticPaymentsRoutes(
   // GET /payments/agentic/commercial/referral-codes?productId=... (operator only).
   // Operator list: display prefixes only — hashes and plaintext
   // values never leave the store.
-  if (path.endsWith("/payments/agentic/commercial/referral-codes") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodes) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -3865,7 +3857,7 @@ export async function handleAgenticPaymentsRoutes(
   // POST /payments/agentic/commercial/referral-codes/revoke (operator only).
   // Idempotent: revoking an already-revoked code returns it
   // as-is. The audit fires only on an actual transition.
-  if (path.endsWith("/payments/agentic/commercial/referral-codes/revoke") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodeRevoke) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -3903,7 +3895,7 @@ export async function handleAgenticPaymentsRoutes(
   // earlier redemption (never double-credits). Attribution is
   // best-effort: the lifecycle port being unbound (or its
   // ensure failing) skips attribution, never the redemption.
-  if (path.endsWith("/payments/agentic/commercial/referral-codes/redeem") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodeRedeem) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -3977,7 +3969,7 @@ export async function handleAgenticPaymentsRoutes(
           redeemerLogin: err.redeemerLogin,
           runsGranted: err.runsGranted,
         });
-        return Response.json({ error: err.message }, { status: 500 });
+        return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
       }
       return referralCodeErrorResponse(err);
     }
@@ -3986,7 +3978,7 @@ export async function handleAgenticPaymentsRoutes(
   // GET /payments/agentic/commercial/referral-codes/mine (self).
   // The caller's own issued codes, across products (display
   // prefixes only — the plaintext is never re-rendered).
-  if (path.endsWith("/payments/agentic/commercial/referral-codes/mine") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodesMine) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -4007,7 +3999,7 @@ export async function handleAgenticPaymentsRoutes(
   // — referrals are inherently cross-tenant). Disabled until an
   // operator creates and activates a user-issuer rule for the
   // product (fail-closed: 409).
-  if (path.endsWith("/payments/agentic/commercial/referral-codes/mine") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodesMine) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -4053,7 +4045,7 @@ export async function handleAgenticPaymentsRoutes(
   // Revokes one of the caller's own codes. A code issued by
   // anyone else answers 403 (never 404 — the existence of
   // another login's code must not leak through this route).
-  if (path.endsWith("/payments/agentic/commercial/referral-codes/mine/revoke") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodesMineRevoke) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -4087,7 +4079,7 @@ export async function handleAgenticPaymentsRoutes(
   // The caller's code-runs balance: one number, family-agnostic,
   // kept visibly separate from the USD referral-credit balance
   // (which lives on /referral/balance).
-  if (path.endsWith("/payments/agentic/commercial/referral-codes/balance") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralCodesBalance) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -4116,17 +4108,17 @@ export async function handleAgenticPaymentsRoutes(
   // client-supplied tenantId is ignored, and a target with no
   // account row fails closed (400) — the operator creates the
   // account first through the existing Accounts UI flow.
-  if (path.endsWith("/payments/agentic/commercial/subscription/grant") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.subscriptionGrant) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login || !isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { userId?: unknown; planId?: unknown; tenantId?: unknown };
       const userId = typeof body.userId === "string" ? body.userId : "";
       const planId = typeof body.planId === "string" ? body.planId : "";
-      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
-      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      if (!userId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "userId is required." }, { status: 400 });
+      if (!planId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "planId is required." }, { status: 400 });
       const store = requireStore();
       if (store instanceof Response) return store;
       const subs = requireSubs();
@@ -4134,8 +4126,8 @@ export async function handleAgenticPaymentsRoutes(
       const ensured = await ensureStores(store, subs);
       if (ensured) return ensured;
       const plan = await subs.getPlan(planId);
-      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
-      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      if (!plan) return Response.json({ code: "FAILURE_PLAN_NOT_FOUND", error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ code: "FAILURE_COMMERCIAL_CONFLICT", error: `Plan ${planId} is not active.` }, { status: 409 });
       // Issue #2522: tier-change audit — capture the before rows
       // so the audit can state previous → new effective tier.
       const previousAccount = await store.getAccount(userId);
@@ -4167,11 +4159,11 @@ export async function handleAgenticPaymentsRoutes(
         newEffectiveTier: grantTransition.newEffectiveTier,
       });
       const effectiveTier = resolveEffectiveTier(account, [subscription], Date.now());
-      return Response.json({ subscription, account, effectiveTier });
+      return Response.json({ code: "SUCCESS_SUBSCRIPTION_GRANTED", subscription, account, effectiveTier });
     } catch (err: any) {
       const message = err.message || "Failed to grant subscription";
       const status = /No commercial account|required|must be|not active/.test(message) ? 400 : 500;
-      return Response.json({ error: message }, { status });
+      return Response.json({ ...(/No commercial account|required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
@@ -4185,15 +4177,15 @@ export async function handleAgenticPaymentsRoutes(
   // trialDays refuses with 409. Trial-end: the row lapses at periodEnd via the existing
   // unexpired-row reads (resolveEffectiveTier) and the response carries the outcome-encoded
   // trial message, never a raw error code. No journal entry: $0, no money moved.
-  if (path.endsWith("/payments/agentic/commercial/subscription/trial") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.subscriptionTrial) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const flag = await requireMonetization();
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as { planId?: unknown; tenantId?: unknown };
       const planId = typeof body.planId === "string" ? body.planId : "";
-      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      if (!planId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "planId is required." }, { status: 400 });
       const store = requireStore();
       if (store instanceof Response) return store;
       const subs = requireSubs();
@@ -4201,10 +4193,10 @@ export async function handleAgenticPaymentsRoutes(
       const ensured = await ensureStores(store, subs);
       if (ensured) return ensured;
       const plan = await subs.getPlan(planId);
-      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
-      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      if (!plan) return Response.json({ code: "FAILURE_PLAN_NOT_FOUND", error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ code: "FAILURE_COMMERCIAL_CONFLICT", error: `Plan ${planId} is not active.` }, { status: 409 });
       if (plan.trialDays === null || plan.trialDays === undefined) {
-        return Response.json({ error: `Plan ${planId} offers no trial.` }, { status: 409 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_CONFLICT", error: `Plan ${planId} offers no trial.` }, { status: 409 });
       }
       // #2219 fix, same as purchase: the tenant comes from the
       // resolved identity, never the request body. A missing
@@ -4218,7 +4210,7 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       const tenantId = identity.tenantId ?? login;
       const previousSubscriptions = await subs.listSubscriptions(login);
@@ -4255,7 +4247,7 @@ export async function handleAgenticPaymentsRoutes(
         includedRuns: plan.includedRuns,
         trialEndsAtMs,
       });
-      return Response.json({ subscription, account, effectiveTier, trialEndsAtMs, message });
+      return Response.json({ code: "SUCCESS_SUBSCRIPTION_TRIAL_STARTED", subscription, account, effectiveTier, trialEndsAtMs, message });
     } catch (err: any) {
       const message = err.message || "Failed to start trial";
       const status = /Tenant mismatch/.test(message)
@@ -4265,7 +4257,7 @@ export async function handleAgenticPaymentsRoutes(
           : /required|must be/.test(message)
             ? 400
             : 500;
-      return Response.json({ error: message }, { status });
+      return Response.json({ ...(/Tenant mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already used|offers no trial|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
@@ -4278,15 +4270,15 @@ export async function handleAgenticPaymentsRoutes(
   // subscription metadata; the tenant comes from the resolved identity, never the request body
   // (same rule as the one-time checkout, #2219). An existing customer mapping is passed through
   // so a second checkout reuses the provider customer instead of fragmenting customers.
-  if (path.endsWith("/payments/agentic/commercial/subscription/billing-checkout") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.subscriptionBillingCheckout) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const flag = await requireMonetization();
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as { planId?: unknown };
       const planId = typeof body.planId === "string" ? body.planId : "";
-      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      if (!planId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "planId is required." }, { status: 400 });
       const store = requireStore();
       if (store instanceof Response) return store;
       const subs = requireSubs();
@@ -4300,8 +4292,8 @@ export async function handleAgenticPaymentsRoutes(
       const ensuredBilling = await ensureBillingStores(policy, customers);
       if (ensuredBilling) return ensuredBilling;
       const plan = await subs.getPlan(planId);
-      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
-      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      if (!plan) return Response.json({ code: "FAILURE_PLAN_NOT_FOUND", error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ code: "FAILURE_COMMERCIAL_CONFLICT", error: `Plan ${planId} is not active.` }, { status: 409 });
       // Issue #3357: only an APPROVED plan price may be charged — refuse before any provider call.
       // Fail-closed with a catalog-coded message, never a raw error string.
       if (!isPlanPriceApproved(plan)) {
@@ -4311,7 +4303,7 @@ export async function handleAgenticPaymentsRoutes(
       const priceId = policyValue.stripePriceByPlan[plan.id];
       if (!priceId) {
         return Response.json(
-          { error: `No operator-mapped Stripe Price id for plan ${plan.id}: Billing checkout is not configured.` },
+          { code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: `No operator-mapped Stripe Price id for plan ${plan.id}: Billing checkout is not configured.` },
           { status: 503 },
         );
       }
@@ -4322,7 +4314,7 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       const tenantId = identity.tenantId ?? login;
       // Issue #3289: same effective+approved-for-segment check as
@@ -4344,7 +4336,7 @@ export async function handleAgenticPaymentsRoutes(
       }
       const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
       if (!ports) {
-        return Response.json({ error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
       }
       const existingCustomer = await customers.getCustomer(login);
       const draftId = `bill-${crypto.randomUUID()}`;
@@ -4357,10 +4349,10 @@ export async function handleAgenticPaymentsRoutes(
           metadata: { userId: login, planId: plan.id, tenantId },
         });
       } catch (err: any) {
-        return Response.json({ error: err.message || "Stripe subscription checkout could not be created." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       if (!created.url || !created.id) {
-        return Response.json({ error: "Stripe subscription checkout could not be created." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Stripe subscription checkout could not be created." }, { status: 503 });
       }
       ctx.audit("commercial.subscription.billing_checkout_created", "payments", {
         userId: login,
@@ -4370,14 +4362,14 @@ export async function handleAgenticPaymentsRoutes(
         checkoutSessionId: created.id,
         stripeCustomerId: existingCustomer?.stripeCustomerId ?? null,
       });
-      return Response.json({
+      return Response.json({ code: "SUCCESS_BILLING_CHECKOUT_CREATED", 
         checkoutRequestId: draftId,
         checkoutUrl: created.url,
         checkoutSessionId: created.id,
         plan: { id: plan.id, name: plan.name, priceUSD: plan.priceUSD, periodDays: plan.periodDays, includedRuns: plan.includedRuns },
       });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to create Billing checkout" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -4393,22 +4385,22 @@ export async function handleAgenticPaymentsRoutes(
   // activates nothing. A replay (existing provider row) refuses with 409; a customer-mapping
   // mismatch refuses with 409 (possible account confusion, operator resolves). Included-run
   // bypass stays OFF: this confers tier only, never included runs.
-  if (path.endsWith("/payments/agentic/commercial/subscription/billing-purchase") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.subscriptionBillingPurchase) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const flag = await requireMonetization();
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as { planId?: unknown; checkoutRequestId?: unknown; checkoutSessionId?: unknown };
       const planId = typeof body.planId === "string" ? body.planId : "";
       const checkoutRequestId = typeof body.checkoutRequestId === "string" ? body.checkoutRequestId : "";
       const checkoutSessionId = typeof body.checkoutSessionId === "string" ? body.checkoutSessionId : "";
-      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
-      if (!checkoutRequestId) return Response.json({ error: "checkoutRequestId is required." }, { status: 400 });
+      if (!planId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "planId is required." }, { status: 400 });
+      if (!checkoutRequestId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "checkoutRequestId is required." }, { status: 400 });
       if (!checkoutRequestId.startsWith("bill-")) {
-        return Response.json({ error: "checkoutRequestId must come from the Billing checkout route." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "checkoutRequestId must come from the Billing checkout route." }, { status: 400 });
       }
-      if (!checkoutSessionId) return Response.json({ error: "checkoutSessionId is required." }, { status: 400 });
+      if (!checkoutSessionId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "checkoutSessionId is required." }, { status: 400 });
       const store = requireStore();
       if (store instanceof Response) return store;
       const subs = requireSubs();
@@ -4422,8 +4414,8 @@ export async function handleAgenticPaymentsRoutes(
       const ensuredBilling = await ensureBillingStores(policy, customers);
       if (ensuredBilling) return ensuredBilling;
       const plan = await subs.getPlan(planId);
-      if (!plan) return Response.json({ error: `No plan ${planId}.` }, { status: 404 });
-      if (!plan.active) return Response.json({ error: `Plan ${planId} is not active.` }, { status: 409 });
+      if (!plan) return Response.json({ code: "FAILURE_PLAN_NOT_FOUND", error: `No plan ${planId}.` }, { status: 404 });
+      if (!plan.active) return Response.json({ code: "FAILURE_COMMERCIAL_CONFLICT", error: `Plan ${planId} is not active.` }, { status: 409 });
       // Issue #3357: only an APPROVED plan price may be charged — refuse before any provider call.
       // Fail-closed with a catalog-coded message, never a raw error string.
       if (!isPlanPriceApproved(plan)) {
@@ -4433,7 +4425,7 @@ export async function handleAgenticPaymentsRoutes(
       const priceId = policyValue.stripePriceByPlan[plan.id];
       if (!priceId) {
         return Response.json(
-          { error: `No operator-mapped Stripe Price id for plan ${plan.id}: Billing purchase is not configured.` },
+          { code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: `No operator-mapped Stripe Price id for plan ${plan.id}: Billing purchase is not configured.` },
           { status: 503 },
         );
       }
@@ -4444,22 +4436,22 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       const tenantId = identity.tenantId ?? login;
       const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
       if (!ports) {
-        return Response.json({ error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
       }
       const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
       if (!billing) {
-        return Response.json({ error: "Billing is not configured (Stripe)." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing is not configured (Stripe)." }, { status: 503 });
       }
       let evidence;
       try {
         evidence = await ports.retrieveSubscriptionSession(checkoutSessionId);
       } catch {
-        return Response.json({ error: "Payment verification unavailable." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment verification unavailable." }, { status: 503 });
       }
       if (
         evidence.status !== "complete" ||
@@ -4470,30 +4462,30 @@ export async function handleAgenticPaymentsRoutes(
         evidence.metadata?.userId !== login ||
         evidence.metadata?.planId !== plan.id
       ) {
-        return Response.json({ error: "Billing checkout is not paid for this plan and user; no subscription activated." }, { status: 402 });
+        return Response.json({ code: "FAILURE_SUBSCRIPTION_NOT_PAID", error: "Billing checkout is not paid for this plan and user; no subscription activated." }, { status: 402 });
       }
       let provider;
       try {
         provider = await billing.retrieveProviderSubscription(evidence.subscriptionId);
       } catch {
-        return Response.json({ error: "Billing subscription verification unavailable." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing subscription verification unavailable." }, { status: 503 });
       }
       if (provider.priceId !== priceId) {
-        return Response.json({ error: "Billing subscription price does not match the operator-mapped price for this plan; no subscription activated." }, { status: 402 });
+        return Response.json({ code: "FAILURE_SUBSCRIPTION_PRICE_MISMATCH", error: "Billing subscription price does not match the operator-mapped price for this plan; no subscription activated." }, { status: 402 });
       }
       if (provider.status !== "active" && provider.status !== "trialing") {
-        return Response.json({ error: "Billing subscription is not active; no subscription activated." }, { status: 402 });
+        return Response.json({ code: "FAILURE_SUBSCRIPTION_NOT_ACTIVE", error: "Billing subscription is not active; no subscription activated." }, { status: 402 });
       }
       const existingMapping = await customers.getCustomer(login);
       if (existingMapping && existingMapping.stripeCustomerId !== evidence.customerId) {
         return Response.json(
-          { error: `Billing customer mismatch: mapped to ${existingMapping.stripeCustomerId}, session names ${evidence.customerId} (operator resolves; no subscription activated).` },
+          { code: "FAILURE_COMMERCIAL_CONFLICT", error: `Billing customer mismatch: mapped to ${existingMapping.stripeCustomerId}, session names ${evidence.customerId} (operator resolves; no subscription activated).` },
           { status: 409 },
         );
       }
       const existingRow = await subs.findByProviderSubscriptionId(evidence.subscriptionId);
       if (existingRow) {
-        return Response.json({ error: `Billing subscription ${evidence.subscriptionId} already activated subscription ${existingRow.id}.` }, { status: 409 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_CONFLICT", error: `Billing subscription ${evidence.subscriptionId} already activated subscription ${existingRow.id}.` }, { status: 409 });
       }
       const beforeAccount = await store.getAccount(login);
       const previousSubscriptions = await subs.listSubscriptions(login);
@@ -4547,7 +4539,7 @@ export async function handleAgenticPaymentsRoutes(
         versionId: plan.id,
       }));
       const effectiveTier = resolveEffectiveTier(afterAccount, [subscription], Date.now());
-      return Response.json({ subscription, account: afterAccount, effectiveTier });
+      return Response.json({ code: "SUCCESS_BILLING_PURCHASE_COMPLETED", subscription, account: afterAccount, effectiveTier });
     } catch (err: any) {
       const message = err.message || "Failed to activate Billing subscription";
       const status = /Tenant mismatch/.test(message)
@@ -4557,7 +4549,7 @@ export async function handleAgenticPaymentsRoutes(
           : /required|must be|not active/.test(message)
             ? 400
             : 500;
-      return Response.json({ error: message }, { status });
+      return Response.json({ ...(/Tenant mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already activated|already belongs|mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
@@ -4572,23 +4564,23 @@ export async function handleAgenticPaymentsRoutes(
   // canonical-instance hop: the handler builds the store adapters straight from ctx.env.AGENT_DB.
   // Dunning-notice SENDING is out of scope here: a failed renewal marks past_due, and the notice
   // schedule (policy) is applied by a later slice.
-  if (path.endsWith("/payments/agentic/commercial/billing/webhook") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.billingWebhook) && request.method === "POST") {
     try {
       const rawBody = await request.text();
       let verification;
       try {
         verification = await new PaymentGatewayService(ctx.env).verifyWebhookSignature("stripe", rawBody, request.headers);
       } catch {
-        return Response.json({ error: "Webhook verification unavailable." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Webhook verification unavailable." }, { status: 503 });
       }
       if (!verification.isValid) {
-        return Response.json({ error: "Invalid webhook signature: nothing applied." }, { status: 401 });
+        return Response.json({ code: "FAILURE_WEBHOOK_SIGNATURE_INVALID", error: "Invalid webhook signature: nothing applied." }, { status: 401 });
       }
       let eventPayload: any;
       try {
         eventPayload = JSON.parse(rawBody);
       } catch {
-        return Response.json({ error: "Malformed webhook payload." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "Malformed webhook payload." }, { status: 400 });
       }
       const eventType = typeof eventPayload?.type === "string" ? eventPayload.type : "";
       const eventObject = eventPayload?.data?.object ?? {};
@@ -4604,11 +4596,11 @@ export async function handleAgenticPaymentsRoutes(
           applied: false,
           reason: "billing_flag_off",
         });
-        return Response.json({ applied: false, reason: "billing_flag_off" });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FLAG_OFF", applied: false, reason: "billing_flag_off" });
       }
       const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
       if (!billing) {
-        return Response.json({ error: "Billing is not configured (Stripe)." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing is not configured (Stripe)." }, { status: 503 });
       }
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
@@ -4618,13 +4610,13 @@ export async function handleAgenticPaymentsRoutes(
         await ensureSubscriptionSchema(subs.db);
         await ensureBillingPolicySchema(policy.db);
       } catch (err: any) {
-        return Response.json({ error: `Billing store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       let policyValue;
       try {
         policyValue = await policy.getPolicy();
       } catch (err: any) {
-        return Response.json({ error: `Billing policy unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const KNOWN_TYPES = new Set([
         "customer.subscription.created",
@@ -4641,7 +4633,7 @@ export async function handleAgenticPaymentsRoutes(
           if (/HTTP 404/.test(err.message || "")) {
             provider = null;
           } else {
-            return Response.json({ error: "Billing subscription verification unavailable." }, { status: 503 });
+            return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing subscription verification unavailable." }, { status: 503 });
           }
         }
       }
@@ -4660,13 +4652,13 @@ export async function handleAgenticPaymentsRoutes(
         reason: result.reason,
         subscriptionId: result.subscription?.id ?? null,
       });
-      return Response.json({
+      return Response.json({ code: "SUCCESS_BILLING_WEBHOOK_APPLIED", 
         applied: result.applied,
         reason: result.reason,
         subscriptionId: result.subscription?.id ?? null,
       });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to apply Billing webhook" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -4675,23 +4667,23 @@ export async function handleAgenticPaymentsRoutes(
   // as the refund policy routes). POST validates a partial update (invalid → 400) and audits.
   // Values not yet edited by an operator are the PROPOSED seed values pending owner approval —
   // the GET response says so rather than claiming approval.
-  if (path.endsWith("/payments/agentic/commercial/billing-policy") && (request.method === "GET" || request.method === "POST")) {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.billingPolicy) && (request.method === "GET" || request.method === "POST")) {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: only a store operator may read or set billing policy." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: only a store operator may read or set billing policy." }, { status: 403 });
       }
       const policy = requireBillingPolicy();
       if (policy instanceof Response) return policy;
       try {
         await ensureBillingPolicySchema(policy.db);
       } catch (err: any) {
-        return Response.json({ error: `Billing policy store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       if (request.method === "GET") {
         const policyValue = await policy.getPolicy();
-        return Response.json({
+        return Response.json({ code: "SUCCESS_BILLING_POLICY_READ", 
           policy: policyValue,
           seedNote: "Values not yet edited by an operator are PROPOSED seed values pending owner approval.",
         });
@@ -4703,7 +4695,7 @@ export async function handleAgenticPaymentsRoutes(
       } catch (err: any) {
         // Issue #3357: a catalog-coded discount failure renders from the catalog.
         if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
-        return Response.json({ error: err.message || "Invalid billing policy update." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
       const updated = await policy.updatePolicy(partial);
       // Issue #3357: the discount change is audited with code + message + login
@@ -4732,9 +4724,9 @@ export async function handleAgenticPaymentsRoutes(
       } else {
         ctx.audit("commercial.billing.policy_set", "payments", { userId: login, policy: updated });
       }
-      return Response.json({ policy: updated });
+      return Response.json({ code: "SUCCESS_BILLING_POLICY_UPDATED", policy: updated });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to handle billing policy" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -4828,9 +4820,6 @@ export async function handleAgenticPaymentsRoutes(
         proofSignature: draft.id,
         createdAt: nowIso,
         updatedAt: nowIso,
-        // Issue #3182: the draft's tenant, resolved server-side from
-        // the verified session at checkout mint (never client input).
-        tenantId: draft.tenantId,
       });
     } catch (err) {
       ctx.audit("commercial.channel.receipt_row_failed", "payments", {
@@ -4844,13 +4833,13 @@ export async function handleAgenticPaymentsRoutes(
 const requireChannelMonetization = async (): Promise<Response | null> => {
     const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
     if (!flagOn) {
-      return Response.json({ error: "monetization flag is OFF; cfpay channel purchases are disabled." }, { status: 403 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "monetization flag is OFF; cfpay channel purchases are disabled." }, { status: 403 });
     }
     return null;
   };
 
   // POST /payments/agentic/commercial/channel/checkout — mint.
-  if (path.endsWith("/commercial/channel/checkout") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.channelCheckout) && request.method === "POST") {
     const login = request.headers.get("x-user-login");
     if (!login) return new Response(JSON.stringify({ error: "Not authenticated." }), { status: 401, headers: { "content-type": "application/json" } });
     const flagError = await requireChannelMonetization();
@@ -4908,7 +4897,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   }
 
   // POST /payments/agentic/commercial/channel/purchase — confirm (HITL).
-  if (path.endsWith("/commercial/channel/purchase") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.channelPurchase) && request.method === "POST") {
     const login = request.headers.get("x-user-login");
     if (!login) return new Response(JSON.stringify({ error: "Not authenticated." }), { status: 401, headers: { "content-type": "application/json" } });
     const flagError = await requireChannelMonetization();
@@ -4975,7 +4964,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   }
 
   // GET /payments/agentic/commercial/channel/purchases?userId= — read, not flag-gated.
-  if (path.endsWith("/commercial/channel/purchases") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.channelPurchases) && request.method === "GET") {
     const login = request.headers.get("x-user-login");
     if (!login) return new Response(JSON.stringify({ error: "Not authenticated." }), { status: 401, headers: { "content-type": "application/json" } });
     const targetUser = url.searchParams.get("userId") ?? login;
@@ -4999,7 +4988,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   }
 
   // POST /payments/agentic/commercial/channel/reconcile — operator-only, not flag-gated.
-  if (path.endsWith("/commercial/channel/reconcile") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.channelReconcile) && request.method === "POST") {
     const login = request.headers.get("x-user-login");
     if (!login) return new Response(JSON.stringify({ error: "Not authenticated." }), { status: 401, headers: { "content-type": "application/json" } });
     if (!isStoreOperator(login)) {
@@ -5063,14 +5052,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // (resolvePlatformIdentity, #2219 mechanism), rechecked by id before execution, and the audit
   // carries code + message + login + tenant. Repurchase rows cancel per-row over the verified set
   // (not the bulk user-keyed call), so out-of-scope tenant rows are never touched.
-  if (path.endsWith("/payments/agentic/commercial/subscription/cancel") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.subscriptionCancel) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const body = (await request.json().catch(() => ({}))) as { userId?: unknown };
       const targetUser = typeof body.userId === "string" && body.userId ? body.userId : login;
       if (targetUser !== login && !isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: only the subscriber or a store operator may cancel." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: only the subscriber or a store operator may cancel." }, { status: 403 });
       }
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
@@ -5253,7 +5242,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({
         userId: targetUser,
-        code: cancelCode,
+        ...(downgradeTiming === "immediate" ? { code: "SUCCESS_SUBSCRIPTION_CANCELED_IMMEDIATE" } : { code: "SUCCESS_SUBSCRIPTION_CANCELED_PERIOD_END" }),
         message: cancelMessage,
         canceled,
         remaining,
@@ -5285,22 +5274,22 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // unexpired; plan exists and is active; price operator-mapped;
   // provider price differs. Provider failure changes nothing locally
   // (provider update runs before the local write).
-  if (path.endsWith("/payments/agentic/commercial/subscription/billing-change-plan") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.subscriptionBillingChangePlan) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
       if (!flagOn) {
-        return Response.json({ error: "monetization flag is OFF; plan changes are disabled." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "monetization flag is OFF; plan changes are disabled." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { subscriptionId?: unknown; planId?: unknown };
       const subscriptionId = typeof body.subscriptionId === "string" ? body.subscriptionId : "";
       const planId = typeof body.planId === "string" ? body.planId : "";
-      if (!subscriptionId) return Response.json({ error: "subscriptionId is required." }, { status: 400 });
-      if (!planId) return Response.json({ error: "planId is required." }, { status: 400 });
+      if (!subscriptionId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "subscriptionId is required." }, { status: 400 });
+      if (!planId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "planId is required." }, { status: 400 });
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
       const store = requireStore();
@@ -5312,15 +5301,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureBillingPolicySchema(billingPolicyAdapter.db);
       } catch (err: any) {
-        return Response.json({ error: `Billing policy store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const billingPolicy = await billingPolicyAdapter.getPolicy();
       const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
       if (!billing) {
-        return Response.json({ error: "Billing plan change is not configured (Stripe)." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing plan change is not configured (Stripe)." }, { status: 503 });
       }
       const existingRow = await subs.getSubscription(subscriptionId);
-      if (!existingRow) return Response.json({ error: `No subscription ${subscriptionId}.` }, { status: 404 });
+      if (!existingRow) return Response.json({ code: "FAILURE_COMMERCIAL_NOT_FOUND", error: `No subscription ${subscriptionId}.` }, { status: 404 });
       const beforeAccount = await store.getAccount(existingRow.userId);
       const beforeSubscriptions = await subs.listSubscriptions(existingRow.userId);
       let changed;
@@ -5342,7 +5331,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
                 : /Stripe Billing request failed/.test(message)
                   ? 502
                   : 500;
-        return Response.json({ error: message }, { status });
+        return Response.json({ ...(/No subscription/.test(message) ? { code: "FAILURE_COMMERCIAL_NOT_FOUND" } : /No plan/.test(message) ? { code: "FAILURE_PLAN_NOT_FOUND" } : /already on price/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /not active|repurchase|not active and unexpired/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : /no operator-mapped|not configured|Billing policy/.test(message) ? { code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE" } : /Stripe Billing request failed/.test(message) ? { code: "FAILURE_COMMERCIAL_UPSTREAM_FAILED" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
       }
       const afterAccount = await store.getAccount(changed.record.userId);
       const afterSubscriptions = await subs.listSubscriptions(changed.record.userId);
@@ -5357,26 +5346,26 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         previousEffectiveTier: transition.previousEffectiveTier,
         newEffectiveTier: transition.newEffectiveTier,
       });
-      return Response.json({
+      return Response.json({ code: "SUCCESS_SUBSCRIPTION_PLAN_CHANGED", 
         subscription: changed.record,
         fromPlanId: changed.fromPlanId,
         prorationBehavior: changed.prorationBehavior,
       });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to change plan" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
   // GET /payments/agentic/commercial/subscription?userId= — self or operator. Effective tier included:
   // the stored account tier alone does not say whether the user is Subscribed right now.
-  if (path.endsWith("/payments/agentic/commercial/subscription") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.subscription) && request.method === "GET") {
     try {
       const login = commercialLogin();
       const userId = url.searchParams.get("userId") ?? "";
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
-      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!userId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "userId is required." }, { status: 400 });
       if (!canAccessAccount(login, userId)) {
-        return Response.json({ error: "Forbidden: only the subscriber or a store operator may read a subscription." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: only the subscriber or a store operator may read a subscription." }, { status: 403 });
       }
       const store = requireStore();
       if (store instanceof Response) return store;
@@ -5391,9 +5380,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         subscriptions.length > 0
           ? subscriptions.reduce((a, b) => (b.periodEndMs > a.periodEndMs ? b : a))
           : null;
-      return Response.json({ userId, effectiveTier, current, subscriptions });
+      return Response.json({ code: "SUCCESS_SUBSCRIPTION_READ", userId, effectiveTier, current, subscriptions });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read subscription" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -5425,10 +5414,10 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // without a client deploy. The failure policy is the native gate's
   // disclosure: a one-time replacement-run credit, never a cash
   // refund promise — refund copy lands with the refunds slice (#2147).
-  if (path.endsWith("/payments/agentic/commercial/pricing") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.pricing) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const monetizationEnabled = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
       let prices: Record<string, number> = { ...PROPOSED_SEED_PRICES };
       try {
@@ -5472,7 +5461,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       } catch {
         // Unavailable: keep null (see above).
       }
-      return Response.json({
+      return Response.json({ code: "SUCCESS_PRICING_READ", 
         monetizationEnabled,
         prices,
         topUpLimits,
@@ -5481,7 +5470,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         failurePolicy: NATIVE_PAYMENT_DISCLOSURE,
       });
     } catch {
-      return Response.json({ error: "Failed to read pricing." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: "Failed to read pricing." }, { status: 500 });
     }
   }
 
@@ -5495,23 +5484,23 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // is 401 like the pricing GET. This GET never ensures the schema
   // (no writes on a read path, mirroring the pricing GET); an
   // unbound store is 503, never a silent no-op.
-  if (path.endsWith("/payments/agentic/commercial/prices") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.prices) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) {
-        return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+        return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       }
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
       if (!catalogue) {
-        return Response.json({ error: "Price catalogue unavailable: AGENT_DB is not bound." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Price catalogue unavailable: AGENT_DB is not bound." }, { status: 503 });
       }
       const entries = await catalogue.getAllPrices();
-      return Response.json({ entries });
+      return Response.json({ code: "SUCCESS_PRICES_LISTED", entries });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read prices." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -5524,11 +5513,11 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // the proposed defaults on a fresh store; the upsert then
   // overwrites exactly the family named). Invalid family or price
   // is 400; an unbound store is 503, never a silent no-op.
-  if (path.endsWith("/payments/agentic/commercial/prices") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.prices) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as {
         family?: unknown;
@@ -5537,12 +5526,12 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       };
       const catalogue = createPriceCatalogueAdapter(ctx.env as { AGENT_DB?: unknown });
       if (!catalogue) {
-        return Response.json({ error: "Price catalogue unavailable: AGENT_DB is not bound." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Price catalogue unavailable: AGENT_DB is not bound." }, { status: 503 });
       }
       try {
         await ensurePriceCatalogueSchema(catalogue.db);
       } catch (err: any) {
-        return Response.json({ error: `Price catalogue unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       // #2547: a price write lands as PROPOSED (setPrice clears
       // any prior approval). Approval is a separate, explicit
@@ -5551,7 +5540,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       // approver — the body cannot name a different approver.
       if (body.approvalStatus !== undefined && body.approvalStatus !== "approved") {
         return Response.json(
-          { error: 'approvalStatus must be "approved" when present: use a price write to return an entry to proposed.' },
+          { code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: 'approvalStatus must be "approved" when present: use a price write to return an entry to proposed.' },
           { status: 400 },
         );
       }
@@ -5571,14 +5560,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       }
       if (!entry) {
         return Response.json(
-          { error: "Nothing to do: provide priceUSD to set a price or approvalStatus approved to approve one." },
+          { code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "Nothing to do: provide priceUSD to set a price or approvalStatus approved to approve one." },
           { status: 400 },
         );
       }
-      return Response.json({ entry });
+      return Response.json({ code: "SUCCESS_PRICE_ENTRY_SAVED", entry });
     } catch (err: any) {
       const message = err.message || "Failed to set price";
-      return Response.json({ error: message }, { status: /Invalid|must be/.test(message) ? 400 : 500 });
+      return Response.json({ ...(/Invalid|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /Invalid|must be/.test(message) ? 400 : 500 });
     }
   }
 
@@ -5590,7 +5579,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // unapproved version refuses (409), as does a move across products. A move onto the version
   // already held is a no-op success ({ moved: false }). Runs and credits are untouched.
   if (
-    path.includes("/payments/agentic/commercial/subscriptions/") &&
+    path.includes(`${COMMERCIAL_BARE_BASE}/subscriptions/`) &&
     path.endsWith("/move") &&
     request.method === "POST"
   ) {
@@ -5623,7 +5612,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureProductSchema(products.db);
       } catch (err: any) {
-        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const result = await moveSubscriptionToVersion({
         subs,
@@ -5667,7 +5656,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // future move may target); it changes nothing about held versions, runs, or credits. The
   // move audit records the held version when one exists.
   if (
-    path.includes("/payments/agentic/commercial/accounts/") &&
+    path.includes(`${COMMERCIAL_BARE_BASE}/accounts/`) &&
     path.endsWith("/segment") &&
     request.method === "POST"
   ) {
@@ -5700,7 +5689,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureProductSchema(products.db);
       } catch (err: any) {
-        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const result = await setAccountSegment({
         store,
@@ -5777,7 +5766,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // by segment and marks the effective version per segment
   // with the one resolver). Free (prod-free) rides along as
   // the read-only baseline row with no versions.
-  if (path.endsWith("/payments/agentic/commercial/products") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.products) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -5800,7 +5789,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       }
       return Response.json({ products: withVersions });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to list products." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -5808,7 +5797,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // create a product (identity only; versions are created
   // separately). The id is server-generated unless the caller
   // supplies one; the name + kind are operator data.
-  if (path.endsWith("/payments/agentic/commercial/products") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.products) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -5827,7 +5816,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureProductSchema(products.db);
       } catch (err: any) {
-        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const product = await products.createProduct(body);
       ctx.audit("commercial.product.created", "payments", {
@@ -5913,7 +5902,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // are HTTP 200 with the reason code in the payload (the client
   // renders the fixed copy only). Unbound or failing stores are a
   // catalog-coded 503 (FAILURE_OFFER_UNAVAILABLE).
-  if (path.endsWith("/payments/agentic/commercial/offer") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.offer) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -5930,7 +5919,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       }
       if (trigger === "ambient") {
         return Response.json(
-          { error: "The ambient trigger is served by GET /payments/agentic/commercial/offer/compare." },
+          { error: `The ambient trigger is served by GET ${commercialBarePath("offerCompare")}.` },
           { status: 400 },
         );
       }
@@ -5987,7 +5976,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // suppressions, renders regardless of coverage. A pure read: NO
   // shown audit — ambient views are not offers, and auditing
   // every compare view would flood the log with non-decision reads.
-  if (path.endsWith("/payments/agentic/commercial/offer/compare") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.offerCompare) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -6031,7 +6020,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // an audit failure is a 503 and nothing is written, so a
   // dismissal is never silently unrecorded. Response 200 carries
   // { suppressedUntilMs }.
-  if (path.endsWith("/payments/agentic/commercial/offer/dismiss") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.offerDismiss) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -6094,7 +6083,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // and refuses with the same code at 409. Audited
   // commercial.product.rank.set with the old and new rank.
   if (
-    path.includes("/payments/agentic/commercial/products/") &&
+    path.includes(`${commercialBarePath("products")}/`) &&
     path.endsWith("/rank") &&
     request.method === "POST"
   ) {
@@ -6140,7 +6129,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureProductSchema(products.db);
       } catch (err: any) {
-        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const existing = await products.getProduct(productId);
       if (!existing) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
@@ -6157,7 +6146,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({ product: updated });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to set product rank." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -6167,7 +6156,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // chain read; buyers never see it (GET /plans stays the
   // effective-only per-segment buyer read).
   if (
-    path.includes("/payments/agentic/commercial/products/") &&
+    path.includes(`${commercialBarePath("products")}/`) &&
     path.endsWith("/versions") &&
     request.method === "GET"
   ) {
@@ -6196,7 +6185,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const versions = await loadProductVersions(product, subs, catalogue, packs, segment);
       return Response.json({ product, versions });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read version chain." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -6210,7 +6199,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // and refuses. A pack version's terms are (runs, price) —
   // never derived from a per-run price.
   if (
-    path.includes("/payments/agentic/commercial/products/") &&
+    path.includes(`${commercialBarePath("products")}/`) &&
     path.endsWith("/versions") &&
     request.method === "POST"
   ) {
@@ -6243,7 +6232,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureProductSchema(products.db);
       } catch (err: any) {
-        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const product = await products.getProduct(productId);
       if (!product) return Response.json({ error: `No product ${productId}.` }, { status: 404 });
@@ -6263,7 +6252,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         try {
           await ensureRunsPackSchema(packs.versions.db);
         } catch (err: any) {
-          return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
         }
         const segment = typeof body.segment === "string" && body.segment.trim() ? body.segment.trim() : "default";
         const version = await packs.versions.createVersion({
@@ -6375,7 +6364,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // audit event and outcome shape match POST /plans/approve
   // exactly — one approval action, not a second one.
   if (
-    path.includes("/payments/agentic/commercial/products/") &&
+    path.includes(`${commercialBarePath("products")}/`) &&
     path.endsWith("/approve") &&
     request.method === "POST"
   ) {
@@ -6415,7 +6404,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         try {
           await ensureRunsPackSchema(packs.versions.db);
         } catch (err: any) {
-          return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
         }
         const existing = await packs.versions.getVersion(versionId);
         if (!existing || existing.productId !== productId) {
@@ -6456,7 +6445,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // purchases only; holders ride to period end or plan change.
   // Mirrors POST /plans/deactivate exactly.
   if (
-    path.includes("/payments/agentic/commercial/products/") &&
+    path.includes(`${commercialBarePath("products")}/`) &&
     path.endsWith("/deactivate") &&
     request.method === "POST"
   ) {
@@ -6494,7 +6483,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         try {
           await ensureRunsPackSchema(packs.versions.db);
         } catch (err: any) {
-          return Response.json({ error: `Runs-pack store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
         }
         const existing = await packs.versions.getVersion(versionId);
         if (!existing || existing.productId !== productId) {
@@ -6525,7 +6514,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // per-run product, optionally narrowed to one segment
   // (?segment=). Catalogue approval stays in #2739's UI: this
   // read shows approval status, never approves.
-  if (path.endsWith("/payments/agentic/commercial/catalogue/versions") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.catalogueVersions) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -6550,7 +6539,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const versions = family ? await catalogue.listVersions(family, segment) : [];
       return Response.json({ product, versions });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read catalogue versions." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -6561,7 +6550,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // versioned write path setPrice delegates to; the audit
   // event matches setPrice (commercial.price.set) — one price
   // vocabulary, not a second one.
-  if (path.endsWith("/payments/agentic/commercial/catalogue/versions") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.catalogueVersions) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -6573,7 +6562,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         family = assertPriceFamily(body.family);
       } catch (err: any) {
-        return Response.json({ error: err.message || "Invalid family." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
       const priceUSD = body.priceUSD;
       if (typeof priceUSD !== "number" || !Number.isFinite(priceUSD) || priceUSD < 0) {
@@ -6602,7 +6591,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensurePriceCatalogueSchema(catalogue.db);
       } catch (err: any) {
-        return Response.json({ error: `Price catalogue unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const entry = await catalogue.createVersion({ family, priceUSD, segment, effectiveFromMs, effectiveToMs });
       ctx.audit("commercial.price.set", "payments", { family: entry.family, priceUSD: entry.priceUSD });
@@ -6626,7 +6615,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // commercial.product.bulk_move (real runs only — a dry run
   // is a read and writes nothing).
   if (
-    path.includes("/payments/agentic/commercial/products/") &&
+    path.includes(`${commercialBarePath("products")}/`) &&
     path.endsWith("/bulk-move") &&
     request.method === "POST"
   ) {
@@ -6677,7 +6666,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureProductSchema(products.db);
       } catch (err: any) {
-        return Response.json({ error: `Product store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const result = await runBulkMove({
         subs,
@@ -6723,7 +6712,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // (operator only) — the bulk-move summaries for one product,
   // newest first.
   if (
-    path.includes("/payments/agentic/commercial/products/") &&
+    path.includes(`${commercialBarePath("products")}/`) &&
     path.endsWith("/bulk-moves") &&
     request.method === "GET"
   ) {
@@ -6747,7 +6736,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const bulkMoves = await products.listBulkMoves(productId);
       return Response.json({ bulkMoves });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to list bulk moves." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -6756,7 +6745,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // per-customer move rows (the audit that answers "who moved,
   // from what, to what").
   if (
-    path.includes("/payments/agentic/commercial/products/") &&
+    path.includes(`${commercialBarePath("products")}/`) &&
     path.includes("/bulk-moves/") &&
     request.method === "GET"
   ) {
@@ -6784,7 +6773,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const moves = await products.listMovesForBulkMove(bulkMoveId);
       return Response.json({ bulkMove, moves });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read bulk move." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -6800,93 +6789,93 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // is no store row to remove. Unbound store is 503 for
   // add/remove (there is nowhere to write) but list still
   // returns the env rows.
-  if (path.endsWith("/payments/agentic/commercial/operators") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.operators) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       let operators: EffectiveOperatorEntry[];
       try {
         operators = await listEffectiveOperators();
       } catch (err: any) {
-        return Response.json({ error: `Operator store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
-      return Response.json({ operators });
+      return Response.json({ code: "SUCCESS_OPERATORS_LISTED", operators });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to list operators" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
-  if (path.endsWith("/payments/agentic/commercial/operators/add") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.operatorsAdd) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { login?: unknown };
       let target: string;
       try {
         target = assertOperatorLogin(body.login);
       } catch (err: any) {
-        return Response.json({ error: err.message }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
       if (envOperators.has(target)) {
         return Response.json(
-          { error: `Login ${target} is already an env-managed operator: env operators are managed via dashboard, not via the UI.` },
+          { code: "FAILURE_COMMERCIAL_CONFLICT", error: `Login ${target} is already an env-managed operator: env operators are managed via dashboard, not via the UI.` },
           { status: 409 },
         );
       }
       const adapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
       if (!adapter) {
-        return Response.json({ error: "Operator store unavailable: AGENT_DB is not bound." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Operator store unavailable: AGENT_DB is not bound." }, { status: 503 });
       }
       try {
         await ensureStoreOperatorsSchema(adapter.db);
       } catch (err: any) {
-        return Response.json({ error: `Operator store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const existing = await adapter.listOperators();
       const already = existing.find((entry) => entry.login === target);
       if (already) {
-        return Response.json({ operator: already });
+        return Response.json({ code: "SUCCESS_OPERATOR_ADDED", operator: already });
       }
       const operator = await adapter.addOperator({ login: target, addedBy: login });
       ctx.audit("commercial.operator.added", "payments", { operatorLogin: operator.login, addedBy: login });
-      return Response.json({ operator });
+      return Response.json({ code: "SUCCESS_OPERATOR_ADDED", operator });
     } catch (err: any) {
       const message = err.message || "Failed to add operator";
-      return Response.json({ error: message }, { status: /must be/.test(message) ? 400 : 500 });
+      return Response.json({ ...(/must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /must be/.test(message) ? 400 : 500 });
     }
   }
 
-  if (path.endsWith("/payments/agentic/commercial/operators/remove") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.operatorsRemove) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { login?: unknown };
       let target: string;
       try {
         target = assertOperatorLogin(body.login);
       } catch (err: any) {
-        return Response.json({ error: err.message }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
       const adapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
       if (!adapter) {
-        return Response.json({ error: "Operator store unavailable: AGENT_DB is not bound." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Operator store unavailable: AGENT_DB is not bound." }, { status: 503 });
       }
       try {
         await ensureStoreOperatorsSchema(adapter.db);
       } catch (err: any) {
-        return Response.json({ error: `Operator store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const storeEntries = await adapter.listOperators();
       const hasStoreRow = storeEntries.some((entry) => entry.login === target);
       if (!hasStoreRow) {
         return Response.json(
-          { error: `No store operator row for login ${target}: env-managed operators are removed via dashboard, not via the UI.` },
+          { code: "FAILURE_COMMERCIAL_NOT_FOUND", error: `No store operator row for login ${target}: env-managed operators are removed via dashboard, not via the UI.` },
           { status: 404 },
         );
       }
@@ -6901,19 +6890,19 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       }
       if (effectiveAfter.size === 0) {
         return Response.json(
-          { error: "Refusing to remove the last effective operator: the system must never reach zero operators through the UI." },
+          { code: "FAILURE_COMMERCIAL_CONFLICT", error: "Refusing to remove the last effective operator: the system must never reach zero operators through the UI." },
           { status: 409 },
         );
       }
       const removed = await adapter.removeOperator({ login: target });
       if (!removed) {
-        return Response.json({ error: `No store operator row for login ${target}.` }, { status: 404 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_NOT_FOUND", error: `No store operator row for login ${target}.` }, { status: 404 });
       }
       ctx.audit("commercial.operator.removed", "payments", { operatorLogin: target, addedBy: login });
-      return Response.json({ removed: target });
+      return Response.json({ code: "SUCCESS_OPERATOR_REMOVED", removed: target });
     } catch (err: any) {
       const message = err.message || "Failed to remove operator";
-      return Response.json({ error: message }, { status: /must be/.test(message) ? 400 : 500 });
+      return Response.json({ ...(/must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /must be/.test(message) ? 400 : 500 });
     }
   }
 
@@ -6930,10 +6919,10 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // service derives the record's tenant from the resolved payment
   // source, refusing with a typed error when the source carries
   // none — a client-supplied tenantId is never read.
-  if (path.endsWith("/payments/agentic/commercial/refunds") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.refunds) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const flag = await requireRefundFlag();
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as {
@@ -6946,7 +6935,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureRefundSchema(ports.store.db);
       } catch (err: any) {
-        return Response.json({ error: `Refund store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       let resolver: ReturnType<typeof createSubscriptionPaymentResolver> | undefined;
       if (body.kind === "subscription") {
@@ -6980,7 +6969,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         originalPaymentRef: record.originalPaymentRef,
         amountUSD: record.amountUSD,
       });
-      return Response.json({ refund: record });
+      return Response.json({ code: "SUCCESS_REFUND_REQUESTED", refund: record });
     } catch (err: any) {
       const message = err.message || "Failed to request refund";
       // Issue #2662: unapproved-kind refusal is a policy-state refusal
@@ -6991,33 +6980,33 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         : /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|Only the|no stored|determinable|rail is required|resolver/.test(message)
           ? 400
           : 500;
-      return Response.json({ error: message }, { status });
+      return Response.json({ ...(/not owner-approved/.test(message) ? { code: "FAILURE_REFUND_POLICY_REFUSAL" } : /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|Only the|no stored|determinable|rail is required|resolver/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
   // Operator decision on a requested refund: approve or deny.
   // Approver is operator HITL only (policy enforces the same).
-  if (path.endsWith("/payments/agentic/commercial/refunds/approve") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.refundsApprove) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const flag = await requireRefundFlag();
       if (flag) return flag;
       const body = (await request.json().catch(() => ({}))) as { refundId?: unknown; decision?: unknown; note?: unknown };
       const refundId = typeof body.refundId === "string" ? body.refundId : "";
-      if (!refundId) return Response.json({ error: "refundId is required." }, { status: 400 });
+      if (!refundId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "refundId is required." }, { status: 400 });
       if (body.decision !== "approve" && body.decision !== "deny") {
-        return Response.json({ error: "decision must be approve or deny." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "decision must be approve or deny." }, { status: 400 });
       }
       const ports = requireRefunds();
       if (ports instanceof Response) return ports;
       try {
         await ensureRefundSchema(ports.store.db);
       } catch (err: any) {
-        return Response.json({ error: `Refund store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const record = await decideRefund(
         { refundStore: ports.store },
@@ -7028,11 +7017,11 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         decision: body.decision,
         approverLogin: login,
       });
-      return Response.json({ refund: record });
+      return Response.json({ code: "SUCCESS_REFUND_DECIDED", refund: record });
     } catch (err: any) {
       const message = err.message || "Failed to decide refund";
       const status = /No refund/.test(message) ? 404 : /cannot be decided/.test(message) ? 400 : 500;
-      return Response.json({ error: message }, { status });
+      return Response.json({ ...(/No refund/.test(message) ? { code: "FAILURE_COMMERCIAL_NOT_FOUND" } : /cannot be decided/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
@@ -7040,26 +7029,26 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // payment-intent id. Unapproved, unresolvable, window/amount, and
   // crypto cases are refused by the service before any gateway
   // call; a gateway failure marks execution_failed (retryable).
-  if (path.endsWith("/payments/agentic/commercial/refunds/execute") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.refundsExecute) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("monetization");
       if (!flagOn) {
-        return Response.json({ error: "monetization flag is OFF; refunds are disabled." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "monetization flag is OFF; refunds are disabled." }, { status: 403 });
       }
       const body = (await request.json().catch(() => ({}))) as { refundId?: unknown };
       const refundId = typeof body.refundId === "string" ? body.refundId : "";
-      if (!refundId) return Response.json({ error: "refundId is required." }, { status: 400 });
+      if (!refundId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "refundId is required." }, { status: 400 });
       const ports = requireRefunds();
       if (ports instanceof Response) return ports;
       try {
         await ensureRefundSchema(ports.store.db);
       } catch (err: any) {
-        return Response.json({ error: `Refund store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const store = requireStore();
       if (store instanceof Response) return store;
@@ -7169,7 +7158,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
             }
           : {}),
       });
-      return Response.json({ refund: record });
+      return Response.json({ code: "SUCCESS_REFUND_EXECUTED", refund: record });
     } catch (err: any) {
       const message = err.message || "Failed to execute refund";
       const status = /No refund/.test(message)
@@ -7181,39 +7170,39 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
             : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF|already received its automatic replacement-run credit|failure-credit lookup|not owner-approved|cross-tenant/.test(message)
               ? 422
               : 500;
-      return Response.json({ error: message }, { status });
+      return Response.json({ ...(/No refund/.test(message) ? { code: "FAILURE_COMMERCIAL_NOT_FOUND" } : /Only an approved refund/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /Gateway refund failed/.test(message) ? { code: "FAILURE_COMMERCIAL_UPSTREAM_FAILED" } : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF|already received its automatic replacement-run credit|failure-credit lookup|not owner-approved|cross-tenant/.test(message) ? { code: "FAILURE_REFUND_POLICY_REFUSAL" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
   // Refund read: one record by id, or the caller's own list (an
   // operator may list another user's refunds by userId). Reads are
   // not flag-gated: refund status stays readable when the flag is OFF.
-  if (path.endsWith("/payments/agentic/commercial/refunds") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.refunds) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const ports = requireRefunds();
       if (ports instanceof Response) return ports;
       try {
         await ensureRefundSchema(ports.store.db);
       } catch (err: any) {
-        return Response.json({ error: `Refund store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const refundId = url.searchParams.get("refundId") ?? "";
       if (refundId) {
         const record = await ports.store.getRefund(refundId);
-        if (!record) return Response.json({ error: `No refund ${refundId}.` }, { status: 404 });
+        if (!record) return Response.json({ code: "FAILURE_COMMERCIAL_NOT_FOUND", error: `No refund ${refundId}.` }, { status: 404 });
         if (record.userId !== login && !isStoreOperator(login)) {
-          return Response.json({ error: "Forbidden: only the refund owner or a store operator may read a refund." }, { status: 403 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: only the refund owner or a store operator may read a refund." }, { status: 403 });
         }
-        return Response.json({ refund: record });
+        return Response.json({ code: "SUCCESS_REFUND_READ", refund: record });
       }
       const userId = url.searchParams.get("userId") ?? "";
       const target = userId && isStoreOperator(login) ? userId : login;
       const refunds = await ports.store.listRefunds(target);
-      return Response.json({ refunds });
+      return Response.json({ code: "SUCCESS_REFUNDS_LISTED", refunds });
     } catch {
-      return Response.json({ error: "Failed to read refunds." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: "Failed to read refunds." }, { status: 500 });
     }
   }
 
@@ -7223,51 +7212,51 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // a hardcoded proposed flag. An unapproved kind's values are
   // PROPOSED seeds or operator edits awaiting approval, not an
   // activation.
-  if (path.endsWith("/payments/agentic/commercial/refund-policy") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.refundPolicy) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const ports = requireRefunds();
       if (ports instanceof Response) return ports;
       try {
         await ensureRefundSchema(ports.store.db);
       } catch (err: any) {
-        return Response.json({ error: `Refund store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const policy = await ports.policy.getPolicy();
-      if (!policy) return Response.json({ error: "Refund policy is not configured." }, { status: 503 });
-      return Response.json({ policy, disclosure: REFUND_POLICY_COPY });
+      if (!policy) return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Refund policy is not configured." }, { status: 503 });
+      return Response.json({ code: "SUCCESS_REFUND_POLICY_READ", policy, disclosure: REFUND_POLICY_COPY });
     } catch {
-      return Response.json({ error: "Failed to read refund policy." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: "Failed to read refund policy." }, { status: 500 });
     }
   }
 
   // Operator refund policy update: validated partial update, no
   // code deploy. Not flag-gated (configuration precedes activation).
-  if (path.endsWith("/payments/agentic/commercial/refund-policy") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.refundPolicy) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const ports = requireRefunds();
       if (ports instanceof Response) return ports;
       try {
         await ensureRefundSchema(ports.store.db);
       } catch (err: any) {
-        return Response.json({ error: `Refund store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       try {
         const policy = await ports.policy.setPolicy(body);
         ctx.audit("commercial.refund.policy.set", "payments", { policy });
-        return Response.json({ policy });
+        return Response.json({ code: "SUCCESS_REFUND_POLICY_UPDATED", policy });
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to set refund policy" }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
     } catch {
-      return Response.json({ error: "Failed to set refund policy." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: "Failed to set refund policy." }, { status: 500 });
     }
   }
 
@@ -7280,26 +7269,26 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // individual refund — each refund still needs operator HITL
   // approve + execute. Not flag-gated (configuration precedes
   // activation, same rule as the policy routes).
-  if (path.endsWith("/payments/agentic/commercial/refund-policy/approve") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.refundPolicyApprove) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: store operator required." }, { status: 403 });
       }
       const ports = requireRefunds();
       if (ports instanceof Response) return ports;
       try {
         await ensureRefundSchema(ports.store.db);
       } catch (err: any) {
-        return Response.json({ error: `Refund store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const body = (await request.json().catch(() => ({}))) as { kind?: unknown; approved?: unknown };
       if (body.kind !== "subscription" && body.kind !== "pay_per_run") {
-        return Response.json({ error: "kind must be subscription or pay_per_run." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "kind must be subscription or pay_per_run." }, { status: 400 });
       }
       if (typeof body.approved !== "boolean") {
-        return Response.json({ error: "approved must be a boolean." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "approved must be a boolean." }, { status: 400 });
       }
       try {
         const policy = await ports.policy.setKindApproval(body.kind, body.approved, login);
@@ -7309,12 +7298,12 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           approverLogin: login,
           approvedKinds: policy.approvedKinds,
         });
-        return Response.json({ policy });
+        return Response.json({ code: "SUCCESS_REFUND_POLICY_APPROVED", policy });
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to set refund policy approval" }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
     } catch {
-      return Response.json({ error: "Failed to set refund policy approval." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: "Failed to set refund policy approval." }, { status: 500 });
     }
   }
 
@@ -7352,15 +7341,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // four-condition rule the gate applies. Crypto is paid ONLY when
   // the facilitator verifies the supplied proof for this run's amount
   // and recipient (and the claimed payer matches, when supplied).
-  if (path.endsWith("/payments/agentic/commercial/submission/check-payment") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.submissionCheckPayment) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const body = (await request.json().catch(() => ({}))) as {
         runRequestId?: unknown; sessionId?: unknown; family?: unknown; paymentProof?: unknown; payer?: unknown;
       };
       const runRequestId = typeof body.runRequestId === "string" ? body.runRequestId : "";
-      if (!runRequestId) return Response.json({ error: "runRequestId is required." }, { status: 400 });
+      if (!runRequestId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "runRequestId is required." }, { status: 400 });
       const asString = (v: unknown): string | undefined =>
         typeof v === "string" && v.length > 0 ? v : undefined;
       if (
@@ -7369,7 +7358,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         (body.paymentProof !== undefined && typeof body.paymentProof !== "string") ||
         (body.payer !== undefined && typeof body.payer !== "string")
       ) {
-        return Response.json({ error: "sessionId, family, paymentProof, and payer must be strings when supplied." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "sessionId, family, paymentProof, and payer must be strings when supplied." }, { status: 400 });
       }
       // Issue #2137 (check-payment ownership hardening): the
       // verified session login must own the submission being
@@ -7398,20 +7387,20 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureCommercialSchema(ownershipStore.db);
       } catch (err: any) {
-        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       let ownershipSubmission;
       try {
         ownershipSubmission = await ownershipStore.getPaidSubmission(runRequestId);
       } catch (err: any) {
-        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       if (ownershipSubmission && ownershipSubmission.userId !== login) {
-        return Response.json({ error: "Forbidden: this submission belongs to another user." }, { status: 403 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: this submission belongs to another user." }, { status: 403 });
       }
       const envRecord = ctx.env as unknown as Record<string, unknown>;
       const ports = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
-      if (!ports) return Response.json({ error: "Payment verification is temporarily unavailable." }, { status: 503 });
+      if (!ports) return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment verification is temporarily unavailable." }, { status: 503 });
       // Resolve the card session + family from the checkout_created
       // audit trail when the caller did not supply a session id.
       let sessionId = asString(body.sessionId);
@@ -7464,7 +7453,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       ) => {
         const binding = ctx.env.PAYMENT_WORKFLOW as unknown as PaymentWorkflowBinding | undefined;
         if (!binding || typeof binding.get !== "function") {
-          return Response.json({ runRequestId, paid: true, delivered: false, state, paymentUrl: null, rail });
+          return Response.json({ code: "SUCCESS_SUBMISSION_PAYMENT_CHECKED", runRequestId, paid: true, delivered: false, state, paymentUrl: null, rail });
         }
         try {
           const host: PaymentWorkflowHost = {
@@ -7481,27 +7470,27 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
             },
           };
           await deliverPaymentVerifiedViaHost(host, runRequestId, proof);
-          return Response.json({ runRequestId, paid: true, delivered: true, state, paymentUrl: null, rail });
+          return Response.json({ code: "SUCCESS_SUBMISSION_PAYMENT_CHECKED", runRequestId, paid: true, delivered: true, state, paymentUrl: null, rail });
         } catch {
-          return Response.json({ runRequestId, paid: true, delivered: false, state, paymentUrl: null, rail });
+          return Response.json({ code: "SUCCESS_SUBMISSION_PAYMENT_CHECKED", runRequestId, paid: true, delivered: false, state, paymentUrl: null, rail });
         }
       };
       // Card path: a session id is known (caller-supplied or audited).
       if (sessionId) {
-        if (!ports.card) return Response.json({ error: "Payment verification is temporarily unavailable." }, { status: 503 });
+        if (!ports.card) return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment verification is temporarily unavailable." }, { status: 503 });
         const price = await resolvePrice();
-        if (price === null) return Response.json({ error: "Payment verification is temporarily unavailable." }, { status: 503 });
+        if (price === null) return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment verification is temporarily unavailable." }, { status: 503 });
         let evidence;
         try {
           evidence = await ports.card.retrieveCardSession({ sessionId });
         } catch (err) {
           // #3573: a guard failure (timeout / breaker open) maps to its
-          // catalog-coded 503; any other retrieve failure keeps the
-          // fixed 503 (unchanged).
+          // catalog-coded 503; any other retrieve failure is the coded
+          // service-unavailable 503 (#2846).
           if (isCheckoutPortGuardError(err)) {
             return codedOutcomeResponse(err.outcomeCode);
           }
-          return Response.json({ error: "Payment verification is temporarily unavailable." }, { status: 503 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment verification is temporarily unavailable." }, { status: 503 });
         }
         const paid =
           evidence.status === "complete" &&
@@ -7511,7 +7500,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         if (!paid) {
           // Unpaid: present the native checkoutUrl when Stripe still
           // serves one (open session); never invent a link.
-          return Response.json({
+          return Response.json({ code: "SUCCESS_SUBMISSION_PAYMENT_CHECKED", 
             runRequestId, paid: false, state: evidence.status || "unknown",
             paymentUrl: evidence.checkoutUrl ?? null, rail: "stripe",
           });
@@ -7525,25 +7514,25 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       // Crypto path: the caller supplies a payment proof to verify.
       const paymentProof = asString(body.paymentProof);
       if (paymentProof) {
-        if (!ports.x402) return Response.json({ error: "Payment verification is temporarily unavailable." }, { status: 503 });
+        if (!ports.x402) return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment verification is temporarily unavailable." }, { status: 503 });
         const price = await resolvePrice();
-        if (price === null) return Response.json({ error: "Payment verification is temporarily unavailable." }, { status: 503 });
+        if (price === null) return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment verification is temporarily unavailable." }, { status: 503 });
         let verdict;
         try {
           verdict = await ports.x402.verifyCryptoPayment({ paymentProof, expectedAmountUSD: price });
         } catch (err) {
           // #3573: a guard failure (timeout / breaker open) maps to its
-          // catalog-coded 503; any other verification failure keeps
-          // the fixed 503 (unchanged).
+          // catalog-coded 503; any other verification failure is the
+          // coded service-unavailable 503 (#2846).
           if (isCheckoutPortGuardError(err)) {
             return codedOutcomeResponse(err.outcomeCode);
           }
-          return Response.json({ error: "Payment verification is temporarily unavailable." }, { status: 503 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Payment verification is temporarily unavailable." }, { status: 503 });
         }
         const payer = asString(body.payer);
         const paid = verdict.verified && (!payer || verdict.payer === payer);
         if (!paid) {
-          return Response.json({
+          return Response.json({ code: "SUCCESS_SUBMISSION_PAYMENT_CHECKED", 
             runRequestId, paid: false, state: "unverified", paymentUrl: null, rail: "x402",
           });
         }
@@ -7566,7 +7555,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
               ? (envRecord.X402_NETWORK as string)
               : "base-sepolia",
         });
-        return Response.json({
+        return Response.json({ code: "SUCCESS_SUBMISSION_PAYMENT_CHECKED", 
           runRequestId, paid: false, state: "awaiting_proof", paymentUrl: null, rail: "x402",
           challengeFlow: {
             network: network.x402Network,
@@ -7577,11 +7566,11 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           },
         });
       }
-      return Response.json({
+      return Response.json({ code: "SUCCESS_SUBMISSION_PAYMENT_CHECKED", 
         runRequestId, paid: false, state: "checkout_not_found", paymentUrl: null, rail: "stripe",
       });
     } catch {
-      return Response.json({ error: "Failed to check payment." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: "Failed to check payment." }, { status: 500 });
     }
   }
 
@@ -7593,10 +7582,10 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // screenerCommand the caller then submits via the paid route (which
   // enforces the gate). userLogin is the verified login, never a
   // caller claim.
-  if (path.endsWith("/payments/agentic/commercial/goal-command") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.goalCommand) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const body = (await request.json().catch(() => ({}))) as {
         jobId?: unknown; goalKind?: unknown; direction?: unknown; symbols?: unknown; tenantId?: unknown;
       };
@@ -7607,10 +7596,10 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const symbols = Array.isArray(body.symbols)
         ? body.symbols.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
         : undefined;
-      if (!jobId) return Response.json({ error: "jobId is required." }, { status: 400 });
-      if (!(goalKind in GOAL_TAXONOMY)) return Response.json({ error: "goalKind is not a known goal kind." }, { status: 400 });
+      if (!jobId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "jobId is required." }, { status: 400 });
+      if (!(goalKind in GOAL_TAXONOMY)) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "goalKind is not a known goal kind." }, { status: 400 });
       if (!["bullish", "bearish", "range_bound", "volatile", "unknown"].includes(direction)) {
-        return Response.json({ error: "direction must be bullish, bearish, range_bound, volatile, or unknown." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "direction must be bullish, bearish, range_bound, volatile, or unknown." }, { status: 400 });
       }
       const scenario = buildScenario({
         goalKind: goalKind as keyof typeof GOAL_TAXONOMY,
@@ -7627,9 +7616,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         scenarioSource: "built",
         symbols,
       });
-      return Response.json({ screenerCommand });
+      return Response.json({ code: "SUCCESS_GOAL_COMMAND_BUILT", screenerCommand });
     } catch {
-      return Response.json({ error: "Failed to build goal command." }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: "Failed to build goal command." }, { status: 500 });
     }
   }
 
@@ -7639,17 +7628,17 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
     try {
       const agentId = url.searchParams.get("agentId");
       const state = deriveBudgetGuardState(ctx.getOrm().transactions.findMany(), agentId);
-      return Response.json({ agentId, state });
+      return Response.json({ code: "SUCCESS_BUDGET_STATE_READ", agentId, state });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to derive budget state" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
   // Issue #896: PaymentsAgent-origin payments, read back from the ledger.
   if (path.endsWith("/payments/agentic/ledger/payments") && request.method === "GET") {
     try {
-      const rawLimit = Number(url.searchParams.get("limit") ?? 50);
-      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(500, Math.floor(rawLimit))) : 50;
+      const rawLimit = Number(url.searchParams.get("limit") ?? COMMERCIAL_DEFAULTS.ledgerPaymentsDefaultLimit);
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(500, Math.floor(rawLimit))) : COMMERCIAL_DEFAULTS.ledgerPaymentsDefaultLimit;
       // Newest first. createdAt is millisecond-resolution, so two
       // payments recorded in the same millisecond tie on timestamp;
       // Array.sort is stable, which would then return them in
@@ -7667,9 +7656,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         )
         .slice(0, limit)
         .map(({ row }) => toPaymentRecord(row));
-      return Response.json({ count: payments.length, payments });
+      return Response.json({ code: "SUCCESS_LEDGER_PAYMENTS_LISTED", count: payments.length, payments });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to list ledger payments" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -7683,9 +7672,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const walletMode = resolveAgenticRouteMode(ctx, "wallet", url.searchParams.get("mode"), "rest");
       if (walletMode === "mcp") {
         const status = await paymentService.getWalletStatus();
-        return Response.json({ success: true, ...status });
+        return Response.json({ code: "SUCCESS_AUTO_APPROVE_LIMIT_READ", success: true, ...status });
       }
-      return Response.json({
+      return Response.json({ code: "SUCCESS_AUTO_APPROVE_LIMIT_READ", 
         autoApproveLimitUSD: paymentService.getAutoApproveLimit(),
         network: ctx.env.X402_NETWORK || "base-sepolia",
       });
@@ -7701,20 +7690,20 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         const walletMode = resolveAgenticRouteMode(ctx, "wallet", body.mode, "rest");
         const limit = Number(body.limitUSD !== undefined ? body.limitUSD : body.limit);
         if (isNaN(limit) || limit < 0) {
-          return Response.json({ error: "Invalid limitUSD. Must be non-negative number." }, { status: 400 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "Invalid limitUSD. Must be non-negative number." }, { status: 400 });
         }
         paymentService.setAutoApproveLimit(limit);
         ctx.audit("agentic_payment.limit_updated", "payments", { limitUSD: limit });
         if (walletMode === "mcp") {
-          return Response.json({
+          return Response.json({ code: "SUCCESS_AUTO_APPROVE_LIMIT_UPDATED", 
             success: true,
             message: `Agentic payment auto-approval limit set to $${limit.toFixed(2)} USD.`,
             autoApproveLimitUSD: limit,
           });
         }
-        return Response.json({ success: true, autoApproveLimitUSD: limit });
+        return Response.json({ code: "SUCCESS_AUTO_APPROVE_LIMIT_UPDATED", success: true, autoApproveLimitUSD: limit });
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to update limit" }, { status: 500 });
+        return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
       }
     }
   }
@@ -7729,13 +7718,13 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // ================================================================
 
   // GET /payments/agentic/commercial/referral/balance?userId= — own balance or operator.
-  if (path.endsWith("/payments/agentic/commercial/referral/balance") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralBalance) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const userId = url.searchParams.get("userId") ?? "";
-      if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
-      if (!canAccessAccount(login, userId)) return Response.json({ error: "Forbidden." }, { status: 403 });
+      if (!userId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "userId is required." }, { status: 400 });
+      if (!canAccessAccount(login, userId)) return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden." }, { status: 403 });
       const lifecycle = requireLifecycle();
       if (lifecycle instanceof Response) return lifecycle;
       const ensured = await ensureLifecycle(lifecycle);
@@ -7746,7 +7735,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         lifecycle.listEarnings(userId),
         lifecycle.getAttribution(userId),
       ]);
-      return Response.json({
+      return Response.json({ code: "SUCCESS_REFERRAL_BALANCE_READ", 
         userId,
         redeemableUSD,
         totalEarnedUSD: earnings.reduce((s, e) => s + e.amountUSD, 0),
@@ -7761,23 +7750,23 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         },
       });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read referral balance" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
   // POST /payments/agentic/commercial/referral/record-earn (operator only).
   // The earn event: a referred user's first paid run. Idempotent
   // per referred user; self-referral refused by the port.
-  if (path.endsWith("/payments/agentic/commercial/referral/record-earn") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralRecordEarn) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
-      if (!isStoreOperator(login)) return Response.json({ error: "Forbidden: operator only." }, { status: 403 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: operator only." }, { status: 403 });
       const body = (await request.json().catch(() => ({}))) as {
         referrerUserId?: unknown; referredUserId?: unknown; tenantId?: unknown;
       };
       if (typeof body.referrerUserId !== "string" || typeof body.referredUserId !== "string" || typeof body.tenantId !== "string") {
-        return Response.json({ error: "referrerUserId, referredUserId, and tenantId are required." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "referrerUserId, referredUserId, and tenantId are required." }, { status: 400 });
       }
       const lifecycle = requireLifecycle();
       if (lifecycle instanceof Response) return lifecycle;
@@ -7793,9 +7782,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         referredUserId: earning.referredUserId,
         amountUSD: earning.amountUSD,
       });
-      return Response.json({ earning });
+      return Response.json({ code: "SUCCESS_REFERRAL_EARNING_RECORDED", earning });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to record referral earning" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -7809,16 +7798,16 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // can claim a code source here.
   // Attribution alone earns nothing — it only lets the submit path's
   // automatic earn trigger know whom to credit on first paid run.
-  if (path.endsWith("/payments/agentic/commercial/referral/attribute") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralAttribute) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
-      if (!isStoreOperator(login)) return Response.json({ error: "Forbidden: operator only." }, { status: 403 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: operator only." }, { status: 403 });
       const body = (await request.json().catch(() => ({}))) as {
         referrerUserId?: unknown; referredUserId?: unknown; tenantId?: unknown;
       };
       if (typeof body.referrerUserId !== "string" || typeof body.referredUserId !== "string" || typeof body.tenantId !== "string") {
-        return Response.json({ error: "referrerUserId, referredUserId, and tenantId are required." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "referrerUserId, referredUserId, and tenantId are required." }, { status: 400 });
       }
       const lifecycle = requireLifecycle();
       if (lifecycle instanceof Response) return lifecycle;
@@ -7834,9 +7823,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         referredUserId: attribution.referredUserId,
         tenantId: attribution.tenantId,
       });
-      return Response.json({ attribution });
+      return Response.json({ code: "SUCCESS_REFERRAL_ATTRIBUTION_RECORDED", attribution });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to record referral attribution" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -7862,13 +7851,13 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
     try {
       await ensureFreeAccessGrantSchema(adapter.db);
     } catch (err: any) {
-      return Response.json({ error: `Free-access grant store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return adapter;
   };
 
   // POST /payments/agentic/commercial/free-access/grant (operator only)
-  if (path.endsWith("/payments/agentic/commercial/free-access/grant") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.freeAccessGrant) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -7891,14 +7880,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           Date.now(),
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Invalid free-access grant." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
       const store = requireStore();
       if (store instanceof Response) return store;
       try {
         await ensureCommercialSchema(store.db);
       } catch (err: any) {
-        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const targetAccount = await store.getAccount(userId);
       if (!targetAccount) {
@@ -7935,7 +7924,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   }
 
   // POST /payments/agentic/commercial/free-access/revoke (operator only)
-  if (path.endsWith("/payments/agentic/commercial/free-access/revoke") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.freeAccessRevoke) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -7956,7 +7945,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         await ensureCommercialSchema(store.db);
       } catch (err: any) {
-        return Response.json({ error: `Commercial store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const targetAccount = await store.getAccount(userId);
       if (!targetAccount) {
@@ -7986,7 +7975,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // Mirrors GET /payments/agentic/commercial/referral/balance: the
   // same shape for self and operator reads (it is the subject's
   // own record). No audit event on read.
-  if (path.endsWith("/payments/agentic/commercial/free-access") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.freeAccess) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -8002,42 +7991,42 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       ]);
       return Response.json({ userId, active, history });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read free-access grants" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
   // GET /payments/agentic/commercial/lifecycle/preferences?userId= — own or operator.
-  if (path.endsWith("/payments/agentic/commercial/lifecycle/preferences") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.lifecyclePreferences) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const userId = url.searchParams.get("userId") ?? "";
       const tenantId = url.searchParams.get("tenantId") ?? "";
-      if (!userId || !tenantId) return Response.json({ error: "userId and tenantId are required." }, { status: 400 });
-      if (!canAccessAccount(login, userId)) return Response.json({ error: "Forbidden." }, { status: 403 });
+      if (!userId || !tenantId) return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "userId and tenantId are required." }, { status: 400 });
+      if (!canAccessAccount(login, userId)) return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden." }, { status: 403 });
       const lifecycle = requireLifecycle();
       if (lifecycle instanceof Response) return lifecycle;
       const ensured = await ensureLifecycle(lifecycle);
       if (ensured) return ensured;
-      return Response.json({ preferences: await lifecycle.getPreferences(userId, tenantId) });
+      return Response.json({ code: "SUCCESS_LIFECYCLE_PREFERENCES_READ", preferences: await lifecycle.getPreferences(userId, tenantId) });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to read preferences" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
   // POST /payments/agentic/commercial/lifecycle/preferences — own or operator.
   // Digest opt-out takes effect on the next send check (same-day).
-  if (path.endsWith("/payments/agentic/commercial/lifecycle/preferences") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.lifecyclePreferences) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const body = (await request.json().catch(() => ({}))) as {
         userId?: unknown; tenantId?: unknown; digestEnabled?: unknown; welcomeEnabled?: unknown;
       };
       if (typeof body.userId !== "string" || typeof body.tenantId !== "string") {
-        return Response.json({ error: "userId and tenantId are required." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "userId and tenantId are required." }, { status: 400 });
       }
-      if (!canAccessAccount(login, body.userId)) return Response.json({ error: "Forbidden." }, { status: 403 });
+      if (!canAccessAccount(login, body.userId)) return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden." }, { status: 403 });
       const lifecycle = requireLifecycle();
       if (lifecycle instanceof Response) return lifecycle;
       const ensured = await ensureLifecycle(lifecycle);
@@ -8048,9 +8037,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         digestEnabled: body.digestEnabled,
         welcomeEnabled: body.welcomeEnabled,
       });
-      return Response.json({ preferences });
+      return Response.json({ code: "SUCCESS_LIFECYCLE_PREFERENCES_UPDATED", preferences });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to write preferences" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -8061,19 +8050,19 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // grantee email (grantMembership takes an internal user id
   // only), so this route is the trigger surface until an
   // email-bearing provisioning path exists.
-  if (path.endsWith("/payments/agentic/commercial/lifecycle/welcome") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.lifecycleWelcome) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const body = (await request.json().catch(() => ({}))) as {
         userId?: unknown; email?: unknown; tenantId?: unknown;
       };
       if (typeof body.userId !== "string" || typeof body.email !== "string") {
-        return Response.json({ error: "userId and email are required." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "userId and email are required." }, { status: 400 });
       }
-      if (!canAccessAccount(login, body.userId)) return Response.json({ error: "Forbidden." }, { status: 403 });
+      if (!canAccessAccount(login, body.userId)) return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden." }, { status: 403 });
       const sender = lifecycleSender();
-      if (!sender) return Response.json({ sent: false, reason: "no-email-transport" });
+      if (!sender) return Response.json({ code: "FAILURE_LIFECYCLE_EMAIL_NOT_SENT", sent: false, reason: "no-email-transport" });
       let preferences;
       const lifecycle = createLifecycleAdapter(ctx.env as { AGENT_DB?: unknown });
       if (lifecycle && typeof body.tenantId === "string" && body.tenantId) {
@@ -8095,7 +8084,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         tier = await resolveEmailTier(body.userId);
       } catch {
-        return Response.json({ error: "TierUnavailable: the tier store could not be read; welcome mail was not sent." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "TierUnavailable: the tier store could not be read; welcome mail was not sent." }, { status: 503 });
       }
       const result = await sendWelcomeBestEffort({
         sender,
@@ -8110,9 +8099,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       if (result.sent && lifecycle && typeof body.tenantId === "string" && body.tenantId) {
         await lifecycle.setSubscriberEmail(body.userId, body.tenantId, body.email).catch(() => {});
       }
-      return Response.json(result);
+      return Response.json({ ...result, ...(result.sent ? { code: "SUCCESS_LIFECYCLE_WELCOME_SENT" } : { code: "FAILURE_LIFECYCLE_EMAIL_NOT_SENT" }) });
     } catch (err: any) {
-      return Response.json({ sent: false, reason: "send-failed" });
+      return Response.json({ code: "FAILURE_LIFECYCLE_EMAIL_NOT_SENT", sent: false, reason: "send-failed" });
     }
   }
 
@@ -8120,27 +8109,27 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // The guarded send: opt-in check, per-day guard, skip-on-empty.
   // A scheduled trigger is follow-up work; this route is the
   // callable send surface.
-  if (path.endsWith("/payments/agentic/commercial/lifecycle/digest/send") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.lifecycleDigestSend) && request.method === "POST") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
       const body = (await request.json().catch(() => ({}))) as {
         userId?: unknown; tenantId?: unknown; email?: unknown; items?: unknown;
       };
       if (typeof body.userId !== "string" || typeof body.tenantId !== "string" || typeof body.email !== "string") {
-        return Response.json({ error: "userId, tenantId, and email are required." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "userId, tenantId, and email are required." }, { status: 400 });
       }
-      if (!canAccessAccount(login, body.userId)) return Response.json({ error: "Forbidden." }, { status: 403 });
+      if (!canAccessAccount(login, body.userId)) return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden." }, { status: 403 });
       const items = Array.isArray(body.items) ? body.items.filter((i): i is string => typeof i === "string") : [];
       const lifecycle = requireLifecycle();
       if (lifecycle instanceof Response) return lifecycle;
       const ensured = await ensureLifecycle(lifecycle);
       if (ensured) return ensured;
       const sender = lifecycleSender();
-      if (!sender) return Response.json({ sent: false, reason: "no-email-transport" });
+      if (!sender) return Response.json({ code: "FAILURE_LIFECYCLE_EMAIL_NOT_SENT", sent: false, reason: "no-email-transport" });
       const secret = unsubscribeSecret();
       const unsubscribeUrl = secret
-        ? `https://agent.openaimp.com/payments/agentic/commercial/lifecycle/unsubscribe?token=${await signUnsubscribeToken(secret, body.userId, body.tenantId)}`
+        ? `https://agent.openaimp.com${commercialBarePath("lifecycleUnsubscribe")}?token=${await signUnsubscribeToken(secret, body.userId, body.tenantId)}`
         : undefined;
       // Issue #2522: same fail direction as the welcome route —
       // a tier-store failure refuses with a typed 503 before any
@@ -8149,7 +8138,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         tier = await resolveEmailTier(body.userId);
       } catch {
-        return Response.json({ error: "TierUnavailable: the tier store could not be read; digest mail was not sent." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "TierUnavailable: the tier store could not be read; digest mail was not sent." }, { status: 503 });
       }
       const result = await sendDailyDigest({
         store: lifecycle,
@@ -8167,9 +8156,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       if (result.sent) {
         await lifecycle.setSubscriberEmail(body.userId, body.tenantId, body.email).catch(() => {});
       }
-      return Response.json(result);
+      return Response.json({ ...result, ...(result.sent ? { code: "SUCCESS_LIFECYCLE_DIGEST_SENT" } : { code: "FAILURE_LIFECYCLE_EMAIL_NOT_SENT" }) });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to send digest" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -8194,12 +8183,12 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // the scheduled path has no trustworthy public origin (the
   // tick is a cron event, not a user-facing request) — opt-out
   // remains via the preferences panel and the unsubscribe route.
-  if (path.endsWith("/payments/agentic/commercial/lifecycle/digest/run-due") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.lifecycleDigestRunDue) && request.method === "POST") {
     try {
       const login = commercialLogin();
       const serviceLogin = getServiceUserLogin(ctx.env);
       if (!login || !serviceLogin || login !== serviceLogin) {
-        return Response.json({ error: "Unauthorized: service identity required." }, { status: 401 });
+        return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: service identity required." }, { status: 401 });
       }
       const lifecycle = requireLifecycle();
       if (lifecycle instanceof Response) return lifecycle;
@@ -8207,11 +8196,11 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       if (ensured) return ensured;
       const day = digestDayKey(Date.now());
       if (await lifecycle.hasDigestPassRun(day)) {
-        return Response.json({ fired: false, reason: "already-ran-today", dateKey: day });
+        return Response.json({ code: "SUCCESS_LIFECYCLE_DIGEST_SKIPPED", fired: false, reason: "already-ran-today", dateKey: day });
       }
       const sender = lifecycleSender();
       if (!sender) {
-        return Response.json({ error: "Digest pass unavailable: no email transport configured." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Digest pass unavailable: no email transport configured." }, { status: 503 });
       }
       const body = (await request.json().catch(() => ({}))) as { itemsByUser?: unknown };
       const itemsByUser: Record<string, string[]> = {};
@@ -8254,9 +8243,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       } catch {
         // Audit failure never changes the pass result.
       }
-      return Response.json({ fired: true, dateKey: day, summary });
+      return Response.json({ code: "SUCCESS_LIFECYCLE_DIGEST_SENT", fired: true, dateKey: day, summary });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Digest pass failed" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -8264,26 +8253,26 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // is the authentication (no session required: this is the
   // one-click link). Digest ONLY: a non-digest token is a 400,
   // and security mail has no unsubscribe path at all.
-  if (path.endsWith("/payments/agentic/commercial/lifecycle/unsubscribe") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.lifecycleUnsubscribe) && request.method === "POST") {
     try {
       const body = (await request.json().catch(() => ({}))) as { token?: unknown };
       if (typeof body.token !== "string" || !body.token) {
-        return Response.json({ error: "token is required." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "token is required." }, { status: 400 });
       }
       const secret = unsubscribeSecret();
-      if (!secret) return Response.json({ error: "Unsubscribe is not configured." }, { status: 503 });
+      if (!secret) return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Unsubscribe is not configured." }, { status: 503 });
       const lifecycle = requireLifecycle();
       if (lifecycle instanceof Response) return lifecycle;
       const ensured = await ensureLifecycle(lifecycle);
       if (ensured) return ensured;
       try {
         const preferences = await applyUnsubscribe(lifecycle, secret, body.token);
-        return Response.json({ preferences });
+        return Response.json({ code: "SUCCESS_LIFECYCLE_UNSUBSCRIBED", preferences });
       } catch (err: any) {
-        return Response.json({ error: err.message || "Invalid unsubscribe token." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to unsubscribe" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 

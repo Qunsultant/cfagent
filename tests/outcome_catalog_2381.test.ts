@@ -53,6 +53,8 @@ const LEGACY_ALIASES: Record<string, string> = {
   DELIVER_002: "FAILURE_DELIVERY_CHANNEL_FAILED",
   DATA_001: "FAILURE_DATA_PROVIDER_UNAVAILABLE",
   MCP_001: "FAILURE_MCP_PERMISSION_DENIED",
+  // #2846: the legacy deactivation code renamed to the coded outcome.
+  DeactivationBlockedByActiveSubscription: "FAILURE_DEACTIVATION_BLOCKED_BY_SUBSCRIPTION",
 };
 
 describe("outcome catalog (#2381)", () => {
@@ -245,15 +247,20 @@ describe("outcome catalog: run detail messages (#2608)", () => {
     // + FAILURE_RUNS_PACK_REPLAY + FAILURE_RUNS_PACK_NOT_PAID)
     // + 4 (#3307 slice 1: FAILURE_CODE_RUNS_UNAVAILABLE +
     // FAILURE_REFERRAL_CODE_INVALID + FAILURE_REFERRAL_CODE_CAP_EXCEEDED
-    // + FAILURE_REFERRAL_CODE_RULE_UNAVAILABLE) + 1 (#2373 S1b:
-    // FAILURE_PROVIDER_MISMATCH)) + 9 (#3571:
+    // + FAILURE_REFERRAL_CODE_RULE_UNAVAILABLE)
+    // + 69 (#2846: the commercial outcome codes) + 1 (#2373 S1b:
+    // FAILURE_PROVIDER_MISMATCH) + 9 (#3571:
     // SUCCESS_TOP_UP_CHECKOUT_CREATED, FAILURE_TOP_UP_UNAUTHORIZED,
     // FAILURE_TOP_UP_VALIDATION, FAILURE_TOP_UP_FORBIDDEN,
     // FAILURE_TOP_UP_NOT_FOUND, FAILURE_TOP_UP_STORE_UNAVAILABLE,
     // FAILURE_TOP_UP_DRAFT_RECORD_FAILED,
-    // FAILURE_TOP_UP_CREDIT_MARK_FAILED, FAILURE_TOP_UP_UNEXPECTED).
+    // FAILURE_TOP_UP_CREDIT_MARK_FAILED, FAILURE_TOP_UP_UNEXPECTED)
+    // — of the 9, SUCCESS_TOP_UP_CHECKOUT_CREATED was already added by
+    // #2846 (with the shorter message), so the net addition is +8 and
+    // the #3571 entry supersedes #2846's for that code (see the catalog
+    // union note in the r4 report).
     // The count pins that no RUN_* code leaked into "outcomes".
-    expect(Object.keys(outcomes)).toHaveLength(155);
+    expect(Object.keys(outcomes)).toHaveLength(223);
     expect(Object.keys(outcomes).some((k) => k.startsWith("RUN_"))).toBe(false);
     for (const code of RUN_CODES) {
       expect(code).toMatch(/^RUN_[A-Z_]+$/);
