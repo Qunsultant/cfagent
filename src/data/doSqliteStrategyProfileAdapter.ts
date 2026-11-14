@@ -25,6 +25,7 @@ import type {
   StrategyProfileSpec,
 } from "../trading";
 import type { ScanSqlExecutor } from "./scanRunPorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import type {
   StrategyProfileStore,
   StrategyProfileStoreOptions,
@@ -32,8 +33,8 @@ import type {
 
 const TABLE = "mas_strategy_profiles";
 
-const CREATE_TABLE_SQL = `CREATE TABLE IF NOT EXISTS ${TABLE} (id TEXT PRIMARY KEY, user_login TEXT NOT NULL, name TEXT NOT NULL, version INTEGER NOT NULL, spec_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`;
-const CREATE_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_mas_strategy_profiles_user_name ON ${TABLE} (user_login, name)`;
+const CREATE_TABLE_SQL = doTableSql("mas_strategy_profiles");
+const CREATE_INDEX_SQL = doIndexSql("idx_mas_strategy_profiles_user_name");
 const INSERT_SQL = `INSERT INTO ${TABLE} (id, user_login, name, version, spec_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`;
 const SELECT_BY_USER_SQL = `SELECT id, user_login, name, version, spec_json, created_at, updated_at FROM ${TABLE} WHERE user_login = ?`;
 const SELECT_BY_ID_SQL = `SELECT id, user_login, name, version, spec_json, created_at, updated_at FROM ${TABLE} WHERE user_login = ? AND id = ?`;
