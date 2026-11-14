@@ -152,6 +152,12 @@ export interface WorkflowRun {
   trigger: WorkflowRunTrigger;
   /** How the trigger was evidenced, e.g. "Scheduled (job-tree)" or "Not recorded by the source". */
   triggerDetail: string;
+  /**
+   * Issue #4419: the chain's feed stage failed in full and no downstream
+   * stage was ever planned, so the chain cannot advance without a retry.
+   * Absent = not stranded (a merely delayed chain has a downstream row).
+   */
+  stranded?: boolean;
   triggeredBy: string | null;
   status: WorkflowRunStatus;
   /**
@@ -1322,6 +1328,18 @@ export function runFromJobs(
     : recordedStageStatus;
   const firstError =
     stages.map((s) => s.error).find((e) => Boolean(e)) ?? str(outcome?.codedError) ?? null;
+  // Issue #4419: stranded = the feed stage failed as a whole AND no
+  // downstream stage row exists. The absence of a downstream row is what
+  // distinguishes "never planned" from "pending": a chain that already
+  // recorded a generate/store/serve row is merely progressing, never labelled.
+  const feedStages = stages.filter((s) => s.stage === "feed");
+  const downstreamStages = stages.filter((s) => s.stage !== "feed");
+  const stranded =
+    Boolean(str(jobs[0]?.chain_id)) &&
+    runStatus === "failed" &&
+    feedStages.length > 0 &&
+    feedStages.every((s) => s.status === "failed") &&
+    downstreamStages.length === 0;
   // Issue #3039: the parent flow writes its collation into the main row's
   // result as `{ shardJobIds, result: <collation> }`. Read the two fields
   // the contract records; absent or malformed degrades to "not recorded".
@@ -1366,6 +1384,7 @@ export function runFromJobs(
     source: "job-chain",
     trigger,
     triggerDetail,
+    stranded,
     triggeredBy: outcomeTrigger?.triggeredBy ?? triggerEvidenceForRun.actor ?? null,
     status: runStatus,
     // Issue #3784: Stuck is a display derivation on running +

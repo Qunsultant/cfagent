@@ -237,3 +237,40 @@ describe("workflow runs provenance (#3810)", () => {
     expect(run!.triggerDetail).toMatch(/Not recorded/);
   });
 });
+describe("stranded chain (#4419)", () => {
+  const feed = (id: string, status: string) =>
+    job({
+      job_id: id,
+      capability: "shard.execute",
+      chain_id: "chain-9",
+      stage: "feed",
+      status,
+      payload_json: JSON.stringify({ chain: { chainId: "chain-9" } }),
+    });
+
+  it("marks a chain stranded when every feed shard failed and no downstream was planned", () => {
+    const runs = buildWorkflowRuns({ jobs: [feed("a", "failed"), feed("b", "failed")], outcomes: [], transitions: [] });
+    expect(runs[0].stranded).toBe(true);
+  });
+
+  it("does not mark a partially-failed chain stranded", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [feed("a", "failed"), feed("b", "completed")],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs[0].stranded).toBe(false);
+  });
+
+  it("does not mark a chain with a downstream stage stranded", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        feed("a", "failed"),
+        job({ job_id: "gen", capability: "shard.execute", chain_id: "chain-9", stage: "generate", status: "queued" }),
+      ],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs[0].stranded).toBe(false);
+  });
+});
