@@ -4079,6 +4079,223 @@
       ],
       "constraints": {}
     },
+    "agent_product_bundles": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "member_product_ids",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "price_usd",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "period_days",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "included_runs_per_member",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "approval_status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "approved_by",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "approved_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "created_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "agent_bundle_purchases": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "bundle_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "provider_payment_ref",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stripe_session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stripe_payment_intent_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "provider_subscription_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "provider_status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "period_start_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "period_end_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "canceled_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "created_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        }
+      ],
+      "constraints": {
+        "unique:provider_subscription_id": {
+          "kind": "unique",
+          "columns": [
+            "provider_subscription_id"
+          ]
+        }
+      }
+    },
+    "agent_bundle_entitlements": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "bundle_purchase_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "product_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "included_runs",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "period_start_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "period_end_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
     "agent_approved_free_quotas": {
       "columns": [
         {
@@ -5523,6 +5740,27 @@
         "job_id",
         "created_at DESC",
         "id DESC"
+      ],
+      "unique": false
+    },
+    "idx_bundle_purchases_user": {
+      "table": "agent_bundle_purchases",
+      "columns": [
+        "user_id"
+      ],
+      "unique": false
+    },
+    "idx_bundle_entitlements_user": {
+      "table": "agent_bundle_entitlements",
+      "columns": [
+        "user_id"
+      ],
+      "unique": false
+    },
+    "idx_bundle_entitlements_purchase": {
+      "table": "agent_bundle_entitlements",
+      "columns": [
+        "bundle_purchase_id"
       ],
       "unique": false
     },

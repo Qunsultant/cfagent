@@ -411,6 +411,65 @@ export function mapSubscriptionPurchaseToJournalEntries(
 }
 
 /**
+ * Bundle purchase journal input (#2781). A bundle purchase is
+ * prepaid access — a liability until consumed, exactly like a
+ * subscription purchase. transactionRef is the bundle checkout
+ * draft id (`bbnd-…`, the route-minted checkoutRequestId), and
+ * the draft id is also the entry row's reference
+ * (runRequestId = the bundle purchase id), so a replayed fulfill
+ * can never double-post — the adapter returns the existing
+ * entries for that ref.
+ */
+export interface BundlePurchaseJournalInput {
+  /** Idempotency key: the bundle purchase checkoutRequestId (`bbnd-…` draft id). */
+  transactionRef: string;
+  tenantId: string;
+  /** The created bundle purchase record id (carried in runRequestId). */
+  bundlePurchaseId: string;
+  /** The bundle price at purchase. */
+  amountUSD: number;
+  currency?: string;
+}
+
+/** bundle purchase → Dr 1000 / Cr 2100. NOT immediate revenue. */
+export function mapBundlePurchaseToJournalEntries(
+  input: BundlePurchaseJournalInput,
+): JournalEntryInput[] {
+  const amount = round2(input.amountUSD);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Journal mapping requires a positive finite amountUSD.");
+  }
+  if (!input.transactionRef || !input.tenantId || !input.bundlePurchaseId) {
+    throw new Error(
+      "Journal mapping requires transactionRef, tenantId, and bundlePurchaseId.",
+    );
+  }
+  const currency = input.currency ?? "USD";
+  return [
+    {
+      transactionRef: input.transactionRef,
+      accountCode: "1000",
+      debitUSD: amount,
+      creditUSD: 0,
+      currency,
+      tenantId: input.tenantId,
+      runRequestId: input.bundlePurchaseId,
+      family: "bundle",
+    },
+    {
+      transactionRef: input.transactionRef,
+      accountCode: "2100",
+      debitUSD: 0,
+      creditUSD: amount,
+      currency,
+      tenantId: input.tenantId,
+      runRequestId: input.bundlePurchaseId,
+      family: "bundle",
+    },
+  ];
+}
+
+/**
  * Self-service top-up journal input (#3262). A top-up is prepaid
  * credit — a liability until consumed, exactly like a subscription
  * purchase. transactionRef is the top-up draft id (the confirm's

@@ -649,6 +649,79 @@ export const agentSubscriptions = sqliteTable("agent_subscriptions", {
 });
 
 /**
+ * Commercial product bundles (#2781, Monetization Phase 2.15)
+ * on D1. Bundles are OPERATOR DATA, not code: operators create
+ * them; no bundle, price, or combination is hardcoded anywhere.
+ * member_product_ids is a JSON array of catalog product ids
+ * (`family:PayPerUse`), ≥2, unique. This schema MAPS the
+ * tables; it does not create them — DDL authority lives in
+ * migration 0053 (src/data/migrationRunner.ts).
+ */
+export const agentProductBundles = sqliteTable("agent_product_bundles", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  memberProductIds: text("member_product_ids").notNull(),
+  priceUSD: real("price_usd").notNull(),
+  periodDays: integer("period_days").notNull(),
+  includedRunsPerMember: integer("included_runs_per_member").notNull(),
+  approvalStatus: text("approval_status").notNull().default("proposed"),
+  approvedBy: text("approved_by"),
+  approvedAtMs: integer("approved_at_ms"),
+  active: integer("active").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Verified bundle purchases (#2781) on D1. One row per verified
+ * Billing checkout: the provider subscription id is the replay
+ * guard (UNIQUE), mirroring agent_subscriptions. This schema
+ * MAPS the table; it does not create it — DDL authority lives
+ * in migration 0053 (src/data/migrationRunner.ts).
+ */
+export const agentBundlePurchases = sqliteTable("agent_bundle_purchases", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  bundleId: text("bundle_id").notNull(),
+  provider: text("provider").notNull(),
+  providerPaymentRef: text("provider_payment_ref").notNull(),
+  stripeSessionId: text("stripe_session_id"),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  providerSubscriptionId: text("provider_subscription_id"),
+  providerStatus: text("provider_status"),
+  status: text("status").notNull(),
+  periodStartMs: integer("period_start_ms").notNull(),
+  periodEndMs: integer("period_end_ms").notNull(),
+  canceledAtMs: integer("canceled_at_ms"),
+  createdAtMs: integer("created_at_ms").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Per-member-product entitlements under a bundle purchase
+ * (#2781) on D1. One row per member product per purchase,
+ * written in the SAME atomic batch as the purchase row — a
+ * purchase never lands without its full entitlement set.
+ * This schema MAPS the table; it does not create it — DDL
+ * authority lives in migration 0053
+ * (src/data/migrationRunner.ts).
+ */
+export const agentBundleEntitlements = sqliteTable("agent_bundle_entitlements", {
+  id: text("id").primaryKey(),
+  bundlePurchaseId: text("bundle_purchase_id").notNull(),
+  userId: text("user_id").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  productId: text("product_id").notNull(),
+  includedRuns: integer("included_runs").notNull(),
+  periodStartMs: integer("period_start_ms").notNull(),
+  periodEndMs: integer("period_end_ms").notNull(),
+  status: text("status").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
  * Billing policy (#2202, sub-issue of #2020, implementation
  * of design #2145) on D1. One row per policy key; the value
  * is JSON. This schema MAPS the table; it does not create

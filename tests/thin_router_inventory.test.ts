@@ -306,6 +306,15 @@
  * handleAgenticPaymentsRoutes, after the commercial identity GET —
  * bringing the pinned array to 409 entries (measured); the delegation
  * sequence is unchanged (same handler, same position).
+ * Issue #2781 (Monetization Phase 2.15) added six — GET/POST
+ * /payments/agentic/commercial/bundles, POST /bundles/approve, POST
+ * /bundles/deactivate, POST
+ * /payments/agentic/commercial/subscription/bundle-checkout, and POST
+ * /payments/agentic/commercial/subscription/bundle-purchase (in
+ * handleAgenticPaymentsRoutes, after the plans routes) — bringing the
+ * pinned inventory to 477 entries (measured: 471 on main + 6); the
+ * delegation
+ * sequence is unchanged (same handler, same position).
  *
  * LANDMARK RULE (#405): all position assertions anchor to DELEGATION
  * CALLS - the only landmarks a thin router has.
@@ -701,6 +710,17 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/plans\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/plans/approve\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/plans/deactivate\")",
+  // Issue #2781: GET/POST /bundles, POST /bundles/approve, POST
+  // /bundles/deactivate, POST /subscription/bundle-checkout, POST
+  // /subscription/bundle-purchase (in handleAgenticPaymentsRoutes,
+  // after the plans routes, so the bundle entries sit adjacent to
+  // the plans entries they mirror).
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/bundles\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/bundles\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/bundles/approve\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/bundles/deactivate\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/bundle-checkout\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/bundle-purchase\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/checkout\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/subscription/purchase\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/top-up/checkout\")",

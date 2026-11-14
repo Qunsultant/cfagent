@@ -250,7 +250,8 @@ describe("outcome catalog: run detail messages (#2608)", () => {
     // + 69 (#2846: the commercial outcome codes) + 1 (#2373 S1b:
     // FAILURE_PROVIDER_MISMATCH).
     // The count pins that no RUN_* code leaked into "outcomes".
-    expect(Object.keys(outcomes)).toHaveLength(215);
+    expect(Object.keys(outcomes)).toHaveLength(229);
+    // Count is the merged catalog (this branch + main).
     expect(Object.keys(outcomes).some((k) => k.startsWith("RUN_"))).toBe(false);
     for (const code of RUN_CODES) {
       expect(code).toMatch(/^RUN_[A-Z_]+$/);

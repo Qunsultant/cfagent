@@ -79,6 +79,14 @@ export interface BillingPolicy {
   /** Operator mapping: local plan id -> Stripe Price id (price_*). Empty = fail closed. */
   stripePriceByPlan: Record<string, string>;
   /**
+   * Issue #2781: operator mapping: local bundle id -> Stripe
+   * Price id (price_*). Empty = fail closed: a bundle with no
+   * mapped price id refuses mint and purchase with 503 (operator
+   * configuration gap, not a client error), exactly like an
+   * unmapped plan.
+   */
+  stripePriceByBundle: Record<string, string>;
+  /**
    * Issue #2945: operator-attested fixed charge for cfpay channel
    * checkouts, in USD. The card takes no amount input, so the channel
    * is offered ONLY for catalogue products whose approved price exactly
@@ -187,6 +195,9 @@ export const PROPOSED_SEED_BILLING_POLICY: BillingPolicy = {
   prorationBehavior: "create_prorations",
   repurchaseMigration: "grandfather",
   stripePriceByPlan: {},
+  // Issue #2781: no bundle price is mapped until an operator maps
+  // one — an unmapped bundle refuses mint/purchase fail-closed.
+  stripePriceByBundle: {},
   cfpayChannelFixedPriceUSD: null,
   // Issue #3262: owner-decided 2026-11-06 (min $1, max $500).
   // PROPOSED defaults, operator-editable via the Billing servicing
@@ -207,6 +218,7 @@ export const BILLING_POLICY_KEYS = {
   prorationBehavior: "proration_behavior",
   repurchaseMigration: "repurchase_migration",
   stripePriceByPlan: "stripe_price_by_plan",
+  stripePriceByBundle: "stripe_price_by_bundle",
   cfpayChannelFixedPriceUSD: "cfpay_channel_fixed_price_usd",
   topUpMinUSD: "top_up_min_usd",
   topUpMaxUSD: "top_up_max_usd",
@@ -429,6 +441,21 @@ export function assertStripePriceByPlan(value: unknown): Record<string, string> 
   return out;
 }
 
+/** Issue #2781: same contract as assertStripePriceByPlan, keyed by bundle id. */
+export function assertStripePriceByBundle(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("stripePriceByBundle must be an object mapping bundle id to Stripe Price id.");
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v !== "string" || !v.trim()) {
+      throw new Error(`stripePriceByBundle[${k}] must be a non-empty Stripe Price id.`);
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
 /** Validate a full policy object (used when reading stored rows). */
 export function assertBillingPolicy(value: unknown): BillingPolicy {
   const v = value as Record<string, unknown>;
@@ -442,6 +469,7 @@ export function assertBillingPolicy(value: unknown): BillingPolicy {
     prorationBehavior: assertProrationBehavior(v.prorationBehavior),
     repurchaseMigration: assertRepurchaseMigration(v.repurchaseMigration),
     stripePriceByPlan: assertStripePriceByPlan(v.stripePriceByPlan),
+    stripePriceByBundle: assertStripePriceByBundle(v.stripePriceByBundle),
     cfpayChannelFixedPriceUSD: assertCfpayChannelFixedPriceUSD(v.cfpayChannelFixedPriceUSD),
     topUpMinUSD: assertTopUpMinUSD(v.topUpMinUSD),
     topUpMaxUSD: assertTopUpMaxUSD(v.topUpMaxUSD),
@@ -468,6 +496,7 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
     "prorationBehavior",
     "repurchaseMigration",
     "stripePriceByPlan",
+    "stripePriceByBundle",
     "cfpayChannelFixedPriceUSD",
     "topUpMinUSD",
     "topUpMaxUSD",
@@ -486,6 +515,7 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
   if (v.prorationBehavior !== undefined) out.prorationBehavior = assertProrationBehavior(v.prorationBehavior);
   if (v.repurchaseMigration !== undefined) out.repurchaseMigration = assertRepurchaseMigration(v.repurchaseMigration);
   if (v.stripePriceByPlan !== undefined) out.stripePriceByPlan = assertStripePriceByPlan(v.stripePriceByPlan);
+  if (v.stripePriceByBundle !== undefined) out.stripePriceByBundle = assertStripePriceByBundle(v.stripePriceByBundle);
   if (v.cfpayChannelFixedPriceUSD !== undefined) out.cfpayChannelFixedPriceUSD = assertCfpayChannelFixedPriceUSD(v.cfpayChannelFixedPriceUSD);
   if (v.topUpMinUSD !== undefined) out.topUpMinUSD = assertTopUpMinUSD(v.topUpMinUSD);
   if (v.topUpMaxUSD !== undefined) out.topUpMaxUSD = assertTopUpMaxUSD(v.topUpMaxUSD);
