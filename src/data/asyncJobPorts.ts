@@ -141,6 +141,10 @@ export interface AsyncJobChainRow {
   error: string | null;
   created_at: string;
   parent_job_id: string | null;
+  /** Issue #4423 — the retry attempt history the row persisted (#4417), or
+   *  null on a row written before the column existed. Read so the Docs row
+   *  can say a retry happened; never rewritten. */
+  attempts_json?: string | null;
 }
 
 export interface InsertQueuedJobInput {

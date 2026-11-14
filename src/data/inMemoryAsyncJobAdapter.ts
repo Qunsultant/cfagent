@@ -301,6 +301,7 @@ export class InMemoryAsyncJobStore
         error: r.error,
         created_at: r.created_at,
         parent_job_id: r.parent_job_id,
+        attempts_json: r.attempts_json ?? null,
       }));
   }
 
