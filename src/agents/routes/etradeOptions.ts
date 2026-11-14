@@ -72,13 +72,14 @@ import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
-import { type KernelSnapshot, type PanelDiscoveryResult } from "../../services/recommendationKernel";
+import { type KernelSnapshot, type PanelDiscoveryResult, mintComparisonRunId } from "../../services/recommendationKernel";
 import {
   runComparePanelViaPipeline,
   runManualPanelViaPipeline,
 } from "../../workflows/manualPanelScreen";
+import { optionsEngineStoresFromSql, runComparisonViaEngine } from "../../workflows/optionsScreenEngine";
 import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
-import { listComparisonOutcomes, runProductionComparison } from "../../services/comparisonRunner";
+import { listComparisonOutcomes, runProductionComparison, type ProductionComparisonDeps, type ProductionComparisonResult } from "../../services/comparisonRunner";
 import { getSymbolEventCalendar, toEventCalendarInfo } from "../../services/eventCalendar";
 import {
   handleOptionsLatestRuns,
@@ -613,7 +614,7 @@ export async function handleEtradeOptionsRoutes(
         const recommender = new RecommendationAgent();
         const req = parsedDiscovery.value.request;
         const question = `What ${req.thesis ?? "directional"} option strategies on ${req.symbol} look best for a ${req.targetDate ?? "near-term"} horizon with max planned loss ${req.maxPlannedLoss ?? "the stated limit"}?`;
-        const { artifact, generationNotes } = await runProductionComparison({
+        const coreArgs: ProductionComparisonDeps = {
           snapshot,
           request: req,
           question,
@@ -624,7 +625,44 @@ export async function handleEtradeOptionsRoutes(
           screenFn: (candidates, filter) => riskAgent.screenStrategies(candidates, filter),
           env: ctx.env,
           ledgerSql: ctx.getOrm(),
-        });
+        };
+        // Issue #4399: the panel comparison dispatches through the
+        // engine comparison job (#4276) when the host DO's SQL
+        // handle is available, so the run has a durable pipeline
+        // record and control addresses it by run id; without a
+        // usable handle the core executes directly (the #4069
+        // accepted-absent discipline), exactly as the NLQ
+        // comparison leg does. The engine path changes nothing
+        // about the comparison itself — same core inputs, same
+        // envelope — modulo the run id, which the route mints so
+        // the engine job and the artifact carry one id.
+        const storageSql = ctx.agentCtx?.storage?.sql;
+        let comparison: ProductionComparisonResult;
+        if (typeof storageSql?.exec === "function") {
+          const runId = mintComparisonRunId();
+          comparison = await runComparisonViaEngine(
+            {
+              runId,
+              request: {
+                assetClass: "options",
+                runIdentity: { runId },
+                trigger: "manual",
+                classInput: {
+                  comparisonRequest: {
+                    request: req,
+                    riskProfile: parsedDiscovery.value.riskProfile ?? "balanced",
+                    strategyFilter: parsedDiscovery.value.strategyFilter,
+                  },
+                },
+              },
+              engineStores: optionsEngineStoresFromSql(storageSql),
+            },
+            () => runProductionComparison({ ...coreArgs, runId }),
+          );
+        } else {
+          comparison = await runProductionComparison(coreArgs);
+        }
+        const { artifact, generationNotes } = comparison;
         return Response.json({
           status: "compared",
           artifact,
