@@ -18,14 +18,11 @@ import type {
   DiscoveryAlertSqlExecutor,
   DiscoveryAlertStore,
 } from "./discoveryAlertPorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 const TABLE = "mas_discovery_alerts";
 
-const CREATE_TABLE_SQL =
-  `CREATE TABLE IF NOT EXISTS ${TABLE} (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, ` +
-  `scope_key TEXT NOT NULL, symbol TEXT NOT NULL, thesis TEXT NOT NULL, score REAL NOT NULL, ` +
-  `day TEXT NOT NULL, evidence TEXT NOT NULL, fired_signals TEXT NOT NULL, created_at TEXT NOT NULL, ` +
-  `UNIQUE(scope_key, symbol, thesis, day))`;
+const CREATE_TABLE_SQL = doTableSql("mas_discovery_alerts");
 const HAS_SQL =
   `SELECT COUNT(*) AS count FROM ${TABLE} WHERE scope_key = ? AND symbol = ? AND thesis = ? AND day = ?`;
 const COUNT_DAY_SQL = `SELECT COUNT(*) AS count FROM ${TABLE} WHERE scope_key = ? AND day = ?`;
