@@ -9,7 +9,11 @@
  * - StockHub's initial screening-provider selection resolves from the
  *   tenant's configured data provider (registry id -> hub variant id)
  *   instead of assuming "etrade"; a tenant provider with no hub variant
- *   falls back to the first available variant.
+ *   resolves to NO selection (issue #4430 — the old first-variant
+ *   fallback silently posted to the E*TRADE endpoint and the broker
+ *   gate refused with 409). No provider, broker, or variant is ever
+ *   substituted as a default — the workflow-backed variant is only
+ *   ever a user-invoked choice (the switch-to-Yahoo action).
  * - Deferred defaults are pinned UNCHANGED: the tenant-providers
  *   fail-to-legacy fallback (a documented safety contract), the order
  *   ticket's E*TRADE preview copy (it names the broker that actually
@@ -20,6 +24,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   getScreeningProviders,
+  noScreeningProviderMessage,
   resolveInitialScreeningProviderId,
 } from "../src/client/screeningAdapters";
 import { firstRunBrokerStep } from "../src/client/firstRunBrokerStep";
@@ -60,18 +65,50 @@ describe("neutrality S3 — StockHub default follows the tenant's configured pro
   it("tenant yahoo resolves to the yahoo-finance variant (registry id -> variant id)", () => {
     expect(resolveInitialScreeningProviderId("yahoo", variants)).toBe("yahoo-finance");
   });
-  it("a tenant provider with no hub variant falls back to the first variant", () => {
-    expect(resolveInitialScreeningProviderId("alpaca", variants)).toBe("etrade");
-    expect(resolveInitialScreeningProviderId("nasdaq", variants)).toBe("etrade");
-    expect(resolveInitialScreeningProviderId("", variants)).toBe("etrade");
+  it("a tenant provider with no hub variant resolves to NO selection, never the first variant (#4430)", () => {
+    // Broker-neutral: every no-variant provider id behaves the same —
+    // the selection depends only on the tenant's configured data
+    // provider, never on a substituted default.
+    for (const providerId of ["alpaca", "public", "nasdaq", ""]) {
+      expect(resolveInitialScreeningProviderId(providerId, variants)).toBe("");
+    }
+  });
+  it("the selection is tenant-resolved only — no broker input exists (#4430)", () => {
+    // The corrected rule: the resolver takes (tenantDataProviderId,
+    // providers) and nothing else. A broker must never change the
+    // selection — the superseded three-arg shape defaulted non-E*TRADE
+    // brokers to the workflow-backed variant, a named-provider fallback.
+    expect(resolveInitialScreeningProviderId.length).toBe(2);
+    // And behaviourally: the etrade provider resolves to etrade — the
+    // gate, not a substituted default, is what refuses a mismatched run.
+    expect(resolveInitialScreeningProviderId("etrade", variants)).toBe("etrade");
+  });
+  it("a tenant provider with no hub variant resolves to NO selection even when the workflow-backed variant is absent (#4430)", () => {
+    const withoutYahoo = variants.filter((v) => v.id !== "yahoo-finance");
+    expect(resolveInitialScreeningProviderId("alpaca", withoutYahoo)).toBe("");
   });
   it("no variants resolves to the empty selection the correction effect already handles", () => {
     expect(resolveInitialScreeningProviderId("etrade", [])).toBe("");
   });
   it("StockHub wires the resolver to the tenant state instead of a hardcoded brand", () => {
     const src = read("src/client/StockHub.tsx");
-    expect(src).toContain("resolveInitialScreeningProviderId(readTenantProvidersState().dataProviderId, providers)");
+    expect(src).toContain(
+      "resolveInitialScreeningProviderId(tenantProvidersState.dataProviderId, providers)",
+    );
     expect(src).not.toContain('useState("etrade")');
+  });
+  it("StockHub never repairs an invalid selection to the first variant (#4430)", () => {
+    const src = read("src/client/StockHub.tsx");
+    expect(src).not.toContain("providers[0]");
+    expect(src).toContain("noScreeningProviderMessage(tenantProvidersState.dataProviderId)");
+    expect(src).toContain("Switch to Yahoo Finance");
+    expect(src).toContain("offerSwitchToYahoo");
+  });
+  it("the no-provider block names the code and the configured provider, never a guessed brand (#4430)", () => {
+    expect(noScreeningProviderMessage("nasdaq")).toContain("NO_SCREENING_PROVIDER_FOR_TENANT");
+    expect(noScreeningProviderMessage("nasdaq")).toContain('"nasdaq"');
+    expect(noScreeningProviderMessage("nasdaq")).toMatch(/no screen was started/i);
+    expect(noScreeningProviderMessage("")).toContain("not configured");
   });
 });
 

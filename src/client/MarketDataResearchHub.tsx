@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { apiFetch as fetch } from "./apiFetch";
-import { mapScreenError } from "./paidScreenSubmit";
+import { mapScreenErrorFromBody } from "./paidScreenSubmit";
 import { UpgradeOffer } from "./UpgradeOffer";
 import { Badge, Card, EmptyState, Spinner, Button, Notice, Select, Table, TextInput, PageShell, PageSection, FieldShell, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { ResearchReportActions } from "./ResearchReportActions";
@@ -251,7 +251,9 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             runRequestId: typeof data.runRequestId === "string" ? data.runRequestId : undefined,
           });
         }
-        throw new Error(mapScreenError(resp.status, data.error));
+        // Issue #4430: the body is mapped whole, so a `message`-only
+        // body is read too.
+        throw new Error(mapScreenErrorFromBody(resp.status, data));
       }
       setScreenerStocks(data.stocks || data.results || []);
       if (data.filterSummary) setScreenerSummary(data.filterSummary);

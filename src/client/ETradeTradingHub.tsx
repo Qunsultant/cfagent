@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch as fetch } from "./apiFetch";
-import { mapScreenError } from "./paidScreenSubmit";
+import { mapScreenErrorFromBody } from "./paidScreenSubmit";
 import { getDisplayUserDid } from "../agents/did";
 import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, PageSection, FieldShell, Flex, Grid, Stack, useToast } from "./components/ui";
@@ -1360,8 +1360,9 @@ export function ETradeTradingHub({
         // Issue #3239: a 402 (and any screen error) surfaces as an
         // outcome-encoded message with remediation, never the raw
         // server code. Full paid-path wiring for this hub is a
-        // named follow-up in the #3239 PR body.
-        setScanMessage(mapScreenError(resp.status, data.error));
+        // named follow-up in the #3239 PR body. Issue #4430: the
+        // body is mapped whole, so a `message`-only body is read too.
+        setScanMessage(mapScreenErrorFromBody(resp.status, data));
         setScanStatus("scan_failed");
       }
     } catch (error) {

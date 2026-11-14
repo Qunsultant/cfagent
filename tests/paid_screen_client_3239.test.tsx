@@ -10,6 +10,10 @@ import React, { act } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { StockHub } from "../src/client/StockHub";
+import {
+  resetTenantProvidersStateForTest,
+  setTenantProvidersStateForTest,
+} from "../src/client/tenantProviders";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -75,6 +79,13 @@ async function submitForm() {
 }
 
 beforeEach(() => {
+  // Issue #4430 (S1a): these tests exercise the paid run through the
+  // hub's screen endpoint, so they run under a hub-variant tenant
+  // provider (etrade -> the "etrade" variant the fetch stub serves).
+  // A no-variant tenant (the platform default, alpaca) resolves to no
+  // selection and the run is blocked before any POST — the paid-flow
+  // paths would never be exercised.
+  setTenantProvidersStateForTest({ dataProviderId: "etrade" });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -88,6 +99,7 @@ afterEach(async () => {
   }
   container?.remove();
   globalThis.fetch = realFetch;
+  resetTenantProvidersStateForTest();
   vi.restoreAllMocks();
 });
 
