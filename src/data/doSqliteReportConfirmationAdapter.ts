@@ -19,6 +19,7 @@ import type {
   ReportConfirmationRow,
 } from "./orchestratorTablePorts";
 import { doTableSql } from "./schemaComponent/doCatalogue";
+import { remainderStatementSql } from "./schemaComponent/remainderCatalogue";
 
 /** Add a column to the table when it is missing (additive migration). */
 function ensureColumn(
@@ -31,7 +32,12 @@ function ensureColumn(
   ) as Array<{ name?: unknown }>;
   const names = cols.map((c) => String(c?.name ?? ""));
   if (!names.includes(column)) {
-    sql.exec(`ALTER TABLE mas_report_confirmations ADD COLUMN ${column} ${type}`);
+    sql.exec(
+      remainderStatementSql("schema.do.mas_report_confirmations.alter_table_add_column", {
+        column,
+        type,
+      }),
+    );
   }
 }
 
