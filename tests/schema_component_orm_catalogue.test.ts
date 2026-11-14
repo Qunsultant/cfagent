@@ -72,6 +72,7 @@ import {
   ormIndexSql,
   ormTableSql,
 } from "../src/data/schemaComponent/ormCatalogue";
+import { REMAINDER_CATALOGUE_ENTRIES } from "../src/data/schemaComponent/remainderCatalogue";
 import { validateCatalogueEntry } from "../src/data/schemaComponent/catalogue";
 import {
   runEqualityCheck,
@@ -272,29 +273,33 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
         sql.slice(0, 60),
       ).toBe(true);
     }
-    // The only ALTERs initializeSchema still executes inline are the
-    // 2 guarded mas_trades reconciliations (P3's scope) plus the 11
-    // mas_reports reconciliation ALTERs that ensureScheduledReportsTable
-    // owns (issue #389 — the service is mas_reports' single source).
-    // Asserted here so a third inline ALTER cannot creep in unnoticed.
+    // #4282 P3: the 2 guarded mas_trades reconciliations moved to the
+    // remainder catalogue (they are no longer inline — they resolve
+    // through remainderAlterSql). The only ALTERs initializeSchema
+    // still executes inline are the 11 mas_reports reconciliation
+    // ALTERs that ensureScheduledReportsTable owns (issue #389 — the
+    // service is mas_reports' single source). Asserted here so a third
+    // inline ALTER cannot creep in unnoticed.
     const alters = rec.queries.filter((q) =>
       q.trim().startsWith("ALTER TABLE"),
     );
-    const inlineAlters = alters.filter(
-      (q) => !ORM_CATALOGUE_ENTRIES.some((e) => e.statement === q),
+    const masTradesCatalogue = alters.filter((q) =>
+      REMAINDER_CATALOGUE_ENTRIES.some((e) => e.statement === q),
     );
-    const masTradesInline = inlineAlters.filter((q) =>
-      q.includes("ALTER TABLE mas_trades"),
+    const inlineAlters = alters.filter(
+      (q) =>
+        !ORM_CATALOGUE_ENTRIES.some((e) => e.statement === q) &&
+        !REMAINDER_CATALOGUE_ENTRIES.some((e) => e.statement === q),
     );
     const masReportsInline = inlineAlters.filter((q) =>
       q.includes("ALTER TABLE mas_reports"),
     );
-    expect(masTradesInline).toEqual([
+    expect(masTradesCatalogue).toEqual([
       "ALTER TABLE mas_trades ADD COLUMN broker TEXT",
       "ALTER TABLE mas_trades ADD COLUMN price_source TEXT",
     ]);
     expect(masReportsInline).toHaveLength(11);
-    expect(inlineAlters).toHaveLength(13);
+    expect(inlineAlters).toHaveLength(11);
   });
 
   it("the four index-schema modules execute exactly the catalogue CREATE INDEX statements", () => {
@@ -329,7 +334,7 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
     ]);
   });
 
-  it("no inline DDL remains in the delegated files except the 2 P3 mas_trades ALTERs", () => {
+  it("no inline DDL remains in the delegated files (P3 emptied the pinned set)", () => {
     const srcRoot = path.join(
       path.dirname(fileURLToPath(import.meta.url)),
       "..",
@@ -357,9 +362,11 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
         }
       }
     }
-    expect(inline).toEqual([
-      'data/ormFacade.ts: this.sql.exec("ALTER TABLE mas_trades ADD COLUMN broker TEXT");',
-      'data/ormFacade.ts: this.sql.exec("ALTER TABLE mas_trades ADD COLUMN price_source TEXT");',
-    ]);
+    // #4282 P3: the 2 mas_trades ALTERs moved from ormFacade into the
+    // remainder catalogue (src/data/schemaComponent/
+    // remainderCatalogue.ts) — asserted at their new home by the
+    // remainder suite. The empty list is kept so a future inline
+    // statement fails by appearing in the diff.
+    expect(inline).toEqual([]);
   });
 });
