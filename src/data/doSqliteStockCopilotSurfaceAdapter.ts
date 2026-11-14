@@ -23,6 +23,7 @@ import {
   type StockCopilotMemoryPort,
   type StockCopilotStoreSqlExecutor,
 } from "./stockCopilotStorePorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 const str = (v: unknown): string => (typeof v === "string" ? v : String(v ?? ""));
 const strOrNull = (v: unknown): string | null =>
@@ -109,16 +110,7 @@ export class DoSqliteStockCopilotActivityStore
 
   ensureSchema(): void {
     this.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${COPILOT_ACTIVITY_TABLE} (
-        id TEXT PRIMARY KEY,
-        user_login TEXT NOT NULL,
-        cycle_at TEXT NOT NULL,
-        outcome TEXT NOT NULL,
-        entries_json TEXT NOT NULL,
-        exits_json TEXT NOT NULL,
-        detail TEXT,
-        session TEXT
-      )`,
+      doTableSql("stock_copilot_activity"),
     );
     // #3398: tables created before session recording gain the
     // column in place (the data layer's PRAGMA/ALTER idiom).
@@ -184,12 +176,7 @@ export class DoSqliteStockCopilotControlStore
 
   ensureSchema(): void {
     this.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${COPILOT_CONTROL_TABLE} (
-        user_login TEXT PRIMARY KEY,
-        paused INTEGER NOT NULL,
-        updated_at TEXT NOT NULL,
-        updated_by TEXT NOT NULL
-      )`,
+      doTableSql("stock_copilot_control"),
     );
   }
 
@@ -258,16 +245,7 @@ export class DoSqliteStockCopilotMemoryStore implements StockCopilotMemoryPort {
 
   ensureSchema(): void {
     this.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${COPILOT_LEARNINGS_TABLE} (
-        id TEXT PRIMARY KEY,
-        user_login TEXT NOT NULL,
-        cycle_id TEXT,
-        timestamp TEXT NOT NULL,
-        category TEXT NOT NULL,
-        insight TEXT NOT NULL,
-        source_verdict TEXT,
-        suggested_action TEXT
-      )`,
+      doTableSql("stock_copilot_learnings"),
     );
   }
 
