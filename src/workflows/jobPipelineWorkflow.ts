@@ -38,6 +38,7 @@ import {
   D1JobRunRecordStore,
 } from "../data/d1JobRunRecordAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
+import { stageQueueSendFromEnv } from "./stageQueueTransport";
 import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
 import { screenerStepDepsForWorkflow } from "../services/screenerPipelineJobs";
 import { buildFeedJobRegistry } from "../services/feedJobs";
@@ -201,6 +202,16 @@ export function optionsStepDepsForWorkflow(
     // chains, as every options leg does today.
     chainSourceFor: (userLogin) =>
       userLogin ? new ETradeRestClient(env, userLogin) : undefined,
+    // Issue #4453: the stage-message queue, built from env — the
+    // residency publishes one boundary message per stage through
+    // the same queue the production legs publish through. Null
+    // when the deployment binds no queue: the stages publish
+    // nothing and the miss is warned, never failed. No scan-run
+    // store is bound here, by decided-not-to (#4453): the
+    // scan-run family lives in the per-login store every reader
+    // reads, and no residency-side home exists — the persist
+    // stage's named degradation is the contract.
+    queue: stageQueueSendFromEnv(env),
   };
 }
 

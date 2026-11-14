@@ -88,6 +88,21 @@ export interface StageQueueSend {
   send: (body: unknown) => Promise<unknown> | unknown;
 }
 
+/**
+ * Issue #4453 — the env-built stage queue sender: the
+ * SCREENER_EVENTS producer binding as a StageQueueSend, or null
+ * when the deployment does not bind it. The binding's send IS the
+ * seam (the production legs inline `env.SCREENER_EVENTS ?? null`);
+ * this factory names it once, for residencies that build their
+ * deps from env. A null queue publishes nothing:
+ * publishStageBoundaryMessage reports the miss, never throws.
+ */
+export function stageQueueSendFromEnv(env: {
+  SCREENER_EVENTS?: StageQueueSend;
+}): StageQueueSend | null {
+  return env.SCREENER_EVENTS ?? null;
+}
+
 /** Build the analysis-done message for one run. Reuses the stage contract. */
 export function buildAnalysisDoneMessage(args: {
   timestamp: string;
