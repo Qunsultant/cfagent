@@ -11,18 +11,13 @@ import type {
   ReselectionSqlExecutor,
   ReselectionStore,
 } from "./reselectionPorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqliteReselectionStore implements ReselectionStore {
   constructor(private readonly sql: ReselectionSqlExecutor) {}
 
   ensureTable(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS mas_strategy_bank_proposals (
-    id TEXT PRIMARY KEY,
-    user_login TEXT NOT NULL,
-    regime TEXT NOT NULL,
-    proposal_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`);
+    this.sql.exec(doTableSql("mas_strategy_bank_proposals"));
   }
 
   insertProposal(id: string, userLogin: string, proposal: ReselectionProposal): void {
