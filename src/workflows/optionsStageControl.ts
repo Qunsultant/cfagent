@@ -37,14 +37,20 @@
  * - The step's ports are rebuilt from the request's shape
  *   (strategyRequest → panel ports; scan → scanner ports;
  *   request/filter → manual ports) with the SAME stage storage the
- *   original leg used, so a re-run reads the earlier stages'
- *   artifacts from the keys the original run wrote. The rebuild is
- *   the shared one (optionsStepPorts.ts — the workflow host's
- *   resolving steps use it per invocation, #4289). The claims store
- *   is fresh in-memory: a claim is per-dispatch idempotency, and an
- *   explicit re-run IS a new execution (the engine's checkpoint is
- *   what `rerunStage` reset). The queue is null: a control re-run
- *   publishes no stage-boundary messages.
+ *   original leg used — the caller's handle when supplied, else the
+ *   threaded storage (#4400): the engine stores' artifact store
+ *   scoped by the run's current engine run id, where a panel
+ *   dispatch wrote the stage artifacts — so a re-run reads the
+ *   earlier stages' artifacts from the keys the original run wrote.
+ *   A run whose artifacts live in neither refuses
+ *   `stage_storage_unavailable` by name before any execution (the
+ *   first stage, which reads no earlier artifact, is exempt). The
+ *   rebuild is the shared one (optionsStepPorts.ts — the workflow
+ *   host's resolving steps use it per invocation, #4289). The claims
+ *   store is fresh in-memory: a claim is per-dispatch idempotency,
+ *   and an explicit re-run IS a new execution (the engine's
+ *   checkpoint is what `rerunStage` reset). The queue is null: a
+ *   control re-run publishes no stage-boundary messages.
  * - The manual route's shapeReport / deliver are NOT rebuildable in
  *   a chat/MCP turn: the delivery builders need `getScreenerAgent`
  *   (PDF/XLSX/CSV generation), which no MCP context binds. Those two
@@ -82,6 +88,7 @@ import type { DynamicOptionsScreener } from "../trading";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import {
   OPTIONS_ADDRESSABLE_STAGES,
+  OPTIONS_PIPELINE_STAGES,
   STRATEGY_ADDRESSABLE_STAGES,
   type OptionsPipelineStage,
 } from "./stageRuntimeIds";
@@ -89,11 +96,13 @@ import {
   comparisonJobId,
   optionsEngineStoresFromSql,
   optionsScreenJobId,
+  optionsStageStorageFromArtifacts,
   registerOptionsScreenStep,
   strategyScreenJobId,
 } from "./optionsScreenEngine";
-import type {
-  OptionsStageStorage,
+import {
+  optionsArtifactKey,
+  type OptionsStageStorage,
 } from "./optionsScreenPorts";
 import {
   memoryStageStorage,
@@ -134,9 +143,13 @@ export interface OptionsStageControlInput {
   sql: SqlStorage;
   /**
    * The stage storage the original leg used (the host DO's storage in
-   * a chat/MCP turn). Absent, a fresh in-memory store stands in and
-   * earlier artifacts are unreadable — a re-run then fails honestly
-   * at the first artifact read, never on a fabricated input.
+   * a chat/MCP turn). Absent, the threaded storage stands in: the
+   * engine stores' artifact store scoped by the run's current engine
+   * run id, where a panel dispatch since #4400 wrote the stage
+   * artifacts — so a re-run reads the earlier stages' artifacts from
+   * the same stores. A run whose artifacts live in neither refuses
+   * by name (stage_storage_unavailable) before any execution,
+   * instead of reporting a completion it did not execute.
    */
   storage?: OptionsStageStorage;
   /** The Worker env — the manual leg's canonical leg needs it. */
@@ -268,7 +281,6 @@ export async function controlOptionsStage(
   }
   const optionsStage = stage as OptionsPipelineStage;
   const engineStores = optionsEngineStoresFromSql(input.sql);
-  const storage = input.storage ?? memoryStageStorage();
   try {
     // Read first, over a control without the step: getJob executes
     // nothing, so the step is only registered when an execution op
@@ -331,6 +343,46 @@ export async function controlOptionsStage(
         "stage_port_unavailable",
         `options run ${runId}: stage ${stage} of a manual-shape run needs the manual route's delivery builders (PDF/XLSX/CSV via getScreenerAgent), which a chat/MCP turn cannot bind — re-dispatch the screen from the manual route`,
       );
+    }
+    // Issue #4400 — the stage storage: the caller's handle when
+    // supplied (the contract the manual route and the direct legs
+    // already keep: the SAME storage the original leg used), else
+    // the threaded storage — the artifact store scoped by the
+    // run's current engine run id. The engine re-uses that id for
+    // stage actions, so the threaded storage reads exactly what
+    // the dispatch wrote. No current run means the engine refuses
+    // downstream (stage_no_run); the fresh store stands in only so
+    // that refusal, not a storage error, is what surfaces.
+    const engineRunId = view.instance?.currentRunId ?? null;
+    const storage =
+      input.storage ??
+      (engineRunId
+        ? optionsStageStorageFromArtifacts(engineStores.stores.artifacts, engineRunId)
+        : memoryStageStorage());
+    // Issue #4400 — a run whose artifacts were never threaded
+    // refuses by name before any execution: every stage after the
+    // first reads an earlier stage's artifact, and with no threaded
+    // artifact in the store the stage has no persisted input. The
+    // first stage reads none (it plans from the request), so it is
+    // exempt — it re-executes from the request and threads its own
+    // artifact. Caller-supplied storage is the caller's explicit
+    // contract and is never probed.
+    if (
+      needsExecution &&
+      input.storage === undefined &&
+      engineRunId !== null &&
+      stage !== OPTIONS_PIPELINE_STAGES[0]
+    ) {
+      const keys = await engineStores.stores.artifacts.listArtifactKeys(engineRunId);
+      const threaded = OPTIONS_PIPELINE_STAGES.some((stageId) =>
+        keys.includes(optionsArtifactKey(runId, stageId)),
+      );
+      if (!threaded) {
+        throw new OptionsStageControlError(
+          "stage_storage_unavailable",
+          `options run ${runId}: stage ${stage} cannot be driven (${operation}) — no stage artifacts for this run exist in this host's engine stores; the run was dispatched before stage-storage threading (#4400) or over per-call storage, so the stage has no persisted input to read; re-dispatch the screen`,
+        );
+      }
     }
     const control = needsExecution
       ? new JobPipelineControl({

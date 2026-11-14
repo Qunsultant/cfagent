@@ -356,6 +356,13 @@ export interface OptionsScreenStepDeps {
   /** The stage records + published messages, in pipeline order. */
   stageRecords: OptionsStageRecord[];
   published: StageMessage[];
+  /**
+   * Issue #4400 — the deferred stage-storage scope the closure
+   * registration binds per step invocation (the step context's
+   * engine run id). Absent, steps execute with the storage their
+   * ports closed over, exactly as before.
+   */
+  stageStorageScope?: DeferredStageStorageScope;
 }
 
 const optionsBlocks = new Map(OPTIONS_BLOCKS.map((block) => [block.id, block]));
@@ -457,6 +464,53 @@ export function optionsStageStorageFromArtifacts(
 }
 
 /**
+ * Issue #4400 — the engine-run scope a deferred stage storage
+ * resolves against. The scope is bound at step-execution time (the
+ * closure registration sets it from the step context's engine run
+ * id before the shared step body runs): the dispatch path builds
+ * its ports before the engine mints the run id, so the scope the
+ * artifacts land under is unknowable at construction. One scope
+ * object per dispatch; the binding is the step's own run id, never
+ * a guess.
+ */
+export interface DeferredStageStorageScope {
+  engineRunId?: string;
+}
+
+/**
+ * Issue #4400 — the stage storage over the engine's artifact store
+ * with a LATE-BOUND engine-run scope: the same adapter as
+ * optionsStageStorageFromArtifacts, resolving its scope per call
+ * instead of closing over it. The panel dispatch uses it: the
+ * stages write their artifacts into the artifact store under the
+ * executing run id, so a later control action over the same stores
+ * reads them back through the fixed-scope adapter. An access
+ * before any step bound the scope throws — storage outside a step
+ * execution has no run to scope by, and inventing one would strand
+ * the artifacts.
+ */
+export function optionsStageStorageFromArtifactsDeferred(
+  artifacts: JobArtifactStore,
+  scope: DeferredStageStorageScope,
+): OptionsStageStorage {
+  const resolve = (): OptionsStageStorage => {
+    const engineRunId = scope.engineRunId;
+    if (!engineRunId) {
+      throw new Error(
+        "options stage storage accessed before its engine-run scope was bound — a stage must execute through the engine step for its artifacts to resolve; refusing to read or write unscoped artifacts",
+      );
+    }
+    return optionsStageStorageFromArtifacts(artifacts, engineRunId);
+  };
+  return {
+    put: async (key, value) => {
+      await resolve().put(key, value);
+    },
+    get: async <T>(key: string): Promise<T | undefined> => resolve().get<T>(key),
+  };
+}
+
+/**
  * Register the `options.runStage` step on a registry: one step per stage,
  * the stageId riding its params. The step runs the shared per-stage body
  * (runOptionsStageOnce — the same body the thin composer calls), records
@@ -477,9 +531,15 @@ export function registerOptionsScreenStep(
     output: deps.request,
     descriptor: `options screen ${deps.runId} input`,
   }));
-  registry.register(OPTIONS_SCREEN_STEP, async (ctx: JobStepContext) =>
-    runOptionsScreenStep(ctx, deps),
-  );
+  registry.register(OPTIONS_SCREEN_STEP, async (ctx: JobStepContext) => {
+    // Issue #4400: bind the deferred storage scope before the body
+    // runs, so the stage's artifact reads and writes land under
+    // this execution's engine run id.
+    if (deps.stageStorageScope) {
+      deps.stageStorageScope.engineRunId = ctx.runId;
+    }
+    return runOptionsScreenStep(ctx, deps);
+  });
   return registry;
 }
 
@@ -563,7 +623,19 @@ export async function runOptionsPanelViaEngineWithAgents(
 ): Promise<PipelineResult> {
   const runId = options.runId ?? `options-panel:service:${request.symbol}:${new Date().toISOString()}`;
   const trigger = options.trigger ?? "manual";
-  const storage = memoryStageStorage();
+  // Issue #4400: over caller-supplied engine stores, the stages
+  // write their artifacts into the stores' artifact store (scoped
+  // by the executing engine run id, bound per step invocation), so
+  // a later control action over the same stores reads them back.
+  // Without engine stores there is no durable record to thread
+  // into, so the per-call storage stands exactly as before.
+  const engineStores = options.engineStores ?? null;
+  const stageStorageScope: DeferredStageStorageScope | undefined = engineStores
+    ? {}
+    : undefined;
+  const storage = engineStores && stageStorageScope
+    ? optionsStageStorageFromArtifactsDeferred(engineStores.stores.artifacts, stageStorageScope)
+    : memoryStageStorage();
   // Issue #4271: the panel is a strategy screen — it defines the
   // strategy job (strategy-screen:<runId>), not the options job.
   const outcome = await runStrategyScreenViaEngine(
@@ -592,6 +664,7 @@ export async function runOptionsPanelViaEngineWithAgents(
       claims: memoryStageClaims(),
       queue: options.queue ?? null,
       ...(options.engineStores ? { engineStores: options.engineStores } : {}),
+      ...(stageStorageScope ? { stageStorageScope } : {}),
     },
   );
   if (outcome.outcome !== "completed") {
@@ -872,6 +945,14 @@ export interface OptionsScreenEngineDeps {
    * SQL handle passes optionsEngineStoresFromSql(sql) instead.
    */
   engineStores?: OptionsEngineStores | null;
+  /**
+   * Issue #4400 — the deferred stage-storage scope, threaded into
+   * the step deps so the closure registration binds it per step
+   * invocation. Only the panel dispatch supplies one (its ports
+   * close over the deferred adapter); every other dispatch leaves
+   * it absent and its steps execute exactly as before.
+   */
+  stageStorageScope?: DeferredStageStorageScope;
 }
 
 /**
@@ -914,6 +995,7 @@ async function dispatchScreenViaEngine(
     },
     stageRecords,
     published,
+    ...(deps.stageStorageScope ? { stageStorageScope: deps.stageStorageScope } : {}),
   };
   const registry = registerOptionsScreenStep(createBuiltinStepRegistry(), stepDeps);
   const control = new JobPipelineControl({
