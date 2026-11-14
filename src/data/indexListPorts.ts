@@ -4,7 +4,7 @@
  * #1852 fetches live on every call, stores nothing, and has no
  * production consumer. This port is the stored side: one artifact
  * per (index, snapshotDate) — symbols + source + sourceLabel —
- * shaped on the #1236 feed seam (CREATE TABLE IF NOT EXISTS +
+ * shaped on the #1236 feed seam (idempotent creation +
  * single-line statements on the SQL adapters; asOf/snapshotDate +
  * provenance/source label on every artifact; job results carry
  * descriptors, NOT bytes — see indexListProducer.ts /
