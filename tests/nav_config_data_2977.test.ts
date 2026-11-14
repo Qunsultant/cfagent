@@ -58,9 +58,9 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("subMenus: 11 groups, every sub-item has id and label", () => {
+  it("subMenus: 12 groups, every sub-item has id and label", () => {
     const groups = Object.keys(navData.subMenus as Record<string, unknown[]>);
-    expect(groups).toHaveLength(11);
+    expect(groups).toHaveLength(12);
     for (const items of Object.values(navData.subMenus as Record<string, { id: string; label: string }[]>)) {
       for (const item of items) {
         expect(item.id).toBeTruthy();

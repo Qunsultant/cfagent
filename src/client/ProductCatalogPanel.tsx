@@ -52,9 +52,22 @@ import {
 } from "./firstRunApi";
 import { trialEndedMessage } from "../services/trialSubscriptionActivation";
 import { csrfHeaders } from "./apiFetch";
+import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
+import { Tabs, TabPanel, type TabOption } from "./components/ui/Tabs";
 
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 const SELLING_BASE = COMMERCIAL_API_BASE;
+
+/** Issue #4511 — Products sub-tabs: the catalog view and the selling
+ *  options view, URL-synced on the shared "view" param. */
+export type ProductCatalogTab = "catalog" | "selling-options";
+const PRODUCT_CATALOG_TABS: TabOption<ProductCatalogTab>[] = [
+  { id: "catalog", label: "Catalog" },
+  { id: "selling-options", label: "Selling options" },
+];
+function isProductCatalogTab(value: unknown): value is ProductCatalogTab {
+  return value === "catalog" || value === "selling-options";
+}
 
 const pageWrapperStyle: React.CSSProperties = {
   padding: "var(--space-4)",
@@ -1054,6 +1067,13 @@ export function ProductCatalogPanel() {
   const [preview, setPreview] = useState<MarketingDraft | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [sellingOpenRequest, setSellingOpenRequest] = useState(0);
+  // Issue #4511 — Selling options is a sub-tab (URL-synced on "view",
+  // default "catalog"); the selling reads still happen only on demand.
+  const { activeTab, visitedTabs, handleTabChange } = useUrlSyncedTabs<ProductCatalogTab>({
+    param: "view",
+    isValid: isProductCatalogTab,
+    defaultTab: "catalog",
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -1100,7 +1120,15 @@ export function ProductCatalogPanel() {
       header: "Purchase path",
       render: (row) =>
         row.listed && (row.tier === "Subscribed" || row.availability === "entitlement-pending") ? (
-          <Button variant="secondary" onClick={() => setSellingOpenRequest((n) => n + 1)}>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              // Issue #4511 — Subscribe switches to the Selling options
+              // sub-tab as well as opening the selling flow.
+              handleTabChange("selling-options");
+              setSellingOpenRequest((n) => n + 1);
+            }}
+          >
             Subscribe
           </Button>
         ) : row.purchasePath ? (
@@ -1159,7 +1187,20 @@ export function ProductCatalogPanel() {
         emptyTitle="No products registered"
         emptyDescription="The catalog has no entries yet."
       >
-        <PageSection title="Catalog">
+        <Tabs<ProductCatalogTab>
+          idBase="products"
+          ariaLabel="Product catalog sections"
+          tabs={PRODUCT_CATALOG_TABS}
+          value={activeTab}
+          onChange={handleTabChange}
+        />
+        <TabPanel
+          idBase="products"
+          tabId="catalog"
+          active={activeTab === "catalog"}
+          retain={visitedTabs.has("catalog")}
+        >
+          <PageSection title="Catalog">
           <Table
             columns={columns}
             rows={products ?? []}
@@ -1228,7 +1269,15 @@ export function ProductCatalogPanel() {
             </Card>
           )}
         </PageSection>
-        <SellingSection products={products} openSignal={sellingOpenRequest} />
+        </TabPanel>
+        <TabPanel
+          idBase="products"
+          tabId="selling-options"
+          active={activeTab === "selling-options"}
+          retain={visitedTabs.has("selling-options")}
+        >
+          <SellingSection products={products} openSignal={sellingOpenRequest} />
+        </TabPanel>
       </PageShell>
     </div>
   );

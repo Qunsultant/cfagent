@@ -225,12 +225,15 @@ describe("ladder position editor", () => {
 
 describe("new-product rank input", () => {
   async function openForm() {
-    const button = Array.from(container!.querySelectorAll("button")).find(
-      (b) => (b.textContent || "").trim() === "New product",
+    // Issue #4511 — the create form lives in the "Create product"
+    // sub-tab directly (the tab is the entry; there is no "New
+    // product" toggle any more).
+    const tab = Array.from(container!.querySelectorAll('button[role="tab"]')).find((b) =>
+      (b.textContent || "").includes("Create product"),
     );
-    if (!button) throw new Error("No New product button");
+    if (!tab) throw new Error("No Create product tab");
     await act(async () => {
-      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      tab.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await act(async () => {});
   }
@@ -256,7 +259,7 @@ describe("new-product rank input", () => {
     });
     await act(async () => {
       const create = Array.from(container!.querySelectorAll("button")).find(
-        (b) => (b.textContent || "").trim() === "Create product",
+        (b) => b.getAttribute("role") !== "tab" && (b.textContent || "").trim() === "Create product",
       );
       create!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -278,7 +281,7 @@ describe("new-product rank input", () => {
     });
     await act(async () => {
       const create = Array.from(container!.querySelectorAll("button")).find(
-        (b) => (b.textContent || "").trim() === "Create product",
+        (b) => b.getAttribute("role") !== "tab" && (b.textContent || "").trim() === "Create product",
       );
       create!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -301,7 +304,7 @@ describe("new-product rank input", () => {
     });
     await act(async () => {
       const create = Array.from(container!.querySelectorAll("button")).find(
-        (b) => (b.textContent || "").trim() === "Create product",
+        (b) => b.getAttribute("role") !== "tab" && (b.textContent || "").trim() === "Create product",
       );
       create!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });

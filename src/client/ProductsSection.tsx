@@ -33,6 +33,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Button, Notice, Select, Stack, TextInput } from "./components/ui";
+import { Tabs, TabPanel, type TabOption } from "./components/ui/Tabs";
 import { apiFetch } from "./apiFetch";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import { COMMERCIAL_API_BASE, commercialPath } from "../data/commercialUrlCatalog";
@@ -273,13 +274,25 @@ function ProductRankEditor({
   );
 }
 
+/** Issue #4511 — ProductsSection sub-tabs: the product list, the
+ *  product-creation form, and the new-version form. Local state, not
+ *  URL-synced, so the tabs never fight the parent PlatformAdminPage
+ *  "view" param. */
+type ProductsSectionTab = "products" | "create-product" | "create-version";
+const PRODUCTS_SECTION_TABS: TabOption<ProductsSectionTab>[] = [
+  { id: "products", label: "Products" },
+  { id: "create-product", label: "Create product" },
+  { id: "create-version", label: "Create version" },
+];
+
 export function ProductsSection() {
   const [entries, setEntries] = useState<ProductEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [showNewProduct, setShowNewProduct] = useState(false);
+  const [activeTab, setActiveTab] = useState<ProductsSectionTab>("products");
+  const [versionProductId, setVersionProductId] = useState("");
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState<"subscription" | "per_run" | "runs_pack">("subscription");
   const [newDescription, setNewDescription] = useState("");
@@ -339,8 +352,10 @@ export function ProductsSection() {
       setNewName("");
       setNewDescription("");
       setNewRank("");
-      setShowNewProduct(false);
       setNote(`Product "${newName.trim()}" created. Add a version to make it sellable.`);
+      // Issue #4511 — creation lives in its own sub-tab; a successful
+      // create returns to the Products tab so the new row is visible.
+      setActiveTab("products");
       await load();
     } catch (err: any) {
       setCreateError(err.message || "Failed to create product.");
@@ -362,11 +377,25 @@ export function ProductsSection() {
         </div>
         {error && <Notice tone="danger">{error}</Notice>}
         {note && <Notice tone="success">{note}</Notice>}
-        {loading && <p>Loading products…</p>}
-        {!loading && entries && entries.length === 0 && <p>No products yet. Create the first product below.</p>}
-        {!loading && entries && entries.length > 0 && (
-          <Stack gap="2">
-            {entries.map(({ product, versions }) => {
+        <Tabs<ProductsSectionTab>
+          idBase="platform-admin-products"
+          ariaLabel="Product sections"
+          tabs={PRODUCTS_SECTION_TABS}
+          value={activeTab}
+          onChange={setActiveTab}
+        />
+        <TabPanel
+          idBase="platform-admin-products"
+          tabId="products"
+          active={activeTab === "products"}
+        >
+          {loading && <p>Loading products…</p>}
+          {!loading && entries && entries.length === 0 && (
+            <p>No products yet. Create the first product in the Create product tab.</p>
+          )}
+          {!loading && entries && entries.length > 0 && (
+            <Stack gap="2">
+              {entries.map(({ product, versions }) => {
               const isFree = product.id === FREE_PRODUCT_ID;
               const expanded = expandedId === product.id;
               const groups = groupBySegment(versions);
@@ -419,41 +448,77 @@ export function ProductsSection() {
               );
             })}
           </Stack>
-        )}
-        <div>
-          {!showNewProduct ? (
-            <Button onClick={() => setShowNewProduct(true)}>New product</Button>
-          ) : (
-            <Stack gap="1">
-              <TextInput label="Product name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <Select label="Kind" value={newKind} onChange={(e) => setNewKind(e.target.value as "subscription" | "per_run" | "runs_pack")}>
-                <option value="subscription">Subscription</option>
-                <option value="per_run">Per-run</option>
-                <option value="runs_pack">Runs pack</option>
-              </Select>
-              <TextInput
-                label="Description (optional)"
-                value={newDescription}
-                onChange={(e) => setNewDescription(e.target.value)}
-              />
-              <TextInput
-                label="Ladder position (optional)"
-                type="number"
-                value={newRank}
-                onChange={(e) => setNewRank(e.target.value)}
-              />
-              {createError && <Notice tone="danger">{createError}</Notice>}
-              <div>
-                <Button loading={creating} onClick={() => void createProduct()}>
-                  Create product
-                </Button>{" "}
-                <Button variant="secondary" onClick={() => setShowNewProduct(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </Stack>
           )}
-        </div>
+        </TabPanel>
+        <TabPanel
+          idBase="platform-admin-products"
+          tabId="create-product"
+          active={activeTab === "create-product"}
+        >
+          <Stack gap="1">
+            <TextInput label="Product name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+            <Select label="Kind" value={newKind} onChange={(e) => setNewKind(e.target.value as "subscription" | "per_run" | "runs_pack")}>
+              <option value="subscription">Subscription</option>
+              <option value="per_run">Per-run</option>
+              <option value="runs_pack">Runs pack</option>
+            </Select>
+            <TextInput
+              label="Description (optional)"
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+            />
+            <TextInput
+              label="Ladder position (optional)"
+              type="number"
+              value={newRank}
+              onChange={(e) => setNewRank(e.target.value)}
+            />
+            {createError && <Notice tone="danger">{createError}</Notice>}
+            <div>
+              <Button loading={creating} onClick={() => void createProduct()}>
+                Create product
+              </Button>{" "}
+              <Button variant="secondary" onClick={() => setActiveTab("products")}>
+                Cancel
+              </Button>
+            </div>
+          </Stack>
+        </TabPanel>
+        <TabPanel
+          idBase="platform-admin-products"
+          tabId="create-version"
+          active={activeTab === "create-version"}
+        >
+          {(() => {
+            const versionEntry =
+              entries?.find((e) => e.product.id === versionProductId) ?? entries?.[0] ?? null;
+            if (!versionEntry) {
+              return <p>No products yet. Create a product first.</p>;
+            }
+            return (
+              <Stack gap="1">
+                <Select
+                  label="Product"
+                  value={versionEntry.product.id}
+                  onChange={(e) => setVersionProductId(e.target.value)}
+                >
+                  {(entries ?? []).map((e) => (
+                    <option key={e.product.id} value={e.product.id}>
+                      {e.product.name}
+                    </option>
+                  ))}
+                </Select>
+                <NewVersionForm
+                  product={versionEntry.product}
+                  versions={versionEntry.versions}
+                  onCreated={load}
+                  onNote={setNote}
+                  startOpen
+                />
+              </Stack>
+            );
+          })()}
+        </TabPanel>
       </Stack>
     </div>
   );
@@ -1151,13 +1216,17 @@ function NewVersionForm({
   versions,
   onCreated,
   onNote,
+  startOpen = false,
 }: {
   product: ProductRecord;
   versions: VersionView[];
   onCreated: () => Promise<void>;
   onNote: (note: string) => void;
+  /** Issue #4511 — the Create version sub-tab opens the form directly;
+   *  the in-row form keeps its own "New version" button (default). */
+  startOpen?: boolean;
 }) {
-  const [show, setShow] = useState(false);
+  const [show, setShow] = useState(startOpen);
   const [price, setPrice] = useState("");
   const [periodDays, setPeriodDays] = useState("");
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "annual">("monthly");
