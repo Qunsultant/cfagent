@@ -37,6 +37,7 @@
  * half-provisioned provider can never serve data.
  */
 import type { SqlStorage } from "../orm";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import type { DataProviderCapability, DataProviderId } from "../trading";
 import {
   DEFAULT_CAPABILITY_ROUTES,
@@ -55,19 +56,9 @@ import {
 } from "./providerConfigPorts";
 
 export function ensureProviderConfigTable(sql: SqlStorage): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS ${PROVIDER_CONFIG_TABLE} (
-    id TEXT PRIMARY KEY,
-    adapter_kind TEXT NOT NULL,
-    lifecycle_state TEXT NOT NULL,
-    enabled INTEGER NOT NULL DEFAULT 0,
-    precedence INTEGER NOT NULL,
-    credential_ref TEXT,
-    config_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`);
+  sql.exec(doTableSql("mas_data_providers"));
   sql.exec(
-    `CREATE INDEX IF NOT EXISTS idx_mas_data_providers_precedence ON ${PROVIDER_CONFIG_TABLE}(precedence)`
+    doIndexSql("idx_mas_data_providers_precedence")
   );
 }
 
@@ -220,14 +211,7 @@ export function clearProviderCredentialRef(
 }
 
 export function ensureProviderRoutingTable(sql: SqlStorage): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS ${PROVIDER_ROUTING_TABLE} (
-    capability TEXT PRIMARY KEY,
-    primary_provider_id TEXT NOT NULL,
-    gap_fill_provider_id TEXT,
-    min_tier TEXT NOT NULL DEFAULT 'freemium',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`);
+  sql.exec(doTableSql("mas_data_provider_routes"));
   // Pre-E5 tables lack min_tier: add it in place (the scan-run
   // store's ensure-column idiom). The column DEFAULT backfills
   // existing rows to freemium — the tier they always effectively had.
