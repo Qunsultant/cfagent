@@ -66,17 +66,16 @@ describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
     // No auto-merge mutation and no flagless `gh pr merge` may remain.
     expect(autoMergeTrustedYml).not.toContain("enablePullRequestAutoMerge");
     expect(autoMergeTrustedYml).not.toMatch(/^\s+gh pr merge\b[^\n]*--auto/m);
-    // Issue #4444: `workflow_run` was never delivered for PR branches, so the
-    // enrollment now runs on `pull_request` (payload resolution) plus a
-    // 5-minute sweep of labeled open PRs. `gh pr list --json` exposes `id` (the
-    // node id) and has no `nodeId` field — asking for one fails the job
+    // Issue #4444: enrollment runs on `pull_request` (payload resolution) plus
+    // a 5-minute sweep of labeled open PRs — the retry that carries a PR past a
+    // required check which finishes after the CI workflow. The label and the
+    // limit come from config/auto-merge.json. `gh pr list --json` exposes `id`
+    // (the node id) and has no `nodeId` field — asking for one fails the job
     // (observed on #4316).
     expect(autoMergeTrustedYml).toContain(
-      "--label auto-merge --state open --limit 50",
+      '--label "$LABEL" --state open --limit "$SWEEP_LIMIT"',
     );
-    expect(autoMergeTrustedYml).toContain(
-      "--json number,id,isDraft,mergeStateStatus",
-    );
+    expect(autoMergeTrustedYml).toContain("--json number,id,isDraft");
     expect(autoMergeTrustedYml).not.toContain("nodeId");
     expect(autoMergeTrustedYml).toContain('gh pr view "$PR_NUMBER"');
   });

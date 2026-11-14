@@ -1,26 +1,37 @@
-# Auto-ready draft PRs when their checks go green — issue #4315; trigger fixed
-# in #4325.
+# Auto-ready draft PRs when their checks go green — issue #4315; judgement
+# corrected in #4325.
 #
 # WHAT: publish-early (#4054) creates a draft PR as soon as Tier 1 is green, but
 # a draft never reaches the queue by itself. This workflow marks an eligible
 # draft ready once its full gating set is green on the head SHA. The enrollment
-# workflow (`auto-merge-trusted.yml`) then puts it in the merge queue on its next
-# pass — one chain, both halves on the same 5-minute cadence.
+# workflow (`auto-merge-trusted.yml`) then puts it in the merge queue — the flip
+# fires `ready_for_review`, which that workflow now acts on, and its 5-minute
+# sweep is the backstop. One chain, both halves on the same cadence.
 #
-# WHY A SWEEP (#4325): the original trigger was `workflow_run` on the five
-# gating workflows. GitHub does not deliver `workflow_run` for PR-branch runs in
-# this repository — every delivery was a main-branch run — so a draft never
-# became ready. The sweep is the replacement: every 5 minutes, evaluate the open
-# labeled drafts, bounded lag, no event plumbing.
+# WHY A SWEEP (#4325): the trigger used to be `workflow_run` on each gating
+# workflow. It does fire for PR branches — the 19:10:22Z run on 2026-11-13
+# evaluated PR #4442's head (`HEAD_BRANCH: fix/4441-autopilot-capabilities-doc`)
+# — but it judged whichever gate finished first: "Not all gating workflows are
+# green on e8ef2458", while `Policy Gate` was still in progress, and nothing
+# re-evaluated when that gate passed. The PR stayed draft. The sweep removes
+# the ordering dependency: once every gating workflow has a successful run on
+# the head, the next 5-minute pass flips it.
 #
-# SCOPE: only open draft PRs carrying the `auto-merge` label — the marker that
-# the PR is in the automated pipeline. Human drafts without the label are never
-# touched.
+# The run query is filtered by `head_sha`, not a repo-wide window: two
+# 5-minute sweeps push a global window out within hours, and a head with no
+# run in the window would read as pending forever.
+#
+# SCOPE: only open draft PRs carrying the configured `auto-merge` label — the
+# marker that the PR is in the automated pipeline. Human drafts without the
+# label are never touched.
 #
 # SAFETY: the full required set must be green on the head SHA, judged by the
 # watcher's verdict logic — latest run per workflow name, cancelled/skipped never
 # decides a verdict, a missing run is pending, never green. Marking ready merges
 # NOTHING by itself: the merge queue re-validates every requirement.
+#
+# CONFIG: `config/auto-merge.json` is the single source for the label, the
+# gating workflow set and the sweep limit, shared with `auto-merge-trusted.yml`.
 #
 # TOKEN: the workflow's own scoped GITHUB_TOKEN (pull requests: write) — no App
 # credentials are needed to mark a same-repo draft ready.
@@ -42,22 +53,43 @@ concurrency:
   group: auto-ready-sweep
   cancel-in-progress: false
 
+env:
+  CONFIG_PATH: config/auto-merge.json
+
 jobs:
   mark-ready:
     name: Mark eligible drafts ready when all checks are green
     runs-on: ubuntu-24.04
     steps:
-      - name: Mark eligible drafts ready when all checks are green
+      - name: Read the automation config
+        id: config
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          GATING="Continuous Integration & Test Verification|Policy Gate|CodeQL|Secret Scanning|Auto-merge trusted PRs"
+          config=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH" --jq '.content' | base64 -d)
+          jq -e '.label and .sweepLimit and (.gatingWorkflows | length > 0)' <<<"$config" >/dev/null \
+            || { echo "::error::$CONFIG_PATH is missing label, sweepLimit or gatingWorkflows"; exit 1; }
+          {
+            echo "label=$(jq -r '.label' <<<"$config")"
+            echo "limit=$(jq -r '.sweepLimit' <<<"$config")"
+            echo "gating=$(jq -c '.gatingWorkflows' <<<"$config")"
+          } >> "$GITHUB_OUTPUT"
 
-          # Eligible drafts: open + draft + the auto-merge label, with the head
-          # SHA each one is judged on.
-          DRAFTS=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=50" --jq \
-            '.[] | select(.draft == true) | select(.labels | map(.name) | index("auto-merge")) | [.number, .head.sha] | @tsv')
+      - name: Mark eligible drafts ready when all checks are green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LABEL: ${{ steps.config.outputs.label }}
+          SWEEP_LIMIT: ${{ steps.config.outputs.limit }}
+          GATING: ${{ steps.config.outputs.gating }}
+        run: |
+          set -euo pipefail
+
+          # Eligible drafts: open + draft + the configured label, with the head
+          # SHA each one is judged on. `gh pr list` paginates to the limit.
+          DRAFTS=$(gh pr list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open \
+            --limit "$SWEEP_LIMIT" --json number,isDraft,headRefOid \
+            --jq '.[] | select(.isDraft == true) | "\(.number)\t\(.headRefOid)"')
           if [ -z "$DRAFTS" ]; then
             echo "No eligible draft PRs."
             exit 0
@@ -68,19 +100,19 @@ jobs:
 
             # Full required set green on this head? (watcher verdict logic:
             # latest run per workflow name, cancelled/skipped never decides a
-            # verdict, a missing run is pending, never green.)
-            ALL_GREEN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?per_page=50" --jq "
+            # verdict, a missing run is pending, never green.) The query is
+            # filtered by head_sha so the window is this head's own runs.
+            RUNS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&per_page=100")
+            ALL_GREEN=$(printf '%s' "$RUNS" | jq -r --argjson want "$GATING" '
               [ .workflow_runs[]
-                | select(.head_sha == \"$HEAD_SHA\")
-                | select(.status == \"completed\")
-                | select(.conclusion != \"cancelled\" and .conclusion != \"skipped\") ]
+                | select(.status == "completed")
+                | select(.conclusion != "cancelled" and .conclusion != "skipped") ]
               | sort_by(.name) | group_by(.name) | map(max_by(.created_at))
-              | map(select(.name | test(\"^($GATING)$\")))
-              | select(length == 5)
-              | all(.conclusion == \"success\")
-            ")
+              | map(select(.name as $n | $want | index($n)))
+              | if (length == ($want | length)) then all(.conclusion == "success") else false end
+            ')
             if [ "$ALL_GREEN" != "true" ]; then
-              echo "PR #$PR: not all gating workflows are green on $HEAD_SHA — leaving it as-is."
+              echo "PR #$PR: not every gating workflow is green on $HEAD_SHA yet — leaving it as-is."
               continue
             fi
 
@@ -92,7 +124,7 @@ jobs:
               continue
             fi
             if gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$PR/ready_for_review" --silent; then
-              echo "Marked PR #$PR ready for review; the enrollment sweep will queue it once green."
+              echo "Marked PR #$PR ready for review; the enrollment workflow queues it."
             else
               echo "Could not mark PR #$PR ready (probably already ready) — continuing."
             fi

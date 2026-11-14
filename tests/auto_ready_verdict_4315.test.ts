@@ -1,13 +1,18 @@
 /**
  * Issue #4315 — auto-ready draft PRs once the gating workflows are green.
+ * Corrected by #4325: the `workflow_run` trigger did fire for a PR branch, but
+ * it judged whichever gate finished first (the 19:10:22Z run on 2026-11-13
+ * evaluated PR #4442's head while `Policy Gate` was still in progress) and
+ * nothing re-evaluated when the last gate passed. The verdict is now a sweep.
  *
- * The workflow ships with its verdict inline (the shape the issue specifies), so
- * these pins read the file and assert the parts that matter:
- *  - P01 it watches exactly the five gating workflows, on completion.
- *  - P02 only an open DRAFT that carries the `auto-merge` label is eligible.
+ * Pins:
+ *  - P01 it sweeps on a 5-minute cadence and takes the gating set from
+ *    config/auto-merge.json (no inline list, no inline count).
+ *  - P02 only an open DRAFT carrying the configured label is eligible.
  *  - P03 the verdict is the watcher's: latest run per workflow name on the head
  *    SHA, cancelled/skipped never deciding, a missing run pending (never green),
- *    and all five required before anything is flipped.
+ *    and the whole configured set required before anything is flipped. The run
+ *    query is filtered by `head_sha`, so the window is the head's own runs.
  *  - P04 it flips with `ready_for_review`, re-checks the draft flag first, and
  *    tolerates an already-ready 422.
  *  - P05 no privileged trigger, no App credentials, no PR code checkout.
@@ -18,10 +23,14 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const workflow = readFileSync(
-  join(here, "..", ".github/workflows/auto-ready-drafts.yml"),
-  "utf8",
-);
+const read = (relative: string) =>
+  readFileSync(join(here, "..", relative), "utf8").replace(/\r\n/g, "\n");
+
+const workflow = read(".github/workflows/auto-ready-drafts.yml");
+const config = JSON.parse(read("config/auto-merge.json")) as {
+  label: string;
+  gatingWorkflows: string[];
+};
 
 const GATING = [
   "Continuous Integration & Test Verification",
@@ -32,51 +41,54 @@ const GATING = [
 ];
 
 describe("4315-P01 gating workflows", () => {
-  it("sweeps on a 5-minute cadence — workflow_run never reached PR branches (#4325)", () => {
-    // #4325: the original `workflow_run` trigger was never delivered for
-    // PR-branch runs (every delivery was a main-branch run), so a draft never
-    // flipped. The sweep evaluates the same gating set on its own cadence.
+  it("sweeps on a 5-minute cadence and reads the gating set from config", () => {
     expect(workflow).toContain("schedule:");
     expect(workflow).toContain('cron: "*/5 * * * *"');
     expect(workflow).not.toMatch(/^\s*workflow_run:\s*$/m);
-    for (const name of GATING) expect(workflow).toContain(name);
-    expect(workflow).toContain("select(length == 5)");
+    // The set lives in one place, shared with the enrollment half.
+    expect(config.gatingWorkflows).toEqual(GATING);
+    expect(workflow).toContain("CONFIG_PATH: config/auto-merge.json");
+    expect(workflow).toContain("contents/$CONFIG_PATH");
+    // No inline list and no literal count: the count is the array's length.
+    expect(workflow).not.toContain("Continuous Integration & Test Verification");
+    expect(workflow).not.toContain("length == 5");
   });
 });
 
 describe("4315-P02 eligibility", () => {
-  it("requires an open draft carrying the auto-merge label", () => {
-    expect(workflow).toContain("state=open");
-    expect(workflow).toContain("select(.draft == true)");
-    expect(workflow).toContain('index("auto-merge")');
+  it("requires an open draft carrying the configured label", () => {
+    expect(workflow).toContain('--label "$LABEL" --state open');
+    expect(workflow).toContain("select(.isDraft == true)");
+    expect(workflow).toContain("headRefOid");
   });
 });
 
 describe("4315-P03 the verdict", () => {
   it("judges the head SHA with the watcher's rules", () => {
-    // The expression lives inside a shell double-quoted string, so quotes
-    // are escaped in the file: assert the tokens, not the exact quoting.
-    expect(workflow).toContain("head_sha ==");
+    // The expression lives inside a shell double-quoted heredoc, so assert the
+    // tokens, not the exact quoting.
+    expect(workflow).toContain("actions/runs?head_sha=$HEAD_SHA");
     expect(workflow).toContain("$HEAD_SHA");
-    expect(workflow).toContain("status ==");
+    expect(workflow).toContain('select(.status == "completed")');
     expect(workflow).toContain("cancelled");
     expect(workflow).toContain("skipped");
     expect(workflow).toContain("group_by(.name)");
     expect(workflow).toContain("max_by(.created_at)");
-    expect(workflow).toContain("length == 5");
+    expect(workflow).toContain('--argjson want "$GATING"');
+    expect(workflow).toContain("length == ($want | length)");
     expect(workflow).toContain("all(.conclusion");
   });
 
   it("does nothing when the set is not green", () => {
     expect(workflow).toContain('if [ "$ALL_GREEN" != "true" ]');
-    expect(workflow).toContain("exit 0");
+    expect(workflow).toContain("continue");
   });
 });
 
 describe("4315-P04 the action", () => {
   it("flips with ready_for_review and tolerates already-ready", () => {
     expect(workflow).toContain("/ready_for_review");
-    expect(workflow).toContain('STILL_DRAFT=$(gh api');
+    expect(workflow).toContain("STILL_DRAFT=$(gh api");
     expect(workflow).toContain("probably already ready");
   });
 });

@@ -5,13 +5,30 @@
 #
 #   - `pull_request` (opened / synchronize / reopened / ready_for_review):
 #     label the PR, then attempt enrollment immediately when the head is
-#     already green (a ready_for_review flip or a push after green).
-#   - `schedule` (every 5 minutes): sweep open PRs carrying the `auto-merge`
-#     label and enroll every green, ready one. This is the path that catches
-#     CI completing AFTER the pull_request event — the previous design hung
-#     that on `workflow_run`, which GitHub never delivers for PR-branch runs
-#     in this repository (#4444 / #4325), so green PRs sat unenrolled.
+#     already green. This is the path that carries a ready flip to the queue
+#     (#4346) — a flip fires no CI completion, so nothing else would.
+#   - `schedule` (every 5 minutes): sweep open PRs carrying the configured
+#     label and enroll every green, ready, conflict-free one. This is the
+#     retry the previous design never had (#4444).
 #   - `workflow_dispatch`: manual sweep.
+#
+# WHY THE SWEEP — order, not delivery (#4444 / #4325 / #4346). The 19:10:24Z
+# run on 2026-11-13 that exposed this proves the old trigger DID reach a PR
+# branch: its step log shows `HEAD_BRANCH: fix/4441-autopilot-capabilities-doc`,
+# it resolved PR #4442, called `enqueuePullRequest`, and got UNPROCESSABLE —
+# required status check "Policy Gate" is in progress — because the
+# compliance gate finishes after the CI workflow. The job failed and nothing
+# retried, so a green PR sat unenrolled. The auto-ready sibling hit the same
+# race two seconds later ("Not all gating workflows are green on e8ef2458"),
+# which is why a draft never flipped (#4325). The earlier reading that
+# "workflow_run never fires for PR branches" came from `head_branch` in the
+# runs list: a `workflow_run` run is attributed to the default branch, and only
+# its payload (the job log's env) names the PR branch.
+#
+# Required checks finish in no fixed order, so enrollment must be re-attempted
+# until it lands. The 5-minute sweep is that retry — bounded lag, independent
+# of which gate finishes last. Enrollment stays idempotent: a PR already in the
+# queue is left alone.
 #
 # WHY NOT auto-merge (verified 2026-11-12 on #4298): GitHub records an
 # auto-merge request's method as the repository default — SQUASH on this
@@ -19,12 +36,6 @@
 # request cannot merge under a rebase-only ruleset. The PR then sits green,
 # CLEAN and unmerged (#4267, #4219, #4244, #4283, #4285, #4297, #4303).
 # Enrollment is the queue entry; the queue owns the strategy (REBASE).
-#
-# WHY A SCHEDULE (#4325 / #4346 / #4444): `workflow_run` as a trigger does
-# not reach `pull_request`-event runs here — every `workflow_run` delivery
-# this workflow ever saw was a main-branch run. The 5-minute sweep is the
-# replacement: bounded lag, no event plumbing, and it also covers the
-# ready-flip case where CI finished long before the flip.
 #
 # TRIGGER SAFETY: plain `pull_request`, not the privileged target variant,
 # which GitHub restricts on public repositories from 2026-12-02 (#4313). The
@@ -37,6 +48,10 @@
 # #4320), and the App's pull-requests + contents scopes are what the queue
 # API accepts.
 #
+# CONFIG: `config/auto-merge.json` is the single source for the label, the
+# gating workflow set and the sweep limit. It is read from the default branch,
+# so a pull request cannot widen its own eligibility.
+#
 # SAFETY: no checkout, no PR code execution. The App token is short-lived,
 # scoped to this one repository, and used only for the queue call. The
 # required checks and the queue's merge-group validation remain the gate.
@@ -48,8 +63,9 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
   schedule:
-    # Every 5 minutes — the enrollment path for CI that completes after the
-    # pull_request event (#4444).
+    # Every 5 minutes — the retry that catches required checks finishing
+    # after the event, and the ready flip that fired no CI completion
+    # (#4444 / #4346).
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
@@ -64,17 +80,36 @@ concurrency:
   group: auto-merge-${{ github.event.pull_request.number || 'sweep' }}
   cancel-in-progress: false
 
+env:
+  CONFIG_PATH: config/auto-merge.json
+  # Every job name starts with this prefix, so the enrollment verdict can
+  # ignore this workflow's own check runs: a failed attempt must stay visible
+  # (#4317) without turning the head red and blocking its own retry.
+  OWN_CHECK_PREFIX: "auto-merge:"
+
 jobs:
   label:
-    name: Label PRs that belong to the automated pipeline
+    name: "auto-merge: label"
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
+      - name: Read the automation config
+        id: config
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH" --jq '.content' | base64 -d)
+          jq -e '.label and .sweepLimit and (.gatingWorkflows | length > 0)' <<<"$config" >/dev/null \
+            || { echo "::error::$CONFIG_PATH is missing label, sweepLimit or gatingWorkflows"; exit 1; }
+          echo "label=$(jq -r '.label' <<<"$config")" >> "$GITHUB_OUTPUT"
+
       - name: Label the PR (lane from the body hashtag)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          LABEL: ${{ steps.config.outputs.label }}
         run: |
           set -euo pipefail
           LANE_LABEL=""
@@ -83,17 +118,29 @@ jobs:
             AGENT_ID=$(echo "$AGENT_TAG" | sed 's/^#//' | tr '[:upper:]' '[:lower:]')
             LANE_LABEL="lane:$AGENT_ID"
           fi
-          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "auto-merge" || true
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$LABEL" || true
           if [ -n "$LANE_LABEL" ]; then
             gh label create "$LANE_LABEL" --repo "$GITHUB_REPOSITORY" --color "ededed" --description "Agent ownership lane" --force 2>/dev/null || true
             gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$LANE_LABEL" || true
           fi
 
   enroll:
-    name: Enroll green, ready, labeled PRs (event + 5-minute sweep)
+    name: "auto-merge: enroll"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
+      - name: Read the automation config
+        id: config
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH" --jq '.content' | base64 -d)
+          jq -e '.label and .sweepLimit and (.gatingWorkflows | length > 0)' <<<"$config" >/dev/null \
+            || { echo "::error::$CONFIG_PATH is missing label, sweepLimit or gatingWorkflows"; exit 1; }
+          echo "label=$(jq -r '.label' <<<"$config")" >> "$GITHUB_OUTPUT"
+          echo "limit=$(jq -r '.sweepLimit' <<<"$config")" >> "$GITHUB_OUTPUT"
+
       - name: Create short-lived GitHub App token (queue API scope)
         id: app-token
         continue-on-error: true
@@ -111,6 +158,8 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          LABEL: ${{ steps.config.outputs.label }}
+          SWEEP_LIMIT: ${{ steps.config.outputs.limit }}
         run: |
           set -euo pipefail
           FAILED=0
@@ -119,7 +168,7 @@ jobs:
           # FAILED) when the queue read-back says the enrollment did not land
           # (#4317: a green check proves the job ran, not that the PR is queued).
           enroll() {
-            local node_id="$1" pr_number="$2" state IN_QUEUE rollup merge_state merge_method
+            local node_id="$1" pr_number="$2" state verdict IN_QUEUE merge_state merge_method
             state=$(gh api graphql -F id="$node_id" -f query='
               query($id: ID!) {
                 node(id: $id) {
@@ -128,23 +177,46 @@ jobs:
                     mergeStateStatus
                     autoMergeRequest { mergeMethod }
                     commits(last: 1) {
-                      nodes { commit { statusCheckRollup { state } } }
+                      nodes {
+                        commit {
+                          statusCheckRollup {
+                            contexts(first: 100) {
+                              nodes {
+                                __typename
+                                ... on CheckRun { name status conclusion }
+                                ... on StatusContext { context state }
+                              }
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 }
               }
             ' 2>&1 || true)
             IN_QUEUE=$(echo "$state" | jq -r '.data.node.isInMergeQueue // false' 2>/dev/null || echo false)
-            rollup=$(echo "$state" | jq -r '.data.node.commits.nodes[0].commit.statusCheckRollup.state // "MISSING"' 2>/dev/null || echo MISSING)
             merge_state=$(echo "$state" | jq -r '.data.node.mergeStateStatus // "UNKNOWN"' 2>/dev/null || echo UNKNOWN)
             merge_method=$(echo "$state" | jq -r '.data.node.autoMergeRequest.mergeMethod // "none"' 2>/dev/null || echo none)
-            echo "PR #$pr_number: queue=$IN_QUEUE checks=$rollup mergeState=$merge_state autoMerge=$merge_method"
+            # Green means: every check on the head that is NOT this workflow's
+            # own either succeeded or never needed to run. Own checks are
+            # excluded so a failed attempt cannot make the head look red and
+            # block the next sweep from retrying it.
+            verdict=$(echo "$state" | jq -r --arg p "$OWN_CHECK_PREFIX" '
+              [ .data.node.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?
+                | select((((.name // .context) // "") | startswith($p)) | not)
+                | (.conclusion // .state // "UNKNOWN") ] as $others
+              | if ($others | length) == 0 then "MISSING"
+                elif ($others | map(. == "SUCCESS" or . == "NEUTRAL" or . == "SKIPPED") | all) then "SUCCESS"
+                else "NOT_GREEN" end
+            ' 2>/dev/null || echo MISSING)
+            echo "PR #$pr_number: queue=$IN_QUEUE checks=$verdict mergeState=$merge_state autoMerge=$merge_method"
             if [ "$IN_QUEUE" = "true" ]; then
               echo "PR #$pr_number is already in the merge queue."
               return 0
             fi
-            if [ "$rollup" != "SUCCESS" ]; then
-              echo "PR #$pr_number is not green ($rollup) — leaving it for the next sweep, not enrolling."
+            if [ "$verdict" != "SUCCESS" ]; then
+              echo "PR #$pr_number is not green ($verdict) — leaving it for the next sweep, not enrolling."
               return 0
             fi
             if [ "$merge_state" = "DIRTY" ] || [ "$merge_state" = "CONFLICTING" ]; then
@@ -181,22 +253,29 @@ jobs:
 
           if [ "$EVENT_NAME" = "pull_request" ]; then
             # One PR, resolved from the event payload — no head-branch lookup.
-            PR_JSON=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json number,id,isDraft)
+            PR_JSON=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json number,id,isDraft,labels)
+            # Enrollment is label-gated on every path. On `opened` the label job
+            # may still be adding it, in which case the next sweep enrolls.
+            LABELED=$(echo "$PR_JSON" | jq -r --arg l "$LABEL" '[.labels[]?.name] | index($l) != null')
+            if [ "$LABELED" != "true" ]; then
+              echo "PR #$PR_NUMBER does not carry $LABEL yet; the label job adds it and the next sweep enrolls it."
+              exit 0
+            fi
             if [ "$(echo "$PR_JSON" | jq -r '.isDraft')" = "true" ]; then
               # A draft cannot queue. The ready half flips a green labeled
-              # draft on the same cadence, and the next sweep enrolls it.
+              # draft on the same cadence, and the next pass enrolls it.
               echo "PR #$PR_NUMBER is a draft; auto-ready-drafts will flip it when the gates are green, and the next sweep enrolls it."
               exit 0
             fi
             enroll "$(echo "$PR_JSON" | jq -r '.id')" "$PR_NUMBER"
           else
-            # Sweep: every open PR carrying this workflow's label, oldest first.
-            # A fork branch cannot carry the label of a same-repo workflow run,
-            # so the list is same-repo by construction.
-            gh pr list --repo "$GITHUB_REPOSITORY" --label auto-merge --state open --limit 50 \
-              --json number,id,isDraft,mergeStateStatus > prs.json
+            # Sweep: every open PR carrying the configured label, oldest first.
+            # The label is the opt-in gate: this workflow only labels same-repo
+            # PRs, and a maintainer who labels another one has opted it in.
+            gh pr list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit "$SWEEP_LIMIT" \
+              --json number,id,isDraft > prs.json
             count=$(jq 'length' prs.json)
-            echo "Sweep: $count open auto-merge PR(s)."
+            echo "Sweep: $count open $LABEL PR(s)."
             # Process substitution, not a pipe: a pipe would run the loop in a
             # subshell and lose FAILED from the enroll calls.
             while read -r pr; do

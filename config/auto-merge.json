@@ -1,0 +1,12 @@
+{
+  "_comment": "Merge-queue automation tunables — the single source for both workflow halves (auto-merge-trusted.yml and auto-ready-drafts.yml). Edit here, not in the workflow YAML: .github/workflows/* is not writable through the GitHub connector, config/ is. See docs/agents/gitops.md §11.",
+  "label": "auto-merge",
+  "sweepLimit": 100,
+  "gatingWorkflows": [
+    "Continuous Integration & Test Verification",
+    "Policy Gate",
+    "CodeQL",
+    "Secret Scanning",
+    "Auto-merge trusted PRs"
+  ]
+}
