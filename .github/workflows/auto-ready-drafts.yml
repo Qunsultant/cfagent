@@ -86,6 +86,7 @@ jobs:
             echo "label=$(jq -r '.label' <<<"$config")"
             echo "limit=$(jq -r '.sweepLimit' <<<"$config")"
             echo "gating=$(jq -c '.gatingWorkflows' <<<"$config")"
+            echo "excluded=$(jq -c '.excludedAuthors // []' <<<"$config")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Mark eligible drafts ready when all checks are green
@@ -94,14 +95,20 @@ jobs:
           LABEL: ${{ steps.config.outputs.label }}
           SWEEP_LIMIT: ${{ steps.config.outputs.limit }}
           GATING: ${{ steps.config.outputs.gating }}
+          EXCLUDED: ${{ steps.config.outputs.excluded }}
         run: |
           set -euo pipefail
 
           # Eligible drafts: open + draft + the configured label, with the head
           # SHA each one is judged on. `gh pr list` paginates to the limit.
-          DRAFTS=$(gh pr list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open \
-            --limit "$SWEEP_LIMIT" --json number,isDraft,headRefOid \
-            --jq '.[] | select(.isDraft == true) | "\(.number)\t\(.headRefOid)"')
+          PRS=$(gh pr list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open \
+            --limit "$SWEEP_LIMIT" --json number,isDraft,headRefOid,author)
+          # Excluded authors (Dependabot) are never flipped ready — owner rule,
+          # 2026-11-14; the list lives in config/auto-merge.json.
+          DRAFTS=$(printf '%s' "$PRS" | jq -r --argjson ex "$EXCLUDED" '
+            .[] | select(.isDraft == true)
+            | select(([(.author.login // ""), (.author.name // "")] | any(. as $a | ($ex | index($a)) != null)) | not)
+            | "\(.number)\t\(.headRefOid)"')
           if [ -z "$DRAFTS" ]; then
             echo "No eligible draft PRs."
             exit 0

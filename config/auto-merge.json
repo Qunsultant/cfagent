@@ -2,6 +2,8 @@
   "_comment": "Merge-queue automation tunables — the single source for both workflow halves (auto-merge-trusted.yml and auto-ready-drafts.yml). Edit here, not in the workflow YAML: .github/workflows/* is not writable through the GitHub connector, config/ is. See docs/agents/gitops.md §11.",
   "label": "auto-merge",
   "sweepLimit": 100,
+  "_excludedAuthors_comment": "PRs authored by these accounts are never labelled for automation, never flipped ready and never enrolled. Dependabot updates need a human decision (owner direction, 2026-11-14).",
+  "excludedAuthors": ["app/dependabot", "dependabot[bot]"],
   "gatingWorkflows": [
     "Continuous Integration & Test Verification",
     "Policy Gate",
