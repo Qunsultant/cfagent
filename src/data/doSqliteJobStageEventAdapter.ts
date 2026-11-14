@@ -15,24 +15,12 @@ import {
   type JobStageEventRecord,
   type JobStageEventStore,
 } from "./jobStageEventPorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 function ensureTable(sql: SqlStorage): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS ${JOB_STAGE_EVENTS_TABLE} (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      event_key TEXT NOT NULL UNIQUE,
-      claim_key TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      job_id TEXT NOT NULL,
-      stage_id TEXT NOT NULL,
-      unit_id TEXT,
-      action TEXT NOT NULL,
-      at TEXT NOT NULL,
-      started_at TEXT,
-      ended_at TEXT,
-      detail TEXT
-    )`);
+  sql.exec(doTableSql("job_stage_events"));
   sql.exec(
-    `CREATE INDEX IF NOT EXISTS idx_${JOB_STAGE_EVENTS_TABLE}_run ON ${JOB_STAGE_EVENTS_TABLE} (run_id)`,
+    doIndexSql("idx_job_stage_events_run"),
   );
 }
 
