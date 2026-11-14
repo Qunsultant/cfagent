@@ -5,6 +5,7 @@
  * contains zero above-layer SQL `.exec(` calls beyond its single `ActorStatePort` shim.
  */
 
+import { doTableSql } from "./schemaComponent/doCatalogue";
 export interface WorkspaceSqlLike {
   exec(sql: string, ...params: unknown[]): Iterable<unknown>;
 }
@@ -19,16 +20,7 @@ export interface WorkspaceSqlRow {
 export function ensureWorkspaceSqlSchema(sql?: WorkspaceSqlLike): void {
   if (!sql?.exec) return;
   try {
-    sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_agent_workspace_files (
-        user_login TEXT NOT NULL,
-        path TEXT NOT NULL,
-        content TEXT NOT NULL,
-        size INTEGER NOT NULL,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (user_login, path)
-      )
-    `);
+    sql.exec(doTableSql("mas_agent_workspace_files"));
   } catch {
     // Best-effort table creation when sql is a minimal mock
   }
