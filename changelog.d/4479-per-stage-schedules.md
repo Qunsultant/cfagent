@@ -1,0 +1,3 @@
+### Added
+
+- **A stage can carry its own cadence (#4479):** the engine already arms a node's schedule (`registerSchedules` walks every node; one task per stage, `pipeline:<jobId>:<nodePath>`), so this is the surface — the definition spec may declare a stage cadence, the builder writes it onto the node, the define route takes `stageSchedules`, and the flow offers a per-stage cadence (15m · hourly · 6h · daily · custom cron, default "no separate cadence"). Validation uses the engine's rules: an enabled cadence needs one source, cron and interval together are refused as ambiguous, and the floor is one minute. A stage cadence on a newly defined job arms at the host's next declaration until the dynamic-declaration follow-up lands, and the dialog says so. #autoclaw-001

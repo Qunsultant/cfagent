@@ -34,6 +34,7 @@ export interface JobDefinitionsRouteContext {
     overrides: {
       stageParams?: Record<string, Record<string, unknown>>;
       stageModes?: Record<string, Partial<JobExecutionMode>>;
+      stageSchedules?: Record<string, { intervalMinutes?: number; cron?: string }>;
     },
   ) => Promise<JobDefinitionDefineResult>;
 }
@@ -52,6 +53,23 @@ function withSelectOptions(spec: JobDefinitionSpec): JobDefinitionSpec {
     return param;
   });
   return parameters ? { ...spec, parameters } : spec;
+}
+
+function readStageSchedules(
+  value: unknown,
+): Record<string, { intervalMinutes?: number; cron?: string }> | undefined {
+  const raw = readStageMap(value);
+  if (!raw) return undefined;
+  const out: Record<string, { intervalMinutes?: number; cron?: string }> = {};
+  for (const [kind, entry] of Object.entries(raw)) {
+    const next: { intervalMinutes?: number; cron?: string } = {};
+    if (typeof entry.intervalMinutes === "number" && Number.isFinite(entry.intervalMinutes)) {
+      next.intervalMinutes = entry.intervalMinutes;
+    }
+    if (typeof entry.cron === "string" && entry.cron.trim()) next.cron = entry.cron.trim();
+    if (next.intervalMinutes !== undefined || next.cron) out[kind] = next;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function readStageMap(value: unknown): Record<string, Record<string, unknown>> | undefined {
@@ -130,10 +148,12 @@ export async function handleJobDefinitionsRoutes(
   const stageModes = readStageMap(body.stageModes) as
     | Record<string, Partial<JobExecutionMode>>
     | undefined;
+  const stageSchedules = readStageSchedules(body.stageSchedules);
   try {
     const defined = await ctx.defineJobFromSpec(spec.id, jobId, params, {
       ...(stageParams ? { stageParams } : {}),
       ...(stageModes ? { stageModes } : {}),
+      ...(stageSchedules ? { stageSchedules } : {}),
     });
     return Response.json({
       ...defined,

@@ -35,6 +35,13 @@ export interface JobStageSpec {
    * `effectiveMode`), so this is a surface, not a new capability.
    */
   executionMode?: Partial<JobExecutionMode>;
+  /**
+   * Issue #4479 — this stage's own cadence. The engine already walks nodes
+   * in `registerSchedules` and arms `node.schedule`, so a stage cadence is a
+   * surface over an existing capability (one task id per stage:
+   * `pipeline:<jobId>:<nodePath>`).
+   */
+  schedule?: { enabled: boolean; cron?: string; interval?: string };
   /** Nested sub-stages, when the stage composes others. */
   children?: JobStageSpec[];
 }
@@ -151,13 +158,49 @@ function resolveStage(raw: unknown, specId: string, path: string): JobStageSpec 
       );
     }
   }
+  const schedule = isRecord(raw.schedule)
+    ? resolveStageSchedule(raw.schedule, specId, path)
+    : undefined;
   return {
     kind,
     step,
     ...(params ? { params } : {}),
     ...(parameters && parameters.length > 0 ? { parameters } : {}),
     ...(executionMode ? { executionMode } : {}),
+    ...(schedule ? { schedule } : {}),
     ...(children && children.length > 0 ? { children } : {}),
+  };
+}
+
+/**
+ * Issue #4479 — one stage's cadence. The engine's own rule (an enabled
+ * schedule needs a cron expression or an interval) is enforced here so the
+ * refusal happens at load time, and both at once is refused as ambiguous:
+ * `registerSchedules` would arm one schedule with two sources.
+ */
+function resolveStageSchedule(
+  raw: Record<string, unknown>,
+  specId: string,
+  path: string,
+): { enabled: boolean; cron?: string; interval?: string } {
+  const fail = (reason: string): never => {
+    throw new Error(`Job definition "${specId}" stage ${path} schedule is invalid: ${reason}`);
+  };
+  if (raw.enabled !== undefined && typeof raw.enabled !== "boolean") {
+    fail('"enabled" must be a boolean.');
+  }
+  const enabled = raw.enabled === true;
+  const cron = typeof raw.cron === "string" && raw.cron.trim() ? raw.cron.trim() : undefined;
+  const interval =
+    typeof raw.interval === "string" && raw.interval.trim() ? raw.interval.trim() : undefined;
+  if (raw.cron !== undefined && cron === undefined) fail('"cron" must be a non-empty string.');
+  if (raw.interval !== undefined && interval === undefined) fail('"interval" must be a non-empty string.');
+  if (cron && interval) fail("a stage schedule takes a cron expression or an interval, not both.");
+  if (enabled && !cron && !interval) fail("an enabled schedule requires a cron expression or an interval.");
+  return {
+    enabled,
+    ...(cron ? { cron } : {}),
+    ...(interval ? { interval } : {}),
   };
 }
 

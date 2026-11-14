@@ -54,6 +54,13 @@ const MODE_AXES: ReadonlyArray<{ key: string; label: string; options: string[] }
   { key: "shape", label: "Shape", options: ["monolith", "sharded"] },
 ];
 
+const STAGE_CADENCES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "15", label: "Every 15 minutes" },
+  { id: "60", label: "Hourly" },
+  { id: "360", label: "Every 6 hours" },
+  { id: "1440", label: "Daily" },
+];
+
 const CADENCES: ReadonlyArray<{ id: string; label: string; intervalSeconds: number }> = [
   { id: "15m", label: "Every 15 minutes", intervalSeconds: 15 * 60 },
   { id: "1h", label: "Hourly", intervalSeconds: 60 * 60 },
@@ -70,6 +77,9 @@ export function WorkflowDefinitionFlow() {
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [stageModes, setStageModes] = useState<Record<string, Record<string, string>>>({});
   const [stageParams, setStageParams] = useState<Record<string, Record<string, string>>>({});
+  const [stageSchedules, setStageSchedules] = useState<
+    Record<string, { intervalMinutes?: number; cron?: string }>
+  >({});
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [scheduled, setScheduled] = useState<{ jobId: string; intervalSeconds: number } | null>(null);
@@ -109,6 +119,7 @@ export function WorkflowDefinitionFlow() {
     setParamValues({});
     setStageModes({});
     setStageParams({});
+    setStageSchedules({});
     setActionError(null);
     setScheduled(null);
   };
@@ -125,7 +136,7 @@ export function WorkflowDefinitionFlow() {
           Accept: "application/json",
           ...csrfHeaders(),
         },
-        body: JSON.stringify({ jobId, params: paramValues, stageModes, stageParams }),
+        body: JSON.stringify({ jobId, params: paramValues, stageModes, stageParams, stageSchedules }),
       });
       const definedBody = (await defined.json().catch(() => ({}))) as { error?: string };
       if (!defined.ok) {
@@ -162,6 +173,12 @@ export function WorkflowDefinitionFlow() {
       <Stack gap="3">
         <strong>Workflow definitions</strong>
         <span>Define a job from its spec and schedule it</span>
+        <Notice tone="warning" density="compact" title="Stage cadences">
+          A stage cadence is a separate schedule for that stage. Until the host re-declares its
+          scheduled tasks (the dynamic-declaration follow-up), a stage cadence on a newly defined job
+          takes effect at the host&apos;s next declaration; the job&apos;s own cadence is armed
+          immediately.
+        </Notice>
         <Notice tone="info" density="compact">
           Every definition is validated before it is defined: a spec with an unknown stage, a
           missing step or an invalid mode refuses by name, a required parameter with no value
@@ -269,6 +286,49 @@ export function WorkflowDefinitionFlow() {
                     ))}
                   </Select>
                 ))}
+                <div>
+                  <span>{`${stage.kind} — cadence`}</span>
+                  <Select
+                    aria-label={`${stage.kind} cadence`}
+                    value={
+                      stageSchedules[stage.kind]?.cron
+                        ? "cron"
+                        : stageSchedules[stage.kind]?.intervalMinutes !== undefined
+                          ? String(stageSchedules[stage.kind]!.intervalMinutes)
+                          : ""
+                    }
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setStageSchedules((current) => {
+                        const next = { ...current };
+                        if (!value) delete next[stage.kind];
+                        else if (value === "cron") next[stage.kind] = { cron: "" };
+                        else next[stage.kind] = { intervalMinutes: Number(value) };
+                        return next;
+                      });
+                    }}
+                  >
+                    <option value="">No separate cadence</option>
+                    {STAGE_CADENCES.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                    <option value="cron">Custom cron (UTC)</option>
+                  </Select>
+                  {stageSchedules[stage.kind]?.cron !== undefined && (
+                    <TextInput
+                      aria-label={`${stage.kind} cron`}
+                      value={stageSchedules[stage.kind]?.cron ?? ""}
+                      onChange={(event) =>
+                        setStageSchedules((current) => ({
+                          ...current,
+                          [stage.kind]: { cron: event.target.value },
+                        }))
+                      }
+                    />
+                  )}
+                </div>
                 {(stage.parameters ?? []).map((param) => (
                   <TextInput
                     key={param.name}

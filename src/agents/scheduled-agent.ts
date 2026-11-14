@@ -1187,6 +1187,8 @@ export class ScheduledAgent extends PortThink {
       /** Issue #4466 — per-stage values the flow collected, keyed by stage kind. */
       stageParams?: Record<string, Record<string, unknown>>;
       stageModes?: Record<string, Partial<import("../data/jobPipelinePorts").JobExecutionMode>>;
+      /** Issue #4479 — per-stage cadence: minutes or a cron expression. */
+      stageSchedules?: Record<string, { intervalMinutes?: number; cron?: string }>;
     },
   ): Promise<{ jobId: string; name: string; version: number; stages: number }> {
     const spec = jobDefinitionSpec(specId);
@@ -1211,6 +1213,7 @@ export class ScheduledAgent extends PortThink {
     const perStage = bindStageOverrides(spec, {
       stageParams: opts?.stageParams,
       stageModes: opts?.stageModes,
+      stageSchedules: opts?.stageSchedules,
     });
     const definition = await control.defineJob(
       buildJobConfigFromSpec(spec, id, runParams, perStage),

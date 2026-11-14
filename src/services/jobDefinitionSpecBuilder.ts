@@ -15,6 +15,8 @@ import type { JobExecutionMode } from "../data/jobPipelinePorts";
 export interface JobDefinitionPerStage {
   params?: Record<string, Record<string, unknown>>;
   modes?: Record<string, Partial<JobExecutionMode>>;
+  /** Issue #4479 — a stage's own cadence (engine `JobScheduleConfig` shape). */
+  schedules?: Record<string, { enabled: boolean; cron?: string; interval?: string }>;
 }
 
 export interface RawJobConfig {
@@ -45,6 +47,7 @@ function nodeFromStage(stage: JobStageSpec, perStage: JobDefinitionPerStage): Re
     : undefined;
   const stageParams = { ...(stage.params ?? {}), ...(perStage.params?.[stage.kind] ?? {}) };
   const mode = { ...(stage.executionMode ?? {}), ...(perStage.modes?.[stage.kind] ?? {}) };
+  const schedule = { ...(stage.schedule ?? {}), ...(perStage.schedules?.[stage.kind] ?? {}) };
   return {
     kind: stage.kind,
     steps: [
@@ -54,6 +57,7 @@ function nodeFromStage(stage: JobStageSpec, perStage: JobDefinitionPerStage): Re
       },
     ],
     ...(Object.keys(mode).length > 0 ? { executionMode: mode } : {}),
+    ...(schedule.enabled ? { schedule } : {}),
     ...(children ? { children } : {}),
   };
 }

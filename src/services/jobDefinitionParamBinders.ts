@@ -94,6 +94,8 @@ export function bindStageOverrides(
   input: {
     stageParams?: Record<string, Record<string, unknown>>;
     stageModes?: Record<string, Partial<JobExecutionMode>>;
+    /** Issue #4479 — a stage's cadence, as minutes or a cron expression. */
+    stageSchedules?: Record<string, { intervalMinutes?: number; cron?: string }>;
   },
 ): JobDefinitionPerStage {
   const stages = new Map(spec.stages.map((stage) => [stage.kind, stage]));
@@ -144,8 +146,42 @@ export function bindStageOverrides(
     }
     modes[kind] = { ...mode };
   }
+  const schedules: Record<string, { enabled: boolean; cron?: string; interval?: string }> = {};
+  for (const [kind, entry] of Object.entries(input.stageSchedules ?? {})) {
+    if (!stages.has(kind)) {
+      throw new Error(
+        `Job definition "${spec.id}" has no stage "${kind}". Its stages are: ${[...stages.keys()].join(", ")}.`,
+      );
+    }
+    const cron = typeof entry.cron === "string" && entry.cron.trim() ? entry.cron.trim() : undefined;
+    const minutes =
+      typeof entry.intervalMinutes === "number" && Number.isFinite(entry.intervalMinutes)
+        ? entry.intervalMinutes
+        : undefined;
+    if (cron && minutes !== undefined) {
+      throw new Error(
+        `Stage "${kind}" of job definition "${spec.id}" takes a cron expression or an interval, not both.`,
+      );
+    }
+    if (minutes !== undefined && minutes < 1) {
+      throw new Error(
+        `Stage "${kind}" of job definition "${spec.id}" has an interval below one minute — the engine's floor is one minute.`,
+      );
+    }
+    if (!cron && minutes === undefined) {
+      throw new Error(
+        `Stage "${kind}" of job definition "${spec.id}" declares a cadence with neither a cron expression nor an interval — refusing rather than inventing one.`,
+      );
+    }
+    schedules[kind] = {
+      enabled: true,
+      ...(cron ? { cron } : {}),
+      ...(minutes !== undefined ? { interval: `every ${minutes} minutes` } : {}),
+    };
+  }
   return {
     ...(Object.keys(params).length > 0 ? { params } : {}),
     ...(Object.keys(modes).length > 0 ? { modes } : {}),
+    ...(Object.keys(schedules).length > 0 ? { schedules } : {}),
   };
 }
