@@ -14,37 +14,14 @@ import type {
   PolicyVerdictPort,
   PolicyVerdictRecentRow,
 } from "./orchestratorTablePorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqlitePolicyVerdictStore implements PolicyVerdictPort {
   constructor(private readonly sql: OrchestratorTableSqlExecutor) {}
 
   ensureSchema(): void {
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_policy_verdicts (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        symbol TEXT NOT NULL,
-        action TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        notional REAL,
-        mode TEXT NOT NULL,
-        dry_run INTEGER NOT NULL DEFAULT 0,
-        passed INTEGER NOT NULL,
-        execution_allowed INTEGER NOT NULL,
-        requires_approval INTEGER NOT NULL,
-        binding_rule TEXT,
-        detail TEXT NOT NULL,
-        limits_json TEXT NOT NULL,
-        projections_json TEXT NOT NULL,
-        findings_json TEXT NOT NULL,
-        signature TEXT NOT NULL,
-        signing_key_id TEXT NOT NULL,
-        proposer_did TEXT NOT NULL,
-        authorizer_did TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )
-    `);
-    this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_policy_verdicts_created ON mas_policy_verdicts(created_at DESC)");
+    this.sql.exec(doTableSql("mas_policy_verdicts"));
+    this.sql.exec(doIndexSql("idx_mas_policy_verdicts_created"));
   }
 
   insertVerdict(row: PolicyVerdictInsert): void {
