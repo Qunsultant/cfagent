@@ -1,0 +1,1268 @@
+{
+  "tables": {
+    "mas_learnings": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "domain",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "observation",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "evidence_refs",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "confidence",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "superseded_by",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_cancel_previews": {
+      "columns": [
+        {
+          "name": "token",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "ids_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "expires_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "used_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_ladder_states": {
+      "columns": [
+        {
+          "name": "ladder_id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "symbol",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "entry_mode",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "spec_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "plan_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "placed_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "committed_notional",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "stopped_by",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_delivery_claims": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "claimed_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_stage_claims": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "claimed_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_feed_datasets": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "dataset",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "as_of",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "rows_persisted",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "artifact_json",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_trades": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "symbol",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "action",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "order_type",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "quantity",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "price",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "total_value",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "order_ref",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "proposer_did",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "authorizer_did",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "proof_signature",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "preview_notes",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "expiration_schedule_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "broker",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "price_source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_reports": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "summary",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "generation_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "user_login",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "body_r2_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "fanout_outcome",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_async_jobs": {
+      "columns": [
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "result_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "response_status",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "completed_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "parent_job_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "job_kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "channel",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "not_before",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stage",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "chain_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stuck_alerted_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "trigger",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "triggered_by",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "schedule_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "last_activity_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "error_code",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_iv_history": {
+      "columns": [
+        {
+          "name": "symbol",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "date",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "atm_iv",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "spot",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "expiry_date",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "dte",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "collected_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "broker",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {
+        "primary_key": {
+          "kind": "primaryKey",
+          "columns": [
+            "symbol",
+            "date"
+          ]
+        }
+      }
+    },
+    "job_pipeline_definitions": {
+      "columns": [
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "definition_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "job_pipeline_instances": {
+      "columns": [
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "desired_state",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "current_run_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_started_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_trigger",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_schedule_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_async_job_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "checkpoint_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stage_checkpoint_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stage_desired_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "job_run_records": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "pk": 1
+        },
+        {
+          "name": "system",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "operation",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "started",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "finished",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "triggered_by",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "trigger_text",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "schedule_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "async_job_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "workflow_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "error_text",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "descriptor",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "artifact_refs_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "broker_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "data_provider_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "mode_source",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_data_captures": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "provider_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "request_params_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "user_login",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "fetched_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "raw_kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "raw_blob_ref",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "raw_byte_size",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "raw_sha256",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "normalized_digest",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "retention_class",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "failure_error",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "failure_kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "failure_message",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_data_provider_routes": {
+      "columns": [
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "primary_provider_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "gap_fill_provider_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "min_tier",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_report_confirmations": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "decided_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "decided_by",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "report_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_opportunity_scans": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "generated_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "model_version",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "user_login",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "schedule_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "async_job_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "workflow_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "summary_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "result_json",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "stock_copilot_positions": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "user_login",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "symbol",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "strategy",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "quantity",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "entry_price",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "stop_price",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "target_price",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "broker_order_ref",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "opened_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "exit_broker_order_ref",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "exit_price",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
+          "name": "exit_reason",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "entry_session",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "entry_order_type",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "stock_copilot_activity": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "user_login",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "cycle_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "entries_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "exits_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "session",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "critic_verdict_json",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    }
+  },
+  "indexes": {
+    "idx_learnings_domain": {
+      "table": "mas_learnings",
+      "columns": [
+        "domain"
+      ],
+      "unique": false
+    },
+    "idx_learnings_active": {
+      "table": "mas_learnings",
+      "columns": [
+        "superseded_by"
+      ],
+      "unique": false
+    },
+    "idx_mas_reports_created": {
+      "table": "mas_reports",
+      "columns": [
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_reports_user": {
+      "table": "mas_reports",
+      "columns": [
+        "user_login"
+      ],
+      "unique": false
+    },
+    "idx_mas_reports_generation": {
+      "table": "mas_reports",
+      "columns": [
+        "user_login",
+        "generation_id"
+      ],
+      "unique": true
+    },
+    "idx_mas_async_jobs_session_created": {
+      "table": "mas_async_jobs",
+      "columns": [
+        "session_id",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_async_jobs_status_created": {
+      "table": "mas_async_jobs",
+      "columns": [
+        "status",
+        "created_at"
+      ],
+      "unique": false
+    },
+    "idx_mas_async_jobs_parent": {
+      "table": "mas_async_jobs",
+      "columns": [
+        "parent_job_id"
+      ],
+      "unique": false
+    },
+    "idx_mas_async_jobs_chain": {
+      "table": "mas_async_jobs",
+      "columns": [
+        "chain_id"
+      ],
+      "unique": false
+    },
+    "idx_mas_iv_history_symbol_date": {
+      "table": "mas_iv_history",
+      "columns": [
+        "symbol",
+        "date DESC"
+      ],
+      "unique": false
+    },
+    "job_run_records_job_idx": {
+      "table": "job_run_records",
+      "columns": [
+        "job_id",
+        "started DESC",
+        "id DESC"
+      ],
+      "unique": false
+    },
+    "job_run_records_recent_idx": {
+      "table": "job_run_records",
+      "columns": [
+        "started DESC",
+        "id DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_data_captures_run": {
+      "table": "mas_data_captures",
+      "columns": [
+        "tenant_id",
+        "run_id"
+      ],
+      "unique": false
+    },
+    "idx_mas_data_captures_provider": {
+      "table": "mas_data_captures",
+      "columns": [
+        "tenant_id",
+        "provider_id"
+      ],
+      "unique": false
+    },
+    "idx_mas_opportunity_scans_generated_at": {
+      "table": "mas_opportunity_scans",
+      "columns": [
+        "generated_at DESC"
+      ],
+      "unique": false
+    }
+  }
+}
