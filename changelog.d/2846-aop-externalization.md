@@ -1,0 +1,9 @@
+### Added
+
+- **One commercial URL catalog as the single source of truth (#2846):** `src/data/commercialUrlCatalog.ts` owns every commercial route path (47 routes, canonical `/api` + bare spellings, channel family included). The dispatcher, handlers, and all client call sites derive paths from it; the IAAA explorer entry derives its prefixes + source from it. A pin test (`tests/commercial_url_catalog_2846.test.ts`) fails if any hardcoded commercial path literal survives elsewhere in `src/` or if the handler's `endsWith` set drifts from the catalog.
+- **Commercial defaults as configuration (#2846):** `config/commercial-defaults.json` + `src/config/commercialDefaults.ts` own the inventoried pagination defaults with values unchanged (receipts default 50 / cap 100, transactions 50, ledger payments 50). The receipts, transactions, and ledger-payments routes read them from the config port.
+- **Commercial outcome codes in the existing outcome catalog (#2846):** 69 new `commercial`/`system` entries (12 + 57) in `src/outcomes/outcomeCatalog.json`, resolved only through the single resolver `src/outcomes/outcomeAspects.ts` (legacy alias `DeactivationBlockedByActiveSubscription` → `FAILURE_DEACTIVATION_BLOCKED_BY_SUBSCRIPTION`). Every commercial `Response.json` body now carries a resolving `code`; raw store error text no longer reaches a commercial client (coded `codedMessage(...)` instead). No new catalog, no second resolver; the frozen error catalog is untouched.
+
+### Changed
+
+- **Commercial clients and dispatcher use the catalog (#2846):** the five client API modules, Billing/Selling panels, operator/account panels, `productMarketing.ts`, the platform dispatcher, `auth.ts` cancel route, and the digest run-due URL all build paths from the catalog. No behavior change: paths, defaults, and response shapes are unchanged apart from the added `code` field (and coded `error` text where raw store text leaked).

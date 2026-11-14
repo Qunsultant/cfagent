@@ -86,6 +86,7 @@ import { StoreOperatorsPanel } from "./StoreOperatorsPanel";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { withCsrfInit, csrfHeaders } from "./apiFetch";
 
+import { commercialPath } from "../data/commercialUrlCatalog";
 export interface FakeConfig {
   monetizationOn: boolean;
   family: ScreenerFamily;
@@ -509,7 +510,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     const headers: Record<string, string> = { "x-user-login": userLogin };
     let pricingPrices: Partial<Record<StorePriceFamily, number>> = {};
     try {
-      const res = await globalThis.fetch("/api/payments/agentic/commercial/pricing", { headers });
+      const res = await globalThis.fetch(commercialPath("pricing"), { headers });
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
         setLoadError(typeof data["error"] === "string" ? data["error"] : `Price list failed (HTTP ${res.status}).`);
@@ -534,7 +535,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     // blocks the section, and for a non-operator the 403 here is
     // expected (the probe below is the gating signal).
     try {
-      const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", { headers });
+      const res = await globalThis.fetch(commercialPath("prices"), { headers });
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       const list = data["entries"];
       if (!res.ok || !Array.isArray(list)) {
@@ -571,7 +572,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
       setEntriesAvailable(false);
     }
     try {
-      const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", {
+      const res = await globalThis.fetch(commercialPath("prices"), {
         method: "POST",
         headers: { ...headers, "content-type": "application/json", ...csrfHeaders() },
         body: "{}",
@@ -595,7 +596,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     setBusyFamily(family);
     setRowError((prev) => ({ ...prev, [family]: undefined }));
     try {
-      const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", {
+      const res = await globalThis.fetch(commercialPath("prices"), {
         method: "POST",
         headers: { "x-user-login": userLogin, "content-type": "application/json", ...csrfHeaders() },
         body: JSON.stringify({ family, approvalStatus: "approved" }),
@@ -715,7 +716,7 @@ export function PriceApprovalSection({ userLogin }: { userLogin?: string }) {
     setBusyFamily(family);
     setRowError((prev) => ({ ...prev, [family]: undefined }));
     try {
-      const res = await globalThis.fetch("/api/payments/agentic/commercial/prices", {
+      const res = await globalThis.fetch(commercialPath("prices"), {
         method: "POST",
         headers: { "x-user-login": userLogin, "content-type": "application/json", ...csrfHeaders() },
         body: JSON.stringify(body),

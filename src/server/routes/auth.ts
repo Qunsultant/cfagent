@@ -66,6 +66,7 @@ import { createLifecycleAdapter } from "../../data/createLifecyclePorts";
 import { listApiKeys, mintApiKey, revokeApiKey } from "../../security/apiKeys";
 import { sendProvisioningWelcome } from "../../services/provisioningWelcome";
 
+import { commercialPath } from "../../data/commercialUrlCatalog";
 /**
  * Slice 3 of Qunsultant/cfagent#2902 (Auth & IAAA) — moves only.
  * The login family of handleFetch, verbatim and in original order:
@@ -3200,7 +3201,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                 error:
                   "Deactivation blocked: an active subscription is still billing this identity. Cancel it first, then deactivate.",
                 code: "DeactivationBlockedByActiveSubscription",
-                cancelRoute: "/api/payments/agentic/commercial/subscription/cancel",
+                cancelRoute: commercialPath("subscriptionCancel"),
                 loginsWithActive: subscriptionGate.loginsWithActive,
               },
               { status: 409 },

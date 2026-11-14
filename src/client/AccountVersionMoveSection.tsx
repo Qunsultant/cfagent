@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Notice, Select, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { DEFAULT_SEGMENT, resolveEffectiveVersion } from "../data/productPorts";
+import { COMMERCIAL_API_BASE, commercialPath } from "../data/commercialUrlCatalog";
 import type { AccountSubscriptionView } from "./AccountAdminPanel";
 import type { PlanVersionView, ProductEntry } from "./ProductsSection";
 
@@ -68,8 +69,8 @@ export function AccountVersionMoveSection({
     setError("");
     try {
       const [accountBody, productsBody] = await Promise.all([
-        apiJson<{ segment?: string }>(`/api/payments/agentic/commercial/account?userId=${encodeURIComponent(userId)}`),
-        apiJson<{ products: ProductEntry[] }>("/api/payments/agentic/commercial/products"),
+        apiJson<{ segment?: string }>(`${commercialPath("account")}?userId=${encodeURIComponent(userId)}`),
+        apiJson<{ products: ProductEntry[] }>(commercialPath("products")),
       ]);
       setSegment(accountBody.segment ?? DEFAULT_SEGMENT);
       setEntries(productsBody.products ?? []);
@@ -106,7 +107,7 @@ export function AccountVersionMoveSection({
     setNote("");
     try {
       const body = await apiJson<{ moved: boolean; fromVersionId: string; toVersionId: string }>(
-        `/api/payments/agentic/commercial/subscriptions/${encodeURIComponent(subscription.id)}/move`,
+        `${COMMERCIAL_API_BASE}/subscriptions/${encodeURIComponent(subscription.id)}/move`,
         { method: "POST", body: JSON.stringify({ toVersionId, reason: reason.trim() || null }) },
       );
       const from = planVersions.get(body.fromVersionId);
@@ -134,7 +135,7 @@ export function AccountVersionMoveSection({
     setNote("");
     try {
       const body = await apiJson<{ previousSegment: string; segment: string }>(
-        `/api/payments/agentic/commercial/accounts/${encodeURIComponent(userId)}/segment`,
+        `${COMMERCIAL_API_BASE}/accounts/${encodeURIComponent(userId)}/segment`,
         {
           method: "POST",
           body: JSON.stringify({ segment: effectiveSegmentChoice, reason: reason.trim() || null }),

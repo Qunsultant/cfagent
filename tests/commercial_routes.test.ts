@@ -358,6 +358,7 @@ describe("free-run allowance routes (#3315)", () => {
         { family: "options", runs: 10 },
         { family: "strategy", runs: 10 },
       ],
+      code: "SUCCESS_FREE_RUN_ALLOWANCE_READ",
     });
     const userRead = await call(ctx, "GET", "/payments/agentic/commercial/free-run-allowance", "u1");
     expect(userRead?.status).toBe(403);
@@ -372,7 +373,7 @@ describe("free-run allowance routes (#3315)", () => {
       runs: 25,
     });
     expect(set?.status).toBe(200);
-    expect(await set?.json()).toEqual({ family: "goal", runs: 25 });
+    expect(await set?.json()).toEqual({ family: "goal", runs: 25, code: "SUCCESS_FREE_RUN_ALLOWANCE_UPDATED" });
     const audit = (ctx.audit as any).mock.calls.find(
       ([t]: [string]) => t === "commercial.free_run_allowance.set",
     );

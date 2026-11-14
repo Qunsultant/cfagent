@@ -17,7 +17,8 @@
 import type { RefundKind } from "./refundPolicyApi";
 import { withCsrfInit } from "./apiFetch";
 
-const BASE = "/api/payments/agentic/commercial";
+import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
+const BASE = COMMERCIAL_API_BASE;
 
 export type { RefundKind };
 

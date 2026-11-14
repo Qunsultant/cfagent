@@ -27,6 +27,7 @@ import { Button, Notice, Select, Stack } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { listPlans, type PlanView } from "./commercialApi";
 
+import { commercialPath } from "../data/commercialUrlCatalog";
 async function readJson(res: Response): Promise<Record<string, unknown>> {
   return (await res.json().catch(() => ({}))) as Record<string, unknown>;
 }
@@ -72,7 +73,7 @@ export function SubscriptionGrantSection({
     setNote("");
     setGrantError("");
     try {
-      const res = await apiFetch("/api/payments/agentic/commercial/subscription/grant", {
+      const res = await apiFetch(commercialPath("subscriptionGrant"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: targetLogin, planId: selectedPlanId }),

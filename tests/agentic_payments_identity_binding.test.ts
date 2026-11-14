@@ -438,7 +438,7 @@ describe("auto-approve limit persists per identity (#183)", () => {
       ctx,
     );
     expect(postRes?.status).toBe(200);
-    expect(await postRes!.json()).toEqual({ success: true, autoApproveLimitUSD: 0.33 });
+    expect(await postRes!.json()).toEqual({ success: true, autoApproveLimitUSD: 0.33, code: "SUCCESS_AUTO_APPROVE_LIMIT_UPDATED" });
     expect(audit).toHaveBeenCalledWith("agentic_payment.limit_updated", "payments", { limitUSD: 0.33 });
 
     // A later request (fresh service inside the handler) reads it back.

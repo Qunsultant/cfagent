@@ -23,8 +23,9 @@
  */
 import { withCsrfInit } from "./apiFetch";
 import { listOperators } from "./refundPolicyApi";
+import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 
-const BASE = "/api/payments/agentic/commercial";
+const BASE = COMMERCIAL_API_BASE;
 
 export type ApprovedFreeQuotaFamily = "stock" | "goal" | "options" | "strategy";
 export type ApprovedFreeQuotaWindowKind = "month" | "week";

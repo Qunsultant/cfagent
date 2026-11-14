@@ -32,6 +32,7 @@ import type {
 } from "./productCatalogue";
 import type { PriceFamily } from "./priceCataloguePorts";
 
+import { commercialBarePath } from "./commercialUrlCatalog";
 /* ------------------------------------------------------------------ */
 /* Teaser policy (#1076 B1)                                            */
 /* ------------------------------------------------------------------ */
@@ -269,7 +270,7 @@ export function buildCatalogDisplay(
     } else if (entry.availability === "entitlement-pending") {
       purchasePath = {
         label: "View plans",
-        route: "/payments/agentic/commercial/plans",
+        route: commercialBarePath("plans"),
         note: "Subscription checkout is a separate slice (#2656); this points at the existing plans surface, not a checkout flow.",
       };
     } else {
