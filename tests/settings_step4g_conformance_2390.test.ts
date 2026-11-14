@@ -207,9 +207,17 @@ describe("G-7 ownership: one writer, one ensurer", () => {
   });
 
   it("mas_settings DDL ensurers in src/ are exactly the settings adapter", () => {
+    // #4282 P2b: the mas_settings CREATE moved from the adapter
+    // into the DO catalogue (src/data/schemaComponent/
+    // doCatalogue.ts), so the catalogue is now the SOLE file
+    // holding the statement text — the adapter still executes
+    // it, through MAS_SETTINGS_DDL. The DDL has exactly one
+    // home, as the pin requires; only the file changed.
     const re = /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+mas_settings(?![\w])/gi;
     const actual = SRC_FILES.filter((f) => re.test(STRIPPED.get(f)!)).sort();
-    expect(actual).toEqual([SETTINGS_ADAPTER]);
+    expect(actual).toEqual([
+      "src/data/schemaComponent/doCatalogue.ts",
+    ]);
   });
 });
 
