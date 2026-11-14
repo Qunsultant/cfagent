@@ -71,6 +71,15 @@ A definition created after host start is armed through that schedule row. The
 alternative — teaching the Think host to re-declare its scheduled tasks on
 definition change — is out of scope here and filed as issue #4457.
 
+**Per-stage parameters and mode (#4466).** Both were already engine
+capabilities: a node carries `executionMode` (`JobNodeConfig`, merged over the
+job's resolved mode by `effectiveMode`) and `steps[].params` (merged over the
+run's params). The flow now surfaces them: each stage row in the dialog offers
+a mode override per axis (default "inherit") and the parameters its spec
+declares. Values are validated against the spec before the definition exists —
+an unknown stage, an undeclared stage parameter, a missing required one or an
+unsupported mode refuses by name.
+
 ## Definitions are externalized (#4365)
 
 A job is a spec, not code. `src/config/jobDefinitionCatalog.ts` holds the

@@ -130,7 +130,7 @@ import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRe
 import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { buildJobConfigFromSpec } from "../services/jobDefinitionSpecBuilder";
-import { bindJobDefinitionParams } from "../services/jobDefinitionParamBinders";
+import { bindJobDefinitionParams, bindStageOverrides } from "../services/jobDefinitionParamBinders";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import {
   buildFeedJobSurfaceView,
@@ -1181,7 +1181,13 @@ export class ScheduledAgent extends PortThink {
   async definePipelineJobFromSpec(
     specId: string,
     jobId: string,
-    opts?: { userLogin?: string; params?: Record<string, unknown> },
+    opts?: {
+      userLogin?: string;
+      params?: Record<string, unknown>;
+      /** Issue #4466 — per-stage values the flow collected, keyed by stage kind. */
+      stageParams?: Record<string, Record<string, unknown>>;
+      stageModes?: Record<string, Partial<import("../data/jobPipelinePorts").JobExecutionMode>>;
+    },
   ): Promise<{ jobId: string; name: string; version: number; stages: number }> {
     const spec = jobDefinitionSpec(specId);
     const id = typeof jobId === "string" ? jobId.trim() : "";
@@ -1200,7 +1206,15 @@ export class ScheduledAgent extends PortThink {
     // run parameters (universe → shards for the screener); a missing or
     // undeclared parameter refuses here, before the definition exists.
     const runParams = bindJobDefinitionParams(spec, opts?.params ?? {}, ownerLogin);
-    const definition = await control.defineJob(buildJobConfigFromSpec(spec, id, runParams));
+    // Issue #4466 — per-stage parameters and mode overrides, validated
+    // against the spec before the definition exists.
+    const perStage = bindStageOverrides(spec, {
+      stageParams: opts?.stageParams,
+      stageModes: opts?.stageModes,
+    });
+    const definition = await control.defineJob(
+      buildJobConfigFromSpec(spec, id, runParams, perStage),
+    );
     return {
       jobId: definition.jobId,
       name: definition.name,

@@ -13,6 +13,7 @@
  */
 import { jobDefinitionSpec, listJobDefinitionSpecs, type JobDefinitionSpec } from "../../config/jobDefinitionCatalog";
 import { UNIVERSES } from "../../trading";
+import type { JobExecutionMode } from "../../data/jobPipelinePorts";
 
 export interface JobDefinitionDefineResult {
   jobId: string;
@@ -29,6 +30,11 @@ export interface JobDefinitionsRouteContext {
     specId: string,
     jobId: string,
     params: Record<string, unknown>,
+    /** Issue #4466 — per-stage values, keyed by stage kind. */
+    overrides: {
+      stageParams?: Record<string, Record<string, unknown>>;
+      stageModes?: Record<string, Partial<JobExecutionMode>>;
+    },
   ) => Promise<JobDefinitionDefineResult>;
 }
 
@@ -46,6 +52,17 @@ function withSelectOptions(spec: JobDefinitionSpec): JobDefinitionSpec {
     return param;
   });
   return parameters ? { ...spec, parameters } : spec;
+}
+
+function readStageMap(value: unknown): Record<string, Record<string, unknown>> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [kind, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      out[kind] = entry as Record<string, unknown>;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function decode(value: string): string {
@@ -109,8 +126,15 @@ export async function handleJobDefinitionsRoutes(
     body.params && typeof body.params === "object" && !Array.isArray(body.params)
       ? (body.params as Record<string, unknown>)
       : {};
+  const stageParams = readStageMap(body.stageParams);
+  const stageModes = readStageMap(body.stageModes) as
+    | Record<string, Partial<JobExecutionMode>>
+    | undefined;
   try {
-    const defined = await ctx.defineJobFromSpec(spec.id, jobId, params);
+    const defined = await ctx.defineJobFromSpec(spec.id, jobId, params, {
+      ...(stageParams ? { stageParams } : {}),
+      ...(stageModes ? { stageModes } : {}),
+    });
     return Response.json({
       ...defined,
       specId: spec.id,

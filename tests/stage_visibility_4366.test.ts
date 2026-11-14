@@ -181,7 +181,8 @@ describe("4366-P05 the host defines from the validated spec", () => {
     expect(agent).toContain("jobDefinitionSpec(specId)");
     expect(agent).toContain("one is never invented");
     expect(agent).toContain("bindJobDefinitionParams(spec, opts?.params ?? {}, ownerLogin)");
-    expect(agent).toContain("buildJobConfigFromSpec(spec, id, runParams)");
+    expect(agent).toContain("bindStageOverrides(spec, {");
+    expect(agent).toContain("buildJobConfigFromSpec(spec, id, runParams, perStage)");
   });
 });
 
@@ -208,7 +209,7 @@ describe("4366-P06 the run parameters are bound and the mutation is CSRF-safe", 
 
   it("the route passes the parameters through, and the client sends them with CSRF", () => {
     const route = readFileSync(join(root, "src/agents/routes/jobDefinitions.ts"), "utf8");
-    expect(route).toContain("ctx.defineJobFromSpec(spec.id, jobId, params)");
+    expect(route).toContain("ctx.defineJobFromSpec(spec.id, jobId, params, {");
     const client = readFileSync(join(root, "src/client/WorkflowDefinitionFlow.tsx"), "utf8");
     expect(client).toContain("csrfHeaders()");
     expect(client).toContain("params: paramValues");

@@ -316,7 +316,12 @@ export interface ScheduledAgentDoorStub {
   definePipelineJobFromSpec(
     specId: string,
     jobId: string,
-    opts?: { userLogin?: string; params?: Record<string, unknown> },
+    opts?: {
+      userLogin?: string;
+      params?: Record<string, unknown>;
+      stageParams?: Record<string, Record<string, unknown>>;
+      stageModes?: Record<string, Partial<import("../../data/jobPipelinePorts").JobExecutionMode>>;
+    },
   ): Promise<{ jobId: string; name: string; version: number; stages: number }>;
   setPipelineJobExecutionMode(
     jobId: string,
@@ -1324,11 +1329,17 @@ export async function definePipelineJobFromSpecViaDoor(
   specId: string,
   jobId: string,
   params: Record<string, unknown> = {},
+  overrides: {
+    stageParams?: Record<string, Record<string, unknown>>;
+    stageModes?: Record<string, Partial<import("../../data/jobPipelinePorts").JobExecutionMode>>;
+  } = {},
 ): Promise<{ jobId: string; name: string; version: number; stages: number }> {
   const login = requireActingLogin(actingLogin);
   return getScheduledAgentDoor(env).definePipelineJobFromSpec(specId, jobId, {
     userLogin: login,
     params,
+    ...(overrides.stageParams ? { stageParams: overrides.stageParams } : {}),
+    ...(overrides.stageModes ? { stageModes: overrides.stageModes } : {}),
   });
 }
 
