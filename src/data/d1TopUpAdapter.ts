@@ -21,6 +21,7 @@ import {
   type TopUpDraft,
   type TopUpDraftStore,
 } from "./topUpPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Drizzle D1 database object carrying the top-up draft schema. */
 export type TopUpDraftDb = DrizzleD1Database<{
@@ -145,12 +146,14 @@ export class D1TopUpAdapter implements TopUpDraftStore {
       .returning();
     if (rows.length === 0) {
       const existing = await this.getDraft(id);
-      if (!existing) throw new Error(`Unknown top-up draft ${id}.`);
-      if (existing.status === "credited") throw new Error(`Top-up ${id} is already credited.`);
-      throw new Error(`Top-up ${id} is not crediting.`);
+      if (!existing) throw new BusinessError("FAILURE_TOP_UP_NOT_FOUND");
+      if (existing.status === "credited") throw new BusinessError("FAILURE_TOP_UP_REPLAY");
+      // Merely minted (never claimed): the draft is not in the
+      // crediting state markCredited requires — an invalid state
+      // transition, not a replay (it was never credited).
+      throw new BusinessError("FAILURE_TOP_UP_VALIDATION");
     }
-    return toDraft(rows[0]);
-  }
+    return toDraft(rows[0]);  }
 
   async listByUser(userLogin: string): Promise<TopUpDraft[]> {
     const rows = await this.db
