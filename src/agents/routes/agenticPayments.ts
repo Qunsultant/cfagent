@@ -961,7 +961,7 @@ export async function handleAgenticPaymentsRoutes(
     try {
       await ensureProductBundleSchema(bundles.db);
     } catch (err: any) {
-      return Response.json({ error: `Bundle store unavailable: ${err.message || "unknown error"}` }, { status: 503 });
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return null;
   };
@@ -2371,7 +2371,7 @@ export async function handleAgenticPaymentsRoutes(
   // GET /payments/agentic/commercial/bundles — active bundles any verified login may buy
   // (Issue #2781, Monetization Phase 2.15). Read-only catalog data, same shape as GET /plans:
   // no flag gate, no operator requirement. The panel lists these through the Selling UX.
-  if (path.endsWith("/payments/agentic/commercial/bundles") && request.method === "GET") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.bundles) && request.method === "GET") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -2381,7 +2381,7 @@ export async function handleAgenticPaymentsRoutes(
       if (ensured) return ensured;
       return Response.json({ bundles: await bundles.listBundles(true) });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to list bundles" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -2393,7 +2393,7 @@ export async function handleAgenticPaymentsRoutes(
   // buildProductCatalog uses to list a product — a missing approved price is unlisted).
   // The Stripe Price mapping lives in the billing policy (stripePriceByBundle, set through
   // the operator billing-policy route) — never in the bundle record, never a catalogue price.
-  if (path.endsWith("/payments/agentic/commercial/bundles") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.bundles) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
@@ -2456,7 +2456,7 @@ export async function handleAgenticPaymentsRoutes(
   // bundle's price, recording the approving operator. New bundles land PROPOSED; only an APPROVED
   // bundle price may be charged. Approving a deactivated bundle is allowed (approval is about the
   // price, not about whether the bundle is sold); deactivation never un-approves.
-  if (path.endsWith("/payments/agentic/commercial/bundles/approve") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.bundlesApprove) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -2488,7 +2488,7 @@ export async function handleAgenticPaymentsRoutes(
   }
 
   // POST /payments/agentic/commercial/bundles/deactivate (operator only) — stops new purchases; existing purchases run to periodEnd.
-  if (path.endsWith("/payments/agentic/commercial/bundles/deactivate") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.bundlesDeactivate) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
@@ -2522,7 +2522,7 @@ export async function handleAgenticPaymentsRoutes(
   // metadata; the tenant comes from the resolved identity, never the request body
   // (same rule as the one-time checkout, #2219). An existing customer mapping is passed through
   // so a second checkout reuses the provider customer instead of fragmenting customers.
-  if (path.endsWith("/payments/agentic/commercial/subscription/bundle-checkout") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.bundleCheckout) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -2567,7 +2567,7 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       const tenantId = identity.tenantId ?? login;
       const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
@@ -2585,7 +2585,7 @@ export async function handleAgenticPaymentsRoutes(
           metadata: { userId: login, bundleId: bundle.id, tenantId },
         });
       } catch (err: any) {
-        return Response.json({ error: err.message || "Stripe subscription checkout could not be created." }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Stripe subscription checkout could not be created." }, { status: 503 });
       }
       if (!created.url || !created.id) {
         return Response.json({ error: "Stripe subscription checkout could not be created." }, { status: 503 });
@@ -2605,7 +2605,7 @@ export async function handleAgenticPaymentsRoutes(
         bundle: { id: bundle.id, name: bundle.name, priceUSD: bundle.priceUSD, periodDays: bundle.periodDays, includedRunsPerMember: bundle.includedRunsPerMember, memberProductIds: bundle.memberProductIds },
       });
     } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to create bundle Billing checkout" }, { status: 500 });
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
   }
 
@@ -2623,7 +2623,7 @@ export async function handleAgenticPaymentsRoutes(
   // per member product are written atomically — no partial entitlement, ever. A best-effort
   // mas_transactions row (gateway stripe) surfaces the purchase in receipts, and a best-effort
   // deferred-revenue journal entry (Dr 1000 / Cr 2100) mirrors the subscription purchase.
-  if (path.endsWith("/payments/agentic/commercial/subscription/bundle-purchase") && request.method === "POST") {
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.bundlePurchase) && request.method === "POST") {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
@@ -2675,7 +2675,7 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ error: err.message || "Failed to resolve platform identity" }, { status: 503 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       const tenantId = identity.tenantId ?? login;
       const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
