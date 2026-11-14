@@ -156,6 +156,11 @@ function shardSpec(
     displayName,
     stage,
     chainId: chain.chainId,
+    // Issue #4415: the dispatch knew the trigger and actor; stamp them so the
+    // row records provenance instead of NULLs ("Not recorded" in the panel).
+    trigger: chain.trigger,
+    triggeredBy: chain.userLogin,
+    ...(chain.scheduleId ? { scheduleId: chain.scheduleId } : {}),
     ...(runAt ? { runAt } : {}),
   } as unknown as AsyncJobSubmission;
 }

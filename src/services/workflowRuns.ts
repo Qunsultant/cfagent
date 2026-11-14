@@ -722,16 +722,30 @@ function triggerEvidence(job: WorkflowRunJobRow): { trigger?: string; detail?: s
   if (!payload) return {};
   const outcome = asObject(payload.outcome);
   const body = asObject(payload.body) ?? parseObject(payload.body);
+  // Issue #4415: legacy shard-chain rows predate the stamps — the chain object
+  // they already carry is evidence of the trigger and the actor, never a guess.
+  const chain = asObject(payload.chain);
+  const chainTrigger = str(chain?.trigger);
+  const chainActor = str(chain?.userLogin);
   const candidates = [
     str(payload.trigger),
     str(outcome?.trigger),
     str(body?.trigger),
+    chainTrigger,
   ].filter(Boolean) as string[];
-  if (candidates.includes("manual")) return { trigger: "manual" };
-  if (candidates.includes("scheduled")) return { trigger: "scheduled" };
+  if (candidates.includes("manual")) {
+    return { trigger: "manual", ...(chainActor ? { actor: chainActor } : {}) };
+  }
+  if (candidates.includes("scheduled")) {
+    return { trigger: "scheduled", ...(chainActor ? { actor: chainActor } : {}) };
+  }
 
   const scheduleName =
-    str(payload.scheduleName) ?? str(payload.scheduleId) ?? str(payload.cron) ?? str(payload.schedule);
+    str(payload.scheduleName) ??
+    str(chain?.scheduleId) ??
+    str(payload.scheduleId) ??
+    str(payload.cron) ??
+    str(payload.schedule);
   const goalId = str(payload.goalId);
   if (scheduleName || goalId) {
     return {
@@ -2082,6 +2096,10 @@ function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boole
   const runs: WorkflowRun[] = [];
   for (const [key, group] of groups) {
     const jobIds = new Set(group.jobs.map((j) => j.job_id));
+    // Issue #4415: a chain's serve outcome is keyed by its chain id
+    // (`workflow:<chainId>:<shard>`); match it to the chain group instead of
+    // letting it render as a separate singleton.
+    jobIds.add(key);
     const outcome = input.outcomes.find((o) => outcomeMatchesGroup(o.id, jobIds));
     const engine = engineStagesFor(group.jobs);
     runs.push(
@@ -2100,9 +2118,12 @@ function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boole
     // The outcome belongs to a job-chain run when its id names one of
     // that run's jobs (directly, or via the `workflow:<jobId>:<shard>`
     // delivery id). Otherwise it IS the run.
-    const isTwin = runs.some((run) =>
-      run.stages.some((stage) => stage.recordedBy === "job" && outcomeMatchesGroup(outcome.id, new Set([stage.key]))),
-    );
+    // Issue #4415: an outcome naming a chain (not a job) is already attached to
+    // that chain's run by the group loop above; it is a twin, not a singleton.
+    const isTwin =
+      runs.some((run) =>
+        run.stages.some((stage) => stage.recordedBy === "job" && outcomeMatchesGroup(outcome.id, new Set([stage.key]))),
+      ) || outcomeMatchesGroup(outcome.id, new Set(groups.keys()));
     if (isTwin) continue;
     const ownTransitions = input.transitions.filter(
       (transition) => transition.chainId === outcome.id || transition.jobId === outcome.id,

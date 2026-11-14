@@ -67,6 +67,52 @@ describe("workflow runs provenance (#3810)", () => {
     expect(runs[0].triggeredBy).toBeNull();
   });
 
+  it("reads a legacy shard-chain row's trigger and actor from payload.chain (#4415)", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "shard-legacy",
+          capability: "shard.execute",
+          chain_id: "chain-9",
+          payload_json: JSON.stringify({
+            shard: { stage: "feed", key: "NASDAQ100" },
+            chain: { chainId: "chain-9", userLogin: "venus", trigger: "scheduled", timestamp: "2026-11-08T21:14:18.000Z" },
+          }),
+        }),
+      ],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs).toHaveLength(1);
+    expect(runs[0].trigger).toBe("scheduled");
+    expect(runs[0].triggeredBy).toBe("venus");
+  });
+
+  it("attaches a chain-keyed serve outcome to the chain run, not a singleton (#4415)", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "shard-1",
+          capability: "shard.execute",
+          chain_id: "chain-9",
+          payload_json: JSON.stringify({ chain: { chainId: "chain-9", userLogin: "venus", trigger: "scheduled" } }),
+        }),
+      ],
+      outcomes: [
+        {
+          id: "workflow:chain-9:report",
+          kind: "report",
+          trigger: "scheduled",
+          status: "completed",
+          createdAt: "2026-11-08T21:20:00.000Z",
+        },
+      ],
+      transitions: [],
+    });
+    expect(runs).toHaveLength(1);
+    expect((runs[0].outputs as Record<string, any>).outcome?.status).toBe("completed");
+  });
+
   it("records a scheduled run's schedule from the job's schedule column", () => {
     const runs = buildWorkflowRuns({
       jobs: [

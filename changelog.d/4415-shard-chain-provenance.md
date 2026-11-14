@@ -1,0 +1,3 @@
+### Fixed
+
+- **Shard-chain runs show their real provenance (#4415):** `shardSpec` now stamps the chain's trigger, actor and (when known) schedule id onto every shard submission, so a scheduled or manual shard-chain run shows Trigger and Triggered by in Workflow Runs instead of "Not recorded". Rows written before the stamp are read through the `payload.chain.trigger` / `payload.chain.userLogin` fallback, and a chain's serve outcome (`workflow:<chainId>:…`) attaches to the chain run instead of rendering as a separate singleton. A run with genuinely no evidence still renders "Not recorded". #autoclaw-001
