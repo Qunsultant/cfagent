@@ -21,6 +21,7 @@
  * Enforcement scheduling is a later slice's concern.
  */
 import type { SqlStorage } from "../orm";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import type {
   DataProviderCapability,
   DataProviderId,
@@ -45,27 +46,7 @@ import {
 } from "./providerCapturePorts";
 
 export function ensureCaptureTable(sql: SqlStorage): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS ${DATA_CAPTURE_TABLE} (
-    id TEXT PRIMARY KEY,
-    provider_id TEXT NOT NULL,
-    capability TEXT NOT NULL,
-    request_params_json TEXT NOT NULL DEFAULT '{}',
-    run_id TEXT NOT NULL,
-    tenant_id TEXT NOT NULL,
-    user_login TEXT,
-    fetched_at TEXT NOT NULL,
-    status TEXT NOT NULL,
-    raw_kind TEXT,
-    raw_blob_ref TEXT,
-    raw_byte_size INTEGER,
-    raw_sha256 TEXT,
-    normalized_digest TEXT,
-    retention_class TEXT NOT NULL,
-    failure_error TEXT,
-    failure_kind TEXT,
-    failure_message TEXT,
-    created_at TEXT NOT NULL
-  )`);
+  sql.exec(doTableSql("mas_data_captures"));
   // Pre-E7 tables lack the failure columns: add them in place (the
   // E5 ensure-column idiom from the config store). Existing rows
   // read back with NULL kind/message — they predate fetch-outcome
@@ -84,10 +65,10 @@ export function ensureCaptureTable(sql: SqlStorage): void {
     );
   }
   sql.exec(
-    `CREATE INDEX IF NOT EXISTS idx_mas_data_captures_run ON ${DATA_CAPTURE_TABLE}(tenant_id, run_id)`
+    doIndexSql("idx_mas_data_captures_run")
   );
   sql.exec(
-    `CREATE INDEX IF NOT EXISTS idx_mas_data_captures_provider ON ${DATA_CAPTURE_TABLE}(tenant_id, provider_id)`
+    doIndexSql("idx_mas_data_captures_provider")
   );
 }
 
