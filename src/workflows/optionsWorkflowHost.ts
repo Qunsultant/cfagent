@@ -36,6 +36,16 @@
  * scan-run store + stage queue in the residency, universe deps that
  * do not travel); the legs stay on the sync dispatch until those
  * land, and this surface is what they cut over onto.
+ *
+ * Issue #4290 — the goal leg's dispatch surface over this host:
+ * startGoalOptionsLegWorkflow validates the goal shape, the goal
+ * run id, and the symbol-scoped filter BEFORE defining anything,
+ * stamps the goal run id on the stored request (the resolving steps
+ * rebuild the leg's delivery builders from it), and dispatches
+ * under the options job identity — the same identity the leg's sync
+ * dispatch defines today. The goal leg itself stays on the sync
+ * dispatch until its cutover gaps land (#3960, #4473, binding
+ * reachability); this surface is what it cuts over onto.
  */
 import {
   createJobPipelineStoresFromD1,
@@ -200,6 +210,114 @@ export async function startStrategyScreenWorkflow(
     );
   }
   return startOptionsScreenWorkflow(env, { ...input, jobKind: "strategy-screen" }, opts);
+}
+
+/**
+ * What one durable goal-leg start needs: the options-screen start,
+ * minus the job kind (pinned to the options job — the goal leg's
+ * job identity), plus the composing goal run's id.
+ */
+export interface StartGoalOptionsLegWorkflowInput {
+  /** The options leg's run id — the job is `options-screen:<runId>`, one job per run. */
+  runId: string;
+  /** The dispatch request, stored on the job definition's raw config (#4066). */
+  request: unknown;
+  /**
+   * The composing goal run's id, stamped on the stored request's
+   * classInput.goalPlan.goalRunId — the resolving steps rebuild the
+   * leg's delivery builders from it, and the leg's report section
+   * and delivery handoff stamp it. Required: a goal leg without its
+   * composing run's id cannot attribute its contribution.
+   */
+  goalRunId?: string;
+  /** The acting login — rides the raw config beside the request. */
+  userLogin?: string;
+  trigger?: "manual" | "scheduled";
+}
+
+/**
+ * Issue #4290 — the goal options leg's start seam: the goal-named
+ * entry point over startOptionsScreenWorkflow, dispatching under
+ * the options job identity (`options-screen:<runId>`) — the same
+ * identity runOptionsScreenViaEngine defines for the leg today, so
+ * the host's job record IS the leg's job record (the #4274 blocker,
+ * removed for the host path: the definition is persisted in the D1
+ * residency, and the goal shape's ports rebuild per invocation).
+ *
+ * Three dispatch-time validations run BEFORE defining anything, so
+ * the caller learns at dispatch time, with no job defined and no
+ * workflow instance created, instead of watching a workflow
+ * instance fail inside:
+ * - the request must decode as the goal shape (any other shape is
+ *   refused by name, with its own seam to dispatch through);
+ * - the composing goal run's id must be supplied (goalRunId) — it
+ *   is stamped on the stored request for the resolving steps;
+ * - the goal filter must carry explicit underlyingSymbols: a
+ *   discovery-mode leg needs universe deps to resolve its
+ *   underlyings, and universe deps do not travel as a stage input
+ *   yet (#4473) — refused by name until #4473 lands.
+ * The resolving steps re-check the shape and the stamped id per
+ * invocation, so the two can never drift.
+ */
+export async function startGoalOptionsLegWorkflow(
+  env: Env,
+  input: StartGoalOptionsLegWorkflowInput,
+  opts: StartOptionsScreenWorkflowOpts = {},
+): Promise<{ instanceId: string; jobId: string }> {
+  const shape = decodeOptionsRequestShape(input.request, input.runId);
+  if (shape !== "goal") {
+    const home =
+      shape === "panel" || shape === "scan"
+        ? "dispatch it through the strategy seam (startStrategyScreenWorkflow, #4291)"
+        : shape === "manual"
+          ? "a manual-shape screen dispatches from the manual route"
+          : "a comparison run is a single engine step, not a staged pipeline (#4276)";
+    throw new OptionsStepPortsError(
+      "stage_port_unavailable",
+      `goal screen ${input.runId}: the goal seam dispatches goal screens only — this request decodes as the ${shape} shape; ${home}`,
+    );
+  }
+  const classInput = (input.request as { classInput?: Record<string, unknown> } | null)
+    ?.classInput;
+  const goalPlan = classInput?.goalPlan;
+  if (!goalPlan || typeof goalPlan !== "object") {
+    throw new OptionsStepPortsError(
+      "stage_request_unrecognized",
+      `goal screen ${input.runId}: the stored request's classInput.goalPlan is not an object — the goal leg cannot be dispatched; re-dispatch the goal screen`,
+    );
+  }
+  const goalRunId = input.goalRunId;
+  if (typeof goalRunId !== "string" || goalRunId.length === 0) {
+    throw new OptionsStepPortsError(
+      "stage_port_unavailable",
+      `goal screen ${input.runId}: a goal leg needs the goal run id of the composing run — pass goalRunId to the goal seam, so the leg's report section and delivery handoff stamp it; refusing to dispatch without it`,
+    );
+  }
+  const symbols = (goalPlan as { optionsFilter?: { underlyingSymbols?: unknown } })
+    .optionsFilter?.underlyingSymbols;
+  const hasSymbols =
+    Array.isArray(symbols) &&
+    symbols.some((symbol) => typeof symbol === "string" && symbol.trim().length > 0);
+  if (!hasSymbols) {
+    throw new OptionsStepPortsError(
+      "stage_port_unavailable",
+      `goal screen ${input.runId}: a discovery-mode goal leg (no underlyingSymbols in the goal filter) needs universe deps to resolve its underlyings, and universe deps do not travel as a stage input yet (#4473) — re-dispatch with explicit underlyingSymbols, or after #4473 lands`,
+    );
+  }
+  const stampedRequest = {
+    ...(input.request as Record<string, unknown>),
+    classInput: { ...classInput, goalPlan: { ...goalPlan, goalRunId } },
+  };
+  return startOptionsScreenWorkflow(
+    env,
+    {
+      runId: input.runId,
+      request: stampedRequest,
+      ...(input.userLogin ? { userLogin: input.userLogin } : {}),
+      ...(input.trigger ? { trigger: input.trigger } : {}),
+    },
+    opts,
+  );
 }
 
 /** One stage's summary in the read-back view. */

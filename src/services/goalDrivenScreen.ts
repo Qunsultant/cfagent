@@ -134,6 +134,16 @@ function memoryStageClaimStore(): StageClaimStore {
  * completed result is never an error result). The provider id is the
  * registry's options provider id when one is registered, so hits
  * keep their provenance across the migration.
+ *
+ * Issue #4290 — the durable path for this leg is the goal seam
+ * (startGoalOptionsLegWorkflow in optionsWorkflowHost.ts): the job
+ * definition persists in the workflow residency and the workflow
+ * step is the engine's journal. This sync dispatch stays until the
+ * cutover gaps land — the residency binds one chain source while
+ * this leg's source is broker-aware (#3960), discovery-mode legs
+ * need universe deps as a stage input (#4473), and the workflow
+ * binding's reachability from this residency is unverified — and
+ * the seam refuses discovery-mode legs by name until #4473 lands.
  */
 async function runGoalOptionsLegViaWorkflow(args: {
   workflow: OptionsWorkflowDeps;
