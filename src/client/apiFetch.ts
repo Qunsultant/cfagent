@@ -124,12 +124,88 @@ export function asyncJobErrorCode(status: number, data: unknown): string | undef
   return undefined;
 }
 
+/**
+ * Rejection for an apiFetch call that opted into a per-request
+ * timeout and got no response within it (issue #4513). The
+ * timeout says nothing about whether a mutation landed
+ * server-side, so callers distinguish it with
+ * isApiFetchTimeoutError and decide what to tell the user —
+ * this error never carries a claim about the server outcome.
+ */
+export class ApiFetchTimeoutError extends Error {
+  readonly timeoutMs: number;
+  constructor(timeoutMs: number) {
+    super("Request timed out.");
+    this.name = "ApiFetchTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+export function isApiFetchTimeoutError(value: unknown): value is ApiFetchTimeoutError {
+  return value instanceof ApiFetchTimeoutError;
+}
+
+export interface ApiFetchOptions {
+  /**
+   * Opt-in per-fetch timeout in milliseconds (issue #4513). When
+   * set, every fetch apiFetch performs — the initial request and
+   * each 202 status poll — aborts after this long, and apiFetch
+   * rejects with ApiFetchTimeoutError instead of hanging. The
+   * bound is per fetch: the 202 poll deadline still bounds the
+   * total wait, and the per-fetch bound keeps a hung fetch from
+   * blocking the deadline check itself. Callers that do not opt
+   * in keep the historical behavior exactly: no per-fetch
+   * timeout, the poll deadline the only bound.
+   */
+  timeoutMs?: number;
+}
+
+/**
+ * One fetch with a caller-supplied bound. A caller signal, when
+ * present, still aborts the fetch; only expiry of this bound
+ * rejects with ApiFetchTimeoutError.
+ */
+async function fetchBounded(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const parentSignal = init?.signal ?? null;
+  const onParentAbort = (): void => controller.abort();
+  parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+  if (parentSignal?.aborted) controller.abort();
+  try {
+    return await globalThis.fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (timedOut) throw new ApiFetchTimeoutError(timeoutMs);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", onParentAbort);
+  }
+}
+
 export async function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
   poll?: Partial<AsyncJobPollConfig>,
+  options?: ApiFetchOptions,
 ): Promise<Response> {
-  const initialResponse = await globalThis.fetch(input, withCsrfInit(init));
+  const timeoutMs = options?.timeoutMs;
+  const fetchOnce = (
+    target: RequestInfo | URL,
+    requestInit: RequestInit | undefined,
+  ): Promise<Response> =>
+    timeoutMs === undefined
+      ? globalThis.fetch(target, requestInit)
+      : fetchBounded(target, requestInit, timeoutMs);
+  const initialResponse = await fetchOnce(input, withCsrfInit(init));
   if (initialResponse.status !== 202) return initialResponse;
 
   let accepted: Partial<AsyncJobStatusResponse>;
@@ -145,7 +221,7 @@ export async function apiFetch(
   const deadline = Date.now() + config.deadlineMs;
   while (Date.now() < deadline) {
     await sleep(delayMs);
-    const response = await globalThis.fetch(accepted.statusUrl, { headers: { "Accept": "application/json" } });
+    const response = await fetchOnce(accepted.statusUrl, { headers: { "Accept": "application/json" } });
     if (!response.ok) return response;
     const job = await response.json() as AsyncJobStatusResponse;
     if (job.status === "failed") {

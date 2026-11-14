@@ -25,10 +25,16 @@
  *   verified session login, and the server gates every call
  *   on store-operator status (401 / 403 otherwise).
  *
+ * Every create settles with a plain outcome (issue #4513): a
+ * success notice naming the tenant, or a failure notice. A
+ * request that never returns surfaces a timeout instead of
+ * spinning forever (the bound lives in tenantAdminApi.ts).
+ *
  * All calls go through src/client/apiFetch.ts (the #71 rule),
  * via tenantAdminApi.ts and iaaaAdminApi.ts.
  */
 import { useCallback, useEffect, useState } from "react";
+import { isApiFetchTimeoutError } from "./apiFetch";
 import {
   Button,
   Checkbox,
@@ -64,6 +70,7 @@ export function TenantAdminPanel() {
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,13 +114,19 @@ export function TenantAdminPanel() {
     }
     setCreating(true);
     setFormError("");
+    setNotice("");
     try {
       const created = await createTenant(tenantId);
+      setNotice(`Tenant ${created.tenantId} created.`);
       setNewTenantId("");
       await load();
       await loadDetail(created.tenantId);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Failed to create tenant.");
+      setFormError(
+        isApiFetchTimeoutError(err)
+          ? "The create request timed out. Check the tenant list — if the tenant is not there, try again."
+          : err instanceof Error ? err.message : "Failed to create tenant.",
+      );
     } finally {
       setCreating(false);
     }
@@ -127,6 +140,7 @@ export function TenantAdminPanel() {
     if (!detail) return;
     setSaving(true);
     setFormError("");
+    setNotice("");
     try {
       setDetail({ ...detail, ...(await updateTenantSettings(detail.tenantId, patch)) });
       await load();
@@ -150,12 +164,16 @@ export function TenantAdminPanel() {
       </Notice>
       {error && <Notice tone="danger">{error}</Notice>}
       {formError && <Notice tone="danger">{formError}</Notice>}
+      {notice && <Notice tone="success">{notice}</Notice>}
       <Stack gap="1">
         <TextInput
           label="New tenant id"
           hint="Creates a tenant settings row with store defaults (ads on, auto-refresh off, broker providers)."
           value={newTenantId}
-          onChange={(e) => setNewTenantId(e.target.value)}
+          onChange={(e) => {
+            setNewTenantId(e.target.value);
+            setNotice("");
+          }}
         />
         <div>
           <Button onClick={() => void handleCreate()} loading={creating} disabled={creating}>
@@ -179,7 +197,13 @@ export function TenantAdminPanel() {
               key: "open",
               header: "",
               render: (row) => (
-                <Button size="sm" onClick={() => void loadDetail(row.tenantId)}>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setNotice("");
+                    void loadDetail(row.tenantId);
+                  }}
+                >
                   Manage
                 </Button>
               ),

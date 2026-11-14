@@ -10,8 +10,23 @@
  * tenant, so no IAAA state is ever written from this surface.
  *
  * All calls go through src/client/apiFetch.ts (the #71 rule).
+ *
+ * Every call opts into a per-request bound (issue #4513): a
+ * request that never returns surfaces ApiFetchTimeoutError
+ * instead of leaving the panel spinning forever. The bound
+ * changes nothing for other apiFetch callers, which do not
+ * opt in.
  */
 import { apiFetch } from "./apiFetch";
+
+/**
+ * Per-request bound for tenant administration calls (issue
+ * #4513). 30 seconds is far above a healthy round trip and
+ * short enough that an operator is never left staring at a
+ * spinner. The bound is per fetch (see ApiFetchOptions);
+ * the panel translates a timeout into a plain retry message.
+ */
+export const TENANT_ADMIN_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface TenantSettingsView {
   tenantId: string;
@@ -56,7 +71,7 @@ function isSettings(value: unknown): value is TenantSettingsView {
 }
 
 async function send<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await apiFetch(path, init);
+  const resp = await apiFetch(path, init, undefined, { timeoutMs: TENANT_ADMIN_REQUEST_TIMEOUT_MS });
   const data = (await resp.json().catch(() => ({}))) as T & { error?: string };
   if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
   return data;
