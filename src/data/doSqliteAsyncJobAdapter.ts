@@ -32,6 +32,7 @@ import {
   type InsertQueuedJobInput,
   type InsertTerminalJobInput,
 } from "./asyncJobPorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 function rowsWritten(result: unknown): number {
   const cursor = result as { rowsWritten?: number };
@@ -50,31 +51,15 @@ export class DoSqliteAsyncJobStore
   // ------------------------------------------------------------------
 
   ensureSchema(): void {
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_async_jobs (
-        job_id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        capability TEXT NOT NULL,
-        display_name TEXT NOT NULL,
-        status TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        result_json TEXT,
-        response_status INTEGER,
-        error TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        started_at TEXT,
-        completed_at TEXT
-      )
-    `);
-    this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_session_created ON mas_async_jobs(session_id, created_at DESC)");
+    this.sql.exec(doTableSql("mas_async_jobs"));
+    this.sql.exec(doIndexSql("idx_mas_async_jobs_session_created"));
     this.ensureGateIndexes();
     this.ensureGraphColumns();
   }
 
   ensureGateIndexes(): void {
     this.sql.exec(
-      "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_status_created ON mas_async_jobs(status, created_at)",
+      doIndexSql("idx_mas_async_jobs_status_created"),
     );
   }
 
@@ -129,8 +114,8 @@ export class DoSqliteAsyncJobStore
       // NULL on rows that never failed.
       this.sql.exec("ALTER TABLE mas_async_jobs ADD COLUMN error_code TEXT");
     }
-    this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_parent ON mas_async_jobs(parent_job_id)");
-    this.sql.exec("CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_chain ON mas_async_jobs(chain_id)");
+    this.sql.exec(doIndexSql("idx_mas_async_jobs_parent"));
+    this.sql.exec(doIndexSql("idx_mas_async_jobs_chain"));
   }
 
   // ------------------------------------------------------------------
