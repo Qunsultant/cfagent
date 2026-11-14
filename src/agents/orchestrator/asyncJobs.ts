@@ -227,7 +227,7 @@ async function projectAsyncJobTransition(ctx: AsyncJobsContext, jobId: string): 
  * Issue #2358: the family's ONE DDL home is the queue port's
  * ensureSchema (base table + session index + gate index + the
  * probed graph migration). OrchestratorAgent.ensureTables calls
- * this in place of its former inline CREATE TABLE block.
+ * this in place of its former inline table-creation block.
  */
 export function ensureAsyncJobTables(sql: AgentContext["storage"]["sql"]): void {
   createAsyncJobPorts(sql as never).queue.ensureSchema();
@@ -237,7 +237,7 @@ export function ensureAsyncJobTables(sql: AgentContext["storage"]["sql"]): void 
  * Issue #1123: additive job-graph migration for mas_async_jobs —
  * parent_job_id / job_kind / channel, probed and added when missing so
  * existing DO tables upgrade in place. Called from
- * OrchestratorAgent.ensureTables after the CREATE TABLE.
+ * OrchestratorAgent.ensureTables after the table creation.
  * Consolidation C3 (#1277): the same probed migration adds the
  * stage-chain columns — not_before (per-stage timing), stage and
  * chain_id (stage identity) — all nullable, so legacy rows read as
