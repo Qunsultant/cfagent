@@ -11,18 +11,13 @@ import type {
   AutopilotStatePort,
   OrchestratorTableSqlExecutor,
 } from "./orchestratorTablePorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqliteAutopilotStateStore implements AutopilotStatePort {
   constructor(private readonly sql: OrchestratorTableSqlExecutor) {}
 
   ensureSchema(): void {
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS mas_autopilot (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
+    this.sql.exec(doTableSql("mas_autopilot"));
   }
 
   getValue(key: string): string | null {
