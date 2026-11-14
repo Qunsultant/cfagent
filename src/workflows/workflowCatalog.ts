@@ -488,6 +488,39 @@ export function assertWorkflowCatalog(
     if (workflow.stages.length === 0) {
       throw new Error(`Workflow catalog refused: workflow ${workflow.id} declares no stages.`);
     }
+    // Issue #3285 — a family with NO runtime mapping must NAME the gap and its
+    // owner. Before this, an unmapped family could declare stages that look
+    // wired while nothing maps them to runtime ids, and the page implied
+    // coverage the platform does not have. A mapped family needs no gap note.
+    const mappedStageCount = workflow.stages.filter(
+      (stageDeclaration) => (stageDeclaration.runtimeStageIds ?? []).length > 0,
+    ).length;
+    const gap = workflow.runtimeMappingGap?.trim() ?? "";
+    if (mappedStageCount === 0 && !gap) {
+      throw new Error(
+        `Workflow catalog refused: ${workflow.id} maps no runtime stage ids and names no runtimeMappingGap — an unmapped family must say why, and who owns it (#3285).`,
+      );
+    }
+    if (gap) {
+      // The gap carries the two facts #3285 requires on a stage with no path:
+      // an owner reference and a reason. A gap note without an issue number is
+      // prose nobody can chase; a bare issue number is not a reason.
+      if (!/#\d+/.test(gap)) {
+        throw new Error(
+          `Workflow catalog refused: ${workflow.id}.runtimeMappingGap names no owning issue (#NNNN) — the gap must say who owns it (#3285).`,
+        );
+      }
+      if (gap.replace(/#\d+/g, "").trim().length < 20) {
+        throw new Error(
+          `Workflow catalog refused: ${workflow.id}.runtimeMappingGap states no reason beyond its issue number — the gap must say why (#3285).`,
+        );
+      }
+    }
+    if (mappedStageCount > 0 && gap) {
+      throw new Error(
+        `Workflow catalog refused: ${workflow.id} both maps runtime stage ids and declares a runtimeMappingGap — the gap is for unmapped families; a mapped family states its mapping, not a gap (#3285).`,
+      );
+    }
     let lastIndex = -1;
     const seenRuntimeIds = new Set<string>();
     for (const stageDeclaration of workflow.stages) {
