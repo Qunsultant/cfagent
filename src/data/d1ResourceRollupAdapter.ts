@@ -27,34 +27,14 @@
 import type { ResourceD1Db } from "./d1ResourceUsageAdapter";
 import type { AlertState, ResourceRollupStorePort } from "./resourceRollupPorts";
 import type { DailyRollupRow } from "../telemetry/resourceRollup";
+import { d1TableSql } from "./schemaComponent/d1Catalogue";
 
 export type { ResourceD1Db };
 
 const CREATE_TABLES_SQL = [
-  `CREATE TABLE IF NOT EXISTS resource_daily_rollups (
-    day TEXT NOT NULL,
-    ns TEXT NOT NULL,
-    op TEXT NOT NULL,
-    caller TEXT NOT NULL,
-    trigger TEXT NOT NULL,
-    ops INTEGER NOT NULL,
-    rows_read INTEGER NOT NULL,
-    rows_written INTEGER NOT NULL,
-    PRIMARY KEY (day, ns, op, caller, trigger)
-  )`,
-  `CREATE TABLE IF NOT EXISTS resource_alert_state (
-    budget TEXT NOT NULL,
-    day TEXT NOT NULL,
-    alerted_at INTEGER NOT NULL,
-    delivered INTEGER NOT NULL,
-    note TEXT,
-    PRIMARY KEY (budget, day)
-  )`,
-  `CREATE TABLE IF NOT EXISTS resource_comparison_reports (
-    day TEXT PRIMARY KEY,
-    generated_at INTEGER NOT NULL,
-    report_json TEXT NOT NULL
-  )`,
+  d1TableSql("resource_daily_rollups"),
+  d1TableSql("resource_alert_state"),
+  d1TableSql("resource_comparison_reports"),
 ];
 
 export class D1ResourceRollupStore implements ResourceRollupStorePort {
