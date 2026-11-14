@@ -260,13 +260,15 @@ export class DoSqliteAsyncJobStore
 
   reapStaleRunning(jobId: string, error: string, nowIso: string, errorCode?: string | null): number {
     const cursor = this.sql.exec(
+      // Issue #4418: the reap does NOT overwrite last_activity_at — that value
+      // is the pre-reap evidence the owner needs; the reap instant is recorded
+      // by updated_at / completed_at instead.
       `UPDATE mas_async_jobs SET status = 'failed',
        error = ?,
        error_code = ?,
-       last_activity_at = ?, updated_at = ?, completed_at = ? WHERE job_id = ? AND status = 'running'`,
+       updated_at = ?, completed_at = ? WHERE job_id = ? AND status = 'running'`,
       error,
       errorCode ?? null,
-      nowIso,
       nowIso,
       nowIso,
       jobId,

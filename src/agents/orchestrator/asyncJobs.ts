@@ -519,9 +519,18 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
 function orphanedReapMessage(
   lastActivityAt: string | null,
   rearmedAs?: string,
-  recording?: { feedJobId?: string | null; pipelineRunId?: string | null },
+  recording?: {
+    feedJobId?: string | null;
+    pipelineRunId?: string | null;
+    /** Issue #4418: the host that died, when the platform reports one. */
+    hostId?: string | null;
+  },
 ): string {
-  const base = `Orphaned by a host restart: the executor died with its host before a result was recorded (last activity ${lastActivityAt ?? "unknown"}). The run never recorded a result.`;
+  // Issue #4418: attribution is stated only when known. The platform reports a
+  // version id, not a restart cause, so the cause is named as unreported
+  // rather than guessed (deploy / eviction / hibernation stay indistinguishable).
+  const host = recording?.hostId ? `host ${recording.hostId}` : "host unknown";
+  const base = `Orphaned by a host restart (${host}; restart cause not reported by the platform): the executor died with its host before a result was recorded (last activity ${lastActivityAt ?? "unknown"}). The run never recorded a result.`;
   let message = rearmedAs ? `${base} Re-armed as job ${rearmedAs}; the work continues there.` : base;
   // Issue #4002 (recording slice): the ids the row must carry.
   // The Workflow Runs view renders the row's error, so the feed
@@ -844,9 +853,14 @@ export async function recoverStaleRunningAsyncJobs(
         }
       }
       const completedAt = new Date(nowMs).toISOString();
+      const versionMetadata = (ctx.env as unknown as Record<string, unknown> | undefined)?.CF_VERSION_METADATA as
+        | { id?: unknown }
+        | undefined;
+      const hostId = versionMetadata && typeof versionMetadata.id === "string" ? versionMetadata.id : null;
       const message = orphanedReapMessage(lastActivityAt, rearmedJobId, {
         feedJobId,
         pipelineRunId,
+        hostId,
       });
       const written = ports(ctx).queue.reapStaleRunning(
         jobId,
@@ -863,6 +877,7 @@ export async function recoverStaleRunningAsyncJobs(
           error: message,
           errorCode: FAILURE_ASYNC_JOB_ORPHANED_CODE,
           lastActivityAt,
+          ...(hostId ? { hostId } : {}),
           ...(rearmedJobId ? { rearmedAs: rearmedJobId } : {}),
           ...(feedJobId ? { feedJobId } : {}),
           ...(pipelineRunId ? { pipelineRunId } : {}),

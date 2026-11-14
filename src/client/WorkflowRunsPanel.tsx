@@ -1390,6 +1390,10 @@ export function RunDetail({
                   <div className="workflow-runs-what">
                     <span>{stage.detail || "No description recorded"}</span>
                     {stage.reason && <span className="workflow-runs-muted">Reason: {stage.reason}</span>}
+            {/* Issue #4418: the pre-reap last activity, preserved for an orphaned stage. */}
+            {stage.lastActivityAt && (
+              <span className="workflow-runs-muted">Last activity {stage.lastActivityAt}</span>
+            )}
                     {stage.error && (
                       <span className="workflow-runs-error">{stage.error}</span>
                     )}

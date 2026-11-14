@@ -228,3 +228,16 @@ describe("stranded chain surface (#4419)", () => {
     expect(container.textContent ?? "").toContain("Stranded chain");
   });
 });
+
+describe("per-stage last activity (#4418)", () => {
+  it("renders the preserved last activity for a stage", async () => {
+    root = createRoot(container);
+    const base = run({ status: "failed" });
+    const stage = { ...base.stages[0], lastActivityAt: "2026-11-08T21:20:00.000Z" };
+    await act(async () => {
+      root.render(<RunDetail run={{ ...base, stages: [stage] }} />);
+    });
+    await flush();
+    expect(container.textContent ?? "").toContain("Last activity 2026-11-08T21:20:00.000Z");
+  });
+});

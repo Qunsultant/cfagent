@@ -1,0 +1,3 @@
+### Fixed
+
+- **An orphaned run names the host that died and keeps its evidence (#4418):** the recovery reap no longer overwrites `last_activity_at` — the pre-reap heartbeat is the evidence the owner needs, and the reap instant is recorded on `updated_at`/`completed_at` instead. The orphan message names the host when the platform reports a `CF_VERSION_METADATA` id and says "host unknown" when it does not; the restart cause is named as not reported rather than guessed, because deploy, eviction and hibernation are indistinguishable from the worker. The run detail now shows each stage's last activity. #autoclaw-001
