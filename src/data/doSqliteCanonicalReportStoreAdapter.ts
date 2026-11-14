@@ -23,6 +23,7 @@ import type {
   CanonicalReportWritePort,
   InsertCanonicalReportRow,
 } from "./canonicalReportStorePorts";
+import { doStatementSql } from "./schemaComponent/doCatalogue";
 
 const TABLE = "mas_reports";
 const HIT_COLUMNS =
@@ -53,16 +54,7 @@ export class DoSqliteCanonicalReportStore
   // ------------------------------------------------------------------
 
   ensureSchema(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS ${TABLE} (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    source TEXT NOT NULL,
-    summary TEXT NOT NULL,
-    body TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    generation_id TEXT
-  )`);
+    this.sql.exec(doStatementSql("schema.do.mas_reports.create_table", { TABLE }));
     // Issue #876: reconcile EVERY expected column additively, not
     // just the newest ones (see the legacy ensure's note: column
     // order in CREATE TABLE is unchanged — reconciliation only
@@ -86,10 +78,10 @@ export class DoSqliteCanonicalReportStore
     ensureColumn(this.sql, "fanout_outcome", "TEXT");
 
     this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_mas_reports_created ON ${TABLE} (created_at DESC)`
+      doStatementSql("schema.index.mas_reports.create_index_idx_mas_reports_created", { TABLE })
     );
     this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_mas_reports_user ON ${TABLE} (user_login)`
+      doStatementSql("schema.index.mas_reports.create_index_idx_mas_reports_user", { TABLE })
     );
     // Issue #2398: the dedupe index is TENANT-scoped —
     // UNIQUE (user_login, generation_id) — matching the
@@ -139,7 +131,7 @@ export class DoSqliteCanonicalReportStore
     // logged loudly (never deleted here) and the ensure completes.
     try {
       this.sql.exec(
-        `CREATE UNIQUE INDEX IF NOT EXISTS idx_mas_reports_generation ON ${TABLE} (user_login, generation_id)`
+        doStatementSql("schema.index.mas_reports.create_unique_index_idx_mas_reports_generation", { TABLE })
       );
     } catch (err) {
       console.error(
