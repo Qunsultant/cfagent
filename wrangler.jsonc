@@ -98,10 +98,12 @@
       // uncapped concurrency stacked DO requests. Throughput is deliberately
       // lower: the backlog drains one batch at a time.
       // Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535):
-      // the job-pipeline-events consumer arrives with its first
-      // handler (the #1739 sequencing) — completions route to the
-      // ScheduledAgent host. Its settings are the
-      // JOB_PIPELINE_EVENTS_CONSUMER_CONFIG pin in
+      // Issue #4425: the job-pipeline-events consumer is WIRED —
+      // handleQueueBatch instantiates createJobPipelineEventsHandler
+      // for this queue, completions route to the ScheduledAgent host
+      // (recordPipelineCompletion + fireCompletionSchedules), and
+      // stage events persist through recordStageEvent. Its settings
+      // are the JOB_PIPELINE_EVENTS_CONSUMER_CONFIG pin in
       // src/messaging/jobPipelineEventsConsumer.ts.
       { "queue": "job-pipeline-events", "max_batch_size": 5, "max_batch_timeout": 10, "max_retries": 2, "dead_letter_queue": "job-pipeline-events-dlq", "max_concurrency": 1 },
       // Issue #2544 (Cloudflare migration step 1, report §3.2): the

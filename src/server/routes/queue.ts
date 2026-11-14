@@ -38,6 +38,8 @@ import { isPlatformServiceProvisioned } from "../../security/serviceDispatch";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
 import { consumeCfBatch, dispatchSubscriberBatch } from "../../messaging/cfQueueMessagingAdapter";
 import { createMessagingPorts } from "../../messaging/createMessagingPorts";
+import { createJobPipelineEventsHandler } from "../../messaging/jobPipelineEventsConsumer";
+import type { JobStageEventRecord } from "../../data/jobStageEventPorts";
 import { createScreenerEventsWorkHandler } from "../../messaging/screenerEventsConsumer";
 import type { RunLedgerProjectMessage } from "../../workflows/runLedgerQueueTransport";
 import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema } from "../../data/createDeadLetterStorePorts";
@@ -73,6 +75,51 @@ const screenerDeliverySeen = new Set<string>();
 // processed/drop envelope ids seen, so an at-least-once redelivery
 // never re-invokes the work handler.
 const screenerEventsSeen = new Set<string>();
+/** Issue #4425 — the job-pipeline-events consumer's dedup set (per isolate). */
+const jobPipelineEventsSeen = new Set<string>();
+
+/**
+ * Issue #4425 — the stage actions that END a stage. A `started` (or any
+ * non-terminal) publication is the live stream, never a completion.
+ */
+const TERMINAL_STAGE_ACTIONS = new Set(["completed", "failed", "timed_out", "cancelled"]);
+
+/**
+ * Issue #4425 — the completion state a terminal stage action names to a
+ * binding. A timeout IS a failure for a chained schedule; naming it
+ * "timed_out" would match no binding and silently strand the chain.
+ */
+function stageActionState(action: string): string {
+  return action === "timed_out" ? "failed" : action;
+}
+
+/**
+ * Issue #4425 — the ScheduledAgent RPCs the job-pipeline-events consumer
+ * needs: the completion record (the claim-check hand-off downstream stages
+ * read), the stage-event store (#4360), and the completion-trigger firing
+ * (#4425). Declared once here, beside the queue that calls it, like the cron
+ * entry point's own door above.
+ */
+interface JobPipelineEventsDoor {
+  recordPipelineCompletion(note: {
+    jobId: string;
+    runId: string;
+    state: string;
+    artifactKeys: string[];
+    at: string;
+  }): Promise<void>;
+  recordStageEvent(event: JobStageEventRecord): Promise<boolean>;
+  fireCompletionSchedules(event: {
+    jobId: string;
+    runId?: string | null;
+    state: string;
+    stage?: string | null;
+  }): Promise<{
+    fired: string[];
+    skipped: Array<{ jobId: string; reason: string }>;
+    invalid: Array<{ jobId: string; reason: string }>;
+  }>;
+}
 
 /**
  * Issue #2544 — the single options_analysis queue dispatch, shared
@@ -438,6 +485,87 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
           );
         }
       : undefined;
+    // Issue #4425 — the job-pipeline-events consumer. It was defined at
+    // #3543 and never instantiated (the RCA's Gap 1), so a terminal job
+    // event reached no host and no chained schedule could exist. This is
+    // its first wiring: the completion is recorded on the ScheduledAgent
+    // (the claim-check hand-off downstream stages read) and then matched
+    // against every target job's `completionTrigger`; a stage terminal
+    // event is persisted (#4360) and matched the same way, so a
+    // stage-scoped binding fires from the stage it names.
+    if (batch?.queue === "job-pipeline-events") {
+      const ports = createMessagingPorts(env, { seenIds: jobPipelineEventsSeen });
+      if (!ports) {
+        // No messaging ports (no binding): the worker cannot claim QueuePort
+        // routing, so the batch is retried into the DLQ path visibly rather
+        // than acked into silence — the same rule as screener-events.
+        console.warn(
+          "[job-pipeline-events] no messaging ports — retrying envelopes into the DLQ path.",
+        );
+        for (const msg of batch.messages ?? []) {
+          if (typeof msg.retry === "function") msg.retry();
+        }
+        return;
+      }
+      const door = actorGateway.stub<JobPipelineEventsDoor>(env.SCHEDULED_AGENT, "default");
+      const pipelineLog = createStructuredLogger(createObservabilitySink(env), {
+        component: "server/routes/queue",
+      });
+      const logFiring = (source: string, result: {
+        fired: string[];
+        skipped: Array<{ jobId: string; reason: string }>;
+        invalid: Array<{ jobId: string; reason: string }>;
+      }): void => {
+        if (result.fired.length === 0 && result.skipped.length === 0 && result.invalid.length === 0) {
+          return;
+        }
+        pipelineLog.info("job_pipeline.completion_triggers", {
+          message: `[job-pipeline] completion from ${source} fired ${result.fired.length} schedule(s); ${result.skipped.length} skipped, ${result.invalid.length} invalid binding(s).`,
+          fired: result.fired,
+          skipped: result.skipped,
+          invalid: result.invalid,
+        });
+      };
+      const handler = createJobPipelineEventsHandler({
+        routeCompletion: async (completion) => {
+          await door.recordPipelineCompletion({
+            jobId: completion.jobId,
+            runId: completion.runId,
+            state: completion.state,
+            artifactKeys: completion.artifactKeys,
+            at: completion.at,
+          });
+          logFiring(
+            `job ${completion.jobId}`,
+            await door.fireCompletionSchedules({
+              jobId: completion.jobId,
+              runId: completion.runId,
+              state: completion.state,
+            }),
+          );
+        },
+        recordStageEvent: async (event) => {
+          const recorded = await door.recordStageEvent(event);
+          // Only a terminal stage action can fire a stage-scoped binding; a
+          // "started" publication is the live stream, not a completion.
+          if (TERMINAL_STAGE_ACTIONS.has(event.action)) {
+            logFiring(
+              `stage ${event.jobId}/${event.stageId}`,
+              await door.fireCompletionSchedules({
+                jobId: event.jobId,
+                runId: event.runId,
+                state: stageActionState(event.action),
+                stage: event.stageId,
+              }),
+            );
+          }
+          return recorded;
+        },
+        persistDeadLetter,
+      });
+      await consumeCfBatch(batch, ports.consumer, handler, persistDeadLetter);
+      return;
+    }
     if (batch?.queue === "screener-events-delivery") {
       const deliveryHandler = createScreenerQueueHandler({ env });
       const handlers: SubscriberHandlers = new Map([
