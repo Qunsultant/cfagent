@@ -25,6 +25,7 @@ import {
   type EnrichmentRunRecord,
   type EnrichmentRunStore,
 } from "../enrichment/enrichmentPorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import { createSettingsPort } from "./createSettingsPorts";
 import type { SettingsPort } from "./settingsReadPorts";
 
@@ -40,10 +41,8 @@ export type EnrichmentAuditFn = (
 
 const RUNS_TABLE = "mas_enrichment_runs";
 
-const CREATE_RUNS_SQL =
-  `CREATE TABLE IF NOT EXISTS ${RUNS_TABLE} (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, job_id TEXT NOT NULL, stage TEXT NOT NULL, record_json TEXT NOT NULL)`;
-const CREATE_RUNS_INDEX_SQL =
-  `CREATE INDEX IF NOT EXISTS idx_mas_enrichment_runs_job ON ${RUNS_TABLE} (job_id, stage, created_at DESC)`;
+const CREATE_RUNS_SQL = doTableSql("mas_enrichment_runs");
+const CREATE_RUNS_INDEX_SQL = doIndexSql("idx_mas_enrichment_runs_job");
 const INSERT_RUN_SQL =
   `INSERT INTO ${RUNS_TABLE} (id, created_at, job_id, stage, record_json) VALUES (?, ?, ?, ?, ?)`;
 const LIST_RUNS_SQL =
