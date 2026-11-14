@@ -122,6 +122,11 @@ import {
   type PipelineCompletionNote,
   type ScheduledTasksPipelineContext,
 } from "./scheduledTasksPipeline";
+import {
+  dispatchCompletionSchedules,
+  type CompletionFiringResult,
+} from "./scheduledTasksCompletion";
+import type { CompletionEvent } from "../services/completionTrigger";
 import type { ThinkScheduledTasks } from "../actors/thinkAdapter";
 import type {
   JobInstanceRecord,
@@ -1580,6 +1585,23 @@ export class ScheduledAgent extends PortThink {
     await dispatchAnalyzeAfterEnrichCompletion(ctx, note);
     await dispatchGenerateAfterAnalyzeCompletion(ctx, note);
     await dispatchDeliverAfterGenerateCompletion(ctx, note);
+  }
+
+  /**
+   * Issue #4425 — fire the owner-defined completion triggers this terminal
+   * event matches.
+   *
+   * Distinct from the four fixed data-pipeline dispatches above: those are
+   * the feed pipeline's own wiring (feed → enrich → analyze → generate →
+   * deliver), not owner-definable. This door is the generic binding — any
+   * target job whose raw config carries `completionTrigger` — and it reuses
+   * the same control plane, so a fired target is an ordinary scheduled run.
+   * The result names what fired and what could not, so the consumer's log
+   * says why a chained schedule did not run.
+   */
+  async fireCompletionSchedules(event: CompletionEvent): Promise<CompletionFiringResult> {
+    const control = createScheduledAgentPipelineControl(this.pipelineContext());
+    return dispatchCompletionSchedules(control, event);
   }
 
   /** Recorded pipeline completions, newest first. */
