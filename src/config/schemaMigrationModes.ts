@@ -11,8 +11,8 @@
  *    and records each one in the mas_schema_migrations ledger
  *    (marker-LAST: the ledger row is written only after the
  *    migration's statements succeed).
- *  - "legacy": the store's existing inline CREATE TABLE IF NOT
- *    EXISTS path, byte-identical to current behavior.
+ *  - "legacy": the store's existing inline table-creation
+ *    path, byte-identical to current behavior.
  *
  * Built-in default is "legacy" (current behavior — unset changes
  * nothing). Resolution order (owner directive 2026-10-26):
