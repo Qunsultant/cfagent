@@ -9,22 +9,15 @@ import type {
   StrategyPolicySqlExecutor,
   StrategyPolicyStore,
 } from "./strategyPolicyPorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqliteStrategyPolicyStore implements StrategyPolicyStore {
   constructor(private readonly sql: StrategyPolicySqlExecutor) {}
 
   ensureTables(): void {
     const sql = this.sql;
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_strategy_weight_caps (
-    strategy TEXT PRIMARY KEY,
-    cap REAL NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`);
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_strategy_gates (
-    strategy TEXT PRIMARY KEY,
-    gated_off INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`);
+    sql.exec(doTableSql("mas_strategy_weight_caps"));
+    sql.exec(doTableSql("mas_strategy_gates"));
   }
 
   getCap(strategy: string): number | null {
