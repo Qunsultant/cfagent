@@ -4,7 +4,7 @@
  *
  * This schema MAPS tables; it does not create them. DDL authority
  * lives in exactly one migration file per table
- * (src/data/migrationRunner.ts, migration 0001); a test pins that
+ * (src/data/migrationRunner.ts, migrations 0001–0066); a test pins that
  * this mapping and that DDL agree on columns. If they ever drift,
  * the migration file wins and this mapping is fixed to match.
  */
