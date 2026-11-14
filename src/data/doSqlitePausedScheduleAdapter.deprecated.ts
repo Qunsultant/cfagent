@@ -33,19 +33,10 @@ import {
   type PausedScheduleRecord,
   type PausedScheduleStore,
 } from "./pausedSchedulePorts.deprecated";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 function ensureTable(sql: SqlStorage): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS ${PAUSED_SCHEDULES_TABLE} (
-      id TEXT PRIMARY KEY,
-      callback TEXT NOT NULL,
-      payload_json TEXT,
-      sched_type TEXT NOT NULL,
-      cron TEXT,
-      interval_seconds INTEGER,
-      time INTEGER,
-      delay_seconds INTEGER,
-      paused_at TEXT NOT NULL
-    )`);
+  sql.exec(doTableSql("paused_schedules"));
 }
 
 function saveSync(sql: SqlStorage, record: PausedScheduleRecord): void {
