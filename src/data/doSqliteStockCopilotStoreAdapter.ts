@@ -14,6 +14,7 @@ import {
   type StockCopilotPositionPort,
   type StockCopilotStoreSqlExecutor,
 } from "./stockCopilotStorePorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 const num = (v: unknown): number => (typeof v === "number" ? v : Number(v ?? 0));
 const str = (v: unknown): string => (typeof v === "string" ? v : String(v ?? ""));
@@ -51,25 +52,7 @@ export class DoSqliteStockCopilotPositionStore
 
   ensureSchema(): void {
     this.sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${COPILOT_POSITIONS_TABLE} (
-        id TEXT PRIMARY KEY,
-        user_login TEXT NOT NULL,
-        symbol TEXT NOT NULL,
-        strategy TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        entry_price REAL NOT NULL,
-        stop_price REAL NOT NULL,
-        target_price REAL NOT NULL,
-        broker_order_ref TEXT NOT NULL,
-        status TEXT NOT NULL,
-        opened_at TEXT NOT NULL,
-        closed_at TEXT,
-        exit_broker_order_ref TEXT,
-        exit_price REAL,
-        exit_reason TEXT,
-        entry_session TEXT,
-        entry_order_type TEXT
-      )`,
+      doTableSql("stock_copilot_positions"),
     );
     // #3398: tables created before session recording gain the
     // columns in place (the data layer's PRAGMA/ALTER idiom).
