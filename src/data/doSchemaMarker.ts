@@ -24,6 +24,7 @@
  * (ADR 0022 D-F.5).
  */
 
+import { doTableSql } from "./schemaComponent/doCatalogue";
 /** Minimal SQL surface the marker needs from a DO instance. */
 export interface DoSchemaSql {
   exec(query: string, ...params: unknown[]): Iterable<Record<string, unknown>>;
@@ -41,11 +42,7 @@ export interface DoSchemaVersionReport {
 
 function ensureMarkerTable(sql: DoSchemaSql): void {
   sql.exec(
-    `CREATE TABLE IF NOT EXISTS ${DO_SCHEMA_MARKER_TABLE} (
-  id INTEGER PRIMARY KEY,
-  version INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-)`,
+    doTableSql("mas_do_schema_marker"),
   );
 }
 
