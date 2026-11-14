@@ -202,6 +202,27 @@ export function strategyScreenJobId(runId: string): string {
 }
 
 /**
+ * Issue #4420 — the run id one options feed shard records its inner
+ * per-symbol strategy scan under. The shard executor dispatches the scan
+ * with this identity, so the checkpoint and the shard row name the same
+ * run; the reader derives it from the shard's own payload (chain id +
+ * shard key) instead of guessing.
+ */
+export function shardScanRunId(chainId: string, symbol: string): string {
+  return `shard-scan:${chainId}:${symbol}`;
+}
+
+/**
+ * Issue #4420 — the engine job id that inner shard scan is defined and
+ * checkpointed as. Deriving it from the shard payload is what lets the
+ * Workflow Runs stage detail read the inner stages of a shard that has
+ * already failed (its row is readable; its result is not).
+ */
+export function shardScanJobId(chainId: string, symbol: string): string {
+  return strategyScreenJobId(shardScanRunId(chainId, symbol));
+}
+
+/**
  * The options screen job definition, as raw configuration for
  * JobPipelineControl.defineJob: a root with one child per options stage,
  * each child one `options.runStage` step carrying its stageId. Sequential

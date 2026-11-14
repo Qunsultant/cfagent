@@ -73,6 +73,10 @@ import type { JobRunRecord } from "./jobRunRecords";
 // roll-up is the chain surface's (one rule, not a second copy).
 import type { JobStageView } from "./jobPipelineEngine";
 import { aggregateStageStatus } from "./chainPipelineJobs";
+// Issue #4420 — the inner shard run's identity has ONE home (the engine
+// that defines it); this read derives the id from the shard's payload with
+// the same function the executor dispatches it under.
+import { shardScanJobId } from "../workflows/optionsScreenEngine";
 
 export type WorkflowRunTrigger = "manual" | "scheduled" | "autonomous" | "webhook" | "agent" | "unknown";
 
@@ -138,6 +142,19 @@ export interface WorkflowRunStage {
   retryOf?: string | null;
   /** Issue #4417: the failed attempts this shard recorded, oldest first. */
   attempts?: Array<{ attempt: number; error: string; at: string }>;
+  /**
+   * Issue #4420: the inner per-symbol engine job an options feed shard
+   * dispatched (`strategy-screen:shard-scan:<chainId>:<symbol>`), derived
+   * from the shard's own payload. Absent on a row that is not a shard.
+   */
+  innerJobId?: string | null;
+  /**
+   * Issue #4420: that inner run's stages, read from the checkpoint the
+   * shard wrote. Empty = the shard has an inner job id and no checkpoint
+   * was recorded (an honest empty, rendered as such); absent = no inner
+   * run, so the row claims nothing about one.
+   */
+  innerStages?: WorkflowRunStage[];
   /** Human description (the job's display name, or the transition summary). */
   detail: string | null;
   /** Why a skipped/held/failed stage ended that way, when recorded. */
@@ -411,6 +428,12 @@ export interface BuildWorkflowRunsInput {
    * job-row projection.
    */
   engineStages?: ReadonlyMap<string, JobStageView[]>;
+  /**
+   * Issue #4420 — each shard job's inner engine stages, keyed by the
+   * shard job id, read from the checkpoint the shard wrote. Absent for a
+   * page whose shards have no options feed rows.
+   */
+  innerShardStages?: ReadonlyMap<string, { jobId: string; stages: WorkflowRunStage[] }>;
   jobs: WorkflowRunJobRow[];
   outcomes: WorkflowRunOutcomeRow[];
   transitions: WorkflowRunStageTransition[];
@@ -474,8 +497,11 @@ function parseObject(text: unknown): Record<string, any> | null {
   }
 }
 
+/** An already-parsed JSON object, or null — never a coerced non-object. */
 function asObject(value: unknown): Record<string, any> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : null;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : null;
 }
 
 function str(value: unknown): string | null {
@@ -1059,9 +1085,31 @@ function retryOfJob(job: WorkflowRunJobRow): string | null {
   return typeof payload?.retryOf === "string" && payload.retryOf ? payload.retryOf : null;
 }
 
+/**
+ * Issue #4420 — the inner engine job an options feed shard dispatched, read
+ * from the shard's own payload (`chain.chainId` + `shard.key`). The identity
+ * is DERIVED, not stored twice: the executor defines that run under the same
+ * function (shardScanRunId), so a failed shard with no result is still
+ * addressable, and a non-shard row answers null rather than a guess.
+ */
+export function innerShardScanJobId(job: WorkflowRunJobRow): string | null {
+  if (job.capability !== "shard.execute") return null;
+  const payload = parseObject(job.payload_json);
+  const shard = asObject(payload?.shard);
+  const chain = asObject(payload?.chain);
+  if (!shard || !chain) return null;
+  if (shard.stage !== "feed" || chain.screenType !== "options") return null;
+  const chainId = typeof chain.chainId === "string" && chain.chainId ? chain.chainId : null;
+  const symbol = typeof shard.key === "string" && shard.key ? shard.key : null;
+  if (!chainId || !symbol) return null;
+  return shardScanJobId(chainId, symbol);
+}
+
 function stageRowsForGroup(
   jobs: WorkflowRunJobRow[],
   transitions: WorkflowRunStageTransition[],
+  /** Issue #4420 — inner shard stages, keyed by the shard job row they belong to. */
+  innerShardStages?: ReadonlyMap<string, { jobId: string; stages: WorkflowRunStage[] }> | null,
 ): WorkflowRunStage[] {
   const ordered = sortJobs(jobs);
   const usedTransitionIds = new Set<string>();
@@ -1088,6 +1136,7 @@ function stageRowsForGroup(
         ? jobResult.reason
         : null;
     const errorCode = str(job.error_code);
+    const inner = innerShardStages?.get(job.job_id);
     stages.push({
       key: job.job_id,
       order: stages.length + 1,
@@ -1102,6 +1151,7 @@ function stageRowsForGroup(
       attempts: attemptsForJob(job),
       jobId: job.job_id,
       retryOf: retryOfJob(job),
+      ...(inner ? { innerJobId: inner.jobId, innerStages: inner.stages } : {}),
       detail: job.display_name || null,
       reason: matchedTransition?.reason ?? resultReason ?? (errorCode ? codedMessage(errorCode) : null),
       error: codedStageError(job),
@@ -1327,13 +1377,19 @@ export function runFromJobs(
    */
   engineStages?: JobStageView[] | null,
   engineJobId?: string | null,
+  /**
+   * Issue #4420 — the inner per-symbol engine stages of this group's
+   * shards, keyed by shard job id. Only the job-row projection carries
+   * them: an engine run's own stages are the run's truth.
+   */
+  innerShardStages?: ReadonlyMap<string, { jobId: string; stages: WorkflowRunStage[] }> | null,
 ): WorkflowRun {
   const main = mainJobOf(jobs);
   const family = workflowFamilyForJobs(jobs, outcome);
   const stages =
     engineStages && engineStages.length > 0
       ? stagesFromEngineViews(engineStages, engineJobId ?? null)
-      : stageRowsForGroup(jobs, transitions);
+      : stageRowsForGroup(jobs, transitions, innerShardStages);
   // Real trigger evidence wins; an "unknown" API-channel evidence is
   // the fallback, never a mask over a job that recorded a real one.
   const evidences = jobs.map(triggerEvidence);
@@ -2172,6 +2228,7 @@ function collectWorkflowRuns(input: BuildWorkflowRunsInput, includeTraces: boole
         nowMs,
         engine?.views,
         engine?.jobId ?? null,
+        input.innerShardStages ?? null,
       ),
     );
   }

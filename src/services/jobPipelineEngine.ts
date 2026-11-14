@@ -619,6 +619,98 @@ export function vocabularyStageNodePath(
   return matches[0];
 }
 
+/**
+ * Issue #4359 / #4420 — the stage projection from a job's definition and the
+ * instance's stage checkpoint. One projection for every reader: the job
+ * surfaces (getJob / getJobStages) and a store-direct read of a job this host
+ * did not dispatch itself (readStagesFromPipelineStores).
+ */
+export function projectStageViews(
+  definition: JobDefinition,
+  instance: JobInstanceRecord | null,
+): JobStageView[] {
+  if (!instance?.stageCheckpoint) return [];
+  const kinds = new Map<string, string>();
+  const walk = (node: JobNodeConfig, path: string): void => {
+    kinds.set(path, node.kind);
+    (node.children ?? []).forEach((child, i) => walk(child, childPath(path, i)));
+  };
+  walk(definition.root, "");
+  const byStage = new Map<string, JobStageView>();
+  for (const unit of instance.stageCheckpoint.units) {
+    if (!isJobStageId(unit.stage)) continue;
+    const nodePath = unit.stage === "job:root" ? "" : unit.stage.slice("job:".length);
+    let view = byStage.get(unit.stage);
+    if (!view) {
+      view = {
+        stageId: unit.stage,
+        nodePath,
+        kind: kinds.get(nodePath) ?? null,
+        executionMode: definition.config.executionMode ?? null,
+        startedAt: null,
+        endedAt: null,
+        durationMs: null,
+        units: [],
+      };
+      byStage.set(unit.stage, view);
+    }
+    view.units.push({
+      unitId: unit.unitId,
+      status: unit.status,
+      attempt: unit.attempt,
+      ...(unit.error !== undefined ? { error: unit.error } : {}),
+      ...(unit.startedAt !== undefined ? { startedAt: unit.startedAt } : {}),
+      ...(unit.endedAt !== undefined ? { endedAt: unit.endedAt } : {}),
+    });
+  }
+  // Issue #4359 — the stage's window is its units' recorded window:
+  // earliest start, latest end once every unit is terminal. Nothing is
+  // estimated; a stage still running keeps endedAt null.
+  for (const view of byStage.values()) {
+    const starts = view.units
+      .map((unit) => unit.startedAt)
+      .filter((at): at is string => typeof at === "string")
+      .sort();
+    const ends = view.units
+      .map((unit) => unit.endedAt)
+      .filter((at): at is string => typeof at === "string")
+      .sort();
+    const allTerminal = view.units.every((unit) =>
+      TERMINAL_STAGE_UNIT_STATUSES.has(unit.status),
+    );
+    const startedAt = starts[0] ?? null;
+    const endedAt = allTerminal ? (ends[ends.length - 1] ?? null) : null;
+    view.startedAt = startedAt;
+    view.endedAt = endedAt;
+    view.durationMs =
+      startedAt && endedAt
+        ? Math.max(0, Date.parse(endedAt) - Date.parse(startedAt))
+        : null;
+  }
+  return [...byStage.values()];
+}
+
+/**
+ * Issue #4420 — the stage read over a pipeline store directly: the same
+ * projection getJobStages serves, for a job this caller can address by id
+ * but whose host did not dispatch it here (an options shard's inner
+ * `strategy-screen:shard-scan:…` run, written into the shard host's own
+ * SQLite by the shard executor). A store with no definition for the job
+ * answers null — nothing is invented into a stage list.
+ */
+export async function readStagesFromPipelineStores(
+  stores: JobPipelineStores,
+  jobId: string,
+): Promise<JobStagesRead | null> {
+  const definition = await stores.definitions.getDefinition(jobId);
+  if (!definition) return null;
+  const instance = await stores.instances.getInstance(jobId);
+  return {
+    stages: projectStageViews(definition, instance),
+    checkpointRunId: instance?.stageCheckpoint?.runId ?? null,
+  };
+}
+
 export class JobPipelineControl {
   private readonly now: () => Date;
   private readonly newRunId: () => string;
@@ -1837,65 +1929,7 @@ export class JobPipelineControl {
     definition: JobDefinition,
     instance: JobInstanceRecord | null,
   ): JobStageView[] {
-    if (!instance?.stageCheckpoint) return [];
-    const kinds = new Map<string, string>();
-    const walk = (node: JobNodeConfig, path: string): void => {
-      kinds.set(path, node.kind);
-      (node.children ?? []).forEach((child, i) => walk(child, childPath(path, i)));
-    };
-    walk(definition.root, "");
-    const byStage = new Map<string, JobStageView>();
-    for (const unit of instance.stageCheckpoint.units) {
-      if (!isJobStageId(unit.stage)) continue;
-      const nodePath = unit.stage === "job:root" ? "" : unit.stage.slice("job:".length);
-      let view = byStage.get(unit.stage);
-      if (!view) {
-        view = {
-          stageId: unit.stage,
-          nodePath,
-          kind: kinds.get(nodePath) ?? null,
-          executionMode: definition.config.executionMode ?? null,
-          startedAt: null,
-          endedAt: null,
-          durationMs: null,
-          units: [],
-        };
-        byStage.set(unit.stage, view);
-      }
-      view.units.push({
-        unitId: unit.unitId,
-        status: unit.status,
-        attempt: unit.attempt,
-        ...(unit.error !== undefined ? { error: unit.error } : {}),
-        ...(unit.startedAt !== undefined ? { startedAt: unit.startedAt } : {}),
-        ...(unit.endedAt !== undefined ? { endedAt: unit.endedAt } : {}),
-      });
-    }
-    // Issue #4359 — the stage's window is its units' recorded window:
-    // earliest start, latest end once every unit is terminal. Nothing
-    // is estimated; a stage still running keeps endedAt null.
-    for (const view of byStage.values()) {
-      const starts = view.units
-        .map((unit) => unit.startedAt)
-        .filter((at): at is string => typeof at === "string")
-        .sort();
-      const ends = view.units
-        .map((unit) => unit.endedAt)
-        .filter((at): at is string => typeof at === "string")
-        .sort();
-      const allTerminal = view.units.every((unit) =>
-        TERMINAL_STAGE_UNIT_STATUSES.has(unit.status),
-      );
-      const startedAt = starts[0] ?? null;
-      const endedAt = allTerminal ? (ends[ends.length - 1] ?? null) : null;
-      view.startedAt = startedAt;
-      view.endedAt = endedAt;
-      view.durationMs =
-        startedAt && endedAt
-          ? Math.max(0, Date.parse(endedAt) - Date.parse(startedAt))
-          : null;
-    }
-    return [...byStage.values()];
+    return projectStageViews(definition, instance);
   }
 
   // ---- execution ----------------------------------------------------------

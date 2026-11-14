@@ -53,7 +53,11 @@ import {
   memoryStageClaims,
   memoryStageStorage,
 } from "../workflows/optionsScreenWorkflow";
-import { optionsEngineStoresFromSql, runStrategyScreenViaEngine } from "../workflows/optionsScreenEngine";
+import {
+  optionsEngineStoresFromSql,
+  runStrategyScreenViaEngine,
+  shardScanRunId,
+} from "../workflows/optionsScreenEngine";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 import type { StageQueueSend } from "../workflows/stageQueueTransport";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -521,7 +525,10 @@ async function executeOptionsSymbol(
     // chain rows and the ASSEMBLED result is recorded by
     // generateAssembleOptions - the direct path never saved
     // per-symbol rows to mas_opportunity_scans either.
-    const shardRunId = `shard-scan:${chain.chainId}:${symbol}`;
+    // Issue #4420: the inner run's identity has one home
+    // (shardScanRunId), so the Workflow Runs read derives the same id
+    // from the shard payload instead of re-spelling the format.
+    const shardRunId = shardScanRunId(chain.chainId, symbol);
     const shardStorage = memoryStageStorage();
     // Issue #4271: a shard is a strategy screen — it defines the
     // strategy job (strategy-screen:<runId>), not the options job.
