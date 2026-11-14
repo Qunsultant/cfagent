@@ -20,35 +20,15 @@ import {
   type WeightVersionRecord,
   type WeightVersionWrite,
 } from "./strategyWeightsPorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqliteStrategyWeightsStore implements StrategyWeightsStore {
   constructor(private readonly sql: StrategyWeightsSqlExecutor) {}
 
   ensureTables(): void {
     const sql = this.sql;
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_strategy_weights_v2 (
-    strategy TEXT NOT NULL,
-    regime TEXT NOT NULL,
-    weight REAL NOT NULL,
-    version INTEGER NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (strategy, regime)
-  )`);
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_strategy_weight_versions (
-    id TEXT PRIMARY KEY,
-    version INTEGER NOT NULL,
-    strategy TEXT NOT NULL,
-    regime TEXT NOT NULL,
-    before_weight REAL,
-    after_weight REAL NOT NULL,
-    signal REAL,
-    evaluated INTEGER NOT NULL DEFAULT 0,
-    win_rate_after_cost REAL,
-    avg_r_after_cost REAL,
-    actor TEXT NOT NULL,
-    rationale TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  )`);
+    sql.exec(doTableSql("mas_strategy_weights_v2"));
+    sql.exec(doTableSql("mas_strategy_weight_versions"));
   }
 
   currentVersion(): number {
