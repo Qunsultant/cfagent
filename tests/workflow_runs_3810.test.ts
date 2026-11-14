@@ -307,3 +307,74 @@ describe("per-shard attempt history (#4417)", () => {
     expect(runs[0].stages[0].attempts).toEqual([]);
   });
 });
+
+describe("retry lineage (#4421)", () => {
+  it("a retry row carries retryOf from its payload and its own job id", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "shard-retry-1",
+          capability: "shard.execute",
+          chain_id: "chain-7",
+          stage: "feed",
+          status: "queued",
+          payload_json: JSON.stringify({ retryOf: "shard-original-1", chain: { chainId: "chain-7" } }),
+        }),
+      ],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs[0].stages[0].jobId).toBe("shard-retry-1");
+    expect(runs[0].stages[0].retryOf).toBe("shard-original-1");
+  });
+
+  it("an original shard carries no retry marker", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "shard-original-1",
+          capability: "shard.execute",
+          chain_id: "chain-7",
+          stage: "feed",
+          status: "failed",
+          payload_json: JSON.stringify({ chain: { chainId: "chain-7" } }),
+        }),
+      ],
+      outcomes: [],
+      transitions: [],
+    });
+    expect(runs[0].stages[0].jobId).toBe("shard-original-1");
+    expect(runs[0].stages[0].retryOf).toBeNull();
+  });
+
+  it("a stage recorded only as a transition has no job id (never a guessed one)", () => {
+    const runs = buildWorkflowRuns({
+      jobs: [
+        job({
+          job_id: "shard-original-1",
+          capability: "shard.execute",
+          chain_id: "chain-7",
+          stage: "feed",
+          status: "failed",
+        }),
+      ],
+      outcomes: [],
+      transitions: [
+        {
+          id: "tr-1",
+          chainId: "chain-7",
+          stage: "deliver",
+          status: "completed",
+          summary: "delivered",
+          reason: null,
+          jobId: "a-job-this-run-never-recorded",
+          createdAt: "2026-11-08T21:15:00.000Z",
+        },
+      ],
+    });
+    const transitionRow = runs[0].stages.find((stage) => stage.recordedBy === "stage-transition");
+    // The transition's own recorded job id is evidence; it has no lineage.
+    expect(transitionRow?.jobId).toBe("a-job-this-run-never-recorded");
+    expect(transitionRow?.retryOf).toBeNull();
+  });
+});

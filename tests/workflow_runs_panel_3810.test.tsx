@@ -262,3 +262,34 @@ describe("per-shard attempt history surface (#4417)", () => {
     expect(text).toContain("#2 upstream 500");
   });
 });
+
+describe("retry lineage surface (#4421)", () => {
+  it("renders the job id and a retry link to the original row", async () => {
+    root = createRoot(container);
+    const base = run({ status: "queued" });
+    const retryRow = { ...base.stages[0], jobId: "shard-retry-1", retryOf: "shard-original-1" };
+    await act(async () => {
+      root.render(<RunDetail run={{ ...base, stages: [retryRow] }} />);
+    });
+    await flush();
+    const text = container.textContent ?? "";
+    expect(text).toContain("shard-retry-1");
+    expect(text).toContain("Retry of");
+    const link = container.querySelector('a[href="#stage-shard-original-1"]');
+    expect(link?.textContent).toBe("shard-original-1");
+  });
+
+  it("renders no retry marker on an original shard", async () => {
+    root = createRoot(container);
+    const base = run({ status: "completed" });
+    const originalRow = { ...base.stages[0], jobId: "shard-original-1", retryOf: null };
+    await act(async () => {
+      root.render(<RunDetail run={{ ...base, stages: [originalRow] }} />);
+    });
+    await flush();
+    const text = container.textContent ?? "";
+    expect(text).toContain("shard-original-1");
+    expect(text).not.toContain("Retry of");
+    expect(container.querySelector('a[href^="#stage-"]')).toBeNull();
+  });
+});

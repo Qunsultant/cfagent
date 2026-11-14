@@ -1323,6 +1323,29 @@ export function RunDetail({
                 ),
               },
               {
+                // Issue #4421 — the durable job id, and whether this row is a
+                // retry linked to the row it repeated. Reuses the mono/muted
+                // spans: no new bespoke class for the UX ratchet to count.
+                key: "job",
+                header: "Job",
+                render: (stage: WorkflowRunStage) => (
+                  <div className="workflow-runs-when">
+                    {stage.jobId ? (
+                      <span className="workflow-runs-mono" title={stage.jobId}>
+                        {stage.jobId}
+                      </span>
+                    ) : (
+                      <span className="workflow-runs-muted">—</span>
+                    )}
+                    {stage.retryOf ? (
+                      <span className="workflow-runs-muted" title={`A retry of job ${stage.retryOf}`}>
+                        Retry of <a href={`#stage-${stage.retryOf}`}>{stage.retryOf}</a>
+                      </span>
+                    ) : null}
+                  </div>
+                ),
+              },
+              {
                 key: "recorded",
                 header: "Recorded",
                 render: (stage: WorkflowRunStage) => (
@@ -1416,6 +1439,8 @@ export function RunDetail({
             rows={run.stages}
             rowKey={(stage) => stage.key}
             caption="Stages in execution order"
+            // Issue #4421: each row is addressable so a retry can link to it.
+            rowProps={(stage) => ({ id: `stage-${stage.key}` })}
           />
         </div>
       )}
