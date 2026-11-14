@@ -1,42 +1,45 @@
-# Auto-merge eligible PRs — issue #1509; enrollment fixed in #4305 / #4313.
+# Auto-merge trusted PRs — issue #1509; enrollment fixed in #4305 / #4313 / #4444.
 #
-# WHAT: labels an eligible PR, and ENQUEUES it once CI finishes. The merge queue
-# owns the strategy (REBASE) and rebuilds the group on current main, so nothing
-# here depends on an auto-merge request.
+# WHAT: labels an eligible PR, then ENROLLS it in the merge queue once its
+# checks are green — from three triggers that actually fire:
 #
-# WHY NOT auto-merge (verified 2026-11-12 on #4298): GitHub records an auto-merge
-# request's method as the repository default — SQUASH on this repo — even when the
-# mutation asks for `mergeMethod: REBASE`, and a SQUASH request cannot merge under
-# a rebase-only ruleset. The PR then sits green, CLEAN and unmerged (#4267,
-# #4219, #4244, #4283, #4285, #4297, #4303). Enrollment is the queue entry.
+#   - `pull_request` (opened / synchronize / reopened / ready_for_review):
+#     label the PR, then attempt enrollment immediately when the head is
+#     already green (a ready_for_review flip or a push after green).
+#   - `schedule` (every 5 minutes): sweep open PRs carrying the `auto-merge`
+#     label and enroll every green, ready one. This is the path that catches
+#     CI completing AFTER the pull_request event — the previous design hung
+#     that on `workflow_run`, which GitHub never delivers for PR-branch runs
+#     in this repository (#4444 / #4325), so green PRs sat unenrolled.
+#   - `workflow_dispatch`: manual sweep.
 #
-# WHY TWO TRIGGERS (#4299: two runs 14s apart; #4313):
-# - `pull_request` labels the PR. It does NOT rely on a later `labeled` run: the
-#   label this job adds would re-trigger it, which is the duplicate run the old
-#   version produced on every PR. `labeled` is therefore not in the types list.
-# - `workflow_run` on CI completion does the enqueue. An enqueue attempted at
-#   `opened` is rejected while required checks are still running ("required
-#   status checks have not succeeded"), and no pull_request event fires when they
-#   finish — so the retry must hang off the CI run, as the old bot did.
+# WHY NOT auto-merge (verified 2026-11-12 on #4298): GitHub records an
+# auto-merge request's method as the repository default — SQUASH on this
+# repo — even when the mutation asks for `mergeMethod: REBASE`, and a SQUASH
+# request cannot merge under a rebase-only ruleset. The PR then sits green,
+# CLEAN and unmerged (#4267, #4219, #4244, #4283, #4285, #4297, #4303).
+# Enrollment is the queue entry; the queue owns the strategy (REBASE).
 #
-# VERIFIED, NOT ASSUMED (#4317): after the enqueue the job reads the PR back and
-# FAILS when it is not in the merge queue. A green check used to prove only that
-# the job ran, while green PRs sat unenrolled (#4311, #4283, #4285, #4297, #4303).
-# A draft is skipped — auto-ready-drafts flips it, and the flip brings it back here.
+# WHY A SCHEDULE (#4325 / #4346 / #4444): `workflow_run` as a trigger does
+# not reach `pull_request`-event runs here — every `workflow_run` delivery
+# this workflow ever saw was a main-branch run. The 5-minute sweep is the
+# replacement: bounded lag, no event plumbing, and it also covers the
+# ready-flip case where CI finished long before the flip.
 #
-# TRIGGER SAFETY: plain `pull_request`, not the privileged target variant, which
-# GitHub restricts on public repositories from 2026-12-02 (#4313). The labelling
-# job never checks out or executes PR code. The enqueue job runs on the default
-# branch (workflow_run semantics) and only calls the queue API.
+# TRIGGER SAFETY: plain `pull_request`, not the privileged target variant,
+# which GitHub restricts on public repositories from 2026-12-02 (#4313). The
+# labelling job never checks out or executes PR code; the enrollment job
+# resolves the PR's node id from the API and only calls the queue API.
 #
-# TOKEN: the labelling job uses the workflow's own token. The enqueue job needs
-# the GitHub App token: `enqueuePullRequest` answers FORBIDDEN to the workflow
-# token ("Resource not accessible by integration", observed on #4320), and the
-# App's pull-requests + contents scopes are what the queue API accepts.
+# TOKEN: the labelling job uses the workflow's own token. The enrollment job
+# needs the GitHub App token — `enqueuePullRequest` answers FORBIDDEN to the
+# workflow token ("Resource not accessible by integration", observed on
+# #4320), and the App's pull-requests + contents scopes are what the queue
+# API accepts.
 #
 # SAFETY: no checkout, no PR code execution. The App token is short-lived,
-# scoped to this one repository, and used only for the queue call. The required
-# checks and the queue's merge-group validation remain the gate.
+# scoped to this one repository, and used only for the queue call. The
+# required checks and the queue's merge-group validation remain the gate.
 
 name: Auto-merge trusted PRs
 
@@ -44,9 +47,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
-  workflow_run:
-    workflows: ["Continuous Integration & Test Verification"]
-    types: [completed]
+  schedule:
+    # Every 5 minutes — the enrollment path for CI that completes after the
+    # pull_request event (#4444).
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 permissions:
   pull-requests: write
@@ -54,13 +59,14 @@ permissions:
   contents: read
 
 concurrency:
-  # One run per subject; an idempotent enqueue must not cancel an in-flight one.
-  group: auto-merge-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}
+  # One run per subject; an idempotent enrollment must not cancel an in-flight
+  # one. A sweep is one subject of its own.
+  group: auto-merge-${{ github.event.pull_request.number || 'sweep' }}
   cancel-in-progress: false
 
 jobs:
   label:
-    name: Label PRs and enable auto-merge when mergeable
+    name: Label PRs that belong to the automated pipeline
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
@@ -83,9 +89,9 @@ jobs:
             gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$LANE_LABEL" || true
           fi
 
-  enqueue:
-    name: Enqueue the PR once CI finishes
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+  enroll:
+    name: Enroll green, ready, labeled PRs (event + 5-minute sweep)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
       - name: Create short-lived GitHub App token (queue API scope)
@@ -100,60 +106,111 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - name: Enqueue the open PR for this branch
+      - name: Enroll
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
-          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          # Only PRs that carry this workflow's label are enrolled; a fork branch
-          # has no label and is skipped by construction.
-          PR_JSON=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH" --state open \
-            --json number,id,isDraft,labels \
-            --jq '[.[] | select(any(.labels[]?; .name == "auto-merge"))][0] // empty')
-          if [ -z "$PR_JSON" ]; then
-            echo "No open auto-merge PR for branch '$HEAD_BRANCH'; nothing to enqueue."
-            exit 0
-          fi
-          PR_NODE_ID=$(echo "$PR_JSON" | jq -r '.id')
-          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
-          # A draft cannot be enqueued; auto-ready-drafts flips it once the gates
-          # are green, and that flip brings the PR back here (#4317).
-          if [ "$(echo "$PR_JSON" | jq -r '.isDraft')" = "true" ]; then
-            echo "PR #$PR_NUMBER is a draft; auto-ready-drafts will flip it when the gates are green."
-            exit 0
-          fi
+          FAILED=0
 
-          # Enqueue. The entry IS the enrollment. An "already in the queue"
-          # response is not a failure: the read-back below is the verdict.
-          ENQUEUE=$(gh api graphql -F id="$PR_NODE_ID" -f query='
-            mutation($id: ID!) {
-              enqueuePullRequest(input: { pullRequestId: $id }) {
-                mergeQueueEntry { position state }
-              }
-            }
-          ' 2>&1 || true)
-          echo "$ENQUEUE"
-
-          # Verification (#4317): a green check proves the job ran, not that the
-          # PR is enrolled. Read the queue state back and fail loudly when the
-          # enrollment did not land — the silent version is what let green PRs
-          # sit unenrolled (#4311, #4283, #4285, #4297, #4303).
-          STATE_JSON=$(gh api graphql -F id="$PR_NODE_ID" -f query='
-            query($id: ID!) {
-              node(id: $id) {
-                ... on PullRequest {
-                  isInMergeQueue
-                  mergeStateStatus
-                  autoMergeRequest { mergeMethod }
+          # The one enrollment decision, for one PR. Returns non-zero (and marks
+          # FAILED) when the queue read-back says the enrollment did not land
+          # (#4317: a green check proves the job ran, not that the PR is queued).
+          enroll() {
+            local node_id="$1" pr_number="$2" state IN_QUEUE rollup merge_state merge_method
+            state=$(gh api graphql -F id="$node_id" -f query='
+              query($id: ID!) {
+                node(id: $id) {
+                  ... on PullRequest {
+                    isInMergeQueue
+                    mergeStateStatus
+                    autoMergeRequest { mergeMethod }
+                    commits(last: 1) {
+                      nodes { commit { statusCheckRollup { state } } }
+                    }
+                  }
                 }
               }
-            }
-          ' 2>&1 || true)
-          echo "$STATE_JSON"
-          IN_QUEUE=$(echo "$STATE_JSON" | jq -r '.data.node.isInMergeQueue // false' 2>/dev/null || echo false)
-          if [ "$IN_QUEUE" != "true" ]; then
-            echo "::error::PR #$PR_NUMBER is not in the merge queue after the enrollment attempt. Enqueue response: $ENQUEUE"
+            ' 2>&1 || true)
+            IN_QUEUE=$(echo "$state" | jq -r '.data.node.isInMergeQueue // false' 2>/dev/null || echo false)
+            rollup=$(echo "$state" | jq -r '.data.node.commits.nodes[0].commit.statusCheckRollup.state // "MISSING"' 2>/dev/null || echo MISSING)
+            merge_state=$(echo "$state" | jq -r '.data.node.mergeStateStatus // "UNKNOWN"' 2>/dev/null || echo UNKNOWN)
+            merge_method=$(echo "$state" | jq -r '.data.node.autoMergeRequest.mergeMethod // "none"' 2>/dev/null || echo none)
+            echo "PR #$pr_number: queue=$IN_QUEUE checks=$rollup mergeState=$merge_state autoMerge=$merge_method"
+            if [ "$IN_QUEUE" = "true" ]; then
+              echo "PR #$pr_number is already in the merge queue."
+              return 0
+            fi
+            if [ "$rollup" != "SUCCESS" ]; then
+              echo "PR #$pr_number is not green ($rollup) — leaving it for the next sweep, not enrolling."
+              return 0
+            fi
+            if [ "$merge_state" = "DIRTY" ] || [ "$merge_state" = "CONFLICTING" ]; then
+              echo "PR #$pr_number has merge conflicts — not enrolling; resolve them first."
+              return 0
+            fi
+
+            local enqueue
+            enqueue=$(gh api graphql -F id="$node_id" -f query='
+              mutation($id: ID!) {
+                enqueuePullRequest(input: { pullRequestId: $id }) {
+                  mergeQueueEntry { position state }
+                }
+              }
+            ' 2>&1 || true)
+            echo "$enqueue"
+
+            local after IN_QUEUE
+            after=$(gh api graphql -F id="$node_id" -f query='
+              query($id: ID!) {
+                node(id: $id) {
+                  ... on PullRequest { isInMergeQueue mergeStateStatus }
+                }
+              }
+            ' 2>&1 || true)
+            IN_QUEUE=$(echo "$after" | jq -r '.data.node.isInMergeQueue // false' 2>/dev/null || echo false)
+            if [ "$IN_QUEUE" != "true" ]; then
+              echo "::error::PR #$pr_number is not in the merge queue after the enrollment attempt. Enqueue response: $enqueue State: $after"
+              FAILED=1
+              return 0
+            fi
+            echo "PR #$pr_number is enrolled in the merge queue."
+          }
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # One PR, resolved from the event payload — no head-branch lookup.
+            PR_JSON=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json number,id,isDraft)
+            if [ "$(echo "$PR_JSON" | jq -r '.isDraft')" = "true" ]; then
+              # A draft cannot queue. The ready half flips a green labeled
+              # draft on the same cadence, and the next sweep enrolls it.
+              echo "PR #$PR_NUMBER is a draft; auto-ready-drafts will flip it when the gates are green, and the next sweep enrolls it."
+              exit 0
+            fi
+            enroll "$(echo "$PR_JSON" | jq -r '.id')" "$PR_NUMBER"
+          else
+            # Sweep: every open PR carrying this workflow's label, oldest first.
+            # A fork branch cannot carry the label of a same-repo workflow run,
+            # so the list is same-repo by construction.
+            gh pr list --repo "$GITHUB_REPOSITORY" --label auto-merge --state open --limit 50 \
+              --json number,id,isDraft,mergeStateStatus > prs.json
+            count=$(jq 'length' prs.json)
+            echo "Sweep: $count open auto-merge PR(s)."
+            # Process substitution, not a pipe: a pipe would run the loop in a
+            # subshell and lose FAILED from the enroll calls.
+            while read -r pr; do
+              number=$(echo "$pr" | jq -r '.number')
+              draft=$(echo "$pr" | jq -r '.isDraft')
+              if [ "$draft" = "true" ]; then
+                echo "PR #$number is a draft — the ready half flips it when green."
+                continue
+              fi
+              enroll "$(echo "$pr" | jq -r '.id')" "$number"
+            done < <(jq -c '.[]' prs.json)
+          fi
+
+          if [ "$FAILED" != "0" ]; then
+            echo "::error::At least one enrollment attempt did not land in the queue — see the errors above."
             exit 1
           fi
-          echo "PR #$PR_NUMBER is enrolled in the merge queue."

@@ -66,16 +66,19 @@ describe("CI/CD Merge Queue Auto-Enqueue & Auto-Merge Velocity (#2629)", () => {
     // No auto-merge mutation and no flagless `gh pr merge` may remain.
     expect(autoMergeTrustedYml).not.toContain("enablePullRequestAutoMerge");
     expect(autoMergeTrustedYml).not.toMatch(/^\s+gh pr merge\b[^\n]*--auto/m);
-    // The enqueue runs on CI completion (workflow_run has no pull_request
-    // payload), so the PR is resolved by head branch and only when it carries
-    // the auto-merge label. `gh pr list --json` exposes `id` (the node id) and
-    // has no `nodeId` field — asking for one fails the job (observed on #4316).
-    expect(autoMergeTrustedYml).toContain("--json number,id,isDraft,labels");
-    expect(autoMergeTrustedYml).not.toContain("nodeId");
+    // Issue #4444: `workflow_run` was never delivered for PR branches, so the
+    // enrollment now runs on `pull_request` (payload resolution) plus a
+    // 5-minute sweep of labeled open PRs. `gh pr list --json` exposes `id` (the
+    // node id) and has no `nodeId` field — asking for one fails the job
+    // (observed on #4316).
     expect(autoMergeTrustedYml).toContain(
-      'gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH"',
+      "--label auto-merge --state open --limit 50",
     );
-    expect(autoMergeTrustedYml).toContain('select(any(.labels[]?; .name == "auto-merge"))');
+    expect(autoMergeTrustedYml).toContain(
+      "--json number,id,isDraft,mergeStateStatus",
+    );
+    expect(autoMergeTrustedYml).not.toContain("nodeId");
+    expect(autoMergeTrustedYml).toContain('gh pr view "$PR_NUMBER"');
   });
 
   it("no longer depends on pull_request_target (#4313)", () => {
