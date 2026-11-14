@@ -20,12 +20,13 @@
  * never counted the 2 audit-chain ALTERs that
  * ensureAuditChainColumns executes.
  *
- * NOT catalogued here (P3 owns them): the 2 guarded ALTER TABLEs
+ * NOT catalogued here: the 2 guarded ALTERs
  * on mas_trades in ormFacade.initializeSchema (broker,
- * price_source) — they stay inline until P3's reconciliation
- * catalogue. The mas_reports DDL stays in
- * src/services/scheduledReports.ts via ensureScheduledReportsTable
- * (issue #389 single-source rule); it is not an ORM-table entry.
+ * price_source) live in the remainder catalogue (#4282 P3);
+ * the mas_reports DDL lives in the DO catalogue
+ * (doCatalogue.ts, parameterized on the table name), ensured
+ * only by DoSqliteCanonicalReportStore.ensureSchema (issue #389
+ * single-source rule); it is not an ORM-table entry.
  *
  * Code naming (`<kind>.<plane>.<table>.<action>`):
  *  - CREATE TABLE: `create_table` (plane "orm").
