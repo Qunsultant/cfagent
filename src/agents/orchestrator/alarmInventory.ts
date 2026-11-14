@@ -60,7 +60,7 @@ export const ALARM_SURFACE_REGISTER: readonly AlarmSurfaceEntry[] = [
     kind: "framework-queue-index",
     what: "ensureFrameworkQueueIndexes: creates the seek indexes the re-arm/claim scans rely on (issue #2280).",
     documentedGap:
-      "Two single CREATE INDEX statements; DDL only, schedules nothing. Framework queue has no time index otherwise, and the owner (SDK) does not ship one.",
+      "Two single index statements; DDL only, schedules nothing. Framework queue has no time index otherwise, and the owner (SDK) does not ship one.",
     singleShot: true,
   },
   {
