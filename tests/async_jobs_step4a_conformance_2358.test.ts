@@ -279,7 +279,14 @@ for (const [name, make] of ADAPTERS) {
       expect(source?.job_kind).toBe("report");
       expect(source?.channel).toBe("slack");
       expect(p.read.listSessionPayloads("s1")).toEqual([
-        { job_id: "src", status: "queued", payload_json: JSON.stringify({ jobId: "src" }) },
+        {
+          job_id: "src",
+          status: "queued",
+          payload_json: JSON.stringify({ jobId: "src" }),
+          // Issue #4416: the read carries the capability so a chain-scoped
+          // retry can select its shards without a second query.
+          capability: "http.request",
+        },
       ]);
       expect(p.read.listSessionPayloads("nobody")).toEqual([]);
     });
