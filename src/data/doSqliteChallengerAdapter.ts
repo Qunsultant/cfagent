@@ -22,6 +22,7 @@ import type {
   PromotionRecord,
   PromotionRecordWrite,
 } from "./challengerPorts";
+import { doTableSql } from "./schemaComponent/doCatalogue";
 
 function rowToChallenger(r: any): Challenger {
   return {
@@ -48,50 +49,10 @@ export class DoSqliteChallengerStore implements ChallengerStore {
 
   ensureTables(): void {
     const sql = this.sql;
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_challengers (
-    id TEXT PRIMARY KEY,
-    user_login TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    title TEXT NOT NULL,
-    regime TEXT,
-    spec_json TEXT NOT NULL,
-    criteria_json TEXT NOT NULL,
-    eval_set_version TEXT NOT NULL,
-    source_proposal_id TEXT,
-    status TEXT NOT NULL,
-    evaluation_json TEXT,
-    created_by TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`);
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_challenger_approvals (
-    id TEXT PRIMARY KEY,
-    challenger_id TEXT NOT NULL,
-    user_login TEXT NOT NULL,
-    approver TEXT NOT NULL,
-    decision TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  )`);
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_challenger_promotions (
-    id TEXT PRIMARY KEY,
-    challenger_id TEXT NOT NULL,
-    user_login TEXT NOT NULL,
-    action TEXT NOT NULL,
-    prior_json TEXT NOT NULL,
-    applied_json TEXT NOT NULL,
-    weights_version INTEGER,
-    actor TEXT NOT NULL,
-    reason TEXT,
-    created_at TEXT NOT NULL
-  )`);
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_strategy_bank_active (
-    id TEXT PRIMARY KEY,
-    user_login TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    strategies_json TEXT NOT NULL,
-    challenger_id TEXT,
-    created_at TEXT NOT NULL
-  )`);
+    sql.exec(doTableSql("mas_challengers"));
+    sql.exec(doTableSql("mas_challenger_approvals"));
+    sql.exec(doTableSql("mas_challenger_promotions"));
+    sql.exec(doTableSql("mas_strategy_bank_active"));
   }
 
   getChallenger(userLogin: string, id: string): Challenger | null {
