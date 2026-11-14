@@ -6,8 +6,8 @@
  * scanRunPorts.ts, so every existing import path and call
  * signature is preserved.
  *
- * The table is ensured lazily by the store (CREATE TABLE/INDEX
- * IF NOT EXISTS, plus the issue #103 user_login column probe),
+ * The table is ensured lazily by the store (idempotent creation,
+ * plus the issue #103 user_login column probe),
  * mirroring how mas_policy_verdicts is written from the
  * orchestrator: plain sql.exec statements with bound parameters
  * and JSON payload columns.
@@ -39,6 +39,7 @@ import {
   type ScanSqlExecutor,
   type StoredScanRun,
 } from "./scanRunPorts";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 const TABLE = "mas_opportunity_scans";
 
@@ -63,13 +64,13 @@ const PRUNE_AGE_SQL = `DELETE FROM ${TABLE} WHERE generated_at < ?`;
 const PRUNE_CAP_SQL =
   `DELETE FROM ${TABLE} WHERE id NOT IN (SELECT id FROM ${TABLE} ORDER BY generated_at DESC, id DESC LIMIT ?)`;
 const TABLE_INFO_SQL = `PRAGMA table_info(${TABLE})`;
-const ADD_USER_LOGIN_COLUMN_SQL = `ALTER TABLE ${TABLE} ADD COLUMN user_login TEXT`;
+const ADD_USER_LOGIN_COLUMN_SQL = remainderAlterSql("mas_opportunity_scans", "user_login");
 // Issue #3314: the three §4 linkage columns, probed exactly like
 // user_login above — one ALTER per missing column, existing rows
 // read back NULL (an explicit absence, never a dropped row).
-const ADD_SCHEDULE_ID_COLUMN_SQL = `ALTER TABLE ${TABLE} ADD COLUMN schedule_id TEXT`;
-const ADD_ASYNC_JOB_ID_COLUMN_SQL = `ALTER TABLE ${TABLE} ADD COLUMN async_job_id TEXT`;
-const ADD_WORKFLOW_ID_COLUMN_SQL = `ALTER TABLE ${TABLE} ADD COLUMN workflow_id TEXT`;
+const ADD_SCHEDULE_ID_COLUMN_SQL = remainderAlterSql("mas_opportunity_scans", "schedule_id");
+const ADD_ASYNC_JOB_ID_COLUMN_SQL = remainderAlterSql("mas_opportunity_scans", "async_job_id");
+const ADD_WORKFLOW_ID_COLUMN_SQL = remainderAlterSql("mas_opportunity_scans", "workflow_id");
 
 function summarize(
   id: string,
@@ -145,7 +146,7 @@ export class SqlScanRunStore implements ScanRunStore {
     this.sql.exec(CREATE_INDEX_SQL);
     // Issue #103 migration: tables created before per-user scoping
     // have no user_login column. PRAGMA table_info (the repo's ORM
-    // uses the same probe) → ALTER TABLE ADD COLUMN when missing;
+    // uses the same probe) → add-column reconciliation when missing;
     // existing rows read back NULL, which the visibility rule treats
     // as legacy/unscoped. Idempotent: once the column exists the
     // probe finds it and no ALTER runs.
