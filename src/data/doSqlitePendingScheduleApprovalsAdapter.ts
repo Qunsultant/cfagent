@@ -6,7 +6,7 @@
  * through the approvals API.
  *
  * One table, `pending_schedule_approvals`, ensured lazily on every
- * operation (CREATE TABLE IF NOT EXISTS), exactly as the paused-
+ * operation (idempotent creation), exactly as the paused-
  * schedule adapter does. The store is DO-agnostic: the orchestrator
  * DO (SDK schedules) and the ScheduledAgent DO (goal schedules) each
  * construct it with their own sql handle, so each DO owns its own
