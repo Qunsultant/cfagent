@@ -180,6 +180,12 @@ export class InMemoryCommercialAdapter implements CommercialStore {
     return existing?.brokerId ? existing.brokerId : null;
   }
 
+  /** Issue #2373 (S1b, F9) — the stored data-provider selection, or null when none is stored. Mirror of getTenantBrokerSelection. */
+  async getTenantDataProviderSelection(tenantId: string): Promise<string | null> {
+    const existing = this.tenantSettings.get(tenantId);
+    return existing?.dataProviderId ? existing.dataProviderId : null;
+  }
+
   async setTenantProviders(
     tenantId: string,
     providers: TenantProviders,

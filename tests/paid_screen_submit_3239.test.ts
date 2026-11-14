@@ -10,13 +10,22 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  APPROVED_FREE_QUOTA_EXHAUSTED_ERROR,
+  APPROVED_FREE_QUOTA_EXHAUSTED_MESSAGE,
+  APPROVED_FREE_QUOTA_EXHAUSTED_STOP_ERROR,
   BROKER_UNAVAILABLE_ERROR,
+  CHECKOUT_EMAIL_REQUIRED_ERROR,
   MONETIZATION_WORKFLOW_ERROR,
+  PROVIDER_MISMATCH_ERROR,
+  PROVIDER_MISMATCH_MESSAGE,
   buildPaidScreenBody,
   buildPaidScreenQuery,
+  isApprovedFreeQuotaExhaustedError,
   isBrokerUnavailableError,
+  isCheckoutEmailRequiredError,
   isMonetizationWorkflowError,
   isPaymentStarted,
+  isProviderMismatchError,
   mapScreenError,
   mapScreenErrorFromBody,
   readMonetizationState,
@@ -32,13 +41,17 @@ describe("paidScreenBody (#3239)", () => {
     expect(body).toEqual({ universe: "NASDAQ100", async: true, email: "buyer@firm.com" });
   });
 
-  it("leaves the body unchanged when monetization is ON but no email is present", () => {
+  // Issue #2373 (S1b, gate-before-email): async rides whenever
+  // monetization is ON — a covered run starts with no email
+  // demanded, so the body carries async without an email and the
+  // server gate decides coverage first.
+  it("adds async but no email when monetization is ON and no email is present", () => {
     const body = buildPaidScreenBody(
       { universe: "NASDAQ100" },
       { monetization: "on", checkoutEmail: "  " },
     );
-    expect(body).toEqual({ universe: "NASDAQ100" });
-    expect("async" in body).toBe(false);
+    expect(body).toEqual({ universe: "NASDAQ100", async: true });
+    expect("email" in body).toBe(false);
   });
 
   it("leaves the body unchanged when monetization is OFF", () => {
@@ -66,6 +79,18 @@ describe("paidScreenQuery (#3239)", () => {
     });
     expect(params.get("async")).toBe("1");
     expect(params.get("email")).toBe("buyer@firm.com");
+    expect(params.get("sector")).toBe("Technology");
+  });
+
+  // Issue #2373 (S1b): async=1 rides whenever monetization is
+  // ON; the email rides only when one is present.
+  it("adds async=1 but no email to the GET query when monetization is ON and no email is present", () => {
+    const params = buildPaidScreenQuery(new URLSearchParams("sector=Technology"), {
+      monetization: "on",
+      checkoutEmail: "  ",
+    });
+    expect(params.get("async")).toBe("1");
+    expect(params.has("email")).toBe(false);
     expect(params.get("sector")).toBe("Technology");
   });
 
@@ -109,6 +134,18 @@ describe("mapScreenError (#3239)", () => {
       "email (checkout contact) is required when monetization is on.",
     );
     expect(message).toMatch(/checkout email/i);
+  });
+
+  // Issue #2373 (S1b): the seam's 400 carries the code
+  // checkout_email_required — the prompt maps by code, not only
+  // by the message text.
+  it("maps the 400 checkout_email_required code to an email prompt", () => {
+    const message = mapScreenError(400, undefined, CHECKOUT_EMAIL_REQUIRED_ERROR);
+    expect(message).toMatch(/checkout email/i);
+    expect(isCheckoutEmailRequiredError(400, undefined, CHECKOUT_EMAIL_REQUIRED_ERROR)).toBe(true);
+    expect(isCheckoutEmailRequiredError(400, "email (checkout contact) is required when monetization is on.")).toBe(true);
+    expect(isCheckoutEmailRequiredError(400, "something else")).toBe(false);
+    expect(isCheckoutEmailRequiredError(500, undefined, CHECKOUT_EMAIL_REQUIRED_ERROR)).toBe(false);
   });
 
   it("keeps a 400 field-guidance sentence (it is remediation, not a code)", () => {
@@ -182,6 +219,48 @@ describe("mapScreenError — broker-gate 409 (#4430)", () => {
   });
 });
 
+describe("mapScreenError — provider-mismatch 409 (#2373 S1b, F9)", () => {
+  const mismatchBody = {
+    code: PROVIDER_MISMATCH_ERROR,
+    error: PROVIDER_MISMATCH_MESSAGE,
+    message: PROVIDER_MISMATCH_MESSAGE,
+    retryable: false,
+    requestedProvider: "yahoo",
+    selectedProvider: "etrade",
+  };
+
+  it("maps 409 + FAILURE_PROVIDER_MISMATCH to the coded business message, never the raw code", () => {
+    const message = mapScreenErrorFromBody(409, mismatchBody);
+    expect(message).toBe(PROVIDER_MISMATCH_MESSAGE);
+    expect(message).not.toContain(PROVIDER_MISMATCH_ERROR);
+    expect(message).not.toContain("Screening request failed [HTTP 409]");
+  });
+
+  it("detects the provider-mismatch refusal by status + code, not by the message text", () => {
+    expect(isProviderMismatchError(409, undefined, PROVIDER_MISMATCH_ERROR)).toBe(true);
+    expect(isProviderMismatchError(409, PROVIDER_MISMATCH_ERROR)).toBe(true);
+    expect(isProviderMismatchError(409, "something else")).toBe(false);
+    expect(isProviderMismatchError(500, undefined, PROVIDER_MISMATCH_ERROR)).toBe(false);
+  });
+});
+
+describe("mapScreenError — approved-free quota cap 402 (#2373 S1b)", () => {
+  it("maps the cap refusal to its fixed message, never the generic 402 payment text", () => {
+    const message = mapScreenError(402, "Approved-free quota for stock exhausted in the current monthly period (10/10). Nothing runs over allowance (#3241 decision 4).", APPROVED_FREE_QUOTA_EXHAUSTED_ERROR);
+    expect(message).toBe(APPROVED_FREE_QUOTA_EXHAUSTED_MESSAGE);
+    expect(message).not.toMatch(/require payment/i);
+    expect(mapScreenError(402, "Approved-free quota exhausted.", APPROVED_FREE_QUOTA_EXHAUSTED_STOP_ERROR)).toBe(
+      APPROVED_FREE_QUOTA_EXHAUSTED_MESSAGE,
+    );
+  });
+
+  it("detects the cap refusal by status + code", () => {
+    expect(isApprovedFreeQuotaExhaustedError(402, APPROVED_FREE_QUOTA_EXHAUSTED_ERROR)).toBe(true);
+    expect(isApprovedFreeQuotaExhaustedError(402, APPROVED_FREE_QUOTA_EXHAUSTED_STOP_ERROR)).toBe(true);
+    expect(isApprovedFreeQuotaExhaustedError(402, "FAILURE_SOMETHING_ELSE")).toBe(false);
+    expect(isApprovedFreeQuotaExhaustedError(500, APPROVED_FREE_QUOTA_EXHAUSTED_ERROR)).toBe(false);
+  });
+});
 describe("readMonetizationState (#3239)", () => {
   it("maps the pricing flag to on/off and any read failure to unknown", async () => {
     await expect(readMonetizationState(async () => ({ monetizationEnabled: true }))).resolves.toBe("on");

@@ -259,9 +259,14 @@ export class PaymentWorkflow extends ThinkWorkflow<
   ): Promise<PaymentWorkflowOutcome> {
     const p = event.payload;
     // Issue #1185 discipline: no default identity, fail closed.
-    if (!p.userId || !p.email || !p.tenantId) {
+    // Issue #2373 (S1b, gate-before-email): identity is the
+    // verified userId + tenantId; the email is the CHECKOUT
+    // contact, enforced by the gate only when a checkout is
+    // minted. A covered run enters with an empty email and the
+    // gate covers it without one.
+    if (!p.userId || !p.tenantId) {
       throw new Error(
-        "Payment workflow payload is missing verified userId, email, or tenantId (no default identity).",
+        "Payment workflow payload is missing verified userId or tenantId (no default identity).",
       );
     }
     if (p.account.tenantId && p.tenantId !== p.account.tenantId) {

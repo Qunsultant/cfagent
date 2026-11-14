@@ -16,13 +16,14 @@ import { readTenantProvidersState } from "./tenantProviders";
 import {
   buildPaidScreenBody,
   isBrokerUnavailableError,
+  isCheckoutEmailRequiredError,
   isMonetizationWorkflowError,
   isPaymentStarted,
   mapScreenErrorFromBody,
   readMonetizationState,
   type MonetizationState,
 } from "./paidScreenSubmit";
-import { checkPayment, getPricing } from "./commercialApi";
+import { checkPayment, getOfferCompare, getPricing, isOfferPayloadView } from "./commercialApi";
 import type { ScreenedStockItem } from "../types";
 import {
   StockCriteriaPanel,
@@ -328,6 +329,10 @@ export function StockHub({
   // 202 payment_started parks here until the payment is verified.
   const [monetization, setMonetization] = useState<MonetizationState>("unknown");
   const [checkoutEmail, setCheckoutEmail] = useState("");
+  // Issue #2373 (S1b): the remaining automatic free runs
+  // (10/product/UTC-month) — the only balance surface before this
+  // slice was the post-402 UpgradeOffer. Null = unknown/unread.
+  const [freeRunsRemaining, setFreeRunsRemaining] = useState<number | null>(null);
   const [paymentStarted, setPaymentStarted] = useState<{
     runRequestId: string;
     workflowId?: string;
@@ -412,6 +417,31 @@ export function StockHub({
       cancelled = true;
     };
   }, []);
+
+  // Issue #2373 (S1b): the free-run balance, read from the same
+  // offer-compare endpoint the UpgradeOffer uses (a read, never a
+  // paid submission). A failed or ineligible read degrades
+  // silently: the balance line simply stays hidden, exactly as
+  // the UpgradeOffer's additive fetch behaves. Refreshed on
+  // mount while monetization is on, and after a run completes.
+  const loadFreeRunsRemaining = useCallback(async () => {
+    try {
+      const res = await getOfferCompare("stock");
+      if (!isOfferPayloadView(res)) return;
+      const remaining = res.current?.freeRunsRemaining;
+      setFreeRunsRemaining(typeof remaining === "number" ? remaining : null);
+    } catch {
+      // Degrade silently: no balance line, no error state.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (monetization !== "on") {
+      setFreeRunsRemaining(null);
+      return;
+    }
+    void loadFreeRunsRemaining();
+  }, [monetization, loadFreeRunsRemaining]);
 
   // Issue #329 (P1): 30 s -> 60 s, and paused entirely while the tab is hidden.
   // Issue #2481 — screener auto-load polling is gated by the
@@ -519,17 +549,17 @@ export function StockHub({
         }
       }
 
-      // Issue #3239: monetization ON rides the paid seam (async +
-      // checkout email); every other state sends today's sync body
-      // unchanged. A forced-paid retry always rides the seam. The
-      // checkout email is required for a paid run — without it the
-      // seam would 400, so the run stops here with the prompt.
+      // Issue #3239: monetization ON rides the paid seam (async);
+      // every other state sends today's sync body unchanged. A
+      // forced-paid retry always rides the seam. Issue #2373
+      // (S1b, gate-before-email): the checkout email is NOT
+      // demanded here — the server gate decides coverage first,
+      // and a covered run starts with no email at all. Only when
+      // the gate says payment is actually needed does the seam
+      // answer 400 checkout_email_required, and the error branch
+      // below then shows the email prompt (retryPaid).
       const paidMode = forcePaid || monetization === "on";
       const checkout = checkoutEmail.trim();
-      if (paidMode && !checkout) {
-        setRetryPaid(true);
-        throw new Error("Enter a checkout email to run this paid screen.");
-      }
       const paidBody = paidMode
         ? buildPaidScreenBody(requestBody, { monetization: "on", checkoutEmail: checkout })
         : requestBody;
@@ -590,6 +620,10 @@ export function StockHub({
       }
       if (!response.ok) {
         if (isMonetizationWorkflowError(response.status, data.error)) setRetryPaid(true);
+        // Issue #2373 (S1b): the gate said payment is needed and
+        // no checkout contact was supplied — show the email
+        // prompt (retryPaid) instead of the bare 400 text.
+        if (isCheckoutEmailRequiredError(response.status, data.error, data.code)) setRetryPaid(true);
         // Issue #4430 (S1a): a broker-gate 409 offers the switch to
         // the workflow-backed variant instead of the generic 409 text.
         // mapScreenErrorFromBody reads `error` or `message`, so the
@@ -668,6 +702,9 @@ export function StockHub({
       setError(cause instanceof Error ? cause.message : "Screening request failed.");
     } finally {
       setLoading(false);
+      // Issue #2373 (S1b): the run spent a free run or covered
+      // itself another way — refresh the balance line.
+      if (monetization === "on") void loadFreeRunsRemaining();
     }
   };
 
@@ -1151,13 +1188,16 @@ export function StockHub({
                   </FieldShell>
                 </Stack>
               </Grid>
+              {monetization === "on" && freeRunsRemaining !== null && (
+                <span className="ui-meta">{freeRunsRemaining} free runs remaining this month</span>
+              )}
               {(monetization === "on" || retryPaid) && (
                 <TextInput label="Checkout email"
                   type="email"
                   value={checkoutEmail}
                   onChange={(event) => setCheckoutEmail(event.target.value)}
                   placeholder="Payment contact email"
-                  hint="Required when monetization is on — the payment contact for this run."
+                  hint="Needed only when the run needs payment — a covered run starts without it."
                 />
               )}
               <Flex gap="2">

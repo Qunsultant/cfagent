@@ -81,8 +81,15 @@ export interface PaymentWorkflowSubmissionInput {
 export function buildPaymentWorkflowParams(
   input: PaymentWorkflowSubmissionInput,
 ): PaymentWorkflowEventParams {
-  if (!input.userId || !input.email || !input.tenantId) {
-    throw new Error("Payment workflow submission requires verified userId, email, and tenantId.");
+  // Issue #2373 (S1b, gate-before-email): identity is the
+  // verified userId + tenantId; the email is the CHECKOUT
+  // contact, enforced by the gate only when a checkout is
+  // minted. A covered run has no checkout, so it submits with
+  // an empty email and the gate covers it without one; an
+  // uncovered run fails at the mint, never with an invented
+  // contact. No default identity is ever substituted here.
+  if (!input.userId || !input.tenantId) {
+    throw new Error("Payment workflow submission requires verified userId and tenantId.");
   }
   if (!input.screenerCommand || typeof input.screenerCommand.jobId !== "string") {
     throw new Error("Payment workflow submission requires a screenerCommand with a jobId.");

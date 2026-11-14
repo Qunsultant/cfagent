@@ -522,6 +522,21 @@ function measure(): Map<string, number> {
  * seed counts. 2 new rows + 1 raise. (The header's last recorded
  * totals were stale: counted 1181 rows / 9333 lines before this change.)
  * Totals move 1181/9333 -> 1183/9334.
+ * Baseline update (#2373 S1b, 2026-11-14): the paid seam carries the
+ * tenant-resolved provider into the paid flow and the premium
+ * fulfilment resolves it instead of hardcoding "yahoo" — 2 raises,
+ * both dispositioned INTEGRATION, both data-bearing provider-id
+ * literals naming the engine-default provider (the #3911 precedent:
+ * an id named verbatim is baselined, its prose neutralized, never
+ * the id rewritten): paidStockScreenSeam.ts etrade 7->8 (the
+ * route-implied provider default, `spec.provider ?? "etrade"`) and
+ * premium.ts etrade 7->8 (the stored-selection comparison
+ * `storedProvider !== "etrade"`). The surrounding prose was
+ * neutralized instead (the premium fulfilment comment names no
+ * brand; the seam's comments name none either), and the premium
+ * "yahoo" row does not move (hardcoded literals removed as fast as
+ * the resolved-provider comparisons arrive). Totals move
+ * 1183/9334 -> 1183/9336.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -889,9 +904,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/optionsProviderGate.ts", "etrade", 11],
   ["src/agents/routes/optionsProviderGate.ts", "yahoo", 2],
   ["src/agents/routes/optionsRegenerate.ts", "etrade", 5],
-  ["src/agents/routes/paidStockScreenSeam.ts", "etrade", 7],
+  ["src/agents/routes/paidStockScreenSeam.ts", "etrade", 8],
   ["src/agents/routes/platformTenants.ts", "etrade", 1],
-  ["src/agents/routes/premium.ts", "etrade", 7],
+  ["src/agents/routes/premium.ts", "etrade", 8],
   ["src/agents/routes/premium.ts", "yahoo", 7],
   ["src/agents/routes/reports.ts", "alpaca", 1],
   ["src/agents/routes/reports.ts", "etrade", 1],

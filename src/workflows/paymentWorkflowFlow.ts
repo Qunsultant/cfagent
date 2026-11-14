@@ -496,9 +496,15 @@ export async function runPaymentWorkflowFlow(
     }
     return result;
   };
-  if (!params.userId || !params.email || !params.tenantId) {
+  // Issue #2373 (S1b, gate-before-email): identity is the
+  // verified userId + tenantId; the email is the CHECKOUT
+  // contact, enforced by the gate only when a checkout is
+  // minted. A covered run enters with an empty email and the
+  // gate covers it without one; missing identity still fails
+  // closed with no fallback.
+  if (!params.userId || !params.tenantId) {
     throw new Error(
-      "Payment workflow payload is missing verified userId, email, or tenantId: no default identity, fail closed.",
+      "Payment workflow payload is missing verified userId or tenantId: no default identity, fail closed.",
     );
   }
   if (deps.account.tenantId && params.tenantId !== deps.account.tenantId) {

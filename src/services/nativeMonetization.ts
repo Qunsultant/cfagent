@@ -274,6 +274,32 @@ export interface NativeCheckInput {
   nowMs?: number;
 }
 
+/**
+ * Issue #2373 (S1b, gate-before-email) — the result of the
+ * read-only coverage probe (probeCoverage). `covered` means
+ * check() would cover this run without minting a checkout;
+ * `refusedAtLimit` means check() would refuse it at the
+ * approved-free quota cap with no fall-through — no checkout
+ * is minted for that run either, so no checkout email may be
+ * demanded for it. `via` names the covering branch, mirroring
+ * check()'s paidVia values.
+ */
+export interface CoverageProbeResult {
+  covered: boolean;
+  via?:
+    | "approved_free_quota"
+    | "free_run_allowance"
+    | "unlimited_free_grant"
+    | "subscription_included"
+    | "code_runs"
+    | "runs_pack"
+    | "credits";
+  refusedAtLimit?: boolean;
+  outcomeCode?: string;
+  nextStep?: ApprovedFreeQuotaAtLimitAction;
+  reason: string;
+}
+
 export interface NativeConfirmProof {
   claimTxHash?: string;
   paymentIntentId?: string;
@@ -414,9 +440,159 @@ export class NativeMonetizationGate {
     }
   }
 
+  /**
+   * Issue #2373 (S1b, gate-before-email) — read-only coverage
+   * probe: would check() cover this run WITHOUT minting a
+   * checkout? Mirrors check()'s order exactly (grant + quota,
+   * Free allowance, grant fall-through, then the priced branches
+   * behind an approved price), but consumes nothing and never
+   * throws for a missing/unapproved price or an unreadable
+   * store: a branch that cannot be read reports as unavailable,
+   * and the caller treats that as "not covered" (demands the
+   * email). The caller is the paid seam: a covered run starts
+   * the payment workflow with no checkout email, and the
+   * workflow's own check() remains the single consuming
+   * decision — so a race between probe and workflow can only
+   * resolve to the workflow refusing or minting a checkout,
+   * never to an uncounted run. A probe saying "covered" is
+   * advisory; a probe saying "refused at the quota cap" is
+   * exact — the gate refuses that run with no fall-through, so
+   * no email may be demanded for it either.
+   */
+  async probeCoverage(input: {
+    account: NativeCommercialAccount;
+    family: NativeScreenerFamily;
+    trigger?: NativeRunTrigger;
+    tenantId?: string;
+    nowMs?: number;
+  }): Promise<CoverageProbeResult> {
+    const { account } = input;
+    const nowMs = input.nowMs ?? Date.now();
+    const login = account.userId;
+    const tenantId = account.tenantId ?? input.tenantId ?? "";
+    // Grant + quota (read-only): same order as check(). A
+    // configured quota with room covers; at the cap — or with
+    // no cap row for the family, exactly as consumeQuotaRun
+    // reports it — the gate refuses with no fall-through.
+    if (isUnlimitedFreeGrantActive(account.unlimitedFreeGrant, nowMs)) {
+      const quota = this.config.approvedFreeQuota ?? null;
+      try {
+        const settings = quota ? await quota.getSettings() : null;
+        if (quota && settings && tenantId !== "") {
+          const period = approvedFreeQuotaPeriodKey(nowMs, settings.windowKind);
+          const cap = await quota.getCap(input.family);
+          const used = await quota.getUsed({ tenantId, login, family: input.family, period });
+          if (cap !== null && cap > 0 && used < cap) {
+            return {
+              covered: true,
+              via: "approved_free_quota",
+              reason: "Active unlimited-free grant within its per-service quota.",
+            };
+          }
+          const outcomeCode =
+            settings.atLimitAction === "stop"
+              ? "FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED_STOP"
+              : "FAILURE_APPROVED_FREE_QUOTA_EXHAUSTED";
+          return {
+            covered: false,
+            refusedAtLimit: true,
+            outcomeCode,
+            nextStep: settings.atLimitAction,
+            reason: `Approved-free quota for ${input.family} exhausted in the current ${settings.windowKind} period (${used}/${cap}). Nothing runs over allowance (#3241 decision 4).`,
+          };
+        }
+      } catch {
+        // Safe degradation (tech-standards §13): the quota store
+        // could not be read — fall through to the allowance, as
+        // check() does. No free run is granted on a store error.
+      }
+    }
+    // Free-tier allowance (read-only): the same cap, never
+    // consumed here. A store error reads as no allowance.
+    if (account.tier === "Free" && this.config.freeRunCounter) {
+      try {
+        const allowance = await this.config.freeRunCounter.getAllowance(input.family);
+        const used = await this.config.freeRunCounter.getUsed({
+          login,
+          family: input.family,
+          month: freeRunMonthKey(nowMs),
+        });
+        if (allowance !== null && used < allowance) {
+          return {
+            covered: true,
+            via: "free_run_allowance",
+            reason: `Free-run allowance has ${allowance - used} of ${allowance} runs left this month.`,
+          };
+        }
+      } catch {
+        // Unreadable counter reads as no allowance (fail-closed).
+      }
+    }
+    // Grant fall-through (read-only): the quota-unavailable path,
+    // after the allowance, exactly as check() orders it.
+    if (isUnlimitedFreeGrantActive(account.unlimitedFreeGrant, nowMs)) {
+      return {
+        covered: true,
+        via: "unlimited_free_grant",
+        reason: "Active unlimited-free grant covers the run.",
+      };
+    }
+    // Priced branches: only behind an APPROVED price, exactly as
+    // check() resolves it — an unapproved or missing price makes
+    // these branches unavailable, never an error here.
+    let priceUSD: number | null = null;
+    try {
+      const pricing = await this.resolveChargePricing(input.family, account.segment ?? "default");
+      priceUSD = pricing.priceUSD;
+    } catch {
+      priceUSD = null;
+    }
+    if (priceUSD !== null) {
+      if (account.tier === "Subscribed" && account.includedRunsRemaining > 0) {
+        return {
+          covered: true,
+          via: "subscription_included",
+          reason: "Subscription included runs cover the run.",
+        };
+      }
+      try {
+        const codeBalance = this.config.codeRunsBalance
+          ? await this.config.codeRunsBalance.getBalance(login)
+          : 0;
+        if (codeBalance > 0) {
+          return { covered: true, via: "code_runs", reason: "Code-runs balance covers the run." };
+        }
+      } catch {
+        // Unreadable code balance reads as empty (fail-closed).
+      }
+      try {
+        const packBalance = this.config.runsPackBalance
+          ? await this.config.runsPackBalance.getBalance(login)
+          : 0;
+        if (packBalance > 0) {
+          return { covered: true, via: "runs_pack", reason: "Runs-pack balance covers the run." };
+        }
+      } catch {
+        // Unreadable pack balance reads as empty (fail-closed).
+      }
+      if (account.creditsUSD >= priceUSD) {
+        return { covered: true, via: "credits", reason: "Prepaid credits cover the run." };
+      }
+    }
+    return { covered: false, reason: "No coverage covers this run; payment is needed." };
+  }
+
   async check(run: NativeCheckInput): Promise<NativeGateDecision> {
     const { account } = run;
-    if (!account.userId || !account.email) throw new Error("Verified user id and email are required");
+    // Issue #2373 (S1b): the email is the CHECKOUT contact, not
+    // identity — identity is the verified user id (+ tenant).
+    // A covered run has no checkout, so it needs no contact:
+    // the email is required only at the checkout mint below.
+    // The workflow entry guards were relaxed the same way, so a
+    // covered run reaches this gate with an empty email and the
+    // covered branches below allow it; an uncovered run throws
+    // at the mint instead of minting a checkout with no contact.
+    if (!account.userId) throw new Error("Verified user id is required");
     if (run.tenantId && account.tenantId && run.tenantId !== account.tenantId) throw new Error("Tenant mismatch: run tenant must equal the verified account tenant. No cross-tenant billing.");
     const existing = this.byRun.get(run.id);
     if (existing?.status === "paid") {
@@ -615,6 +791,14 @@ export class NativeMonetizationGate {
     const port = rail === "stripe" ? ports.card : ports.x402;
     if (!port) {
       throw new Error(`Native checkout is not configured for rail ${rail}: refusing to mint a checkout (fail-closed).`);
+    }
+    // Issue #2373 (S1b): the checkout contact is required HERE,
+    // at the mint — a covered run never reaches this branch, so
+    // it needs no email at all. Minting a checkout with no
+    // contact would leave the payer unreachable; fail closed
+    // instead of inventing one.
+    if (!account.email) {
+      throw new Error("A checkout email is required to mint a checkout for this run: the run is not covered and no checkout contact was supplied.");
     }
     const checkout = await port.createCheckout({
       runRequestId: run.id,

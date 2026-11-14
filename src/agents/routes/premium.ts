@@ -67,6 +67,7 @@ import {
 import { createCanonicalReportStorePorts } from "../../data/createCanonicalReportStorePorts";
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
+import { resolveTenantDataProviderSelection } from "../../services/tenantProviders";
 import type { StoreTier } from "../../data/commercialPorts";
 import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import type { MeteredGateOptions } from "../../services/meteredPaymentGate";
@@ -87,7 +88,7 @@ export interface PremiumRouteContext {
   env: Env;
   /** ORM accessor (owner: OrchestratorAgent - was `this.getOrm()`). */
   getOrm(): DatabaseORM;
-  /** Screener agent (owner: OrchestratorAgent.getScreenerAgent) — issue #1007: premium stock-signals execute through the one stock pipeline via this agent, with the Yahoo data-source adapter as provider. */
+  /** Screener agent (owner: OrchestratorAgent.getScreenerAgent) — issue #1007: premium stock-signals execute through the one stock pipeline via this agent, with the tenant-resolved data provider (issue #2373 S1b, F9) as provider. */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
   /**
    * Issue #4278: the one engine seam (runStockScreenViaEngine)
@@ -572,16 +573,37 @@ export async function handlePremiumRoutes(
         }
         symbols = symbols.map((s) => String(s).trim().toUpperCase()).filter(Boolean);
 
+        // Issue #2373 (S1b, F9) — the fulfilment provider is the
+        // tenant's stored data-provider selection, never a
+        // hardcoded "yahoo". "yahoo" stays yahoo; the engine-default
+        // provider or no selection stored omits the provider (the
+        // engine then resolves its own default — a disclosed
+        // behaviour change: an unconfigured tenant's premium
+        // signals move from Yahoo to the engine default); any other
+        // stored provider does not serve premium stock signals and
+        // the fulfilment is refused with a plain error — no fallback
+        // provider, no fabricated signals.
+        const storedProvider = await resolveTenantDataProviderSelection(ctx.env);
+        if (storedProvider !== null && storedProvider !== "yahoo" && storedProvider !== "etrade") {
+          return {
+            success: false,
+            service: tier.name,
+            receipt,
+            error: "The selected data provider does not serve premium stock signals.",
+          };
+        }
+        const premiumProvider = storedProvider === "yahoo" ? ("yahoo" as const) : undefined;
+
         // Issue #1007 (consolidation S3): the paid signals execute
         // through the ONE stock pipeline — ScreenerAgent with the
-        // Yahoo data-source adapter as provider — instead of the
-        // retired second Market-data engine. The requested symbols
-        // are the run's explicit universe (membership only; prices come
-        // from live Yahoo quotes via the adapter). The run stores a
-        // canonical report in the REST idiom, like every other stock
-        // screen. Identity follows the #183 rule used by the options
-        // scan above: session login when present, else the verified
-        // payer scope.
+        // tenant-resolved data provider as provider (issue #2373
+        // S1b, F9) — instead of the retired second Market-data
+        // engine. The requested symbols are the run's explicit
+        // universe (membership only; prices come from live quotes
+        // via the adapter). The run stores a canonical report in
+        // the REST idiom, like every other stock screen. Identity
+        // follows the #183 rule used by the options scan above:
+        // session login when present, else the verified payer scope.
         const userLogin = request.headers.get("x-user-login") || payerScopeId(receipt.payer);
         const listings: NasdaqStockListing[] = symbols.map((symbol) => {
           const curated = getCuratedStockBySymbol(symbol);
@@ -611,7 +633,10 @@ export async function handlePremiumRoutes(
             role: "parent",
             tenantId: workflowTenantId(ctx.env),
             shards: [{ shardId: "symbols", symbols: listings }],
-            provider: "yahoo",
+            // Issue #2373 (S1b, F9): the tenant-resolved provider
+            // (yahoo), or omitted so the engine defaults when the
+            // stored selection is the engine default or none is stored.
+            ...(premiumProvider ? { provider: premiumProvider } : {}),
             deliver: false,
             maxItems: listings.length,
             maxSymbols: listings.length,
@@ -639,7 +664,10 @@ export async function handlePremiumRoutes(
           source: "premium" as const,
           trigger: "manual" as const,
           deliver: false,
-          provider: "yahoo" as const,
+          // Issue #2373 (S1b, F9): the tenant-resolved provider
+          // (yahoo), or omitted so the engine defaults when the
+          // stored selection is the engine default or none is stored.
+          ...(premiumProvider ? { provider: premiumProvider } : {}),
           filters: {},
           universe: "symbols",
           jobId: manualWorkflowJobId("symbols"),
@@ -690,14 +718,15 @@ export async function handlePremiumRoutes(
           await ctx.persistScreenerReportCanonical({ ...result, userLogin });
         }
         if (!result.success) {
-          // Honest failure (the options-scan idiom above): Yahoo
-          // unavailable fails the fulfillment visibly — no signals are
-          // fabricated from another provider or from static data.
+          // Honest failure (the options-scan idiom above): the
+          // data provider being unavailable fails the fulfillment
+          // visibly — no signals are fabricated from another
+          // provider or from static data.
           return {
             success: false,
             service: tier.name,
             receipt,
-            error: result.error || "Yahoo Finance unavailable; no stock signals could be produced.",
+            error: result.error || "The data provider is unavailable; no stock signals could be produced.",
           };
         }
         // Signals are the pipeline's screened rows for the requested

@@ -39,7 +39,7 @@
  * tests pass a fake starter and never touch a workflow binding.
  */
 
-import { shardableUniverses } from "../trading";
+import { shardableUniverses, type BrokerId } from "../trading";
 import type { Env, StageChainConfig } from "../types";
 import {
   manualWorkflowJobId,
@@ -106,6 +106,12 @@ export interface ParentScreenCommandInput {
   screenIntent?: string;
   deliver?: boolean;
   provider?: string;
+  /**
+   * Issue #2373 (S1b, F9) — the tenant's stored broker, carried
+   * as provenance only (the #4278 note on WorkflowJobCommand:
+   * quote sourcing keys on `provider`, never on this).
+   */
+  broker?: BrokerId;
   environment?: "TEST" | "PROD";
   portfolioContext?: boolean;
   /**
@@ -148,6 +154,9 @@ export function buildParentScreenCommand(
       : {}),
     ...(input.stageChain !== undefined ? { stageChain: input.stageChain } : {}),
     ...(input.provider ? { provider: input.provider } : {}),
+    // Issue #2373 (S1b, F9) — the tenant's stored broker, as
+    // provenance only (see the input field's note).
+    ...(input.broker !== undefined ? { broker: input.broker } : {}),
     filters: input.filters,
     ...(input.maxItems !== undefined ? { maxItems: input.maxItems } : {}),
     ...(input.pollIntervalMs !== undefined ? { pollIntervalMs: input.pollIntervalMs } : {}),
@@ -180,6 +189,24 @@ export interface StockScreenWorkflowCommandDeps {
   environment?: "TEST" | "PROD";
   /** Optional: E*TRADE passes its flag; market-data passes none. */
   portfolioContext?: boolean;
+  /**
+   * Issue #2373 (S1b, F9) — the tenant-resolved data provider,
+   * verified against the tenant's stored selection by the paid
+   * seam before the command is built. Wins over the spec's
+   * route-implied provider (they agree once the seam's mismatch
+   * check passes); absent, the spec's provider rides, and the
+   * engine defaults it when the spec carries none.
+   */
+  provider?: string;
+  /**
+   * Issue #2373 (S1b, F9) — the tenant's stored broker, carried
+   * as provenance only (the #4278 note: quote sourcing keys on
+   * `provider`, never on this). Set only when a broker selection
+   * is actually stored; absent when unconfigured, exactly as
+   * today — a defaulted broker must never be stamped as the
+   * run's broker.
+   */
+  brokerId?: BrokerId;
 }
 
 export function buildStockScreenWorkflowCommand(
@@ -194,6 +221,13 @@ export function buildStockScreenWorkflowCommand(
   // provenance survives the workflow hop.
   // Issue #2914 (G7): the command comes from the one
   // builder — the literal lived in the broker before, now shared.
+  // Issue #2373 (S1b, F9) — the paid seam passes the
+  // tenant-resolved provider (verified against the stored
+  // selection); it wins over the spec's route-implied provider,
+  // and they agree once the seam's mismatch check passes.
+  // Absent, the spec's provider rides, and the engine defaults
+  // it when the spec carries none.
+  const provider = deps.provider ?? spec.provider;
   return buildParentScreenCommand({
     jobId: spec.jobId ?? manualWorkflowJobId(spec.universe),
     source: "manual",
@@ -212,7 +246,10 @@ export function buildStockScreenWorkflowCommand(
       ? { delivery: spec.delivery }
       : {}),
     ...(spec.stageChain !== undefined ? { stageChain: spec.stageChain } : {}),
-    ...(spec.provider ? { provider: spec.provider } : {}),
+    ...(provider ? { provider } : {}),
+    // Issue #2373 (S1b, F9) — the tenant's stored broker, as
+    // provenance only (see the deps field's note).
+    ...(deps.brokerId !== undefined ? { broker: deps.brokerId } : {}),
     filters: spec.filters as unknown as Record<string, unknown>,
     ...(deps.environment !== undefined ? { environment: deps.environment } : {}),
     ...(deps.portfolioContext !== undefined ? { portfolioContext: deps.portfolioContext } : {}),
