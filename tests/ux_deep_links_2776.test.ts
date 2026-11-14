@@ -73,7 +73,9 @@ describe("Deep-link catalog (issue #2776)", () => {
     // best-trade still lands on the Custom Thesis tab with the surface.
     // Issue #4168: the autopilot:job-outcomes key is likewise kept —
     // Autopilot has no sub-menu node, so the Job outcomes view is
-    // addressed by the `view` param, not by a nav node.
+    // addressed by the `view` param, not by a nav node. Issue #4409
+    // extends the same exception to the other five sub-tabs — all six
+    // autopilot views are `view`-param addresses, not nav nodes.
     const legacyKeys = new Set([
       "planned",
       "planned:forex",
@@ -81,7 +83,12 @@ describe("Deep-link catalog (issue #2776)", () => {
       "planned:commodities",
       "planned:bonds",
       "options-screener:best-trade",
+      "autopilot:performance",
+      "autopilot:status",
+      "autopilot:limits",
       "autopilot:job-outcomes",
+      "autopilot:actions",
+      "autopilot:policy-decisions",
     ]);
     for (const key of Object.keys(DEEP_LINK_OVERRIDES)) {
       expect(keys.has(key) || ids.has(key) || legacyKeys.has(key)).toBe(true);

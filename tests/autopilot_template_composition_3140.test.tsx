@@ -22,6 +22,11 @@
  * source lines. The h1 / scopeNote / section assertions are
  * regression guards: they pass before and after, and fail if the
  * migration doubles the header or drops a section.
+ *
+ * Issue #4409: the six workspace sections became sub-tabs driven by
+ * the `view` param, so only the active section renders — the
+ * "all sections" assertions below now mount the relevant view (or
+ * click through the tabs) instead of assuming one long page.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
@@ -117,6 +122,9 @@ beforeEach(() => {
   localStorage.setItem("nextgen_autopilot_running", "false");
   vi.stubGlobal("fetch", stubFetch());
   Element.prototype.scrollIntoView = vi.fn() as any;
+  // #4409: the panel reads its sub-tab from the URL — a view left by
+  // a previous test must not leak into the next mount.
+  window.history.pushState(null, "", "/");
 });
 
 afterEach(async () => {
@@ -144,11 +152,10 @@ describe("autopilot page template composition (#3140)", () => {
     );
   });
 
-  it("the template Stack holds the ribbon slot first, then the six workspace sections", async () => {
+  it("the template Stack holds the ribbon slot first, then the tab row and the active panel", async () => {
     await mountHub("autopilot");
     // PageTemplate wraps slots + children in <Stack gap="4">; the
-    // kpiRibbon slot renders ahead of the workspace sections in the
-    // same Stack. This is the round-2 red driver.
+    // kpiRibbon slot renders ahead of the workspace in the same Stack.
     const ribbon = container.querySelector(".ui-stat-grid");
     expect(ribbon).not.toBeNull();
     const stack = ribbon!.parentElement;
@@ -156,17 +163,23 @@ describe("autopilot page template composition (#3140)", () => {
     expect(stack?.parentElement?.className).toContain(
       "ui-page-shell-sections",
     );
-    // Ribbon first, then the workspace sections, in DOM order. The
-    // sections are not all direct children of the Stack — Status and
-    // Live policy limits sit inside the two-column Grid, and Job
-    // outcomes sits inside its ui-anchor div — so the order check
-    // walks the Stack's descendants in document order.
-    const ordered = [...stack!.querySelectorAll(".ui-stat-grid, section")];
+    // Ribbon first, then the tab row, then the active panel — the
+    // other five sections live in inactive TabPanels that render
+    // nothing (#4409), so only the default Performance section is
+    // in the DOM. The order check walks the Stack's descendants in
+    // document order.
+    const ordered = [...stack!.querySelectorAll(".ui-stat-grid, [role='tablist'], section")];
     const at = (el: Element) => ordered.indexOf(el);
     const chart = sectionFor("Strategy Equity vs S&P 500 Benchmark");
+    const tablist = container.querySelector('[role="tablist"]');
+    expect(tablist).not.toBeNull();
+    expect(at(tablist as Element)).toBeGreaterThan(at(ribbon as Element));
+    expect(at(tablist as Element)).toBeLessThan(at(chart));
     expect(at(chart)).toBeGreaterThan(at(ribbon as Element));
-    expect(at(sectionFor("Live policy limits"))).toBeGreaterThan(at(ribbon as Element));
-    expect(at(sectionFor("Job outcomes"))).toBeGreaterThan(at(ribbon as Element));
+    // Exactly one workspace section in the Stack — the hub shell's
+    // own sections wrapper is the Stack's parent, not a workspace
+    // section, so the count is scoped here, not to the container.
+    expect(stack!.querySelectorAll("section")).toHaveLength(1);
   });
 
   it("the executive ribbon renders in the kpiRibbon slot as a KpiRibbon", async () => {
@@ -189,20 +202,16 @@ describe("autopilot page template composition (#3140)", () => {
     expect(h2s()).not.toContain("Executive performance");
   });
 
-  it("all seven content blocks render: the ribbon slot plus six workspace sections", async () => {
+  it("the default sub-tab renders its section; the other five render on selection, not all at once", async () => {
     await mountHub("autopilot");
-    expect(h2s()).toEqual([
-      "Strategy Equity vs S&P 500 Benchmark",
-      "Live policy limits",
-      "Job outcomes",
-      "Recent autonomous actions",
-      "Policy decisions",
-    ]);
-    // The untitled Status section has no h2; its card content proves
-    // it rendered (stubbed state: not running, no kill switch).
-    expect(container.textContent).toContain("Paused");
+    // #4409: only the default Performance section is in the DOM.
+    expect(h2s()).toEqual(["Strategy Equity vs S&P 500 Benchmark"]);
     expect(container.textContent).toContain("No performance history recorded");
-    // The seventh block is the ribbon slot, not a section.
+    // The Status section's card content (stubbed state: not running,
+    // no kill switch) proves it rendered — but only after its tab is
+    // selected, so it is absent here. The seventh block is the ribbon
+    // slot, not a section.
+    expect(container.textContent).not.toContain("Paused");
     expect(container.querySelector(".ui-stat-grid")).not.toBeNull();
   });
 
@@ -218,12 +227,18 @@ describe("autopilot page template composition (#3140)", () => {
   });
 
   it("the live policy limits card renders as a DetailCard with a CardHeader", async () => {
+    window.history.pushState(null, "", "/?tab=autopilot&view=limits");
     await mountHub("autopilot");
-    const section = sectionFor("Live policy limits");
-    const card = section.querySelector(".ui-card.elevated");
+    // #4409: the limits title lives in the CardHeader now (with the
+    // Edit limits action), so the section is found through the
+    // visible tab panel, not an h2.
+    const panel = container.querySelector('[role="tabpanel"]:not([hidden])');
+    expect(panel).not.toBeNull();
+    const card = panel!.querySelector(".ui-card.elevated");
     expect(card).not.toBeNull();
     const header = card!.querySelector(".ui-card-header");
     expect(header).not.toBeNull();
+    expect(header!.querySelector("h4")?.textContent?.trim()).toBe("Live policy limits");
     // Source line in the header; Edit limits action in the header meta.
     expect(header!.textContent).toContain(
       "Source: GET /api/autopilot — OrchestratorAgent state",
@@ -234,14 +249,27 @@ describe("autopilot page template composition (#3140)", () => {
   });
 
   it("the verdict and policy rows render as DetailCards with CardHeaders", async () => {
+    // #4409: each table section renders only on its own sub-tab, so
+    // the test clicks through the tabs instead of assuming one page.
+    window.history.pushState(null, "", "/?tab=autopilot&view=job-outcomes");
     await mountHub("autopilot");
-    for (const [title, source] of [
-      ["Job outcomes", "Source: GET /api/autopilot/jobs — mas_job_outcomes"],
-      ["Recent autonomous actions", "Source: GET /api/audit (mas_events)"],
-      ["Policy decisions", "Source: GET /api/autopilot — mas_policy_verdicts"],
+    for (const [tabLabel, title, source] of [
+      ["Job outcomes", "Job outcomes", "Source: GET /api/autopilot/jobs — mas_job_outcomes"],
+      ["Recent autonomous actions", "Recent autonomous actions", "Source: GET /api/audit (mas_events)"],
+      ["Policy decisions", "Policy decisions", "Source: GET /api/autopilot — mas_policy_verdicts"],
     ] as const) {
-      const section = sectionFor(title);
-      const card = section.querySelector(".ui-card.elevated");
+      const tab = [...container.querySelectorAll('[role="tab"]')].find(
+        (t) => t.textContent?.trim() === tabLabel,
+      ) as HTMLButtonElement | undefined;
+      expect(tab).toBeDefined();
+      await act(async () => {
+        tab!.click();
+      });
+      await flush();
+      expect(tab!.getAttribute("aria-selected")).toBe("true");
+      const panel = container.querySelector('[role="tabpanel"]:not([hidden])');
+      expect(panel?.textContent).toContain(title);
+      const card = panel!.querySelector(".ui-card.elevated");
       expect(card).not.toBeNull();
       const header = card!.querySelector(".ui-card-header");
       expect(header).not.toBeNull();
@@ -250,9 +278,13 @@ describe("autopilot page template composition (#3140)", () => {
   });
 
   it("the template does not swallow the workspace: verdict and policy rows render", async () => {
+    window.history.pushState(null, "", "/?tab=autopilot&view=policy-decisions");
     await mountHub("autopilot");
-    expect(container.textContent).toContain("Job outcomes");
-    expect(container.textContent).toContain("Policy decisions");
+    const panel = container.querySelector('[role="tabpanel"]:not([hidden])');
+    expect(panel?.textContent).toContain("Policy decisions");
+    expect(panel?.textContent).toContain("No policy decisions recorded");
+    // The ribbon's verdict count is the live source for the "No
+    // verdicts recorded" sub — it renders on every sub-tab.
     expect(container.textContent).toContain("No verdicts recorded");
   });
 });

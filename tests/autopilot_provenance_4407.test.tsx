@@ -185,8 +185,20 @@ function stubFetch(verdicts: unknown) {
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
-async function renderCenter(verdicts: unknown) {
+async function renderCenter(verdicts: unknown, view = "performance") {
+  // #4409: each section lives on its own sub-tab — a test that needs
+  // a table or source outside the default Performance tab mounts that
+  // view. Re-mounting unmounts the previous root first.
+  if (root) {
+    await act(async () => {
+      root!.unmount();
+    });
+    root = null;
+  }
+  container?.remove();
+  container = null;
   stubFetch(verdicts);
+  window.history.pushState(null, "", `/?tab=autopilot&view=${view}`);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -258,26 +270,33 @@ describe("Autopilot provenance — no fake/generated data (#4407)", () => {
   });
 
   it("names every section's source on the page", async () => {
-    await renderCenter(verdictsPayload.recentVerdicts);
-    const text = container!.textContent ?? "";
-    expect(text).toContain("mas_policy_verdicts");
-    expect(text).toContain("mas_events");
-    expect(text).toContain("mas_trades");
-    expect(text).toContain("mas_job_outcomes");
-    expect(text).toContain("GET /api/autopilot");
+    // #4409: each section names its source on its own sub-tab.
+    await renderCenter(verdictsPayload.recentVerdicts, "job-outcomes");
+    expect(container!.textContent ?? "").toContain("mas_job_outcomes");
+    await renderCenter(verdictsPayload.recentVerdicts, "actions");
+    const actionsText = container!.textContent ?? "";
+    expect(actionsText).toContain("mas_events");
+    expect(actionsText).toContain("mas_trades");
+    await renderCenter(verdictsPayload.recentVerdicts, "policy-decisions");
+    const verdictsText = container!.textContent ?? "";
+    expect(verdictsText).toContain("mas_policy_verdicts");
+    expect(verdictsText).toContain("GET /api/autopilot");
   });
 
   it("shows one canonical date+time format on every table", async () => {
-    await renderCenter(verdictsPayload.recentVerdicts);
-    const text = container!.textContent ?? "";
+    // #4409: one table per sub-tab, so each format is checked on its own tab.
+    await renderCenter(verdictsPayload.recentVerdicts, "policy-decisions");
     // Verdict row (ISO created_at) renders date + time.
-    expect(text).toContain(canonical(VERDICT_ISO));
+    expect(container!.textContent ?? "").toContain(canonical(VERDICT_ISO));
+    await renderCenter(verdictsPayload.recentVerdicts, "actions");
+    const actionsText = container!.textContent ?? "";
     // Audit-event action row renders date + time, not time-only.
-    expect(text).toContain(canonical(EVENT_ISO));
+    expect(actionsText).toContain(canonical(EVENT_ISO));
     // Trade action row renders date + time, not time-only.
-    expect(text).toContain(canonical(TRADE_ISO));
+    expect(actionsText).toContain(canonical(TRADE_ISO));
+    await renderCenter(verdictsPayload.recentVerdicts, "job-outcomes");
     // Job outcome row renders the same canonical format.
-    expect(text).toContain(canonical(JOB_ISO));
+    expect(container!.textContent ?? "").toContain(canonical(JOB_ISO));
   });
 
   it("mapPolicyVerdictToRow never renders a raw stored timestamp", () => {

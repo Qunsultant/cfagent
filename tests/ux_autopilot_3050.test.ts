@@ -22,7 +22,10 @@ describe("autopilot shell composition (#3050)", () => {
     expect(panel).toContain(
       '<PageSection title="Strategy Equity vs S&P 500 Benchmark"',
     );
-    expect(panel).toContain('<PageSection title="Live policy limits">');
+    expect(panel).toContain('<PageSection title="Autopilot Status">');
+    // #4409: the limits title lives in its DetailCard, not the
+    // PageSection, so "Edit limits" sits in the same CardHeader row.
+    expect(panel).toContain('title="Live policy limits"');
     expect(panel).toContain('<PageSection title="Job outcomes">');
     expect(panel).toContain(
       '<PageSection title="Recent autonomous actions">',

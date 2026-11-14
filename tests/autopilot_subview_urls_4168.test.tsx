@@ -17,6 +17,11 @@
  * Pattern: #2784 (options research adopts `?research=` on mount + on
  * route changes and scrolls to the section); `view` is the shared
  * sub-view param, so no TAB_PARAM_OWNERS entry is needed.
+ *
+ * Issue #4409 extends the one target to six sub-tabs (performance,
+ * status, limits, job-outcomes, actions, policy-decisions) and replaces
+ * the scroll adoption with tab selection: adopting a `view` selects
+ * its tab, and the tab IS the navigation — nothing scrolls anymore.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
@@ -137,20 +142,27 @@ describe("autopilot sub-view URLs (#4168)", () => {
     ).toBe("?tab=autopilot&view=job-outcomes");
   });
 
-  it("mounting with ?tab=autopilot&view=job-outcomes scrolls to the Job outcomes section", async () => {
+  it("mounting with ?tab=autopilot&view=job-outcomes selects the Job outcomes tab", async () => {
     await mountAutopilot("?tab=autopilot&view=job-outcomes");
-    const section = document.getElementById("autopilot-job-outcomes");
-    expect(section).not.toBeNull();
-    expect(section?.textContent).toContain("Job outcomes");
-    expect((Element.prototype as any).scrollIntoView).toHaveBeenCalled();
-  });
-
-  it("mounting without a view does not scroll", async () => {
-    await mountAutopilot("?tab=autopilot");
+    const tab = [...document.querySelectorAll('[role="tab"]')].find(
+      (t) => t.textContent?.trim() === "Job outcomes",
+    );
+    expect(tab?.getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain("Job outcomes");
+    // #4409: the tab selection IS the navigation — nothing scrolls.
     expect((Element.prototype as any).scrollIntoView).not.toHaveBeenCalled();
   });
 
-  it("navigating to ?tab=autopilot&view=job-outcomes while mounted scrolls too", async () => {
+  it("mounting without a view selects the Performance tab and does not scroll", async () => {
+    await mountAutopilot("?tab=autopilot");
+    const tab = [...document.querySelectorAll('[role="tab"]')].find(
+      (t) => t.textContent?.trim() === "Performance",
+    );
+    expect(tab?.getAttribute("aria-selected")).toBe("true");
+    expect((Element.prototype as any).scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("navigating to ?tab=autopilot&view=job-outcomes while mounted selects the tab too", async () => {
     await mountAutopilot("?tab=autopilot");
     expect((Element.prototype as any).scrollIntoView).not.toHaveBeenCalled();
     await act(async () => {
@@ -159,6 +171,10 @@ describe("autopilot sub-view URLs (#4168)", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     await flush();
-    expect((Element.prototype as any).scrollIntoView).toHaveBeenCalled();
+    const tab = [...document.querySelectorAll('[role="tab"]')].find(
+      (t) => t.textContent?.trim() === "Job outcomes",
+    );
+    expect(tab?.getAttribute("aria-selected")).toBe("true");
+    expect((Element.prototype as any).scrollIntoView).not.toHaveBeenCalled();
   });
 });

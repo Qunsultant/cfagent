@@ -89,7 +89,8 @@ describe("top-bar control uniformity (#3825)", () => {
 
   it("the Job outcomes TIME column shows date + time", () => {
     const panel = src(PANEL);
-    expect(panel).toContain('header: "DATE & TIME"');
+    // #4409: the header is a SortHeader button now, not a plain string.
+    expect(panel).toContain('label="DATE & TIME"');
     const section = panel.slice(panel.indexOf('<PageSection title="Job outcomes">'));
     // #4407: one canonical date+time helper (the #3825 precedent); the old
     // two-call toLocaleDateString/toLocaleTimeString formatting is gone.

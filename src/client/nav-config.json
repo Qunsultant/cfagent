@@ -1303,9 +1303,29 @@
     "autopilot": {
       "tab": "autopilot"
     },
+    "autopilot:performance": {
+      "tab": "autopilot",
+      "view": "performance"
+    },
+    "autopilot:status": {
+      "tab": "autopilot",
+      "view": "status"
+    },
+    "autopilot:limits": {
+      "tab": "autopilot",
+      "view": "limits"
+    },
     "autopilot:job-outcomes": {
       "tab": "autopilot",
       "view": "job-outcomes"
+    },
+    "autopilot:actions": {
+      "tab": "autopilot",
+      "view": "actions"
+    },
+    "autopilot:policy-decisions": {
+      "tab": "autopilot",
+      "view": "policy-decisions"
     }
   },
   "deepLinkSurfaces": [
@@ -1484,7 +1504,12 @@
       "page": "autopilot",
       "param": "view",
       "values": [
-        "job-outcomes"
+        "performance",
+        "status",
+        "limits",
+        "job-outcomes",
+        "actions",
+        "policy-decisions"
       ]
     }
   ],

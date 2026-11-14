@@ -70,6 +70,9 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
 async function renderCenter() {
+  // #4409: the verdicts table lives on the Policy decisions sub-tab —
+  // the default view is Performance, so this file mounts its own tab.
+  window.history.pushState(null, "", "/?tab=autopilot&view=policy-decisions");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);

@@ -30,7 +30,7 @@ export function CardHeader({ title, subtitle, meta, belowSubtitle }: CardHeaderP
   return (
     <Flex justify="between" align="start" wrap gap="2" className="ui-card-header">
       {(title || subtitle || belowSubtitle) && (
-        <div>
+        <div className="ui-card-header-main">
           {title && <h4>{title}</h4>}
           {subtitle && <span className="ui-card-header-subtitle">{subtitle}</span>}
           {belowSubtitle}
