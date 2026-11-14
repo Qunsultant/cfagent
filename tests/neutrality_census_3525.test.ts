@@ -545,8 +545,6 @@ function measure(): Map<string, number> {
  * unchanged: -1 on the adapter, +1 on the catalogue).
  */
 const BASELINE: Array<[string, string, number]> = [
-  // ---- PLATFORM (189 rows / 1050 lines) ----
-  // ---- PLATFORM (189 rows / 1050 lines) ----
   ["README.md", "etrade", 3],
   ["README.md", "yahoo", 1],
   // #4038/#4039 INTEGRATION: the broker parity matrix names the brokers it
