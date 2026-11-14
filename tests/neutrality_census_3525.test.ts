@@ -543,6 +543,17 @@ function measure(): Map<string, number> {
  * `remainderCatalogue.ts / etrade / 1` is added at the end of the
  * baseline. Totals move 1183/9336 -> 1184/9336 (one new row, lines
  * unchanged: -1 on the adapter, +1 on the catalogue).
+ * Baseline update (#4532 S1, 2026-11-14): the ledger's per-broker tabs
+ * resolve each stored row to its broker id, and rows recorded before
+ * the broker stamp carry none — the table module names the legacy
+ * broker id verbatim as the fallback, dispositioned INTEGRATION (a
+ * data-bearing identifier, the #3911 precedent: an id named verbatim
+ * is baselined, its prose neutralized, never the id rewritten). The
+ * module's prose names no brand, the panel carries no brand row, and
+ * display names come from the one broker presentation helper. 1 new
+ * row, added at the end of the baseline. (The header's last recorded
+ * totals were stale: counted 1187 rows / 9344 lines before this
+ * change.) Totals move 1187/9344 -> 1188/9345.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -1858,6 +1869,7 @@ const BASELINE: Array<[string, string, number]> = [
   // schema default, reproduced byte-identically from the IvHistory
   // adapter; neutralizing it would falsify the schema.
   ["src/data/schemaComponent/remainderCatalogue.ts", "etrade", 1],
+  ["src/client/ledgerTable.ts", "etrade", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
