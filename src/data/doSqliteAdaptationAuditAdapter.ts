@@ -12,27 +12,15 @@ import type {
   AdaptationAuditStore,
   AdaptationRecord,
 } from "./adaptationAuditPorts";
+import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 export class DoSqliteAdaptationAuditStore implements AdaptationAuditStore {
   constructor(private readonly sql: AdaptationAuditSqlExecutor) {}
 
   ensureTable(): void {
     const sql = this.sql;
-    sql.exec(`CREATE TABLE IF NOT EXISTS mas_adaptation_audit (
-    id TEXT PRIMARY KEY,
-    actor TEXT NOT NULL,
-    subject TEXT NOT NULL,
-    parameter TEXT NOT NULL,
-    before_value TEXT NOT NULL,
-    after_value TEXT NOT NULL,
-    delta REAL,
-    rationale TEXT NOT NULL,
-    data_window TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'applied',
-    block_reason TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`);
-    sql.exec(`CREATE INDEX IF NOT EXISTS idx_adaptation_audit_subject ON mas_adaptation_audit(subject, created_at)`);
+    sql.exec(doTableSql("mas_adaptation_audit"));
+    sql.exec(doIndexSql("idx_adaptation_audit_subject"));
   }
 
   insert(
