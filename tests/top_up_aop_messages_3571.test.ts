@@ -25,7 +25,7 @@ import {
   handleAgenticPaymentsRoutes,
   type AgenticPaymentsRouteContext,
 } from "../src/agents/routes/agenticPayments";
-import { resolveOutcome } from "../src/outcomes/outcomeAspects";
+import { codedMessage, resolveOutcome } from "../src/outcomes/outcomeAspects";
 import {
   createD1CommercialDb,
   ensureCommercialSchema,
@@ -275,8 +275,14 @@ function catalogMessage(code: string): string {
 function expectCoded(body: any, res: Response | null, status: number, code: string) {
   expect(res?.status).toBe(status);
   expect(body.code).toBe(code);
-  expect(body.message).toBe(catalogMessage(code));
-  expect(body.error).toBeUndefined();
+  // Main's convention: failures carry `error` (codedMessage of the code);
+  // successes carry no error, and neither carries a `message` field.
+  if (code.startsWith("FAILURE_")) {
+    expect(body.error).toBe(codedMessage(code));
+  } else {
+    expect(body.error).toBeUndefined();
+  }
+  expect(body.message).toBeUndefined();
   expect(JSON.stringify(body)).not.toContain(SENTINEL);
 }
 

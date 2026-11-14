@@ -3234,13 +3234,14 @@ export async function handleAgenticPaymentsRoutes(
       message: resolved.businessMessage ?? resolved.code,
       metadata: { code: resolved.code, ...metadata },
     });
+    // Main's coded-response convention (#2373/#2846): a success carries `code`
+    // and its fields; a failure carries `code` + `error` from the outcome
+    // catalog. One shape for every commercial endpoint.
+    const failure = resolved.code.startsWith("FAILURE_");
     return Response.json(
-      {
-        ...extra,
-        code: resolved.code,
-        message: resolved.businessMessage,
-        retryable: resolved.entry?.retryable ?? false,
-      },
+      failure
+        ? { ...extra, code: resolved.code, error: codedMessage(resolved.code) }
+        : { ...extra, code: resolved.code },
       { status },
     );
   }
