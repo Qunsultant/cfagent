@@ -983,6 +983,14 @@ export interface TransactionRecord {
   note?: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Tenant the row is attributed to (#3182). Nullable: legacy rows
+   * written before tenant stamping carry NULL, as do rows written
+   * where no tenant was resolvable at write time (drafts, which move
+   * no money, and agent-to-agent x402 rows) — never invented.
+   * Tenant-filtered reads exclude null-tenant rows.
+   */
+  tenantId?: string | null;
 }
 
 export interface SessionData {

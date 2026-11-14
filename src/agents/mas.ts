@@ -215,6 +215,10 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
           note: input.note || "Draft created by payments subagent",
           createdAt: now,
           updatedAt: now,
+          // Issue #3182: a draft moves no money and no tenant is
+          // resolvable at draft time (customer is free text) —
+          // explicit null, never invented from the customer string.
+          tenantId: null,
         });
         inserted = true;
       } catch (err) {

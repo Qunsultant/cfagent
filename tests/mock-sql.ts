@@ -87,6 +87,8 @@ export class MockSqlStorage implements SqlStorage {
       { name: "note", type: "TEXT", pk: 0 },
       { name: "created_at", type: "TEXT", pk: 0 },
       { name: "updated_at", type: "TEXT", pk: 0 },
+      // Issue #3182: nullable tenant attribution, last (mirrors the DDL).
+      { name: "tenant_id", type: "TEXT", pk: 0 },
     ]);
 
     this.schema.set("mas_messages", [

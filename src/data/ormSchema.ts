@@ -57,6 +57,7 @@ import {
   ormAuditChainAlterSql,
   ormIndexSql,
   ormTableSql,
+  ormTransactionTenantAlterSql,
 } from "./schemaComponent/ormCatalogue";
 
 /** The eight mas_* tables shared by the ORM and the orchestrator. */
@@ -135,6 +136,32 @@ export function ensureAuditChainColumns(sql: SqlStorage): void {
   if (!names.has("event_hash")) {
     sql.exec(ormAuditChainAlterSql("event_hash"));
   }
+}
+
+/**
+ * Issue #3182: tenant column for mas_transactions on tables created
+ * before the column existed. An IF NOT EXISTS create never
+ * migrates, so the missing column is added explicitly (the
+ * #2178 audit-chain pattern above). Idempotent: a table that
+ * already has the column is untouched. The column is nullable by
+ * design — legacy rows without a resolvable tenant stay explicitly
+ * NULL, never invented — and tenant-filtered reads exclude nulls.
+ * The index keeps the tenant-scoped read from table-scanning the
+ * ledger; fresh tables get the column from the catalogue DDL
+ * (src/data/schemaComponent/ormCatalogue.ts), in the same (last)
+ * position, so fresh and migrated tables agree. The ALTER and the
+ * index statements live in the catalogue too (#4282 single home
+ * for statement text) — this helper only executes them.
+ */
+export function ensureTransactionTenantColumn(sql: SqlStorage): void {
+  const info = Array.from(sql.exec(`PRAGMA table_info(mas_transactions)`)) as Array<{
+    name: string;
+  }>;
+  const names = new Set(info.map((c) => c.name));
+  if (!names.has("tenant_id")) {
+    sql.exec(ormTransactionTenantAlterSql());
+  }
+  sql.exec(ormIndexSql("idx_mas_transactions_tenant_id"));
 }
 
 /** Create every shared table, in SHARED_MAS_TABLES order. */

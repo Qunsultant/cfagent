@@ -60,6 +60,16 @@ export interface TransactionLedgerPort
   /** INSERT OR REPLACE the full record; returns the record. */
   replace(record: TransactionRecord): TransactionRecord;
   /**
+   * Tenant-scoped read (#3182): rows whose tenant_id equals the
+   * requested tenant, newest first. Null-tenant legacy rows are
+   * EXCLUDED — they carry no tenant attribution and must never
+   * leak into a tenant's view; they stay reachable via the
+   * unfiltered findMany and via the audit-payload join (which
+   * attributes by run id, not by tenant_id). A tenant with no
+   * rows gets an empty array.
+   */
+  findByTenant(tenantId: string): TransactionRecord[];
+  /**
    * The immediate-confirm completion: SET status='completed'
    * with the gateway fields, WHERE id = ?. No status guard.
    * Returns rows matched.

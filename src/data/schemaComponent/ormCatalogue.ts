@@ -181,9 +181,18 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
         proof_signature TEXT,
         note TEXT,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        tenant_id TEXT
       )
     `,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.orm.mas_transactions.alter_table_add_column_tenant_id",
+    plane: "orm",
+    table: "mas_transactions",
+    statement: `ALTER TABLE mas_transactions ADD COLUMN tenant_id TEXT`,
     kind: "schema",
     form: "literal",
   },
@@ -392,6 +401,15 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.index.mas_transactions.create_index_idx_mas_transactions_tenant_id",
+    plane: "index",
+    table: "mas_transactions",
+    index: "idx_mas_transactions_tenant_id",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_transactions_tenant_id ON mas_transactions (tenant_id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     // Issue #4412: the mas_promotions candidate index — a separate
     // exec from the table (SqlStorage.exec takes one statement at a
     // time), matching #760's two exec calls.
@@ -444,6 +462,19 @@ export function ormTableSql(table: string): string {
 export function ormAuditChainAlterSql(column: string): string {
   return ORM_CATALOGUE.get(
     `schema.orm.mas_events.alter_table_add_column_${column}`,
+  ).statement;
+}
+
+/**
+ * Issue #3182: the ALTER TABLE ADD COLUMN statement for the
+ * mas_transactions tenant column. The column is nullable by design —
+ * legacy rows without a resolvable tenant stay explicitly NULL, never
+ * invented — and fresh tables get the column from the catalogue DDL
+ * in the same (last) position, so fresh and migrated tables agree.
+ */
+export function ormTransactionTenantAlterSql(): string {
+  return ORM_CATALOGUE.get(
+    "schema.orm.mas_transactions.alter_table_add_column_tenant_id",
   ).statement;
 }
 

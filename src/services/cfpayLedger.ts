@@ -83,6 +83,13 @@ export interface CfpayLedgerChargeInput {
   checkoutId?: string;
   claimTxHash?: string;
   paymentIntentId?: string;
+  /**
+   * Resolved tenant of the payer (#3182), threaded from the payment
+   * workflow's verified identity. Optional at the type level because
+   * older callers predate tenant stamping; absent means unattributed
+   * (NULL), never invented.
+   */
+  tenantId?: string | null;
 }
 
 export interface CfpayLedgerCreditInput {
@@ -91,6 +98,8 @@ export interface CfpayLedgerCreditInput {
   family: string;
   /** The run's list price: the replacement value owed. */
   priceUSD: number;
+  /** Resolved tenant of the payer (#3182); see the charge input. */
+  tenantId?: string | null;
 }
 
 function rowId(prefix: string): string {
@@ -121,6 +130,9 @@ export function buildCfpayChargeTransaction(
       (input.paymentIntentId ? `; payment intent ${input.paymentIntentId}` : ""),
     createdAt: ts,
     updatedAt: ts,
+    // Issue #3182: tenant stamped from the workflow's resolved identity;
+    // null when none was threaded (unattributed, never invented).
+    tenantId: input.tenantId ?? null,
   };
 }
 
@@ -152,6 +164,8 @@ export function buildCfpayCreditTransaction(
       `(${input.family}); redeemable for one future run of the same family; this credit is not a cash refund.`,
     createdAt: ts,
     updatedAt: ts,
+    // Issue #3182: see the charge builder.
+    tenantId: input.tenantId ?? null,
   };
 }
 

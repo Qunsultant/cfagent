@@ -18,8 +18,8 @@
  *    template literals.
  *  - The expected-model fixture
  *    (tests/schema_component_orm_expected_model.json): the ORM +
- *    index-schema model built by executing the 22 base statements
- *    through the P0 InMemorySchemaInstance — 12 tables, 8 indexes.
+ *    index-schema model built by executing the 26 base statements
+ *    through the P0 InMemorySchemaInstance — 13 tables, 10 indexes.
  *    Regenerate only with the generator script
  *    ~/workspace/w4282/evidence-p2a/gen-orm-catalogue.ts run against
  *    the base tree, and review the refreshed fixture in the PR diff:
@@ -27,7 +27,9 @@
  *    a defect, not a cleanup (same discipline as the grep baseline).
  *
  * Scope correction (measured on the tip, not the filing counts):
- * 22 statements, not the filed ~15. The filing's "12 INDEX" is a
+ * 22 statements at #4282, not the filed ~15; 24 since #4412
+ * restored the mas_promotions table + index; 26 since #3182
+ * added the mas_transactions tenant column's ALTER + index. The filing's "12 INDEX" is a
  * grep count — 4 of the 12 lines are comment mentions, so the
  * executable index count is 8 — and the filing never counted the 2
  * audit-chain ALTERs that ensureAuditChainColumns executes. The 2
@@ -91,13 +93,15 @@ const ORM_STATEMENT_SHA256: Record<string, string> = {
   "schema.orm.mas_watchlists.create_table":
     "d1e45f58b918782a42844360638df5e37b475971fa7fca481c1e4d6596db3a77",
   "schema.orm.mas_transactions.create_table":
-    "6f43ab16095951528bbf784b783972a42f8b384121dcd62c0a82fb8cbd1205b0",
+    "d37a4dda803eb8cc866ef2addd0c40ac52bf6405641ab1845225e0e7fba0f7b7",
   "schema.orm.mas_promotions.create_table":
     "7fb0e867c8891cb42a0f3abd99356b6243b104d66c839672ed6f39e3968d5ef5",
   "schema.orm.mas_events.alter_table_add_column_previous_event_hash":
     "9023001ed24d883d5009321d097984444b4a3ef732ecd483b2eeacbe6dcefb3d",
   "schema.orm.mas_events.alter_table_add_column_event_hash":
     "76bb4c99838e942e284484a2af3a5f6117573f8c584b922536c3278de484144f",
+  "schema.orm.mas_transactions.alter_table_add_column_tenant_id":
+    "a3b2b0a3d5d21fa0a6432cc86c564632d910f205239f251ba412600ca4fb365c",
   "schema.orm.mas_categories.create_table":
     "6687d9d035565abcd5ce7321a53df741dc5016a2a674101fc89ce03259a63821",
   "schema.orm.mas_external_ads.create_table":
@@ -120,6 +124,8 @@ const ORM_STATEMENT_SHA256: Record<string, string> = {
     "3a2d55abeb93c43f3f20c2a12d7b12e5130a30ced30161ee29517b6a9e001869",
   "schema.index.mas_events.create_index_idx_mas_events_session_type":
     "794107ce1a6f887f0440b46f16be7bddda8438d2aeea0548d448d37009339c4a",
+  "schema.index.mas_transactions.create_index_idx_mas_transactions_tenant_id":
+    "558714cbe75842e8f123303d5b0762b5b73dcc829c03024656246b6cef1f4da9",
   "schema.index.unified_schedules.create_index_unified_schedules_created_idx":
     "02d02f32fdd8806de25d59e50690446684fc9c4ead6e7d62cca62aedebe12fbc",
   "schema.index.job_run_records.create_index_job_run_records_recent_idx":
@@ -147,11 +153,11 @@ class RecordingSqlStorage extends MockSqlStorage {
 }
 
 describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => {
-  it("catalogues all 24 ORM/index statements: 13 CREATE TABLE + 2 ALTER TABLE + 9 CREATE INDEX", () => {
+  it("catalogues all 26 ORM/index statements: 13 CREATE TABLE + 3 ALTER TABLE + 10 CREATE INDEX", () => {
     const catalogue = buildOrmCatalogue();
-    expect(ORM_CATALOGUE_ENTRIES.length).toBe(24);
-    expect(catalogue.size()).toBe(24);
-    expect(catalogue.byKind("schema").length).toBe(24);
+    expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
+    expect(catalogue.size()).toBe(26);
+    expect(catalogue.byKind("schema").length).toBe(26);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -172,26 +178,26 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
     expect(verbs.get("CREATE TABLE")).toBe(13);
-    expect(verbs.get("CREATE INDEX")).toBe(9);
-    expect(verbs.get("ALTER TABLE")).toBe(2);
+    expect(verbs.get("CREATE INDEX")).toBe(10);
+    expect(verbs.get("ALTER TABLE")).toBe(3);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(ORM_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(24);
+    expect(codes.size).toBe(26);
     for (const entry of ORM_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
     // Planes: ORM tables on "orm", indexes on "index".
     expect(
       ORM_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length,
-    ).toBe(15);
+    ).toBe(16);
     expect(
       ORM_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length,
-    ).toBe(9);
+    ).toBe(10);
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(ORM_STATEMENT_SHA256).length).toBe(24);
+    expect(Object.keys(ORM_STATEMENT_SHA256).length).toBe(26);
     for (const entry of ORM_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")
@@ -204,7 +210,7 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
     const catalogue = buildOrmCatalogue();
     const expected = expectedOrmModel();
     expect(Object.keys(expected.tables).length).toBe(13);
-    expect(Object.keys(expected.indexes).length).toBe(9);
+    expect(Object.keys(expected.indexes).length).toBe(10);
     const { diff, report } = await runEqualityCheck(catalogue, expected);
     expect(report).toBe(
       "schema diff: no differences — the catalogue-built schema equals the expected schema",

@@ -120,6 +120,10 @@ export function buildLedgerTransaction(
     note: input.operation,
     createdAt: ts,
     updatedAt: ts,
+    // Issue #3182: no tenant is resolvable for an agent-to-agent x402
+    // row — attribution stays the spending agentId (session/customer).
+    // Explicit null, never invented.
+    tenantId: null,
   };
 }
 

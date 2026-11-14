@@ -134,6 +134,9 @@ describe("DDL parser — real shared-table DDL (#4282 P0)", () => {
       "note:TEXT:pk0",
       "created_at:TEXT:pk0",
       "updated_at:TEXT:pk0",
+      // Issue #3182: nullable tenant attribution, last (fresh and
+      // ALTER-migrated tables agree on column order).
+      "tenant_id:TEXT:pk0",
     ]);
   });
 });
