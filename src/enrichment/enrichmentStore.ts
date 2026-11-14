@@ -2,7 +2,7 @@
  * Issue #1888: enrichment run store + dedicated killswitch storage.
  *
  * Runs persist in the orchestrator's storage SQL (the same idiom as
- * the feed-snapshot store: CREATE TABLE IF NOT EXISTS + single-line
+ * the feed-snapshot store: idempotent creation + single-line
  * statements), keyed by job + stage so stage-persisted output is
  * addressable and resumable. The killswitch lives in the existing
  * settings table under its own key — the same table the global
