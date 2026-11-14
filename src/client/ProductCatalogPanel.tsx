@@ -1064,17 +1064,28 @@ function parityTone(
   return verdict === "parity" ? "success" : "neutral";
 }
 
-export function ProductCatalogPanel() {
+export function ProductCatalogPanel({
+  /**
+   * Issue #4530 — the query param this panel's sub-tabs sync on. The panel
+   * used `view` while it WAS the standalone products page; inside the hub,
+   * `view` is the HUB's tab, so sharing it made a sub-tab click (e.g.
+   * "Selling options") also switch the hub tab. The hub passes its own
+   * nested param and the collision is gone.
+   */
+  tabParam = "view",
+}: { tabParam?: string } = {}) {
   const [products, setProducts] = useState<CatalogDisplayEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [channel, setChannel] = useState<MarketingChannel>("facebook");
   const [preview, setPreview] = useState<MarketingDraft | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [sellingOpenRequest, setSellingOpenRequest] = useState(0);
-  // Issue #4511 — Selling options is a sub-tab (URL-synced on "view",
-  // default "catalog"); the selling reads still happen only on demand.
+  // Issue #4511 — Selling options is a sub-tab (URL-synced, default
+  // "catalog"); the selling reads still happen only on demand.
+  // Issue #4530 — the param is a prop: standalone `view`, nested inside the
+  // hub `productTab`, so the two tab levels never read each other's value.
   const { activeTab, visitedTabs, handleTabChange } = useUrlSyncedTabs<ProductCatalogTab>({
-    param: "view",
+    param: tabParam,
     isValid: isProductCatalogTab,
     defaultTab: "catalog",
   });

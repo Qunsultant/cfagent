@@ -131,7 +131,7 @@ export function ProductHub() {
           retain
         >
           <ErrorBoundary label="Products panel">
-            <ProductCatalogPanel />
+            <ProductCatalogPanel tabParam="productTab" />
           </ErrorBoundary>
         </TabPanel>
       )}

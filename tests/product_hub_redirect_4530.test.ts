@@ -15,7 +15,6 @@ describe("legacy product redirect (#4530)", () => {
     ["?tab=products", "products"],
     ["?tab=products&view=catalog", "products"],
     ["?tab=products&view=selling-options", "selling-options"],
-    ["?tab=products&view=marketing-draft-preview", "marketing-draft-preview"],
     // An unknown nested view lands on the hub's Products tab.
     ["?tab=products&view=bogus", "products"],
     ["?tab=platform-admin&view=products", "admin-products"],
@@ -24,6 +23,17 @@ describe("legacy product redirect (#4530)", () => {
     ["?tab=platform-admin:free-runs", "free-runs"],
   ])("%s redirects to the %s hub tab", (search, view) => {
     expect(legacyProductRedirect(search)).toEqual({ tab: "product-hub", view });
+  });
+
+  it("keeps the catalog's Marketing draft preview sub-tab without claiming the hub's `view`", () => {
+    // #4530: the preview is a NESTED sub-tab of the hub's Products tab. Mapping
+    // it onto `view` would name a hub tab that does not exist (and, with the
+    // shared param, made a sub-tab click switch the hub tab).
+    expect(legacyProductRedirect("?tab=products&view=marketing-draft-preview")).toEqual({
+      tab: "product-hub",
+      view: "products",
+      params: { productTab: "marketing-draft-preview" },
+    });
   });
 
   it.each([

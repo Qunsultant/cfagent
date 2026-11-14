@@ -88,16 +88,24 @@ export function Chat({ user }: { user: User }) {
   // address never renders a surface — see schedulesHome.ts.
   useEffect(() => {
     const applyRoute = () => {
-      setTab(readTabFromLocation());
+      // Issue #4530 — redirects run BEFORE the tab is adopted: a retired
+      // address resolves through `resolveRouteId`, whose unknown-id fallback
+      // is "autopilot", so adopting first painted the wrong panel for one
+      // pass before the redirect landed. `replaceToTab` dispatches
+      // `routechange` synchronously, so the nested call adopts the target.
       if (typeof window !== "undefined") {
         const redirect = legacySchedulesRedirect(window.location.search);
-        if (redirect) replaceToTab(redirect.tab, redirect.view, redirect.params);
-        // Issue #4530: a retired product-domain address is replaced
-        // by its Product Hub tab the same way, so the old address
-        // never renders a surface.
+        if (redirect) {
+          replaceToTab(redirect.tab, redirect.view, redirect.params);
+          return;
+        }
         const productRedirect = legacyProductRedirect(window.location.search);
-        if (productRedirect) replaceToTab(productRedirect.tab, productRedirect.view);
+        if (productRedirect) {
+          replaceToTab(productRedirect.tab, productRedirect.view, productRedirect.params);
+          return;
+        }
       }
+      setTab(readTabFromLocation());
     };
     applyRoute();
     return subscribeToRouteChanges(applyRoute);

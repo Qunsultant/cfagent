@@ -227,4 +227,40 @@ describe("Product Hub (#4530)", () => {
     expect(hubTabButton("products").getAttribute("aria-selected")).toBe("true");
     expect(text()).toContain("Options Screener");
   });
+
+  it("a catalog sub-tab click moves the SUB-tab, never the hub tab", async () => {
+    // #4530: the embedded catalog panel syncs on its own `productTab` param.
+    // When it shared `view` with the hub, clicking "Selling options" inside
+    // the catalog also switched the HUB to its Selling tab — two tab levels
+    // reading one value.
+    const { impl } = hubFetch();
+    await renderHub(impl, "/?tab=product-hub&view=products");
+    const sellingSubTab = container.querySelector('#products-tab-selling-options');
+    expect(sellingSubTab, "catalog Selling options sub-tab").toBeTruthy();
+    await act(async () => {
+      (sellingSubTab as HTMLButtonElement).click();
+    });
+    await flush();
+    expect(window.location.search).toContain("productTab=selling-options");
+    expect(window.location.search).toContain("view=products");
+    expect(hubTabButton("products").getAttribute("aria-selected")).toBe("true");
+    expect(hubTabButton("selling-options").getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("a nested deep link opens the catalog's Marketing draft preview sub-tab", async () => {
+    const { impl } = hubFetch();
+    await renderHub(
+      impl,
+      "/?tab=product-hub&view=products&productTab=marketing-draft-preview",
+    );
+    expect(hubTabButton("products").getAttribute("aria-selected")).toBe("true");
+    // The sub-tab is the selected one and its own panel is rendered.
+    expect(
+      container.querySelector('#products-tab-marketing-draft-preview')?.getAttribute("aria-selected"),
+    ).toBe("true");
+    // The sub-tab's own panel is mounted and shows its form, not the catalog table.
+    expect(container.querySelector('#products-panel-marketing-draft-preview')?.textContent ?? "").toContain(
+      "Compose channel-formatted",
+    );
+  });
 });
