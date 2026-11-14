@@ -43,9 +43,11 @@ import { fetchTenants, type TenantListRow } from "./tenantAdminApi";
 import {
   checkPlatformBootstrap,
   confirmCleanState,
+  confirmRecreate,
   fetchDataLifecycleExport,
   initializePlatformBootstrap,
   previewCleanState,
+  previewRecreate,
   previewTenantBootstrap,
   runTenantBootstrap,
   type BootstrapElement,
@@ -54,6 +56,9 @@ import {
   type CleanScope,
   type CleanTarget,
   type PlatformBootstrapReport,
+  type RecreatePreview,
+  type RecreateResult,
+  type RecreateStepDescriptor,
   type TenantBootstrapReport,
 } from "./dataLifecycleApi";
 
@@ -635,6 +640,381 @@ function TenantBootstrapCard() {
 }
 
 // ---------------------------------------------------------------------------
+// Recreate (#4383)
+// ---------------------------------------------------------------------------
+
+/** Display group for a planned step, derived from its code's action. */
+function detailGroupOf(code: string): string {
+  if (code.startsWith("seed.")) return "seeds";
+  if (code.includes(".create_table")) return "creations";
+  if (code.includes(".create_index") || code.includes(".create_unique_index")) {
+    return "indexes";
+  }
+  return "reconciliations";
+}
+
+interface DetailRow {
+  leg: string;
+  group: string;
+  code: string;
+  params: string;
+}
+
+function detailRowsOf(preview: RecreatePreview): DetailRow[] {
+  const rows: DetailRow[] = [];
+  for (const step of preview.d1.selected) {
+    rows.push({
+      leg: "D1",
+      group: detailGroupOf(step.code),
+      code: step.code,
+      params: paramsText(step),
+    });
+  }
+  for (const instance of preview.instances) {
+    for (const step of instance.selected) {
+      rows.push({
+        leg: instance.login,
+        group: detailGroupOf(step.code),
+        code: step.code,
+        params: paramsText(step),
+      });
+    }
+  }
+  return rows;
+}
+
+function paramsText(step: RecreateStepDescriptor): string {
+  const entries = Object.entries(step.params);
+  if (entries.length === 0) return "—";
+  return entries.map(([k, v]) => `${k}=${v}`).join(", ");
+}
+
+function RecreateCard() {
+  const [tenants, setTenants] = useState<TenantListRow[]>([]);
+  const [tenantsError, setTenantsError] = useState("");
+  const [scope, setScope] = useState<CleanScope>("tenant");
+  const [tenantId, setTenantId] = useState("");
+  const [preview, setPreview] = useState<RecreatePreview | null>(null);
+  const [result, setResult] = useState<RecreateResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [auditChecked, setAuditChecked] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTenants()
+      .then((rows) => {
+        if (cancelled) return;
+        setTenants(rows);
+        if (rows.length > 0) setTenantId((prev) => prev || rows[0].tenantId);
+      })
+      .catch((err) => {
+        if (!cancelled) setTenantsError(messageOf(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const resetFlow = useCallback(() => {
+    setPreview(null);
+    setResult(null);
+    setConfirmText("");
+    setAuditChecked(false);
+    setDetailOpen(false);
+    setError("");
+  }, []);
+
+  const onPreview = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      setPreview(
+        await previewRecreate(scope, scope === "tenant" ? tenantId : undefined),
+      );
+    } catch (err) {
+      setPreview(null);
+      setError(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [scope, tenantId]);
+
+  const onDownload = useCallback(() => {
+    const payload = result ?? preview;
+    if (!payload) return;
+    downloadTextFile(
+      `data-lifecycle-recreate-${scope}${scope === "tenant" ? `-${tenantId}` : ""}-${new Date().toISOString().slice(0, 10)}.json`,
+      JSON.stringify(payload, null, 2),
+      "application/json",
+    );
+  }, [result, preview, scope, tenantId]);
+
+  const canConfirm =
+    preview !== null &&
+    auditChecked &&
+    (scope === "tenant" || confirmText === "CLEAN PLATFORM");
+
+  const onConfirm = useCallback(async () => {
+    if (!preview) return;
+    setBusy(true);
+    setError("");
+    try {
+      const out = await confirmRecreate({
+        scope,
+        tenantId: scope === "tenant" ? tenantId : undefined,
+        previewToken: preview.previewToken,
+        confirmText: scope === "platform" ? confirmText : undefined,
+        auditConfirm: true,
+      });
+      setResult(out);
+      setPreview(null);
+      setModalOpen(false);
+    } catch (err) {
+      setError(messageOf(err));
+      setModalOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  }, [preview, scope, tenantId, confirmText]);
+
+  const shownLayers = result?.uncreatableLayers ?? preview?.uncreatableLayers ?? [];
+  const detailRows = preview ? detailRowsOf(preview) : [];
+  const d1Executed = result?.d1.report.executed.length ?? 0;
+  const d1Failed = result?.d1.report.failed.length ?? 0;
+
+  return (
+    <Stack gap="3">
+      <div className="section-label-row">
+        <span>Recreate schema</span>
+        <small>Rebuild the schema on the D1 leg and the member instances</small>
+      </div>
+      <Notice tone="info">
+        The recreate rebuilds SQL schema only: it probes each store, runs
+        only the steps that close a diff, and verifies afterwards. A second
+        run is a no-op. The layers below cannot be rebuilt from a route —
+        they are reported, never faked.
+      </Notice>
+      {tenantsError && <Notice tone="danger">{tenantsError}</Notice>}
+      {error && <Notice tone="danger">{error}</Notice>}
+      <SegmentedControl<CleanScope>
+        ariaLabel="Recreate scope"
+        options={[
+          { id: "tenant", label: "Tenant" },
+          { id: "platform", label: "Platform" },
+        ]}
+        value={scope}
+        onChange={(next) => {
+          setScope(next);
+          resetFlow();
+        }}
+      />
+      {scope === "tenant" && (
+        <Select
+          label="Tenant"
+          value={tenantId}
+          onChange={(e) => {
+            setTenantId(e.target.value);
+            resetFlow();
+          }}
+        >
+          {tenants.map((t) => (
+            <option key={t.tenantId} value={t.tenantId}>
+              {t.tenantId}
+            </option>
+          ))}
+        </Select>
+      )}
+      <div>
+        <Button onClick={() => void onPreview()} disabled={busy || (scope === "tenant" && !tenantId)}>
+          Preview recreate
+        </Button>{" "}
+        <Button
+          variant="danger"
+          onClick={() => setModalOpen(true)}
+          disabled={!preview || busy}
+        >
+          Review and recreate
+        </Button>{" "}
+        <Button onClick={onDownload} disabled={!preview && !result}>
+          Download recreate report
+        </Button>
+        {busy && <Spinner label="Working" />}
+      </div>
+      {preview && (
+        <Table<{ leg: string; planned: number; skipped: number; error?: string }>
+          columns={[
+            { key: "leg", header: "Leg", render: (row) => row.leg },
+            {
+              key: "planned",
+              header: "Planned",
+              render: (row) => `${row.planned} planned`,
+            },
+            {
+              key: "skipped",
+              header: "Skipped",
+              render: (row) => String(row.skipped),
+            },
+            {
+              key: "status",
+              header: "Status",
+              render: (row) =>
+                row.error ? (
+                  <Badge tone="danger">{row.error}</Badge>
+                ) : (
+                  <Badge tone="neutral">preview</Badge>
+                ),
+            },
+          ]}
+          rows={[
+            {
+              leg: "D1",
+              planned: preview.d1.selected.length,
+              skipped: preview.d1.skipped.length,
+            },
+            ...preview.instances.map((i) => ({
+              leg: i.login,
+              planned: i.selected.length,
+              skipped: i.skipped.length,
+              ...(i.error ? { error: i.error } : {}),
+            })),
+          ]}
+          rowKey={(row) => row.leg}
+        />
+      )}
+      {preview && detailRows.length > 0 && (
+        <div>
+          <Button onClick={() => setDetailOpen((v) => !v)}>
+            {detailOpen ? "Hide planned steps" : "Show planned steps"}
+          </Button>
+          {detailOpen && (
+            <Table<DetailRow>
+              columns={[
+                { key: "leg", header: "Leg", render: (row) => row.leg },
+                { key: "group", header: "Group", render: (row) => row.group },
+                {
+                  key: "code",
+                  header: "Step",
+                  render: (row) => <code>{row.code}</code>,
+                },
+                { key: "params", header: "Params", render: (row) => row.params },
+              ]}
+              rows={detailRows}
+              rowKey={(row) => `${row.leg}:${row.group}:${row.code}:${row.params}`}
+            />
+          )}
+        </div>
+      )}
+      {shownLayers.length > 0 && (
+        <Table<{ layer: string; reason: string; remedy: string }>
+          columns={[
+            {
+              key: "layer",
+              header: "Cannot be recreated",
+              render: (row) => <code>{row.layer}</code>,
+            },
+            { key: "reason", header: "Reason", render: (row) => row.reason },
+            { key: "remedy", header: "Remedy", render: (row) => row.remedy },
+          ]}
+          rows={shownLayers}
+          rowKey={(row) => row.layer}
+        />
+      )}
+      {result && (
+        <>
+          <Notice tone={d1Failed > 0 ? "warning" : "success"}>
+            Recreate complete — D1 leg executed {d1Executed} step(s)
+            {d1Failed > 0 ? `, ${d1Failed} failed` : ""};{" "}
+            {result.instances.length} instance leg(s) reported.
+          </Notice>
+          <Table<{ login: string; executed: number; failed: number; outcome: string; error?: string }>
+            columns={[
+              { key: "login", header: "Instance", render: (row) => row.login },
+              {
+                key: "executed",
+                header: "Executed",
+                render: (row) => String(row.executed),
+              },
+              {
+                key: "failed",
+                header: "Failed",
+                render: (row) => String(row.failed),
+              },
+              {
+                key: "outcome",
+                header: "Outcome",
+                render: (row) =>
+                  row.error ? (
+                    <Badge tone="danger">{row.error}</Badge>
+                  ) : (
+                    <Badge tone={row.outcome === "succeeded" ? "success" : "danger"}>
+                      {row.outcome}
+                    </Badge>
+                  ),
+              },
+            ]}
+            rows={result.instances.map((i) => ({
+              login: i.login,
+              executed: i.report?.executed.length ?? 0,
+              failed: i.report?.failed.length ?? 0,
+              outcome: i.report?.outcome ?? "error",
+              ...(i.error ? { error: i.error } : {}),
+            }))}
+            rowKey={(row) => row.login}
+          />
+          <AuditLine audit={result.audit} />
+        </>
+      )}
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={scope === "tenant" ? "Confirm tenant recreate" : "Confirm platform recreate"}
+        footer={
+          <>
+            <Button onClick={() => setModalOpen(false)} disabled={busy}>
+              Keep data
+            </Button>
+            <Button
+              onClick={() => void onConfirm()}
+              disabled={!canConfirm || busy}
+              variant="danger"
+            >
+              Confirm recreate
+            </Button>
+          </>
+        }
+      >
+        <Stack gap="3">
+          <p>
+            This rebuilds the schema for exactly the previewed{" "}
+            {scope === "tenant" ? `tenant (${tenantId})` : "platform"} scope —
+            the confirm is bound to the preview token, so a scope that changed
+            since the preview is refused by the server.
+          </p>
+          {scope === "platform" && (
+            <TextInput
+              label="Type the scope phrase to confirm"
+              placeholder="CLEAN PLATFORM"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+            />
+          )}
+          <Checkbox
+            label="I confirm the schema may be rebuilt in the member instances (auditConfirm)"
+            checked={auditChecked}
+            onChange={(e) => setAuditChecked(e.target.checked)}
+          />
+        </Stack>
+      </Modal>
+    </Stack>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Section composition
 // ---------------------------------------------------------------------------
 
@@ -644,6 +1024,7 @@ export function DataLifecyclePanel() {
       <CleanStateCard />
       <PlatformBootstrapCard />
       <TenantBootstrapCard />
+      <RecreateCard />
     </Stack>
   );
 }
