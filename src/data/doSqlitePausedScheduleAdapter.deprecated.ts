@@ -23,7 +23,7 @@
  *    transaction-capable storage object, and sequentially
  *    otherwise.
  * The table is ensured lazily on every operation, exactly as
- * the legacy module did (CREATE TABLE IF NOT EXISTS).
+ * the legacy module did (idempotent creation).
  */
 import type { DoTransactionStorage } from "../aspects/transactionAspect";
 import { getTransactionRunner } from "./transactionRunnerProvider";
