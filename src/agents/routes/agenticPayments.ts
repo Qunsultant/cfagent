@@ -273,6 +273,7 @@ import {
 import { ensureUsageEventsTable } from "../../services/scheduledReports";
 import { activateSubscription, grantSubscription, assertPlanEffectiveAndApprovedForSegment } from "../../services/subscriptionActivation";
 import { activateTrialSubscription, trialStartedMessage } from "../../services/trialSubscriptionActivation";
+import { isTenantMismatchError, TENANT_MISMATCH_HTTP_STATUS } from "../../services/paidScreenSubmission";
 import {
   createProductAdapter,
   ensureProductSchema,
@@ -2761,8 +2762,8 @@ export async function handleAgenticPaymentsRoutes(
       } catch (err: any) {
         if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
         const message = err.message || "Failed to record bundle purchase";
-        const status = /Tenant mismatch/.test(message)
-          ? 403
+        const status = isTenantMismatchError(message)
+          ? TENANT_MISMATCH_HTTP_STATUS
           : /already|mismatch/.test(message)
             ? 409
             : /required|must be|not active/.test(message)
@@ -2836,8 +2837,8 @@ export async function handleAgenticPaymentsRoutes(
       });
     } catch (err: any) {
       const message = err.message || "Failed to activate bundle purchase";
-      const status = /Tenant mismatch/.test(message)
-        ? 403
+      const status = isTenantMismatchError(message)
+        ? TENANT_MISMATCH_HTTP_STATUS
         : /already activated|already belongs|mismatch/.test(message)
           ? 409
           : /required|must be|not active/.test(message)
@@ -3146,14 +3147,14 @@ export async function handleAgenticPaymentsRoutes(
       return Response.json({ code: "SUCCESS_SUBSCRIPTION_PURCHASED", subscription, account, effectiveTier });
     } catch (err: any) {
       const message = err.message || "Failed to activate subscription";
-      const status = /Tenant mismatch/.test(message)
-        ? 403
+      const status = isTenantMismatchError(message)
+        ? TENANT_MISMATCH_HTTP_STATUS
         : /already activated/.test(message)
           ? 409
           : /required|must be|not active/.test(message)
             ? 400
             : 500;
-      return Response.json({ ...(/Tenant mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already activated/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      return Response.json({ ...(isTenantMismatchError(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already activated/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
@@ -4760,14 +4761,14 @@ export async function handleAgenticPaymentsRoutes(
       return Response.json({ code: "SUCCESS_SUBSCRIPTION_TRIAL_STARTED", subscription, account, effectiveTier, trialEndsAtMs, message });
     } catch (err: any) {
       const message = err.message || "Failed to start trial";
-      const status = /Tenant mismatch/.test(message)
-        ? 403
+      const status = isTenantMismatchError(message)
+        ? TENANT_MISMATCH_HTTP_STATUS
         : /already used|offers no trial|not active|not approved|not the effective version/.test(message)
           ? 409
           : /required|must be/.test(message)
             ? 400
             : 500;
-      return Response.json({ ...(/Tenant mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already used|offers no trial|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      return Response.json({ ...(isTenantMismatchError(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already used|offers no trial|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
@@ -5064,14 +5065,14 @@ export async function handleAgenticPaymentsRoutes(
       return Response.json({ code: "SUCCESS_BILLING_PURCHASE_COMPLETED", subscription, account: afterAccount, effectiveTier });
     } catch (err: any) {
       const message = err.message || "Failed to activate Billing subscription";
-      const status = /Tenant mismatch/.test(message)
-        ? 403
+      const status = isTenantMismatchError(message)
+        ? TENANT_MISMATCH_HTTP_STATUS
         : /already activated|already belongs|mismatch/.test(message)
           ? 409
           : /required|must be|not active/.test(message)
             ? 400
             : 500;
-      return Response.json({ ...(/Tenant mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already activated|already belongs|mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      return Response.json({ ...(isTenantMismatchError(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already activated|already belongs|mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 

@@ -269,7 +269,8 @@ export async function submitPaidStockScreenOrNull(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (/Tenant mismatch/.test(message)) {
-      return Response.json({ error: message }, { status: 403 });
+      const { TENANT_MISMATCH_HTTP_STATUS } = await import("../../services/paidScreenSubmission");
+      return Response.json({ error: message }, { status: TENANT_MISMATCH_HTTP_STATUS });
     }
     structuredLog.warn("paidStockScreenSeam.paid_start_failed", {
       message: `[paid-stock-screen-seam] Paid start failed: ${message}`,

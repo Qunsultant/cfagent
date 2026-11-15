@@ -182,6 +182,27 @@ export interface PaidScreenStorePorts {
  * starts on unverified coverage). A missing store row is a Free account
  * with no balance, never an error — Free is implicit.
  */
+/**
+ * Issue #4604 — pinned HTTP status for any seam-level "Tenant mismatch" throw
+ * across every HTTP route caller (screenerResearch, sagaEntry, paidStockScreenSeam,
+ * agenticPayments).
+ */
+export const TENANT_MISMATCH_HTTP_STATUS = 403 as const;
+
+/**
+ * Returns true when an error (or message string) represents a seam-level
+ * tenant-mismatch refusal (`"Tenant mismatch: ..."`).
+ */
+export function isTenantMismatchError(err: unknown): boolean {
+  const message =
+    typeof err === "string"
+      ? err
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  return /Tenant mismatch/.test(message);
+}
+
 export async function resolvePaidScreenAccount(
   ports: PaidScreenStorePorts,
   input: { userId: string; email: string; tenantId: string; nowMs: number },

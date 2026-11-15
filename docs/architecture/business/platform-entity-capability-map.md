@@ -621,9 +621,12 @@ capability, not an absence.
 14. Schedules-list owner filtering inside the Agent base class — the
     route passes only a type filter; binding-level scoping rests on
     the per-login instance model, verified only via instance naming.
-15. HTTP status mapping of the seam-level tenant-mismatch throw — the
-    throw is verified; per-caller status mapping was not pinned for
-    every caller.
+15. HTTP status mapping of the seam-level tenant-mismatch throw —
+    **pinned (#4604):** `TENANT_MISMATCH_HTTP_STATUS = 403` and
+    `isTenantMismatchError` in `src/services/paidScreenSubmission.ts`
+    are used across every HTTP route caller (`screenerResearch.ts`,
+    `sagaEntry.ts`, `paidStockScreenSeam.ts`, and all 5 commercial
+    activation handlers in `agenticPayments.ts`).
 
 ## 9. Bottom line
 
