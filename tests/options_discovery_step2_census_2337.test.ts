@@ -71,6 +71,16 @@
 // behind the port, exactly where ADR D-D requires them; the pin moves with the
 // change (gitops section 7) rather than the feature being split around a census
 // number.
+// #4385 count update: 80 -> 28. The nine tranche files' 53 DML statements
+// moved OUT of the adapters into the DO DML catalogue
+// (src/data/schemaComponent/doDmlEntries.ts), executed through the DO DML
+// executor — the statements live on, behind the port, in the catalogue, exactly
+// where ADR D-D and ADR 0032 require them. What remains in each adapter is the
+// DDL the #4282 programme keeps there by design (CREATE TABLE / CREATE INDEX /
+// ALTER / PRAGMA via the DDL catalogue): ScanRun 7, DiscoveryRun 2,
+// DiscoverySetup 2, DiscoveryAlert 1, IvHistory 3, StrategyProfile 2,
+// FeedSnapshot 2, Enrichment 2; PausedSchedule is unchanged at 7 (not a
+// tranche file). The pin moves with the change (gitops section 7).
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -98,20 +108,24 @@ const ADAPTER_FILES: Array<[string, number]> = [
   // list reads the bounded window with the run's provenance stamp applied.
   // 22 since #3314: three probe-and-ALTER statements (one per §4 linkage
   // column) plus the updateLedgerLinkage backfill's GET + UPDATE pair.
-  ["src/data/doSqliteScanRunAdapter.ts", 22],
-  ["src/data/doSqliteDiscoveryRunAdapter.ts", 8],
-  ["src/data/doSqliteDiscoverySetupAdapter.ts", 9],
-  ["src/data/doSqliteDiscoveryAlertAdapter.ts", 4],
+  ["src/data/doSqliteScanRunAdapter.ts", 7],
+  ["src/data/doSqliteDiscoveryRunAdapter.ts", 2],
+  ["src/data/doSqliteDiscoverySetupAdapter.ts", 2],
+  ["src/data/doSqliteDiscoveryAlertAdapter.ts", 1],
   // 8 at step 2; 11 since #3326: the provenance column probe plus the
   // broker-scoped series and symbol reads.
-  ["src/data/doSqliteIvHistoryAdapter.ts", 11],
-  ["src/data/doSqliteStrategyProfileAdapter.ts", 7],
-  ["src/data/doSqliteFeedSnapshotAdapter.ts", 7],
+  // 3 since #4385: the 11 DML statements moved into the DO DML catalogue;
+  // the CREATE TABLE + CREATE INDEX + ALTER_ADD_BROKER DDL sites stay.
+  ["src/data/doSqliteIvHistoryAdapter.ts", 3],
+  ["src/data/doSqliteStrategyProfileAdapter.ts", 2],
+  ["src/data/doSqliteFeedSnapshotAdapter.ts", 2],
   ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts", 7],
   // 8 at step 2; 5 since #2390 (step 4g): the killswitch
   // SELECT + DELETE/INSERT pair left this adapter for the
   // dedicated settings port (the G-7 ruling).
-  ["src/data/doSqliteEnrichmentAdapter.ts", 5],
+  // 2 since #4385: the 3 DML statements moved into the DO DML catalogue;
+  // the CREATE TABLE + CREATE INDEX DDL sites stay.
+  ["src/data/doSqliteEnrichmentAdapter.ts", 2],
 ];
 
 function countMatches(text: string, pattern: RegExp): number {
@@ -139,7 +153,7 @@ describe("#2337 D-D census — options/discovery family entries (shrink-only)", 
     }
   });
 
-  it("the family's statements live in the data layer's adapters (80 sites)", () => {
+  it("the family's statements live in the data layer's adapters (28 sites)", () => {
     let total = 0;
     for (const [file, expected] of ADAPTER_FILES) {
       const text = readFileSync(file, "utf8");
@@ -147,6 +161,6 @@ describe("#2337 D-D census — options/discovery family entries (shrink-only)", 
       expect(count, `${file} holds the family's statements`).toBe(expected);
       total += count;
     }
-    expect(total).toBe(80);
+    expect(total).toBe(28);
   });
 });
