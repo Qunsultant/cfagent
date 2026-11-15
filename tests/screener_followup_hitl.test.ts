@@ -204,6 +204,13 @@ describe("reportDispatch screener confirmations", () => {
           const row = settings.find((s) => s.key === args[0]);
           return Object.assign(row ? [{ value: row.value }] : [], { rowsWritten: 0 });
         }
+        // #4386 (#4282 P6c): the settings get() now dispatches the
+        // catalogue's Repository findById entry, so the Repository's
+        // SELECT * shape arrives here; the row is the mapped record.
+        if (/^SELECT \* FROM mas_settings WHERE/i.test(q)) {
+          const row = settings.find((s) => s.key === args[0]);
+          return Object.assign(row ? [{ key: row.key, value: row.value }] : [], { rowsWritten: 0 });
+        }
         if (/^DELETE FROM mas_report_confirmations/i.test(q)) return Object.assign([], { rowsWritten: 0 });
         if (/^INSERT INTO mas_report_confirmations/i.test(q)) {
           inserted.push(args);
