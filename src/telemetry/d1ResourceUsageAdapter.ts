@@ -7,4 +7,8 @@
  * modules keep their import paths; new code should import
  * from the data layer.
  */
-export { D1ResourceUsageAdapter, type ResourceD1Db } from "../data/d1ResourceUsageAdapter";
+export {
+  createD1ResourceDb,
+  D1ResourceUsageAdapter,
+  type ResourceD1Db,
+} from "../data/d1ResourceUsageAdapter";
