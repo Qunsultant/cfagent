@@ -26,6 +26,13 @@
  * Baseline on 1501f5f4 (evidence-p6b/scan-do-dml-1501f5f4.txt): 52
  * files, 142 write / 155 read = 297 statements; the tranche is 53
  * (21 write / 32 read). The pin is RED on that base by design.
+ *
+ * #4386 (P6c): the catalogue grew to 79 entries (64 repository +
+ * 15 template) with the ORM-core tables — the counts below move
+ * with the change (gitops §7: pins move with the change, they are
+ * never weakened). The tranche files and their 11 templates are
+ * unchanged; the P6c entries are pinned by
+ * tests/orm_dml_catalogue_4386.test.ts.
  */
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
@@ -200,13 +207,14 @@ describe("DO DML catalogue coverage (#4385)", () => {
     const built = buildDoDmlCatalogue();
     expect(built.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
     expect(DO_DML_CATALOGUE.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
-    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(53);
+    // 53 (P6b tranche) + 26 (P6c ORM-core) = 79.
+    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(79);
     expect(new Set(DO_DML_CATALOGUE_ENTRIES.map((e) => e.code)).size).toBe(
       DO_DML_CATALOGUE_ENTRIES.length,
     );
   });
 
-  it("per-table entry counts match the migration (42 repository + 11 template)", () => {
+  it("per-table entry counts match the migration (64 repository + 15 template)", () => {
     const counts: Record<string, number> = {
       mas_discovery_alerts: 4,
       mas_discovery_runs: 6,
@@ -225,8 +233,9 @@ describe("DO DML catalogue coverage (#4385)", () => {
       (acc, e) => ({ ...acc, [e.form]: (acc[e.form] ?? 0) + 1 }),
       {} as Record<string, number>,
     );
-    expect(forms.repository).toBe(42);
-    expect(forms.template).toBe(11);
+    // 42 + 22 (P6c) repository; 11 + 4 (P6c) template.
+    expect(forms.repository).toBe(64);
+    expect(forms.template).toBe(15);
   });
 
   it("every template statement is byte-identical to the constant it replaced", () => {
