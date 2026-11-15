@@ -22,7 +22,7 @@ import type { ProductBundleStore } from "./productBundles";
 export function createProductBundleAdapter(env: { AGENT_DB?: unknown }): D1ProductBundleAdapter | null {
   if (!env.AGENT_DB) return null;
   const d1 = env.AGENT_DB as D1Database;
-  return new D1ProductBundleAdapter(createD1ProductBundleDb(d1), d1);
+  return new D1ProductBundleAdapter(createD1ProductBundleDb(d1));
 }
 
 export { ensureProductBundleSchema };
