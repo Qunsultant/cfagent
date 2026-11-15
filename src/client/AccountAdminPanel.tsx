@@ -27,7 +27,7 @@
  * successful operator lookup prefills the target's tenant.
  *
  * Built strictly with src/client/components/ui/ primitives and
- * token-only styling per docs/agents/ux-architecture.md §20.
+ * token-only styling per docs/architecture/UX/ux-architecture.md §20.
  * All calls go through src/client/apiFetch.ts (the #71 rule).
  * Editing tenant/user/account lives here, never on the payment
  * screen: the payment screen shows this identity read-only.

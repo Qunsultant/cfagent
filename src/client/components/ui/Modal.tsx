@@ -24,7 +24,7 @@ const FOCUSABLE =
  * Dialog built on the repo's Universal Modal System classes in
  * tokens.css (.modal-backdrop + .modal-dialog + .modal-header +
  * .btn-close-modal) with the behavior the spec requires
- * (docs/agents/ux-architecture.md section 13): portal to body, Escape
+ * (docs/architecture/UX/ux-architecture.md section 13): portal to body, Escape
  * to close, backdrop-click to close, initial focus inside the dialog,
  * Tab kept inside (focus trap), focus restored to the opener on close,
  * and body scroll locked while open. Styles: ./primitives.css.

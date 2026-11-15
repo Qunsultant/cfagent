@@ -18,7 +18,7 @@ export interface NoticeProps {
 /**
  * Notice (#492)
  * Inline banner/alert for status, warnings, and guarantees
- * (docs/agents/ux-architecture.md sections 6/12). Danger and warning
+ * (docs/architecture/UX/ux-architecture.md sections 6/12). Danger and warning
  * tones announce via role="alert"; other tones use role="status" (or no
  * live role for neutral). Styles: ./primitives.css.
  */

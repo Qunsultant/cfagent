@@ -2,7 +2,7 @@
 
 > **Status:** Active Architectural Reference & Implementation Blueprint  
 > **Location:** `docs/architecture/UX/consistent-ux-standards-and-patterns.md`  
-> **Complements:** `docs/agents/ux-architecture.md` (normative contract) and `docs/architecture/UX/consolidated-design-system.md` (token & component specifications)  
+> **Complements:** `docs/architecture/UX/ux-architecture.md` (normative contract) and `docs/architecture/UX/consolidated-design-system.md` (token & component specifications)  
 > **Audience:** Core platform engineers, agentic system architects, frontend engineers, and autonomous coding agents  
 
 ---

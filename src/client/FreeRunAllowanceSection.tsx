@@ -21,7 +21,7 @@
  * the seed lives only as migration 0044's rows.
  *
  * Built strictly with src/client/components/ui/ primitives and
- * token-only styling per docs/agents/ux-architecture.md §20.
+ * token-only styling per docs/architecture/UX/ux-architecture.md §20.
  * All calls go through src/client/apiFetch.ts (the #71 rule).
  */
 import { useCallback, useEffect, useState } from "react";

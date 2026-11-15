@@ -1,6 +1,6 @@
 /**
  * Delegation Contract preview (Qunsultant/cfagent#1773, item 4;
- * Microsoft HAX #1 scope disclosure, docs/agents/ux-architecture.md §7).
+ * Microsoft HAX #1 scope disclosure, docs/architecture/UX/ux-architecture.md §7).
  *
  * Before a scheduled goal is created, the form must show what the
  * goal authorizes: what will be done, what will not be done, which

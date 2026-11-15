@@ -20,7 +20,7 @@
  * The panel renders only payloads that pass the shape guard;
  * a 401/403 body or garbage must never reach the table.
  * Built strictly with src/client/components/ui/ primitives and
- * token-only styling per docs/agents/ux-architecture.md §20.
+ * token-only styling per docs/architecture/UX/ux-architecture.md §20.
  */
 
 import { useCallback, useEffect, useState } from "react";

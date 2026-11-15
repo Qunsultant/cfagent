@@ -4,7 +4,7 @@
 > per owner approval 2026-11-04 (issue #3096).** The 7 owner decisions
 > in §5 are still pending, and no code has changed under this document.
 > Placement is not approval of its contents: it does not replace
-> anything on its own, and `docs/agents/ux-architecture.md` remains the
+> anything on its own, and `docs/architecture/UX/ux-architecture.md` remains the
 > live contract until the §5 decisions land.
 >
 > **What this document is.** One holistic replacement for the
@@ -800,7 +800,7 @@ not deviations from it.
 | This doc | Consolidates |
 |---|---|
 | §0 rule of three | Owner directive 2026-11-03 (new; no prior doc states it) |
-| §1 page template | `docs/archive/design-system-01.md` §2–§3 (shell, route table, retained views, tabbed browsing, composition); `docs/agents/ux-architecture.md` §5 (information architecture), §16 (frontend–backend contracts); code: `routes.ts`, `navConfig.ts`, `deepLinks.ts`, `router.ts`, `useUrlSyncedTabs.ts`, `Chat.tsx` outlets, `LeftNavBar.tsx`, `featureFlags.tsx` |
+| §1 page template | `docs/archive/design-system-01.md` §2–§3 (shell, route table, retained views, tabbed browsing, composition); `docs/architecture/UX/ux-architecture.md` §5 (information architecture), §16 (frontend–backend contracts); code: `routes.ts`, `navConfig.ts`, `deepLinks.ts`, `router.ts`, `useUrlSyncedTabs.ts`, `Chat.tsx` outlets, `LeftNavBar.tsx`, `featureFlags.tsx` |
 | §2.1 layers | `../archive/design-system-01.md` §1; `docs/plans/UX/ux-token-architecture-plan.md` (phases, 3 layers, one vocabulary); `branding.ts` (#1297); `designTokens.ts`; `tokens.css` |
 | §2.2 tokens | `ux-architecture.md` §6 (design tokens); plan doc (one vocabulary, shim deletion, 3 themes one mechanism); `tokens.css` header; `designTokens.ts` |
 | §2.3 primitives | `../archive/design-system-01.md` §1; `src/client/components/ui/index.ts` inventory; `composable_ui_primitives.test.ts` |

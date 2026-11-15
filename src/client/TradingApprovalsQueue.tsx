@@ -23,7 +23,7 @@
  * queue covers the draft-backed proposals, which are the ones the
  * execute door acts on.
  *
- * Compliance (docs/agents/ux-architecture.md): built only from
+ * Compliance (docs/architecture/UX/ux-architecture.md): built only from
  * src/client/components/ui/ primitives; approval dialogs show the exact
  * action/target/content/cost before anything moves; server state is
  * authoritative (every decision refreshes the list); failures render a

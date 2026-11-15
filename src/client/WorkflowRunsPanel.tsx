@@ -25,7 +25,7 @@
  * the shared `RunDetail` the ledger renders for a folded run, so the detail
  * (stages, inputs/outputs, artifacts, delivery) has one implementation.
  *
- * Compliance (docs/agents/ux-architecture.md §20): ui/ primitives only,
+ * Compliance (docs/architecture/UX/ux-architecture.md §20): ui/ primitives only,
  * semantic tokens only, server state is authoritative, and a field the
  * stores do not record renders as absent/not recorded — never invented.
  */

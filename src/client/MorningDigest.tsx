@@ -22,7 +22,7 @@
  * morning reader always sees last night's runs. The window is
  * deterministic per morning: one digest per morning.
  *
- * Compliance (docs/agents/ux-architecture.md): built only from
+ * Compliance (docs/architecture/UX/ux-architecture.md): built only from
  * src/client/components/ui/ primitives; server-confirmed state only
  * (feed rows + pending endpoint); failures render business messages;
  * evidence is labeled by outcome (Complete/Partial/Failed), never by

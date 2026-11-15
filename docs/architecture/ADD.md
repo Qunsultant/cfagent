@@ -5,11 +5,11 @@ links to the individual architecture docs. It duplicates nothing — it
 links. Each section below links to its individual doc, or states it as
 pending with its owning issue. Delivery rules live in
 [gitops](../agents/gitops.md); user journeys live in
-[ux-architecture](../agents/ux-architecture.md).
+[ux-architecture](../UX/ux-architecture.md).
 
 ## UX architecture
 
-- [UX architecture](../agents/ux-architecture.md) — user journeys,
+- [UX architecture](../UX/ux-architecture.md) — user journeys,
   components, and the token architecture (CPO lane).
 - Related assessments: [assessment-01](../archive/assessment-01.md),
   [design-system-01](../archive/design-system-01.md),

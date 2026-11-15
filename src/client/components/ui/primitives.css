@@ -5,7 +5,7 @@
  * the semantic token layer in tokens.css: no raw colors (the #476 zero
  * gate covers this file), so every primitive follows dark / light /
  * system / high-contrast by construction. Imported once from main.tsx
- * after styles.css. Accessibility notes (docs/agents/ux-architecture.md
+ * after styles.css. Accessibility notes (docs/architecture/UX/ux-architecture.md
  * section 13): focus is always visible via --shadow-focus-ring +
  * border-focus, targets meet the size scale below, and motion honors
  * prefers-reduced-motion.

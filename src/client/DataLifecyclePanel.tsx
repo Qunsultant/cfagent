@@ -5,7 +5,7 @@
  * dataLifecycleApi.ts.
  *
  * Built strictly with src/client/components/ui/ primitives and
- * token-only styling per docs/agents/ux-architecture.md §20,
+ * token-only styling per docs/architecture/UX/ux-architecture.md §20,
  * following the AdminQueueWipePanel idiom: preview first
  * (fail-closed, nothing destructive), modal confirm, then the
  * confirmed result rendered as the verify step.

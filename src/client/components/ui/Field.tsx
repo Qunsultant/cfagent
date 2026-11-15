@@ -13,7 +13,7 @@ export interface FieldShellProps {
  * FieldShell (#492) — shared label/hint/error chrome for the form
  * primitives (TextInput, Select). Wires the label via htmlFor and the
  * hint/error via ids the control references with aria-describedby
- * (docs/agents/ux-architecture.md section 13: accessible errors).
+ * (docs/architecture/UX/ux-architecture.md section 13: accessible errors).
  * Internal helper for components/ui; not a standalone primitive.
  */
 export function FieldShell({ id, label, hint, error, className = "", children }: FieldShellProps) {

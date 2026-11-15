@@ -29,7 +29,7 @@ export interface BadgeProps {
 
 /**
  * Badge (#492)
- * Small status/label pill. Tone is semantic (docs/agents/ux-architecture.md
+ * Small status/label pill. Tone is semantic (docs/architecture/UX/ux-architecture.md
  * section 6: status is never carried by color alone — pair with the label
  * text; the dot is only a redundant cue). Styles: ./primitives.css.
  */

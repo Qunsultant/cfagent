@@ -53,7 +53,7 @@ This PR completes its linked issue in full (gitops §5, issue #4072: one sub-iss
 ## Checklist
 - [ ] Required checks green on the current merge with `main`
 - [ ] Pins my change alters are updated in this PR (gitops §7)
-- [ ] UX changes use ui/ primitives and tokens only (docs/agents/ux-architecture.md §20)
+- [ ] UX changes use ui/ primitives and tokens only (docs/architecture/UX/ux-architecture.md §20)
 - [ ] CHANGELOG fragment added (changelog.d/, preferred) or entry added (additive, under Unreleased)
 - [ ] No file deleted in this PR (pure renames only; deprecate in place instead — gitops §22, gate check (i))
 - [ ] Any new deprecation names what superseded it (gitops §22, gate check (j))
