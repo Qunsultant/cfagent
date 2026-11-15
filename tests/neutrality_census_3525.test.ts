@@ -590,6 +590,18 @@ function measure(): Map<string, number> {
  * names none). (The header's last recorded totals were stale:
  * counted 1191 rows / 9358 lines before this change.) Totals move
  * 1191/9358 -> 1191/9356.
+ * Baseline update (#3655 F6, 2026-11-15): the scheduled E*TRADE
+ * fallbacks retire — the run-time `return "etrade"` and the three
+ * inline `: "etrade"` broker fallbacks in scheduledTasks.ts go,
+ * with the two stale "etrade" comment lines (the resolver doc and
+ * the `provider?` option comment). The retired mentions lower
+ * their baseline entries in this PR, per the header rule:
+ * scheduledTasks.ts etrade 97 -> 90 and nasdaq 5 -> 4 (the stale
+ * "public, nasdaq" comment line). The yahoo row moves 19 -> 17
+ * with no yahoo line in this diff — drift since the seed,
+ * reconciled to measured here. No new rows; the catalog entry
+ * adds no brand line (outcomeCatalog.json is one line, counts
+ * unchanged). Totals move 1191/9356 -> 1191/9346.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -1338,8 +1350,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/riskPolicyEngine.ts", "etrade", 1],
   ["src/services/sandboxAgent.ts", "etrade", 1],
   ["src/services/scheduleSystems.ts", "etrade", 1],
-  ["src/services/scheduledTasks.ts", "etrade", 97],
-  ["src/services/scheduledTasks.ts", "yahoo", 19],
+  ["src/services/scheduledTasks.ts", "etrade", 90],
+  ["src/services/scheduledTasks.ts", "yahoo", 17],
   ["src/services/screenerFollowupDelivery.ts", "etrade", 6],
   ["src/services/screenerFollowups.ts", "etrade", 1],
   ["src/services/screeningDelivery.ts", "etrade", 6],
@@ -1769,7 +1781,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "nasdaq", 18],
   ["src/services/quoteCache.ts", "nasdaq", 3],
   ["src/services/researchProviders.ts", "nasdaq", 1],
-  ["src/services/scheduledTasks.ts", "nasdaq", 5],
+  ["src/services/scheduledTasks.ts", "nasdaq", 4],
   ["src/services/shardExecutors.ts", "nasdaq", 15],
   ["src/services/shardJobs.ts", "nasdaq", 10],
   ["src/trading/etrade/platform.ts", "nasdaq", 1],
