@@ -368,12 +368,12 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
     tooltip: {
       eyebrow: "Business & Platform",
       title: "BizCopilot Active",
-      description: "BizCopilot Active: Manage tenants and accounts through chat — create, list, and configure tenants, view members, and look up accounts, grant subscriptions and free access, and move accounts to current pricing. Every result links the page so you can open and verify it.",
+      description: "BizCopilot Active: Manage tenants, accounts, and channels through chat — create, list, and configure tenants, view members, look up accounts, grant subscriptions and free access, move accounts to current pricing, and view and change per-tenant channel enablement. Every result links the page so you can open and verify it.",
     },
     hero: {
       icon: "💼",
       title: "BizCopilot & Platform Administration",
-      description: "Manage tenants and accounts conversationally: create a tenant, list tenants with settings and member counts, read and update tenant settings, and view account members — plus look up an account by login, grant a subscription or free access, and move an account to current pricing. Actions run through the same server paths as the Tenants and Accounts pages, with the same operator gate — every result links the page so you can verify what was done.",
+      description: "Manage tenants, accounts, and channels conversationally: create a tenant, list tenants with settings and member counts, read and update tenant settings, and view account members — plus look up an account by login, grant a subscription or free access, move an account to current pricing, and view or change a tenant's channel enablement and enforcement state. Actions run through the same server paths as the Tenants, Accounts, and Channels pages, with the same operator gate — every result links the page so you can verify what was done.",
     },
     quickChips: [
       {
@@ -411,13 +411,28 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         prompt: "Move alice@example.com to current pricing",
         category: "Account Administration",
       },
+      {
+        label: "📡 Show channels for a tenant",
+        prompt: "Show channels for tenant acme",
+        category: "Channel Administration",
+      },
+      {
+        label: "🛡️ Show enforcement state",
+        prompt: "Show enforcement for tenant acme",
+        category: "Channel Administration",
+      },
+      {
+        label: "🔕 Disable a channel",
+        prompt: "Disable slack for tenant acme",
+        category: "Channel Administration",
+      },
     ],
-    composerPlaceholder: "Ask BizCopilot (e.g. 'List tenants', 'Create tenant acme', 'Show account alice@example.com')…",
+    composerPlaceholder: "Ask BizCopilot (e.g. 'List tenants', 'Create tenant acme', 'Show account alice@example.com', 'Show channels for tenant acme')…",
     sourceTab: "BizCopilot",
     banner: {
       icon: "💼",
       headline: "BizCopilot Active:",
-      description: "Manage tenants and accounts through chat — create, list, and configure tenants, view members, and look up accounts, grant subscriptions and free access, and move accounts to current pricing. Results link the Tenants and Accounts pages for verification.",
+      description: "Manage tenants, accounts, and channels through chat — create, list, and configure tenants, view members, look up accounts, grant subscriptions and free access, move accounts to current pricing, and view or change channel enablement. Results link the Tenants, Accounts, and Channels pages for verification.",
     },
   },
 ];

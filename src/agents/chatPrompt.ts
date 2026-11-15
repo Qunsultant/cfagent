@@ -140,6 +140,16 @@ export interface OrchestratorPromptInput {
    */
   bizCopilotAccountContext?: string;
   /**
+   * Issue #4517 (BizCopilot slice 3): the deterministic result of a
+   * BizCopilot channel action, executed by the turn's BizCopilot
+   * branch through the Channels page's own routes (see
+   * src/services/bizCopilotChannels.ts). Inserted delimited as
+   * retrieved content, exactly like bizCopilotAccountContext, with
+   * a narration instruction; absent keeps the prompt byte-identical
+   * (the fixtures' contract).
+   */
+  bizCopilotChannelContext?: string;
+  /**
    * Issue #3846: selected broker id, trading mode ('paper' default, or 'live'),
    * and interactive chat execution policy ('hitl' default, or 'autonomous').
    */
@@ -236,13 +246,13 @@ export function buildOrchestratorSystemPrompt(input: OrchestratorPromptInput): s
   if (input.stockCopilotMcpActive) {
     return buildStockCopilotSystemPrompt(input);
   }
-  const { route, memoryContext, vectorContext, optionsResearchContext, isAutoOptionsResearchRequest, bizCopilotTenantContext, bizCopilotAccountContext } = input;
+  const { route, memoryContext, vectorContext, optionsResearchContext, isAutoOptionsResearchRequest, bizCopilotTenantContext, bizCopilotAccountContext, bizCopilotChannelContext } = input;
   const brokerTools = resolvePromptBrokerTools(input);
   const prompt = `You are the master orchestrator for Multi-Agent Studio (OpenAIMP), an enterprise financial intelligence and multi-agent execution platform powered by Cloudflare Agents, Durable Objects, and SQLite.
 Intent router classified request as: [${route.agent}] (confidence: ${(route.confidence * 100).toFixed(0)}%). Rationale: ${route.reason}.${delimitRetrievedContent(memoryContext)}${delimitRetrievedContent(vectorContext)}
 ${optionsResearchContext ? `\n${delimitRetrievedContent(optionsResearchContext)}\n${isAutoOptionsResearchRequest
     ? "If AUTO_OPTIONS_RESEARCH_JOB_SUBMITTED is present, tell the user it was accepted and include its job ID; do not claim analysis results yet. If AUTO_OPTIONS_RESEARCH_EXECUTION_ERROR is present, report that queueing failure clearly."
-    : ""}` : ""}${bizCopilotTenantContext ? `\n${delimitRetrievedContent(bizCopilotTenantContext)}\nIf BIZCOPILOT_TENANT_RESULT is present, report the outcome plainly — success or failure — include the Tenants page link from the result, and do not claim any action not in the result. If BIZCOPILOT_TENANT_ERROR is present, report the failure and its reason clearly.` : ""}${bizCopilotAccountContext ? `\n${delimitRetrievedContent(bizCopilotAccountContext)}\nIf BIZCOPILOT_ACCOUNT_RESULT is present, report the outcome plainly — success or failure — include the Accounts page link from the result, and do not claim any action not in the result. If BIZCOPILOT_ACCOUNT_ERROR is present, report the failure and its reason clearly.` : ""}
+    : ""}` : ""}${bizCopilotTenantContext ? `\n${delimitRetrievedContent(bizCopilotTenantContext)}\nIf BIZCOPILOT_TENANT_RESULT is present, report the outcome plainly — success or failure — include the Tenants page link from the result, and do not claim any action not in the result. If BIZCOPILOT_TENANT_ERROR is present, report the failure and its reason clearly.` : ""}${bizCopilotAccountContext ? `\n${delimitRetrievedContent(bizCopilotAccountContext)}\nIf BIZCOPILOT_ACCOUNT_RESULT is present, report the outcome plainly — success or failure — include the Accounts page link from the result, and do not claim any action not in the result. If BIZCOPILOT_ACCOUNT_ERROR is present, report the failure and its reason clearly.` : ""}${bizCopilotChannelContext ? `\n${delimitRetrievedContent(bizCopilotChannelContext)}\nIf BIZCOPILOT_CHANNEL_RESULT is present, report the outcome plainly — success or failure — include the Channels page link from the result, and do not claim any action not in the result. If the result concerns Copilot card or Docs, state plainly that the flag is configuration only and no dispatch exists — never imply a message was sent. If BIZCOPILOT_CHANNEL_ERROR is present, report the failure and its reason clearly.` : ""}
 
 Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client — each discovered tool carries its own description; the remaining tools are native to this turn). Only the steering lines follow; per-tool descriptions live in the discovered catalog, not in this prompt:
 - 'tool_openaimp_query_platform_knowledge': The authoritative source for platform documentation — all 8 platform workflows, UI navigation, 8 quantitative FAQs, and 6 decisioning engines (PickBestTrades, screeners). Answer platform questions from it (rule 1), never from prompt memory.
@@ -270,7 +280,7 @@ Agentic Best Practices & Workflow Rules:
 6. Broker-Neutral Trading & Market Screening (${brokerTools.brokerLabel} ${brokerTools.modeLabel}): When the user asks to run a stock screen over a universe (e.g. NASDAQ100, SP500, or ALL universes), invoke 'tool_openaimp_run_stock_screen' with that universe. When the user asks to screen options strategies over a universe (e.g. bull put credit spreads in NASDAQ100 with max loss <= $30 and max profit > $0), invoke 'tool_openaimp_run_options_strategy_screen' with the structured constraints (strategyType, maxLoss, minProfit) — never deflect that request to a UI workflow. When the user asks for a listings-style filter scan (by RSI, market cap, sector, price, gainers/losers across listings), invoke 'tool_openaimp_etrade_market_scan'. Active broker is ${brokerTools.brokerLabel} (${brokerTools.modeLabel}) — never ask which broker to use. For quotes invoke '${brokerTools.quoteTool}'. ${brokerTools.executionPolicy === "autonomous" ? `Autonomous mode is active: for trade orders (buy/sell/bracket), invoke '${brokerTools.executeTool}' directly.` : `For trade orders (buy/sell/bracket), ALWAYS invoke '${brokerTools.previewTool}' in one call. Only execute via '${brokerTools.executeTool}' when the user explicitly confirms approval.`} Never state an order price without its source + timestamp (user limit, or live quote + provider + time); missing \u2192 ask for the limit, never guess. A failed quote tool is a failure, never an estimated price.
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
 8. Background execution: MCP capabilities return queued job IDs instead of final results. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results. Never imply queued work is already complete.${input.stockCopilotMcpActive ? `\n\n${input.stockCopilotCapability ? buildStockCopilotMcpSteering(input.stockCopilotCapability) : STOCK_COPILOT_MCP_STEERING}` : ""}`;
-  return withRetrievedContentRule(prompt, Boolean(memoryContext || vectorContext || optionsResearchContext || bizCopilotTenantContext || bizCopilotAccountContext));
+  return withRetrievedContentRule(prompt, Boolean(memoryContext || vectorContext || optionsResearchContext || bizCopilotTenantContext || bizCopilotAccountContext || bizCopilotChannelContext));
 }
 
 /**

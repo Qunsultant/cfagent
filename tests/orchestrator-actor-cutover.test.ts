@@ -459,6 +459,20 @@ describe("#686 carried-forward 3a pins — prompt builder byte-identity + clamp"
     ).toBe(EXPECTED_PROMPTS.bizCopilotAccounts);
   });
 
+  it("bizCopilotChannels fixture: the BizCopilot channel-result prompt (#4517)", () => {
+    expect(
+      buildOrchestratorSystemPrompt({
+        route: { agent: "trading", confidence: 1, reason: "Direct execution" },
+        memoryContext: "",
+        vectorContext: "",
+        optionsResearchContext: "",
+        isAutoOptionsResearchRequest: false,
+        bizCopilotChannelContext:
+          "BIZCOPILOT_CHANNEL_RESULT: {\"action\":\"show\",\"tenantId\":\"acme\",\"pageUrl\":\"https://agent.openaimp.com/?tab=platform-admin&view=channels\",\"result\":{\"tenantId\":\"acme\",\"channels\":{\"email\":true,\"slack\":true,\"webhook\":true,\"copilot\":true,\"docs\":true},\"enforcement\":[{\"channel\":\"email\",\"label\":\"Email\",\"enabled\":true,\"dispatch\":\"permitted\",\"state\":\"Email is enabled \u2014 dispatch may proceed.\"},{\"channel\":\"slack\",\"label\":\"Slack\",\"enabled\":true,\"dispatch\":\"permitted\",\"state\":\"Slack is enabled \u2014 dispatch may proceed.\"},{\"channel\":\"webhook\",\"label\":\"Webhook\",\"enabled\":true,\"dispatch\":\"permitted\",\"state\":\"Webhook is enabled \u2014 dispatch may proceed.\"},{\"channel\":\"copilot\",\"label\":\"Copilot card\",\"enabled\":true,\"dispatch\":\"configuration-only\",\"state\":\"Copilot card is configuration only \u2014 no dispatch exists for it yet, so this flag sends nothing.\"},{\"channel\":\"docs\",\"label\":\"Docs\",\"enabled\":true,\"dispatch\":\"configuration-only\",\"state\":\"Docs is configuration only \u2014 no dispatch exists for it yet, so this flag sends nothing.\"}]}}",
+      })
+    ).toBe(EXPECTED_PROMPTS.bizCopilotChannels);
+  });
+
   it("R8: the sanitized clamp is now the production resolver for the class", () => {
     expect(makeAgent({ AI: {} }).agent.maxSteps).toBe(6);
     expect(makeAgent({ AI: {}, MAS_MAX_STEPS: "99" }).agent.maxSteps).toBe(10);

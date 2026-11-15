@@ -15,6 +15,7 @@ import { actorGateway } from "../services/cloudflareActorGateway";
 import { copilotRegistrationForSourceTab } from "../services/copilotChannels";
 import { runBizCopilotTenantBranch } from "../services/bizCopilotTenants";
 import { runBizCopilotAccountBranch } from "../services/bizCopilotAccounts";
+import { runBizCopilotChannelBranch } from "../services/bizCopilotChannels";
 import { recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import {
@@ -2714,20 +2715,16 @@ export class OrchestratorAgent extends PortThink {
     // branch lives in src/services/bizCopilotTenants.ts (the
     // orchestrator stays within its #992 size budget); the
     // deterministic outcome below is narrated by the model.
-    const bizCopilotTenantContext = await runBizCopilotTenantBranch({
-      sourceTab,
-      userText,
-      env: this.env,
-      userLogin,
-      audit: (type, payload) => this.audit(type, "orchestrator", payload),
-    });
+    const bizCopilotTenantContext = await runBizCopilotTenantBranch({ sourceTab, userText, env: this.env, userLogin,
+      audit: (type, payload) => this.audit(type, "orchestrator", payload) });
 
     // Issue #4516 (BizCopilot slice 2): the account branch, same shape as the tenant branch above (see src/services/bizCopilotAccounts.ts).
-    const bizCopilotAccountContext = await runBizCopilotAccountBranch({
-      sourceTab, userText, env: this.env, userLogin,
-      getOrm: () => this.getOrm(),
-      audit: (type, payload) => this.audit(type, "orchestrator", payload),
-    });
+    const bizCopilotAccountContext = await runBizCopilotAccountBranch({ sourceTab, userText, env: this.env, userLogin,
+      getOrm: () => this.getOrm(), audit: (type, payload) => this.audit(type, "orchestrator", payload) });
+
+    // Issue #4517 (BizCopilot slice 3): the channel branch, same shape as the branches above (see src/services/bizCopilotChannels.ts).
+    const bizCopilotChannelContext = await runBizCopilotChannelBranch({ sourceTab, userText, env: this.env, userLogin,
+      audit: (type, payload) => this.audit(type, "orchestrator", payload) });
 
     const { memoryContext, vectorContext } = await this.assembleGrounding(userText);
     // #2488/#2496: the CHAT_NLQ_MODE gate at the Think layer. The
@@ -2821,9 +2818,11 @@ export class OrchestratorAgent extends PortThink {
         bizCopilotTenantContext,
         // Issue #4516: the BizCopilot account outcome — the model narrates it, nothing else.
         bizCopilotAccountContext,
+        // Issue #4517: the BizCopilot channel outcome — the model narrates it, nothing else.
+        bizCopilotChannelContext,
       }),
       maxSteps: this.maxSteps,
-      ...(isAutoOptionsResearchRequest || bizCopilotTenantContext || bizCopilotAccountContext
+      ...(isAutoOptionsResearchRequest || bizCopilotTenantContext || bizCopilotAccountContext || bizCopilotChannelContext
         ? { activeTools: [] as string[] }
         : nlqGate.activeTools
           ? { activeTools: nlqGate.activeTools }
