@@ -20,6 +20,8 @@ import {
   TradeRecord,
 } from "../types";
 import type { TradeAssetClass, TradeOrderContext } from "./trading/tradeOrderContext";
+import type { OrderTimeInForce } from "../config/orderCapabilities";
+import { buildOrderPreviewBody, orderPreviewRefusalMessage } from "./trading/orderPreviewBody";
 import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { brokerSectionNav } from "./brokerSectionNav";
 import type { RiskBroker } from "./portfolioRiskApi";
@@ -420,6 +422,9 @@ export function ETradeTradingHub({
   const [orderSymbol, setOrderSymbol] = useState("");
   const [orderAction, setOrderAction] = useState<"BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT">("BUY");
   const [orderType, setOrderType] = useState<"MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT">("LIMIT");
+  // Issue #4573: time-in-force is part of the ticket and the preview body.
+  // Which values are offerable comes from config/order-capabilities.json.
+  const [orderTif, setOrderTif] = useState<OrderTimeInForce>("DAY");
   const [orderQuantity, setOrderQuantity] = useState(10);
   const [orderLimitPrice, setOrderLimitPrice] = useState<string>("125.50");
   const [orderQuote, setOrderQuote] = useState<ETradeQuote | null>(null);
@@ -1670,21 +1675,30 @@ export function ETradeTradingHub({
       // the hardwired E*TRADE route.
       const brokerId = readTenantProvidersState().brokerId;
       const brokerLabel = labelForBroker(readTenantProvidersState(), brokerId);
+      // Issue #4573: the body is built (and an unsupported combination is
+      // refused) in one place — see orderPreviewBody.
+      const built = buildOrderPreviewBody({
+        brokerId,
+        mode: orderTradingType,
+        assetClass: orderAssetClass,
+        symbol: orderSymbol,
+        orderAction,
+        quantity: Number(orderQuantity),
+        orderType,
+        timeInForce: orderTif,
+        limitPrice: orderType === "LIMIT" ? String(price) : undefined,
+        optionLegs: orderContext?.optionLegs,
+        strategyNetDebit: orderContext?.strategyNetDebit,
+      });
+      if (!built.ok) {
+        setOrderError(orderPreviewRefusalMessage(built.reason, brokerLabel));
+        setPreviewLoading(false);
+        return;
+      }
       const resp = await fetch("/api/broker/order/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-environment": activeEnv },
-        body: JSON.stringify({
-          broker: brokerId,
-          assetClass: orderAssetClass,
-          symbol: orderSymbol.toUpperCase(),
-          orderAction,
-          action: orderAction,
-          quantity: Number(orderQuantity),
-          orderType,
-          limitPrice: orderType === "LIMIT" ? price : undefined,
-          optionLegs: orderContext?.optionLegs?.map((leg) => ({ ...leg, underlyingSymbol: orderSymbol.toUpperCase(), quantity: leg.quantity * Number(orderQuantity) })),
-          strategyNetDebit: orderContext?.strategyNetDebit === undefined ? undefined : orderContext.strategyNetDebit * Number(orderQuantity),
-        }),
+        body: JSON.stringify(built.body),
       });
 
       const data = await resp.json() as any;
@@ -1765,6 +1779,7 @@ export function ETradeTradingHub({
           action: activeDraft.action,
           quantity: activeDraft.quantity,
           orderType: activeDraft.orderType,
+          timeInForce: (activeDraft as { timeInForce?: OrderTimeInForce }).timeInForce ?? orderTif,
           limitPrice: activeDraft.limitPrice,
           optionLegs: activeDraft.optionLegs,
           strategyNetDebit: activeDraft.strategyNetDebit,
@@ -2268,6 +2283,7 @@ export function ETradeTradingHub({
             orderSymbol,
             orderAction,
             orderType,
+            orderTif,
             orderQuantity,
             orderLimitPrice,
             orderQuote,
@@ -2289,6 +2305,7 @@ export function ETradeTradingHub({
             setOrderSymbol,
             setOrderAction,
             setOrderType,
+            setOrderTif,
             setOrderQuantity,
             setOrderLimitPrice,
             setOrderContext,

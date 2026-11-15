@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "note": "Order-entry capabilities per broker, mode and asset class. The ticket offers exactly what this table lists and disables the rest, and the preview body carries only a supported combination. This is the single home for the matrix (issue #4573) — no component hardcodes a broker rule. Values mirror each broker's documented order-entry fields; tighten them here when a broker changes its contract.",
+  "brokers": {
+    "etrade": {
+      "paper": {
+        "equity": {
+          "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        },
+        "options": {
+          "orderTypes": ["MARKET", "LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        }
+      },
+      "live": {
+        "equity": {
+          "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        },
+        "options": {
+          "orderTypes": ["MARKET", "LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        }
+      }
+    },
+    "alpaca": {
+      "paper": {
+        "equity": {
+          "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        },
+        "options": {
+          "orderTypes": ["MARKET", "LIMIT"],
+          "timeInForce": ["DAY", "GTC"]
+        }
+      },
+      "live": {
+        "equity": {
+          "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        },
+        "options": {
+          "orderTypes": ["MARKET", "LIMIT"],
+          "timeInForce": ["DAY", "GTC"]
+        }
+      }
+    }
+  }
+}

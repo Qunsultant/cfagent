@@ -34,6 +34,18 @@ import { buildTradeLegs, describeTradeLeg } from "./trading/strategyAutobuild";
 import { brokerModeBadge, brokerPresentation } from "../trading";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { safeNumberFormat, safePriceFormat } from "./formatters";
+import {
+  ALL_ORDER_TYPES,
+  ALL_TIME_IN_FORCE,
+  ORDER_TYPE_LABELS,
+  TIME_IN_FORCE_LABELS,
+  orderCapabilitiesFor,
+  resolveOrderType,
+  resolveTimeInForce,
+  supportsOrderType,
+  type OrderTimeInForce,
+  type OrderType,
+} from "../config/orderCapabilities";
 
 /**
  * OrderTicketPanel — the Fast Order Ticket as its own shell-conforming
@@ -57,7 +69,9 @@ export type OrderTicketTab = "stock" | "options" | "risk" | "approvals" | "nlq-g
 export interface OrderTicketModel {
   orderSymbol: string;
   orderAction: "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT";
-  orderType: "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
+  orderType: OrderType;
+  /** Issue #4573: time-in-force, offered from the broker capability matrix. */
+  orderTif?: OrderTimeInForce;
   orderQuantity: number;
   orderLimitPrice: string;
   orderQuote: ETradeQuote | null;
@@ -86,7 +100,8 @@ export interface OrderTicketModel {
   onConnectBroker: (override?: unknown) => Promise<void>;
   setOrderSymbol: (symbol: string) => void;
   setOrderAction: (action: "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT") => void;
-  setOrderType: (type: "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT") => void;
+  setOrderType: (type: OrderType) => void;
+  setOrderTif?: (tif: OrderTimeInForce) => void;
   setOrderQuantity: (quantity: number) => void;
   setOrderLimitPrice: (price: string) => void;
   setOrderContext: (ctx: TradeOrderContext | null) => void;
@@ -118,6 +133,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
     orderSymbol,
     orderAction,
     orderType,
+    orderTif = "DAY",
     orderQuantity,
     orderLimitPrice,
     orderQuote,
@@ -136,6 +152,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
     setOrderSymbol,
     setOrderAction,
     setOrderType,
+    setOrderTif,
     setOrderQuantity,
     setOrderLimitPrice,
     setOrderContext,
@@ -160,6 +177,27 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
   // is named as a selection, never silently as E*TRADE.
   const presentation = brokerPresentation(brokerId);
   const brokerLabel = presentation.label;
+  // Issue #4573: what this broker, in this mode, supports for this asset
+  // class — from config/order-capabilities.json, never hardcoded here.
+  const orderCaps = useMemo(
+    () =>
+      orderCapabilitiesFor({
+        brokerId,
+        mode: tradingType,
+        assetClass: orderAssetClass === "options" ? "options" : "equity",
+      }),
+    [brokerId, tradingType, orderAssetClass],
+  );
+
+  // Keep the selection inside the supported set when the broker, mode, or
+  // asset class changes: an unsupported combination is never left selected.
+  useEffect(() => {
+    if (!orderCaps.supported) return;
+    const nextType = resolveOrderType(orderCaps, orderType);
+    if (nextType && nextType !== orderType) setOrderType(nextType);
+    const nextTif = resolveTimeInForce(orderCaps, orderTif);
+    if (nextTif && nextTif !== orderTif) setOrderTif?.(nextTif);
+  }, [orderCaps, orderType, orderTif, setOrderType, setOrderTif]);
 
   const applyTab = (tab: OrderTicketTab) => {
     // Issue #4573: three tabs are not asset classes — Risk analysis
@@ -426,6 +464,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                     selection the hub passes in, not from a broker
                     status read (see hub orderTradingType). */}
                 <WorkCard
+                  singleLine
                   title={`⚡ ${orderAssetClass === "options" ? "Options Order Ticket" : "Equity / ETF Order Ticket"}`}
                   subtitle={
                     orderAssetClass === "options"
@@ -692,21 +731,47 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                       <Button type="button" variant={(orderContext?.strategyNetDebit ?? 0) < 0 ? "primary" : "secondary"} tone={(orderContext?.strategyNetDebit ?? 0) < 0 ? "solid" : "subtle"} onClick={() => setOptionNetOrderDirection(true)}>Credit</Button>
                     </Flex>
                   )}
-                  <Grid columns={2} gap="2">
+                  {!orderCaps.supported && (
+                    <Notice tone="warning" title="Order entry not available yet">
+                      {brokerLabel} has no order-entry contract in this mode for this asset class, so the ticket cannot offer an order type or time-in-force. Nothing will be sent.
+                    </Notice>
+                  )}
+                  <Grid columns={3} gap="2">
                     <Stack gap="1">
                       <Select label="Order Type"
                         value={orderType}
-                        disabled={Boolean(orderContext?.optionLegs?.length)}
+                        disabled={Boolean(orderContext?.optionLegs?.length) || !orderCaps.supported}
                         onChange={(e) => {
-                          setOrderType(e.target.value as any);
+                          setOrderType(e.target.value as OrderType);
                           setActiveDraft(null);
                           setLastExecutionResult(null);
                         }}
                       >
-                        <option value="MARKET">Market</option>
-                        <option value="LIMIT">Limit</option>
-                        <option value="STOP">Stop</option>
-                        <option value="STOP_LIMIT">Stop Limit</option>
+                        {ALL_ORDER_TYPES.map((type) => (
+                          <option key={type} value={type} disabled={!supportsOrderType(orderCaps, type)}>
+                            {ORDER_TYPE_LABELS[type]}
+                            {supportsOrderType(orderCaps, type) ? "" : " — not available"}
+                          </option>
+                        ))}
+                      </Select>
+                    </Stack>
+
+                    <Stack gap="1">
+                      <Select label="Time in force"
+                        value={orderTif}
+                        disabled={!orderCaps.supported}
+                        onChange={(e) => {
+                          setOrderTif?.(e.target.value as OrderTimeInForce);
+                          setActiveDraft(null);
+                          setLastExecutionResult(null);
+                        }}
+                      >
+                        {ALL_TIME_IN_FORCE.map((tif) => (
+                          <option key={tif} value={tif} disabled={!orderCaps.timeInForce.includes(tif)}>
+                            {TIME_IN_FORCE_LABELS[tif]}
+                            {orderCaps.timeInForce.includes(tif) ? "" : " — not available"}
+                          </option>
+                        ))}
                       </Select>
                     </Stack>
 

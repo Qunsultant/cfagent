@@ -122,6 +122,7 @@ function PanelHarness() {
     orderSymbol: "NVDA",
     orderAction: "BUY",
     orderType: "LIMIT",
+    orderTif: "DAY",
     orderQuantity: 1,
     orderLimitPrice: "5.00",
     orderQuote: null,
@@ -139,6 +140,7 @@ function PanelHarness() {
     setOrderSymbol: () => {},
     setOrderAction: () => {},
     setOrderType: () => {},
+    setOrderTif: () => {},
     setOrderQuantity: () => {},
     setOrderLimitPrice: () => {},
     setOrderContext: setContext,
@@ -212,5 +214,67 @@ describe("order sub-tabs (#4573)", () => {
     // Before #4573 the card sat in a 2-column grid whose other column held
     // the HITL/NLQ cards; the grid went with them.
     expect(title!.closest(".ui-grid")).toBeNull();
+  });
+});
+
+describe("single-line ticket header (#4573)", () => {
+  it("puts title, scope note, broker, mode and Refresh Quote on one header row", async () => {
+    // The Refresh Quote control only renders with a symbol, so this uses the
+    // stateful harness (symbol NVDA) rather than the bare hub.
+    window.history.pushState(null, "", "?tab=order&orderTab=stock");
+    await renderNode(<PanelHarness />);
+    const header = container.querySelector(".ui-card-header-single") as HTMLElement | null;
+    expect(header).toBeTruthy();
+    const text = header!.textContent ?? "";
+    expect(text).toContain("Equity / ETF Order Ticket");
+    expect(text).toContain("Zero-commission equity trading");
+    expect(text).toContain("Alpaca");
+    expect(text).toContain("PAPER TRADING");
+    expect(text).toContain("Refresh Quote");
+  });
+});
+
+describe("capability matrix in the ticket (#4573)", () => {
+  function optionFor(select: HTMLSelectElement, value: string) {
+    return Array.from(select.options).find((o) => o.value === value);
+  }
+
+  it("disables the order types this broker does not support for options", async () => {
+    window.history.pushState(null, "", "?tab=order&orderTab=options");
+    await renderNode(<PanelHarness />);
+    const selects = Array.from(container.querySelectorAll("select")) as HTMLSelectElement[];
+    const orderTypeSelect = selects.find((sel) => optionFor(sel, "MARKET") !== undefined)!;
+    expect(orderTypeSelect).toBeTruthy();
+    // Alpaca options: market and limit only.
+    expect(optionFor(orderTypeSelect, "MARKET")!.disabled).toBe(false);
+    expect(optionFor(orderTypeSelect, "LIMIT")!.disabled).toBe(false);
+    expect(optionFor(orderTypeSelect, "STOP")!.disabled).toBe(true);
+    expect(optionFor(orderTypeSelect, "STOP_LIMIT")!.disabled).toBe(true);
+  });
+
+  it("offers only the broker's time-in-force values for that asset class", async () => {
+    window.history.pushState(null, "", "?tab=order&orderTab=options");
+    await renderNode(<PanelHarness />);
+    const selects = Array.from(container.querySelectorAll("select")) as HTMLSelectElement[];
+    const tifSelect = selects.find((sel) => optionFor(sel, "DAY") !== undefined)!;
+    expect(tifSelect).toBeTruthy();
+    expect(optionFor(tifSelect, "DAY")!.disabled).toBe(false);
+    expect(optionFor(tifSelect, "GTC")!.disabled).toBe(false);
+    // Alpaca restricts options to day/gtc.
+    expect(optionFor(tifSelect, "IOC")!.disabled).toBe(true);
+    expect(optionFor(tifSelect, "FOK")!.disabled).toBe(true);
+  });
+
+  it("offers the full equity set for the same broker", async () => {
+    await renderOrderPage("stock");
+    const selects = Array.from(container.querySelectorAll("select")) as HTMLSelectElement[];
+    const orderTypeSelect = selects.find((sel) => optionFor(sel, "MARKET") !== undefined)!;
+    for (const type of ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]) {
+      expect(optionFor(orderTypeSelect, type)!.disabled, type).toBe(false);
+    }
+    const tifSelect = selects.find((sel) => optionFor(sel, "DAY") !== undefined)!;
+    for (const tif of ["DAY", "GTC", "IOC", "FOK"]) {
+      expect(optionFor(tifSelect, tif)!.disabled, tif).toBe(false);
+    }
   });
 });

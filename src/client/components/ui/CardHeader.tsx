@@ -10,6 +10,13 @@ export interface CardHeaderProps {
   meta?: React.ReactNode;
   /** Content under the subtitle on the left (the order form card's broker/mode badges). */
   belowSubtitle?: React.ReactNode;
+  /**
+   * Issue #4573: put title, subtitle, belowSubtitle and meta on ONE row
+   * instead of stacking the left block. Long text ellipsizes (the
+   * #4409 `.ui-single-line` rule) and meta stays pinned right. Pass the
+   * full text in a `title=` attribute where truncation is possible.
+   */
+  singleLine?: boolean;
 }
 
 /**
@@ -25,10 +32,16 @@ export interface CardHeaderProps {
  * title, subtitle, meta, or belowSubtitle (§1.6b). Pages migrate onto
  * it in Wave 1 (#3138–#3140); this slice builds the organism only.
  */
-export function CardHeader({ title, subtitle, meta, belowSubtitle }: CardHeaderProps) {
+export function CardHeader({ title, subtitle, meta, belowSubtitle, singleLine = false }: CardHeaderProps) {
   if (!title && !subtitle && !meta && !belowSubtitle) return null;
   return (
-    <Flex justify="between" align="start" wrap gap="2" className="ui-card-header">
+    <Flex
+      justify="between"
+      align={singleLine ? "center" : "start"}
+      wrap={!singleLine}
+      gap="2"
+      className={singleLine ? "ui-card-header ui-card-header-single" : "ui-card-header"}
+    >
       {(title || subtitle || belowSubtitle) && (
         <div className="ui-card-header-main">
           {title && <h4>{title}</h4>}
