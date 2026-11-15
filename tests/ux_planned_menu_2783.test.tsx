@@ -2,9 +2,11 @@
 /**
  * Issue #2972 (retires issue #2783): the Planned menu is gone from the
  * left nav — no PLANNED section, no planned item, no planned_asset_tabs
- * flag. This file pins that absence. What stays: the planned deep links
- * (bookmarks still resolve to the Assets Hub views) and the #2438
- * hub-bar exclusion removal.
+ * flag. This file pins that absence. Issue 4630 SUPERSEDES the #2972
+ * bookmark contract: the planned deep links are gone too — an old
+ * planned bookmark no longer resolves to an Assets Hub view, and the
+ * canonical assets-hub:* keys are the only addresses. What stays: the
+ * #2438 hub-bar exclusion removal.
  *
  * The file name keeps the #2783 origin (no-deletion gate); the content
  * asserts the #2972 end state.
@@ -22,7 +24,11 @@ import {
   SUB_MENU_CONFIGS,
   findNavItemConfig,
 } from "../src/client/navConfig";
-import { deepLinkForNavNode, deepLinkHref } from "../src/client/deepLinks";
+import {
+  DEEP_LINK_OVERRIDES,
+  deepLinkForNavNode,
+  deepLinkHref,
+} from "../src/client/deepLinks";
 import { TAB_TO_FEATURE_MAP } from "../src/client/featureFlags";
 import { ALL_FEATURE_FLAGS } from "../src/features/featureFlagPorts";
 
@@ -61,9 +67,16 @@ describe("Planned menu removal (issue #2972)", () => {
     }
   });
 
-  it("keeps every Planned deep link resolving to its hub view (bookmarks safe, #2972)", () => {
+  it("the Planned deep links are gone (bookmark contract superseded, issue 4630)", () => {
+    // The #2972 contract kept these keys so old bookmarks still landed
+    // on the Assets Hub views. Issue 4630 removes them as duplicates of
+    // the assets-hub:* keys; the canonical keys are the only addresses.
+    for (const key of ["planned", ...PLANNED_IDS.map((id) => `planned:${id}`)]) {
+      expect(DEEP_LINK_OVERRIDES[key]).toBeUndefined();
+    }
     for (const id of PLANNED_IDS) {
-      expect(deepLinkForNavNode("planned", id)).toEqual({
+      expect(deepLinkForNavNode("planned", id)).toEqual({ tab: "autopilot" });
+      expect(deepLinkForNavNode("assets-hub", id)).toEqual({
         tab: "assets-hub",
         view: id,
       });
@@ -71,10 +84,7 @@ describe("Planned menu removal (issue #2972)", () => {
         `?tab=assets-hub&view=${id}`,
       );
     }
-    expect(deepLinkForNavNode(null, "planned")).toEqual({
-      tab: "assets-hub",
-      view: "forex",
-    });
+    expect(deepLinkForNavNode(null, "planned")).toEqual({ tab: "autopilot" });
   });
 
   it("removes the hub-bar exclusion (issue #2438 filter is gone)", () => {

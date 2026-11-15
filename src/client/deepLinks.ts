@@ -22,7 +22,7 @@ import {
   type NavSubMenuItemConfig,
 } from "./navConfig";
 import { navigateToTab } from "./router";
-import { resolveRouteId, type RouteId } from "./routes";
+import { getRoute, resolveRouteId, type RouteId } from "./routes";
 import { getRegisteredCopilots } from "./chat/copilotRegistry";
 import navConfigData from "./nav-config.json";
 
@@ -99,22 +99,42 @@ type NavNodeLike = {
   subItems?: NavSubMenuItemConfig[] | NavMenuItemConfig["subItems"];
 };
 
-/** Every node in a nav config, each with its resolved deep link. */
+/** A nav node with sub-items whose id is not a route at all has no
+ *  destination: it is a menu, not a link. Both nav surfaces render such
+ *  a parent as a toggle-only button (LeftNavBar renders no href for it;
+ *  NavigationMenu's top-strip entry toggles without navigating), because
+ *  there is no page to land on and the catalog fallback (autopilot)
+ *  would be a wrong link. Issue 4630: the sandbox parent is the only
+ *  such node today — its bare deep-link key is gone, and its checkout
+ *  sub-item (`sandbox-checkout`) is the address. */
+export function isDestinationLessMenuParent(
+  id: string,
+  hasSubItems: boolean,
+): boolean {
+  return hasSubItems && getRoute(id) === undefined;
+}
+
+/** Every linkable node in a nav config, each with its resolved deep link.
+ *  Destination-less menu parents carry no entry (see
+ *  isDestinationLessMenuParent); their sub-items still walk below. */
 export function buildDeepLinkCatalog(
   config: LeftNavConfig = DEFAULT_LEFT_NAV_CONFIG,
 ): DeepLinkCatalogEntry[] {
   const entries: DeepLinkCatalogEntry[] = [];
   const walk = (parentId: string | null, nodes: NavNodeLike[]) => {
     for (const node of nodes) {
-      const link = deepLinkForNavNode(parentId, node.id);
-      entries.push({
-        parentId,
-        id: node.id,
-        key: navNodeKey(parentId, node.id),
-        link,
-        href: deepLinkHref(link),
-      });
-      if (node.subItems && node.subItems.length > 0) {
+      const hasSubItems = (node.subItems?.length ?? 0) > 0;
+      if (!isDestinationLessMenuParent(node.id, hasSubItems)) {
+        const link = deepLinkForNavNode(parentId, node.id);
+        entries.push({
+          parentId,
+          id: node.id,
+          key: navNodeKey(parentId, node.id),
+          link,
+          href: deepLinkHref(link),
+        });
+      }
+      if (hasSubItems) {
         walk(node.id, node.subItems as NavNodeLike[]);
       }
     }

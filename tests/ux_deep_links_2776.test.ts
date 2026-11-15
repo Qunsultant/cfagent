@@ -8,6 +8,7 @@ import {
   deepLinkHref,
   DEEP_LINK_OVERRIDES,
   getSurfaceTabDefs,
+  isDestinationLessMenuParent,
   navNodeKey,
   surfaceTabHref,
   SURFACE_TAB_DEFS,
@@ -27,7 +28,11 @@ function collectNodeKeys(): string[] {
   const keys: string[] = [];
   const walk = (parentId: string | null, nodes: Array<{ id: string; subItems?: Array<{ id: string }> }>) => {
     for (const node of nodes) {
-      keys.push(navNodeKey(parentId, node.id));
+      // Issue 4630: destination-less menu parents carry no catalog entry,
+      // so the expected keys skip them the same way the builder does.
+      if (!isDestinationLessMenuParent(node.id, (node.subItems?.length ?? 0) > 0)) {
+        keys.push(navNodeKey(parentId, node.id));
+      }
       if (node.subItems) walk(node.id, node.subItems);
     }
   };
@@ -38,7 +43,7 @@ function collectNodeKeys(): string[] {
 }
 
 describe("Deep-link catalog (issue #2776)", () => {
-  it("covers every left-nav node exactly once", () => {
+  it("covers every linkable left-nav node exactly once", () => {
     const catalog = buildDeepLinkCatalog();
     const keys = collectNodeKeys();
     expect(catalog.length).toBe(keys.length);
@@ -66,23 +71,22 @@ describe("Deep-link catalog (issue #2776)", () => {
       };
       walkIds(section.items);
     }
-    // Issue #2972: the planned:* keys are intentionally kept after the
-    // Planned menu retired, so old node references still generate the
-    // Assets Hub view links. They are legacy, not stale-by-neglect.
+    // Issue 4630 SUPERSEDES the issue 2972 bookmark contract: the
+    // planned:* keys are gone from the catalog, so an old planned
+    // bookmark no longer resolves to an Assets Hub view — the canonical
+    // assets-hub:* keys are the only addresses. Do not re-add them.
     // Issue #2994: the options-screener:best-trade key is likewise kept
     // after the Best Trade sub-menu retired, so ?tab=options&research=
     // best-trade still lands on the Custom Thesis tab with the surface.
-    // Issue #4168: the autopilot:job-outcomes key is likewise kept —
-    // Autopilot has no sub-menu node, so the Job outcomes view is
-    // addressed by the `view` param, not by a nav node. Issue #4409
-    // extends the same exception to the other five sub-tabs — all six
-    // autopilot views are `view`-param addresses, not nav nodes.
+    // It is NOT a duplicate: its href differs from custom-thesis and it
+    // carries a focus section the view address does not (issue 4630
+    // verified, kept). Issue #4168: the autopilot:job-outcomes key is
+    // likewise kept — Autopilot has no sub-menu node, so the Job
+    // outcomes view is addressed by the `view` param, not by a nav
+    // node. Issue #4409 extends the same exception to the other five
+    // sub-tabs — all six autopilot views are `view`-param addresses,
+    // not nav nodes.
     const legacyKeys = new Set([
-      "planned",
-      "planned:forex",
-      "planned:futures",
-      "planned:commodities",
-      "planned:bonds",
       "options-screener:best-trade",
       "autopilot:performance",
       "autopilot:status",
@@ -139,10 +143,6 @@ describe("Deep-link catalog (issue #2776)", () => {
     expect(deepLinkForNavNode(null, "goal-screen")).toEqual({
       tab: "goal-screen",
     });
-    expect(deepLinkForNavNode(null, "sandbox")).toEqual({
-      href: "/checkout/sandbox",
-      newTab: true,
-    });
     expect(deepLinkForNavNode("sandbox", "sandbox-checkout")).toEqual({
       href: "/checkout/sandbox",
       newTab: true,
@@ -185,6 +185,56 @@ describe("Deep-link catalog (issue #2776)", () => {
       view: "ads",
     });
     expect(deepLinkForNavNode(null, "autopilot")).toEqual({ tab: "autopilot" });
+  });
+
+  it("the sandbox menu parent has no destination; only its checkout sub-item resolves (issue 4630)", () => {
+    // The bare `sandbox` key is gone with the planned:* duplicates: the
+    // parent is a toggle-only menu in both nav surfaces, so resolving it
+    // falls through to the documented unknown-id fallback — never a
+    // rendered link. The catalog carries no entry for it either.
+    expect(DEEP_LINK_OVERRIDES["sandbox"]).toBeUndefined();
+    expect(deepLinkForNavNode(null, "sandbox")).toEqual({ tab: "autopilot" });
+    expect(isDestinationLessMenuParent("sandbox", true)).toBe(true);
+    expect(isDestinationLessMenuParent("orders", true)).toBe(false);
+    expect(
+      buildDeepLinkCatalog().some((e) => e.key === "sandbox"),
+    ).toBe(false);
+    expect(deepLinkForNavNode("sandbox", "sandbox-checkout")).toEqual({
+      href: "/checkout/sandbox",
+      newTab: true,
+    });
+    expect(deepLinkForNavNode(null, "sandbox-checkout")).toEqual({
+      href: "/checkout/sandbox",
+      newTab: true,
+    });
+  });
+
+  it("the kept view-param families still resolve to distinct addresses (issue 4630)", () => {
+    // Verified in the build: none of these keys shares a value with any
+    // other key, so none is a duplicate. The best-trade key is kept too:
+    // its href differs from custom-thesis and it carries a focus section
+    // the view address does not.
+    const expected: Record<string, unknown> = {
+      "autopilot:performance": { tab: "autopilot", view: "performance" },
+      "autopilot:status": { tab: "autopilot", view: "status" },
+      "autopilot:limits": { tab: "autopilot", view: "limits" },
+      "autopilot:job-outcomes": { tab: "autopilot", view: "job-outcomes" },
+      "autopilot:actions": { tab: "autopilot", view: "actions" },
+      "autopilot:policy-decisions": { tab: "autopilot", view: "policy-decisions" },
+      "workflow-catalog:workflows": { tab: "workflow-catalog", view: "workflows" },
+      "workflow-catalog:define": { tab: "workflow-catalog", view: "define" },
+      "audit-vault:audit": { tab: "audit-vault", view: "audit" },
+      "audit-vault:nlq": { tab: "audit-vault", view: "nlq" },
+      "options-screener:best-trade": { tab: "options", params: { research: "best-trade" } },
+      "options-screener:custom-thesis": { tab: "options", view: "custom-thesis" },
+    };
+    for (const [key, link] of Object.entries(expected)) {
+      expect(DEEP_LINK_OVERRIDES[key]).toEqual(link);
+    }
+    const hrefs = Object.keys(expected).map((k) =>
+      deepLinkHref(DEEP_LINK_OVERRIDES[k]),
+    );
+    expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
   it("every tab link round-trips through the router's parser", () => {
