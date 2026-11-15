@@ -11,25 +11,25 @@ import type { SchemaPlane, StatementKind } from "./catalogueTypes";
 
 /** The one code format. Kept as a module constant: it is a format contract, not a runtime knob. */
 export const SCHEMA_STATEMENT_CODE_PATTERN =
-  /^(schema|seed)\.(d1|do|orm|index|route)\.[a-z0-9_]+\.[a-z0-9_]+$/;
+  /^(schema|seed|dml)\.(d1|do|orm|index|route)\.[a-z0-9_]+\.[a-z0-9_]+$/;
 
 export function isValidStatementCode(code: string): boolean {
   return SCHEMA_STATEMENT_CODE_PATTERN.test(code);
 }
 
 export function statementCodeKind(code: string): StatementKind | null {
-  const match = code.match(/^(schema|seed)\./);
+  const match = code.match(/^(schema|seed|dml)\./);
   return match ? (match[1] as StatementKind) : null;
 }
 
 export function statementCodePlane(code: string): SchemaPlane | null {
-  const match = code.match(/^(?:schema|seed)\.(d1|do|orm|index|route)\./);
+  const match = code.match(/^(?:schema|seed|dml)\.(d1|do|orm|index|route)\./);
   return match ? (match[1] as SchemaPlane) : null;
 }
 
 export function statementCodeTable(code: string): string | null {
   const match = code.match(
-    /^(?:schema|seed)\.(?:d1|do|orm|index|route)\.([a-z0-9_]+)\./,
+    /^(?:schema|seed|dml)\.(?:d1|do|orm|index|route)\.([a-z0-9_]+)\./,
   );
   return match ? match[1] : null;
 }
