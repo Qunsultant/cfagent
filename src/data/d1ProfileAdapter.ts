@@ -23,6 +23,8 @@ import {
   type MigrationDb,
 } from "./migrationRunner";
 import type { UserProfile, UserProfileStore } from "./profilePorts";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { executeDml } from "./schemaComponent/dmlExecutor";
 
 /** Drizzle D1 database object carrying the user profile tables. */
 export type ProfileDb = DrizzleD1Database<{
@@ -57,12 +59,9 @@ function toProfile(row: typeof agentUserProfiles.$inferSelect): UserProfile {
   };
 }
 
-/** User profiles over D1 via Drizzle (+ raw-SQL batch for the idempotent write). */
+/** User profiles over D1 via Drizzle (the idempotent write runs through the DML catalogue batch entry). */
 export class D1ProfileAdapter implements UserProfileStore {
-  constructor(
-    readonly db: ProfileDb,
-    private readonly d1: D1Database,
-  ) {}
+  constructor(readonly db: ProfileDb) {}
 
   async getProfile(userLogin: string): Promise<UserProfile | null> {
     const rows = await this.db
@@ -110,19 +109,16 @@ export class D1ProfileAdapter implements UserProfileStore {
       return { duplicate: true, profile: null };
     }
     try {
-      await this.d1.batch([
-        this.d1
-          .prepare(
-            `INSERT INTO agent_user_profiles (user_login, display_name, phone, updated_at_ms) VALUES (?, ?, ?, ?) ` +
-              `ON CONFLICT(user_login) DO UPDATE SET display_name = excluded.display_name, phone = excluded.phone, updated_at_ms = excluded.updated_at_ms`,
-          )
-          .bind(profile.userLogin, profile.displayName, profile.phone, profile.updatedAtMs),
-        this.d1
-          .prepare(
-            `INSERT INTO agent_profile_idempotency_keys (idempotency_key, user_login, created_at_ms) VALUES (?, ?, ?)`,
-          )
-          .bind(idempotencyKey, profile.userLogin, createdAtMs),
-      ]);
+      await executeDml(DML_CATALOGUE, this.db, "dml.d1.agent_user_profiles.save_once", {
+        values: {
+          userLogin: profile.userLogin,
+          displayName: profile.displayName,
+          phone: profile.phone,
+          updatedAtMs: profile.updatedAtMs,
+        },
+        idempotencyKey,
+        createdAtMs,
+      });
     } catch (err) {
       // Race: another delivery recorded the key between the check
       // and the batch (the key PK refused the second insert). A
