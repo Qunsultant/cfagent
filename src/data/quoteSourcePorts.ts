@@ -20,6 +20,8 @@
  * settings write that silently did not land would misreport
  * state to the operator who made it.
  */
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { quoteSourceSetting } from "./drizzleSchema";
 
 export type QuoteSource = "auto" | "alpaca" | "yahoo";
 
@@ -31,16 +33,10 @@ export function normalizeQuoteSource(value: unknown): QuoteSource {
     : "auto";
 }
 
-/** Minimal structural shape of the D1 binding this family needs. */
-export interface QuoteSourceD1Db {
-  prepare(sql: string): {
-    bind(...args: unknown[]): {
-      first<T = Record<string, unknown>>(): Promise<T | null>;
-      run(): Promise<unknown>;
-    };
-    run(): Promise<unknown>;
-  };
-}
+/** The Drizzle D1 database object carrying the quote-source setting schema. */
+export type QuoteSourceD1Db = DrizzleD1Database<{
+  quoteSourceSetting: typeof quoteSourceSetting;
+}>;
 
 export interface QuoteSourcePort {
   /** Idempotent schema ensure (the migration-0022 DDL). */
