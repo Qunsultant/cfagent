@@ -445,6 +445,20 @@ describe("#686 carried-forward 3a pins — prompt builder byte-identity + clamp"
     ).toBe(EXPECTED_PROMPTS.bizCopilotTenants);
   });
 
+  it("bizCopilotAccounts fixture: the BizCopilot account-result prompt (#4516)", () => {
+    expect(
+      buildOrchestratorSystemPrompt({
+        route: { agent: "trading", confidence: 1, reason: "Direct execution" },
+        memoryContext: "",
+        vectorContext: "",
+        optionsResearchContext: "",
+        isAutoOptionsResearchRequest: false,
+        bizCopilotAccountContext:
+          'BIZCOPILOT_ACCOUNT_RESULT: {"action":"lookup","userId":"alice@example.com","pageUrl":"https://agent.openaimp.com/?tab=platform-admin&view=accounts","result":{"identity":{"userLogin":"alice@example.com","tenantId":"tenant-a","hasAccount":true,"tier":"Free","creditsUSD":0,"includedRunsRemaining":0}}}',
+      })
+    ).toBe(EXPECTED_PROMPTS.bizCopilotAccounts);
+  });
+
   it("R8: the sanitized clamp is now the production resolver for the class", () => {
     expect(makeAgent({ AI: {} }).agent.maxSteps).toBe(6);
     expect(makeAgent({ AI: {}, MAS_MAX_STEPS: "99" }).agent.maxSteps).toBe(10);
