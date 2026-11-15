@@ -21,6 +21,7 @@ import { WorkflowRunsPanel } from "./WorkflowRunsPanel";
 import { AgentsPanel } from "./AgentsPanel";
 import { ProductHub } from "./ProductHub";
 import { BillingServicingPanel } from "./BillingServicingPanel";
+import { PageChromeContext } from "./components/ui/PageShell";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
 import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
@@ -1087,7 +1088,13 @@ export function Chat({ user }: { user: User }) {
     ),
     billing: (
       <ErrorBoundary label="Billing">
-        <BillingServicingPanel />
+        {/* Issue #4691 — the Billing route is a tab of the app (the
+            crumb is the title), so the host applies "tab" chrome to the
+            panel: its PageShell renders content-only, no second h1.
+            The panel itself is unchanged for its host. */}
+        <PageChromeContext.Provider value="tab">
+          <BillingServicingPanel />
+        </PageChromeContext.Provider>
       </ErrorBoundary>
     ),
     "payment-assurance": (

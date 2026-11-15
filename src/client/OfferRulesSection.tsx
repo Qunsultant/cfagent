@@ -26,6 +26,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import { PageShell } from "./components/ui/PageShell";
 import { Checkbox } from "./components/ui/Checkbox";
 import { Notice } from "./components/ui/Notice";
 import { TextInput } from "./components/ui/TextInput";
@@ -148,9 +149,12 @@ export function OfferRulesSection() {
     [],
   );
 
+  // Issue #4691 — the section title lives in the PageShell: under the
+  // Billing tab host it collapses to content-only (the tab label is the
+  // title); standalone it renders as the page h1.
   return (
-    <Card>
-      <p>Upgrade-offer rules</p>
+    <PageShell title="Upgrade-offer rules">
+      <Card>
       {loading && <p>Loading upgrade-offer rules</p>}
       {!loading && loadError && (
         <>
@@ -251,5 +255,6 @@ export function OfferRulesSection() {
         </>
       )}
     </Card>
+    </PageShell>
   );
 }

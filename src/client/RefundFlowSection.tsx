@@ -32,6 +32,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import { PageShell } from "./components/ui/PageShell";
 import { Notice } from "./components/ui/Notice";
 import { Select } from "./components/ui/Select";
 import { TextInput } from "./components/ui/TextInput";
@@ -345,9 +346,12 @@ export function RefundFlowSection({ subscriptions, plans }: RefundFlowSectionPro
     }
   }, [current]);
 
+  // Issue #4691 — the section title lives in the PageShell: under the
+  // Billing tab host it collapses to content-only (the tab label is the
+  // title); standalone it renders as the page h1.
   return (
-    <Card>
-      <p>Refund flow</p>
+    <PageShell title="Refund flow">
+      <Card>
       <p>
         Request a refund, decide and execute it as operator, and verify its outcome — over the
         existing refund routes. A full subscription refund revokes access immediately and removes
@@ -512,5 +516,6 @@ export function RefundFlowSection({ subscriptions, plans }: RefundFlowSectionPro
           ))}
       </div>
     </Card>
+    </PageShell>
   );
 }
