@@ -418,6 +418,12 @@ class FakeProfileSql implements ScanSqlExecutor {
     if (query.startsWith("SELECT") && query.includes("WHERE user_login = ?")) {
       return this.rows.filter((r) => r.user_login === params[0]).map((r) => ({ ...r }));
     }
+    // #4385 (#4282 P6b): the Repository's findById arrives as
+    // SELECT * … WHERE id = ? LIMIT 1 (the updateWhere verification
+    // re-read); the old statements always carried user_login.
+    if (query.startsWith("SELECT") && query.includes("WHERE id = ?")) {
+      return this.rows.filter((r) => r.id === params[0]).map((r) => ({ ...r }));
+    }
     if (query.startsWith("UPDATE mas_strategy_profiles")) {
       const [name, version, spec_json, updated_at, user_login, id] = params;
       const row = this.rows.find((r) => r.user_login === user_login && r.id === id);
