@@ -32,13 +32,13 @@ describe("nav-config.json shape (issue #2977)", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("routes: navOrders are exactly 0..28 across the 29 nav entries", () => {
+  it("routes: navOrders are exactly 0..30 across the 31 nav entries", () => {
     const orders = (navData.routes as { navEntry?: { navOrder: number } }[])
       .filter((r) => r.navEntry)
       .map((r) => r.navEntry!.navOrder);
-    expect(orders).toHaveLength(29);
+    expect(orders).toHaveLength(31);
     expect([...orders].sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 29 }, (_, i) => i),
+      Array.from({ length: 31 }, (_, i) => i),
     );
   });
 
@@ -58,9 +58,9 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("subMenus: 15 groups, every sub-item has id and label", () => {
+  it("subMenus: 17 groups, every sub-item has id and label", () => {
     const groups = Object.keys(navData.subMenus as Record<string, unknown[]>);
-    expect(groups).toHaveLength(15);
+    expect(groups).toHaveLength(17);
     for (const items of Object.values(navData.subMenus as Record<string, { id: string; label: string }[]>)) {
       for (const item of items) {
         expect(item.id).toBeTruthy();
@@ -84,29 +84,29 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("deepLinkSurfaces: 21 surfaces, unique, pages resolve, values non-empty", () => {
+  it("deepLinkSurfaces: 23 surfaces, unique, pages resolve, values non-empty", () => {
     const ids = new Set((navData.routes as { id: string }[]).map((r) => r.id));
     const surfaces = navData.deepLinkSurfaces as {
       surface: string;
       page: string | null;
       values: string[];
     }[];
-    expect(surfaces).toHaveLength(21);
-    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(21);
+    expect(surfaces).toHaveLength(23);
+    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(23);
     for (const s of surfaces) {
       if (s.page !== null) expect(ids.has(s.page)).toBe(true);
       expect(s.values.length).toBeGreaterThan(0);
     }
   });
 
-  it("platformAdminSections: one section, 13 items, unique ids", () => {
+  it("platformAdminSections: one section, 7 items, unique ids", () => {
     const sections = navData.platformAdminSections as {
       id: string;
       items: { id: string; label: string; description: string }[];
     }[];
     expect(sections).toHaveLength(1);
-    expect(sections[0].items).toHaveLength(13);
-    expect(new Set(sections[0].items.map((i) => i.id)).size).toBe(13);
+    expect(sections[0].items).toHaveLength(7);
+    expect(new Set(sections[0].items.map((i) => i.id)).size).toBe(7);
     for (const item of sections[0].items) {
       expect(item.label).toBeTruthy();
       expect(item.description).toBeTruthy();
@@ -120,7 +120,7 @@ describe("nav-config.json loaders (issue #2977)", () => {
     expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(
       Object.keys(navData.deepLinks as Record<string, unknown>).length,
     );
-    expect(SURFACE_TAB_DEFS).toHaveLength(21);
+    expect(SURFACE_TAB_DEFS).toHaveLength(23);
     // 5 metadata sections + sandbox menu-only section.
     const built = buildDefaultLeftNavConfig().sections;
     expect(built).toHaveLength(6);

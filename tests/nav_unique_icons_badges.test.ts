@@ -31,18 +31,21 @@
  * and navOrders 12..30 shifted down one, so display order stays
  * 0..29; pin updated in the same PR per the §7 pin rule.)
  * (#4575 merged audit + NLQ into the one Audit & Vault entry; nav
- * count 30 → 29 and navOrders 21..29 shifted down one, so display
- * order stays 0..28; pin updated in the same PR per the §7 pin rule.)
+ * count 30 → 29 and navOrders 21..29 shifted down one, so display order stays
+ * 0..28; pin updated in the same PR per the §7 pin rule.)
+ * (#4585 added the DataHub and SecurityHub nav entries, navOrder 29
+ * and 30; nav count 29 → 31 and display order stays 0..30; pin updated
+ * in the same PR per the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 29;
+const NAV_COUNT = 31;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 29-item nav", () => {
+  it("has the full 31-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });

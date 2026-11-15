@@ -143,7 +143,10 @@ describe("4561-P05 the three ids are gone from Platform Admin (#4561)", () => {
     expect(ids).not.toContain("jobs");
     // 15 → 13 in #4575: free-runs and products left Platform Admin for the
     // product hub, which already owned both views.
-    expect(ids).toHaveLength(13);
+    // 13 → 7 in #4585: data-providers, data-lifecycle, downloads,
+    // iaaa-admin, users, and admin-access moved to the DataHub and
+    // SecurityHub hubs.
+    expect(ids).toHaveLength(7);
     const navIds = PLATFORM_ADMIN_NAV_ITEMS.map((item) => item.id);
     expect(navIds).not.toContain("platform-admin:background-tasks");
     expect(navIds).not.toContain("platform-admin:scheduled-goals");
@@ -152,7 +155,10 @@ describe("4561-P05 the three ids are gone from Platform Admin (#4561)", () => {
     const subIds = subMenu.map((item) => item.id);
     expect(subIds).not.toContain("platform-admin:background-tasks");
     expect(subIds).not.toContain("platform-admin:scheduled-goals");
-    expect(subIds).toHaveLength(9);
+    // 9 → 5 in #4585: the JSON sub-menu was always a partial mirror of the
+    // derived sections; the six moved sections had four entries here
+    // (data-providers, iaaa-admin, users, downloads) and all four left.
+    expect(subIds).toHaveLength(5);
   });
 
   it("the deep-link overrides are deleted and the platform-admin surface drops background-tasks", () => {

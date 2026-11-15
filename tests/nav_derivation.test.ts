@@ -32,6 +32,9 @@
  * (#4575 merged audit + NLQ into the one Audit & Vault entry; nav
  * count 30 -> 29 and navOrders 21..29 shift down one, so display
  * order stays 0..28; pin updated in the same PR per the pin rule.)
+ * (#4585 added the DataHub and SecurityHub nav entries, navOrder 29
+ * and 30, last in display order; pin updated in the same PR per the
+ * pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -70,10 +73,12 @@ const EXPECTED_ORDER = [
   "product-hub",
   "billing",
   "assets-hub",
+  "data-hub",
+  "security-hub",
 ];
 
 describe("nav derivation", () => {
-  it("derives the 29 nav items in display order", () => {
+  it("derives the 31 nav items in display order", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).toEqual(EXPECTED_ORDER);
   });
 

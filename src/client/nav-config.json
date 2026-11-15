@@ -148,6 +148,22 @@
       }
     },
     {
+      "id": "data-hub",
+      "navGroup": "data-hub",
+      "crumb": "DataHub",
+      "category": "Platform",
+      "icon": "Database",
+      "description": "Market-data providers, data lifecycle, and parameters & export — one menu, three views",
+      "navEntry": {
+        "label": "DataHub",
+        "shortLabel": "DataHub",
+        "navOrder": 29,
+        "defaultVisible": true,
+        "badge": "Data",
+        "badgeType": "neutral"
+      }
+    },
+    {
       "id": "docs",
       "navGroup": "workflow-runs",
       "crumb": "Docs & Reports",
@@ -479,6 +495,22 @@
         "defaultVisible": true,
         "badge": "Hub",
         "badgeType": "mcp"
+      }
+    },
+    {
+      "id": "security-hub",
+      "navGroup": "security-hub",
+      "crumb": "SecurityHub",
+      "category": "Platform",
+      "icon": "IaaaAdmin",
+      "description": "IAAA admin, users, admin access, and your profile — one menu, four views",
+      "navEntry": {
+        "label": "SecurityHub",
+        "shortLabel": "SecurityHub",
+        "navOrder": 30,
+        "defaultVisible": true,
+        "badge": "Security",
+        "badgeType": "pro"
       }
     },
     {
@@ -902,39 +934,64 @@
         "description": "Tenant create, list, settings, and members"
       },
       {
-        "id": "platform-admin:data-providers",
+        "id": "platform-admin:accounts",
+        "label": "Accounts",
+        "shortLabel": "Self-service account setup, tier, credits, subscriptions & catalogue",
+        "icon": "Contracts",
+        "description": "Self-service account setup, tier, credits, subscriptions & catalogue"
+      }
+    ],
+    "data-hub": [
+      {
+        "id": "data-providers",
         "label": "Data Providers",
         "shortLabel": "Provisioning lifecycle for market-data providers",
         "icon": "DataProviders",
         "description": "Provisioning lifecycle for market-data providers"
       },
       {
-        "id": "platform-admin:accounts",
-        "label": "Accounts",
-        "shortLabel": "Self-service account setup, tier, credits, subscriptions & catalogue",
-        "icon": "Contracts",
-        "description": "Self-service account setup, tier, credits, subscriptions & catalogue"
+        "id": "data-lifecycle",
+        "label": "Data Lifecycle",
+        "shortLabel": "Clean state, platform bootstrap & tenant bootstrap",
+        "icon": "Database",
+        "description": "Clean state, platform bootstrap & tenant bootstrap"
       },
       {
-        "id": "platform-admin:iaaa-admin",
+        "id": "downloads",
+        "label": "Parameters & Export",
+        "shortLabel": "Export options datasets, greek chains, and parameters",
+        "icon": "Docs",
+        "description": "Export options datasets, greek chains, and parameters"
+      }
+    ],
+    "security-hub": [
+      {
+        "id": "iaaa-admin",
         "label": "IAAA Admin",
         "shortLabel": "Read-only memberships, genesis & audit",
         "icon": "IaaaAdmin",
         "description": "Read-only memberships, genesis & audit"
       },
       {
-        "id": "platform-admin:users",
+        "id": "users",
         "label": "Users",
         "shortLabel": "User profiles, tenant memberships & account linkage",
         "icon": "Agents",
         "description": "User profiles, tenant memberships & account linkage"
       },
       {
-        "id": "platform-admin:admin-access",
-        "label": "Request admin access",
+        "id": "admin-access",
+        "label": "Admin Access",
         "shortLabel": "Ask the platform owner for admin rights",
         "icon": "AdminAccess",
         "description": "Ask the platform owner for admin rights"
+      },
+      {
+        "id": "profile",
+        "label": "Profile",
+        "shortLabel": "Your display name and phone",
+        "icon": "Agents",
+        "description": "Your display name and phone"
       }
     ],
     "schedules": [
@@ -1410,6 +1467,34 @@
       "tab": "audit-vault",
       "view": "nlq"
     },
+    "data-hub:data-providers": {
+      "tab": "data-hub",
+      "view": "data-providers"
+    },
+    "data-hub:data-lifecycle": {
+      "tab": "data-hub",
+      "view": "data-lifecycle"
+    },
+    "data-hub:downloads": {
+      "tab": "data-hub",
+      "view": "downloads"
+    },
+    "security-hub:iaaa-admin": {
+      "tab": "security-hub",
+      "view": "iaaa-admin"
+    },
+    "security-hub:users": {
+      "tab": "security-hub",
+      "view": "users"
+    },
+    "security-hub:admin-access": {
+      "tab": "security-hub",
+      "view": "admin-access"
+    },
+    "security-hub:profile": {
+      "tab": "security-hub",
+      "view": "profile"
+    },
     "order:approvals": {
       "tab": "order",
       "params": {
@@ -1474,14 +1559,29 @@
         "api-keys",
         "tenants",
         "channels",
-        "data-providers",
         "accounts",
-        "iaaa-admin",
-        "admin-access",
-        "users",
+        "engine-tuning"
+      ]
+    },
+    {
+      "surface": "data-hub",
+      "page": "data-hub",
+      "param": "view",
+      "values": [
+        "data-providers",
         "data-lifecycle",
-        "engine-tuning",
         "downloads"
+      ]
+    },
+    {
+      "surface": "security-hub",
+      "page": "security-hub",
+      "param": "view",
+      "values": [
+        "iaaa-admin",
+        "users",
+        "admin-access",
+        "profile"
       ]
     },
     {
@@ -1731,52 +1831,16 @@
           "icon": "Omnichannel"
         },
         {
-          "id": "data-providers",
-          "label": "Data Providers",
-          "description": "Provisioning lifecycle for market-data providers",
-          "icon": "DataProviders"
-        },
-        {
           "id": "accounts",
           "label": "Accounts",
           "description": "Self-service account setup, tier, credits, subscriptions & catalogue",
           "icon": "Contracts"
         },
         {
-          "id": "iaaa-admin",
-          "label": "IAAA Admin",
-          "description": "Read-only memberships, genesis & audit",
-          "icon": "IaaaAdmin"
-        },
-        {
-          "id": "users",
-          "label": "Users",
-          "description": "User profiles, tenant memberships & account linkage",
-          "icon": "Agents"
-        },
-        {
-          "id": "data-lifecycle",
-          "label": "Data Lifecycle",
-          "description": "Clean state, platform bootstrap & tenant bootstrap",
-          "icon": "Database"
-        },
-        {
           "id": "engine-tuning",
           "label": "Engine Tuning",
           "description": "Configure trade engine, parameters, and safety controls",
           "icon": "Settings"
-        },
-        {
-          "id": "downloads",
-          "label": "Parameters & Export",
-          "description": "Export options datasets, greek chains, and parameters",
-          "icon": "Docs"
-        },
-        {
-          "id": "admin-access",
-          "label": "Request admin access",
-          "description": "Ask the platform owner for admin rights",
-          "icon": "AdminAccess"
         }
       ]
     }

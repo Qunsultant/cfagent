@@ -21,14 +21,8 @@ export type PlatformAdminSectionId =
   | "api-keys"
   | "tenants"
   | "channels"
-  | "data-providers"
   | "accounts"
-  | "iaaa-admin"
-  | "users"
-  | "data-lifecycle"
-  | "engine-tuning"
-  | "downloads"
-  | "admin-access";
+  | "engine-tuning";
 
 export interface PlatformAdminMenuItemConfig {
   id: PlatformAdminSectionId;

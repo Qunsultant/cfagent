@@ -284,6 +284,11 @@ const CONFORMING_ROUTES: Record<string, string> = {
   // TAB_CONTENT → SchedulesHome), which carries the PageShell — it is
   // conforming now, not a hub-hosted trading route.
   schedules: "src/client/SchedulesHome.tsx",
+  // Issue #4585: the DataHub and SecurityHub homes render from the
+  // shell (Chat.tsx TAB_CONTENT → DataHubHome / SecurityHubHome),
+  // which carry the PageShell.
+  "data-hub": "src/client/DataHubHome.tsx",
+  "security-hub": "src/client/SecurityHubHome.tsx",
   ads: "src/client/chat/tabs/AdsTab.tsx",
   referrals: "src/client/chat/tabs/ReferralsTab.tsx",
   revenue: "src/client/chat/tabs/RevenueTab.tsx",
@@ -361,6 +366,10 @@ const EXPECTED_TAB_CONTENT_KEYS = [
   // Issue #3121 S2: schedules renders from the shell — its
   // TAB_CONTENT entry joins the shell-conforming keys.
   "schedules",
+  // Issue #4585: the DataHub and SecurityHub homes render from the
+  // shell — their TAB_CONTENT entries join the shell-conforming keys.
+  "data-hub",
+  "security-hub",
 ];
 
 const EXPECTED_SUB_TABS = [
@@ -480,6 +489,9 @@ const INTERIOR_SURFACE_FILES: string[] = [
   "src/client/PaymentsPage.tsx",
   "src/client/SocialPostingPanel.tsx",
   "src/client/SchedulesHome.tsx",
+  // Issue #4585: the DataHub and SecurityHub homes (route files).
+  "src/client/DataHubHome.tsx",
+  "src/client/SecurityHubHome.tsx",
   "src/client/chat/tabs/AdsTab.tsx",
   "src/client/chat/tabs/ReferralsTab.tsx",
   "src/client/chat/tabs/RevenueTab.tsx",

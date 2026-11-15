@@ -29,12 +29,6 @@ vi.mock("../src/client/ScheduledGoalsPanel", () => ({
 vi.mock("../src/client/ApiKeysPanel", () => ({
   ApiKeysPanel: () => <div data-testid="api-keys-panel">keys</div>,
 }));
-vi.mock("../src/client/DataProvidersPanel", () => ({
-  DataProvidersPanel: () => <div data-testid="data-providers-panel">providers</div>,
-}));
-vi.mock("../src/client/IaaaAdminPanel", () => ({
-  IaaaAdminPanel: () => <div data-testid="iaaa-admin-panel">iaaa</div>,
-}));
 
 import { PlatformAdminPanel } from "../src/client/PlatformAdminPanel";
 import {
@@ -77,7 +71,10 @@ function panel(over: Partial<React.ComponentProps<typeof PlatformAdminPanel>> = 
 }
 
 describe("platform admin config (#2624)", () => {
-  it("lists the thirteen extracted items in dropdown order", () => {
+  it("lists the seven remaining items in dropdown order", () => {
+    // Issue #4585 moved data-providers, data-lifecycle, downloads,
+    // iaaa-admin, users, and admin-access into the DataHub and
+    // SecurityHub hubs; Platform Admin keeps the other seven.
     const items = platformAdminItems();
     expect(items.map((item) => item.id)).toEqual([
       "ads",
@@ -85,17 +82,11 @@ describe("platform admin config (#2624)", () => {
       "api-keys",
       "tenants",
       "channels",
-      "data-providers",
       "accounts",
-      "iaaa-admin",
-      "users",
-      "data-lifecycle",
       "engine-tuning",
-      "downloads",
-      "admin-access",
     ]);
     expect(items[0].label).toBe("Ads & Partner Banners");
-    expect(items[items.length - 1].label).toBe("Request admin access");
+    expect(items[items.length - 1].label).toBe("Engine Tuning");
   });
 
   it("takes the panel title from the config", () => {
@@ -111,32 +102,27 @@ describe("platform admin config (#2624)", () => {
       expect(item.icon).toBeDefined();
     }
     const icons = items.map((i) => i.icon);
-    // Issue #4561 removed Tasks, ScheduledGoals, and Jobs (all unique);
-    // the one duplicate pair (Agents on Tenants + Users) remains.
-    expect(new Set(icons).size).toBe(12);
+    // Issue #4585 moved Users (the duplicate Agents) to SecurityHub;
+    // all seven remaining icons are distinct.
+    expect(new Set(icons).size).toBe(7);
   });
 });
 
 describe("platform admin in the left navigation (#2624)", () => {
   const adminSection = DEFAULT_LEFT_NAV_CONFIG.sections.find((section) => section.id === "section-platform");
 
-  it("is a left-nav item with its own thirteen-item sub-menu", () => {
+  it("is a left-nav item with its own seven-item sub-menu", () => {
     expect(adminSection).toBeTruthy();
     expect(adminSection!.title).toBe("PLATFORM");
     const item = adminSection!.items.find((i) => i.id === "platform-admin")!;
     expect(item).toBeTruthy();
     expect(item.id).toBe("platform-admin");
     expect(item.label).toBe("Platform Admin");
-    expect(item.subItems).toHaveLength(13);
+    expect(item.subItems).toHaveLength(7);
     expect(item.subItems![0].id).toBe("platform-admin:ads");
     expect(item.subItems![4].id).toBe("platform-admin:channels");
-    expect(item.subItems![6].id).toBe("platform-admin:accounts");
-    expect(item.subItems![7].id).toBe("platform-admin:iaaa-admin");
-    expect(item.subItems![8].id).toBe("platform-admin:users");
-    expect(item.subItems![9].id).toBe("platform-admin:data-lifecycle");
-    expect(item.subItems![10].id).toBe("platform-admin:engine-tuning");
-    expect(item.subItems![11].id).toBe("platform-admin:downloads");
-    expect(item.subItems![12].id).toBe("platform-admin:admin-access");
+    expect(item.subItems![5].id).toBe("platform-admin:accounts");
+    expect(item.subItems![6].id).toBe("platform-admin:engine-tuning");
   });
 
   it("maps sub-item ids to drawer sections, and nothing else", () => {
@@ -164,16 +150,11 @@ describe("platform admin panel (#2624)", () => {
     expect(container.querySelector(".platform-admin-title")?.textContent).toBe("Platform Admin");
 
     const menuItems = container.querySelectorAll(".platform-admin-menu-item");
-    expect(menuItems).toHaveLength(13);
+    expect(menuItems).toHaveLength(7);
     expect(menuItems[0].textContent).toContain("Ads & Partner Banners");
     expect(menuItems[4].textContent).toContain("Channels");
-    expect(menuItems[6].textContent).toContain("Accounts");
-    expect(menuItems[7].textContent).toContain("IAAA Admin");
-    expect(menuItems[8].textContent).toContain("Users");
-    expect(menuItems[9].textContent).toContain("Data Lifecycle");
-    expect(menuItems[10].textContent).toContain("Engine Tuning");
-    expect(menuItems[11].textContent).toContain("Parameters & Export");
-    expect(menuItems[12].textContent).toContain("Request admin access");
+    expect(menuItems[5].textContent).toContain("Accounts");
+    expect(menuItems[6].textContent).toContain("Engine Tuning");
   });
 
   it("opens at the section the nav asked for", async () => {
@@ -185,13 +166,13 @@ describe("platform admin panel (#2624)", () => {
     await render(panel());
     expect(container.textContent).toContain("Workspace Banners");
 
-    const dataProviders = Array.from(container.querySelectorAll(".platform-admin-menu-item")).find((item) =>
-      item.textContent?.includes("Data Providers"),
+    const apiKeys = Array.from(container.querySelectorAll(".platform-admin-menu-item")).find((item) =>
+      item.textContent?.includes("API Keys"),
     ) as HTMLElement;
     await act(async () => {
-      dataProviders.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      apiKeys.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(container.querySelector('[data-testid="data-providers-panel"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();
   });
 
   it("honours a custom config's title and item order", async () => {

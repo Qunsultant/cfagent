@@ -29,8 +29,6 @@ import {
   type AdBannerConfig,
 } from "./adBannerConfig";
 import { ApiKeysPanel } from "./ApiKeysPanel";
-import { DataProvidersPanel } from "./DataProvidersPanel";
-import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import {
   DEFAULT_PLATFORM_ADMIN_CONFIG,
   platformAdminItems,
@@ -39,7 +37,6 @@ import {
   type PlatformAdminMenuItemConfig,
   type PlatformAdminSectionId,
 } from "./platformAdminConfig";
-import { csrfHeaders } from "./apiFetch";
 
 export type { PlatformAdminSectionId };
 
@@ -281,8 +278,6 @@ export function PlatformAdminPanel({
   const firstItem = items[0];
   const [active, setActive] = useState<string>(initialSection ?? firstItem.id);
   const [ads, setAds] = useState<AdBannerConfig>(() => adBannerConfig ?? getStoredAdBannerConfig());
-  const [requesting, setRequesting] = useState(false);
-  const [accessStatus, setAccessStatus] = useState("");
   const panelRef = useRef<HTMLElement | null>(null);
 
   // Ad preferences: parent-controlled when given, stored otherwise.
@@ -304,30 +299,6 @@ export function PlatformAdminPanel({
     (key: keyof Omit<AdBannerConfig, "enabled">, value: boolean) => applyAds({ ...ads, [key]: value }),
     [ads, applyAds],
   );
-
-  const requestAdminAccess = useCallback(async () => {
-    setRequesting(true);
-    setAccessStatus("");
-    try {
-      const res = await globalThis.fetch("/api/iaaa/access-request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...csrfHeaders() },
-        body: JSON.stringify({ requestedRole: "tenant-admin" }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (res.status === 201) {
-        setAccessStatus("Access requested — pending admin approval.");
-      } else if (res.status === 409) {
-        setAccessStatus("You already have a pending access request.");
-      } else {
-        setAccessStatus(data.error || "Access request was not submitted.");
-      }
-    } catch {
-      setAccessStatus("Access request was not submitted.");
-    } finally {
-      setRequesting(false);
-    }
-  }, []);
 
   // Opening the drawer always lands on the requested section (or the first
   // one), never on whatever was left selected in a previous turn.
@@ -436,32 +407,13 @@ export function PlatformAdminPanel({
                 <ApiKeysPanel />
               </div>
             )}
-            {active === "data-providers" && (
-              <div className="etrade-panel-section settings-data-providers-section">
-                <div className="section-label-row">
-                  <span>Data Providers</span>
-                  <small>Provisioning lifecycle for market-data providers</small>
-                </div>
-                <DataProvidersPanel />
-              </div>
-            )}
-            {active === "iaaa-admin" && (
-              <div className="etrade-panel-section settings-iaaa-admin-section">
-                <div className="section-label-row">
-                  <span>IAAA Admin</span>
-                  <small>Read-only memberships, genesis &amp; audit</small>
-                </div>
-                <IaaaAdminPanel />
-              </div>
-            )}
-            {active === "admin-access" && (
-              <AdminAccessSection
-                requesting={requesting}
-                status={accessStatus}
-                onRequest={() => void requestAdminAccess()}
-                user={user}
-              />
-            )}
+            {/* Issue #4585: the data and security sections moved into
+                their own hubs — `data-providers`, `data-lifecycle`, and
+                `downloads` render in DataHub (`?tab=data-hub`);
+                `iaaa-admin`, `users`, and `admin-access` render in
+                SecurityHub (`?tab=security-hub`). This drawer mounts no
+                panels for any of the six; the retired addresses redirect
+                to the hubs (legacyPlatformAdminHubRedirect). */}
           </div>
         </div>
       </aside>

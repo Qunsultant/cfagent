@@ -9,6 +9,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
 import { PlatformAdminPage } from "../src/client/PlatformAdminPage";
+import { DataHubHome } from "../src/client/DataHubHome";
 import {
   copilotSessionAt,
   resolveCopilotSessions,
@@ -223,10 +224,11 @@ describe("Issue #3694 — Platform Admin Engine Tuning and Downloads sub-tabs", 
     root = null;
   });
 
-  it("renders Parameters & Export downloads sub-tab in PlatformAdminPage", async () => {
+  it("renders Parameters & Export downloads sub-tab in DataHubHome (#4585: downloads moved out of Platform Admin into the DataHub hub)", async () => {
+    window.history.pushState(null, "", "/?tab=data-hub&view=downloads");
     root = createRoot(container);
     await act(async () => {
-      root.render(<PlatformAdminPage initialSection="downloads" />);
+      root.render(<DataHubHome />);
     });
 
     expect(container.textContent).toContain("Parameters & Options Data Export");
