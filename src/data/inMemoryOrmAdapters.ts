@@ -163,6 +163,19 @@ export class InMemoryRepository<T extends Record<string, any>>
     return true;
   }
 
+  /**
+   * #4386: INSERT OR REPLACE — full-row replace on the idField,
+   * never a throw. The twin has no column map, so the record is
+   * stored as-is: an absent field stays absent here, while the
+   * DO leg binds it NULL (the #3182 map-driven semantics) — the
+   * one disclosed leg difference, pinned by
+   * tests/orm_repository_create_or_replace_4386.test.ts.
+   */
+  createOrReplace(record: T): T {
+    this.rows.set(String(record[this.idField]), { ...record });
+    return record;
+  }
+
   update(id: string, updates: Partial<T>): T | null {
     const existing = this.rows.get(id);
     if (!existing) {
@@ -383,9 +396,9 @@ export class InMemoryTransactionLedgerAdapter
     super("mas_transactions", "id");
   }
 
+  /** #4386: INSERT OR REPLACE delegates to the base method — one implementation. */
   replace(record: TransactionRecord): TransactionRecord {
-    this.rows.set(record.id, { ...record });
-    return record;
+    return this.createOrReplace(record);
   }
 
   /** #3182: tenant-scoped read — same null-exclusion as the DO
