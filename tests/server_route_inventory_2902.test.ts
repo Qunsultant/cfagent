@@ -22,6 +22,8 @@
  * handleAuthIaaaRoutes — 148 → 149 descriptors.)
  * (#4653: GET /api/security/pep joins the same block, next to the PDP
  * route — 149 → 150 descriptors.)
+ * (#4655: GET /api/security/pip joins the same block, next to the PEP
+ * route — 150 → 151 descriptors.)
  *
  * Slice 2 decisions recorded here (see also the Slice 2 progress comment on
  * #2902):
@@ -167,7 +169,7 @@
  * resolves those constants to their literal values by parsing
  * src/data/commercialUrlCatalog.ts as source text (see the
  * catalog-resolution rule above conditionTokens), so the pinned
- * inventory stays 150 entries and no coverage is lost.
+ * inventory stays 151 entries and no coverage is lost.
  */
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -567,6 +569,7 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/iaaa/offboard",
   "ANY /api/security/pdp",
   "ANY /api/security/pep",
+  "ANY /api/security/pip",
   "ANY /api/api-keys",
   "ANY PREFIX /api/api-keys/",
   "ANY /mcp",
