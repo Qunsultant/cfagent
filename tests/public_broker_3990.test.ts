@@ -516,8 +516,9 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     // FAILURE_REFERRAL_CODE_INVALID + FAILURE_REFERRAL_CODE_CAP_EXCEEDED
     // + FAILURE_REFERRAL_CODE_RULE_UNAVAILABLE)
     // + 69 (#2846: the commercial outcome codes) + 1 (#2373 S1b:
-    // FAILURE_PROVIDER_MISMATCH).
-    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(237);
+    // FAILURE_PROVIDER_MISMATCH) + 1 (#3655 F6:
+    // FAILURE_NO_SCREENING_PROVIDER).
+    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(238);
   });
 
   it("the OAuth scopes request trading.write (the connect grant must cover placement)", () => {
