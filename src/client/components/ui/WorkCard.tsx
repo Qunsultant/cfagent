@@ -19,11 +19,17 @@ export interface WorkCardProps extends CardHeaderProps {
  * #3132's organisms. Pages migrate onto it in Wave 1 (#3138–#3140);
  * this slice builds the organism only.
  */
-export function WorkCard({ title, subtitle, meta, belowSubtitle, children }: WorkCardProps) {
+export function WorkCard({ title, subtitle, meta, belowSubtitle, singleLine, children }: WorkCardProps) {
   return (
     <Card>
       <Stack gap="5">
-        <CardHeader title={title} subtitle={subtitle} meta={meta} belowSubtitle={belowSubtitle} />
+        <CardHeader
+          title={title}
+          subtitle={subtitle}
+          meta={meta}
+          belowSubtitle={belowSubtitle}
+          singleLine={singleLine}
+        />
         {children}
       </Stack>
     </Card>

@@ -645,6 +645,43 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   min-width: 0;
 }
 
+/* Single-line header (#4573): title, scope note, badges and meta share one
+ * row. The left block becomes a row of baseline-aligned items, the subtitle
+ * ellipsizes instead of wrapping (the #4409 single-line rule), and meta
+ * keeps its own width on the right. Token-only: no new colours or sizes. */
+.ui-card-header.ui-card-header-single {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.ui-card-header-single .ui-card-header-main {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ui-card-header-single .ui-card-header-main h4 {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.ui-card-header-single .ui-card-header-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ui-card-header-single .ui-card-header-main > * {
+  min-width: 0;
+}
+
+.ui-card-header-single .ui-push {
+  flex: 0 0 auto;
+}
+
 /* ---------- Skeleton ---------- */
 .ui-skeleton {
   display: block;
