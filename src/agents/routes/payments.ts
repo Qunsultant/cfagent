@@ -494,6 +494,8 @@ export async function handlePaymentsRoutes(
   // Read-only: it confirms nothing, moves no funds, replays no charge.
   // The caller is the session login (x-user-login, set by the worker
   // from the verified session; deleted when no session exists).
+  // Issue #4601 decided boundary: receipts are login-scoped (`scope: "login"`),
+  // so any client-supplied `tenantId` query parameter is ignored.
   if (path.endsWith("/payments/receipts") && request.method === "GET") {
     const login = request.headers.get("x-user-login");
     if (!login) {

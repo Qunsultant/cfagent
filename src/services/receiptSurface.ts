@@ -104,8 +104,17 @@ export interface ReceiptEntry {
   status: string | null;
 }
 
+/**
+ * Issue #4601 — decided boundary: receipts (`GET /payments/receipts`) are
+ * intentionally login-scoped (`"login"`), not tenant-scoped. `mas_transactions`
+ * and `usage_events` (#3185 out of scope) carry no `tenantId` column, and each
+ * login owns at most one commercial account (#4600).
+ */
+export const RECEIPTS_SCOPE_BOUNDARY = "login" as const;
+
 export interface ReceiptsResult {
   userLogin: string;
+  scope: typeof RECEIPTS_SCOPE_BOUNDARY;
   limit: number;
   receipts: ReceiptEntry[];
   counts: {
@@ -244,7 +253,13 @@ export function buildReceipts(input: {
     counts[e.kind] += 1;
     counts[e.provenance] += 1;
   }
-  return { userLogin: input.userLogin, limit: input.limit, receipts: capped, counts };
+  return {
+    userLogin: input.userLogin,
+    scope: RECEIPTS_SCOPE_BOUNDARY,
+    limit: input.limit,
+    receipts: capped,
+    counts,
+  };
 }
 
 export interface ReceiptSqlExecutor {
