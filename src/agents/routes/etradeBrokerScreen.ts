@@ -26,6 +26,7 @@ import { startStockScreenWorkflowOrNull } from "../../workflows/screenExecutionB
 import { runStockScreenViaEngine } from "../../workflows/runStockScreenViaEngine";
 import { persistThenDeliverAll } from "../../workflows/screenRunFinalize";
 import { publishManualScreenerRun } from "./etradeBroker";
+import { manualDeliveryIdentity } from "../../services/deliveryIdentity";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
 import type { ScreenerAgent } from "../screener-agent";
 import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
@@ -116,7 +117,10 @@ async function publishOrBridge(
       typeof (enriched as Record<string, unknown>).timestamp === "string" &&
       typeof (enriched as Record<string, unknown>).universe === "string"
     ) {
-      outcome.deliveryId = `manual:${(enriched as Record<string, unknown>).timestamp as string}:${(enriched as Record<string, unknown>).universe as string}`;
+      outcome.deliveryId = manualDeliveryIdentity({
+        timestamp: (enriched as Record<string, unknown>).timestamp as string,
+        universe: (enriched as Record<string, unknown>).universe as string,
+      });
     }
     await ctx.scheduleScreenerFollowups(outcome, userLogin);
     return;

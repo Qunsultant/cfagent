@@ -34,6 +34,7 @@ import {
   type EffectiveModeSource,
 } from "./scheduledEffectiveMode";
 import { resolveTenantProviders } from "./tenantProviders";
+import { scheduledDeliveryIdentity } from "./deliveryIdentity";
 import type { ScreenerTrace } from "./screenerTrace";
 import { withRetry } from "./resilience";
 import { resolvePipelinePolicy } from "./pipelinePolicy";
@@ -1285,6 +1286,35 @@ export class ScheduledTasksService {
     }
   }
 
+  /**
+   * Issue #4624 — the tenant a delivery belongs to, resolved for the delivery
+   * IDENTITY only (never for authorization). Best effort by design: an
+   * unavailable commercial store, a missing account row, or a tenant mismatch
+   * yields null, is audited, and leaves the identity `unscoped` — the run
+   * itself never fails on this read.
+   */
+  private async resolveDeliveryTenant(userLogin: string): Promise<string | null> {
+    try {
+      const { createCommercialAdapter, ensureCommercialSchema } =
+        await import("../data/createCommercialPorts");
+      const { resolveTickTenant } = await import("./paidScreenSubmission");
+      const commercial = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
+      if (!commercial) return null;
+      await ensureCommercialSchema(commercial.db);
+      const tenant = await resolveTickTenant(commercial, {
+        userId: userLogin,
+        env: this.env,
+      });
+      return tenant.tenantId ?? null;
+    } catch (err) {
+      this.audit("delivery.tenant_unresolved", {
+        userLogin,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
   async autonomousMarketScreen(options: {
     sector?: string;
     universe?: string;
@@ -1381,12 +1411,24 @@ export class ScheduledTasksService {
     let runBrokerId: string | undefined;
     let runMode: "live" | "paper" | undefined;
     let runModeSource: EffectiveModeSource | undefined;
+    // Issue #4624: the delivery tenant. A scheduled run delivers under
+    // `<trigger>:<tenant>:<universe>:<minute>`; without the tenant, two
+    // tenants of one login firing the same trigger + universe in the same
+    // minute shared an identity, so the second delivery was suppressed as a
+    // duplicate in mas_delivery_claims. Declared here because the FAILED
+    // path delivers too (see the catch below).
+    let deliveryTenantId: string | null = null;
 
     try {
       const userLogin = options.userLogin || this.userLogin;
       if (!userLogin) {
         throw new Error("No authenticated account is associated with this scheduled screen. Open the schedules panel while signed in and run it again.");
       }
+      // Issue #4624: resolve the delivery tenant BEFORE the screen runs, so
+      // both the completed and the failed delivery carry it. Best effort:
+      // an unresolvable tenant yields null and the identity says `unscoped`
+      // (audited), never a guessed tenant and never a failed run.
+      deliveryTenantId = await this.resolveDeliveryTenant(userLogin);
       // Issue #2373 (slice C): monetization ON gates scheduled
       // stock screens at the tick, mirroring the goal tick's
       // admission stage — but as a payment DECISION, not a
@@ -1765,7 +1807,12 @@ export class ScheduledTasksService {
         csvKey: result.csvKey,
         csvStatus: result.csvStatus,
         csvError: result.csvError,
-        deliveryId: `${options.trigger || "scheduled"}:${result.universe}:${timestamp.slice(0, 16)}`,
+        deliveryId: scheduledDeliveryIdentity({
+          tenantId: deliveryTenantId,
+          trigger: options.trigger || "scheduled",
+          universe: result.universe,
+          timestamp,
+        }),
         sector: result.sector || options.sector || "ALL",
         totalScanned: result.totalScanned,
         matchedCount: result.matchedCount,
@@ -1871,7 +1918,12 @@ export class ScheduledTasksService {
         timestamp,
         universe: options.universe || "TECH",
         trigger: options.trigger || "scheduled",
-        deliveryId: `${options.trigger || "scheduled"}:${options.universe || "TECH"}:${timestamp.slice(0, 16)}`,
+        deliveryId: scheduledDeliveryIdentity({
+          tenantId: deliveryTenantId,
+          trigger: options.trigger || "scheduled",
+          universe: options.universe || "TECH",
+          timestamp,
+        }),
         sector: options.sector || "ALL",
         error: err.message || "Market screener execution error",
         stageChain: options.stageChain,
