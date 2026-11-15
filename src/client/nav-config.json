@@ -503,7 +503,7 @@
       "crumb": "SecurityHub",
       "category": "Platform",
       "icon": "IaaaAdmin",
-      "description": "IAAA admin, users, admin access, and your profile — one menu, four views",
+      "description": "IAAA admin, users, admin access, and your profile — one menu, five views",
       "navEntry": {
         "label": "SecurityHub",
         "shortLabel": "SecurityHub",
@@ -992,6 +992,13 @@
         "shortLabel": "Your display name and phone",
         "icon": "Agents",
         "description": "Your display name and phone"
+      },
+      {
+        "id": "pdp",
+        "label": "PDP",
+        "shortLabel": "Live policy state: active snapshot, source & obligations",
+        "icon": "IaaaAdmin",
+        "description": "Live policy state: active snapshot, source & obligations"
       }
     ],
     "schedules": [
@@ -1596,6 +1603,10 @@
       "tab": "security-hub",
       "view": "profile"
     },
+    "security-hub:pdp": {
+      "tab": "security-hub",
+      "view": "pdp"
+    },
     "order:approvals": {
       "tab": "order",
       "params": {
@@ -1682,7 +1693,8 @@
         "iaaa-admin",
         "users",
         "admin-access",
-        "profile"
+        "profile",
+        "pdp"
       ]
     },
     {

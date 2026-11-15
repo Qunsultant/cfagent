@@ -5,8 +5,9 @@
  * Six sections move out of Platform Admin into two new hubs, navigation-only
  * (#4561/#4574 pattern): DataHub (`?tab=data-hub`: data-providers,
  * data-lifecycle, downloads) and SecurityHub (`?tab=security-hub`:
- * iaaa-admin, users, admin-access, profile). Platform Admin keeps the
- * remaining seven sections. Old addresses redirect; nothing is deleted
+ * iaaa-admin, users, admin-access, profile, pdp — the pdp view added
+ * by #4651). Platform Admin keeps the remaining seven sections. Old
+ * addresses redirect; nothing is deleted
  * (Policy Gate (i)); the panels keep their single live mount, now in the
  * hub. BYOK cards ride with data-providers; ProfileSection (mounted only
  * in onboarding today) is surfaced as the SecurityHub profile view.
@@ -60,6 +61,9 @@ vi.mock("../src/client/PlatformAdminPanel", () => ({
 vi.mock("../src/client/ProfileSection", () => ({
   ProfileSection: () => <div data-testid="profile-section">profile</div>,
 }));
+vi.mock("../src/client/PdpPanel", () => ({
+  PdpPanel: () => <div data-testid="pdp-panel">pdp</div>,
+}));
 
 import { DataHubHome } from "../src/client/DataHubHome";
 import { SecurityHubHome } from "../src/client/SecurityHubHome";
@@ -94,8 +98,8 @@ function read(rel: string): string {
 
 const DATA_HUB_VIEWS_EXPECTED = ["data-providers", "data-lifecycle", "downloads"] as const;
 const DATA_HUB_LABELS = ["Data Providers", "Data Lifecycle", "Parameters & Export"];
-const SECURITY_HUB_VIEWS_EXPECTED = ["iaaa-admin", "users", "admin-access", "profile"] as const;
-const SECURITY_HUB_LABELS = ["IAAA Admin", "Users", "Admin Access", "Profile"];
+const SECURITY_HUB_VIEWS_EXPECTED = ["iaaa-admin", "users", "admin-access", "profile", "pdp"] as const;
+const SECURITY_HUB_LABELS = ["IAAA Admin", "Users", "Admin Access", "Profile", "PDP"];
 const REMAINING_PLATFORM_ADMIN = [
   "ads",
   "provenance",
@@ -112,7 +116,7 @@ describe("4585-P01 the hubs resolve exactly their views (#4585)", () => {
     expect(DATA_HUB_VIEWS_EXPECTED.map((v) => DATA_HUB_VIEW_LABELS[v])).toEqual(DATA_HUB_LABELS);
   });
 
-  it("SECURITY_HUB_VIEWS lists the four security views, in order", () => {
+  it("SECURITY_HUB_VIEWS lists the five security views, in order", () => {
     expect([...SECURITY_HUB_VIEWS]).toEqual([...SECURITY_HUB_VIEWS_EXPECTED]);
     expect(SECURITY_HUB_VIEWS_EXPECTED.map((v) => SECURITY_HUB_VIEW_LABELS[v])).toEqual(
       SECURITY_HUB_LABELS,
@@ -139,12 +143,12 @@ describe("4585-P02 each hub carries one sub-menu entry per view (#4585)", () => 
     expect(findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "data-hub")).toBeDefined();
   });
 
-  it("the SecurityHub item has four sub-items with labels, descriptions, and icons", () => {
+  it("the SecurityHub item has five sub-items with labels, descriptions, and icons", () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(platform).toBeDefined();
     const item = platform!.items.find((i) => i.id === "security-hub");
     expect(item).toBeDefined();
-    expect(item!.subItems).toHaveLength(4);
+    expect(item!.subItems).toHaveLength(5);
     for (const [index, view] of SECURITY_HUB_VIEWS_EXPECTED.entries()) {
       const sub = item!.subItems![index];
       expect(sub.id).toBe(view);
@@ -204,6 +208,7 @@ describe("4585-P03 each view resolves through the catalog (#4585)", () => {
     expect(home).toContain("UserAdminPanel");
     expect(home).toContain("AdminAccessSection");
     expect(home).toContain("ProfileSection");
+    expect(home).toContain("PdpPanel");
   });
 });
 
@@ -311,6 +316,12 @@ describe("4585-P05 each moved panel has one live mount (#4585)", () => {
       if (read(`src/client/${file}`).includes("<ProfileSection")) profile.push(file);
     }
     expect(profile.sort()).toEqual(["FirstRunScreen.tsx", "SecurityHubHome.tsx"]);
+    // PdpPanel (#4651) has its one live mount: the SecurityHub PDP tab.
+    const pdp: string[] = [];
+    for (const file of files) {
+      if (read(`src/client/${file}`).includes("<PdpPanel")) pdp.push(file);
+    }
+    expect(pdp).toEqual(["SecurityHubHome.tsx"]);
   });
 });
 
@@ -397,7 +408,7 @@ describe("4585-P06 the homes render their tabs and mount the panels (#4585)", ()
     expect(container.querySelector('[data-testid="profile-section"]')).toBeTruthy();
   });
 
-  it("the SecurityHub default view renders all four tabs", async () => {
+  it("the SecurityHub default view renders all five tabs", async () => {
     window.history.pushState(null, "", "/?tab=security-hub");
     await render(
       <ToastProvider>

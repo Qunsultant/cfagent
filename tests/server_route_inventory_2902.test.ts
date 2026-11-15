@@ -18,6 +18,8 @@
  * trading-options, GET|POST market quotes source, OPTIONS premium preflight).
  * Moves only: this list must not change across Slices 2-9 except by a route
  * change approved in its own issue (recorded here with that issue number).
+ * (#4651: GET /api/security/pdp joins the IAAA lifecycle block in
+ * handleAuthIaaaRoutes — 148 → 149 descriptors.)
  *
  * Slice 2 decisions recorded here (see also the Slice 2 progress comment on
  * #2902):
@@ -561,6 +563,7 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/iaaa/memberships",
   "ANY /api/iaaa/deactivate",
   "ANY /api/iaaa/offboard",
+  "ANY /api/security/pdp",
   "ANY /api/api-keys",
   "ANY PREFIX /api/api-keys/",
   "ANY /mcp",

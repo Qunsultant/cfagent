@@ -1,0 +1,3 @@
+### Added
+
+- **SecHub PDP tab shows the Policy Decision Point's live state (#4651):** a fifth `PDP` sub-tab at `?tab=security-hub&view=pdp` renders the active policy snapshot and its source (compiled vs PAP-promoted) from `GET /api/iaaa/policy-proposals/active`, the resolved policy source (`IAAA_PDP_POLICY_SOURCE` code|snapshot + invalid flag, fail-closed to compiled) from the new session-gated `GET /api/security/pdp` (platform-admin only, 403 audited), and the frozen `OBLIGATION_POLICY` entries with their live `evaluateWithObligations()` coverage — read-only, with honest empty states where a value has no source. #CISO-bhdm

@@ -6,7 +6,8 @@
  * through the Platform Admin page — the moved sections live in their own
  * hub now. Its views are the sub-route scheme in `securityHubView.ts`:
  * iaaa-admin (IaaaAdminPanel), users (UserAdminPanel), admin-access
- * (AdminAccessSection, with its request state), profile (ProfileSection).
+ * (AdminAccessSection, with its request state), profile (ProfileSection),
+ * pdp (PdpPanel, issue #4651).
  *
  * View state follows the URL (`?view=`), the same pattern as
  * PlatformAdminPage and SchedulesHome: the component re-reads the URL on
@@ -19,6 +20,7 @@ import { Card, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
 import { ProfileSection } from "./ProfileSection";
+import { PdpPanel } from "./PdpPanel";
 import {
   AdminAccessSection,
   type PlatformAdminUser,
@@ -94,7 +96,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
   return (
     <PageShell
       title="SecurityHub"
-      scopeNote="IAAA admin, users, admin access, and your profile"
+      scopeNote="IAAA admin, users, admin access, your profile, and the Policy Decision Point"
     >
       <div className="security-hub-tabs-wrapper">
         <Tabs<SecurityHubView>
@@ -144,6 +146,16 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
             <small>Your display name and phone</small>
           </div>
           {userLogin ? <ProfileSection userLogin={userLogin} /> : null}
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="security-hub" tabId="pdp" active={deepLink.view === "pdp"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>PDP</span>
+            <small>Live policy state: active snapshot, source &amp; obligations</small>
+          </div>
+          <PdpPanel />
         </Card>
       </TabPanel>
     </PageShell>
