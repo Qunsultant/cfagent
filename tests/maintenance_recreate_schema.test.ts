@@ -136,7 +136,8 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     // descriptors (code + params), not bare codes: the generic
     // column-add steps share one code and differ only by params.
     expect(body.selected).toHaveLength(128);
-    expect(body.skipped).toHaveLength(35);
+    // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
+    expect(body.skipped).toHaveLength(36);
     expect(body.skipped.map((s: any) => s.code)).toContain(
       "schema.index.mas_reports.drop_index_idx_mas_reports_generation",
     );

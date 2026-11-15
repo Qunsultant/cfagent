@@ -112,6 +112,11 @@ export class DoSqliteAsyncJobStore
       // Issue #3810: the trigger's actor (a login, a goal id).
       this.sql.exec(remainderAlterSql("mas_async_jobs", "triggered_by"));
     }
+    if (!names.has("tenant_id")) {
+      // Issue #4623: the tenant a job belongs to. Probed additive column,
+      // NULL on legacy rows (the read model never invents one).
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "tenant_id"));
+    }
     if (!names.has("schedule_id")) {
       // Issue #3810: the originating schedule's id (NULL = not scheduled).
       this.sql.exec(remainderAlterSql("mas_async_jobs", "schedule_id"));
@@ -162,7 +167,7 @@ export class DoSqliteAsyncJobStore
     // not span newlines inside the column list (tests would silently drop
     // the row) — keep this statement on one line.
     this.sql.exec(
-      "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, created_at, updated_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, trigger, triggered_by, schedule_id) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mas_async_jobs (job_id, session_id, capability, display_name, status, payload_json, created_at, updated_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, trigger, triggered_by, schedule_id, tenant_id) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       input.jobId,
       input.sessionId,
       input.capability,
@@ -179,6 +184,7 @@ export class DoSqliteAsyncJobStore
       input.trigger ?? null,
       input.triggeredBy ?? null,
       input.scheduleId ?? null,
+      input.tenantId ?? null,
     );
   }
 
@@ -368,7 +374,7 @@ export class DoSqliteAsyncJobStore
     // lesson as insertQueued's single-line INSERT below. The SQL
     // is identical; only the layout changes.
     const rows = Array.from(this.sql.exec(
-      "SELECT job_id, session_id, capability, display_name, status, result_json, response_status, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, last_activity_at, error_code FROM mas_async_jobs WHERE job_id = ? AND session_id = ?",
+      "SELECT job_id, session_id, capability, display_name, status, result_json, response_status, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, tenant_id, last_activity_at, error_code FROM mas_async_jobs WHERE job_id = ? AND session_id = ?",
       jobId,
       sessionId,
     )) as unknown as AsyncJobStoredRow[];
@@ -377,7 +383,7 @@ export class DoSqliteAsyncJobStore
 
   listRows(sessionId: string, limit: number): AsyncJobListRow[] {
     return Array.from(this.sql.exec(
-      `SELECT job_id, session_id, capability, display_name, status, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, last_activity_at, error_code
+      `SELECT job_id, session_id, capability, display_name, status, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, tenant_id, last_activity_at, error_code
      FROM mas_async_jobs WHERE session_id = ?
      ORDER BY created_at DESC LIMIT ?`,
       sessionId,
@@ -401,12 +407,12 @@ export class DoSqliteAsyncJobStore
     return rows[0];
   }
 
-  getClaimed(jobId: string, sessionId: string): { capability: string; payload_json: string; stage: string | null; chain_id: string | null } | undefined {
+  getClaimed(jobId: string, sessionId: string): { capability: string; payload_json: string; stage: string | null; chain_id: string | null; tenant_id: string | null } | undefined {
     const rows = Array.from(this.sql.exec(
-      "SELECT capability, payload_json, stage, chain_id FROM mas_async_jobs WHERE job_id = ? AND session_id = ?",
+      "SELECT capability, payload_json, stage, chain_id, tenant_id FROM mas_async_jobs WHERE job_id = ? AND session_id = ?",
       jobId,
       sessionId,
-    )) as Array<{ capability: string; payload_json: string; stage: string | null; chain_id: string | null }>;
+    )) as Array<{ capability: string; payload_json: string; stage: string | null; chain_id: string | null; tenant_id: string | null }>;
     return rows[0];
   }
 

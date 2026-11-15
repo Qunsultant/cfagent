@@ -238,7 +238,7 @@
       "file": "data/doSqliteAsyncJobAdapter.ts",
       "trigger": "ensureSchema()",
       "queries": [
-        "\n      CREATE TABLE IF NOT EXISTS mas_async_jobs (\n        job_id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        capability TEXT NOT NULL,\n        display_name TEXT NOT NULL,\n        status TEXT NOT NULL,\n        payload_json TEXT NOT NULL,\n        result_json TEXT,\n        response_status INTEGER,\n        error TEXT,\n        created_at TEXT NOT NULL,\n        updated_at TEXT NOT NULL,\n        started_at TEXT,\n        completed_at TEXT\n      )\n    ",
+        "\n      CREATE TABLE IF NOT EXISTS mas_async_jobs (\n        job_id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        capability TEXT NOT NULL,\n        display_name TEXT NOT NULL,\n        status TEXT NOT NULL,\n        payload_json TEXT NOT NULL,\n        result_json TEXT,\n        response_status INTEGER,\n        error TEXT,\n        created_at TEXT NOT NULL,\n        updated_at TEXT NOT NULL,\n        started_at TEXT,\n        completed_at TEXT,\n        tenant_id TEXT\n      )\n    ",
         "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_session_created ON mas_async_jobs(session_id, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_status_created ON mas_async_jobs(status, created_at)",
         "PRAGMA table_info(mas_async_jobs)",
@@ -251,6 +251,7 @@
         "ALTER TABLE mas_async_jobs ADD COLUMN stuck_alerted_at TEXT",
         "ALTER TABLE mas_async_jobs ADD COLUMN trigger TEXT",
         "ALTER TABLE mas_async_jobs ADD COLUMN triggered_by TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN tenant_id TEXT",
         "ALTER TABLE mas_async_jobs ADD COLUMN schedule_id TEXT",
         "ALTER TABLE mas_async_jobs ADD COLUMN last_activity_at TEXT",
         "ALTER TABLE mas_async_jobs ADD COLUMN error_code TEXT",

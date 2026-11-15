@@ -176,7 +176,7 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
   "schema.do.kv_store.create_table": "516aa66d405986dc7230f7154a6b0365cb02a91f2ddd1972033286553634e661",
   "schema.do.mas_adaptation_audit.create_table": "de2de2116954a30edbdbb3a2da6500146c6303485e577368ebd0abff5d6eb7b8",
   "schema.do.mas_agent_workspace_files.create_table": "84a9b347798fbeab8d30c2be4e390ade91cb6dc59663250f2dd42ec23fc79d97",
-  "schema.do.mas_async_jobs.create_table": "2211b6e5e708bffe2b3937180e65d1919ec6903ebd0d30544ef0d90a6b8432a5",
+  "schema.do.mas_async_jobs.create_table": "71d2b0f25c35f372c1f56fcc5fb8a2578991ab284510a06fd8ecbbce0109d053",
   "schema.do.mas_autopilot.create_table": "a9c7d32ded16e9094588aef398ad7856ba973ea0246d27daea2e957c03e8805c",
   "schema.do.mas_challenger_approvals.create_table": "c24e017890ce9d00adcb13740b09b19c30ec5f1c3966527f4799361fda56797b",
   "schema.do.mas_challenger_promotions.create_table": "f740a2f0f155a052979499970900d94f6c21266ddb12b780a6dc7d255c09ce34",

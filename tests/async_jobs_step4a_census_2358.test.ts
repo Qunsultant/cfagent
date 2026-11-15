@@ -60,7 +60,7 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // (+2: the attempt-history SELECT + UPDATE in appendAttempt); 46
   // after #4423 (+1: the tolerant per-chain attempt-history read the
   // Docs retry marker needs, in the adapter so the service stays at 0).
-  ["src/data/doSqliteAsyncJobAdapter.ts", 46],
+  ["src/data/doSqliteAsyncJobAdapter.ts", 47],
   ["src/data/doSqliteJobOutcomeAdapter.ts", 13],
   ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts", 7],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],
