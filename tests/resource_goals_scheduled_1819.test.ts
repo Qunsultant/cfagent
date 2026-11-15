@@ -62,6 +62,19 @@ function makeCtx(initialGoals?: any[]) {
 }
 
 /** Fake D1 shared by the projection totals query and the rollup store. */
+/**
+ * #4282 P6a (#4384): the rollup store's statements moved into
+ * the DML catalogue and now render through the Drizzle builder
+ * — lowercase, quoted identifiers, `insert ... on conflict`
+ * upserts instead of `INSERT OR REPLACE` — so this fake's
+ * SQL-text dispatch matches the builder rendering, and its
+ * bound statements expose .raw(): drizzle-orm 0.45.4's
+ * select-with-fields path reads array-mode rows via .raw(),
+ * never .all(). The maps keep their role: the goals write to
+ * them and the tests seed/inspect them directly. Param order
+ * is the values-object order (same columns as the old raw
+ * SQL); raw() arrays are in SELECT-list order.
+ */
 function makeFakeD1(projectionRows: Array<Record<string, unknown>> = []) {
   const rollups = new Map<string, Record<string, unknown>>();
   const alertState = new Map<string, Record<string, unknown>>();
@@ -72,47 +85,75 @@ function makeFakeD1(projectionRows: Array<Record<string, unknown>> = []) {
         bind(...params: unknown[]) {
           return {
             run: async () => {
-              if (sql.includes("INSERT OR REPLACE INTO resource_daily_rollups")) {
+              if (/insert into "resource_daily_rollups"/i.test(sql)) {
                 const [day, ns, op, caller, trigger, ops, rows_read, rows_written] = params as [
                   string, string, string, string, string, number, number, number,
                 ];
                 rollups.set([day, ns, op, caller, trigger].join("\0"), {
                   day, ns, op, caller, trigger, ops, rows_read, rows_written,
                 });
-              } else if (sql.includes("INSERT OR REPLACE INTO resource_alert_state")) {
+              } else if (/insert into "resource_alert_state"/i.test(sql)) {
                 const [budget, day, alerted_at, delivered, note] = params as [
                   string, string, number, number, string | null,
                 ];
                 alertState.set([budget, day].join("\0"), { budget, day, alerted_at, delivered, note });
-              } else if (sql.includes("INSERT OR REPLACE INTO resource_comparison_reports")) {
+              } else if (/insert into "resource_comparison_reports"/i.test(sql)) {
                 const [day, generated_at, report_json] = params as [string, number, string];
                 reports.set(day, { day, generated_at, report_json });
               }
               return { success: true };
             },
             all: async () => {
-              if (sql.includes("FROM resource_daily_rollups") && sql.includes("MAX(day)")) {
+              if (/from "resource_daily_rollups"/i.test(sql) && /max\("day"\)/i.test(sql)) {
                 const days = [...rollups.values()].map((r) => r.day as string);
                 return { results: days.length ? [{ day: days.sort().at(-1) }] : [] };
               }
-              if (sql.includes("FROM resource_daily_rollups")) {
+              if (/from "resource_daily_rollups"/i.test(sql)) {
                 const [day] = params as [string];
                 return { results: [...rollups.values()].filter((r) => r.day === day) };
               }
-              if (sql.includes("FROM resource_alert_state")) {
+              if (/from "resource_alert_state"/i.test(sql)) {
                 const [budget, day] = params as [string, string];
                 const row = alertState.get([budget, day].join("\0"));
                 return { results: row ? [row] : [] };
               }
-              if (sql.includes("FROM resource_comparison_reports")) {
+              if (/from "resource_comparison_reports"/i.test(sql)) {
                 const [day] = params as [string];
                 const row = reports.get(day);
                 return { results: row ? [row] : [] };
               }
-              if (sql.includes("FROM resource_sql_ops")) {
+              if (/from "resource_sql_ops"/i.test(sql)) {
                 return { results: projectionRows };
               }
               return { results: [] };
+            },
+            raw: async () => {
+              if (/from "resource_daily_rollups"/i.test(sql) && /max\("day"\)/i.test(sql)) {
+                const days = [...rollups.values()].map((r) => r.day as string);
+                return days.length ? [[days.sort().at(-1)]] : [];
+              }
+              if (/from "resource_daily_rollups"/i.test(sql)) {
+                const [day] = params as [string];
+                return [...rollups.values()]
+                  .filter((r) => r.day === day)
+                  .map((r) => [r.day, r.ns, r.op, r.caller, r.trigger, r.ops, r.rows_read, r.rows_written]);
+              }
+              if (/from "resource_alert_state"/i.test(sql)) {
+                const [budget, day] = params as [string, string];
+                const row = alertState.get([budget, day].join("\0"));
+                return row ? [[row.budget, row.day, row.alerted_at, row.delivered, row.note]] : [];
+              }
+              if (/from "resource_comparison_reports"/i.test(sql)) {
+                const [day] = params as [string];
+                const row = reports.get(day);
+                return row ? [[row.report_json]] : [];
+              }
+              if (/from "resource_sql_ops"/i.test(sql)) {
+                return projectionRows.map((r) => [
+                  r.bucket, r.ns, r.op, r.caller, r.trigger, r.ops, r.rows_read, r.rows_written,
+                ]);
+              }
+              return [];
             },
           };
         },
