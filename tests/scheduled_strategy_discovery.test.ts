@@ -241,10 +241,10 @@ class FakeDiscoverySql implements DiscoverySqlExecutor {
       }
       return [];
     }
-    if (q.startsWith("SELECT summary_json, run_json FROM mas_discovery_runs WHERE id = ?")) {
+    if (q.startsWith("SELECT * FROM mas_discovery_runs WHERE id = ?")) {
       return this.rows
         .filter((r) => r.id === params[0])
-        .map((r) => ({ summary_json: r.summary_json, run_json: r.run_json }));
+        .map((r) => ({ ...r }));
     }
     if (q.startsWith("SELECT summary_json FROM mas_discovery_runs WHERE")) {
       const [scope, limit, offset] = params as [string | null, number, number];
