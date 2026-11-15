@@ -18,6 +18,8 @@
 import type { DoTransactionStorage } from "../aspects/transactionAspect";
 import { getTransactionRunner } from "./transactionRunnerProvider";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 import {
   DISCOVERY_MODEL_VERSION,
   DISCOVERY_SETUP_RUN_MAX_ROWS,
@@ -32,25 +34,8 @@ import {
   type StoredDiscoverySetupRun,
 } from "./discoverySetupPorts";
 
-const TABLE = "mas_discovery_setup_runs";
-
 const CREATE_TABLE_SQL = doTableSql("mas_discovery_setup_runs");
 const CREATE_INDEX_SQL = doIndexSql("idx_mas_discovery_setup_runs_created_at");
-const INSERT_SQL =
-  `INSERT INTO ${TABLE} (id, created_at, scope_key, user_login, run_json) VALUES (?, ?, ?, ?, ?)`;
-// The visibility predicate lives in the list statement itself
-// (issue #103), exactly as in the sibling stores.
-const LIST_SQL =
-  `SELECT run_json FROM ${TABLE} WHERE (user_login IS NULL OR user_login = ?) ` +
-  `ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`;
-const LIST_SCOPED_SQL =
-  `SELECT run_json FROM ${TABLE} WHERE (user_login IS NULL OR user_login = ?) AND scope_key = ? ` +
-  `ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`;
-const GET_SQL = `SELECT run_json FROM ${TABLE} WHERE id = ?`;
-const COUNT_SQL = `SELECT COUNT(*) AS count FROM ${TABLE}`;
-const PRUNE_AGE_SQL = `DELETE FROM ${TABLE} WHERE created_at < ?`;
-const PRUNE_CAP_SQL =
-  `DELETE FROM ${TABLE} WHERE id NOT IN (SELECT id FROM ${TABLE} ORDER BY created_at DESC, id DESC LIMIT ?)`;
 
 function retentionCutoff(now: Date, retentionDays: number): string {
   return new Date(now.getTime() - retentionDays * 86_400_000).toISOString();
@@ -93,8 +78,7 @@ export class SqlDiscoverySetupStore implements DiscoverySetupStore {
   }
 
   private count(): number {
-    const rows = Array.from(this.sql.exec(COUNT_SQL)) as Array<{ count: number }>;
-    return Number(rows[0]?.count ?? 0);
+    return executeDoDml<number>(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_setup_runs.count", {});
   }
 
   async save(input: DiscoverySetupRunInput): Promise<StoredDiscoverySetupRun> {
@@ -106,14 +90,15 @@ export class SqlDiscoverySetupStore implements DiscoverySetupStore {
       modelVersion: DISCOVERY_MODEL_VERSION,
     };
     const insert = () => {
-      this.sql.exec(
-        INSERT_SQL,
-        run.id,
-        run.createdAt,
-        run.scopeKey,
-        run.userLogin ?? null,
-        JSON.stringify(run),
-      );
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_setup_runs.insert", {
+        record: {
+          id: run.id,
+          created_at: run.createdAt,
+          scope_key: run.scopeKey,
+          user_login: run.userLogin ?? null,
+          run_json: JSON.stringify(run),
+        },
+      });
     };
     // Retention is enforced on the write path, relative to the
     // run's own timestamp (same discipline as the sibling stores).
@@ -142,19 +127,29 @@ export class SqlDiscoverySetupStore implements DiscoverySetupStore {
     this.ensure();
     const limit = options.limit ?? 25;
     const offset = options.offset ?? 0;
-    const rows = (
+    const rows = executeDoDml<Array<{ run_json: string }>>(
+      DO_DML_CATALOGUE,
+      this.sql,
       options.scopeKey !== undefined
-        ? Array.from(this.sql.exec(LIST_SCOPED_SQL, options.userLogin ?? null, options.scopeKey, limit, offset))
-        : Array.from(this.sql.exec(LIST_SQL, options.userLogin ?? null, limit, offset))
-    ) as Array<{ run_json: string }>;
+        ? "dml.do.mas_discovery_setup_runs.list_scoped"
+        : "dml.do.mas_discovery_setup_runs.list",
+      options.scopeKey !== undefined
+        ? { userLogin: options.userLogin ?? null, scopeKey: options.scopeKey, limit, offset }
+        : { userLogin: options.userLogin ?? null, limit, offset },
+    );
     return rows.map((r) => JSON.parse(r.run_json) as StoredDiscoverySetupRun);
   }
 
   async get(id: string, options: { userLogin?: string } = {}): Promise<StoredDiscoverySetupRun | null> {
     this.ensure();
-    const rows = Array.from(this.sql.exec(GET_SQL, id)) as Array<{ run_json: string }>;
-    if (!rows[0]) return null;
-    const run = JSON.parse(rows[0].run_json) as StoredDiscoverySetupRun;
+    const row = executeDoDml<{ run_json: string } | null>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_discovery_setup_runs.get",
+      { id },
+    );
+    if (!row) return null;
+    const run = JSON.parse(row.run_json) as StoredDiscoverySetupRun;
     return discoverySetupRunVisibleToCaller(run, options.userLogin) ? run : null;
   }
 
@@ -169,8 +164,12 @@ export class SqlDiscoverySetupStore implements DiscoverySetupStore {
   private pruneSync(now: Date): number {
     this.ensure();
     const before = this.count();
-    this.sql.exec(PRUNE_AGE_SQL, retentionCutoff(now, this.retentionDays));
-    this.sql.exec(PRUNE_CAP_SQL, this.maxRows);
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_setup_runs.prune_age", {
+      where: { created_at: { $lt: retentionCutoff(now, this.retentionDays) } },
+    });
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_setup_runs.prune_cap", {
+      maxRows: this.maxRows,
+    });
     return before - this.count();
   }
 
