@@ -2106,6 +2106,10 @@ async function executeNLQQueryAsyncCore(
         // Issue #28: profile resolution is scoped to the session's
         // login — the same fallback chain the ETradeService above uses.
         userLogin: deps?.userLogin ?? login,
+        // Issue #4469: thread the worker env so the scan leg can
+        // gate onto the strategy workflow host; the gate keeps the
+        // leg on sync when the residency bindings are unconfigured.
+        env,
       });
       return {
         plan,

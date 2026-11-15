@@ -1087,8 +1087,8 @@ async function dispatchScreenViaEngine(
  * - the unified opportunities action
  *   (runUnifiedOpportunitiesViaPipeline): the scan shape, whose
  *   persist stage writes the scan-run row the residency cannot
- *   hold (#4453 decided-not-to) — its cutover belongs to the
- *   scan-leg family (#4469).
+ *   hold (#4453 decided-not-to) — its cutover is a surveyed
+ *   follow-up to the scan-leg cutover (#4469), not this slice.
  * - the goal leg (goalDrivenScreen.ts): its host is #4290, and
  *   its cutover is #4504.
  * New callers must dispatch through the host; a leg moves here
@@ -1130,11 +1130,12 @@ export async function runOptionsScreenViaEngine(
  * sync/in-process dispatch is KEPT, not retired, for the legs that
  * cannot move yet and as the gated fallback for the legs that moved:
  * the NLQ panel leg dispatches through the host since #4468 and
- * falls back here when its gate holds it on sync; the scan, shard,
- * firer, and evaluate legs stay here until their cutovers (#4469,
- * #4471, #4470, #4472) — the scan-run store + stage queue in the
- * residency (#4453) and universe deps that do not travel for the
- * firer and evaluate route are still open for those legs. New
+ * the NLQ scan leg since #4469, each falling back here when its
+ * gate holds it on sync; the shard, firer, and evaluate legs stay
+ * here until their cutovers (#4471, #4470, #4472) — the scan-run
+ * store + stage queue in the residency (#4453) and universe deps
+ * that do not travel for the firer and evaluate route are still
+ * open for those legs. New
  * callers must dispatch through the host; a leg moves here only
  * when its ports are rebuildable per invocation (see
  * optionsStepPorts.ts) and its gap has landed.
