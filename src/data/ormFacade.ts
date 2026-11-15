@@ -47,6 +47,8 @@ import {
 import type { IndexEnv } from "../services/reportSemanticIndex";
 import { ensureSharedTable, ensureAuditChainColumns, ensurePromotionsIndex, ensureTransactionTenantColumn } from "./ormSchema";
 import { ormTableSql } from "./schemaComponent/ormCatalogue";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 import {
   createDoAdRepository,
   createDoCategoryRepository,
@@ -404,8 +406,15 @@ export class DatabaseORM {
 
     for (const tbl of tables) {
       try {
-        const countRaw = Array.from(this.sql.exec(`SELECT COUNT(*) AS count FROM ${tbl}`)) as Array<{ count: number }>;
-        const rowCount = countRaw[0]?.count ?? 0;
+        // #4386: the count is a parameterized operation entry —
+        // the runtime table is the parameter (code table ==
+        // runtime table, enforced by the executor).
+        const rowCount = executeDoDml<number>(
+          DO_DML_CATALOGUE,
+          this.sql,
+          `dml.do.${tbl}.count`,
+          { table: tbl },
+        );
 
         const infoRaw = Array.from(this.sql.exec(`PRAGMA table_info(${tbl})`)) as Array<{
           cid: number;
@@ -448,8 +457,21 @@ export class DatabaseORM {
     const limit = Math.min(Math.max(options.limit || 50, 1), 200);
     const offset = Math.max(options.offset || 0, 0);
 
-    const countRaw = Array.from(this.sql.exec(`SELECT COUNT(*) AS count FROM ${cleanTable}`)) as Array<{ count: number }>;
-    const total = countRaw[0]?.count ?? 0;
+    // #4386: the count is a parameterized operation entry (see
+    // listTables). The browse SELECT below stays inline: its
+    // WHERE is dynamic (lower(col) LIKE ? OR-joined across TEXT
+    // columns discovered at runtime from PRAGMA, plus conditional
+    // ORDER BY and interpolated LIMIT/OFFSET) — it cannot be a
+    // static template or a repository entry, and per-table baked
+    // entries would be ~44 near-duplicates fragile to DDL drift.
+    // Recorded on #4386 as the one ruled point that does not
+    // move; the census pins the facade at 17 exec sites.
+    const total = executeDoDml<number>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      `dml.do.${cleanTable}.count`,
+      { table: cleanTable },
+    );
 
     let query = `SELECT * FROM ${cleanTable}`;
     const args: unknown[] = [];
