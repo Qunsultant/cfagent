@@ -668,11 +668,11 @@ describe("billing-checkout route", () => {
     expect(posted.get("line_items[0][price]")).toBe("price_pro_monthly");
     expect(posted.get("client_reference_id")).toBe(body.checkoutRequestId);
     // Resolved identity wins over the request body: no account row
-    // exists, so the tenant is the login itself, not body tenantId.
+    // exists, so the login-as-tenant fallback is namespaced under login:.
     expect(posted.get("metadata[userId]")).toBe("u1");
-    expect(posted.get("metadata[tenantId]")).toBe("u1");
+    expect(posted.get("metadata[tenantId]")).toBe("login:u1");
     expect(posted.get("metadata[planId]")).toBe("plan-pro");
-    expect((await s.subs.listSubscriptions("u1")).length).toBe(0);
+    expect((await s.subs.listSubscriptions("login:u1")).length).toBe(0);
     expect((s.ctx.audit as any).mock.calls.some((c: any[]) => String(c[0]).includes("billing"))).toBe(true);
   });
 });

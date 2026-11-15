@@ -1,0 +1,2 @@
+### Added
+- Namespaced login-as-tenant fallback ids with `LOGIN_TENANT_PREFIX = "login:"` (`toLoginTenantId`, `isLoginTenantId`, `resolveEffectiveTenantId` in `src/services/platformIdentity.ts`), applied across all free-path/no-account resolution sites (`src/agents/routes/agenticPayments.ts`, `src/agents/routes/platformAccounts.ts`), rejected `"login:"`-prefixed real tenant creation in `POST /platform-tenants` (`src/agents/routes/platformTenants.ts`), and documented the migration note in `docs/architecture/business/platform-entity-capability-map.md` §7.10 (#4602).

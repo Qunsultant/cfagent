@@ -90,6 +90,7 @@ import type { PriceCatalogue, PriceEntry } from "../../data/priceCataloguePorts"
 import type { StoreOperators } from "../../data/storeOperatorsPorts";
 import type { SubscriptionStore } from "../../data/subscriptionPorts";
 import {
+  resolveEffectiveTenantId,
   resolvePlatformIdentity,
   toPlatformIdentityView,
   type PlatformIdentity,
@@ -562,8 +563,8 @@ export async function handlePlatformAccountRoutes(
     }
     // Same derivation as the subscription-purchase auto-create:
     // resolved tenant when one exists (never, on this branch —
-    // no row exists), else the verified login itself.
-    const tenantId = identity.tenantId ?? verifiedLogin;
+    // no row exists), else the namespaced login-as-tenant id (#4602).
+    const tenantId = resolveEffectiveTenantId(identity.tenantId, verifiedLogin);
     await ports.commercial.upsertAccount({
       userId: verifiedLogin,
       tenantId,

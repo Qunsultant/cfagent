@@ -139,15 +139,15 @@ describe("platform account routes (#2222)", () => {
     expect(first?.body.created).toBe(true);
     const identity = first?.body.identity as Record<string, unknown>;
     expect(identity.hasAccount).toBe(true);
-    expect(identity.tenantId).toBe("alice");
+    expect(identity.tenantId).toBe("login:alice");
     expect(identity.tier).toBe("Free");
     const stored = await ports.commercial!.getAccount("alice");
-    expect(stored?.tenantId).toBe("alice");
+    expect(stored?.tenantId).toBe("login:alice");
     expect(stored?.tier).toBe("Free");
     const second = await call(ctx, req("POST", "/platform/accounts/setup", "alice"));
     expect(second?.status).toBe(200);
     expect(second?.body.created).toBe(false);
-    expect((second?.body.identity as Record<string, unknown>).tenantId).toBe("alice");
+    expect((second?.body.identity as Record<string, unknown>).tenantId).toBe("login:alice");
   });
 
   it("setup never trusts a client-supplied tenantId in the body", async () => {
@@ -155,7 +155,7 @@ describe("platform account routes (#2222)", () => {
     const ctx = makeCtx(ports);
     const res = await call(ctx, req("POST", "/platform/accounts/setup", "alice", { tenantId: "evil-tenant" }));
     expect(res?.status).toBe(200);
-    expect((res?.body.identity as Record<string, unknown>).tenantId).toBe("alice");
+    expect((res?.body.identity as Record<string, unknown>).tenantId).toBe("login:alice");
   });
 
   it("setup preserves an existing account's tenant instead of overwriting it", async () => {
@@ -281,6 +281,6 @@ describe("platform account routes (#2222)", () => {
       (c: unknown[]) => c[0] === "platform.account.created",
     );
     expect(created).toHaveLength(1);
-    expect(created[0][2]).toMatchObject({ userLogin: "alice", tenantId: "alice" });
+    expect(created[0][2]).toMatchObject({ userLogin: "alice", tenantId: "login:alice" });
   });
 });

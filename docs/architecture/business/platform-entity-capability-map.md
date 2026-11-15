@@ -155,9 +155,11 @@ flowchart TD
   identity — the one path that creates an account without an operator
   step, besides self-service account setup (`POST /platform/accounts/setup`,
   idempotent, Free tier, `created:false` on replay, never gates free runs).
-- Free-path tenant is the login string itself (`tenantId = login`).
-  Login-as-tenant and real tenant ids share one namespace with no marker
-  distinguishing them (§7.10).
+- Free-path tenant is the namespaced personal login-as-tenant id
+  (`"login:<login>"`, `LOGIN_TENANT_PREFIX` / `toLoginTenantId` in
+  `src/services/platformIdentity.ts`, #4602). Real tenant creation
+  (`POST /platform-tenants`) rejects the `"login:"` prefix so a login
+  string can never collide with a real tenant id (§7.10).
 
 ## 3. Capability / sub-capability map
 
@@ -546,9 +548,14 @@ capability, not an absence.
 9. **Premium identity fallback:** no session login → x402 payer
    identity stands in as the user. A wallet, not a login, becomes the
    subject.
-10. **Free-path tenant = the login string itself.** Login-as-tenant and
-    real tenant ids share one namespace with no marker distinguishing
-    them.
+10. **Free-path tenant = namespaced personal scope (`login:<login>`, #4602 — resolved).**
+    `resolveEffectiveTenantId` / `toLoginTenantId` (`src/services/platformIdentity.ts`)
+    marks login-as-tenant ids with the reserved `LOGIN_TENANT_PREFIX = "login:"`
+    (`isLoginTenantId`), and `POST /platform-tenants` rejects any real tenant id
+    carrying that prefix so a login string can never collide with a real tenant id.
+    **Migration note:** pre-#4602 rows stored with an unprefixed `tenant_id = user_id`
+    remain readable verbatim via `identity.tenantId`; operators may backfill legacy
+    personal-scope rows (`UPDATE ... SET tenant_id = 'login:' || tenant_id WHERE tenant_id = user_id AND tenant_id NOT LIKE 'login:%'`) without breaking in-flight reads.
 11. **Tenant create writes only a settings row (#4603 — decided: stands by design).**
     There is no separate tenant entity table or lifecycle state by design;
     `POST /platform-tenants` (`TENANT_CREATION_MODE = "settings_row_only"` in

@@ -49,6 +49,41 @@ export const NO_ACCOUNT_PAID_MESSAGE =
   "Set up an account through platform management (coming) or ask an operator " +
   "to create one, then try again. No charge was made.";
 
+/**
+ * Issue #4602 — reserved prefix distinguishing personal login-as-tenant ids
+ * (when a verified login has no commercial account row) from real tenant ids.
+ * Real tenant creation rejects this prefix so a login string can never collide
+ * with a real tenant id.
+ */
+export const LOGIN_TENANT_PREFIX = "login:" as const;
+
+/** Format a verified login as a namespaced personal login-as-tenant id (#4602). */
+export function toLoginTenantId(login: string): string {
+  const trimmed = login.trim();
+  return trimmed.startsWith(LOGIN_TENANT_PREFIX)
+    ? trimmed
+    : `${LOGIN_TENANT_PREFIX}${trimmed}`;
+}
+
+/** True when a tenant id uses the reserved personal login-as-tenant prefix (#4602). */
+export function isLoginTenantId(tenantId: string | null | undefined): boolean {
+  return typeof tenantId === "string" && tenantId.startsWith(LOGIN_TENANT_PREFIX);
+}
+
+/**
+ * Resolve the effective tenant id when a route falls back to personal login scope
+ * (`identity.tenantId` when an account exists, else `toLoginTenantId(login)`).
+ */
+export function resolveEffectiveTenantId(
+  identityTenantId: string | null | undefined,
+  login: string,
+): string {
+  if (typeof identityTenantId === "string" && identityTenantId.trim().length > 0) {
+    return identityTenantId.trim();
+  }
+  return toLoginTenantId(login);
+}
+
 /** Port inputs for identity resolution (adapters satisfy these structurally). */
 export interface PlatformIdentityPorts {
   commercial: CommercialStore | null;
