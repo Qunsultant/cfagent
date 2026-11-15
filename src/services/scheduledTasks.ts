@@ -10,7 +10,7 @@
 
 import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedStockItem } from "../types";
 import { DatabaseORM, type SqlStorage } from "../orm";
-import { codedMessage } from "../outcomes/outcomeAspects";
+import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
 import { resolveShardPacing } from "../config/shardPacing";
@@ -33,7 +33,7 @@ import {
   resolveScheduledEffectiveMode,
   type EffectiveModeSource,
 } from "./scheduledEffectiveMode";
-import { isBrokerId, resolveTenantProviders } from "./tenantProviders";
+import { resolveTenantProviders } from "./tenantProviders";
 import type { ScreenerTrace } from "./screenerTrace";
 import { withRetry } from "./resilience";
 import { resolvePipelinePolicy } from "./pipelinePolicy";
@@ -436,14 +436,19 @@ export async function writeScreenerEventTelemetry(
 }
 
 /**
- * Issue #3655: resolve a scheduled stock run's effective data
+ * Issue #3655 (F6): resolve a scheduled stock run's effective data
  * provider. Precedence: an explicit payload provider wins (a schedule
  * that names its provider keeps it); otherwise the tenant's
  * dataProviderId at RUN time — a later change of the tenant selection
- * applies to future runs without re-arming. A data provider with no
- * stock-screen adapter (public, nasdaq) falls back to the legacy
- * etrade default; that gap is named in the #3655 PR body, not hidden.
- * Never returns an unimplemented provider.
+ * applies to future runs without re-arming. A "public" selection
+ * resolves to the Public adapter (#3990) — it is a stock-screen
+ * provider, not a fallback case. When neither source names a
+ * stock-screen provider (StockScreenProvider), the run is REFUSED
+ * with a typed BusinessError (FAILURE_NO_SCREENING_PROVIDER):
+ * the legacy silent default is removed, never replaced by another
+ * silent default — a missing/unavailable provider fails loud and
+ * coded, so the run record and surfaces show the refusal instead
+ * of another provider's data.
  */
 export function resolveScheduledStockProvider(
   payloadProvider: StockScreenProvider | undefined,
@@ -452,18 +457,23 @@ export function resolveScheduledStockProvider(
   if (
     payloadProvider === "etrade" ||
     payloadProvider === "yahoo" ||
-    payloadProvider === "alpaca"
+    payloadProvider === "alpaca" ||
+    payloadProvider === "public"
   ) {
     return payloadProvider;
   }
   if (
     tenantDataProviderId === "etrade" ||
     tenantDataProviderId === "yahoo" ||
-    tenantDataProviderId === "alpaca"
+    tenantDataProviderId === "alpaca" ||
+    tenantDataProviderId === "public"
   ) {
     return tenantDataProviderId;
   }
-  return "etrade";
+  throw new BusinessError("FAILURE_NO_SCREENING_PROVIDER", {
+    payloadProvider: payloadProvider ?? null,
+    tenantDataProviderId: tenantDataProviderId ?? null,
+  });
 }
 
 /**
@@ -1295,8 +1305,11 @@ export class ScheduledTasksService {
      *  schedule. When set, the preset's criteria REPLACE options.filters
      *  — a run never merges two filter sources. */
     presetId?: string;
-    /** Issue #1007: data provider (default "etrade"); "yahoo" runs the
-     *  same pipeline over the Yahoo data-source adapter. */
+    /** Issue #1007: data provider for the run, resolved at run time
+     *  through resolveScheduledStockProvider — an unresolvable
+     *  selection refuses the run with FAILURE_NO_SCREENING_PROVIDER
+     *  (#3655 F6), never a default. "yahoo" runs the same pipeline
+     *  over the Yahoo data-source adapter. */
     provider?: import("../trading").StockScreenProvider;
     /** Consolidation C3 (#1277): stage-chain config from the schedule
      *  payload — carried onto the run's events so the follow-up
@@ -1582,9 +1595,10 @@ export class ScheduledTasksService {
         tenantProvidersResolved.dataProviderId
       );
       effectiveProvider = effectiveProviderResolved;
-      const runBrokerIdResolved = isBrokerId(tenantProvidersResolved.brokerId)
-        ? tenantProvidersResolved.brokerId
-        : "etrade";
+      // Issue #3655 (F6): the broker resolves through the platform
+      // resolver (resolveTenantBroker) — one default, never an
+      // inline legacy default.
+      const runBrokerIdResolved = await resolveTenantBroker(this.env);
       runBrokerId = runBrokerIdResolved;
       const runModeResolved =
         await resolveScheduledEffectiveMode({
@@ -1823,6 +1837,10 @@ export class ScheduledTasksService {
         runType: options.trigger || "scheduled",
         sector: options.sector || "ALL",
         error: err.message,
+        // Issue #3655 (F6): the typed failure code rides the audit
+        // (mirror of #2065 on the goal-screen catch), so a refused
+        // run is diagnosable without log access.
+        ...(typeof err?.code === "string" ? { errorCode: err.code } : {}),
         ...(effectiveProvider ? { provider: effectiveProvider } : {}),
         ...(runBrokerId ? { brokerId: runBrokerId } : {}),
         ...(tenantProviders?.dataProviderId ? { dataProviderId: tenantProviders.dataProviderId } : {}),
@@ -2668,13 +2686,13 @@ export class ScheduledTasksService {
       // Issue #3655 (effective mode): resolved before the guard, from
       // the tenant selections at RUN time — an Alpaca deployment pin
       // (ALPACA_TRADING_TYPE=live) beats a TEST schedule.
+      // Issue #3655 (F6): the broker resolves through the platform
+      // resolver (resolveTenantBroker) — one default, never an
+      // inline legacy default.
       {
-        const optionsTenantProviders = await resolveTenantProviders(this.env);
         optionsEffectiveMode = await resolveScheduledEffectiveMode({
           env: this.env,
-          brokerId: isBrokerId(optionsTenantProviders.brokerId)
-            ? optionsTenantProviders.brokerId
-            : "etrade",
+          brokerId: await resolveTenantBroker(this.env),
           environment: options.environment,
         });
       }
@@ -2846,9 +2864,10 @@ export class ScheduledTasksService {
         // submission, so the shard chain-source resolver executes
         // under the broker this chain was submitted with.
         const chainTenantProviders = await resolveTenantProviders(this.env);
-        const chainBrokerId = isBrokerId(chainTenantProviders.brokerId)
-          ? chainTenantProviders.brokerId
-          : "etrade";
+        // Issue #3655 (F6): the broker resolves through the platform
+        // resolver (resolveTenantBroker) — one default, never an
+        // inline legacy default.
+        const chainBrokerId = await resolveTenantBroker(this.env);
         // Issue #3655 (effective mode): the chain records the mode the
         // run actually executes under — an Alpaca deployment pin beats
         // the schedule's environment, so the chain's mode comes from

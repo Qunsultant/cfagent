@@ -249,9 +249,10 @@ describe("outcome catalog: run detail messages (#2608)", () => {
     // FAILURE_REFERRAL_CODE_INVALID + FAILURE_REFERRAL_CODE_CAP_EXCEEDED
     // + FAILURE_REFERRAL_CODE_RULE_UNAVAILABLE)
     // + 69 (#2846: the commercial outcome codes) + 1 (#2373 S1b:
-    // FAILURE_PROVIDER_MISMATCH).
+    // FAILURE_PROVIDER_MISMATCH) + 1 (#3655 F6:
+    // FAILURE_NO_SCREENING_PROVIDER).
     // The count pins that no RUN_* code leaked into "outcomes".
-    expect(Object.keys(outcomes)).toHaveLength(237);
+    expect(Object.keys(outcomes)).toHaveLength(238);
     // Count is the merged catalog (this branch + main).
     expect(Object.keys(outcomes).some((k) => k.startsWith("RUN_"))).toBe(false);
     for (const code of RUN_CODES) {

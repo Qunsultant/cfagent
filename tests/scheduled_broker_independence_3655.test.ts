@@ -24,6 +24,7 @@ import { resolveScheduledEffectiveMode } from "../src/services/scheduledEffectiv
 import {
   resolveShardChainSource,
 } from "../src/services/shardExecutors";
+import { BusinessError } from "../src/outcomes/outcomeAspects";
 import { resolveScheduledStockProvider } from "../src/services/scheduledTasks";
 import {
   acquireUniverse,
@@ -205,10 +206,40 @@ describe("scheduled stock provider resolution (#3655)", () => {
     expect(resolveScheduledStockProvider("alpaca", "etrade")).toBe("alpaca");
   });
 
-  it("a data provider with no stock-screen adapter falls back to the legacy default", () => {
-    expect(resolveScheduledStockProvider(undefined, "public")).toBe("etrade");
-    expect(resolveScheduledStockProvider(undefined, "nasdaq")).toBe("etrade");
-    expect(resolveScheduledStockProvider(undefined, undefined)).toBe("etrade");
+  it("a Public selection resolves to the Public adapter (#3990), never a fallback", () => {
+    expect(resolveScheduledStockProvider(undefined, "public")).toBe("public");
+    expect(resolveScheduledStockProvider("public", "etrade")).toBe("public");
+  });
+
+  it("no stock-screen provider resolves → loud typed refusal, never a silent default (#3655 F6)", () => {
+    // "nasdaq" names a universe source, not a quote provider; an
+    // unset or unreadable selection names nothing at all. All three
+    // refuse with the coded contract S5 (#4431) builds on.
+    for (const tenant of ["nasdaq", undefined, "not-a-provider"]) {
+      let caught: unknown;
+      try {
+        resolveScheduledStockProvider(undefined, tenant as never);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(BusinessError);
+      expect((caught as BusinessError).code).toBe("FAILURE_NO_SCREENING_PROVIDER");
+      expect((caught as BusinessError).message).toMatch(/No screening provider is available/);
+    }
+    // An explicit payload that names no stock-screen provider
+    // refuses the same way when the tenant selection names none
+    // either (a valid tenant selection still resolves — the
+    // payload leg only wins when it names a provider).
+    expect(() =>
+      resolveScheduledStockProvider("nasdaq" as never, "nasdaq"),
+    ).toThrowError(BusinessError);
+    try {
+      resolveScheduledStockProvider("nasdaq" as never, "nasdaq");
+      expect.unreachable("expected FAILURE_NO_SCREENING_PROVIDER");
+    } catch (err) {
+      expect((err as BusinessError).code).toBe("FAILURE_NO_SCREENING_PROVIDER");
+    }
+    expect(resolveScheduledStockProvider("nasdaq" as never, "alpaca")).toBe("alpaca");
   });
 });
 
