@@ -47,7 +47,10 @@ const CONSUMER_FILES = [
 
 const DATA_LAYER_FILES: Array<[string, number]> = [
   // [file, storage-exec sites at the step-3a landing]
-  ["src/data/ormRepositoryCore.ts", 7],
+  // 9 since #4385 added the Repository extensions the DO DML
+  // tranche needs: updateWhere + deleteWhere each execute one
+  // statement (createOrIgnore reuses insertRecord's site).
+  ["src/data/ormRepositoryCore.ts", 9],
   // 9 at 3a; 13 since #2360 (step 4d-2) added the ledger
   // port's four route-transition statements to this adapter;
   // 17 since #2390 (step 4g) added the dedicated settings
