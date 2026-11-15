@@ -25,9 +25,9 @@ import {
   type IvStats,
 } from "./ivHistoryPorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
-
-const TABLE = "mas_iv_history";
 
 const CREATE_TABLE_SQL = doTableSql("mas_iv_history");
 /**
@@ -37,22 +37,6 @@ const CREATE_TABLE_SQL = doTableSql("mas_iv_history");
  */
 const ALTER_ADD_BROKER_SQL = remainderAlterSql("mas_iv_history", "broker");
 const CREATE_INDEX_SQL = doIndexSql("idx_mas_iv_history_symbol_date");
-const COLUMNS = `symbol, date, atm_iv, spot, expiry_date, dte, collected_at, broker`;
-const GET_SQL = `SELECT ${COLUMNS} FROM ${TABLE} WHERE symbol = ? AND date = ?`;
-const GET_BROKER_SQL = `SELECT ${COLUMNS} FROM ${TABLE} WHERE symbol = ? AND date = ? AND broker = ?`;
-const INSERT_SQL =
-  `INSERT OR IGNORE INTO ${TABLE} (symbol, date, atm_iv, spot, expiry_date, dte, collected_at, broker) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-const SERIES_SQL = `SELECT ${COLUMNS} FROM ${TABLE} WHERE symbol = ? ORDER BY date DESC`;
-const SERIES_BROKER_SQL = `SELECT ${COLUMNS} FROM ${TABLE} WHERE symbol = ? AND broker = ? ORDER BY date DESC`;
-const SERIES_LIMIT_SQL = `SELECT ${COLUMNS} FROM ${TABLE} WHERE symbol = ? ORDER BY date DESC LIMIT ?`;
-const SERIES_BROKER_LIMIT_SQL =
-  `SELECT ${COLUMNS} FROM ${TABLE} WHERE symbol = ? AND broker = ? ORDER BY date DESC LIMIT ?`;
-const COVERAGE_SQL =
-  `SELECT COUNT(*) AS count, MIN(date) AS first_date, MAX(date) AS last_date FROM ${TABLE} WHERE symbol = ?`;
-const COVERAGE_BROKER_SQL =
-  `SELECT COUNT(*) AS count, MIN(date) AS first_date, MAX(date) AS last_date FROM ${TABLE} WHERE symbol = ? AND broker = ?`;
-const SYMBOLS_SQL = `SELECT DISTINCT symbol FROM ${TABLE} ORDER BY symbol ASC`;
-const SYMBOLS_BROKER_SQL = `SELECT DISTINCT symbol FROM ${TABLE} WHERE broker = ? ORDER BY symbol ASC`;
 
 interface IvRow {
   symbol: string;
@@ -116,59 +100,67 @@ export class SqlIvHistoryStore implements IvHistoryStore {
     // First write wins per (symbol, date), regardless of broker: the day has
     // one observation, and a second broker must not rewrite its provenance.
     if (await this.get(symbol, record.date)) return false;
-    this.sql.exec(
-      INSERT_SQL,
-      symbol,
-      record.date,
-      record.atmIv,
-      record.spot,
-      record.expiryDate,
-      record.dte,
-      record.collectedAt,
-      normalizeIvBroker(record.broker),
-    );
-    return true;
+    return executeDoDml<boolean>(DO_DML_CATALOGUE, this.sql, "dml.do.mas_iv_history.insert", {
+      record: {
+        symbol,
+        date: record.date,
+        atm_iv: record.atmIv,
+        spot: record.spot,
+        expiry_date: record.expiryDate,
+        dte: record.dte,
+        collected_at: record.collectedAt,
+        broker: normalizeIvBroker(record.broker),
+      } satisfies IvRow,
+    });
   }
 
   async get(symbol: string, date: string, broker?: IvBroker): Promise<IvHistoryRecord | null> {
     this.ensure();
     const sym = normalizeSymbol(symbol);
-    const rows = (
+    const row = executeDoDml<IvRow | null>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      broker ? "dml.do.mas_iv_history.get_broker" : "dml.do.mas_iv_history.get",
       broker
-        ? Array.from(this.sql.exec(GET_BROKER_SQL, sym, date, normalizeIvBroker(broker)))
-        : Array.from(this.sql.exec(GET_SQL, sym, date))
-    ) as IvRow[];
-    return rows.length ? rowToRecord(rows[0]) : null;
+        ? { where: { symbol: sym, date, broker: normalizeIvBroker(broker) } }
+        : { where: { symbol: sym, date } },
+    );
+    return row ? rowToRecord(row) : null;
   }
 
   async listSeries(symbol: string, options: { limit?: number; broker?: IvBroker } = {}): Promise<IvHistoryRecord[]> {
     this.ensure();
     const sym = normalizeSymbol(symbol);
     const broker = options.broker ? normalizeIvBroker(options.broker) : undefined;
-    const statement = broker
-      ? options.limit !== undefined
-        ? SERIES_BROKER_LIMIT_SQL
-        : SERIES_BROKER_SQL
-      : options.limit !== undefined
-        ? SERIES_LIMIT_SQL
-        : SERIES_SQL;
-    const params: unknown[] = broker ? [sym, broker] : [sym];
-    if (options.limit !== undefined) params.push(options.limit);
-    const rows = Array.from(this.sql.exec(statement, ...params)) as IvRow[];
+    const rows = executeDoDml<IvRow[]>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      broker
+        ? options.limit !== undefined
+          ? "dml.do.mas_iv_history.series_broker_limit"
+          : "dml.do.mas_iv_history.series_broker"
+        : options.limit !== undefined
+          ? "dml.do.mas_iv_history.series_limit"
+          : "dml.do.mas_iv_history.series",
+      {
+        where: broker ? { symbol: sym, broker } : { symbol: sym },
+        orderBy: "date DESC",
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+      },
+    );
     return rows.map(rowToRecord);
   }
 
   async coverage(symbol: string, broker?: IvBroker): Promise<IvHistoryCoverage> {
     this.ensure();
-    const rows = (
+    const rows = executeDoDml<Array<{ count: number; first_date: string | null; last_date: string | null }>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      broker ? "dml.do.mas_iv_history.coverage_broker" : "dml.do.mas_iv_history.coverage",
       broker
-        ? Array.from(this.sql.exec(COVERAGE_BROKER_SQL, normalizeSymbol(symbol), normalizeIvBroker(broker)))
-        : Array.from(this.sql.exec(COVERAGE_SQL, normalizeSymbol(symbol)))
-    ) as Array<{
-      count: number;
-      first_date: string | null;
-      last_date: string | null;
-    }>;
+        ? { symbol: normalizeSymbol(symbol), broker: normalizeIvBroker(broker) }
+        : { symbol: normalizeSymbol(symbol) },
+    );
     const row = rows[0];
     return {
       observations: Number(row?.count ?? 0),
@@ -179,11 +171,12 @@ export class SqlIvHistoryStore implements IvHistoryStore {
 
   async listSymbols(options: { broker?: IvBroker } = {}): Promise<string[]> {
     this.ensure();
-    const rows = (
-      options.broker
-        ? Array.from(this.sql.exec(SYMBOLS_BROKER_SQL, normalizeIvBroker(options.broker)))
-        : Array.from(this.sql.exec(SYMBOLS_SQL))
-    ) as Array<{ symbol: string }>;
+    const rows = executeDoDml<Array<{ symbol: string }>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      options.broker ? "dml.do.mas_iv_history.symbols_broker" : "dml.do.mas_iv_history.symbols",
+      options.broker ? { broker: normalizeIvBroker(options.broker) } : {},
+    );
     return rows.map((r) => r.symbol);
   }
 }
