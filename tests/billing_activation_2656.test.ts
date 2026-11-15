@@ -401,6 +401,7 @@ function signWebhook(secret: string, payload: string): string {
 function stubBillingStripe(overrides: {
   session?: Record<string, unknown>;
   provider?: Record<string, unknown>;
+  sessionCreateError?: { status: number; message: string };
 } = {}) {
   const calls: Array<{ url: string; method: string; body: string }> = [];
   const sessionEvidence = {
@@ -431,6 +432,13 @@ function stubBillingStripe(overrides: {
       const body = String(init?.body ?? "");
       calls.push({ url: href, method, body });
       if (href === "https://api.stripe.com/v1/checkout/sessions" && method === "POST") {
+        if (overrides.sessionCreateError) {
+          return {
+            ok: false,
+            status: overrides.sessionCreateError.status,
+            json: async () => ({ error: { message: overrides.sessionCreateError!.message } }),
+          } as any;
+        }
         return {
           ok: true,
           status: 200,
@@ -519,12 +527,36 @@ describe("billing-checkout route", () => {
     // Issue #3357: the missing-mapping check runs after the approval gate, so approve first.
     await noMap.subs.approvePlan("plan-pro", "op1");
     await noMap.policy.updatePolicy({ stripePriceByPlan: {} });
-    expect(
-      (await call(noMap.ctx, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {
-        planId: "plan-pro",
-        tenantId: "t1",
-      }))?.status,
-    ).toBe(503);
+    const noMapRes = await call(noMap.ctx, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {
+      planId: "plan-pro",
+      tenantId: "t1",
+    });
+    expect(noMapRes?.status).toBe(503);
+    // Issue #4642: the unset-mapping path keeps the generic 503 code — the
+    // distinct rejection code is only for a Stripe rejection of a mapped price.
+    expect((await bodyOf(noMapRes)).code).toBe("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE");
+  });
+
+  it("a Stripe rejection of the mapped price returns the distinct rejection code, not the generic 503 (#4642)", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBillingStripe({
+      sessionCreateError: {
+        status: 400,
+        message: "You cannot use a one-time price in a subscription mode Checkout Session.",
+      },
+    });
+    await seedPlanAndPrice(s);
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {
+      planId: "plan-pro",
+      tenantId: "t1",
+    });
+    const body = await bodyOf(res);
+    // RED before the fix: the mint swallows the Stripe 400 into the generic 503.
+    expect(res?.status).toBe(400);
+    expect(body.code).toBe("FAILURE_BILLING_CHECKOUT_REJECTED");
+    expect(body.code).not.toBe("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE");
+    // The raw Stripe reason never reaches the client.
+    expect(JSON.stringify(body)).not.toContain("You cannot use a one-time price");
   });
 
   it("mints a subscription-mode session and audits, without creating a row", async () => {
