@@ -1352,7 +1352,9 @@ Unposted-§15 ledger (issue #4077): a single ledger (a docs file) lists every un
 
 Merging is not completion. A PR merged without verifying the feature works in production is an unverified change. Every merged PR MUST pass the verification steps below before its issue is marked Done; unrelated work may continue in parallel.
 
-Auto-close reconciliation (issue #4076): a scheduled check reconciles merged-but-open issues — for each open issue whose PR merged, it comments the merge commit and closes the issue, with the merge commit as the evidence. An open issue may already be on main (#3655, #3868, #3872 stayed open after merging); the reconciliation keeps the board truthful. No bare force-close: a close without its merge evidence is not a reconciliation.
+Auto-close reconciliation (issue #4076, implemented by #4565): a merge-time check reconciles merged-but-open issues — for each open issue a merged PR's closing keyword names, `.github/workflows/close-merged-issues.yml` (`scripts/ci/closeMergedIssueRefs.mjs`) comments the merge commit and the PR, then closes the issue, with the merge commit as the evidence. An open issue may already be on main (#3655, #3868, #3872 stayed open after merging); the reconciliation keeps the board truthful. No bare force-close: a close without its merge evidence is not a reconciliation.
+
+**Accepted closing forms.** A closing keyword may name **either** repository slug — `Qunsultant/cfagent#N` (current) or `OpenAIMP/cfagent#N` (the repository's former name) — or a bare `#N`, case-insensitively; any other `owner/repo` is ignored. This exists because GitHub's own auto-close honours only the current slug, so `Fixes OpenAIMP/cfagent#N` merged with its issue open (PR #4560 / #4532, 2026-11-15) even though §9 and the Policy Gate accept that form. The reconciler uses the same closing verbs and slug set as the Policy Gate's check (a) — one grammar, not a second. It only closes an OPEN issue (a re-run is a no-op), does nothing for a closed-but-unmerged PR, and can be replayed with `workflow_dispatch`.
 
 ### 17.1. Integration over unit tests
 

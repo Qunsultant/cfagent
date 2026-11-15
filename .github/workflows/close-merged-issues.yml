@@ -1,0 +1,52 @@
+name: Close merged issues
+
+# Issue #4565 — a merged PR closes the issues its closing keywords name,
+# whichever accepted repository slug it used.
+#
+# GitHub resolves a closing keyword only against the repository the PR lives
+# in, so `Fixes OpenAIMP/cfagent#N` — the repository's former name, which
+# docs/agents/gitops.md §9 and the Policy Gate (check (a)) both accept — merged
+# with its issue still open (PR #4560 / #4532, 2026-11-15). This is gitops
+# §17's auto-close reconciliation, as a merge-time job instead of a scheduled
+# sweep: the merge commit is the evidence, and a replay is a workflow_dispatch.
+#
+# The script comes from the BASE branch (pull_request_target checks out main),
+# never from the merged PR itself.
+
+on:
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number to reconcile (a replay)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: close-merged-issues-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Close the issues this merge named
+    # A closed-but-unmerged PR closes nothing: the work is not on main.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 🧾 Close the referenced issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+        run: node scripts/ci/closeMergedIssueRefs.mjs --pr "$PR_NUMBER" --repo "$REPO"
