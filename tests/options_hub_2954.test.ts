@@ -173,9 +173,6 @@ describe("deep links (#2954)", () => {
     expect(deepLinkHrefForNavNode("assets-hub", "forex")).toBe(
       "?tab=assets-hub&view=forex",
     );
-    expect(deepLinkHrefForNavNode("planned", "forex")).toBe(
-      "?tab=assets-hub&view=forex",
-    );
     expect(deepLinkHrefForNavNode(null, "goal-screen")).toBe(
       "?tab=goal-screen",
     );

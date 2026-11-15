@@ -1,0 +1,3 @@
+### Fixed
+
+- Removed the duplicate deep-link keys `planned`, `planned:forex`, `planned:futures`, `planned:commodities`, `planned:bonds`, and bare `sandbox` from `nav-config.json` (issue 4630). The `planned:*` keys duplicated the `assets-hub:*` addresses and bare `sandbox` duplicated `sandbox-checkout`; this supersedes the issue 2972 bookmark contract. The canonical `assets-hub:*` and `sandbox-checkout` keys are the only addresses. The deep-link catalog no longer carries an entry for the destination-less sandbox menu parent (it renders as a toggle-only button in both nav surfaces); its `sandbox-checkout` sub-item still resolves to `/checkout/sandbox`.

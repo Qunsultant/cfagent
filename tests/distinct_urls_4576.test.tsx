@@ -9,7 +9,9 @@
  *     (`flowsTab`, `researchTab`), so an inner tab never overwrites the hub
  *     tab it is nested inside — the two hooks can write side by side;
  *  3. the orphaned `planned` keys are gone, while the live `assets-hub`
- *     keys and the bare `sandbox` node-id fallback stay;
+ *     keys stay; the bare `sandbox` key is gone with them (issue 4630
+ *     supersedes the #2972 bookmark contract) and the checkout sub-item
+ *     keeps the canonical `sandbox-checkout` address;
  *  4. the platform-admin and checkout surfaces cover the tabs that had no
  *     catalog entry.
  *
@@ -147,23 +149,34 @@ describe("nested sub-tab params (#4576)", () => {
 });
 
 describe("deep-link hygiene (#4576)", () => {
-  it("keeps the retired Planned keys resolving to the assets-hub views (bookmark contract #2972)", () => {
-    // The audit called these orphaned; they are deliberately retained so an
-    // old bookmark still lands on its view — and two suites pin exactly that
-    // (ux_planned_menu_2783, options_hub_2954). The live assets-hub keys stay
-    // too; both addresses resolve to the same views by design.
-    expect(DEEP_LINK_OVERRIDES["planned"]).toEqual({ tab: "assets-hub", view: "forex" });
-    expect(DEEP_LINK_OVERRIDES["planned:forex"]).toEqual({ tab: "assets-hub", view: "forex" });
-    expect(DEEP_LINK_OVERRIDES["planned:futures"]).toEqual({ tab: "assets-hub", view: "futures" });
-    expect(DEEP_LINK_OVERRIDES["planned:commodities"]).toEqual({ tab: "assets-hub", view: "commodities" });
-    expect(DEEP_LINK_OVERRIDES["planned:bonds"]).toEqual({ tab: "assets-hub", view: "bonds" });
+  it("the retired Planned keys are gone (bookmark contract superseded, issue 4630)", () => {
+    // The audit called these orphaned; the #2972 contract retained them
+    // so an old bookmark still landed on its view. Issue 4630 removes
+    // them as duplicates of the assets-hub:* keys — the canonical keys
+    // are the only addresses. The live assets-hub keys stay.
+    for (const key of ["planned", "planned:forex", "planned:futures", "planned:commodities", "planned:bonds"]) {
+      expect(DEEP_LINK_OVERRIDES[key]).toBeUndefined();
+    }
     for (const key of ["assets-hub:forex", "assets-hub:futures", "assets-hub:commodities", "assets-hub:bonds"]) {
       expect(DEEP_LINK_OVERRIDES[key]).toBeDefined();
     }
   });
 
-  it("keeps the bare sandbox node-id fallback, which is a live contract", () => {
-    expect(deepLinkForNavNode(null, "sandbox")).toEqual({ href: "/checkout/sandbox", newTab: true });
+  it("the bare sandbox key is gone; only sandbox-checkout resolves (issue 4630)", () => {
+    // The bare key duplicated sandbox-checkout. The sandbox parent is a
+    // toggle-only menu in both nav surfaces, so resolving it falls
+    // through to the unknown-id fallback — never a rendered link. Its
+    // checkout sub-item keeps the canonical address.
+    expect(DEEP_LINK_OVERRIDES["sandbox"]).toBeUndefined();
+    expect(deepLinkForNavNode(null, "sandbox")).toEqual({ tab: "autopilot" });
+    expect(DEEP_LINK_OVERRIDES["sandbox-checkout"]).toEqual({
+      href: "/checkout/sandbox",
+      newTab: true,
+    });
+    expect(deepLinkForNavNode("sandbox", "sandbox-checkout")).toEqual({
+      href: "/checkout/sandbox",
+      newTab: true,
+    });
   });
 });
 
