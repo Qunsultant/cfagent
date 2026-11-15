@@ -24,6 +24,8 @@
 import type { DoTransactionStorage } from "../aspects/transactionAspect";
 import { getTransactionRunner } from "./transactionRunnerProvider";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 import type { OpportunityScanResult } from "../trading";
 import {
   SCAN_RUN_MAX_ROWS,
@@ -45,24 +47,6 @@ const TABLE = "mas_opportunity_scans";
 
 const CREATE_TABLE_SQL = doTableSql("mas_opportunity_scans");
 const CREATE_INDEX_SQL = doIndexSql("idx_mas_opportunity_scans_generated_at");
-const INSERT_SQL =
-  `INSERT INTO ${TABLE} (id, generated_at, mode, model_version, user_login, schedule_id, async_job_id, workflow_id, summary_json, result_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-// The visibility predicate lives in the list statement itself (issue
-// #103) so pagination walks only rows the caller may see — filtering
-// after LIMIT/OFFSET would return short pages. With a NULL scope
-// parameter the `user_login = NULL` comparison is never true, so an
-// unscoped caller gets exactly the legacy (user_login IS NULL) rows.
-const LIST_SQL =
-  `SELECT summary_json FROM ${TABLE} WHERE (user_login IS NULL OR user_login = ?) ` +
-  `ORDER BY generated_at DESC, id DESC LIMIT ? OFFSET ?`;
-const GET_SQL = `SELECT summary_json, result_json FROM ${TABLE} WHERE id = ?`;
-const UPDATE_PDF_KEY_SQL = `UPDATE ${TABLE} SET summary_json = ?, result_json = ? WHERE id = ?`;
-const UPDATE_LINKAGE_SQL =
-  `UPDATE ${TABLE} SET schedule_id = ?, async_job_id = ?, workflow_id = ?, summary_json = ? WHERE id = ?`;
-const COUNT_SQL = `SELECT COUNT(*) AS count FROM ${TABLE}`;
-const PRUNE_AGE_SQL = `DELETE FROM ${TABLE} WHERE generated_at < ?`;
-const PRUNE_CAP_SQL =
-  `DELETE FROM ${TABLE} WHERE id NOT IN (SELECT id FROM ${TABLE} ORDER BY generated_at DESC, id DESC LIMIT ?)`;
 const TABLE_INFO_SQL = `PRAGMA table_info(${TABLE})`;
 const ADD_USER_LOGIN_COLUMN_SQL = remainderAlterSql("mas_opportunity_scans", "user_login");
 // Issue #3314: the three §4 linkage columns, probed exactly like
@@ -170,8 +154,7 @@ export class SqlScanRunStore implements ScanRunStore {
   }
 
   private count(): number {
-    const rows = Array.from(this.sql.exec(COUNT_SQL)) as Array<{ count: number }>;
-    return Number(rows[0]?.count ?? 0);
+    return executeDoDml<number>(DO_DML_CATALOGUE, this.sql, "dml.do.mas_opportunity_scans.count", {});
   }
 
   async save(
@@ -195,19 +178,20 @@ export class SqlScanRunStore implements ScanRunStore {
     const summary = summarize(id, result, options.userLogin, options.trigger, options.broker, linkage);
     const run: StoredScanRun = { ...summary, result };
     const insert = () => {
-      this.sql.exec(
-        INSERT_SQL,
-        id,
-        result.generatedAt,
-        result.mode,
-        result.modelVersion,
-        summary.userLogin ?? null,
-        linkage?.scheduleId ?? null,
-        linkage?.asyncJobId ?? null,
-        linkage?.workflowId ?? null,
-        JSON.stringify(summary),
-        JSON.stringify(result),
-      );
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_opportunity_scans.insert", {
+        record: {
+          id,
+          generated_at: result.generatedAt,
+          mode: result.mode,
+          model_version: result.modelVersion,
+          user_login: summary.userLogin ?? null,
+          schedule_id: linkage?.scheduleId ?? null,
+          async_job_id: linkage?.asyncJobId ?? null,
+          workflow_id: linkage?.workflowId ?? null,
+          summary_json: JSON.stringify(summary),
+          result_json: JSON.stringify(result),
+        },
+      });
     };
     // Retention is enforced on the write path, relative to the run's
     // own timestamp: a run saved with an old generatedAt (backfill,
@@ -238,18 +222,24 @@ export class SqlScanRunStore implements ScanRunStore {
     const limit = options.limit ?? 25;
     const offset = options.offset ?? 0;
     if (!options.broker) {
-      const rows = Array.from(this.sql.exec(LIST_SQL, options.userLogin ?? null, limit, offset)) as Array<{
-        summary_json: string;
-      }>;
+      const rows = executeDoDml<Array<{ summary_json: string }>>(
+        DO_DML_CATALOGUE,
+        this.sql,
+        "dml.do.mas_opportunity_scans.list",
+        { userLogin: options.userLogin ?? null, limit, offset },
+      );
       return rows.map((r) => JSON.parse(r.summary_json) as ScanRunSummary);
     }
     // Issue #3327: provenance lives inside summary_json, so the broker filter
     // happens after parsing. The table is capped at SCAN_RUN_MAX_ROWS, so
     // reading the (bounded) visible window and slicing here keeps pagination
     // honest instead of returning short pages from a filtered LIMIT.
-    const rows = Array.from(this.sql.exec(LIST_SQL, options.userLogin ?? null, this.maxRows, 0)) as Array<{
-      summary_json: string;
-    }>;
+    const rows = executeDoDml<Array<{ summary_json: string }>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_opportunity_scans.list",
+      { userLogin: options.userLogin ?? null, limit: this.maxRows, offset: 0 },
+    );
     return rows
       .map((r) => JSON.parse(r.summary_json) as ScanRunSummary)
       .filter((summary) => normalizeScanRunBroker(summary.broker) === options.broker)
@@ -258,13 +248,18 @@ export class SqlScanRunStore implements ScanRunStore {
 
   async get(id: string, options: { userLogin?: string } = {}): Promise<StoredScanRun | null> {
     this.ensure();
-    const rows = Array.from(this.sql.exec(GET_SQL, id)) as Array<{ summary_json: string; result_json: string }>;
-    if (!rows.length) return null;
-    const summary = JSON.parse(rows[0].summary_json) as ScanRunSummary;
+    const row = executeDoDml<{ summary_json: string; result_json: string } | null>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_opportunity_scans.get",
+      { id },
+    );
+    if (!row) return null;
+    const summary = JSON.parse(row.summary_json) as ScanRunSummary;
     // The summary is the scoping authority (it is what summarize()
     // stamped); an invisible run reads as absent.
     if (!visibleToCaller(summary, options.userLogin)) return null;
-    const result = JSON.parse(rows[0].result_json) as OpportunityScanResult;
+    const result = JSON.parse(row.result_json) as OpportunityScanResult;
     return { ...summary, result };
   }
 
@@ -272,14 +267,22 @@ export class SqlScanRunStore implements ScanRunStore {
     if (!pdfKey) return false;
     this.ensure();
     const apply = (): boolean => {
-      const rows = Array.from(this.sql.exec(GET_SQL, id)) as Array<{ summary_json: string; result_json: string }>;
-      if (!rows.length) return false;
-      const summary = JSON.parse(rows[0].summary_json) as ScanRunSummary;
+      const row = executeDoDml<{ summary_json: string; result_json: string } | null>(
+        DO_DML_CATALOGUE,
+        this.sql,
+        "dml.do.mas_opportunity_scans.get",
+        { id },
+      );
+      if (!row) return false;
+      const summary = JSON.parse(row.summary_json) as ScanRunSummary;
       if (!visibleToCaller(summary, options.userLogin)) return false;
-      const result = JSON.parse(rows[0].result_json) as OpportunityScanResult;
+      const result = JSON.parse(row.result_json) as OpportunityScanResult;
       summary.pdfKey = pdfKey;
       result.pdfKey = pdfKey;
-      this.sql.exec(UPDATE_PDF_KEY_SQL, JSON.stringify(summary), JSON.stringify(result), id);
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_opportunity_scans.update_pdf_key", {
+        id,
+        updates: { summary_json: JSON.stringify(summary), result_json: JSON.stringify(result) },
+      });
       return true;
     };
     // The GET + UPDATE read-modify-write is one unit when the
@@ -300,14 +303,22 @@ export class SqlScanRunStore implements ScanRunStore {
     if (!xlsxKey) return false;
     this.ensure();
     const apply = (): boolean => {
-      const rows = Array.from(this.sql.exec(GET_SQL, id)) as Array<{ summary_json: string; result_json: string }>;
-      if (!rows.length) return false;
-      const summary = JSON.parse(rows[0].summary_json) as ScanRunSummary;
+      const row = executeDoDml<{ summary_json: string; result_json: string } | null>(
+        DO_DML_CATALOGUE,
+        this.sql,
+        "dml.do.mas_opportunity_scans.get",
+        { id },
+      );
+      if (!row) return false;
+      const summary = JSON.parse(row.summary_json) as ScanRunSummary;
       if (!visibleToCaller(summary, options.userLogin)) return false;
-      const result = JSON.parse(rows[0].result_json) as OpportunityScanResult;
+      const result = JSON.parse(row.result_json) as OpportunityScanResult;
       summary.xlsxKey = xlsxKey;
       result.xlsxKey = xlsxKey;
-      this.sql.exec(UPDATE_PDF_KEY_SQL, JSON.stringify(summary), JSON.stringify(result), id);
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_opportunity_scans.update_pdf_key", {
+        id,
+        updates: { summary_json: JSON.stringify(summary), result_json: JSON.stringify(result) },
+      });
       return true;
     };
     const runner = this.storage ? getTransactionRunner() : null;
@@ -325,14 +336,22 @@ export class SqlScanRunStore implements ScanRunStore {
     if (!csvKey) return false;
     this.ensure();
     const apply = (): boolean => {
-      const rows = Array.from(this.sql.exec(GET_SQL, id)) as Array<{ summary_json: string; result_json: string }>;
-      if (!rows.length) return false;
-      const summary = JSON.parse(rows[0].summary_json) as ScanRunSummary;
+      const row = executeDoDml<{ summary_json: string; result_json: string } | null>(
+        DO_DML_CATALOGUE,
+        this.sql,
+        "dml.do.mas_opportunity_scans.get",
+        { id },
+      );
+      if (!row) return false;
+      const summary = JSON.parse(row.summary_json) as ScanRunSummary;
       if (!visibleToCaller(summary, options.userLogin)) return false;
-      const result = JSON.parse(rows[0].result_json) as OpportunityScanResult;
+      const result = JSON.parse(row.result_json) as OpportunityScanResult;
       summary.csvKey = csvKey;
       result.csvKey = csvKey;
-      this.sql.exec(UPDATE_PDF_KEY_SQL, JSON.stringify(summary), JSON.stringify(result), id);
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_opportunity_scans.update_pdf_key", {
+        id,
+        updates: { summary_json: JSON.stringify(summary), result_json: JSON.stringify(result) },
+      });
       return true;
     };
     const runner = this.storage ? getTransactionRunner() : null;
@@ -360,21 +379,27 @@ export class SqlScanRunStore implements ScanRunStore {
     // columns and the summary move.
     const clean = normalizeScanRunLinkage(linkage);
     const apply = (): boolean => {
-      const rows = Array.from(this.sql.exec(GET_SQL, id)) as Array<{ summary_json: string; result_json: string }>;
-      if (!rows.length) return false;
-      const summary = JSON.parse(rows[0].summary_json) as ScanRunSummary;
+      const row = executeDoDml<{ summary_json: string; result_json: string } | null>(
+        DO_DML_CATALOGUE,
+        this.sql,
+        "dml.do.mas_opportunity_scans.get",
+        { id },
+      );
+      if (!row) return false;
+      const summary = JSON.parse(row.summary_json) as ScanRunSummary;
       if (!visibleToCaller(summary, options.userLogin)) return false;
       summary.scheduleId = clean.scheduleId;
       summary.asyncJobId = clean.asyncJobId;
       summary.workflowId = clean.workflowId;
-      this.sql.exec(
-        UPDATE_LINKAGE_SQL,
-        clean.scheduleId,
-        clean.asyncJobId,
-        clean.workflowId,
-        JSON.stringify(summary),
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_opportunity_scans.update_linkage", {
         id,
-      );
+        updates: {
+          schedule_id: clean.scheduleId,
+          async_job_id: clean.asyncJobId,
+          workflow_id: clean.workflowId,
+          summary_json: JSON.stringify(summary),
+        },
+      });
       return true;
     };
     const runner = this.storage ? getTransactionRunner() : null;
@@ -391,8 +416,12 @@ export class SqlScanRunStore implements ScanRunStore {
   private pruneSync(now: Date): number {
     this.ensure();
     const before = this.count();
-    this.sql.exec(PRUNE_AGE_SQL, retentionCutoff(now, this.retentionDays));
-    this.sql.exec(PRUNE_CAP_SQL, this.maxRows);
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_opportunity_scans.prune_age", {
+      where: { generated_at: { $lt: retentionCutoff(now, this.retentionDays) } },
+    });
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_opportunity_scans.prune_cap", {
+      maxRows: this.maxRows,
+    });
     return before - this.count();
   }
 
