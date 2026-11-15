@@ -11,7 +11,7 @@
       "navEntry": {
         "label": "Sponsored Marketplace",
         "shortLabel": "Deals",
-        "navOrder": 13,
+        "navOrder": 12,
         "defaultVisible": true,
         "badge": "Partners",
         "badgeType": "neutral"
@@ -27,7 +27,7 @@
       "navEntry": {
         "label": "Agents",
         "shortLabel": "Agents",
-        "navOrder": 20,
+        "navOrder": 19,
         "defaultVisible": true,
         "badge": "Registry",
         "badgeType": "neutral"
@@ -60,7 +60,7 @@
       "navEntry": {
         "label": "Assets Hub",
         "shortLabel": "Assets",
-        "navOrder": 30,
+        "navOrder": 29,
         "defaultVisible": true,
         "badge": "Assets",
         "badgeType": "pro"
@@ -76,7 +76,7 @@
       "navEntry": {
         "label": "Audit Vault",
         "shortLabel": "Audit Log",
-        "navOrder": 21,
+        "navOrder": 20,
         "defaultVisible": true,
         "badge": "DID",
         "badgeType": "pro"
@@ -109,7 +109,7 @@
       "navEntry": {
         "label": "Billing",
         "shortLabel": "Billing",
-        "navOrder": 29,
+        "navOrder": 28,
         "defaultVisible": true,
         "badge": "Billing",
         "badgeType": "neutral"
@@ -141,7 +141,7 @@
       "navEntry": {
         "label": "Checkout",
         "shortLabel": "Checkout",
-        "navOrder": 18,
+        "navOrder": 17,
         "defaultVisible": true,
         "badge": "Testnet",
         "badgeType": "pro"
@@ -157,7 +157,7 @@
       "navEntry": {
         "label": "Docs & Reports",
         "shortLabel": "Docs",
-        "navOrder": 26,
+        "navOrder": 25,
         "defaultVisible": true,
         "badge": "PDF",
         "badgeType": "neutral"
@@ -173,7 +173,7 @@
       "navEntry": {
         "label": "Developer & MCP",
         "shortLabel": "Endpoints",
-        "navOrder": 25,
+        "navOrder": 24,
         "defaultVisible": true,
         "badge": "MCP",
         "badgeType": "mcp"
@@ -199,7 +199,7 @@
       "navEntry": {
         "label": "Order History Ledger",
         "shortLabel": "Ledger",
-        "navOrder": 17,
+        "navOrder": 16,
         "defaultVisible": true,
         "badge": "AUDIT",
         "badgeType": "pro"
@@ -215,7 +215,7 @@
       "navEntry": {
         "label": "Records NLQ",
         "shortLabel": "Records",
-        "navOrder": 22,
+        "navOrder": 21,
         "defaultVisible": true,
         "badge": "NLQ",
         "badgeType": "neutral"
@@ -257,7 +257,7 @@
       "navEntry": {
         "label": "Options Flows",
         "shortLabel": "Flows",
-        "navOrder": 24,
+        "navOrder": 23,
         "defaultVisible": true,
         "badge": "Sweeps",
         "badgeType": "pro"
@@ -315,7 +315,7 @@
       "navEntry": {
         "label": "Payment Assurance",
         "shortLabel": "Assurance",
-        "navOrder": 27,
+        "navOrder": 26,
         "defaultVisible": true,
         "badge": "Test",
         "badgeType": "neutral"
@@ -332,7 +332,7 @@
       "navEntry": {
         "label": "Payments",
         "shortLabel": "Payments",
-        "navOrder": 15,
+        "navOrder": 14,
         "defaultVisible": true,
         "badge": "x402",
         "badgeType": "neutral"
@@ -348,7 +348,7 @@
       "navEntry": {
         "label": "Platform Admin",
         "shortLabel": "Admin",
-        "navOrder": 19,
+        "navOrder": 18,
         "defaultVisible": true,
         "badge": "Admin",
         "badgeType": "neutral"
@@ -381,25 +381,9 @@
       "navEntry": {
         "label": "Product Hub",
         "shortLabel": "Product Hub",
-        "navOrder": 28,
+        "navOrder": 27,
         "defaultVisible": true,
         "badge": "Catalog",
-        "badgeType": "neutral"
-      }
-    },
-    {
-      "id": "queues",
-      "navGroup": "queues",
-      "crumb": "Queues",
-      "category": "Platform",
-      "icon": "Jobs",
-      "description": "Every queue with work waiting: async jobs, the dead-letter queue, and trade approvals, composed in one place",
-      "navEntry": {
-        "label": "Queues",
-        "shortLabel": "Queues",
-        "navOrder": 11,
-        "defaultVisible": true,
-        "badge": "Pending",
         "badgeType": "neutral"
       }
     },
@@ -414,7 +398,7 @@
       "navEntry": {
         "label": "Referrals & Earn",
         "shortLabel": "Referrals",
-        "navOrder": 12,
+        "navOrder": 11,
         "defaultVisible": true,
         "badge": "Earn",
         "badgeType": "new"
@@ -448,7 +432,7 @@
       "navEntry": {
         "label": "Revenue Analytics",
         "shortLabel": "Revenue",
-        "navOrder": 16,
+        "navOrder": 15,
         "defaultVisible": true,
         "badge": "Yield",
         "badgeType": "new"
@@ -524,7 +508,7 @@
       "navEntry": {
         "label": "Social Posting",
         "shortLabel": "Social",
-        "navOrder": 14,
+        "navOrder": 13,
         "defaultVisible": true,
         "badge": "Daily",
         "badgeType": "new"
@@ -616,7 +600,7 @@
       "navEntry": {
         "label": "Workflows & FAQ",
         "shortLabel": "Guides",
-        "navOrder": 23,
+        "navOrder": 22,
         "defaultVisible": true,
         "badge": "14 Guides",
         "badgeType": "neutral"
@@ -1013,6 +997,13 @@
         "shortLabel": "Async jobs & execution queue",
         "icon": "Tasks",
         "description": "Async jobs & execution queue"
+      },
+      {
+        "id": "dead-letter-queue",
+        "label": "Dead-letter queue",
+        "shortLabel": "Unreplayed records — replay to the source queue",
+        "icon": "Jobs",
+        "description": "Unreplayed records waiting for a replay to their source queue"
       }
     ],
     "sandbox": [
@@ -1280,6 +1271,10 @@
     "schedules:background-tasks": {
       "tab": "schedules",
       "view": "background-tasks"
+    },
+    "schedules:dead-letter-queue": {
+      "tab": "schedules",
+      "view": "dead-letter-queue"
     },
     "options-screener:iv-history": {
       "tab": "options",
@@ -1560,7 +1555,8 @@
         "runs",
         "goals",
         "queue",
-        "background-tasks"
+        "background-tasks",
+        "dead-letter-queue"
       ]
     }
   ],
