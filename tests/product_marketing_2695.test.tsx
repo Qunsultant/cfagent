@@ -387,7 +387,7 @@ describe("catalog panel (#2695)", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root.render(<ProductCatalogPanel />);
+      root.render(<ProductCatalogPanel onSubscribe={vi.fn()} onPreviewDraft={vi.fn()} />);
     });
     await flush();
     const text = container.textContent ?? "";

@@ -7,12 +7,19 @@
  * legacyProductRedirect in ./router). Billing, Checkout, Payments,
  * Orders, Ledger, and Revenue stay standalone and are NOT hub tabs.
  *
- * Four tabs, URL-synced on "view" via the shared useUrlSyncedTabs
+ * Five tabs, URL-synced on "view" via the shared useUrlSyncedTabs
  * hook + the Tabs/TabPanel primitives, following the StockHub /
  * OptionsHub pattern: panels mount on first visit and stay preserved
  * in the DOM (visitedTabs gating). The panels are reused, not
  * rebuilt: ProductCatalogPanel, the exported SellingSection,
- * ProductsSection, FreeRunAllowanceSection.
+ * MarketingDraftPreviewSection, ProductsSection,
+ * FreeRunAllowanceSection.
+ *
+ * Issue #4582 — just one of everything: the Products tab shows the
+ * catalog directly (no sub-tab row), Selling options is a hub tab
+ * only, and Marketing draft preview is a hub tab of its own (its
+ * composition state lives here in the hub; the catalog's Preview
+ * draft button composes and switches to it).
  *
  * The hub tab IS the demand for the selling load: visiting the
  * Selling options tab opens the selling flow (the Products page
@@ -32,20 +39,31 @@ import {
   TabPanel,
   type TabOption,
 } from "./components/ui";
-import { ProductCatalogPanel, SellingSection } from "./ProductCatalogPanel";
+import {
+  ProductCatalogPanel,
+  MarketingDraftPreviewSection,
+  SellingSection,
+} from "./ProductCatalogPanel";
 import { ProductsSection } from "./ProductsSection";
 import { FreeRunAllowanceSection } from "./FreeRunAllowanceSection";
-import type { CatalogDisplayEntry } from "../data/productMarketing";
+import {
+  composeMarketingDraft,
+  type CatalogDisplayEntry,
+  type MarketingChannel,
+  type MarketingDraft,
+} from "../data/productMarketing";
 
 export type ProductHubTab =
   | "products"
   | "selling-options"
+  | "marketing-draft-preview"
   | "admin-products"
   | "free-runs";
 
 export const PRODUCT_HUB_TABS: readonly ProductHubTab[] = [
   "products",
   "selling-options",
+  "marketing-draft-preview",
   "admin-products",
   "free-runs",
 ] as const;
@@ -60,6 +78,7 @@ export function isValidProductHubTab(tab: unknown): tab is ProductHubTab {
 const PRODUCT_HUB_TAB_OPTIONS: TabOption<ProductHubTab>[] = [
   { id: "products", label: "Products" },
   { id: "selling-options", label: "Selling options" },
+  { id: "marketing-draft-preview", label: "Marketing draft preview" },
   { id: "admin-products", label: "Admin Products" },
   { id: "free-runs", label: "Free Runs" },
 ];
@@ -106,10 +125,46 @@ export function ProductHub() {
       });
   }, [activeTab]);
 
+  // Marketing draft preview state (#4582): the hub owns the
+  // composition (channel / preview / error); the catalog's Preview
+  // draft button composes and switches the hub to this tab.
+  const [previewChannel, setPreviewChannel] = useState<MarketingChannel>("facebook");
+  const [preview, setPreview] = useState<MarketingDraft | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  function handlePreviewDraft(row: CatalogDisplayEntry) {
+    try {
+      setPreviewError(null);
+      setPreview(
+        composeMarketingDraft(
+          {
+            id: row.id,
+            canonicalName: row.canonicalName,
+            priceUSD: row.priceUSD,
+            listed: row.listed,
+            unlistedReasons: row.unlistedReasons,
+          },
+          previewChannel,
+        ),
+      );
+    } catch (err) {
+      setPreview(null);
+      setPreviewError(
+        err instanceof Error ? err.message : "draft composition failed",
+      );
+    }
+    handleTabChange("marketing-draft-preview");
+  }
+
+  function handleSubscribe() {
+    // The hub's selling load opens on tab visit (see the effect below).
+    handleTabChange("selling-options");
+  }
+
   return (
     <PageTemplate
       title="Product Hub"
-      scopeNote="The product catalog, selling options, product and version configuration, and free-run allowances — one hub."
+      scopeNote="The product catalog, selling options, marketing draft previews, product and version configuration, and free-run allowances — one hub."
     >
       <PageSection>
         <Tabs<ProductHubTab>
@@ -131,7 +186,10 @@ export function ProductHub() {
           retain
         >
           <ErrorBoundary label="Products panel">
-            <ProductCatalogPanel tabParam="productTab" />
+            <ProductCatalogPanel
+              onSubscribe={handleSubscribe}
+              onPreviewDraft={handlePreviewDraft}
+            />
           </ErrorBoundary>
         </TabPanel>
       )}
@@ -147,6 +205,24 @@ export function ProductHub() {
             <SellingSection
               products={sellingProducts}
               openSignal={sellingOpenRequest}
+            />
+          </ErrorBoundary>
+        </TabPanel>
+      )}
+
+      {visitedTabs.has("marketing-draft-preview") && (
+        <TabPanel
+          idBase="product-hub"
+          tabId="marketing-draft-preview"
+          active={activeTab === "marketing-draft-preview"}
+          retain
+        >
+          <ErrorBoundary label="Marketing draft preview panel">
+            <MarketingDraftPreviewSection
+              channel={previewChannel}
+              preview={preview}
+              previewError={previewError}
+              onChannelChange={setPreviewChannel}
             />
           </ErrorBoundary>
         </TabPanel>

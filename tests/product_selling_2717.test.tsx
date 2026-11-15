@@ -37,7 +37,8 @@ import {
   type SellingPlanInput,
   type SubscriptionRowInput,
 } from "../src/data/productSelling";
-import { ProductCatalogPanel } from "../src/client/ProductCatalogPanel";
+import { SellingSection } from "../src/client/ProductCatalogPanel";
+import type { CatalogDisplayEntry } from "../src/data/productMarketing";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -306,9 +307,6 @@ describe("selling panel section (#2717)", () => {
     container?.remove();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    // Issue #4511 — the sub-tabs are URL-synced; reset the URL so a
-    // tab change in one test never leaks into the next test's mount.
-    window.history.pushState(null, "", "/");
   });
 
   function buttonByText(text: string): HTMLButtonElement {
@@ -317,35 +315,31 @@ describe("selling panel section (#2717)", () => {
     return found as HTMLButtonElement;
   }
 
-  /** Issue #4511 — the SellingSection lives in the "Selling options"
-   *  sub-tab; open that tab before reaching the section. */
-  function tabButton(label: string): HTMLButtonElement {
-    const found = Array.from(container.querySelectorAll('button[role="tab"]')).find((b) =>
-      (b.textContent ?? "").includes(label),
-    );
-    if (!found) throw new Error(`tab not found: ${label}`);
-    return found as HTMLButtonElement;
-  }
-
-  async function openSellingTab() {
-    await act(async () => {
-      tabButton("Selling options").click();
-    });
-    await flush();
-  }
-
-  async function renderPanel(fetchImpl: (url: string, init?: RequestInit) => Promise<unknown>) {
+  /** Issue #4582 — render the SellingSection directly with the catalog
+   *  products as its prop (in production the Product Hub fetches the
+   *  catalog once and passes it here for its Selling options tab). */
+  async function renderSelling(fetchImpl: (url: string, init?: RequestInit) => Promise<unknown>) {
     vi.stubGlobal("fetch", vi.fn(fetchImpl));
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root.render(<ProductCatalogPanel />);
+      root.render(<SellingSection products={CATALOG_FIXTURE} openSignal={0} />);
     });
     await flush();
   }
 
-  const CATALOG_FIXTURE = [
+  /** Issue #4582 — open the section with its own button (no catalog
+   *  sub-tab to click through first). */
+  async function openSelling(fetchImpl: (url: string, init?: RequestInit) => Promise<unknown>) {
+    await renderSelling(fetchImpl);
+    await act(async () => {
+      buttonByText("Show selling options").click();
+    });
+    await flush();
+  }
+
+  const CATALOG_FIXTURE: CatalogDisplayEntry[] = [
     {
       id: "options:PayPerUse", family: "options", tier: "PayPerUse",
       canonicalName: "Options Screener", servingAgent: "trading",
@@ -379,7 +373,6 @@ describe("selling panel section (#2717)", () => {
       seen.push({ url, method: init?.method ?? "GET" });
       const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
       const err = (status: number) => ({ ok: false, status, json: async () => ({ error: "typed" }) });
-      if (url === "/api/products/catalog") return ok({ products: CATALOG_FIXTURE });
       if (url === "/api/payments/agentic/commercial/identity") {
         return ok({ userLogin: "owner", tenantId: null, hasAccount: true, tier: "Free", creditsUSD: 0, includedRunsRemaining: 0 });
       }
@@ -419,11 +412,10 @@ describe("selling panel section (#2717)", () => {
 
   it("loads selling state on demand and shows tier, plans, and the credits reason", async () => {
     const { impl, seen } = sellingFetch();
-    await renderPanel(impl);
-    // Selling reads happen only when the user asks — Phase 4's catalog-only
-    // fetch contract is untouched until then.
-    expect(seen.map((s) => s.url)).toEqual(["/api/products/catalog"]);
-    await openSellingTab();
+    await renderSelling(impl);
+    // Selling reads happen only when the user asks — the section reads
+    // nothing on mount (it receives the catalog products as a prop).
+    expect(seen.map((s) => s.url)).toEqual([]);
     await act(async () => {
       buttonByText("Show selling options").click();
     });
@@ -453,12 +445,7 @@ describe("selling panel section (#2717)", () => {
       return impl(url, init);
     };
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
-    await renderPanel(wrapped);
-    await openSellingTab();
-    await act(async () => {
-      buttonByText("Show selling options").click();
-    });
-    await flush();
+    await openSelling(wrapped);
     await act(async () => {
       buttonByText("Start checkout").click();
     });
@@ -476,12 +463,7 @@ describe("selling panel section (#2717)", () => {
   it("mint 503 fails closed with a typed message and opens nothing", async () => {
     const { impl } = sellingFetch({ mintStatus: 503 });
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
-    await renderPanel(impl);
-    await openSellingTab();
-    await act(async () => {
-      buttonByText("Show selling options").click();
-    });
-    await flush();
+    await openSelling(impl);
     await act(async () => {
       buttonByText("Start checkout").click();
     });
@@ -499,12 +481,7 @@ describe("selling panel section (#2717)", () => {
   it("confirm 402 fails closed: nothing activated", async () => {
     const { impl } = sellingFetch({ purchaseStatus: 402 });
     vi.spyOn(window, "open").mockImplementation(() => null);
-    await renderPanel(impl);
-    await openSellingTab();
-    await act(async () => {
-      buttonByText("Show selling options").click();
-    });
-    await flush();
+    await openSelling(impl);
     await act(async () => {
       buttonByText("Start checkout").click();
     });
@@ -517,25 +494,6 @@ describe("selling panel section (#2717)", () => {
     expect(text).toMatch(/not verified/);
   });
 
-  it("subscription rows offer Subscribe into the Selling flow, never the View-plans dead end", async () => {
-    const { impl, seen } = sellingFetch();
-    await renderPanel(impl);
-    await flush();
-    const before = container.textContent ?? "";
-    expect(before).toContain("Stock Screener");
-    expect(before).not.toContain("View plans");
-    // The PayPerUse row keeps its gate link; the Subscribed row gets the action.
-    const purchaseLink = container.querySelector('a[href="/api/premium/options-scan"]');
-    expect(purchaseLink).not.toBeNull();
-    await act(async () => {
-      buttonByText("Subscribe").click();
-    });
-    await flush();
-    const after = container.textContent ?? "";
-    expect(after).toContain("Pro");
-    expect(seen.map((s) => s.url)).toContain("/api/payments/agentic/commercial/identity");
-  });
-
   it("points a current subscription at Checkout to manage or cancel it (#2669)", async () => {
     const activeSub = {
       userId: "owner",
@@ -544,12 +502,7 @@ describe("selling panel section (#2717)", () => {
       subscriptions: [billingRow({})],
     };
     const { impl } = sellingFetch({ subscription: activeSub });
-    await renderPanel(impl);
-    await openSellingTab();
-    await act(async () => {
-      buttonByText("Show selling options").click();
-    });
-    await flush();
+    await openSelling(impl);
     const link = container.querySelector('a[href="?tab=checkout&checkoutTab=subscriptions"]');
     expect(link).not.toBeNull();
     expect(link?.textContent).toContain("Manage or cancel");
@@ -557,12 +510,7 @@ describe("selling panel section (#2717)", () => {
 
   it("shows no manage-or-cancel link without a current subscription (#2669)", async () => {
     const { impl } = sellingFetch();
-    await renderPanel(impl);
-    await openSellingTab();
-    await act(async () => {
-      buttonByText("Show selling options").click();
-    });
-    await flush();
+    await openSelling(impl);
     expect(container.querySelector('a[href="?tab=checkout&checkoutTab=subscriptions"]')).toBeNull();
   });
 });

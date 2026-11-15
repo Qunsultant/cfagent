@@ -28,7 +28,6 @@ import { TextInput } from "./components/ui/TextInput";
 import { Table, type TableColumn } from "./components/ui/Table";
 import { AmbientOfferCompare, type PlanChoice } from "./PlanCompare";
 import {
-  composeMarketingDraft,
   TEASER_CANDIDATE_CAP,
   type CatalogDisplayEntry,
   type MarketingChannel,
@@ -52,24 +51,15 @@ import {
 } from "./firstRunApi";
 import { trialEndedMessage } from "../services/trialSubscriptionActivation";
 import { csrfHeaders } from "./apiFetch";
-import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
-import { Tabs, TabPanel, type TabOption } from "./components/ui/Tabs";
-
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 const SELLING_BASE = COMMERCIAL_API_BASE;
 
-/** Issue #4511 — Products sub-tabs: the catalog view and the selling
- *  options view, URL-synced on the shared "view" param. Issue #4530 —
- *  the marketing draft preview is its own sub-tab. */
-export type ProductCatalogTab = "catalog" | "selling-options" | "marketing-draft-preview";
-const PRODUCT_CATALOG_TABS: TabOption<ProductCatalogTab>[] = [
-  { id: "catalog", label: "Catalog" },
-  { id: "selling-options", label: "Selling options" },
-  { id: "marketing-draft-preview", label: "Marketing draft preview" },
-];
-function isProductCatalogTab(value: unknown): value is ProductCatalogTab {
-  return value === "catalog" || value === "selling-options" || value === "marketing-draft-preview";
-}
+/** Issue #4582 — the Products panel is catalog-only (no sub-tabs):
+ *  "Catalog" duplicated the Products hub tab and "Selling options"
+ *  duplicated the Selling options hub tab, and Marketing draft preview
+ *  moved up to a hub tab. The panel renders the catalog table +
+ *  Teaser rules directly. Subscribe and Preview draft are callbacks
+ *  the hub owns (see ProductCatalogPanel's props). */
 
 const pageWrapperStyle: React.CSSProperties = {
   padding: "var(--space-4)",
@@ -1066,29 +1056,20 @@ function parityTone(
 
 export function ProductCatalogPanel({
   /**
-   * Issue #4530 — the query param this panel's sub-tabs sync on. The panel
-   * used `view` while it WAS the standalone products page; inside the hub,
-   * `view` is the HUB's tab, so sharing it made a sub-tab click (e.g.
-   * "Selling options") also switch the hub tab. The hub passes its own
-   * nested param and the collision is gone.
+   * Issue #4582 — the hub owns these: Subscribe switches the hub to its
+   * Selling options tab (the hub's selling load opens on tab visit), and
+   * Preview draft composes the draft and switches the hub to its
+   * Marketing draft preview tab. The panel itself has no sub-tabs and
+   * keeps no selling/preview state.
    */
-  tabParam = "view",
-}: { tabParam?: string } = {}) {
+  onSubscribe,
+  onPreviewDraft,
+}: {
+  onSubscribe: () => void;
+  onPreviewDraft: (row: CatalogDisplayEntry) => void;
+}) {
   const [products, setProducts] = useState<CatalogDisplayEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [channel, setChannel] = useState<MarketingChannel>("facebook");
-  const [preview, setPreview] = useState<MarketingDraft | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [sellingOpenRequest, setSellingOpenRequest] = useState(0);
-  // Issue #4511 — Selling options is a sub-tab (URL-synced, default
-  // "catalog"); the selling reads still happen only on demand.
-  // Issue #4530 — the param is a prop: standalone `view`, nested inside the
-  // hub `productTab`, so the two tab levels never read each other's value.
-  const { activeTab, visitedTabs, handleTabChange } = useUrlSyncedTabs<ProductCatalogTab>({
-    param: tabParam,
-    isValid: isProductCatalogTab,
-    defaultTab: "catalog",
-  });
 
   useEffect(() => {
     let cancelled = false;
@@ -1138,10 +1119,9 @@ export function ProductCatalogPanel({
           <Button
             variant="secondary"
             onClick={() => {
-              // Issue #4511 — Subscribe switches to the Selling options
-              // sub-tab as well as opening the selling flow.
-              handleTabChange("selling-options");
-              setSellingOpenRequest((n) => n + 1);
+              // Issue #4582 — Subscribe switches the hub to its Selling
+              // options tab; the hub's selling load opens on tab visit.
+              onSubscribe();
             }}
           >
             Subscribe
@@ -1160,29 +1140,9 @@ export function ProductCatalogPanel({
           <Button
             variant="secondary"
             onClick={() => {
-              try {
-                setPreviewError(null);
-                setPreview(
-                  composeMarketingDraft(
-                    {
-                      id: row.id,
-                      canonicalName: row.canonicalName,
-                      priceUSD: row.priceUSD,
-                      listed: row.listed,
-                      unlistedReasons: row.unlistedReasons,
-                    },
-                    channel,
-                  ),
-                );
-              } catch (err) {
-                setPreview(null);
-                setPreviewError(
-                  err instanceof Error ? err.message : "draft composition failed",
-                );
-              }
-              // Issue #4530 — the preview lives on its own sub-tab now;
-              // composing a draft opens that tab (the error, if any, shows there).
-              handleTabChange("marketing-draft-preview");
+              // Issue #4582 — the hub composes the draft and switches to
+              // its Marketing draft preview tab (the error, if any, shows there).
+              onPreviewDraft(row);
             }}
           >
             Preview draft
@@ -1205,20 +1165,7 @@ export function ProductCatalogPanel({
         emptyTitle="No products registered"
         emptyDescription="The catalog has no entries yet."
       >
-        <Tabs<ProductCatalogTab>
-          idBase="products"
-          ariaLabel="Product catalog sections"
-          tabs={PRODUCT_CATALOG_TABS}
-          value={activeTab}
-          onChange={handleTabChange}
-        />
-        <TabPanel
-          idBase="products"
-          tabId="catalog"
-          active={activeTab === "catalog"}
-          retain={visitedTabs.has("catalog")}
-        >
-          <PageSection title="Catalog">
+        <PageSection title="Catalog">
           <Table
             columns={columns}
             rows={products ?? []}
@@ -1242,68 +1189,75 @@ export function ProductCatalogPanel({
             </Notice>
           </Card>
         </PageSection>
-        </TabPanel>
-        <TabPanel
-          idBase="products"
-          tabId="selling-options"
-          active={activeTab === "selling-options"}
-          retain={visitedTabs.has("selling-options")}
-        >
-          <SellingSection products={products} openSignal={sellingOpenRequest} />
-        </TabPanel>
-        <TabPanel
-          idBase="products"
-          tabId="marketing-draft-preview"
-          active={activeTab === "marketing-draft-preview"}
-          retain={visitedTabs.has("marketing-draft-preview")}
-        >
-          <PageSection
-            title="Marketing draft preview"
-            description="Compose channel-formatted promotional snippets directly from catalog records."
-          >
-            <div style={channelSelectWrapperStyle}>
-              <FieldShell id="marketing-channel" label="Channel">
-                <Select
-                  id="marketing-channel"
-                  aria-label="Marketing channel"
-                  value={channel}
-                  onChange={(event) =>
-                    setChannel(event.target.value as MarketingChannel)
-                  }
-                >
-                  <option value="facebook">Facebook</option>
-                  <option value="instagram">Instagram</option>
-                  <option value="threads">Threads</option>
-                  <option value="slack">Slack</option>
-                </Select>
-              </FieldShell>
-            </div>
-            {previewError && (
-              <Notice tone="danger" title="Draft Composition Error">
-                {previewError}
-              </Notice>
-            )}
-            {preview && (
-              <Card>
-                <div style={cardHeaderRowStyle}>
-                  <h4 style={cardTitleStyle}>Draft Preview</h4>
-                  <Badge tone="accent">{channel.toUpperCase()}</Badge>
-                </div>
-                <div style={draftBoxStyle}>
-                  <pre style={draftTextStyle}>{preview.text}</pre>
-                </div>
-                <Notice tone="warning" title="Publication Guardrail">
-                  Draft only — not published. Publishing requires owner approval.
-                </Notice>
-                {preview.citationOmittedReason && (
-                  <p style={detailMutedTextStyle}>Citation omitted: {preview.citationOmittedReason}</p>
-                )}
-                {preview.truncated && <Notice tone="neutral">Draft truncated to the channel limit.</Notice>}
-              </Card>
-            )}
-          </PageSection>
-        </TabPanel>
       </PageShell>
     </div>
+  );
+}
+
+/**
+ * Issue #4582 — the Marketing draft preview panel, moved out of the
+ * catalog panel's sub-tab and mounted by the Product Hub as its own
+ * hub tab. Composition state (channel / preview / error) lives in the
+ * hub; this section only renders it. Preview is composition only: no
+ * draft is stored, sent, or posted, and the preview states that
+ * publishing requires owner approval.
+ */
+export function MarketingDraftPreviewSection({
+  channel,
+  preview,
+  previewError,
+  onChannelChange,
+}: {
+  channel: MarketingChannel;
+  preview: MarketingDraft | null;
+  previewError: string | null;
+  onChannelChange: (channel: MarketingChannel) => void;
+}) {
+  return (
+    <PageSection
+      title="Marketing draft preview"
+      description="Compose channel-formatted promotional snippets directly from catalog records."
+    >
+      <div style={channelSelectWrapperStyle}>
+        <FieldShell id="marketing-channel" label="Channel">
+          <Select
+            id="marketing-channel"
+            aria-label="Marketing channel"
+            value={channel}
+            onChange={(event) =>
+              onChannelChange(event.target.value as MarketingChannel)
+            }
+          >
+            <option value="facebook">Facebook</option>
+            <option value="instagram">Instagram</option>
+            <option value="threads">Threads</option>
+            <option value="slack">Slack</option>
+          </Select>
+        </FieldShell>
+      </div>
+      {previewError && (
+        <Notice tone="danger" title="Draft Composition Error">
+          {previewError}
+        </Notice>
+      )}
+      {preview && (
+        <Card>
+          <div style={cardHeaderRowStyle}>
+            <h4 style={cardTitleStyle}>Draft Preview</h4>
+            <Badge tone="accent">{channel.toUpperCase()}</Badge>
+          </div>
+          <div style={draftBoxStyle}>
+            <pre style={draftTextStyle}>{preview.text}</pre>
+          </div>
+          <Notice tone="warning" title="Publication Guardrail">
+            Draft only — not published. Publishing requires owner approval.
+          </Notice>
+          {preview.citationOmittedReason && (
+            <p style={detailMutedTextStyle}>Citation omitted: {preview.citationOmittedReason}</p>
+          )}
+          {preview.truncated && <Notice tone="neutral">Draft truncated to the channel limit.</Notice>}
+        </Card>
+      )}
+    </PageSection>
   );
 }

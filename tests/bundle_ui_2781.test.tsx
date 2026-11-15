@@ -2,23 +2,27 @@
 /**
  * Issue #2781 (Monetization Phase 2.15) — bundle Selling UI.
  *
- * The ProductCatalogPanel's Selling section lists bundle offers through
+ * The SellingSection lists bundle offers through
  * the same mint → confirm-by-retrieve shape as plans, and renders owned
  * bundles with their live entitlements. Harness mirrors the selling
  * panel section in tests/product_selling_2717.test.tsx (fetch stubbed,
  * real React render). The bundles read is best-effort: a bundles fetch
  * failure shows no bundles rather than blocking the plan flow.
+ * Issue #4582 — the section is rendered directly here (in production
+ * the Product Hub mounts it for its Selling options tab); the catalog
+ * panel no longer mounts it.
  */
 import { describe, expect, it, afterEach, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { ProductCatalogPanel } from "../src/client/ProductCatalogPanel";
+import { SellingSection } from "../src/client/ProductCatalogPanel";
+import type { CatalogDisplayEntry } from "../src/data/productMarketing";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 const NOW = 1_800_000_000_000;
 
-const CATALOG_FIXTURE = [
+const CATALOG_FIXTURE: CatalogDisplayEntry[] = [
   {
     id: "options:PayPerUse", family: "options", tier: "PayPerUse",
     canonicalName: "Options Screener", servingAgent: "trading",
@@ -65,9 +69,6 @@ describe("bundle selling panel (#2781)", () => {
     container?.remove();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    // Issue #4511 — the sub-tabs are URL-synced; reset the URL so a
-    // tab change in one test never leaks into the next test's mount.
-    window.history.pushState(null, "", "/");
   });
 
   function buttonByText(text: string): HTMLButtonElement {
@@ -76,13 +77,16 @@ describe("bundle selling panel (#2781)", () => {
     return found as HTMLButtonElement;
   }
 
-  async function renderPanel(fetchImpl: (url: string, init?: RequestInit) => Promise<unknown>) {
+  /** Issue #4582 — render the SellingSection directly with the catalog
+   *  products as its prop (in production the Product Hub fetches the
+   *  catalog once and passes it here for its Selling options tab). */
+  async function renderSelling(fetchImpl: (url: string, init?: RequestInit) => Promise<unknown>) {
     vi.stubGlobal("fetch", vi.fn(fetchImpl));
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root.render(<ProductCatalogPanel />);
+      root.render(<SellingSection products={CATALOG_FIXTURE} openSignal={0} />);
     });
     await flush();
   }
@@ -101,7 +105,6 @@ describe("bundle selling panel (#2781)", () => {
       seen.push({ url, method: init?.method ?? "GET" });
       const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
       const err = (status: number) => ({ ok: false, status, json: async () => ({ error: "typed" }) });
-      if (url === "/api/products/catalog") return ok({ products: CATALOG_FIXTURE });
       if (url === "/api/payments/agentic/commercial/identity") {
         return ok({ userLogin: "owner", tenantId: null, hasAccount: true, tier: "Free", creditsUSD: 0, includedRunsRemaining: 0 });
       }
@@ -146,18 +149,10 @@ describe("bundle selling panel (#2781)", () => {
     return { impl, seen };
   }
 
-  /** Issue #4511 — the SellingSection lives in the "Selling options"
-   *  sub-tab; open that tab before reaching the section. */
+  /** Issue #4582 — the SellingSection is rendered directly, so open it
+   *  with its own button (no catalog sub-tab to click through first). */
   async function openSelling(impl: (url: string, init?: RequestInit) => Promise<unknown>) {
-    await renderPanel(impl);
-    await act(async () => {
-      const tab = Array.from(container.querySelectorAll('button[role="tab"]')).find((b) =>
-        (b.textContent ?? "").includes("Selling options"),
-      );
-      if (!tab) throw new Error("tab not found: Selling options");
-      (tab as HTMLButtonElement).click();
-    });
-    await flush();
+    await renderSelling(impl);
     await act(async () => {
       buttonByText("Show selling options").click();
     });

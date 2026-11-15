@@ -8,20 +8,24 @@
  * StockHub/OptionsHub pattern (visitedTabs gating: a tab's panel mounts
  * only after it is visited).
  *
- * Final scope (owner, 2026-11-14): FOUR hub tabs — Products (catalog),
- * Selling options, Admin Products, Free Runs. Billing, Checkout,
- * Payments, Orders, Ledger, and Revenue stay standalone and are NOT
- * hub tabs. The hub REPLACES the standalone product pages: the
- * product-domain URLs redirect to their hub tabs (see
- * product_hub_redirect_4530.test.ts).
+ * Final scope (owner, 2026-11-14): FIVE hub tabs — Products (catalog),
+ * Selling options, Marketing draft preview, Admin Products, Free Runs.
+ * Billing, Checkout, Payments, Orders, Ledger, and Revenue stay
+ * standalone and are NOT hub tabs. The hub REPLACES the standalone
+ * product pages: the product-domain URLs redirect to their hub tabs
+ * (see product_hub_redirect_4530.test.ts).
  *
- * The panels are reused, not rebuilt: ProductCatalogPanel (Products
- * tab), the exported SellingSection (Selling options tab),
- * ProductsSection (Admin Products tab), FreeRunAllowanceSection
- * (Free Runs tab). The hub tab IS the demand for the selling load:
- * visiting the Selling options hub tab opens the selling flow (the
- * Products page keeps its own on-demand button contract — see
- * product_catalog_subtabs_4511.test.tsx).
+ * Issue #4582 — just one of everything: the Products tab shows the
+ * catalog directly with NO sub-tab row (the catalog sub-tabs duplicated
+ * the hub tabs), and Marketing draft preview is a hub tab of its own
+ * instead of a nested sub-tab. The panels are reused, not rebuilt:
+ * ProductCatalogPanel (Products tab), the exported SellingSection
+ * (Selling options tab), MarketingDraftPreviewSection (Marketing draft
+ * preview tab), ProductsSection (Admin Products tab),
+ * FreeRunAllowanceSection (Free Runs tab). The hub tab IS the demand
+ * for the selling load: visiting the Selling options hub tab opens
+ * the selling flow (the Products page keeps its own on-demand button
+ * contract — see product_catalog_subtabs_4511.test.tsx).
  */
 import { describe, expect, it, afterEach, vi } from "vitest";
 import React, { act } from "react";
@@ -127,16 +131,36 @@ function hubTabLabels(): string[] {
   ).map((b) => (b.textContent ?? "").trim());
 }
 
+function buttonByText(text: string): HTMLButtonElement {
+  const found = Array.from(container.querySelectorAll("button")).find((b) =>
+    (b.textContent ?? "").includes(text),
+  );
+  if (!found) throw new Error(`button not found: ${text}`);
+  return found as HTMLButtonElement;
+}
+
 function text(): string {
   return container.textContent ?? "";
 }
 
 describe("Product Hub (#4530)", () => {
-  it("has exactly four tabs in order: Products, Selling options, Admin Products, Free Runs", async () => {
-    expect(PRODUCT_HUB_TABS).toEqual(["products", "selling-options", "admin-products", "free-runs"]);
+  it("has exactly five tabs in order: Products, Selling options, Marketing draft preview, Admin Products, Free Runs", async () => {
+    expect(PRODUCT_HUB_TABS).toEqual([
+      "products",
+      "selling-options",
+      "marketing-draft-preview",
+      "admin-products",
+      "free-runs",
+    ]);
     const { impl } = hubFetch();
     await renderHub(impl);
-    expect(hubTabLabels()).toEqual(["Products", "Selling options", "Admin Products", "Free Runs"]);
+    expect(hubTabLabels()).toEqual([
+      "Products",
+      "Selling options",
+      "Marketing draft preview",
+      "Admin Products",
+      "Free Runs",
+    ]);
   });
 
   it("defaults to the Products tab and mounts the catalog; other panels are not mounted", async () => {
@@ -149,7 +173,18 @@ describe("Product Hub (#4530)", () => {
     expect(text()).not.toContain("Show selling options");
     expect(text()).not.toContain("Free-run allowance (operator)");
     expect(text()).not.toContain("Create product");
+    expect(container.querySelector('select[aria-label="Marketing channel"]')).toBeNull();
     expect(seen.map((s) => s.url)).toEqual(["/api/products/catalog"]);
+  });
+
+  it("the Products tab shows the catalog with NO sub-tab row", async () => {
+    // #4582 — just one of everything: the catalog sub-tabs duplicated
+    // the hub tabs, so the Products tab has no sub-tabs of its own.
+    const { impl } = hubFetch();
+    await renderHub(impl);
+    expect(container.querySelector('[id^="products-tab-"]')).toBeNull();
+    expect(text()).toContain("Options Screener");
+    expect(text()).toContain("Teaser Rule B1");
   });
 
   it("switching to Selling options mounts the selling section and opens the selling flow; switching back restores the catalog", async () => {
@@ -183,6 +218,46 @@ describe("Product Hub (#4530)", () => {
     expect(seen.filter((s) => s.url === "/api/products/catalog").length).toBe(2);
   });
 
+  it("switching to Marketing draft preview mounts the preview panel", async () => {
+    const { impl } = hubFetch();
+    await renderHub(impl);
+    await act(async () => {
+      hubTabButton("marketing-draft-preview").click();
+    });
+    await flush();
+    expect(hubTabButton("marketing-draft-preview").getAttribute("aria-selected")).toBe("true");
+    expect(window.location.search).toContain("view=marketing-draft-preview");
+    expect(text()).toContain("Compose channel-formatted");
+    expect(container.querySelector('select[aria-label="Marketing channel"]')).not.toBeNull();
+  });
+
+  it("Preview draft in the catalog composes and switches the HUB to the preview tab", async () => {
+    const { impl } = hubFetch();
+    await renderHub(impl);
+    await act(async () => {
+      buttonByText("Preview draft").click();
+    });
+    await flush();
+    expect(hubTabButton("marketing-draft-preview").getAttribute("aria-selected")).toBe("true");
+    expect(window.location.search).toContain("view=marketing-draft-preview");
+    expect(window.location.search).not.toContain("productTab=");
+    expect(text()).toContain("Draft Preview");
+    expect(container.querySelector('select[aria-label="Marketing channel"]')).not.toBeNull();
+  });
+
+  it("Subscribe in the catalog switches the HUB to the selling-options tab and opens the selling flow", async () => {
+    const { impl, seen } = hubFetch();
+    await renderHub(impl);
+    await act(async () => {
+      buttonByText("Subscribe").click();
+    });
+    await flush();
+    expect(hubTabButton("selling-options").getAttribute("aria-selected")).toBe("true");
+    expect(window.location.search).toContain("view=selling-options");
+    expect(text()).toContain("Pro");
+    expect(seen.map((s) => s.url)).toContain("/api/payments/agentic/commercial/identity");
+  });
+
   it("switching to Admin Products mounts ProductsSection with its sub-tabs", async () => {
     const { impl, seen } = hubFetch();
     await renderHub(impl);
@@ -212,6 +287,7 @@ describe("Product Hub (#4530)", () => {
 
   it.each([
     ["selling-options", "Pro"],
+    ["marketing-draft-preview", "Compose channel-formatted"],
     ["admin-products", "Create product"],
     ["free-runs", "Free-run allowance (operator)"],
   ])("a ?tab=product-hub&view=%s URL opens that tab on mount", async (view, marker) => {
@@ -228,39 +304,15 @@ describe("Product Hub (#4530)", () => {
     expect(text()).toContain("Options Screener");
   });
 
-  it("a catalog sub-tab click moves the SUB-tab, never the hub tab", async () => {
-    // #4530: the embedded catalog panel syncs on its own `productTab` param.
-    // When it shared `view` with the hub, clicking "Selling options" inside
-    // the catalog also switched the HUB to its Selling tab — two tab levels
-    // reading one value.
+  it("a stale nested productTab param is ignored by the hub; the catalog shows", async () => {
+    // #4582 — the nested `productTab` mechanism is gone, so the hub
+    // ignores the param (the redirect in Chat routes a bookmarked
+    // nested address to the preview tab; this pins the hub itself
+    // never reading it).
     const { impl } = hubFetch();
-    await renderHub(impl, "/?tab=product-hub&view=products");
-    const sellingSubTab = container.querySelector('#products-tab-selling-options');
-    expect(sellingSubTab, "catalog Selling options sub-tab").toBeTruthy();
-    await act(async () => {
-      (sellingSubTab as HTMLButtonElement).click();
-    });
-    await flush();
-    expect(window.location.search).toContain("productTab=selling-options");
-    expect(window.location.search).toContain("view=products");
+    await renderHub(impl, "/?tab=product-hub&view=products&productTab=marketing-draft-preview");
     expect(hubTabButton("products").getAttribute("aria-selected")).toBe("true");
-    expect(hubTabButton("selling-options").getAttribute("aria-selected")).toBe("false");
-  });
-
-  it("a nested deep link opens the catalog's Marketing draft preview sub-tab", async () => {
-    const { impl } = hubFetch();
-    await renderHub(
-      impl,
-      "/?tab=product-hub&view=products&productTab=marketing-draft-preview",
-    );
-    expect(hubTabButton("products").getAttribute("aria-selected")).toBe("true");
-    // The sub-tab is the selected one and its own panel is rendered.
-    expect(
-      container.querySelector('#products-tab-marketing-draft-preview')?.getAttribute("aria-selected"),
-    ).toBe("true");
-    // The sub-tab's own panel is mounted and shows its form, not the catalog table.
-    expect(container.querySelector('#products-panel-marketing-draft-preview')?.textContent ?? "").toContain(
-      "Compose channel-formatted",
-    );
+    expect(text()).toContain("Options Screener");
+    expect(container.querySelector('[id^="products-tab-"]')).toBeNull();
   });
 });
