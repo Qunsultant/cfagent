@@ -197,13 +197,26 @@ function stripComments(src: string): string {
   return out;
 }
 const STRIPPED = new Map(SRC_FILES.map((f) => [f, stripComments(TEXT.get(f)!)]));
-const SETTINGS_ADAPTER = "src/data/doSqliteOrmAdapters.ts";
 
 describe("G-7 ownership: one writer, one ensurer", () => {
   it("mas_settings value writers in src/ are exactly the settings adapter", () => {
+    // #4386 (P6c): the settings writes are repository entries in
+    // the DO DML catalogue — there is no mas_settings write
+    // STATEMENT anywhere in src/ (the old detector finds []),
+    // and the mas_settings codes are referenced (as executor
+    // calls) only from the settings adapter, registered only in
+    // the catalogue. The adapter remains the only writer; only
+    // the mechanism moved.
     const re = /(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+mas_settings(?![\w])/gi;
-    const actual = SRC_FILES.filter((f) => re.test(STRIPPED.get(f)!)).sort();
-    expect(actual).toEqual([SETTINGS_ADAPTER]);
+    const statementWriters = SRC_FILES.filter((f) => re.test(STRIPPED.get(f)!)).sort();
+    expect(statementWriters).toEqual([]);
+    const codeRefs = SRC_FILES.filter((f) =>
+      STRIPPED.get(f)!.includes("dml.do.mas_settings."),
+    ).sort();
+    expect(codeRefs).toEqual([
+      "src/data/doSqliteOrmAdapters.ts",
+      "src/data/schemaComponent/doDmlEntries.ts",
+    ]);
   });
 
   it("mas_settings DDL ensurers in src/ are exactly the settings adapter", () => {
@@ -238,7 +251,9 @@ describe("step-4g family census (surface-1 pattern, exact counts)", () => {
     // lift's SQL moved to SqlLegacyChatStore — 3 -> 0.
     ["src/agents/orchestrator.ts", 0],
     // In-layer homes after the move:
-    ["src/data/doSqliteOrmAdapters.ts", 17],
+    // 1 since #4386 (P6c): all 16 DML statements moved into the
+    // DO DML catalogue — only ensureSchema's DDL exec remains.
+    ["src/data/doSqliteOrmAdapters.ts", 1],
     ["src/data/doSqliteStrategyWeightsAdapter.ts", 11],
     // 2 since #4385: the adapter's 3 DML statements moved into
     // the DO DML catalogue; the CREATE TABLE + CREATE INDEX DDL
