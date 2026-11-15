@@ -12,7 +12,7 @@ import { ETradeTradingHub } from "./ETradeTradingHub";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { FirstRunGate } from "./FirstRunGate";
 import { BrokerDynamicMenu, SettingsMenu, type BrokerDynamicMenuProps, type ETradeDynamicMenuProps } from "./BrokerDynamicMenu";
-import { useBrokerEnvironment, switchBrokerEnvironment, fetchBrokerEnvironment } from "./brokerEnvironment";
+import { useBrokerEnvironment, switchBrokerEnvironment, fetchBrokerEnvironment, brokerModeLabel } from "./brokerEnvironment";
 import { MarketDataResearchHub } from "./MarketDataResearchHub";
 import { OptionsFlowsHub } from "./options/flows";
 import { OptionsScreenerPage } from "./OptionsScreenerPage";
@@ -1337,7 +1337,7 @@ export function Chat({ user }: { user: User }) {
                 <span className="crumb-module">{getCrumb(tab)}</span>
                 <span className="crumb-divider">{" / "}</span>
                 <span className="crumb-subtitle top-nav-control">
-                  {accountMode === "paper" ? "Paper" : "Live Execution"}
+                  {brokerModeLabel(selectedBrokerLabel, accountMode)}
                 </span>
               </div>
               <MarketStatusPill variant="sub-header" />

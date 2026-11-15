@@ -35,6 +35,15 @@ export function isBrokerEnvironment(value: unknown): value is BrokerEnvironment 
   return value === "TEST" || value === "PROD";
 }
 
+/**
+ * Issue #4587 — the top-left crumb shows broker + mode, never mode
+ * alone: "<broker> / Paper", "<broker> / Live Execution". The live
+ * word stays "Live Execution", the wording the crumb already used.
+ */
+export function brokerModeLabel(brokerLabel: string, accountMode: "paper" | "live"): string {
+  return `${brokerLabel} / ${accountMode === "paper" ? "Paper" : "Live Execution"}`;
+}
+
 /** Remove the pre-#2482 keys. Never read as authority again. */
 export function clearStaleBrokerEnvironmentKeys(): void {
   if (typeof window === "undefined") return;
