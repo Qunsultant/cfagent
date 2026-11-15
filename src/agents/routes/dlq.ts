@@ -95,7 +95,10 @@ export async function handleDlqRoutes(
 ): Promise<Response | null> {
   void url;
   void sessionId;
-  if (path.endsWith("/api/ops/dlq/records") && request.method === "GET") {
+  // Issue #4588: the Worker strips the /api prefix before forwarding
+  // to the DO (src/server/routes/core.ts), so match the stripped tail —
+  // endsWith on the tail also matches the unstripped form.
+  if (path.endsWith("/ops/dlq/records") && request.method === "GET") {
     const login = request.headers.get("x-user-login")?.trim() || null;
     if (!(await isDlqOperator(ctx.env, login))) {
       return new Response("Forbidden: store operator required.", { status: 403 });
@@ -124,7 +127,7 @@ export async function handleDlqRoutes(
     }
     return json({ records }, 200);
   }
-  if (path.endsWith("/api/ops/dlq/replay") && request.method === "POST") {
+  if (path.endsWith("/ops/dlq/replay") && request.method === "POST") {
     const login = request.headers.get("x-user-login")?.trim() || null;
     if (!(await isDlqOperator(ctx.env, login))) {
       return new Response("Forbidden: store operator required.", { status: 403 });
