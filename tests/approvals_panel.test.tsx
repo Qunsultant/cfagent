@@ -129,25 +129,28 @@ describe("Issue #1705 — Approvals surface composes the existing queues", () =>
     expect(gov.exemptions.find((e) => e.path === "src/client/ApprovalsPanel.tsx")).toBeUndefined();
   });
 
-  it("source pin: the Approvals tab is wired in the nav and the shell", () => {
-    // S1 (#1804/#1808): nav entries live in the central route table,
-    // now externalized in nav-config.json (issue #2977), and derive
-    // into NavigationMenu.
+  it("source pin: the Approvals queue lives on the order page, not a standalone tab (#4626)", () => {
+    // S1 #4626 retired the standalone Approvals tab onto the order
+    // page's approvals sub-tab: the route stays in the table
+    // (no-deletion) but carries no nav entry, Chat no longer mounts
+    // ApprovalsPanel, and the legacy address redirects to the sub-tab.
     const data = JSON.parse(readFileSync("src/client/nav-config.json", "utf8")) as {
       routes: { id: string; navEntry?: { label: string } }[];
     };
     const approvals = data.routes.find((r) => r.id === "approvals");
-    expect(approvals?.navEntry?.label).toBe("Approvals");
-    const nav = readFileSync("src/client/components/NavigationMenu.tsx", "utf8");
-    expect(nav).toContain("ROUTES");
-    expect(nav).toContain("DEFAULT_VISIBLE_NAV_TABS");
+    expect(approvals).toBeDefined();
+    expect(approvals?.navEntry).toBeUndefined();
+    const router = readFileSync("src/client/router.ts", "utf8");
+    expect(router).toContain('tab === "approvals"');
+    expect(router).toContain('orderTab: "approvals"');
+    const ticket = readFileSync("src/client/OrderTicketPanel.tsx", "utf8");
+    expect(ticket).toContain('tabId="approvals"');
+    expect(ticket).toContain("<TradingApprovalsQueue />");
     const chat = readFileSync("src/client/Chat.tsx", "utf8");
-    expect(chat).toContain('from "./ApprovalsPanel"');
-    expect(chat).toContain('approvals: (');
-    expect(chat).toContain("<ApprovalsPanel />");
+    expect(chat).not.toContain("ApprovalsPanel");
   });
 
-  it("source pin: the queue's only home is the Approvals page (#4538)", () => {
+  it("source pin: the queue's only home is the order page's approvals tab (#4538, #4626)", () => {
     const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
     expect(hub).not.toContain("TradingApprovalsQueue");
     const panel = readFileSync("src/client/ApprovalsPanel.tsx", "utf8");

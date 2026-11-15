@@ -30,8 +30,10 @@ describe("router param scoping (#3238)", () => {
     expect(buildSearchWithTab("?tab=autopilot&assetClass=options", "order")).toBe(
       "?tab=order&assetClass=options",
     );
+    // S1 #4626 retired the standalone risk-analysis tab: riskTab is
+    // owned by order now, so navigating to the retired address drops it.
     expect(buildSearchWithTab("?tab=autopilot&riskTab=anatomy", "risk-analysis")).toBe(
-      "?tab=risk-analysis&riskTab=anatomy",
+      "?tab=risk-analysis",
     );
     expect(buildSearchWithTab("?tab=autopilot&riskTab=anatomy", "order")).toBe(
       "?tab=order&riskTab=anatomy",
