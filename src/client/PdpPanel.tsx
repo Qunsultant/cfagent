@@ -15,11 +15,13 @@
  * policy is edited through the PAP proposals flow, and
  * OBLIGATION_POLICY is frozen (edit scope undecided, #2838 carry).
  *
- * Styling: no className tokens, no inline styles, no CSS imports —
- * the panel renders inside the hub's Card, so it stays invisible to
- * the #3047/#3136 bespoke-class gates by construction.
+ * Composed from ui/ primitives (ADR-0004): Stack for layout, Spinner
+ * for loading, Notice for the fail-closed warning, EmptyState for
+ * honest empty states. No bespoke className tokens, no inline
+ * styles, no CSS imports.
  */
 import { useEffect, useState } from "react";
+import { EmptyState, Notice, Spinner, Stack } from "./components/ui";
 import { fetchActivePolicy, type PolicySnapshotInfo } from "./policyProposalsApi";
 import { fetchPdpState, type PdpState } from "./pdpApi";
 
@@ -61,20 +63,25 @@ export function PdpPanel() {
   }, []);
 
   if (state.status === "loading") {
-    return <p>Loading policy state…</p>;
+    return (
+      <Stack>
+        <Spinner label="Loading policy state" />
+        <p>Loading policy state…</p>
+      </Stack>
+    );
   }
 
   if (state.status === "error") {
     const forbidden = /forbidden/i.test(state.message);
     return (
-      <div>
-        <p>
-          {forbidden
+      <EmptyState
+        title={
+          forbidden
             ? "Policy state is available to platform admins only."
-            : "The Policy Decision Point state could not be loaded."}
-        </p>
-        <p>{state.message}</p>
-      </div>
+            : "The Policy Decision Point state could not be loaded."
+        }
+        description={state.message}
+      />
     );
   }
 
@@ -85,82 +92,88 @@ export function PdpPanel() {
   );
 
   return (
-    <div>
-      <h3>Active policy</h3>
-      <p>Version: {active.version}</p>
-      <p>Source: {activeSource}</p>
-      {roles.length === 0 ? (
-        <p>No role grants in the active policy.</p>
-      ) : (
-        <ul>
-          {roles.map((role) => (
-            <li key={role}>
-              {role}:{" "}
-              {active.roleGrants[role].length === 0
-                ? "no permissions"
-                : active.roleGrants[role].join(", ")}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h3>Policy source</h3>
-      <p>Resolved source: {pdp.policySource.source}</p>
-      {pdp.policySource.invalid ? (
-        <p>
-          Warning: the platform policy switch is invalid — the PDP has failed
-          closed to the compiled policy. Check IAAA_PDP_POLICY_SOURCE and
-          IAAA_PDP_POLICY_SNAPSHOT_JSON.
-        </p>
-      ) : (
-        <p>
-          The platform policy switch is valid; the PDP decides from the{" "}
-          {pdp.policySource.source === "snapshot" ? "promoted snapshot" : "compiled policy"}.
-        </p>
-      )}
-
-      <h3>Obligations</h3>
-      <p>
-        Read-only: obligations attach to permissions in the frozen obligation
-        policy and cannot be edited on this tab.
-      </p>
-      {pdp.obligations.length === 0 ? (
-        <p>No obligations are declared.</p>
-      ) : (
-        <ul>
-          {pdp.obligations.map((entry) => {
-            const coverage = coverageByPermission.get(entry.permission);
-            return (
-              <li key={entry.permission}>
-                <p>{entry.permission}</p>
-                <p>
-                  Obligations:{" "}
-                  {entry.obligations.length === 0
-                    ? "none"
-                    : entry.obligations.join(", ")}
-                </p>
-                {entry.advice.map((a) => (
-                  <p key={a.kind}>{a.message}</p>
-                ))}
-                {coverage ? (
-                  <p>
-                    Coverage: {coverage.status}
-                    {coverage.status === "enforced" &&
-                    coverage.enforcementPoints.length > 0
-                      ? ` — enforced on ${coverage.enforcementPoints.join(", ")}`
-                      : ""}
-                    {coverage.status === "residual"
-                      ? " — the policy entry exists but no live enforcement point uses it yet"
-                      : ""}
-                  </p>
-                ) : (
-                  <p>Coverage: not reported for this permission.</p>
-                )}
+    <Stack gap="2">
+      <div>
+        <h3>Active policy</h3>
+        <p>Version: {active.version}</p>
+        <p>Source: {activeSource}</p>
+        {roles.length === 0 ? (
+          <EmptyState title="No role grants in the active policy." />
+        ) : (
+          <ul>
+            {roles.map((role) => (
+              <li key={role}>
+                {role}:{" "}
+                {active.roleGrants[role].length === 0
+                  ? "no permissions"
+                  : active.roleGrants[role].join(", ")}
               </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div>
+        <h3>Policy source</h3>
+        <p>Resolved source: {pdp.policySource.source}</p>
+        {pdp.policySource.invalid ? (
+          <Notice tone="warning">
+            Warning: the platform policy switch is invalid — the PDP has failed
+            closed to the compiled policy. Check IAAA_PDP_POLICY_SOURCE and
+            IAAA_PDP_POLICY_SNAPSHOT_JSON.
+          </Notice>
+        ) : (
+          <p>
+            The platform policy switch is valid; the PDP decides from the{" "}
+            {pdp.policySource.source === "snapshot" ? "promoted snapshot" : "compiled policy"}.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <h3>Obligations</h3>
+        <p>
+          Read-only: obligations attach to permissions in the frozen obligation
+          policy and cannot be edited on this tab.
+        </p>
+        {pdp.obligations.length === 0 ? (
+          <EmptyState title="No obligations are declared." />
+        ) : (
+          <ul>
+            {pdp.obligations.map((entry) => {
+              const coverage = coverageByPermission.get(entry.permission);
+              return (
+                <li key={entry.permission}>
+                  <p>{entry.permission}</p>
+                  <p>
+                    Obligations:{" "}
+                    {entry.obligations.length === 0
+                      ? "none"
+                      : entry.obligations.join(", ")}
+                  </p>
+                  {entry.advice.map((a) => (
+                    <p key={a.kind}>{a.message}</p>
+                  ))}
+                  {coverage ? (
+                    <p>
+                      Coverage: {coverage.status}
+                      {coverage.status === "enforced" &&
+                      coverage.enforcementPoints.length > 0
+                        ? ` — enforced on ${coverage.enforcementPoints.join(", ")}`
+                        : ""}
+                      {coverage.status === "residual"
+                        ? " — the policy entry exists but no live enforcement point uses it yet"
+                        : ""}
+                    </p>
+                  ) : (
+                    <p>Coverage: not reported for this permission.</p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </Stack>
   );
 }
