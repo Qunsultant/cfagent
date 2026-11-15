@@ -51,6 +51,27 @@ import {
   type RefundRecord,
   type RefundStatus,
 } from "./refundFlowApi";
+import type { SubscriptionView } from "./commercialApi";
+import type { BillingPlanInput } from "../data/billingServicing";
+
+/**
+ * Issue #4643 — the refund form's "Original payment reference" had no
+ * in-app source. The requester's subscriptions (already fetched by
+ * BillingServicingPanel from GET /subscription) are passed down as
+ * `subscriptions`, with the already-fetched `plans` for the plan
+ * name + amount join. A per-row select pre-fills the reference (the
+ * subscription row id — the resolver tries the row id first, then the
+ * provider payment ref) and the amount (the plan price — the amount
+ * must equal the full original payment, and the server derives the
+ * original amount from the same plan price). Both props are optional:
+ * without them the section behaves exactly as before (free-text
+ * fallback). The picker lists subscriptions only, so it renders only
+ * for kind "subscription".
+ */
+export interface RefundFlowSectionProps {
+  subscriptions?: SubscriptionView[];
+  plans?: BillingPlanInput[];
+}
 
 function statusOf(error: unknown): number {
   return error instanceof RefundFlowApiError ? error.status : 0;
@@ -109,7 +130,7 @@ interface FieldErrors {
   reason?: string;
 }
 
-export function RefundFlowSection() {
+export function RefundFlowSection({ subscriptions, plans }: RefundFlowSectionProps = {}) {
   const [policy, setPolicy] = useState<RefundPolicyView | null>(null);
   const [policyFailed, setPolicyFailed] = useState(false);
   const [isOperator, setIsOperator] = useState(false);
@@ -118,6 +139,7 @@ export function RefundFlowSection() {
   const [loading, setLoading] = useState(true);
   const [current, setCurrent] = useState<RefundRecord | null>(null);
   const [kind, setKind] = useState<RefundKind>("subscription");
+  const [selectedSubscriptionId, setSelectedSubscriptionId] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
@@ -189,6 +211,28 @@ export function RefundFlowSection() {
 
   const kindBlocked = policy !== null && !policy.approvedKinds.includes(kind);
 
+  // Issue #4643 — pre-fill the reference + amount from a picked
+  // subscription. The reference is the row id (the resolver tries the
+  // row id first, then the provider payment ref); the amount is the
+  // plan price (the server derives the original amount from the same
+  // plan price). The amount is pre-filled only when the plan is known;
+  // the reference is always pre-filled.
+  const selectSubscription = useCallback(
+    (row: SubscriptionView) => {
+      const plan = plans?.find((p) => p.id === row.planId) ?? null;
+      if (refRef.current) refRef.current.value = row.id;
+      if (amountRef.current && plan) amountRef.current.value = plan.priceUSD.toFixed(2);
+      setSelectedSubscriptionId(row.id);
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next.ref;
+        delete next.amount;
+        return next;
+      });
+    },
+    [plans],
+  );
+
   const submitRequest = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
@@ -220,6 +264,7 @@ export function RefundFlowSection() {
         if (refRef.current) refRef.current.value = "";
         if (amountRef.current) amountRef.current.value = "";
         if (reasonRef.current) reasonRef.current.value = "";
+        setSelectedSubscriptionId(null);
       } catch (err) {
         setFormError(requestMessage(statusOf(err)));
       } finally {
@@ -325,10 +370,32 @@ export function RefundFlowSection() {
           <option value="subscription">Subscription</option>
           <option value="pay_per_run">Pay-per-run</option>
         </Select>
+        {kind === "subscription" && subscriptions && subscriptions.length > 0 && (
+          <div>
+            <p>Your subscriptions</p>
+            <p>Select a subscription to fill in its payment reference and amount.</p>
+            {subscriptions.map((row) => {
+              const plan = plans?.find((p) => p.id === row.planId) ?? null;
+              return (
+                <div key={row.id}>
+                  <p>
+                    {plan ? plan.name : row.planId}
+                    {plan ? ` — $${plan.priceUSD.toFixed(2)}` : ""} — {row.status} — {row.id}
+                    {row.providerSubscriptionId ? ` — Stripe: ${row.providerSubscriptionId}` : ""}
+                  </p>
+                  <Button variant="secondary" onClick={() => selectSubscription(row)}>
+                    Use this subscription
+                  </Button>
+                  {selectedSubscriptionId === row.id && <p>Selected</p>}
+                </div>
+              );
+            })}
+          </div>
+        )}
         <TextInput
           id="refund-original-ref"
           label="Original payment reference"
-          hint="Subscription id or provider payment reference"
+          hint="Stripe subscription id from Stripe Dashboard, or the subscription id"
           ref={refRef}
           error={fieldErrors.ref}
         />

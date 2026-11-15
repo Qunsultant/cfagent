@@ -31,6 +31,8 @@ import {
   type RefundStatus,
 } from "../src/client/refundFlowApi";
 import { RefundFlowSection } from "../src/client/RefundFlowSection";
+import type { SubscriptionView } from "../src/client/commercialApi";
+import type { BillingPlanInput } from "../src/data/billingServicing";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -246,14 +248,17 @@ describe("refund flow section", () => {
   let root: Root | null = null;
   let container: HTMLDivElement | null = null;
 
-  async function renderSection(state: MockState) {
+  async function renderSection(
+    state: MockState,
+    props?: { subscriptions?: SubscriptionView[]; plans?: BillingPlanInput[] },
+  ) {
     const prev = (globalThis as any).fetch;
     (globalThis as any).fetch = vi.fn(flowFetch(state));
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root!.render(React.createElement(RefundFlowSection));
+      root!.render(React.createElement(RefundFlowSection, props));
     });
     await flush();
     return () => {
@@ -668,6 +673,165 @@ describe("refund flow section", () => {
     try {
       expect(text()).toMatch(/refunds could not be loaded/);
       expect(buttonNamed("Request refund")).toBeDefined();
+    } finally {
+      restore();
+    }
+  });
+
+  // Issue #4643 — subscription picker for the refund form's payment
+  // reference. The rows + plans are the already-fetched GET
+  // /subscription rows and plans list, passed down as props.
+  const PICKER_SUBSCRIPTIONS: SubscriptionView[] = [
+    {
+      id: "sub-a1b2c3d4",
+      planId: "test-subs",
+      status: "active",
+      periodStartMs: NOW - 30 * 86400000,
+      periodEndMs: NOW + 30 * 86400000,
+      providerSubscriptionId: "sub_1ABCDEF",
+    },
+    {
+      id: "sub-e5f6a7b8",
+      planId: "basic",
+      status: "expired",
+      periodStartMs: NOW - 60 * 86400000,
+      periodEndMs: NOW - 30 * 86400000,
+      providerSubscriptionId: null,
+    },
+  ];
+  const PICKER_PLANS: BillingPlanInput[] = [
+    { id: "test-subs", name: "Test-Subs", priceUSD: 1, periodDays: 30 },
+    { id: "basic", name: "Basic", priceUSD: 49.99, periodDays: 30 },
+  ];
+
+  function pickerButtons(): HTMLButtonElement[] {
+    return Array.from(container!.querySelectorAll("button")).filter((b) =>
+      (b.textContent ?? "").trim() === "Use this subscription",
+    ) as HTMLButtonElement[];
+  }
+
+  function inputValue(selector: string): string {
+    return (container!.querySelector(selector) as HTMLInputElement).value;
+  }
+
+  async function setKind(value: string) {
+    const el = container!.querySelector("#refund-kind") as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLSelectElement.prototype,
+      "value",
+    )!.set!;
+    await act(async () => {
+      setter.call(el, value);
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush();
+  }
+
+  it("renders subscription rows with plan, amount, status, and reference", async () => {
+    const restore = await renderSection(freshState(), {
+      subscriptions: PICKER_SUBSCRIPTIONS,
+      plans: PICKER_PLANS,
+    });
+    try {
+      expect(text()).toMatch(/Your subscriptions/);
+      expect(text()).toMatch(/Test-Subs/);
+      expect(text()).toMatch(/\$1\.00/);
+      expect(text()).toMatch(/active/);
+      expect(text()).toMatch(/sub-a1b2c3d4/);
+      // The Stripe subscription id is shown so the operator can
+      // cross-check it in Stripe Dashboard.
+      expect(text()).toMatch(/sub_1ABCDEF/);
+      expect(text()).toMatch(/Basic/);
+      expect(text()).toMatch(/\$49\.99/);
+      expect(text()).toMatch(/expired/);
+      expect(pickerButtons()).toHaveLength(2);
+    } finally {
+      restore();
+    }
+  });
+
+  it("selecting a subscription pre-fills the reference and the amount", async () => {
+    const restore = await renderSection(freshState(), {
+      subscriptions: PICKER_SUBSCRIPTIONS,
+      plans: PICKER_PLANS,
+    });
+    try {
+      await act(async () => {
+        pickerButtons()[0]!.click();
+      });
+      await flush();
+      expect(inputValue("#refund-original-ref")).toBe("sub-a1b2c3d4");
+      expect(inputValue("#refund-amount")).toBe("1.00");
+      expect(text()).toMatch(/Selected/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("submits the pre-filled reference and amount", async () => {
+    const state = freshState({
+      policy: { ...BASE_POLICY, approvedKinds: ["subscription"] },
+    });
+    const restore = await renderSection(state, {
+      subscriptions: PICKER_SUBSCRIPTIONS,
+      plans: PICKER_PLANS,
+    });
+    try {
+      await act(async () => {
+        pickerButtons()[0]!.click();
+      });
+      await flush();
+      setInput("#refund-reason", "changed my mind");
+      await act(async () => {
+        buttonNamed("Request refund")!.click();
+      });
+      await flush();
+      expect(state.requestPosts).toEqual([
+        { kind: "subscription", originalPaymentRef: "sub-a1b2c3d4", amountUSD: 1, reason: "changed my mind" },
+      ]);
+      expect(text()).toMatch(/rf-new/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the free-text field as fallback when no subscriptions are passed", async () => {
+    const state = freshState({
+      policy: { ...BASE_POLICY, approvedKinds: ["subscription"] },
+    });
+    const restore = await renderSection(state);
+    try {
+      expect(text()).not.toMatch(/Your subscriptions/);
+      expect(pickerButtons()).toHaveLength(0);
+      // The hint says where the reference comes from.
+      expect(text()).toMatch(/Stripe subscription id from Stripe Dashboard/);
+      setInput("#refund-original-ref", "sub-1");
+      setInput("#refund-amount", "10");
+      setInput("#refund-reason", "changed my mind");
+      await act(async () => {
+        buttonNamed("Request refund")!.click();
+      });
+      await flush();
+      expect(state.requestPosts).toEqual([
+        { kind: "subscription", originalPaymentRef: "sub-1", amountUSD: 10, reason: "changed my mind" },
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("hides the picker when the kind is pay-per-run", async () => {
+    const restore = await renderSection(freshState(), {
+      subscriptions: PICKER_SUBSCRIPTIONS,
+      plans: PICKER_PLANS,
+    });
+    try {
+      expect(pickerButtons()).toHaveLength(2);
+      await setKind("pay_per_run");
+      expect(pickerButtons()).toHaveLength(0);
+      expect(text()).not.toMatch(/Your subscriptions/);
+      await setKind("subscription");
+      expect(pickerButtons()).toHaveLength(2);
     } finally {
       restore();
     }
