@@ -18,35 +18,17 @@ import {
   getQuoteSource,
   setQuoteSource,
 } from "../src/services/quoteSourceSetting";
+import { createD1QuoteSourceDb } from "../src/data/d1QuoteSourceAdapter";
+import { MockD1Database } from "./mock-d1";
 
-/** Minimal D1-shaped stub: prepare/bind/first/run over one stored row. */
-class FakeD1 {
-  row: string | null = null;
-  prepare(sql: string) {
-    const self = this;
-    const stmt = {
-      bind(...args: unknown[]) {
-        return {
-          async first() {
-            if (/SELECT/i.test(sql)) {
-              return self.row === null ? null : { source: self.row };
-            }
-            return null;
-          },
-          async run() {
-            if (/INSERT|UPDATE/i.test(sql)) self.row = String(args[0]);
-            return {};
-          },
-        };
-      },
-      async run() {
-        return {};
-      },
-    };
-    return stmt as never;
-  }
-}
-
+/**
+ * #4282 P6a (#4384): the quote-source adapter now runs through the
+ * Drizzle builder, so the old prepare/bind/first/run stub (which
+ * also read the source from bound-param position 0 — the new
+ * builder upsert binds (id, source, updatedAt)) cannot stand in
+ * for a D1Database. These tests use the shared MockD1Database
+ * (real node:sqlite) via createD1QuoteSourceDb instead.
+ */
 function mockFetch(handler: (url: string) => unknown) {
   const calls: string[] = [];
   vi.stubGlobal(
@@ -98,12 +80,12 @@ describe("quote source setting (#2108)", () => {
   });
 
   it("persists and reads back through a D1-shaped store", async () => {
-    const db = new FakeD1();
-    expect(await getQuoteSource(db as never)).toBe("auto");
-    await setQuoteSource(db as never, "yahoo");
-    expect(await getQuoteSource(db as never)).toBe("yahoo");
-    await setQuoteSource(db as never, "alpaca");
-    expect(await getQuoteSource(db as never)).toBe("alpaca");
+    const db = new MockD1Database();
+    expect(await getQuoteSource(createD1QuoteSourceDb(db as never))).toBe("auto");
+    await setQuoteSource(createD1QuoteSourceDb(db as never), "yahoo");
+    expect(await getQuoteSource(createD1QuoteSourceDb(db as never))).toBe("yahoo");
+    await setQuoteSource(createD1QuoteSourceDb(db as never), "alpaca");
+    expect(await getQuoteSource(createD1QuoteSourceDb(db as never))).toBe("alpaca");
   });
 
   it("returns auto without a store", async () => {
@@ -212,8 +194,8 @@ describe("quote source setting (#2108)", () => {
   });
 
   it("background refresh honors a stored yahoo setting", async () => {
-    const db = new FakeD1();
-    await setQuoteSource(db as never, "yahoo");
+    const db = new MockD1Database();
+    await setQuoteSource(createD1QuoteSourceDb(db as never), "yahoo");
     const calls = mockFetch((url) => {
       if (url.startsWith("https://query1.finance.yahoo.com/")) return yahooPayload(70, 68);
       throw new Error(`unexpected fetch: ${url}`);
@@ -224,8 +206,8 @@ describe("quote source setting (#2108)", () => {
   });
 
   it("background refresh honors a stored alpaca setting without keys", async () => {
-    const db = new FakeD1();
-    await setQuoteSource(db as never, "alpaca");
+    const db = new MockD1Database();
+    await setQuoteSource(createD1QuoteSourceDb(db as never), "alpaca");
     const calls = mockFetch(() => {
       throw new Error("no fetch expected");
     });
