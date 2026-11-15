@@ -85,21 +85,28 @@ class FakeFeedSql {
       }
       return [];
     }
-    if (q.startsWith("SELECT id FROM mas_feed_snapshots WHERE user_login = ? AND symbol = ?")) {
-      return this.rows
-        .filter((r) => r.user_login === params[0] && r.symbol === params[1])
-        .sort((a, b) => (a.created_at !== b.created_at ? (a.created_at < b.created_at ? 1 : -1) : (a.id < b.id ? 1 : -1)))
-        .map((r) => ({ id: r.id }));
-    }
-    if (q.startsWith("SELECT id, snapshot_json, as_of, data_source, load_params_json, created_at FROM mas_feed_snapshots WHERE user_login = ? AND symbol = ?")) {
+    // #4385 (#4282 P6b): the adapter's reads moved to the DO DML
+    // catalogue's Repository entries, so the Repository's statement
+    // shapes arrive here — SELECT * with the LIMIT inlined — instead
+    // of the old explicit-column statements with a bound LIMIT.
+    // The rows returned are unchanged (the same projection the old
+    // branches returned); only the matched text changes.
+    if (q.startsWith("SELECT * FROM mas_feed_snapshots WHERE user_login = ? AND symbol = ? ORDER BY created_at DESC, id DESC")) {
       const found = this.rows
         .filter((r) => r.user_login === params[0] && r.symbol === params[1])
-        .sort((a, b) => (a.created_at !== b.created_at ? (a.created_at < b.created_at ? 1 : -1) : (a.id < b.id ? 1 : -1)))[0];
-      return found ? [{ id: found.id, snapshot_json: found.snapshot_json, as_of: found.as_of, data_source: found.data_source, load_params_json: found.load_params_json, created_at: found.created_at }] : [];
+        .sort((a, b) => (a.created_at !== b.created_at ? (a.created_at < b.created_at ? 1 : -1) : (a.id < b.id ? 1 : -1)));
+      const limited = q.includes("LIMIT 1") ? found.slice(0, 1) : found;
+      return limited.map((r) => ({ id: r.id, snapshot_json: r.snapshot_json, as_of: r.as_of, data_source: r.data_source, load_params_json: r.load_params_json, created_at: r.created_at }));
     }
-    if (q.startsWith("SELECT id, snapshot_json, as_of, data_source, load_params_json, created_at FROM mas_feed_snapshots WHERE user_login = ? AND id = ?")) {
+    if (q.startsWith("SELECT * FROM mas_feed_snapshots WHERE user_login = ? AND id = ?")) {
       const found = this.rows.find((r) => r.user_login === params[0] && r.id === params[1]);
       return found ? [{ id: found.id, snapshot_json: found.snapshot_json, as_of: found.as_of, data_source: found.data_source, load_params_json: found.load_params_json, created_at: found.created_at }] : [];
+    }
+    // #4385: Repository.delete probes existence via findById
+    // (SELECT * … WHERE id = ? LIMIT 1) before deleting.
+    if (q.startsWith("SELECT * FROM mas_feed_snapshots WHERE id = ?")) {
+      const found = this.rows.find((r) => r.id === params[0]);
+      return found ? [{ ...found }] : [];
     }
     if (q.startsWith("DELETE FROM mas_feed_snapshots WHERE id = ?")) {
       this.rows = this.rows.filter((r) => r.id !== params[0]);
