@@ -473,9 +473,13 @@ const STEP4F_PREPARE_SERVICE_FILES = [
 ] as const;
 
 const STEP4F_PREPARE_DATA_LAYER_FILES: Array<[string, number]> = [
-  ["src/data/d1QuoteSourceAdapter.ts", 3],
-  ["src/data/d1ResourceUsageAdapter.ts", 3],
-  ["src/data/d1ResourceRollupAdapter.ts", 8],
+  // #4282 P6a (#4384): the three adapters' raw .prepare( calls
+  // moved into the DML catalogue by design — zero remain in the
+  // adapters. The catalogue's own census (entries per table) is
+  // pinned by tests/dml_d1_catalogue_4384.test.ts.
+  ["src/data/d1QuoteSourceAdapter.ts", 0],
+  ["src/data/d1ResourceUsageAdapter.ts", 0],
+  ["src/data/d1ResourceRollupAdapter.ts", 0],
   ["src/data/quoteSourcePorts.ts", 0],
   ["src/data/inMemoryQuoteSourceAdapter.ts", 0],
   ["src/data/createQuoteSourcePorts.ts", 0],
@@ -647,11 +651,19 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   // migrationRunner.ts to the D1 catalogue
   // (src/data/schemaComponent/d1Catalogue.ts) — the writer set is
   // unchanged in kind (port + schema authority), only the file moved.
-  quote_source_setting: { layer: ["src/data/d1QuoteSourceAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
-  resource_sql_ops: { layer: ["src/data/d1ResourceUsageAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
-  resource_daily_rollups: { layer: ["src/data/d1ResourceRollupAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
-  resource_alert_state: { layer: ["src/data/d1ResourceRollupAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
-  resource_comparison_reports: { layer: ["src/data/d1ResourceRollupAdapter.ts", "src/data/schemaComponent/d1Catalogue.ts"] },
+  // #4282 P6a (#4384): the DML for these five tables moved
+  // from the adapters into the DML catalogue
+  // (src/data/schemaComponent/dmlEntries.ts) — the adapters no
+  // longer contain write-verb + table-name text, so they leave
+  // the writer set and the catalogue enters it. The catalogue
+  // declares its tables with a `table: "<name>"` entry field;
+  // fileWritesTable below counts that declaration as writing
+  // the table.
+  quote_source_setting: { layer: ["src/data/schemaComponent/d1Catalogue.ts", "src/data/schemaComponent/dmlEntries.ts"] },
+  resource_sql_ops: { layer: ["src/data/schemaComponent/d1Catalogue.ts", "src/data/schemaComponent/dmlEntries.ts"] },
+  resource_daily_rollups: { layer: ["src/data/schemaComponent/d1Catalogue.ts", "src/data/schemaComponent/dmlEntries.ts"] },
+  resource_alert_state: { layer: ["src/data/schemaComponent/d1Catalogue.ts", "src/data/schemaComponent/dmlEntries.ts"] },
+  resource_comparison_reports: { layer: ["src/data/schemaComponent/d1Catalogue.ts", "src/data/schemaComponent/dmlEntries.ts"] },
 };
 
 const WRITE_VERB =
@@ -678,7 +690,16 @@ function fileWritesTable(file: string, table: string): boolean {
   for (const [name, t] of constants) {
     if (t === table) names.push(`\\$\\{${name}\\}`);
   }
-  return new RegExp(`${WRITE_VERB}\\s+(?:${names.join("|")})`, "gi").test(text);
+  if (new RegExp(`${WRITE_VERB}\\s+(?:${names.join("|")})`, "gi").test(text)) return true;
+  // #4282 P6a (#4384): the DML catalogue's entries are builder
+  // calls, not write-verb + table-name text — the catalogue
+  // declares each table it writes with a `table: "<name>"`
+  // entry field. That declaration counts as writing the table,
+  // scoped to the catalogue file so no other table's pin moves.
+  if (file === "src/data/schemaComponent/dmlEntries.ts") {
+    return new RegExp(`table:\\s*"${table}"`, "i").test(text);
+  }
+  return false;
 }
 
 describe("global D-D census: writer sets by table for ported tables", () => {
