@@ -100,7 +100,7 @@ describe.each([
       const mock = new MockD1Database();
       const db = createD1ProfileDb(mock as unknown as D1Database);
       return {
-        store: new D1ProfileAdapter(db, mock as unknown as D1Database),
+        store: new D1ProfileAdapter(db),
         setup: () => ensureUserProfileSchema(db),
       };
     },
