@@ -37,6 +37,16 @@
  *  updateWhere/deleteWhere, so the prune shape (created_at < ?)
  *  is a Repository call, not a template.
  *
+ * #4386 (#4282 P6c): createOrReplace INSERTs OR REPLACEs the
+ * full record and returns it — the draft-payment write
+ * (TransactionLedgerPort.replace) as a first-class Repository
+ * method, on both legs. The DO leg's INSERT column order is
+ * the column map's (absent optional fields bind NULL, the
+ * #3182 replace() semantics); the twin stores the record
+ * as-is, so an absent field stays absent there — the one
+ * disclosed leg difference, pinned by
+ * tests/orm_repository_create_or_replace_4386.test.ts.
+ *
  * Port modules import no store client (ADR 0022 D-B): this file
  * is types + the seam interface only.
  *
@@ -86,4 +96,6 @@ export interface RepositoryPort<T extends Record<string, any>> {
   deleteWhere(where: RepositoryWhere): number;
   /** #4385: INSERT OR IGNORE; true when a row was inserted. */
   createOrIgnore(record: T): boolean;
+  /** #4386: INSERT OR REPLACE the full record; returns the record. */
+  createOrReplace(record: T): T;
 }
