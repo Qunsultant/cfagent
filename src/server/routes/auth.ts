@@ -56,7 +56,8 @@ import { parseBootstrapAdmins, resolveBootstrapEntries } from "../../security/ia
 import { createWiredBindingStore } from "../../security/iaaaLogin";
 import { approveProposal, createKvPolicyProposalStore, createProposal, diffPolicySnapshots, parseStoredProposal, policyProposalAuditInput, previewDecisions, promoteProposal, rejectProposal, POLICY_PROPOSAL_ACTIVE_KEY, POLICY_PROPOSAL_KEY_PREFIX, type PolicyProposal, type PolicyProposalAuditAction } from "../../security/policyProposals";
 import { canRevokeRoleGrant, flattenRoleGrants, removeRoleBinding, toRoleGrantView, validateRoleGrantRequest } from "../../security/roleGrants";
-import { evaluateWithObligations, type ObligationAuditWriter } from "../../security/obligations";
+import { evaluateWithObligations, OBLIGATION_POLICY, type ObligationAuditWriter } from "../../security/obligations";
+import { resolvePdpPolicySource } from "../../security/pdpPorts";
 import { IAAA_AUDIT_POLICY_VERSION, recordAuditEvent } from "../../security/iaaaAudit";
 import { parseSessionRegistryEntries } from "../../security/iaaaSessionRegistry";
 import { isMailSuppressed, resolveOffboardSessions, runOffboard, setMailSuppression } from "../../security/iaaaLifecycleWiring";
@@ -980,7 +981,8 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
       path === "/api/iaaa/bootstrap-proposals/confirm-applied" ||
       path === "/api/iaaa/memberships" ||
       path === "/api/iaaa/deactivate" ||
-      path === "/api/iaaa/offboard"
+      path === "/api/iaaa/offboard" ||
+      path === "/api/security/pdp"
     ) {
       const session = await requireAuth(request, env);
       if (!session) {
@@ -2292,6 +2294,93 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             });
           }
           return Response.json({ error: "Method not allowed" }, { status: 405 });
+        }
+        // #4651 — SecHub PDP tab: read-only PDP state for the
+        // SecurityHub PDP view. Platform-admin ONLY (tenant admins
+        // never reach policy state): a non-platform caller is
+        // refused with 403, audited, before anything is read.
+        // The resolved policy source comes from the platform env
+        // only (resolvePdpPolicySource, #1755); the obligations
+        // come from the frozen OBLIGATION_POLICY table (#1751).
+        // No snapshot JSON is returned: the active snapshot itself
+        // is read through GET /api/iaaa/policy-proposals/active.
+        if (path === "/api/security/pdp") {
+          const pdpDenyAudit = async (): Promise<void> => {
+            try {
+              await recordAuditEvent(createWiredAuditStore(env), {
+                type: "iaaa.policy",
+                actorPrincipalId: session.internalUserId as string,
+                actorType: "human",
+                initiatingPrincipalId: session.internalUserId as string,
+                tenantId: "platform",
+                correlationId: crypto.randomUUID(),
+                action: "policy.access_denied",
+                timestamp: nowMs,
+                decision: "deny",
+                policyVersion: IAAA_AUDIT_POLICY_VERSION,
+                outcome: "failed",
+                errorCode: "PDP_FORBIDDEN",
+              });
+            } catch {
+              /* denial attribution is best-effort; the deny stands */
+            }
+          };
+          if (!callerIsPlatformAdmin) {
+            await pdpDenyAudit();
+            return Response.json(
+              { error: "Forbidden: policy state requires platform-admin." },
+              { status: 403 },
+            );
+          }
+          if (request.method !== "GET") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const resolved = resolvePdpPolicySource(
+            env as unknown as Record<string, unknown>,
+          );
+          // Live evaluateWithObligations() coverage, by permission:
+          // role:assign is enforced on the membership-grant,
+          // role-grants-grant, and permission deny/clear paths;
+          // membership:revoke is enforced on the offboard/deactivate
+          // paths; audit:export has a policy entry but no live
+          // enforcement point yet (residual, #1751). This is a
+          // cited inventory of the call sites in this file, kept
+          // next to them so a wiring change updates it in place —
+          // it is not a tunable, so it is not a config value.
+          const pdpObligationCoverage: Record<
+            string,
+            { status: "enforced" | "residual"; enforcementPoints: string[] }
+          > = {
+            "role:assign": {
+              status: "enforced",
+              enforcementPoints: [
+                "membership grant",
+                "role-grants grant",
+                "permission deny/clear",
+              ],
+            },
+            "membership:revoke": {
+              status: "enforced",
+              enforcementPoints: ["offboard/deactivate"],
+            },
+            "audit:export": { status: "residual", enforcementPoints: [] },
+          };
+          return Response.json({
+            ok: true,
+            policySource: { source: resolved.source, invalid: resolved.invalid },
+            obligations: OBLIGATION_POLICY.map((entry) => ({
+              permission: entry.permission,
+              obligations: [...entry.obligations],
+              advice: entry.advice.map((a) => ({ kind: a.kind, message: a.message })),
+            })),
+            coverage: OBLIGATION_POLICY.map((entry) => ({
+              permission: entry.permission,
+              ...(pdpObligationCoverage[entry.permission] ?? {
+                status: "residual" as const,
+                enforcementPoints: [] as string[],
+              }),
+            })),
+          });
         }
         // #3077 (#945 Q3) — reviewed bootstrap changes: approval-gated
         // administration of the IAAA_BOOTSTRAP_ADMINS list. Platform-admin

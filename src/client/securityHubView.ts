@@ -5,7 +5,7 @@
  * Home: `?tab=security-hub`. Sub-route scheme, following the app's existing
  * `?tab=` + `?view=` deep-link pattern (`src/client/router.ts`
  * `parseViewFromSearch`):
- * `?tab=security-hub&view=iaaa-admin|users|admin-access|profile`.
+ * `?tab=security-hub&view=iaaa-admin|users|admin-access|profile|pdp`.
  *
  * - `view=iaaa-admin` (default): read-only memberships, genesis & audit
  *   (`IaaaAdminPanel`) — moved here from Platform Admin.
@@ -17,6 +17,9 @@
  * - `view=profile`: the signed-in user's profile (`ProfileSection`,
  *   display name + phone) — surfaced here; it was mounted only in the
  *   onboarding screen before.
+ * - `view=pdp`: the Policy Decision Point's live state (`PdpPanel`,
+ *   issue #4651) — active snapshot + source, policy-source resolution,
+ *   and the frozen obligations, read-only.
  *
  * Retired addresses (each maps to the home):
  * - `?tab=platform-admin&view=iaaa-admin` → `?tab=security-hub&view=iaaa-admin`.
@@ -34,13 +37,14 @@
 export const SECURITY_HUB_TAB = "security-hub";
 
 /** The consolidated home's views. */
-export type SecurityHubView = "iaaa-admin" | "users" | "admin-access" | "profile";
+export type SecurityHubView = "iaaa-admin" | "users" | "admin-access" | "profile" | "pdp";
 
 export const SECURITY_HUB_VIEWS: readonly SecurityHubView[] = [
   "iaaa-admin",
   "users",
   "admin-access",
   "profile",
+  "pdp",
 ];
 
 export const SECURITY_HUB_VIEW_LABELS: Record<SecurityHubView, string> = {
@@ -48,6 +52,7 @@ export const SECURITY_HUB_VIEW_LABELS: Record<SecurityHubView, string> = {
   users: "Users",
   "admin-access": "Admin Access",
   profile: "Profile",
+  pdp: "PDP",
 };
 
 export function isSecurityHubView(value: unknown): value is SecurityHubView {

@@ -503,7 +503,7 @@
       "crumb": "SecurityHub",
       "category": "Platform",
       "icon": "IaaaAdmin",
-      "description": "IAAA admin, users, admin access, and your profile — one menu, four views",
+      "description": "IAAA admin, users, admin access, and your profile — one menu, five views",
       "navEntry": {
         "label": "SecurityHub",
         "shortLabel": "SecurityHub",
@@ -992,6 +992,13 @@
         "shortLabel": "Your display name and phone",
         "icon": "Agents",
         "description": "Your display name and phone"
+      },
+      {
+        "id": "pdp",
+        "label": "PDP",
+        "shortLabel": "Live policy state: active snapshot, source & obligations",
+        "icon": "IaaaAdmin",
+        "description": "Live policy state: active snapshot, source & obligations"
       }
     ],
     "schedules": [
@@ -1071,13 +1078,74 @@
     ],
     "billing": [
       {
-        "id": "billing",
-        "label": "Billing",
-        "shortLabel": "Billing",
+        "id": "overview",
+        "label": "Overview",
+        "shortLabel": "Overview",
         "icon": "Billing",
-        "badge": "Billing",
-        "badgeType": "neutral",
-        "description": "Your subscription, receipts, plans, and referral-credit balance — read-only servicing"
+        "description": "Current tier, subscription, receipts, plans, and referral balance"
+      },
+      {
+        "id": "refund-policy",
+        "label": "Refund policy",
+        "shortLabel": "Refund policy",
+        "icon": "Billing",
+        "description": "Refund-policy kinds approval (operator)"
+      },
+      {
+        "id": "refund-flow",
+        "label": "Refund flow",
+        "shortLabel": "Refund flow",
+        "icon": "Billing",
+        "description": "Refund request, approve, execute, and verify"
+      },
+      {
+        "id": "usage-billing",
+        "label": "Usage billing",
+        "shortLabel": "Usage",
+        "icon": "Billing",
+        "description": "Usage and billing"
+      },
+      {
+        "id": "referral-codes",
+        "label": "Referral codes",
+        "shortLabel": "Referral codes",
+        "icon": "Billing",
+        "description": "Referral codes"
+      },
+      {
+        "id": "approved-free-quota",
+        "label": "Approved free quota",
+        "shortLabel": "Free quota",
+        "icon": "Billing",
+        "description": "Approved free quota"
+      },
+      {
+        "id": "top-up-limits",
+        "label": "Top-up limits",
+        "shortLabel": "Top-up limits",
+        "icon": "Billing",
+        "description": "Top-up limits"
+      },
+      {
+        "id": "offer-rules",
+        "label": "Offer rules",
+        "shortLabel": "Offer rules",
+        "icon": "Billing",
+        "description": "Offer rules"
+      },
+      {
+        "id": "plan-stripe-price",
+        "label": "Plan Stripe Price mappings",
+        "shortLabel": "Stripe prices",
+        "icon": "Billing",
+        "description": "Plan Stripe Price mappings"
+      },
+      {
+        "id": "support-snapshot",
+        "label": "Support snapshot",
+        "shortLabel": "Support",
+        "icon": "Billing",
+        "description": "Support snapshot"
       },
       {
         "id": "revenue",
@@ -1251,6 +1319,46 @@
     "stock-hub:new-screen": {
       "tab": "stock-hub",
       "view": "new-screen"
+    },
+    "billing:overview": {
+      "tab": "billing",
+      "view": "overview"
+    },
+    "billing:refund-policy": {
+      "tab": "billing",
+      "view": "refund-policy"
+    },
+    "billing:refund-flow": {
+      "tab": "billing",
+      "view": "refund-flow"
+    },
+    "billing:usage-billing": {
+      "tab": "billing",
+      "view": "usage-billing"
+    },
+    "billing:referral-codes": {
+      "tab": "billing",
+      "view": "referral-codes"
+    },
+    "billing:approved-free-quota": {
+      "tab": "billing",
+      "view": "approved-free-quota"
+    },
+    "billing:top-up-limits": {
+      "tab": "billing",
+      "view": "top-up-limits"
+    },
+    "billing:offer-rules": {
+      "tab": "billing",
+      "view": "offer-rules"
+    },
+    "billing:plan-stripe-price": {
+      "tab": "billing",
+      "view": "plan-stripe-price"
+    },
+    "billing:support-snapshot": {
+      "tab": "billing",
+      "view": "support-snapshot"
     },
     "product-hub:products": {
       "tab": "product-hub",
@@ -1495,6 +1603,10 @@
       "tab": "security-hub",
       "view": "profile"
     },
+    "security-hub:pdp": {
+      "tab": "security-hub",
+      "view": "pdp"
+    },
     "order:approvals": {
       "tab": "order",
       "params": {
@@ -1581,7 +1693,8 @@
         "iaaa-admin",
         "users",
         "admin-access",
-        "profile"
+        "profile",
+        "pdp"
       ]
     },
     {
