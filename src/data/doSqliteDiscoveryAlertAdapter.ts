@@ -19,19 +19,10 @@ import type {
   DiscoveryAlertStore,
 } from "./discoveryAlertPorts";
 import { doTableSql } from "./schemaComponent/doCatalogue";
-
-const TABLE = "mas_discovery_alerts";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 
 const CREATE_TABLE_SQL = doTableSql("mas_discovery_alerts");
-const HAS_SQL =
-  `SELECT COUNT(*) AS count FROM ${TABLE} WHERE scope_key = ? AND symbol = ? AND thesis = ? AND day = ?`;
-const COUNT_DAY_SQL = `SELECT COUNT(*) AS count FROM ${TABLE} WHERE scope_key = ? AND day = ?`;
-const INSERT_SQL =
-  `INSERT INTO ${TABLE} (id, run_id, scope_key, symbol, thesis, score, day, evidence, fired_signals, created_at) ` +
-  `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-const LIST_SQL =
-  `SELECT id, run_id, scope_key, symbol, thesis, score, day, evidence, fired_signals, created_at FROM ${TABLE} ` +
-  `WHERE scope_key = ? ORDER BY created_at DESC, id DESC LIMIT ?`;
 
 interface AlertRow {
   id: string;
@@ -78,43 +69,47 @@ export class SqlDiscoveryAlertStore implements DiscoveryAlertStore {
     this.ensured = true;
   }
 
-  private count(query: string, ...params: unknown[]): number {
-    const rows = Array.from(this.sql.exec(query, ...params)) as Array<{ count: number }>;
-    return Number(rows[0]?.count ?? 0);
+  private count(code: string, where: Record<string, unknown>): number {
+    return executeDoDml<number>(DO_DML_CATALOGUE, this.sql, code, { where });
   }
 
   async hasAlerted(scopeKey: string, symbol: string, thesis: OptionThesis, day: string): Promise<boolean> {
     this.ensure();
-    return this.count(HAS_SQL, scopeKey, symbol, thesis, day) > 0;
+    return this.count("dml.do.mas_discovery_alerts.has", { scope_key: scopeKey, symbol, thesis, day }) > 0;
   }
 
   async countForDay(scopeKey: string, day: string): Promise<number> {
     this.ensure();
-    return this.count(COUNT_DAY_SQL, scopeKey, day);
+    return this.count("dml.do.mas_discovery_alerts.count_day", { scope_key: scopeKey, day });
   }
 
   async record(input: DiscoveryAlertRecordInput): Promise<DiscoveryAlertRecord> {
     this.ensure();
     const record: DiscoveryAlertRecord = { ...input, id: `disc_alert_${this.idFactory()}` };
-    this.sql.exec(
-      INSERT_SQL,
-      record.id,
-      record.runId,
-      record.scopeKey,
-      record.symbol,
-      record.thesis,
-      record.discoveryScore,
-      record.day,
-      record.evidence,
-      JSON.stringify(record.firedSignals),
-      record.createdAt,
-    );
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_alerts.insert", {
+      record: {
+        id: record.id,
+        run_id: record.runId,
+        scope_key: record.scopeKey,
+        symbol: record.symbol,
+        thesis: record.thesis,
+        score: record.discoveryScore,
+        day: record.day,
+        evidence: record.evidence,
+        fired_signals: JSON.stringify(record.firedSignals),
+        created_at: record.createdAt,
+      } satisfies AlertRow,
+    });
     return record;
   }
 
   async list(scopeKey: string, options: { limit?: number } = {}): Promise<DiscoveryAlertRecord[]> {
     this.ensure();
-    const rows = Array.from(this.sql.exec(LIST_SQL, scopeKey, options.limit ?? 25)) as AlertRow[];
+    const rows = executeDoDml<AlertRow[]>(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_alerts.list", {
+      where: { scope_key: scopeKey },
+      orderBy: "created_at DESC, id DESC",
+      limit: options.limit ?? 25,
+    });
     return rows.map(rowToRecord);
   }
 }
