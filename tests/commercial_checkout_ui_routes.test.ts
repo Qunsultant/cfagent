@@ -27,6 +27,11 @@ import {
 } from "../src/agents/routes/agenticPayments";
 import type { DatabaseORM } from "../src/orm";
 import {
+  createD1CommercialDb,
+  D1CommercialAdapter,
+  ensureCommercialSchema,
+} from "../src/data/d1CommercialAdapter";
+import {
   createD1PriceCatalogueDb,
   ensurePriceCatalogueSchema,
 } from "../src/data/d1PriceCatalogueAdapter";
@@ -91,6 +96,19 @@ async function seededDb() {
   const mock = new MockD1Database();
   const db = createD1PriceCatalogueDb(mock as unknown as D1Database);
   await ensurePriceCatalogueSchema(db);
+  const commercialDb = createD1CommercialDb(mock as unknown as D1Database);
+  await ensureCommercialSchema(commercialDb);
+  const commercial = new D1CommercialAdapter(commercialDb);
+  await commercial.recordPaidSubmission({
+    workflowId: "run-1",
+    userId: "u1",
+    runRequestId: "run-1",
+  });
+  await commercial.recordPaidSubmission({
+    workflowId: "run-9",
+    userId: "u1",
+    runRequestId: "run-9",
+  });
   return mock;
 }
 
@@ -478,6 +496,25 @@ describe("checkout UI check-payment route (native rework #2196)", () => {
       { runRequestId: "run-1" },
     );
     expect(noLogin?.status).toBe(401);
+  });
+
+  it("returns 404 FAILURE_COMMERCIAL_NOT_FOUND for an unknown submission before any Stripe or facilitator call (#4606)", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => stripeSession() }));
+    vi.stubGlobal("fetch", fetchMock);
+    sendEvent.mockClear();
+    const res = await call(
+      ctxWith({ AGENT_DB: await seededDb(), STRIPE_SECRET_KEY: "sk_test_x" }, binding),
+      "POST",
+      "/payments/agentic/commercial/submission/check-payment",
+      "u1",
+      { runRequestId: "run-unknown-4606", sessionId: "cs_test_run-1", family: "stock" },
+    );
+    expect(res?.status).toBe(404);
+    const body = (await res?.json()) as { code: string; error: string };
+    expect(body.code).toBe("FAILURE_COMMERCIAL_NOT_FOUND");
+    expect(body.error).toBe("Submission not found.");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sendEvent).not.toHaveBeenCalled();
   });
 });
 

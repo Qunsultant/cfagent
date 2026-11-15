@@ -7971,28 +7971,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       ) {
         return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "sessionId, family, paymentProof, and payer must be strings when supplied." }, { status: 400 });
       }
-      // Issue #2137 (check-payment ownership hardening): the
-      // verified session login must own the submission being
+      // Issue #2137 + #4606 (strict unknown-to-404 check-payment):
+      // the verified session login must own the submission being
       // verified, before any Stripe retrieve, audit scan, or
-      // facilitator call. The submit route records every paid
-      // submission (workflowId == runRequestId) under the verified
-      // login before the workflow starts, so a record here is the
-      // ownership proof: a record owned by another login is
-      // refused with 403 — cross-user and cross-tenant alike,
-      // because ownership is per-login and a tenant is derived
-      // from the login via the platform identity, never from a
-      // client-supplied tenantId (no client tenantId is read
-      // anywhere in this route). An unbound store fails closed
-      // with 503, exactly like submission-status. Residual,
-      // stated plainly: when NO record exists (a pre-record
-      // legacy run, or the redeemed path's best-effort record
-      // failure — redeemed runs start no payment workflow),
-      // there is no owner to check against, so the route follows
-      // the legacy verify path below; a strict unknown -> 404
-      // flip needs the existing check-payment fixtures
-      // (tests/commercial_checkout_ui_routes.test.ts, outside
-      // this slice's file ownership) to seed a paid submission
-      // first, and is left as that follow-up.
+      // facilitator call. Every paid submission records
+      // (workflowId == runRequestId) under the verified login before
+      // the workflow starts (redeemed runs start no payment workflow).
+      // An unknown submission returns 404 (matching submission-status),
+      // and a record owned by another login returns 403. An unbound
+      // store fails closed with 503.
       const ownershipStore = requireStore();
       if (ownershipStore instanceof Response) return ownershipStore;
       try {
@@ -8006,7 +7993,10 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
-      if (ownershipSubmission && ownershipSubmission.userId !== login) {
+      if (!ownershipSubmission) {
+        return Response.json({ code: "FAILURE_COMMERCIAL_NOT_FOUND", error: "Submission not found." }, { status: 404 });
+      }
+      if (ownershipSubmission.userId !== login) {
         return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: this submission belongs to another user." }, { status: 403 });
       }
       const envRecord = ctx.env as unknown as Record<string, unknown>;

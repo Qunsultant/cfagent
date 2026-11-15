@@ -409,9 +409,10 @@ watchlists (owner column `user_login`).
 - **Premium x402 calls:** identity falls back to the on-chain payer
   when no session login exists — a payer wallet can read/act without a
   login identity, and tier is resolved from whatever login that maps to.
-- **Legacy/unrecorded check-payment path:** when no paid-submission
-  record exists, the route follows the legacy verify path with no owner
-  to check against (known follow-up, strict 404 not yet flipped).
+- **Check-payment unknown submission (#4606 — resolved):** when no
+  paid-submission record exists for `runRequestId`, `POST /submission/check-payment`
+  returns `404` (`FAILURE_COMMERCIAL_NOT_FOUND`) before any Stripe/facilitator
+  call, matching `submission-status` (the legacy unrecorded verify fallback is removed).
 
 **Membership's role in multi-user isolation, stated plainly:**
 membership is the *authorization* layer (which tenants a login belongs
