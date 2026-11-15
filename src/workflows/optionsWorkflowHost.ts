@@ -33,8 +33,11 @@
  * the run settles (the vehicle a sync-leg cutover awaits on).
  * Issue #4468 — the NLQ panel leg dispatches through the host,
  * gated (the gate and the unchanged sync fallback live in
- * discoveryService.ts); the remaining strategy legs stay on the
- * sync dispatch until their cutover slices land (scan #4469, firer
+ * discoveryService.ts); issue #4469 — the NLQ scan leg dispatches
+ * through the host, gated (the gate and the unchanged sync
+ * fallback live in nlqOptionsStrategy.ts, with host-side
+ * persistence after settlement); the remaining strategy legs stay
+ * on the sync dispatch until their cutover slices land (firer
  * #4470, shard #4471, evaluate #4472), and this surface is what
  * they cut over onto.
  *
