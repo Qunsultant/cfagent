@@ -135,6 +135,10 @@ const INSTANCE: JobInstanceRecord = {
   // no async job dispatched it. The round-trip below proves the
   // column carries a value through every residency.
   runAsyncJobId: "bridge-1",
+  // Issue #4454 — the workflow instance id that dispatched this run;
+  // null when no workflow instance dispatched it. The round-trip
+  // below proves the column carries a value through every residency.
+  runWorkflowInstanceId: "wf-inst-1",
   checkpoint: {
     runId: "run-1",
     nodePath: "",

@@ -1,0 +1,3 @@
+### Fixed
+
+- Generic-flow eviction replay no longer refuses `job_already_running` (#4454): `runJob` stamps the dispatching workflow instance id on the job instance (new `run_workflow_instance_id` column, migration 0067, all three residencies), and the generic flow's `job_already_running` catch replays the same engine run via the new `replayJob` only when the recorded id equals the replaying instance's `event.instanceId`. A second workflow instance, an unstamped instance, or a replay without an instance id still refuses exactly as before; `resumeJob`/`retryJob` clear the stamp. The #4002 settle + re-dispatch path stays the fallback recovery.

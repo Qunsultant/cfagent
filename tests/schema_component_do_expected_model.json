@@ -343,6 +343,11 @@
           "pk": 0
         },
         {
+          "name": "run_workflow_instance_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
           "name": "checkpoint_json",
           "type": "TEXT",
           "pk": 0

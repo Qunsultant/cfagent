@@ -22,6 +22,7 @@ import {
   MIGRATION_0046_JOB_PIPELINE,
   MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
   MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
+  MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -45,12 +46,13 @@ export function createD1JobPipelineDb(d1: D1Database): JobPipelineDb {
   });
 }
 
-/** Idempotent schema-ensure: applies migrations 0046 + 0061 + 0065 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0046 + 0061 + 0065 + 0067 if unapplied. */
 export async function ensureJobPipelineSchema(db: JobPipelineDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0046_JOB_PIPELINE,
     MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
     MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
+    MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
   ]);
 }
 
@@ -66,6 +68,7 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     runTrigger: record.runTrigger,
     runScheduleId: record.runScheduleId,
     runAsyncJobId: record.runAsyncJobId,
+    runWorkflowInstanceId: record.runWorkflowInstanceId,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -84,6 +87,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     runTrigger: row.runTrigger as JobInstanceRecord["runTrigger"],
     runScheduleId: row.runScheduleId ?? null,
     runAsyncJobId: row.runAsyncJobId ?? null,
+    runWorkflowInstanceId: row.runWorkflowInstanceId ?? null,
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,
@@ -188,6 +192,11 @@ export class D1JobPipelineStores implements JobPipelineStores {
             // conflict path. Omitting it here meant the stamp never
             // landed, and resume-after-restart lost the link (#4427).
             runScheduleId: row.runScheduleId,
+            // Issue #4454 — the replay proof MUST survive a re-save
+            // too, and must be able to LAND on a row that already
+            // exists: executeRun stamps it on the running instance
+            // through this conflict path.
+            runWorkflowInstanceId: row.runWorkflowInstanceId,
             checkpointJson: row.checkpointJson,
             stageCheckpointJson: row.stageCheckpointJson,
             stageDesiredJson: row.stageDesiredJson,

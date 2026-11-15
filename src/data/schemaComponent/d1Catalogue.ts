@@ -2810,6 +2810,14 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.d1.job_pipeline_instances.alter_table_add_column_run_workflow_instance_id",
+    plane: "d1",
+    table: "job_pipeline_instances",
+    statement: `ALTER TABLE job_pipeline_instances ADD COLUMN run_workflow_instance_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.agent_referral_code_rules.create_table",
     plane: "d1",
     table: "agent_referral_code_rules",
@@ -3307,10 +3315,13 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.agent_code_run_balances.create_table",
     "seed.d1.agent_referral_code_rules.insert_default_rules",
   ],
+  67: [
+    "schema.d1.job_pipeline_instances.alter_table_add_column_run_workflow_instance_id",
+  ],
 };
 
-/** Migration versions in the D1 section (1–66; 0053 added by #2781). */
-export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66];
+/** Migration versions in the D1 section (1–67; 0053 added by #2781). */
+export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67];
 
 export interface D1MigrationSqlShape {
   /** Text before the first statement: "\n" or "". */

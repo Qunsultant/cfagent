@@ -1821,6 +1821,7 @@ export const jobPipelineInstances = sqliteTable("job_pipeline_instances", {
   runTrigger: text("run_trigger"),
   runScheduleId: text("run_schedule_id"),
   runAsyncJobId: text("run_async_job_id"),
+  runWorkflowInstanceId: text("run_workflow_instance_id"),
   checkpointJson: text("checkpoint_json"),
   stageCheckpointJson: text("stage_checkpoint_json"),
   stageDesiredJson: text("stage_desired_json"),

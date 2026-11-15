@@ -372,14 +372,14 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.confirmRequired).toBe(true);
     expect(typeof body.previewToken).toBe("string");
     expect(body.previewToken).toHaveLength(64);
-    // D1 leg: the fresh selection (234 schema + 11 seeds).
-    expect(body.d1.selected).toHaveLength(245);
+    // D1 leg: the fresh selection (235 schema + 11 seeds).
+    expect(body.d1.selected).toHaveLength(246);
     expect(body.d1.skipped).toHaveLength(6);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
       expect(inst.selected).toHaveLength(128);
-      expect(inst.skipped).toHaveLength(34);
+      expect(inst.skipped).toHaveLength(35);
     }
     expect(body.uncreatableLayers).toHaveLength(5);
     // Nothing executed: the D1 store and the member instances are
@@ -433,7 +433,7 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(status).toBe(200);
     expect(body.confirmed).toBe(true);
     expect(body.d1.report.outcome).toBe("succeeded");
-    expect(body.d1.report.executed).toHaveLength(245);
+    expect(body.d1.report.executed).toHaveLength(246);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

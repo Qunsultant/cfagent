@@ -341,6 +341,12 @@ export class JobPipelineWorkflow extends ThinkWorkflow<
     step: WorkflowStep,
   ): Promise<JobRunOutcome> {
     const deps = createJobPipelineWorkflowDeps(this.env);
-    return runJobPipelineWorkflowFlow(deps, step, event.payload);
+    // Issue #4454 — the workflow instance id is the replay
+    // proof: stable across replays of this instance, distinct
+    // across instances, so a replayed flow can prove it
+    // dispatched the still-running run it resumes.
+    return runJobPipelineWorkflowFlow(deps, step, event.payload, {
+      workflowInstanceId: event.instanceId,
+    });
   }
 }

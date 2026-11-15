@@ -239,6 +239,17 @@ export interface JobInstanceRecord {
    * run they settle, so it must survive the dispatching process.
    */
   runAsyncJobId: string | null;
+  /**
+   * The workflow instance id that dispatched the live/last run
+   * (#4454 — the replay proof: a replayed workflow flow resumes
+   * a still-`running` instance only when the recorded id matches
+   * the replaying workflow instance's own id). Null when no
+   * workflow instance dispatched the run — an explicit null,
+   * never a laundered id. Persisted on the instance (same class
+   * of fact as `runAsyncJobId`): the replay runs in a new
+   * process, so the proof must survive the dispatching process.
+   */
+  runWorkflowInstanceId: string | null;
   checkpoint: JobCheckpoint | null;
   /**
    * The run's stage-runner checkpoint (#3549): one entry per

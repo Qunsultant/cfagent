@@ -41,11 +41,23 @@ export interface JobPipelineWorkflowStep {
  * The workflow is the async boundary: whatever the job's
  * configured delivery mode, the flow awaits the run's outcome
  * and returns it as the workflow result.
+ *
+ * Issue #4454 — eviction replay: when the runtime evicts a
+ * workflow mid-run and replays it, this flow re-enters with the
+ * persisted instance still `running`, and runJob refuses
+ * `job_already_running`. When the caller passes the workflow
+ * instance id, the flow answers that refusal with a replay
+ * attempt: the engine resumes the run only when the recorded
+ * dispatching instance id matches the caller's — the replay
+ * proof. Every unproven case re-throws the ORIGINAL refusal,
+ * so the concurrent-dispatch behavior is byte-identical to
+ * before: only a proven replay changes the outcome.
  */
 export async function runJobPipelineWorkflowFlow(
   deps: JobPipelineDeps,
   step: JobPipelineWorkflowStep,
   payload: JobPipelineWorkflowPayload,
+  opts?: { workflowInstanceId?: string },
 ): Promise<JobRunOutcome> {
   if (!payload || typeof payload.jobId !== "string" || !payload.jobId.trim()) {
     throw new JobPipelineError(
@@ -59,10 +71,36 @@ export async function runJobPipelineWorkflowFlow(
       do: async <T>(name: string, fn: () => Promise<T>): Promise<T> => step.do(name, fn),
     },
   });
-  const dispatch = await control.runJob(payload.jobId, {
-    trigger: payload.trigger ?? "manual",
-    ...(payload.scopePath ? { scopePath: payload.scopePath } : {}),
-  });
+  const workflowInstanceId = opts?.workflowInstanceId;
+  let dispatch;
+  try {
+    dispatch = await control.runJob(payload.jobId, {
+      trigger: payload.trigger ?? "manual",
+      ...(payload.scopePath ? { scopePath: payload.scopePath } : {}),
+      ...(workflowInstanceId ? { workflowInstanceId } : {}),
+    });
+  } catch (error) {
+    if (
+      workflowInstanceId &&
+      error instanceof JobPipelineError &&
+      error.code === "job_already_running"
+    ) {
+      try {
+        dispatch = await control.replayJob(payload.jobId, {
+          workflowInstanceId,
+          ...(payload.scopePath ? { scopePath: payload.scopePath } : {}),
+        });
+      } catch (replayError) {
+        // Unproven: the original refusal stands, exactly as
+        // before. Only a coded refusal is swallowed — an
+        // infrastructure failure surfaces as itself.
+        if (replayError instanceof JobPipelineError) throw error;
+        throw replayError;
+      }
+    } else {
+      throw error;
+    }
+  }
   if (dispatch.completion) return dispatch.completion;
   const view = await control.getJob(payload.jobId);
   return {

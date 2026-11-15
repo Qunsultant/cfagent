@@ -35,7 +35,8 @@
  *
  * The two frozen JobPipeline v1 copies are history, never the
  * live consts: the instances copy predates the run_schedule_id /
- * run_async_job_id columns (it is the 0046 shape), while the
+ * run_async_job_id / run_workflow_instance_id columns (it is the
+ * 0046 shape), while the
  * legacy ensure path executes the live consts and the two
  * probed ALTERs converge an existing table. Their sha256 pins
  * match the DO suite's FROZEN_* constants.
@@ -121,6 +122,14 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     plane: "do",
     table: "job_pipeline_instances",
     statement: `ALTER TABLE job_pipeline_instances ADD COLUMN run_async_job_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.job_pipeline_instances.alter_table_add_column_run_workflow_instance_id",
+    plane: "do",
+    table: "job_pipeline_instances",
+    statement: `ALTER TABLE job_pipeline_instances ADD COLUMN run_workflow_instance_id TEXT`,
     kind: "schema",
     form: "literal",
   },
