@@ -65,7 +65,16 @@ function isSocialTab(value: unknown): value is SocialTab {
   );
 }
 
-export function SocialPostingPanel({ active = true }: { active?: boolean }) {
+export function SocialPostingPanel({
+  active = true,
+  /** URL param carrying the inner tab. Standalone it is "view"; nested
+   *  in the Marketing Hub it is "socialTab", so the inner tab never
+   *  overwrites the hub tab it is nested inside (issue 4682). */
+  param = "view",
+}: {
+  active?: boolean;
+  param?: string;
+}) {
   const [date] = useState(() => todayInNewYork());
   const [briefText, setBriefText] = useState("");
   const [savedNote, setSavedNote] = useState("");
@@ -81,7 +90,7 @@ export function SocialPostingPanel({ active = true }: { active?: boolean }) {
   const fetchedRef = React.useRef(false);
 
   const { activeTab, visitedTabs, handleTabChange } = useUrlSyncedTabs<SocialTab>({
-    param: "view",
+    param,
     isValid: isSocialTab,
     defaultTab: "brief",
   });

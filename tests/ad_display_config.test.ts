@@ -23,6 +23,8 @@ describe("per-tab ad display configuration", () => {
       "audit",
       "chat",
       "endpoints",
+      // Issue 4682: the Marketing Hub tab itself carries no ad strip.
+      "marketing-hub",
       "nlq",
       "options-flows",
       "payments",

@@ -25,12 +25,13 @@ import { PageChromeContext } from "./components/ui/PageShell";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
 import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
-import { legacyAuditVaultRedirect, legacyDualHomeRedirect, legacyPlatformAdminHubRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
+import { legacyAuditVaultRedirect, legacyDualHomeRedirect, legacyMarketingHubRedirect, legacyPlatformAdminHubRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
 import { legacySchedulesRedirect } from "./schedulesHomeView";
 import { SchedulesHome } from "./SchedulesHome";
 import { AuditVaultPage } from "./AuditVaultPage";
 import { DataHubHome } from "./DataHubHome";
 import { SecurityHubHome } from "./SecurityHubHome";
+import { MarketingHubHome } from "./MarketingHubHome";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import { getCrumb } from "./routes";
 import { StockSearchBar } from "./components/StockSearchBar";
@@ -48,14 +49,11 @@ import { ToolResultView } from "./chat/ToolResultView";
 import { AgentChatTabContent } from "./chat/AgentChatTabContent";
 import { isTradingTab, mapTabToTradingSubTab, SHELL_RETAINED_PAGES } from "./chat/types";
 import type { User, AuditLogEvent, MemoryItem, ReferralItem, AdItem, CategoryItem, ExternalAdItem, RevenueSummaryData, TableMetadataItem } from "./chat/types";
-import { ReferralsTab } from "./chat/tabs/ReferralsTab";
-import { AdsTab } from "./chat/tabs/AdsTab";
 import { RevenueTab } from "./chat/tabs/RevenueTab";
 import { EndpointsTab } from "./chat/tabs/EndpointsTab";
 import { DocsAndReportsPanel } from "./DocsAndReportsPanel";
 import { PaymentWorkflowAssurance } from "./PaymentWorkflowAssurance";
 import { CheckoutPanel } from "./CheckoutPanel";
-import { SocialPostingPanel } from "./SocialPostingPanel";
 import { PaymentsPage } from "./PaymentsPage";
 import { SearchHub } from "./search/SearchHub";
 import {
@@ -130,6 +128,13 @@ export function Chat({ user }: { user: User }) {
           replaceToTab(dualHomeRedirect.tab, dualHomeRedirect.view, dualHomeRedirect.params);
           return;
         }
+        // Issue 4682: the three retired standalone marketing
+        // addresses resolve onto their Marketing Hub section.
+        const marketingHubRedirect = legacyMarketingHubRedirect(window.location.search);
+        if (marketingHubRedirect) {
+          replaceToTab(marketingHubRedirect.tab, marketingHubRedirect.view, marketingHubRedirect.params);
+          return;
+        }
       }
       setTab(readTabFromLocation());
     };
@@ -158,7 +163,7 @@ export function Chat({ user }: { user: User }) {
   const [brokerProps, setBrokerProps] = useState<ETradeDynamicMenuProps | null>(null);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [tbdMenuOpen, setTbdMenuOpen] = useState(false);
-  const isTbdTab = tab === "chat" || tab === "payments" || tab === "referrals" || tab === "ads" || tab === "revenue";
+  const isTbdTab = tab === "chat" || tab === "payments" || tab === "marketing-hub" || tab === "revenue";
 
   // Navigation Layout state (flexible top or left sidebar)
   const [navLayout, setNavLayout] = useState<NavLayoutMode>(() => {
@@ -601,10 +606,9 @@ export function Chat({ user }: { user: User }) {
 
   // Load tab-specific data when tab changes
   useEffect(() => {
-    if (tab === "referrals") {
+    if (tab === "marketing-hub") {
       fetchReferrals();
       fetchCategories();
-    } else if (tab === "ads") {
       fetchAds();
     } else if (tab === "revenue") {
       fetchRevenueSummary();
@@ -1012,7 +1016,7 @@ export function Chat({ user }: { user: User }) {
             showSponsorSpotlight={effectiveAdBannerConfig.enabled && effectiveAdBannerConfig.showSponsorSpotlight && Boolean(effectiveAdBannerConfig.tabVisibility.chat)}
             onAdClick={handleAdClick}
             onOpenAdsTab={() => {
-              handleSelectTab("ads");
+              navigateToTab("marketing-hub", "ads");
               setTbdMenuOpen(false);
             }}
             onNavigateTab={(targetTab) => {
@@ -1140,68 +1144,71 @@ export function Chat({ user }: { user: User }) {
   // the hub). TAB_CONTENT holds only the non-retained ids now.
   const SHELL_CONTENT: Record<string, ReactNode> = {
     payments: <PaymentsPage active={tab === "payments"} user={user} />,
-    social: <SocialPostingPanel active={tab === "social"} />,
-    ads: (
-          <AdsTab
-            adFormError={adFormError}
-            adFormSuccess={adFormSuccess}
-            ads={ads}
-            adsLoading={adsLoading}
-            fetchAds={fetchAds}
-            handleAdClick={handleAdClick}
-            handleCreateAd={handleCreateAd}
-            newAdColor={newAdColor}
-            newAdCta={newAdCta}
-            newAdSponsor={newAdSponsor}
-            newAdTagline={newAdTagline}
-            newAdTitle={newAdTitle}
-            newAdUrl={newAdUrl}
-            savingAd={savingAd}
-            setNewAdColor={setNewAdColor}
-            setNewAdCta={setNewAdCta}
-            setNewAdSponsor={setNewAdSponsor}
-            setNewAdTagline={setNewAdTagline}
-            setNewAdTitle={setNewAdTitle}
-            setNewAdUrl={setNewAdUrl}
-          />
-    ),
-    referrals: (
-          <ReferralsTab
-            activeShareRefId={activeShareRefId}
-            adBannerConfig={effectiveAdBannerConfig}
-            categories={categories}
-            copiedReferral={copiedReferral}
-            copiedShareRefId={copiedShareRefId}
-            discordCopied={discordCopied}
-            externalAds={externalAds}
-            fetchReferrals={fetchReferrals}
-            googleAdsEnabled={googleAdsEnabled}
-            googlePublisherId={googlePublisherId}
-            googleSlotId={googleSlotId}
-            handleCopyDiscordEmbed={handleCopyDiscordEmbed}
-            handleCopyPersonalRef={handleCopyPersonalRef}
-            handleCopyRefDiscordEmbed={handleCopyRefDiscordEmbed}
-            handleCreateReferral={handleCreateReferral}
-            handleDeleteReferral={handleDeleteReferral}
-            handleExternalAdClick={handleExternalAdClick}
-            handleReferralClick={handleReferralClick}
-            newRefCategory={newRefCategory}
-            newRefReward={newRefReward}
-            newRefTitle={newRefTitle}
-            newRefUrl={newRefUrl}
-            personalReferralUrl={personalReferralUrl}
-            refFormError={refFormError}
-            refFormSuccess={refFormSuccess}
-            referrals={referrals}
-            referralsLoading={referralsLoading}
-            savingRef={savingRef}
-            setActiveShareRefId={setActiveShareRefId}
-            setNewRefCategory={setNewRefCategory}
-            setNewRefReward={setNewRefReward}
-            setNewRefTitle={setNewRefTitle}
-            setNewRefUrl={setNewRefUrl}
-            user={user}
-          />
+    // Issue 4682: the Marketing Hub is the ONE marketing surface — the
+    // referrals, ads, and social pages render here as hub sections, not
+    // as standalone shell pages. Props stay in Chat (the three pages
+    // share Chat state), so this entry passes them through as objects.
+    "marketing-hub": (
+      <MarketingHubHome
+        adsProps={{
+          adFormError,
+          adFormSuccess,
+          ads,
+          adsLoading,
+          fetchAds,
+          handleAdClick,
+          handleCreateAd,
+          newAdColor,
+          newAdCta,
+          newAdSponsor,
+          newAdTagline,
+          newAdTitle,
+          newAdUrl,
+          savingAd,
+          setNewAdColor,
+          setNewAdCta,
+          setNewAdSponsor,
+          setNewAdTagline,
+          setNewAdTitle,
+          setNewAdUrl,
+        }}
+        referralsProps={{
+          activeShareRefId,
+          adBannerConfig: effectiveAdBannerConfig,
+          categories,
+          copiedReferral,
+          copiedShareRefId,
+          discordCopied,
+          externalAds,
+          fetchReferrals,
+          googleAdsEnabled,
+          googlePublisherId,
+          googleSlotId,
+          handleCopyDiscordEmbed,
+          handleCopyPersonalRef,
+          handleCopyRefDiscordEmbed,
+          handleCreateReferral,
+          handleDeleteReferral,
+          handleExternalAdClick,
+          handleReferralClick,
+          newRefCategory,
+          newRefReward,
+          newRefTitle,
+          newRefUrl,
+          personalReferralUrl,
+          refFormError,
+          refFormSuccess,
+          referrals,
+          referralsLoading,
+          savingRef,
+          setActiveShareRefId,
+          setNewRefCategory,
+          setNewRefReward,
+          setNewRefTitle,
+          setNewRefUrl,
+          user,
+        }}
+      />
     ),
     revenue: (
           <RevenueTab

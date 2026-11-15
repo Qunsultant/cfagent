@@ -46,10 +46,12 @@ import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 29;
+// Issue 4682: the referrals, ads, and social nav entries retired into
+// the one Marketing Hub route; 29 → 27 entries.
+const NAV_COUNT = 27;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 29-item nav", () => {
+  it("has the full 27-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });
@@ -97,9 +99,15 @@ describe("left-nav unique icons and badges", () => {
     expect(byId.get("platform-admin")!.navEntry.badge).toBe("Admin");
     expect(byId.get("billing")!.icon).toBe("Billing");
     expect(byId.get("billing")!.navEntry.badge).toBe("Billing");
-    expect(byId.get("billing")!.navEntry.navOrder).toBe(25);
+    expect(byId.get("billing")!.navEntry.navOrder).toBe(23);
     expect(byId.get("assets-hub")!.icon).toBe("Screeners");
     expect(byId.get("assets-hub")!.navEntry.badge).toBe("Assets");
-    expect(byId.get("assets-hub")!.navEntry.navOrder).toBe(26);
+    expect(byId.get("assets-hub")!.navEntry.navOrder).toBe(24);
+    // Issue 4682: the Marketing Hub took the referrals slot at
+    // navOrder 10; the freed Earn/Partners/Daily badges went to its
+    // sub-menu items, so the hub carries the neutral Marketing badge.
+    expect(byId.get("marketing-hub")!.icon).toBe("Banners");
+    expect(byId.get("marketing-hub")!.navEntry.badge).toBe("Marketing");
+    expect(byId.get("marketing-hub")!.navEntry.navOrder).toBe(10);
   });
 });

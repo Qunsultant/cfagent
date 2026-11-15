@@ -53,6 +53,10 @@ export interface ReferralsTabProps {
   setNewRefTitle: React.Dispatch<React.SetStateAction<string>>;
   setNewRefUrl: React.Dispatch<React.SetStateAction<string>>;
   user: User;
+  /** URL param carrying the inner tab. Standalone it is "view"; nested
+   *  in the Marketing Hub it is "referralsTab", so the inner tab never
+   *  overwrites the hub tab it is nested inside (issue 4682). */
+  param?: string;
 }
 
 type ReferralsTabId = "share" | "activity" | "links" | "community";
@@ -72,9 +76,9 @@ const isReferralsTab = (v: unknown): v is ReferralsTabId =>
  * third-party network colors already token-valued, not page layout.
  * All layout, stats, and forms move to primitives and utilities.
  */
-export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copiedReferral, copiedShareRefId, discordCopied, externalAds, fetchReferrals, googleAdsEnabled, googlePublisherId, googleSlotId, handleCopyDiscordEmbed, handleCopyPersonalRef, handleCopyRefDiscordEmbed, handleCreateReferral, handleDeleteReferral, handleExternalAdClick, handleReferralClick, newRefCategory, newRefReward, newRefTitle, newRefUrl, personalReferralUrl, refFormError, refFormSuccess, referrals, referralsLoading, savingRef, setActiveShareRefId, setNewRefCategory, setNewRefReward, setNewRefTitle, setNewRefUrl, user}: ReferralsTabProps) {
+export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copiedReferral, copiedShareRefId, discordCopied, externalAds, fetchReferrals, googleAdsEnabled, googlePublisherId, googleSlotId, handleCopyDiscordEmbed, handleCopyPersonalRef, handleCopyRefDiscordEmbed, handleCreateReferral, handleDeleteReferral, handleExternalAdClick, handleReferralClick, newRefCategory, newRefReward, newRefTitle, newRefUrl, personalReferralUrl, refFormError, refFormSuccess, referrals, referralsLoading, savingRef, setActiveShareRefId, setNewRefCategory, setNewRefReward, setNewRefTitle, setNewRefUrl, user, param = "view"}: ReferralsTabProps) {
   const { activeTab, visitedTabs, handleTabChange } = useUrlSyncedTabs<ReferralsTabId>({
-    param: "view",
+    param,
     isValid: isReferralsTab,
     defaultTab: "share",
   });

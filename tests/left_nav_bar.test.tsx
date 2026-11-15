@@ -103,13 +103,19 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).not.toContain("research");
   });
 
-  it("configures Marketing menu with referrals, ads, and social", () => {
+  it("configures the Marketing menu with the Marketing Hub and the Product Hub (issue 4682)", () => {
     const marketing = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-marketing");
     expect(marketing).toBeDefined();
     const itemIds = marketing!.items.map((i) => i.id);
-    expect(itemIds).toContain("referrals");
-    expect(itemIds).toContain("ads");
-    expect(itemIds).toContain("social");
+    // Issue 4682: the referrals, ads, and social top-level entries
+    // retired into the one Marketing Hub route; the Product Hub stays.
+    expect(itemIds).toContain("marketing-hub");
+    expect(itemIds).toContain("product-hub");
+    expect(itemIds).not.toContain("referrals");
+    expect(itemIds).not.toContain("ads");
+    expect(itemIds).not.toContain("social");
+    const hub = marketing!.items.find((i) => i.id === "marketing-hub")!;
+    expect(hub.subItems!.map((s) => s.id)).toEqual(["referrals", "ads", "social"]);
   });
 
   it("configures Agents with endpoints as a sub-menu under Platform", () => {

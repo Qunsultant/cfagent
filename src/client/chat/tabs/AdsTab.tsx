@@ -25,6 +25,10 @@ export interface AdsTabProps {
   setNewAdTagline: React.Dispatch<React.SetStateAction<string>>;
   setNewAdTitle: React.Dispatch<React.SetStateAction<string>>;
   setNewAdUrl: React.Dispatch<React.SetStateAction<string>>;
+  /** URL param carrying the inner tab. Standalone it is "view"; nested
+   *  in the Marketing Hub it is "adsTab", so the inner tab never
+   *  overwrites the hub tab it is nested inside (issue 4682). */
+  param?: string;
 }
 
 type AdsTabId = "offers" | "submit";
@@ -40,9 +44,9 @@ const isAdsTab = (v: unknown): v is AdsTabId => v === "offers" || v === "submit"
  * panels retained mounted-hidden. Per-ad accent colors are record data
  * and still flow through Card/Badge style props; all layout is tokens.
  */
-export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, handleAdClick, handleCreateAd, newAdColor, newAdCta, newAdSponsor, newAdTagline, newAdTitle, newAdUrl, savingAd, setNewAdColor, setNewAdCta, setNewAdSponsor, setNewAdTagline, setNewAdTitle, setNewAdUrl}: AdsTabProps) {
+export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, handleAdClick, handleCreateAd, newAdColor, newAdCta, newAdSponsor, newAdTagline, newAdTitle, newAdUrl, savingAd, setNewAdColor, setNewAdCta, setNewAdSponsor, setNewAdTagline, setNewAdTitle, setNewAdUrl, param = "view"}: AdsTabProps) {
   const { activeTab, visitedTabs, handleTabChange } = useUrlSyncedTabs<AdsTabId>({
-    param: "view",
+    param,
     isValid: isAdsTab,
     defaultTab: "offers",
   });

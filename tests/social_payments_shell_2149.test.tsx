@@ -87,8 +87,10 @@ function panelFor(container: HTMLElement, tabId: string): HTMLElement | null {
 }
 
 describe("shell-retain routing (#2149)", () => {
-  it("social + payments carry shellRetain, not the trading retain flag", () => {
-    for (const id of ["social", "payments"]) {
+  it("marketing-hub + payments carry shellRetain, not the trading retain flag", () => {
+    // Issue 4682: the social shellRetain flag moved onto the one
+    // Marketing Hub route (the social page renders as its section).
+    for (const id of ["marketing-hub", "payments"]) {
       const route = ROUTES.find((r) => r.id === id);
       expect(route).toBeDefined();
       expect((route as any).shellRetain).toBe(true);

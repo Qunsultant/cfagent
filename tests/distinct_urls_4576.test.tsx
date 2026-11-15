@@ -78,6 +78,11 @@ describe("nested sub-tab params (#4576)", () => {
     // home — scoped to ["schedules"] it still drops on a tab change,
     // and the section surfaces are addressable through the registry.
     expect(TAB_PARAM_OWNERS.section).toEqual(["schedules"]);
+    // Issue 4682: the Marketing Hub's three nested section params,
+    // owned by the hub only — the same shape as flowsTab/researchTab.
+    expect(TAB_PARAM_OWNERS.adsTab).toEqual(["marketing-hub"]);
+    expect(TAB_PARAM_OWNERS.referralsTab).toEqual(["marketing-hub"]);
+    expect(TAB_PARAM_OWNERS.socialTab).toEqual(["marketing-hub"]);
   });
 
   it("publishes a surface per panel, with the panel's own values", () => {
@@ -92,6 +97,32 @@ describe("nested sub-tab params (#4576)", () => {
       pageView: "research",
       param: "researchTab",
       values: ["screener", "report", "quoting", "fundamentals", "bars", "snapshot", "compare"],
+    });
+    // Issue 4682: the three retired marketing surfaces now live on
+    // the Marketing Hub with their own nested param per surface.
+    // (Surface values stay in the file's alphabetical order.)
+    expect(surface("ads")).toMatchObject({
+      page: "marketing-hub",
+      pageView: "ads",
+      param: "adsTab",
+      values: ["offers", "submit"],
+    });
+    expect(surface("referrals")).toMatchObject({
+      page: "marketing-hub",
+      pageView: "referrals",
+      param: "referralsTab",
+      values: ["activity", "community", "links", "share"],
+    });
+    expect(surface("social")).toMatchObject({
+      page: "marketing-hub",
+      pageView: "social",
+      param: "socialTab",
+      values: ["approvals", "brief", "goal", "posts", "tokens"],
+    });
+    expect(surface("marketing-hub")).toMatchObject({
+      page: "marketing-hub",
+      param: "view",
+      values: ["referrals", "ads", "social"],
     });
   });
 

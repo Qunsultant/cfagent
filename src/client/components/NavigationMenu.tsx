@@ -111,6 +111,7 @@ export const NAV_TAB_PRESETS: Record<string, Record<string, boolean>> = {
     payments: false,
     referrals: false,
     ads: false,
+    "marketing-hub": false,
     revenue: false,
   },
   minimal: {
@@ -134,6 +135,7 @@ export const NAV_TAB_PRESETS: Record<string, Record<string, boolean>> = {
     payments: false,
     referrals: false,
     ads: false,
+    "marketing-hub": false,
     revenue: false,
   },
 };

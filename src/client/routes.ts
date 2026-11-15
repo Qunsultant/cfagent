@@ -22,8 +22,12 @@
  *   top-level ids `audit` and `nlq` into the one "Audit & Vault" route
  *   (`?tab=audit-vault&view=audit|nlq`), which took the audit slot;
  *   navOrders 21..29 shift down one, keeping 0..28 across the 29 nav
- *   entries; the route count is 42.
- * - `navEntry` is present only for the 29 entries that render in the nav.
+ *   entries; the route count is 42. Issue 4682 retired the three
+ *   marketing nav entries (referrals, ads, social) into the one
+ *   Marketing Hub route (`?tab=marketing-hub`), which took the
+ *   referrals slot at navOrder 10; navOrders 13..28 shift down two,
+ *   keeping 0..26 across the 27 nav entries; the route count is 45.
+ * - `navEntry` is present only for the 27 entries that render in the nav.
  *   Its `navOrder` reproduces the historical sidebar/top-strip order, so
  *   deriving NAVIGATION_ITEMS from this table changes nothing visible.
  * - `navGroup` is the nav entry highlighted when this tab is active. It

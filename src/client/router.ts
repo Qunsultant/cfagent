@@ -101,6 +101,15 @@ export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   // survives navigation to the home and drops on the way out, like
   // every other page-owned param (#3238).
   section: ["schedules"],
+  // Issue 4682: the Marketing Hub's nested section params — one per
+  // section, following the #4576 flowsTab/researchTab precedent, so an
+  // inner sub-tab never overwrites the hub tab it is nested inside.
+  // `adsTab` is AdsTab's tab set (host: the hub's `view=ads`);
+  // `referralsTab` is ReferralsTab's (host: `view=referrals`);
+  // `socialTab` is SocialPostingPanel's (host: `view=social`).
+  adsTab: ["marketing-hub"],
+  referralsTab: ["marketing-hub"],
+  socialTab: ["marketing-hub"],
 };
 
 /** Query string with `tab` set, keeping only the destination's own params. */
@@ -303,6 +312,78 @@ export function legacyDualHomeRedirect(search: string): LegacyProductRedirect | 
   }
   if (tab === "approvals") {
     return { tab: "order", params: { orderTab: "approvals" } };
+  }
+  return null;
+}
+
+/**
+ * Issue 4682 — the redirect for the three retired standalone marketing
+ * addresses, decided 2026-11-15 12:50 EST. One rule, the S1 rule: a
+ * surface lives where its workflow lives, so each standalone address
+ * folds onto its Marketing Hub section and the nested param carries
+ * the inner view through (`adsTab`, `referralsTab`, `socialTab`).
+ * The old standalone form carried the inner tab in `view`
+ * (`?tab=ads&view=submit`); that maps onto the nested param too, so
+ * old bookmarks keep landing on the same inner tab. An unknown inner
+ * value falls back to the section default with no nested param.
+ * Runs after legacyDualHomeRedirect in Chat.tsx applyRoute, before
+ * the tab is adopted.
+ */
+export function legacyMarketingHubRedirect(search: string): LegacyProductRedirect | null {
+  const params = new URLSearchParams(search);
+  const tab = params.get("tab") ?? "";
+  const view = params.get("view") ?? "";
+  if (tab === "ads") {
+    const adsTab = params.get("adsTab") ?? "";
+    if (adsTab === "offers" || adsTab === "submit") {
+      return { tab: "marketing-hub", view: "ads", params: { adsTab } };
+    }
+    if (view === "offers" || view === "submit") {
+      return { tab: "marketing-hub", view: "ads", params: { adsTab: view } };
+    }
+    return { tab: "marketing-hub", view: "ads" };
+  }
+  if (tab === "referrals") {
+    const referralsTab = params.get("referralsTab") ?? "";
+    if (
+      referralsTab === "share" ||
+      referralsTab === "activity" ||
+      referralsTab === "links" ||
+      referralsTab === "community"
+    ) {
+      return { tab: "marketing-hub", view: "referrals", params: { referralsTab } };
+    }
+    if (
+      view === "share" ||
+      view === "activity" ||
+      view === "links" ||
+      view === "community"
+    ) {
+      return { tab: "marketing-hub", view: "referrals", params: { referralsTab: view } };
+    }
+    return { tab: "marketing-hub", view: "referrals" };
+  }
+  if (tab === "social") {
+    const socialTab = params.get("socialTab") ?? "";
+    if (
+      socialTab === "brief" ||
+      socialTab === "goal" ||
+      socialTab === "approvals" ||
+      socialTab === "posts" ||
+      socialTab === "tokens"
+    ) {
+      return { tab: "marketing-hub", view: "social", params: { socialTab } };
+    }
+    if (
+      view === "brief" ||
+      view === "goal" ||
+      view === "approvals" ||
+      view === "posts" ||
+      view === "tokens"
+    ) {
+      return { tab: "marketing-hub", view: "social", params: { socialTab: view } };
+    }
+    return { tab: "marketing-hub", view: "social" };
   }
   return null;
 }
