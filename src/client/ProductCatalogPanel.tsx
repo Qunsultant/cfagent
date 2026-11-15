@@ -165,10 +165,34 @@ const linkStyle: React.CSSProperties = {
  *  are never rendered — they can carry internal detail. The one exception
  *  is the outcome CODE: a coded rejection (issue #4642) maps to its own
  *  fixed message, so a Stripe rejection of the mapped price never reads
- *  as "not configured". */
+ *  as "not configured". Issue #4692 extends the same pattern to every
+ *  distinct mint failure cause: each code has its own what/where/why
+ *  message, and the generic 503 branch below stays ONLY as a fallback
+ *  for truly unclassified 503s. */
 function sellingMintError(status: number, code?: string): string {
   if (code === "FAILURE_BILLING_CHECKOUT_REJECTED") {
     return "Stripe rejected the price mapped for this plan — a subscription checkout needs a recurring price. Ask the operator to map a recurring price for the plan.";
+  }
+  if (code === "FAILURE_BILLING_PRICE_MAPPING_MISSING") {
+    return "No Stripe Price is mapped for this plan yet, so the checkout cannot start. Ask the operator to map a Stripe Price for this plan in the Billing tab.";
+  }
+  if (code === "FAILURE_BILLING_IDENTITY_UNAVAILABLE") {
+    return "Your sign-in could not be confirmed for this checkout, so it could not start. Sign in again and retry.";
+  }
+  if (code === "FAILURE_BILLING_STRIPE_NOT_CONFIGURED") {
+    return "Stripe checkout is not configured yet, so the checkout cannot start. Ask the operator to configure Stripe.";
+  }
+  if (code === "FAILURE_BILLING_CHECKOUT_SESSION_INVALID") {
+    return "Stripe returned a checkout session with no checkout link, so the checkout cannot open. Try again later.";
+  }
+  if (code === "FAILURE_PLAN_NOT_EFFECTIVE_FOR_SEGMENT") {
+    return "This plan is not available for your account right now. Ask the operator to approve an effective version for your segment.";
+  }
+  if (code === "FAILURE_COMMERCIAL_STORE_UNAVAILABLE") {
+    return "The commercial store is unavailable, so the checkout could not start. Try again later.";
+  }
+  if (code === "FAILURE_PLAN_PRICE_NOT_APPROVED") {
+    return "This plan's price has not been approved yet, so it cannot be charged. Ask the operator to approve the price first.";
   }
   if (status === 503) {
     return "Subscription checkout is not configured yet (no active plan, price mapping, or Stripe configuration).";

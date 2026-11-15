@@ -4775,7 +4775,10 @@ export async function handleAgenticPaymentsRoutes(
   // billing-purchase route fulfills from a retrieved session. The price is the OPERATOR-MAPPED
   // provider price id from the billing policy (stripePriceByPlan) — never a catalogue price, never
   // a code constant. A missing mapping refuses with 503 (operator configuration gap, not a client
-  // error). The session carries fulfillment keys (userId/planId/tenantId) in session + provider
+  // error). Issue #4692: every distinct failure cause in this mint returns its own coded outcome
+  // from the outcome catalog (missing mapping, identity failure, Stripe unconfigured, session with
+  // no checkout URL, segment refusal) — the generic FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE never
+  // stands for a known cause here, and the raw segment-check message never reaches the client. The session carries fulfillment keys (userId/planId/tenantId) in session + provider
   // subscription metadata; the tenant comes from the resolved identity, never the request body
   // (same rule as the one-time checkout, #2219). An existing customer mapping is passed through
   // so a second checkout reuses the provider customer instead of fragmenting customers.
@@ -4811,10 +4814,10 @@ export async function handleAgenticPaymentsRoutes(
       const policyValue = await policy.getPolicy();
       const priceId = policyValue.stripePriceByPlan[plan.id];
       if (!priceId) {
-        return Response.json(
-          { code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: `No operator-mapped Stripe Price id for plan ${plan.id}: Billing checkout is not configured.` },
-          { status: 503 },
-        );
+        // Issue #4692: a missing mapping is its own coded outcome, not the
+        // generic 503 — the message must say what (no price mapped), where
+        // (this plan's mapping in the Billing tab), and why (operator must map one).
+        return codedOutcomeResponse("FAILURE_BILLING_PRICE_MAPPING_MISSING");
       }
       let identity;
       try {
@@ -4823,7 +4826,8 @@ export async function handleAgenticPaymentsRoutes(
           { userId: login, nowMs: Date.now() },
         );
       } catch (err: any) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
+        // Issue #4692: an identity failure is its own coded outcome.
+        return codedOutcomeResponse("FAILURE_BILLING_IDENTITY_UNAVAILABLE");
       }
       const tenantId = identity.tenantId ?? login;
       // Issue #3289: same effective+approved-for-segment check as
@@ -4838,14 +4842,15 @@ export async function handleAgenticPaymentsRoutes(
           Date.now(),
         );
       } catch (err: any) {
-        return Response.json(
-          { error: err.message || "Plan is not the effective approved version for your segment." },
-          { status: 409 },
-        );
+        // Issue #4692: the segment refusal is a coded outcome, never a raw
+        // err.message — the thrown detail names internal state the caller
+        // must never see.
+        return codedOutcomeResponse("FAILURE_PLAN_NOT_EFFECTIVE_FOR_SEGMENT");
       }
       const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
       if (!ports) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
+        // Issue #4692: Stripe unconfigured is its own coded outcome.
+        return codedOutcomeResponse("FAILURE_BILLING_STRIPE_NOT_CONFIGURED");
       }
       const existingCustomer = await customers.getCustomer(login);
       const draftId = `bill-${crypto.randomUUID()}`;
@@ -4866,7 +4871,9 @@ export async function handleAgenticPaymentsRoutes(
         return codedOutcomeResponse("FAILURE_BILLING_CHECKOUT_REJECTED");
       }
       if (!created.url || !created.id) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
+        // Issue #4692: a session with no checkout URL is its own coded
+        // outcome — it is not a configuration gap.
+        return codedOutcomeResponse("FAILURE_BILLING_CHECKOUT_SESSION_INVALID");
       }
       ctx.audit("commercial.subscription.billing_checkout_created", "payments", {
         userId: login,

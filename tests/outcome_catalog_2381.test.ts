@@ -253,7 +253,7 @@ describe("outcome catalog: run detail messages (#2608)", () => {
     // FAILURE_NO_SCREENING_PROVIDER) + 1 (#4642:
     // FAILURE_BILLING_CHECKOUT_REJECTED).
     // The count pins that no RUN_* code leaked into "outcomes".
-    expect(Object.keys(outcomes)).toHaveLength(239);
+    expect(Object.keys(outcomes)).toHaveLength(244);
     // Count is the merged catalog (this branch + main).
     expect(Object.keys(outcomes).some((k) => k.startsWith("RUN_"))).toBe(false);
     for (const code of RUN_CODES) {
