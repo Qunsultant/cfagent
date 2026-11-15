@@ -35,14 +35,17 @@
  * explicit operator request, and no grant is activated or
  * seeded anywhere else. Tests use in-memory fakes only.
  *
- * CONSERVATIVE PARSING: only explicit commands parse. Anything
- * ambiguous, partial, or unrecognized returns null and the turn
- * proceeds as a normal LLM turn — the model may ask for
- * clarification, but no mutation is ever guessed. A grant whose
- * required reason or expiry is missing parses, and the
- * executor returns a deterministic error naming what is
- * missing — the target is unambiguous, so the failure is an
- * explicit outcome, never a guessed write.
+ * CONSERVATIVE PARSING: only explicit commands parse. A
+ * recognizable-but-incomplete command — the command shape with
+ * its login missing (#4701) — parses to a deterministic
+ * needs-identifier outcome: the turn answers asking for the
+ * missing login, with the Accounts page link. No route call is
+ * made and no mutation is ever guessed. Anything ambiguous or
+ * unrecognized returns null and the turn proceeds as a normal
+ * LLM turn. A grant whose required reason or expiry is missing
+ * parses, and the executor returns a deterministic error naming
+ * what is missing — the target is unambiguous, so the failure is
+ * an explicit outcome, never a guessed write.
  *
  * RSI posture (slice 1): BizCopilot turns already flow through
  * the generic evaluation path (judge.evaluate + VectorMemory in
@@ -72,6 +75,17 @@ import { copilotRegistrationForSourceTab } from "./copilotChannels";
 export const BIZCOPILOT_ACCOUNTS_PAGE_URL =
   "https://agent.openaimp.com/?tab=platform-admin&view=accounts";
 
+/** The command shape a needs-identifier outcome recognized: the action the user asked for, minus its login. */
+export type BizCopilotAccountAskCommand =
+  | "lookup"
+  | "grant-subscription"
+  | "grant-unlimited-free"
+  | "revoke-unlimited-free"
+  | "grant-free-access"
+  | "revoke-free-access"
+  | "grant-history"
+  | "move-current-pricing";
+
 export type BizCopilotAccountIntent =
   | { action: "lookup"; userId: string }
   | { action: "grant-subscription"; userId: string; planRef: string }
@@ -91,7 +105,16 @@ export type BizCopilotAccountIntent =
     }
   | { action: "revoke-free-access"; userId: string }
   | { action: "grant-history"; userId: string }
-  | { action: "move-current-pricing"; userId: string; reason: string | null };
+  | { action: "move-current-pricing"; userId: string; reason: string | null }
+  | {
+      action: "needs-identifier";
+      command: BizCopilotAccountAskCommand;
+      userId: null;
+      /** For grant-free-access asks: the kind the user named, when one was named. */
+      kind?: "lifetime" | "limited";
+      /** For grant-subscription asks: the plan the user named, when one was named. */
+      planRef?: string;
+    };
 
 function normalize(text: string): string {
   return text.trim().replace(/\s+/g, " ").replace(/[?.!]+$/, "").trim();
@@ -100,6 +123,10 @@ function normalize(text: string): string {
 /**
  * Parse one account command. Returns null for anything that is not
  * an explicit account command — the turn then proceeds normally.
+ * A recognizable command shape with its login missing returns a
+ * needs-identifier intent instead of null (#4701): the turn then
+ * answers asking for the login, never falling through to a model
+ * that denies the capability exists.
  */
 export function parseBizCopilotAccountIntent(
   text: string,
@@ -185,6 +212,71 @@ export function parseBizCopilotAccountIntent(
       userId: move[1],
       reason: move[2]?.trim() ? move[2].trim() : null,
     };
+  }
+
+  // Needs-identifier asks (#4701): the command shapes above with
+  // the login missing. These run AFTER the complete shapes so a
+  // complete command always wins; each returns the deterministic
+  // ask outcome, never a route call. A trailing "to" / "for" /
+  // "from" tail is accepted — the login is still missing, so the
+  // ask is the same.
+  if (
+    /^(?:show|display|get|look up|lookup)(?: me)? (?:the )?account(?: for)?$/i.test(raw) ||
+    /^(?:show|display)(?: me)? (?:the )?subscriptions(?: for)?$/i.test(raw)
+  ) {
+    return { action: "needs-identifier", command: "lookup", userId: null };
+  }
+
+  if (/^(?:show|display|get)(?: me)? (?:the )?grants?(?: history)?(?: for| of)?$/i.test(raw)) {
+    return { action: "needs-identifier", command: "grant-history", userId: null };
+  }
+
+  if (/^grant unlimited[- ]?free(?: to)?$/i.test(raw)) {
+    return { action: "needs-identifier", command: "grant-unlimited-free", userId: null };
+  }
+
+  if (/^revoke unlimited[- ]?free(?: from| for)?$/i.test(raw)) {
+    return { action: "needs-identifier", command: "revoke-unlimited-free", userId: null };
+  }
+
+  const freeAccessAsk = /^grant free[- ]?access(?: (lifetime|limited))?(?: to)?$/i.exec(raw);
+  if (freeAccessAsk) {
+    return {
+      action: "needs-identifier",
+      command: "grant-free-access",
+      userId: null,
+      ...(freeAccessAsk[1]
+        ? { kind: freeAccessAsk[1].toLowerCase() as "lifetime" | "limited" }
+        : {}),
+    };
+  }
+
+  if (/^revoke free[- ]?access(?: from| for)?$/i.test(raw)) {
+    return { action: "needs-identifier", command: "revoke-free-access", userId: null };
+  }
+
+  // Bare subscription grant: "grant <plan> subscription" keeps the
+  // plan so the ask names it; "grant subscription" names neither
+  // plan nor login, so the ask names both. The no-plan shape is
+  // checked first so "grant subscription to" never reads "to" as
+  // a plan name.
+  if (/^grant subscription(?: to)?$/i.test(raw)) {
+    return { action: "needs-identifier", command: "grant-subscription", userId: null };
+  }
+  const grantAsk =
+    /^grant (.+?) subscription(?: to)?$/i.exec(raw) ??
+    /^grant subscription (.+?)(?: to)?$/i.exec(raw);
+  if (grantAsk) {
+    return {
+      action: "needs-identifier",
+      command: "grant-subscription",
+      userId: null,
+      planRef: grantAsk[1].trim(),
+    };
+  }
+
+  if (/^move (?:account )?to current pricing$/i.test(raw)) {
+    return { action: "needs-identifier", command: "move-current-pricing", userId: null };
   }
 
   return null;
@@ -352,6 +444,38 @@ function resultContext(
 }
 
 /**
+ * The ask message for a needs-identifier intent: the question the
+ * turn answers with, naming the recognized command and showing a
+ * complete example the parser accepts. No route call is made.
+ */
+function accountAskMessage(
+  intent: Extract<BizCopilotAccountIntent, { action: "needs-identifier" }>,
+): string {
+  switch (intent.command) {
+    case "lookup":
+      return "Look up which account? Name the login — for example: Show account alice@example.com.";
+    case "grant-history":
+      return "Show the grants for which account? Name the login — for example: Show grants for alice@example.com.";
+    case "grant-unlimited-free":
+      return "Grant unlimited free to which account? Name the login — for example: Grant unlimited free to alice@example.com because approved by the tenant admin.";
+    case "revoke-unlimited-free":
+      return "Revoke unlimited free from which account? Name the login — for example: Revoke unlimited free from alice@example.com.";
+    case "grant-free-access":
+      return intent.kind
+        ? `Grant free access ${intent.kind} to which account? Name the login — for example: Grant free access ${intent.kind} to alice@example.com because approved by the tenant admin.`
+        : "Grant free access to which account, lifetime or limited? Name the login and the kind — for example: Grant free access lifetime to alice@example.com because approved by the tenant admin.";
+    case "revoke-free-access":
+      return "Revoke free access from which account? Name the login — for example: Revoke free access from alice@example.com.";
+    case "grant-subscription":
+      return intent.planRef
+        ? `Grant the ${intent.planRef} subscription to which account? Name the login — for example: Grant ${intent.planRef} subscription to alice@example.com.`
+        : "Grant which subscription to which account? Name the plan and the login — for example: Grant Basic subscription to alice@example.com.";
+    case "move-current-pricing":
+      return "Move which account to current pricing? Name the login — for example: Move alice@example.com to current pricing.";
+  }
+}
+
+/**
  * Execute a parsed account intent through the Accounts page's own
  * routes, in-process. Returns the deterministic context block the
  * turn injects into the system prompt — success or failure, always
@@ -363,6 +487,21 @@ export async function executeBizCopilotAccountIntent(
   intent: BizCopilotAccountIntent,
   deps: BizCopilotAccountDeps,
 ): Promise<string> {
+  // Needs-identifier asks never reach a route: there is no login
+  // to look up, so the outcome is the question itself, with the
+  // Accounts page link. This runs before the lookup every other
+  // intent starts with.
+  if (intent.action === "needs-identifier") {
+    return `BIZCOPILOT_ACCOUNT_RESULT: ${JSON.stringify({
+      action: intent.action,
+      command: intent.command,
+      userId: null,
+      needsIdentifier: true,
+      ask: accountAskMessage(intent),
+      pageUrl: BIZCOPILOT_ACCOUNTS_PAGE_URL,
+    })}`;
+  }
+
   // Every intent starts with the Accounts page lookup — the same
   // gate (store operator) and existence check the page performs
   // before any section loads.
@@ -729,6 +868,7 @@ export async function runBizCopilotAccountBranch(deps: {
       sourceTab: deps.sourceTab,
       action: intent.action,
       userId: intent.userId,
+      ...("command" in intent ? { command: intent.command } : {}),
     });
     return context;
   } catch (error) {
@@ -736,6 +876,7 @@ export async function runBizCopilotAccountBranch(deps: {
       sourceTab: deps.sourceTab,
       action: intent.action,
       userId: intent.userId,
+      ...("command" in intent ? { command: intent.command } : {}),
       error: error instanceof Error ? error.message : String(error),
     });
     return [

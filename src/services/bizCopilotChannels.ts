@@ -38,11 +38,15 @@
  * instruction in chatPrompt repeats the configuration-only truth
  * for Copilot card / Docs results.
  *
- * CONSERVATIVE PARSING: only explicit commands parse. Anything
- * ambiguous, partial, or unrecognized returns null and the turn
- * proceeds as a normal LLM turn — the model may ask for
- * clarification, but no mutation is ever guessed. An unknown
- * channel name parses to nothing, never to a guessed channel.
+ * CONSERVATIVE PARSING: only explicit commands parse. A
+ * recognizable-but-incomplete command — the command shape with
+ * its tenant id missing (#4701) — parses to a deterministic
+ * needs-identifier outcome: the turn answers asking for the
+ * missing id, with the Channels page link. No route call is made
+ * and no mutation is ever guessed. Anything ambiguous or
+ * unrecognized returns null and the turn proceeds as a normal
+ * LLM turn. An unknown channel name parses to nothing, never to
+ * a guessed channel.
  *
  * RSI posture (slice 1): BizCopilot turns already flow through the
  * generic evaluation path (judge.evaluate + VectorMemory in
@@ -90,11 +94,21 @@ export const BIZCOPILOT_CHANNEL_LABELS: Record<TenantChannelId, string> = {
   docs: "Docs",
 };
 
+/** The command shape a needs-identifier outcome recognized: the action the user asked for, minus its tenant id. */
+export type BizCopilotChannelAskCommand = "show" | "enforcement" | "enable" | "disable";
+
 export type BizCopilotChannelIntent =
   | { action: "show"; tenantId: string }
   | { action: "enforcement"; tenantId: string; channel?: TenantChannelId }
   | { action: "enable"; tenantId: string; channel: TenantChannelId }
-  | { action: "disable"; tenantId: string; channel: TenantChannelId };
+  | { action: "disable"; tenantId: string; channel: TenantChannelId }
+  | {
+      action: "needs-identifier";
+      command: BizCopilotChannelAskCommand;
+      tenantId: null;
+      /** For channel-specific asks: the channel the user named, so the ask names it. */
+      channel?: TenantChannelId;
+    };
 
 function normalize(text: string): string {
   return text.trim().replace(/\s+/g, " ").replace(/[?.!]+$/, "").trim();
@@ -116,6 +130,10 @@ const CHANNEL_NAME_PATTERN = "(email|slack|webhook|copilot(?: card)?|docs)";
 /**
  * Parse one channel command. Returns null for anything that is not
  * an explicit channel command — the turn then proceeds normally.
+ * A recognizable command shape with its tenant id missing
+ * returns a needs-identifier intent instead of null (#4701): the
+ * turn then answers asking for the id, never falling through to
+ * a model that denies the capability exists.
  */
 export function parseBizCopilotChannelIntent(text: string): BizCopilotChannelIntent | null {
   const raw = normalize(text);
@@ -185,6 +203,62 @@ export function parseBizCopilotChannelIntent(text: string): BizCopilotChannelInt
     const tenantId = show[1];
     if (!isTenantIdShaped(tenantId)) return null;
     return { action: "show", tenantId };
+  }
+
+  // Needs-identifier asks (#4701): the command shapes above with
+  // the tenant id missing. These run AFTER the complete shapes so
+  // a complete command always wins; each returns the deterministic
+  // ask outcome, never a route call. A trailing "for" / "for
+  // tenant" / "of tenant" tail is accepted — the id is still
+  // missing, so the ask is the same.
+  const toggleAsk = new RegExp(
+    `^(enable|disable|turn on|turn off|switch on|switch off) ${CHANNEL_NAME_PATTERN}(?: channel)?(?: for(?: tenant)?)?$`,
+    "i",
+  ).exec(raw);
+  if (toggleAsk) {
+    const channel = channelFromName(toggleAsk[2]);
+    if (!channel) return null;
+    const verb = toggleAsk[1].toLowerCase();
+    const enabled = verb === "enable" || verb === "turn on" || verb === "switch on";
+    return { action: "needs-identifier", command: enabled ? "enable" : "disable", tenantId: null, channel };
+  }
+  const setToggleAsk = new RegExp(
+    `^set ${CHANNEL_NAME_PATTERN}(?: channel)? (on|off)(?: for(?: tenant)?)?$`,
+    "i",
+  ).exec(raw);
+  if (setToggleAsk) {
+    const channel = channelFromName(setToggleAsk[1]);
+    if (!channel) return null;
+    return {
+      action: "needs-identifier",
+      command: setToggleAsk[2].toLowerCase() === "on" ? "enable" : "disable",
+      tenantId: null,
+      channel,
+    };
+  }
+
+  const enforcementOneAsk = new RegExp(
+    `^is ${CHANNEL_NAME_PATTERN}(?: channel)? (enabled|disabled|on|off)(?: for| of)?(?: tenant)?$`,
+    "i",
+  ).exec(raw);
+  if (enforcementOneAsk) {
+    const channel = channelFromName(enforcementOneAsk[1]);
+    if (!channel) return null;
+    return { action: "needs-identifier", command: "enforcement", tenantId: null, channel };
+  }
+
+  if (
+    /^(?:show|display|get)(?: me)? (?:the )?enforcement(?: state)?(?: for| of)?(?: tenant)?$/i.test(raw) ||
+    /^what is (?:the )?enforcement(?: state)?(?: for| of)?(?: tenant)?$/i.test(raw)
+  ) {
+    return { action: "needs-identifier", command: "enforcement", tenantId: null };
+  }
+
+  if (
+    /^(?:show|display|get|list)(?: me)? (?:the )?(?:channel enablement|channels|channel settings)(?: for| of)?(?: tenant)?$/i.test(raw) ||
+    /^what channels are (?:enabled|on)(?: for| of)?(?: tenant)?$/i.test(raw)
+  ) {
+    return { action: "needs-identifier", command: "show", tenantId: null };
   }
 
   return null;
@@ -287,7 +361,10 @@ async function callChannelRoute(
   return { ok: response.ok, status: response.status, body: parsed ?? {} };
 }
 
-function resultContext(intent: BizCopilotChannelIntent, result: ChannelRouteResult): string {
+function resultContext(
+  intent: Exclude<BizCopilotChannelIntent, { action: "needs-identifier" }>,
+  result: ChannelRouteResult,
+): string {
   const base = {
     action: intent.action,
     tenantId: intent.tenantId,
@@ -306,6 +383,34 @@ function resultContext(intent: BizCopilotChannelIntent, result: ChannelRouteResu
     ...base,
     result: { ...result.body, ...(enforcement ? { enforcement } : {}) },
   })}`;
+}
+
+/**
+ * The ask message for a needs-identifier intent: the question the
+ * turn answers with, naming the recognized command and showing a
+ * complete example the parser accepts. No route call is made.
+ */
+function channelAskMessage(
+  intent: Extract<BizCopilotChannelIntent, { action: "needs-identifier" }>,
+): string {
+  switch (intent.command) {
+    case "show":
+      return "Show the channels for which tenant? Name the tenant id — for example: Show channels for tenant acme.";
+    case "enforcement":
+      return intent.channel
+        ? `Is ${BIZCOPILOT_CHANNEL_LABELS[intent.channel]} enabled for which tenant? Name the tenant id — for example: Is ${intent.channel} enabled for tenant acme?`
+        : "Show the enforcement state for which tenant? Name the tenant id — for example: Show enforcement for tenant acme.";
+    case "enable":
+      if (!intent.channel) {
+        return "Enable which channel for which tenant? Name the channel and the tenant id — for example: Enable email for tenant acme.";
+      }
+      return `Enable ${BIZCOPILOT_CHANNEL_LABELS[intent.channel]} for which tenant? Name the tenant id — for example: Enable ${intent.channel} for tenant acme.`;
+    case "disable":
+      if (!intent.channel) {
+        return "Disable which channel for which tenant? Name the channel and the tenant id — for example: Disable slack for tenant acme.";
+      }
+      return `Disable ${BIZCOPILOT_CHANNEL_LABELS[intent.channel]} for which tenant? Name the tenant id — for example: Disable ${intent.channel} for tenant acme.`;
+  }
 }
 
 /**
@@ -337,6 +442,18 @@ export async function executeBizCopilotChannelIntent(
       intent,
       await callChannelRoute("GET", `/${encodeURIComponent(intent.tenantId)}`, undefined, deps),
     );
+  }
+
+  if (intent.action === "needs-identifier") {
+    return `BIZCOPILOT_CHANNEL_RESULT: ${JSON.stringify({
+      action: intent.action,
+      command: intent.command,
+      tenantId: null,
+      ...(intent.channel ? { channel: intent.channel } : {}),
+      needsIdentifier: true,
+      ask: channelAskMessage(intent),
+      pageUrl: BIZCOPILOT_CHANNELS_PAGE_URL,
+    })}`;
   }
 
   // enable / disable: one PATCH with the single named flag — the
@@ -394,6 +511,7 @@ export async function runBizCopilotChannelBranch(deps: {
       action: intent.action,
       tenantId: intent.tenantId,
       ...("channel" in intent && intent.channel ? { channel: intent.channel } : {}),
+      ...("command" in intent ? { command: intent.command } : {}),
     });
     return context;
   } catch (error) {
@@ -402,6 +520,7 @@ export async function runBizCopilotChannelBranch(deps: {
       action: intent.action,
       tenantId: intent.tenantId,
       ...("channel" in intent && intent.channel ? { channel: intent.channel } : {}),
+      ...("command" in intent ? { command: intent.command } : {}),
       error: error instanceof Error ? error.message : String(error),
     });
     return [
