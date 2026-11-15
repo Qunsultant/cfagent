@@ -2243,6 +2243,8 @@ export class OrchestratorAgent extends PortThink {
     error?: string;
     trigger?: unknown;
     userLogin?: string;
+    /** Issue #2863 (S3): replay criteria — stamped by the store stage, recorded in the body by the writer. Additive. */
+    criteria?: unknown;
   }): Promise<void> {
     return this.persistScreenerReportCanonical(result);
   }

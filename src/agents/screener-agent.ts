@@ -518,6 +518,14 @@ export interface ScreenerRunResult {
   /** Summary of criteria applied during screening. */
   filterSummary?: string;
   /**
+   * Issue #2863 (S3): the validated criteria (filters) this run
+   * screened on, stamped at store time so report replay reads
+   * them from the persisted canonical copy. Absent when the
+   * request carried no filters — replay marks that gap partial;
+   * the store stage never invents criteria.
+   */
+  criteria?: StockScreenerFilter;
+  /**
    * Issue #462: set when the screen ran on an incomplete quote set. The
    * result is a qualified partial report — never a complete screen, never
    * a failure. Zero quotes still fails honestly (success:false + error).
@@ -2733,6 +2741,11 @@ export class ScreenerAgent extends PortThink {
       technicalsCoverage: analysisOutput.technicalsCoverage,
       sentimentCoverage: analysisOutput.sentimentCoverage,
       filterSummary: analysisOutput.screenResult.filterSummary as string,
+      // Issue #2863 (S3): stamp the validated criteria onto the
+      // result (and through it the store payload + canonical
+      // copy) — the run request's filters, as the route parsed
+      // them. Absent when the request carried no filters.
+      ...(req.filters ? { criteria: req.filters } : {}),
       ...(acquired.partial ? { partial: acquired.partial } : {}),
       ...(analysisOutput.screenResult.rejections
         ? { rejections: analysisOutput.screenResult.rejections as ScreenerRunResult["rejections"] }
