@@ -22,6 +22,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import { PageShell } from "./components/ui/PageShell";
 import { Notice } from "./components/ui/Notice";
 import { TextInput } from "./components/ui/TextInput";
 import { getPricing, formatUSD } from "./commercialApi";
@@ -142,9 +143,12 @@ export function TopUpLimitsSection() {
     }
   }, [minInput, maxInput]);
 
+  // Issue #4691 — the section title lives in the PageShell: under the
+  // Billing tab host it collapses to content-only (the tab label is the
+  // title); standalone it renders as the page h1.
   return (
-    <Card>
-      <p>Top-up limits</p>
+    <PageShell title="Top-up limits">
+      <Card>
       {loading && <p>Loading top-up limits</p>}
       {!loading && loadError && (
         <>
@@ -185,5 +189,6 @@ export function TopUpLimitsSection() {
         </>
       )}
     </Card>
+    </PageShell>
   );
 }

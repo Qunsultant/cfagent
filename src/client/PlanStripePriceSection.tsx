@@ -28,6 +28,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import { PageShell } from "./components/ui/PageShell";
 import { Notice } from "./components/ui/Notice";
 import { TextInput } from "./components/ui/TextInput";
 import { listPlans, type PlanView } from "./commercialApi";
@@ -159,9 +160,12 @@ export function PlanStripePriceSection() {
     }
   }, [plans, drafts]);
 
+  // Issue #4691 — the section title lives in the PageShell: under the
+  // Billing tab host it collapses to content-only (the tab label is the
+  // title); standalone it renders as the page h1.
   return (
-    <Card>
-      <p>Plan Stripe Price mappings</p>
+    <PageShell title="Plan Stripe Price mappings">
+      <Card>
       {loading && <p>Loading plan Stripe Price mappings</p>}
       {!loading && loadError && (
         <>
@@ -214,5 +218,6 @@ export function PlanStripePriceSection() {
         </>
       )}
     </Card>
+    </PageShell>
   );
 }

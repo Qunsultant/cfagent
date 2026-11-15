@@ -43,7 +43,7 @@
  * All calls go through approvedFreeQuotaApi.ts (the #71 rule).
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Card, Notice, Select, Stack, TextInput } from "./components/ui";
+import { Button, Card, Notice, PageShell, Select, Stack, TextInput } from "./components/ui";
 import {
   getApprovedFreeQuota,
   isGrantExpired,
@@ -238,9 +238,12 @@ export function ApprovedFreeQuotaSection() {
     await load(userId);
   }, [lookupDraft, load]);
 
+  // Issue #4691 — the section title lives in the PageShell: under the
+  // Billing tab host it collapses to content-only (the tab label is the
+  // title); standalone it renders as the page h1.
   return (
-    <Card>
-      <h2>Approved-free quota</h2>
+    <PageShell title="Approved-free quota">
+      <Card>
       {loading && <p>Loading approved-free quota</p>}
       {!loading && loadError && (
         <>
@@ -352,5 +355,6 @@ export function ApprovedFreeQuotaSection() {
         </Stack>
       )}
     </Card>
+    </PageShell>
   );
 }

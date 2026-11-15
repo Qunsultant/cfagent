@@ -243,9 +243,11 @@ describe("approved-free quota section", () => {
   it("non-operator sees the own quota read-only, with per-family usage and the grant state", async () => {
     const restore = await renderSection(freshState({ operatorsStatus: 403 }));
     try {
-      // A11y (WCAG 2.2 AA): the section title is a heading under the
-      // Billing h1, not a plain paragraph.
-      expect(container!.querySelector("h2")?.textContent).toBe("Approved-free quota");
+      // A11y (WCAG 2.2 AA): the section title is a heading, not a plain
+      // paragraph. Issue #4691: the title lives in the PageShell —
+      // standalone it is the page h1; under the Billing tab host it
+      // collapses to content-only and the tab label is the title.
+      expect(container!.querySelector("h1")?.textContent).toBe("Approved-free quota");
       expect(text()).toMatch(/3 of 10 runs used per month — 7 remaining/);
       expect(text()).toMatch(/10 of 10 runs used per month — 0 remaining/);
       expect(text()).toMatch(/No cap set — no approved-free runs for this service/);

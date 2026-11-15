@@ -16,6 +16,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import { PageShell } from "./components/ui/PageShell";
 import { Notice } from "./components/ui/Notice";
 import { apiFetch } from "./apiFetch";
 import { commercialPath } from "../data/commercialUrlCatalog";
@@ -139,9 +140,12 @@ export function UsageBillingSection() {
     : [];
   const refunds: UsageBillingRefundRow[] = view ? view.billing.refunds : [];
 
+  // Issue #4691 — the section title lives in the PageShell: under the
+  // Billing tab host it collapses to content-only (the tab label is the
+  // title); standalone it renders as the page h1.
   return (
-    <Card>
-      <h3>Usage and billing</h3>
+    <PageShell title="Usage and billing">
+      <Card>
       {loading && !view && !error && <p>Loading your usage and billing…</p>}
       {error && (
         <>
@@ -192,5 +196,6 @@ export function UsageBillingSection() {
         </>
       )}
     </Card>
+    </PageShell>
   );
 }

@@ -22,6 +22,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import { PageShell } from "./components/ui/PageShell";
 import { Notice } from "./components/ui/Notice";
 import {
   getRefundPolicy,
@@ -124,9 +125,12 @@ export function RefundPolicySection() {
     }
   }, []);
 
+  // Issue #4691 — the section title lives in the PageShell: under the
+  // Billing tab host it collapses to content-only (the tab label is the
+  // title); standalone it renders as the page h1.
   return (
-    <Card>
-      <p>Refund policy</p>
+    <PageShell title="Refund policy">
+      <Card>
       {loading && <p>Loading refund policy</p>}
       {!loading && loadError && (
         <>
@@ -176,5 +180,6 @@ export function RefundPolicySection() {
         </>
       )}
     </Card>
+    </PageShell>
   );
 }

@@ -28,6 +28,13 @@
  * once, in its own tab. Tabs change navigation only, never who sees
  * what: operator-only sections keep their existing non-operator
  * behaviour inside their tab.
+ *
+ * Issue #4691 — the panel renders as a tab, not a page: Chat applies
+ * "tab" chrome (PageChromeContext) around it, so this PageShell renders
+ * content-only and the servicing description rides as its scope note
+ * (dropped under tab chrome, kept under page chrome). The tab strip
+ * renders from first paint; each section owns its title through its
+ * own PageShell, so under tab chrome the tab label is the title.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
@@ -224,8 +231,23 @@ export function BillingServicingPanel() {
   }, [load]);
 
   return (
-    <PageShell title="Billing">
-      <PageSection description="Your subscription, receipts, plans, and referral-credit balance — servicing over existing routes. This view never charges, purchases, cancels, or deactivates. Operators also approve refund-policy kinds here and decide and execute refunds; any verified login may request and verify their own refunds.">
+    <PageShell
+      title="Billing"
+      scopeNote="Your subscription, receipts, plans, and referral-credit balance — servicing over existing routes. This view never charges, purchases, cancels, or deactivates. Operators also approve refund-policy kinds here and decide and execute refunds; any verified login may request and verify their own refunds."
+    >
+      <PageSection>
+      {/* Issue #4691 — the tab strip renders from first paint (the
+          ProductHub shape): the active tab is URL-derived, so the strip
+          is the navigation while the data loads, and the panels mount
+          once the view loads. */}
+      <Tabs<BillingTab>
+        idBase="billing"
+        ariaLabel="Billing sections"
+        tabs={BILLING_TAB_OPTIONS}
+        value={activeTab}
+        onChange={handleTabChange}
+      />
+
       {loading && <p>Loading billing view</p>}
       {!loading && loadError && (
         <>
@@ -237,14 +259,6 @@ export function BillingServicingPanel() {
       )}
       {!loading && !loadError && view && (
         <>
-          <Tabs<BillingTab>
-            idBase="billing"
-            ariaLabel="Billing sections"
-            tabs={BILLING_TAB_OPTIONS}
-            value={activeTab}
-            onChange={handleTabChange}
-          />
-
           {/* Tabbed sections — mount on first visit, stay preserved. */}
 
           {visitedTabs.has("overview") && (
@@ -433,7 +447,6 @@ export function BillingServicingPanel() {
             >
               <ErrorBoundary label="Support snapshot panel">
                 <Card>
-                  <p>Support snapshot</p>
                   <p>Account: {view.supportSnapshot.login}</p>
                   <p>Tier: {view.supportSnapshot.tier}</p>
                   <p>Subscription: {view.supportSnapshot.subscriptionStatus}</p>
