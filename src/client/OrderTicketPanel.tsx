@@ -273,9 +273,14 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
   useEffect(() => {
     if (prevAssetClassRef.current === orderAssetClass) return;
     prevAssetClassRef.current = orderAssetClass;
-    // A seed landing while Risk is open refreshes the risk seed (via
-    // riskSeedKey below); it must not move the selected tab.
-    if (activeTabRef.current === "risk") return;
+    // A seed landing while a non-asset tab is open refreshes that
+    // tab's content (the risk seed, via riskSeedKey below); it must
+    // not move the selected tab.
+    if (
+      activeTabRef.current === "risk" ||
+      activeTabRef.current === "approvals" ||
+      activeTabRef.current === "nlq-guarantee"
+    ) return;
     const assetTab: OrderTicketTab =
       orderAssetClass === "options" ? "options" : "stock";
     if (assetTab !== activeTab) handleTabChange(assetTab);
@@ -406,7 +411,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
       title="Order Ticket"
       scopeNote="Preview an order with the broker — nothing is submitted until you approve it"
       contextStrip={
-        activeTab !== "risk" && orderQuote ? (
+        (activeTab === "stock" || activeTab === "options") && orderQuote ? (
           <ContextStrip
             company={orderQuote.companyName}
             price={safePriceFormat(orderQuote.lastPrice)}
@@ -429,9 +434,11 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
         ) : undefined
       }
       queueRail={
-        <PageSection title="Pending approvals">
-          <a href="?tab=order&orderTab=approvals">Review pending approvals in the approvals tab</a>
-        </PageSection>
+        (activeTab === "stock" || activeTab === "options") ? (
+          <PageSection title="Pending approvals">
+            <a href="?tab=order&orderTab=approvals">Review pending approvals in the approvals tab</a>
+          </PageSection>
+        ) : undefined
       }
     >
       <Tabs
@@ -451,7 +458,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
         <TabPanel
           idBase="order-ticket"
           tabId={orderAssetClass === "options" ? "options" : "stock"}
-          active={activeTab !== "risk"}
+          active={activeTab === "stock" || activeTab === "options"}
           retain
         >
           <PageSection>
