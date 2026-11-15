@@ -55,11 +55,116 @@ export interface PlatformIdentityPorts {
   subscriptions: SubscriptionStore | null;
 }
 
+/**
+ * Issue #4600 — canonical authority source for a login's resolved "current tenant"
+ * across the three tenant authorities (commercial account row, IAAA memberships,
+ * and env default). The env default is NEVER a silent fallback here: when neither
+ * an account row nor an active tenant membership exists, the source is `"unresolved"`.
+ */
+export type CurrentTenantAuthoritySource = "account" | "membership" | "unresolved";
+
+/** Minimal membership shape required by `resolveCurrentTenant` (#4600). */
+export interface CurrentTenantMembershipInput {
+  membershipId: string;
+  tenantId: string;
+  createdAtMs: number;
+  revokedAtMs?: number;
+}
+
+/** Recorded result of resolving a login's current tenant (#4600). */
+export interface CurrentTenantResolution {
+  /** Resolved current tenant id, or null when unresolved (never env default). */
+  currentTenantId: string | null;
+  /** Which authority won (`"account"` > `"membership"` > `"unresolved"`). */
+  currentTenantSource: CurrentTenantAuthoritySource;
+  /** Distinct active (unrevoked) tenant-scoped membership tenantIds in deterministic order. */
+  candidateMembershipTenants: string[];
+}
+
+/**
+ * Issue #4600 — resolve a login's single "current tenant" across the platform's
+ * tenant authorities and record which authority won:
+ *
+ * 1. **Commercial account tenant (`"account"`)**: if the login has a stored
+ *    commercial account row (`accountTenantId` non-empty), that single billing
+ *    tenant wins unconditionally, even when the login holds multiple IAAA
+ *    memberships.
+ * 2. **Active IAAA tenant membership (`"membership"`)**: if no commercial
+ *    account row exists, active (unrevoked: `revokedAtMs === undefined`)
+ *    tenant-scoped memberships (`tenantId` non-empty and `!== "platform"`) are
+ *    ordered deterministically by `(createdAtMs ASC, tenantId ASC, membershipId ASC)`
+ *    and the first membership's `tenantId` is selected.
+ * 3. **Unresolved (`"unresolved"`, `currentTenantId: null`)**: when neither an
+ *    account row nor an active tenant membership exists. No path silently falls
+ *    back to the deployment env default (`IAAA_TENANT_ID` / `"primary"`).
+ */
+export function resolveCurrentTenant(input: {
+  accountTenantId?: string | null;
+  memberships?: ReadonlyArray<CurrentTenantMembershipInput> | null;
+}): CurrentTenantResolution {
+  const activeMemberships = (input.memberships ?? [])
+    .filter(
+      (m) =>
+        m.revokedAtMs === undefined &&
+        typeof m.tenantId === "string" &&
+        m.tenantId.trim().length > 0 &&
+        m.tenantId.trim() !== "platform",
+    )
+    .slice()
+    .sort((a, b) => {
+      if (a.createdAtMs !== b.createdAtMs) return a.createdAtMs - b.createdAtMs;
+      const tCmp = a.tenantId.trim().localeCompare(b.tenantId.trim());
+      if (tCmp !== 0) return tCmp;
+      return a.membershipId.localeCompare(b.membershipId);
+    });
+
+  const candidateMembershipTenants: string[] = [];
+  for (const m of activeMemberships) {
+    const tid = m.tenantId.trim();
+    if (!candidateMembershipTenants.includes(tid)) {
+      candidateMembershipTenants.push(tid);
+    }
+  }
+
+  const trimmedAccountTenant =
+    typeof input.accountTenantId === "string" && input.accountTenantId.trim().length > 0
+      ? input.accountTenantId.trim()
+      : null;
+
+  if (trimmedAccountTenant !== null) {
+    return {
+      currentTenantId: trimmedAccountTenant,
+      currentTenantSource: "account",
+      candidateMembershipTenants,
+    };
+  }
+
+  if (candidateMembershipTenants.length > 0) {
+    return {
+      currentTenantId: candidateMembershipTenants[0],
+      currentTenantSource: "membership",
+      candidateMembershipTenants,
+    };
+  }
+
+  return {
+    currentTenantId: null,
+    currentTenantSource: "unresolved",
+    candidateMembershipTenants: [],
+  };
+}
+
 /** The resolved platform identity for one verified login. */
 export interface PlatformIdentity {
   userLogin: string;
   /** Null when no store row exists — never a guessed value. */
   tenantId: string | null;
+  /** Issue #4600: single resolved current tenant across account + active memberships (never env default). */
+  currentTenantId: string | null;
+  /** Issue #4600: recorded authority that supplied `currentTenantId`. */
+  currentTenantSource: CurrentTenantAuthoritySource;
+  /** Issue #4600: deterministic list of active membership tenantIds for multi-membership logins. */
+  candidateMembershipTenants: string[];
   hasAccount: boolean;
   /** Effective tier at read time (a lapsed subscription stops conferring Subscribed). */
   tier: StoreTier;
@@ -82,7 +187,11 @@ export interface PlatformIdentity {
  */
 export async function resolvePlatformIdentity(
   ports: PlatformIdentityPorts,
-  input: { userId: string; nowMs: number },
+  input: {
+    userId: string;
+    nowMs: number;
+    memberships?: ReadonlyArray<CurrentTenantMembershipInput> | null;
+  },
 ): Promise<PlatformIdentity> {
   if (!ports.commercial || !ports.subscriptions) {
     throw new Error(
@@ -99,9 +208,17 @@ export async function resolvePlatformIdentity(
     );
   }
   const tier = resolveEffectiveTier(stored, subscriptions, input.nowMs);
+  const accountTenantId = stored ? stored.tenantId : null;
+  const currentTenant = resolveCurrentTenant({
+    accountTenantId,
+    memberships: input.memberships,
+  });
   return {
     userLogin: input.userId,
-    tenantId: stored ? stored.tenantId : null,
+    tenantId: accountTenantId,
+    currentTenantId: currentTenant.currentTenantId,
+    currentTenantSource: currentTenant.currentTenantSource,
+    candidateMembershipTenants: currentTenant.candidateMembershipTenants,
     hasAccount: stored !== null,
     tier,
     creditsUSD: stored ? stored.creditsUSD : 0,
@@ -114,6 +231,8 @@ export async function resolvePlatformIdentity(
 export function toPlatformIdentityView(identity: PlatformIdentity): {
   userLogin: string;
   tenantId: string | null;
+  currentTenantId: string | null;
+  currentTenantSource: CurrentTenantAuthoritySource;
   hasAccount: boolean;
   tier: StoreTier;
   creditsUSD: number;
@@ -122,6 +241,8 @@ export function toPlatformIdentityView(identity: PlatformIdentity): {
   return {
     userLogin: identity.userLogin,
     tenantId: identity.tenantId,
+    currentTenantId: identity.currentTenantId,
+    currentTenantSource: identity.currentTenantSource,
     hasAccount: identity.hasAccount,
     tier: identity.tier,
     creditsUSD: identity.creditsUSD,
