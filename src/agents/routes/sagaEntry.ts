@@ -29,7 +29,9 @@ import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import { createShardJobAdapter } from "../../data/createShardJobPorts";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import {
+  isTenantMismatchError,
   resolvePaidScreenAccount,
+  TENANT_MISMATCH_HTTP_STATUS,
   type PaidScreenStorePorts,
 } from "../../services/paidScreenSubmission";
 import type { NativeCommercialAccount } from "../../services/nativeMonetization";
@@ -327,8 +329,8 @@ export async function handleSagaEntryRoutes(
     ));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("Tenant mismatch")) {
-      return json(403, { error: message });
+    if (isTenantMismatchError(message)) {
+      return json(TENANT_MISMATCH_HTTP_STATUS, { error: message });
     }
     return json(503, { error: message });
   }

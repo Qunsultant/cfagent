@@ -1,0 +1,2 @@
+### Changed
+- Pinned the HTTP status mapping for seam-level `Tenant mismatch` throws to `TENANT_MISMATCH_HTTP_STATUS = 403` via `isTenantMismatchError` in `src/services/paidScreenSubmission.ts`, wired across `src/agents/routes/screenerResearch.ts`, `src/agents/routes/sagaEntry.ts`, `src/agents/routes/paidStockScreenSeam.ts`, and all five commercial activation handlers in `src/agents/routes/agenticPayments.ts` (#4604).
