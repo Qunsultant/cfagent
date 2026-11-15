@@ -22,6 +22,14 @@
  * store's error. upsert stays check-then-act, correct under
  * per-instance serialization (D-0 (b)).
  *
+ * #4385 (#4282 P6b): predicate extensions — updateWhere /
+ * deleteWhere / createOrIgnore + the $lt/$lte/$gt/$gte
+ * operator where (one language for findMany/count/
+ * updateWhere/deleteWhere). RowsWritten-or-verified-count
+ * returns, following D-E.2: a store that reports rowsWritten
+ * answers directly; a store that does not is verified by
+ * re-read, never by assumption.
+ *
  * Everything else is byte-for-byte the legacy behaviour:
  * camelCase ↔ snake_case mapping with is_* boolean coercion,
  * findMany/findOne/count statement shapes, create returning
@@ -37,6 +45,7 @@ import { ensureAuditChainColumns } from "./ormSchema";
 import type {
   RepositoryPort,
   RepositoryQueryOptions,
+  RepositoryWhere,
   SqlStorage,
 } from "./repositoryPorts";
 
@@ -55,6 +64,61 @@ export class Repository<T extends Record<string, any>>
 
   private toDbCol(key: string): string {
     return this.columnMap[key] || key;
+  }
+
+  /**
+   * #4385: is this where value a comparison-operator object?
+   * A plain object with at least one $lt/$lte/$gt/$gte key —
+   * the `$` prefix is what distinguishes it from a plain
+   * record value (which binds as equality, as before).
+   */
+  private static isOperatorValue(val: unknown): val is {
+    $lt?: unknown;
+    $lte?: unknown;
+    $gt?: unknown;
+    $gte?: unknown;
+  } {
+    if (val === null || typeof val !== "object" || Array.isArray(val)) return false;
+    const keys = Object.keys(val);
+    return (
+      keys.length > 0 &&
+      keys.every((k) => k === "$lt" || k === "$lte" || k === "$gt" || k === "$gte")
+    );
+  }
+
+  /** #4385: one where language for findMany/count/updateWhere/deleteWhere. */
+  private buildWhereClause(where: RepositoryWhere): { clauses: string[]; args: unknown[] } {
+    const clauses: string[] = [];
+    const args: unknown[] = [];
+    const operators: Array<[string, string]> = [
+      ["$lt", "<"],
+      ["$lte", "<="],
+      ["$gt", ">"],
+      ["$gte", ">="],
+    ];
+    for (const [key, val] of Object.entries(where)) {
+      if (val === undefined || val === null) continue;
+      const col = this.toDbCol(key);
+      if (Repository.isOperatorValue(val)) {
+        for (const [op, sqlOp] of operators) {
+          const opVal = (val as Record<string, unknown>)[op];
+          if (opVal === undefined || opVal === null) continue;
+          clauses.push(`${col} ${sqlOp} ?`);
+          args.push(typeof opVal === "boolean" ? (opVal ? 1 : 0) : opVal);
+        }
+        continue;
+      }
+      clauses.push(`${col} = ?`);
+      args.push(typeof val === "boolean" ? (val ? 1 : 0) : val);
+    }
+    return { clauses, args };
+  }
+
+  /** #4385: drain a write cursor, returning its rowsWritten when reported. */
+  private static rowsWrittenOf(cursor: Iterable<unknown>): number | null {
+    Array.from(cursor);
+    const rowsWritten = (cursor as { rowsWritten?: unknown }).rowsWritten;
+    return typeof rowsWritten === "number" ? rowsWritten : null;
   }
 
   private fromDbRow(row: any): T {
@@ -77,17 +141,7 @@ export class Repository<T extends Record<string, any>>
   }
 
   findMany(options: RepositoryQueryOptions = {}): T[] {
-    const clauses: string[] = [];
-    const args: unknown[] = [];
-
-    if (options.where) {
-      for (const [key, val] of Object.entries(options.where)) {
-        if (val !== undefined && val !== null) {
-          clauses.push(`${this.toDbCol(key)} = ?`);
-          args.push(typeof val === "boolean" ? (val ? 1 : 0) : val);
-        }
-      }
-    }
+    const { clauses, args } = this.buildWhereClause(options.where ?? {});
 
     const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const orderClause = options.orderBy ? `ORDER BY ${options.orderBy}` : "";
@@ -106,12 +160,13 @@ export class Repository<T extends Record<string, any>>
     return this.fromDbRow(rows[0]);
   }
 
-  findOne(where: Record<string, unknown>): T | null {
+  findOne(where: RepositoryWhere): T | null {
     const results = this.findMany({ where, limit: 1 });
     return results.length > 0 ? results[0] : null;
   }
 
-  create(record: T): T {
+  /** #4385: the single INSERT shape — create() and createOrIgnore() differ only in the OR IGNORE. */
+  private insertRecord(record: T, orIgnore: boolean): Iterable<unknown> {
     const cols: string[] = [];
     const placeholders: string[] = [];
     const values: unknown[] = [];
@@ -122,9 +177,106 @@ export class Repository<T extends Record<string, any>>
       values.push(typeof val === "boolean" ? (val ? 1 : 0) : val);
     }
 
-    const query = `INSERT INTO ${this.tableName} (${cols.join(", ")}) VALUES (${placeholders.join(", ")})`;
-    this.sql.exec(query, ...values);
+    const query = `INSERT${orIgnore ? " OR IGNORE" : ""} INTO ${this.tableName} (${cols.join(", ")}) VALUES (${placeholders.join(", ")})`;
+    return this.sql.exec(query, ...values);
+  }
+
+  create(record: T): T {
+    this.insertRecord(record, false);
     return record;
+  }
+
+  /**
+   * #4385: INSERT OR IGNORE — first-write-wins. Returns true when a row
+   * was inserted. RowsWritten when the store reports it; otherwise the
+   * total-count delta (an ignored insert changes the count by 0, an
+   * inserted row by exactly 1 — no key shape is assumed, so composite
+   * keys work).
+   */
+  createOrIgnore(record: T): boolean {
+    const before = this.count();
+    const rowsWritten = Repository.rowsWrittenOf(this.insertRecord(record, true));
+    if (rowsWritten !== null) return rowsWritten > 0;
+    return this.count() - before > 0;
+  }
+
+  /**
+   * #4385: UPDATE … SET … WHERE <predicate>. Returns the rows
+   * written — the number of matched rows VERIFIED to carry the
+   * update. RowsWritten when the store reports it; otherwise each
+   * matched row is re-read by id and counted only when it carries
+   * every set field (D-E.2 — the count never claims a row the
+   * write did not land on). A row that does not verify is NOT
+   * counted, and the caller — not this method — decides whether
+   * that is an error: the adapter keeps its own read-back
+   * verification (e.g. StrategyProfile.verifyWrittenRow), whose
+   * message the port's contract pins. Throwing here would mask
+   * that message. A matched row with no idField value cannot be
+   * re-read, so verification fails closed rather than assuming
+   * the write landed.
+   */
+  updateWhere(where: RepositoryWhere, set: Partial<T>): number {
+    const matched = this.findMany({ where });
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    for (const [prop, val] of Object.entries(set)) {
+      if (prop !== this.idField && val !== undefined) {
+        sets.push(`${this.toDbCol(prop)} = ?`);
+        values.push(typeof val === "boolean" ? (val ? 1 : 0) : val);
+      }
+    }
+    if (sets.length === 0) return 0;
+    const { clauses, args } = this.buildWhereClause(where);
+    if (clauses.length === 0) {
+      throw new Error(
+        `Repository.updateWhere refused on ${this.tableName}: an empty predicate would update every row`,
+      );
+    }
+    const whereClause = `WHERE ${clauses.join(" AND ")}`;
+    const query = `UPDATE ${this.tableName} SET ${sets.join(", ")} ${whereClause}`.trim();
+    const rowsWritten = Repository.rowsWrittenOf(this.sql.exec(query, ...values, ...args));
+    if (rowsWritten !== null) return rowsWritten;
+    let verified = 0;
+    for (const row of matched) {
+      const id = (row as Record<string, unknown>)[this.idField];
+      if (typeof id !== "string" && typeof id !== "number") {
+        throw new Error(
+          `Repository.updateWhere verification failed on ${this.tableName}: matched row has no ${this.idField} to re-read`,
+        );
+      }
+      const after = this.findById(String(id));
+      if (!after) continue;
+      let carries = true;
+      for (const [prop, val] of Object.entries(set)) {
+        if (prop === this.idField || val === undefined) continue;
+        if ((after as Record<string, unknown>)[prop] !== val) {
+          carries = false;
+          break;
+        }
+      }
+      if (carries) verified++;
+    }
+    return verified;
+  }
+
+  /**
+   * #4385: DELETE … WHERE <predicate>. Returns the rows written.
+   * RowsWritten when the store reports it; otherwise the
+   * before-count minus the after-count.
+   */
+  deleteWhere(where: RepositoryWhere): number {
+    const before = this.count(where);
+    const { clauses, args } = this.buildWhereClause(where);
+    if (clauses.length === 0) {
+      throw new Error(
+        `Repository.deleteWhere refused on ${this.tableName}: an empty predicate would delete every row`,
+      );
+    }
+    const whereClause = `WHERE ${clauses.join(" AND ")}`;
+    const query = `DELETE FROM ${this.tableName} ${whereClause}`.trim();
+    const rowsWritten = Repository.rowsWrittenOf(this.sql.exec(query, ...args));
+    if (rowsWritten !== null) return rowsWritten;
+    return before - this.count(where);
   }
 
   update(id: string, updates: Partial<T>): T | null {
@@ -184,18 +336,8 @@ export class Repository<T extends Record<string, any>>
     return this.findById(id) === null;
   }
 
-  count(where?: Record<string, unknown>): number {
-    const clauses: string[] = [];
-    const args: unknown[] = [];
-
-    if (where) {
-      for (const [key, val] of Object.entries(where)) {
-        if (val !== undefined && val !== null) {
-          clauses.push(`${this.toDbCol(key)} = ?`);
-          args.push(typeof val === "boolean" ? (val ? 1 : 0) : val);
-        }
-      }
-    }
+  count(where?: RepositoryWhere): number {
+    const { clauses, args } = this.buildWhereClause(where ?? {});
 
     const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const query = `SELECT COUNT(*) AS count FROM ${this.tableName} ${whereClause}`;
