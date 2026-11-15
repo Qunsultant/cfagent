@@ -379,7 +379,8 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
       expect(inst.selected).toHaveLength(128);
-      expect(inst.skipped).toHaveLength(35);
+      // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
+      expect(inst.skipped).toHaveLength(36);
     }
     expect(body.uncreatableLayers).toHaveLength(5);
     // Nothing executed: the D1 store and the member instances are

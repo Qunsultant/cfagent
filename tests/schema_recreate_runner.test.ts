@@ -114,9 +114,9 @@ function canonParams(params: Record<string, string>): string {
 }
 
 describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
-  it("resolves 415 executable steps and skips the seed-form entry with its reason", () => {
+  it("resolves 416 executable steps and skips the seed-form entry with its reason", () => {
     const p = plan();
-    expect(p.steps).toHaveLength(415);
+    expect(p.steps).toHaveLength(416);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -127,7 +127,7 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     const harness = resolveCombinedSteps().filter(
       (s) => s.code !== SEED_FORM_CODE,
     );
-    expect(harness).toHaveLength(415);
+    expect(harness).toHaveLength(416);
     // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
@@ -268,14 +268,14 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
   it("selects every needed schema step on a fresh DO store", () => {
     const legPlan = planForLeg(plan(), "do");
     const selected = selectSteps(legPlan, emptySchemaModel(), []);
-    // 162 schema steps in the leg, minus 2 superseded v1 creations
-    // (the full creation precedes them in the plan), 32 column-adds
+    // 163 schema steps in the leg, minus 2 superseded v1 creations
+    // (the full creation precedes them in the plan), 33 column-adds
     // whose columns a selected creation already provides, and the
     // conditional index drop (its index does not exist yet). No seeds
     // live on the DO leg.
     expect(selected.schema).toHaveLength(128);
     expect(selected.seeds).toHaveLength(0);
-    expect(selected.skipped).toHaveLength(35);
+    expect(selected.skipped).toHaveLength(36);
     expect(codesOf(selected.skipped)).toContain(DROP_INDEX_CODE);
   });
 

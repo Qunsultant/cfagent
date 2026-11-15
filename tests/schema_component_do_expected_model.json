@@ -754,6 +754,11 @@
           "name": "completed_at",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}

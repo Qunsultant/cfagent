@@ -2910,6 +2910,11 @@ export interface AsyncJobGraphFields {
   /** Issue #3810: the originating schedule's id, when the job was
    *  submitted from a schedule. Null/absent = not scheduled. */
   scheduleId?: string | null;
+  /** Issue #4623: the tenant this job belongs to. Stamped at submission
+   *  (explicit value wins; otherwise resolved from the submitting login).
+   *  Null = the queue could not attribute the job — the row says so rather
+   *  than implying a tenant. */
+  tenantId?: string | null;
 }
 
 export interface AsyncJobRecord {
@@ -2933,6 +2938,9 @@ export interface AsyncJobRecord {
   trigger?: AsyncJobTrigger | null;
   triggeredBy?: string | null;
   scheduleId?: string | null;
+  /** Issue #4623: the tenant the job was submitted for (NULL when the
+   *  submission could not be attributed — rendered as "Not recorded"). */
+  tenantId?: string | null;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;

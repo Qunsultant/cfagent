@@ -206,6 +206,14 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.do.mas_async_jobs.alter_table_add_column_tenant_id",
+    plane: "do",
+    table: "mas_async_jobs",
+    statement: `ALTER TABLE mas_async_jobs ADD COLUMN tenant_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.mas_async_jobs.alter_table_add_column_chain_id",
     plane: "do",
     table: "mas_async_jobs",

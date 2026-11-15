@@ -95,6 +95,9 @@ export interface AsyncJobStoredRow {
   attempts_json?: string | null;
   triggered_by: string | null;
   schedule_id: string | null;
+  /** Issue #4623: the tenant the job belongs to. Probed additive column,
+   *  same migration family as the graph columns; NULL on legacy rows. */
+  tenant_id: string | null;
   /** Issue #3811: the last instant the executor touched this row
    *  (claim, heartbeat, or terminal transition), or NULL for rows
    *  claimed before this slice existed. Probed additive column.
@@ -165,6 +168,8 @@ export interface InsertQueuedJobInput {
   trigger?: string | null;
   triggeredBy?: string | null;
   scheduleId?: string | null;
+  /** Issue #4623: the tenant stamped at submission. */
+  tenantId?: string | null;
 }
 
 export interface InsertTerminalJobInput {
@@ -278,7 +283,7 @@ export interface AsyncJobReadPort {
   /** The executor's not-before pre-read. */
   getExecutionState(jobId: string, sessionId: string): { status: string; not_before: string | null } | undefined;
   /** The claimed row's execution projection. */
-  getClaimed(jobId: string, sessionId: string): { capability: string; payload_json: string; stage: string | null; chain_id: string | null } | undefined;
+  getClaimed(jobId: string, sessionId: string): { capability: string; payload_json: string; stage: string | null; chain_id: string | null; tenant_id: string | null } | undefined;
   /** Retry's source row (identity + graph fields). */
   getRetrySource(jobId: string, sessionId: string): {
     job_id: string;

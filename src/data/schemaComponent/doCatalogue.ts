@@ -303,7 +303,8 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         started_at TEXT,
-        completed_at TEXT
+        completed_at TEXT,
+        tenant_id TEXT
       )
     `,
     kind: "schema",

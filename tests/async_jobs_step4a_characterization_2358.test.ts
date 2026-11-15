@@ -187,7 +187,15 @@ describe("characterization 4a: submit", () => {
         },
       },
     ]);
+    // Issue #4623 (pin update, §7): a submission with no tenant on the
+    // submission and no account store in this harness records null honestly
+    // and says so BEFORE the queued audit — the tenant is decided at the
+    // door, then the row is queued.
     expect(h.audits).toEqual([
+      {
+        type: "async_job.tenant_unresolved",
+        payload: { jobId: out.jobId, capability: "task.draft", userLogin: "sess-1" },
+      },
       { type: "async_job.queued", payload: { jobId: out.jobId, capability: "task.draft" } },
     ]);
   });

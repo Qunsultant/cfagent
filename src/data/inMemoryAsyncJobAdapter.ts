@@ -90,6 +90,7 @@ export class InMemoryAsyncJobStore
       trigger: input.trigger ?? null,
       triggered_by: input.triggeredBy ?? null,
       schedule_id: input.scheduleId ?? null,
+      tenant_id: input.tenantId ?? null,
       last_activity_at: null,
       error_code: null,
     });
@@ -135,6 +136,7 @@ export class InMemoryAsyncJobStore
       trigger: input.trigger ?? null,
       triggered_by: input.triggeredBy ?? null,
       schedule_id: input.scheduleId ?? null,
+      tenant_id: null,
       last_activity_at: input.nowIso,
       error_code: null,
     });
@@ -244,7 +246,7 @@ export class InMemoryAsyncJobStore
     return { status: row.status, not_before: row.not_before };
   }
 
-  getClaimed(jobId: string, sessionId: string): { capability: string; payload_json: string; stage: string | null; chain_id: string | null } | undefined {
+  getClaimed(jobId: string, sessionId: string): { capability: string; payload_json: string; stage: string | null; chain_id: string | null; tenant_id: string | null } | undefined {
     const row = this.rows.get(jobId);
     if (!row || row.session_id !== sessionId) return undefined;
     return {
@@ -252,6 +254,7 @@ export class InMemoryAsyncJobStore
       payload_json: row.payload_json as string,
       stage: row.stage,
       chain_id: row.chain_id,
+      tenant_id: row.tenant_id ?? null,
     };
   }
 

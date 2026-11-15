@@ -227,7 +227,9 @@ const STEP4A_DATA_LAYER_FILES: Array<[string, number]> = [
   // after #4423 (+1: the tolerant per-chain attempt-history read that
   // feeds the Docs retry marker — the site lives in the adapter, never
   // in shardJobs, which keeps zero storage-exec sites).
-  ["src/data/doSqliteAsyncJobAdapter.ts", 46],
+  // Issue #4623 adds one probed additive exec (mas_async_jobs.tenant_id) —
+  // 46 → 47, all of it in the data layer (no site above it).
+  ["src/data/doSqliteAsyncJobAdapter.ts", 47],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],
   ["src/data/asyncJobPorts.ts", 0],
   ["src/data/createAsyncJobPorts.ts", 0],

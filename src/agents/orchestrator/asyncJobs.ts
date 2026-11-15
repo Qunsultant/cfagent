@@ -267,6 +267,7 @@ function jobGraphFields(row: Record<string, unknown>): {
   trigger?: AsyncJobTrigger | null;
   triggeredBy?: string | null;
   scheduleId?: string | null;
+  tenantId?: string | null;
 } {
   const kind = ASYNC_JOB_KINDS.find((k) => k === row.job_kind);
   const channel = ASYNC_JOB_CHANNELS.find((c) => c === row.channel);
@@ -284,6 +285,9 @@ function jobGraphFields(row: Record<string, unknown>): {
     trigger: ASYNC_JOB_TRIGGERS.find((t) => t === row.trigger) ?? null,
     triggeredBy: typeof row.triggered_by === "string" && row.triggered_by ? row.triggered_by : null,
     scheduleId: typeof row.schedule_id === "string" && row.schedule_id ? row.schedule_id : null,
+    // Issue #4623: the tenant the job was submitted for. NULL on legacy rows
+    // and in deployments that cannot attribute — rendered as "Not recorded".
+    tenantId: typeof row.tenant_id === "string" && row.tenant_id ? row.tenant_id : null,
   };
 }
 
@@ -377,6 +381,52 @@ function recordStageTransition(
   });
 }
 
+/**
+ * Issue #4623 — the tenant a submission belongs to.
+ *
+ * Resolved from the submitting login through the account store (the same
+ * resolver the tick and the delivery identity use), memoized for a minute so
+ * a chain's many shard submissions do not each pay for the read. Best effort:
+ * an unavailable store yields null, and the caller decides what null means
+ * (refuse in a deployment that can attribute tenants, record it honestly in
+ * one that cannot).
+ */
+const SUBMISSION_TENANT_TTL_MS = 60_000;
+const submissionTenantCache = new Map<string, { tenantId: string | null; atMs: number }>();
+
+async function resolveSubmissionTenant(env: Env, userLogin: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = submissionTenantCache.get(userLogin);
+  if (cached && now - cached.atMs < SUBMISSION_TENANT_TTL_MS) return cached.tenantId;
+  let tenantId: string | null = null;
+  try {
+    const { createCommercialAdapter, ensureCommercialSchema } = await import(
+      "../../data/createCommercialPorts"
+    );
+    const { resolveTickTenant } = await import("../../services/paidScreenSubmission");
+    const commercial = createCommercialAdapter(env as { AGENT_DB?: unknown });
+    if (commercial) {
+      await ensureCommercialSchema(commercial.db);
+      const tenant = await resolveTickTenant(commercial, { userId: userLogin, env });
+      tenantId = tenant.tenantId ?? null;
+    }
+  } catch {
+    tenantId = null;
+  }
+  submissionTenantCache.set(userLogin, { tenantId, atMs: now });
+  return tenantId;
+}
+
+/** Issue #4623: a submission this deployment cannot attribute to a tenant. */
+export class AsyncJobTenantUnresolvedError extends Error {
+  constructor(public readonly userLogin: string) {
+    super(
+      "This deployment can attribute jobs to a tenant, but this submission could not be attributed. Nothing was queued.",
+    );
+    this.name = "AsyncJobTenantUnresolvedError";
+  }
+}
+
 export async function submitAsyncJob(ctx: AsyncJobsContext,
   job: AsyncJobSubmission,
 ): Promise<{ jobId: string; status: "queued"; statusUrl: string }> {
@@ -430,6 +480,25 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
   // names a trigger (the read model renders "Not recorded", never
   // invented).
   const provenance = resolveJobProvenance(job);
+  // Issue #4623: every queued job carries its tenant. An explicit tenant on
+  // the submission wins; otherwise it resolves from the submitting login. In
+  // a deployment that HAS an account store (AGENT_DB), a job we cannot
+  // attribute is refused rather than queued under an invented tenant — the
+  // queue's one tenant rule, enforced at the door. A deployment without the
+  // store records null honestly and audits it.
+  const explicitTenant = (job as { tenantId?: string | null }).tenantId ?? null;
+  const tenantId =
+    explicitTenant ?? (await resolveSubmissionTenant(ctx.env, ctx.sessionKey()));
+  if (!tenantId) {
+    if (ctx.env && (ctx.env as { AGENT_DB?: unknown }).AGENT_DB) {
+      throw new AsyncJobTenantUnresolvedError(ctx.sessionKey());
+    }
+    ctx.audit("async_job.tenant_unresolved", "orchestrator", {
+      jobId,
+      capability: job.capability,
+      userLogin: ctx.sessionKey(),
+    });
+  }
   queue.insertQueued({
     jobId,
     sessionId: ctx.sessionKey(),
@@ -446,6 +515,7 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
     trigger: provenance.trigger,
     triggeredBy: provenance.triggeredBy,
     scheduleId: provenance.scheduleId,
+    tenantId,
   });
 
   // Issue #4116 — project the queued row into D1 (ORM + queue
@@ -1921,7 +1991,14 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
   // so a job stuck in "running" is observable from its own trail
   // (queued → started → completed/failed), not only from the 30-min
   // stuck-run threshold.
-  ctx.audit("async_job.started", "orchestrator", { jobId, capability: job.capability });
+  // Issue #4623: the executor names the tenant it is executing for. A row
+  // with no tenant (legacy, or a deployment without the account store) says
+  // so here instead of implying one.
+  ctx.audit("async_job.started", "orchestrator", {
+    jobId,
+    capability: job.capability,
+    tenantId: job.tenant_id ?? null,
+  });
   // Issue #3811: heartbeat while the job runs — the #624
   // research-task precedent (2-minute interval, cleared at the
   // terminal points below). The stamp is observation, not a state

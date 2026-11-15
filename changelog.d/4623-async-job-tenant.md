@@ -1,0 +1,3 @@
+### Fixed
+
+- Tenant on the async-job queue (#4623). `tenantId` now travels from submission to the `mas_async_jobs` row and back out to the executor: the column is added by a probed additive migration (legacy tables upgrade in place), every submission stamps it (explicit value wins, otherwise resolved from the submitting login and memoized for a minute), and the record exposes it — NULL on legacy rows rather than an invented tenant. A deployment that **can** attribute tenants (`AGENT_DB` bound) refuses a submission it cannot attribute instead of queuing it blind; one that cannot records null honestly and audits `async_job.tenant_unresolved`. The executor names the job's tenant on its start audit.

@@ -116,11 +116,11 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(405);
-    // 405 entries resolve to 416 statements: the mas_reports generic
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(406);
+    // 406 entries resolve to 417 statements: the mas_reports generic
     // ALTER expands to 11 pairs and the confirmations generic ALTER to
     // 2, each pair one statement.
-    expect(executedStatements).toBe(416);
+    expect(executedStatements).toBe(417);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);
