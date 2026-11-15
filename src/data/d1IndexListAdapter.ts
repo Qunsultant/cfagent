@@ -1,43 +1,44 @@
 /**
  * Issue #1980 — the D1 implementation of the stored index-list
- * port, raw prepare/bind (the d1QuoteSourceAdapter pattern, not
- * Drizzle: one table, four statements). Semantics identical to
+ * port, Drizzle over the DML catalogue. Semantics identical to
  * the DO-SQLite and in-memory adapters: newest-first per index,
- * keep-per-index prune via per-row DELETEs. Statements are
- * single-line (the feed-seam idiom); the CREATE is idempotent,
- * so environments whose migrations have not run still get a
- * writable table on first store, and reads against a missing
- * table resolve to undefined (no stored list) rather than
- * inventing one.
+ * keep-per-index prune via per-row DELETEs. The CREATE is
+ * idempotent, so environments whose migrations have not run
+ * still get a writable table on first store, and reads against
+ * a missing table resolve to undefined (no stored list) rather
+ * than inventing one.
+ *
+ * #4282 P6a (#4384): the insert + reads + prune DELETE are
+ * catalogue entries (dml.d1.mas_index_lists.*), executed
+ * through the DML executor. The CREATE stays the DDL
+ * catalogue's text, issued via db.run(sql.raw(...)).
  */
+import { sql } from "drizzle-orm";
+import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import type { IndexId, IndexMember } from "../trading";
 import type {
   IndexListArtifact,
   IndexListStore,
   IndexListStoreOptions,
 } from "./indexListPorts";
+import { masIndexLists } from "./drizzleSchema";
 import { doTableSql } from "./schemaComponent/doCatalogue";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { executeDml } from "./schemaComponent/dmlExecutor";
 
-/** Minimal structural shape of the D1 binding this adapter needs. */
-export interface IndexListD1Db {
-  prepare(sql: string): {
-    bind(...args: unknown[]): {
-      first<T = Record<string, unknown>>(): Promise<T | null>;
-      all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
-      run(): Promise<unknown>;
-    };
-    run(): Promise<unknown>;
-  };
+/** Drizzle D1 database object carrying the index-list schema. */
+export type IndexListD1Db = DrizzleD1Database<{
+  masIndexLists: typeof masIndexLists;
+}>;
+
+/** Build the Drizzle D1 database object from a bound D1 client. */
+export function createD1IndexListDb(d1: D1Database): IndexListD1Db {
+  return drizzle(d1, {
+    schema: { masIndexLists },
+  });
 }
 
 const CREATE_TABLE_SQL = doTableSql("mas_index_lists");
-const INSERT_SQL =
-  "INSERT INTO mas_index_lists (id, created_at, index_id, snapshot_date, source, source_label, derived_from_holdings, members_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-const IDS_SQL =
-  "SELECT id FROM mas_index_lists WHERE index_id = ? ORDER BY created_at DESC, id DESC";
-const LATEST_SQL =
-  "SELECT id, snapshot_date, source, source_label, derived_from_holdings, members_json, created_at FROM mas_index_lists WHERE index_id = ? ORDER BY created_at DESC, id DESC LIMIT 1";
-const DELETE_SQL = "DELETE FROM mas_index_lists WHERE id = ?";
 
 interface IndexListRow {
   id: string;
@@ -83,28 +84,31 @@ export class D1IndexListStore implements IndexListStore {
     derivedFromHoldings: boolean;
     nowIso?: string;
   }): Promise<IndexListArtifact> {
-    await this.db.prepare(CREATE_TABLE_SQL).run();
+    await this.db.run(sql.raw(CREATE_TABLE_SQL));
     const id = this.idFactory();
     const createdAt = input.nowIso ?? new Date().toISOString();
-    await this.db
-      .prepare(INSERT_SQL)
-      .bind(
+    await executeDml(DML_CATALOGUE, this.db, "dml.d1.mas_index_lists.insert", {
+      values: {
         id,
         createdAt,
-        input.index,
-        input.snapshotDate,
-        input.source,
-        input.sourceLabel,
-        input.derivedFromHoldings ? 1 : 0,
-        JSON.stringify(input.symbols),
-      )
-      .run();
-    const ids = await this.db
-      .prepare(IDS_SQL)
-      .bind(input.index)
-      .all<{ id: string }>();
-    for (const excess of ids.results.slice(this.keepPerIndex)) {
-      await this.db.prepare(DELETE_SQL).bind(excess.id).run();
+        indexId: input.index,
+        snapshotDate: input.snapshotDate,
+        source: input.source,
+        sourceLabel: input.sourceLabel,
+        derivedFromHoldings: input.derivedFromHoldings ? 1 : 0,
+        membersJson: JSON.stringify(input.symbols),
+      },
+    });
+    const ids = (await executeDml(
+      DML_CATALOGUE,
+      this.db,
+      "dml.d1.mas_index_lists.list_ids",
+      { indexId: input.index },
+    )) as Array<{ id: string }>;
+    for (const excess of ids.slice(this.keepPerIndex)) {
+      await executeDml(DML_CATALOGUE, this.db, "dml.d1.mas_index_lists.prune_delete", {
+        id: excess.id,
+      });
     }
     return {
       id,
@@ -120,12 +124,14 @@ export class D1IndexListStore implements IndexListStore {
 
   async latest(index: IndexId): Promise<IndexListArtifact | undefined> {
     try {
-      const row = await this.db
-        .prepare(LATEST_SQL)
-        .bind(index)
-        .first<IndexListRow>();
-      if (!row) return undefined;
-      return parseRow(row, index);
+      const rows = (await executeDml(
+        DML_CATALOGUE,
+        this.db,
+        "dml.d1.mas_index_lists.read_latest",
+        { indexId: index },
+      )) as IndexListRow[];
+      if (!rows[0]) return undefined;
+      return parseRow(rows[0], index);
     } catch {
       // Missing table (migrations not run, no store yet): no
       // stored list — the honest absence, never an invented one.
