@@ -21,7 +21,7 @@
  * the cap.
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import {
   agentApprovedFreeQuotaCounts,
   agentApprovedFreeQuotas,
@@ -46,6 +46,8 @@ import {
   type ApprovedFreeQuotaSettings,
   type ApprovedFreeQuotaUsageInput,
 } from "./approvedFreeQuotaPorts";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { dmlFragment } from "./schemaComponent/dmlExecutor";
 
 /** Drizzle D1 database object carrying the approved-free quota schema. */
 export type ApprovedFreeQuotaDb = DrizzleD1Database<{
@@ -168,8 +170,25 @@ export class D1ApprovedFreeQuotaAdapter implements ApprovedFreeQuota {
           agentApprovedFreeQuotaCounts.family,
           agentApprovedFreeQuotaCounts.period,
         ],
-        set: { used: sql`${agentApprovedFreeQuotaCounts.used} + 1`, updatedAtMs: now },
-        where: sql`${agentApprovedFreeQuotaCounts.used} < (SELECT ${agentApprovedFreeQuotas.capRuns} FROM ${agentApprovedFreeQuotas} WHERE ${agentApprovedFreeQuotas.family} = ${agentApprovedFreeQuotaCounts.family})`,
+        set: {
+          used: dmlFragment(
+            DML_CATALOGUE,
+            "dml.d1.agent_approved_free_quota_counts.increment_used",
+          ),
+          updatedAtMs: now,
+        },
+        where: lt(
+          agentApprovedFreeQuotaCounts.used,
+          this.db
+            .select({ capRuns: agentApprovedFreeQuotas.capRuns })
+            .from(agentApprovedFreeQuotas)
+            .where(
+              eq(
+                agentApprovedFreeQuotas.family,
+                agentApprovedFreeQuotaCounts.family,
+              ),
+            ),
+        ),
       });
     // Applied-check: the increment landed exactly when the count
     // grew by one. When the conditional upsert did not apply (the
