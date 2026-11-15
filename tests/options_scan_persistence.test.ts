@@ -337,7 +337,11 @@ class FakeScanSql implements ScanSqlExecutor {
       }
       return [];
     }
-    if (q.startsWith("SELECT summary_json, result_json FROM mas_opportunity_scans WHERE id = ?")) {
+    // #4385 (#4282 P6b): the adapter's GET moved to the DO DML
+    // catalogue's Repository entry, so the Repository's statement
+    // shape arrives here — SELECT * with LIMIT 1 — instead of the
+    // old explicit-column select. The rows returned are unchanged.
+    if (q.startsWith("SELECT * FROM mas_opportunity_scans WHERE id = ? LIMIT 1")) {
       return this.rows
         .filter((r) => r.id === params[0])
         .map((r) => ({ summary_json: r.summary_json, result_json: r.result_json }));
