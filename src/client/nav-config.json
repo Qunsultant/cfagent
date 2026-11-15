@@ -487,7 +487,7 @@
       "crumb": "SecurityHub",
       "category": "Platform",
       "icon": "IaaaAdmin",
-      "description": "IAAA admin, users, admin access, and your profile — one menu, six views",
+      "description": "IAAA admin, users, admin access, and your profile — one menu, seven views",
       "navEntry": {
         "label": "SecurityHub",
         "shortLabel": "SecurityHub",
@@ -990,6 +990,13 @@
         "shortLabel": "Live enforcement state: gated routes, enforcement & grace",
         "icon": "IaaaAdmin",
         "description": "Live enforcement state: gated routes, enforcement & grace"
+      },
+      {
+        "id": "pip",
+        "label": "PIP",
+        "shortLabel": "Live attribute state: schema, sources & your attributes",
+        "icon": "IaaaAdmin",
+        "description": "Live attribute state: schema, sources & your attributes"
       }
     ],
     "schedules": [
@@ -1787,7 +1794,11 @@
     },
     "payment-assurance:operators": {
       "tab": "payment-assurance",
-      "view": "operators"    }
+      "view": "operators"    },
+    "security-hub:pip": {
+      "tab": "security-hub",
+      "view": "pip"
+    }
   },
   "deepLinkSurfaces": [
     {
@@ -1864,7 +1875,8 @@
         "admin-access",
         "profile",
         "pdp",
-        "pep"
+        "pep",
+        "pip"
       ]
     },
     {

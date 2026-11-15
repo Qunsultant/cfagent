@@ -50,7 +50,7 @@ import { isAdminRoleGrant, listGrantsForReview, resolveGrantDefaultExpiryDays, r
 import { createGrantProposalStore, resolveAdminGrantProposal } from "../../security/grantProposals";
 import { requiresStepUpForAction, requiresStepUpForMint } from "../../security/iaaaGates";
 import { MANAGEABLE_DENIED_PERMISSIONS, canManagePermissionDenial } from "../../security/permissionDenials";
-import { ALL_ROLES, canGrantRole, PERMISSIONS, type AuthorizationScope, type Role } from "../../security/authorization";
+import { ALL_ROLES, canGrantRole, membershipStoreToAttributeProvider, PERMISSIONS, type AuthorizationScope, type Role } from "../../security/authorization";
 import { approveBootstrapProposal, bootstrapProposalAuditInput, confirmBootstrapApplied, createBootstrapProposal, createKvBootstrapProposalStore, currentBootstrapEntries, findBootstrapDivergence, parseStoredBootstrapProposal, rejectBootstrapProposal, BOOTSTRAP_PROPOSAL_KEY_PREFIX, type BootstrapProposal, type BootstrapProposalAuditAction } from "../../security/bootstrapProposals";
 import { parseBootstrapAdmins, resolveBootstrapEntries } from "../../security/iaaaBootstrap";
 import { createWiredBindingStore } from "../../security/iaaaLogin";
@@ -983,7 +983,8 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
       path === "/api/iaaa/deactivate" ||
       path === "/api/iaaa/offboard" ||
       path === "/api/security/pdp" ||
-      path === "/api/security/pep"
+      path === "/api/security/pep" ||
+      path === "/api/security/pip"
     ) {
       const session = await requireAuth(request, env);
       if (!session) {
@@ -2450,6 +2451,94 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             gates: PEP_GATE_INVENTORY.map((gate) => ({ ...gate })),
             decisions: null,
             decisionsAvailable: false,
+          });
+        }
+        // #4655 — SecHub PIP tab: read-only PIP state for the
+        // SecurityHub PIP view. Any WIRED session may read it,
+        // because it returns only the CALLER's own attributes
+        // (memberships + denials for session.internalUserId,
+        // resolved through the live AttributeProvider) — there is
+        // no other-user lookup on this endpoint at all (admin
+        // lookup of another user is out of scope, filed as #4661
+        // under #4655). Unauthenticated callers get 401 and
+        // unwired (legacy) sessions get 403 from the lifecycle
+        // block above, before any handler runs. No enforcement
+        // change: the provider is read, never reconfigured, and
+        // no gate, permission, or decision changes here.
+        if (path === "/api/security/pip") {
+          if (request.method !== "GET") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          // The attribute schema is the live AttributeProvider
+          // interfaces (Membership, RoleBinding, PermissionDenial
+          // in src/security/authorization.ts), field for field —
+          // a cited description kept next to the interfaces, not
+          // a tunable, so it is not a config value (same idiom
+          // as the PDP coverage map above).
+          const pipSchema = {
+            membership: {
+              fields: [
+                "membershipId",
+                "internalUserId",
+                "tenantId",
+                "workspaceId",
+                "roleBindings",
+                "createdBy",
+                "createdAtMs",
+                "revokedAtMs",
+                "email",
+              ],
+            },
+            roleBinding: {
+              fields: ["role", "scope", "workspaceId", "resourceId", "grantedBy", "expiresAtMs"],
+            },
+            permissionDenial: {
+              fields: [
+                "denialId",
+                "internalUserId",
+                "tenantId",
+                "permission",
+                "deniedBy",
+                "deniedAtMs",
+              ],
+            },
+          };
+          const provider = membershipStoreToAttributeProvider(
+            membershipStore,
+            createKvPermissionDenialStore(sessionStore(env)),
+          );
+          const callerId = session.internalUserId as string;
+          const memberships = await provider.getMembershipsByUser(callerId);
+          // The denial reader is always supplied above, so
+          // denialsAvailable is true for every caller that reads
+          // this endpoint; the null branch keeps the honest
+          // empty state real if a future wiring ever supplies a
+          // denial-unaware provider.
+          const denials = provider.getPermissionDenials
+            ? await provider.getPermissionDenials(callerId)
+            : null;
+          return Response.json({
+            ok: true,
+            schema: pipSchema,
+            sources: [
+              {
+                id: "memberships",
+                name: "Membership store",
+                via: "membershipStoreToAttributeProvider",
+                available: true,
+              },
+              {
+                id: "denials",
+                name: "KV denial store",
+                via: "createKvPermissionDenialStore",
+                available: denials !== null,
+              },
+            ],
+            attributes: {
+              memberships,
+              denials: denials ?? [],
+              denialsAvailable: denials !== null,
+            },
           });
         }
         // #3077 (#945 Q3) — reviewed bootstrap changes: approval-gated

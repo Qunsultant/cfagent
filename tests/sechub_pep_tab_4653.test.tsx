@@ -136,7 +136,7 @@ const PEP_STATE = {
 };
 
 describe("4653 view: pep joins the SecurityHub views (#4653)", () => {
-  it("SECURITY_HUB_VIEWS lists the six security views, in order, PEP last", () => {
+  it("SECURITY_HUB_VIEWS lists the seven security views, in order, PEP sixth (#4655 adds pip last)", () => {
     expect([...SECURITY_HUB_VIEWS]).toEqual([
       "iaaa-admin",
       "users",
@@ -144,6 +144,7 @@ describe("4653 view: pep joins the SecurityHub views (#4653)", () => {
       "profile",
       "pdp",
       "pep",
+      "pip",
     ]);
     expect(SECURITY_HUB_VIEW_LABELS["pep"]).toBe("PEP");
   });
@@ -161,12 +162,12 @@ describe("4653 view: pep joins the SecurityHub views (#4653)", () => {
 });
 
 describe("4653 nav: PEP has a sub-menu entry, deep link, and surface value (#4653)", () => {
-  it("the SecurityHub item has six sub-items, PEP last, each with a resolvable icon", () => {
+  it("the SecurityHub item has seven sub-items, PEP sixth, each with a resolvable icon (#4655 adds pip last)", () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(platform).toBeDefined();
     const item = platform!.items.find((i) => i.id === "security-hub");
     expect(item).toBeDefined();
-    expect(item!.subItems).toHaveLength(6);
+    expect(item!.subItems).toHaveLength(7);
     const sub = item!.subItems![5];
     expect(sub.id).toBe("pep");
     expect(sub.label).toBe("PEP");
@@ -196,11 +197,12 @@ describe("4653 nav: PEP has a sub-menu entry, deep link, and surface value (#465
       "profile",
       "pdp",
       "pep",
+      "pip",
     ]);
   });
 });
 
-describe("4653 hub: SecurityHub renders six tabs and mounts the PEP panel (#4653)", () => {
+describe("4653 hub: SecurityHub renders seven tabs and mounts the PEP panel (#4653)", () => {
   let container: HTMLDivElement;
   let root: Root | null = null;
 
@@ -234,7 +236,7 @@ describe("4653 hub: SecurityHub renders six tabs and mounts the PEP panel (#4653
     vi.unstubAllGlobals();
   });
 
-  it("the PEP tab mounts the PEP panel and the hub shows six tabs", async () => {
+  it("the PEP tab mounts the PEP panel and the hub shows seven tabs", async () => {
     mockedFetchPepState.mockResolvedValue(PEP_STATE);
     window.history.pushState(null, "", "/?tab=security-hub&view=pep");
     await render(
@@ -246,7 +248,7 @@ describe("4653 hub: SecurityHub renders six tabs and mounts the PEP panel (#4653
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(["IAAA Admin", "Users", "Admin Access", "Profile", "PDP", "PEP"]);
+    expect(tabs).toEqual(["IAAA Admin", "Users", "Admin Access", "Profile", "PDP", "PEP", "PIP"]);
     // The real PepPanel mounts under the PEP tab and renders live state.
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
