@@ -28,20 +28,11 @@ import type {
   FeedSqlExecutor,
 } from "./feedSnapshotPorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
-
-const TABLE = "mas_feed_snapshots";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 
 const CREATE_TABLE_SQL = doTableSql("mas_feed_snapshots");
 const CREATE_INDEX_SQL = doIndexSql("idx_mas_feed_snapshots_lookup");
-const INSERT_SQL =
-  `INSERT INTO ${TABLE} (id, created_at, user_login, symbol, as_of, data_source, snapshot_json, load_params_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-const IDS_SQL =
-  `SELECT id FROM ${TABLE} WHERE user_login = ? AND symbol = ? ORDER BY created_at DESC, id DESC`;
-const LATEST_SQL =
-  `SELECT id, snapshot_json, as_of, data_source, load_params_json, created_at FROM ${TABLE} WHERE user_login = ? AND symbol = ? ORDER BY created_at DESC, id DESC LIMIT 1`;
-const BY_ID_SQL =
-  `SELECT id, snapshot_json, as_of, data_source, load_params_json, created_at FROM ${TABLE} WHERE user_login = ? AND id = ?`;
-const DELETE_SQL = `DELETE FROM ${TABLE} WHERE id = ?`;
 
 interface FeedSnapshotRow {
   id: string;
@@ -104,25 +95,34 @@ export class SqlFeedSnapshotStore implements FeedSnapshotStore {
     const id = this.idFactory();
     const createdAt = input.nowIso ?? new Date().toISOString();
     const write = () => {
-      this.sql.exec(
-        INSERT_SQL,
-        id,
-        createdAt,
-        input.userLogin,
-        symbol,
-        input.asOf,
-        input.dataSource,
-        JSON.stringify(input.snapshot),
-        JSON.stringify(input.loadParams),
-      );
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_feed_snapshots.insert", {
+        record: {
+          id,
+          created_at: createdAt,
+          user_login: input.userLogin,
+          symbol,
+          as_of: input.asOf,
+          data_source: input.dataSource,
+          snapshot_json: JSON.stringify(input.snapshot),
+          load_params_json: JSON.stringify(input.loadParams),
+        },
+      });
       // Prune one row at a time (single-id DELETEs): the shared mock
       // does not evaluate NOT IN subqueries, and per-row deletes are
       // exactly as cheap at this volume.
-      const ids = Array.from(
-        this.sql.exec(IDS_SQL, input.userLogin, symbol),
-      ) as Array<{ id: string }>;
+      const ids = executeDoDml<Array<{ id: string }>>(
+        DO_DML_CATALOGUE,
+        this.sql,
+        "dml.do.mas_feed_snapshots.ids",
+        {
+          where: { user_login: input.userLogin, symbol },
+          orderBy: "created_at DESC, id DESC",
+        },
+      );
       for (const excess of ids.slice(this.keepPerSymbol)) {
-        this.sql.exec(DELETE_SQL, excess.id);
+        executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_feed_snapshots.delete", {
+          id: excess.id,
+        });
       }
     };
     const runner = this.storage?.transactionSync ? getTransactionRunner() : null;
@@ -153,9 +153,16 @@ export class SqlFeedSnapshotStore implements FeedSnapshotStore {
 
   latest(userLogin: string, symbol: string): FeedSnapshotArtifact | undefined {
     this.ensureTables();
-    const rows = Array.from(
-      this.sql.exec(LATEST_SQL, userLogin, symbol.toUpperCase().trim()),
-    ) as FeedSnapshotRow[];
+    const rows = executeDoDml<FeedSnapshotRow[]>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_feed_snapshots.latest",
+      {
+        where: { user_login: userLogin, symbol: symbol.toUpperCase().trim() },
+        orderBy: "created_at DESC, id DESC",
+        limit: 1,
+      },
+    );
     const row = rows[0];
     if (!row) return undefined;
     return parseRow(row, userLogin, symbol.toUpperCase().trim());
@@ -163,10 +170,12 @@ export class SqlFeedSnapshotStore implements FeedSnapshotStore {
 
   byId(userLogin: string, id: string): FeedSnapshotArtifact | undefined {
     this.ensureTables();
-    const rows = Array.from(
-      this.sql.exec(BY_ID_SQL, userLogin, id),
-    ) as FeedSnapshotRow[];
-    const row = rows[0];
+    const row = executeDoDml<FeedSnapshotRow | null>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_feed_snapshots.by_id",
+      { where: { user_login: userLogin, id } },
+    );
     if (!row) return undefined;
     // The row's symbol is not needed beyond the stored snapshot,
     // which always carries its own symbol.
