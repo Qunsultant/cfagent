@@ -44,6 +44,7 @@ import {
   OptionsDataAgent,
   RecommendationAgent,
   StrategyRiskAgent,
+  type NasdaqUniverseDeps,
   type PipelineResult,
   type StrategyRequest,
 } from "../trading";
@@ -148,9 +149,18 @@ function panelInputFromPlan(
  */
 export function createStrategyScreenAgents(
   client: ConstructorParameters<typeof DynamicOptionsScreener>[0],
+  universeDeps?: NasdaqUniverseDeps,
 ): ScannerScreenAgents {
   return {
-    data: new OptionsDataAgent(new DynamicOptionsScreener(client)),
+    // The screener is constructed with the resolved universe deps
+    // when the caller supplies them (#4473): the shared rebuild
+    // hands the run's deps here, so a stage resolves its universe
+    // from the run inputs. Absent, construction is byte-identical
+    // to before — the screener has no deps, and discovery-mode
+    // legs throw the #1378 error at the screen stage.
+    data: new OptionsDataAgent(
+      new DynamicOptionsScreener(client, undefined, universeDeps),
+    ),
     risk: new StrategyRiskAgent(),
     recommender: new RecommendationAgent(),
   };

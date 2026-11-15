@@ -44,7 +44,8 @@
  * definition from before #4066 persisted requests),
  * stage_request_unrecognized, stage_port_unavailable (comparison
  * shapes; a goal request with no stamped goal run id; a manual
- * rebuild with no bound environment).
+ * rebuild with no bound environment; a universe stage input with
+ * no bound factory, #4473).
  */
 import type { JobArtifactStore, JobDefinitionStore } from "../data/jobPipelinePorts";
 import type { ScanRunStore } from "../data/scanRunPorts";
@@ -54,6 +55,7 @@ import {
   OptionsDataAgent,
   RecommendationAgent,
   StrategyRiskAgent,
+  type NasdaqUniverseDeps,
   type OptionChainSource,
   type RiskProfile,
   type StrategyRequest,
@@ -75,8 +77,10 @@ import {
 import {
   assertOptionsStageRebuildable,
   decodeOptionsRequestShape,
+  decodeUniverseDepsStageInput,
   rebuildOptionsStepDeps,
   OptionsStepPortsError,
+  type UniverseDepsStageInput,
 } from "../workflows/optionsStepPorts";
 import { createManualOptionsResidencyDelivery } from "../workflows/manualOptionsResidency";
 import type { OptionsScreenWorkflowDeps } from "../workflows/optionsScreenWorkflow";
@@ -109,6 +113,19 @@ export interface OptionsWorkflowStepDeps {
   scanRunStore?: ScanRunStore;
   /** The stage-message queue. Absent, null: the host publishes nothing. */
   queue?: OptionsScreenWorkflowDeps["queue"];
+  /**
+   * The universe deps factory (#4473): rebuilds live deps from a
+   * run's universe stage input, per invocation. Called only when
+   * the stored request carries the input; the run id handed over
+   * is the ENGINE run id, so captures/outcomes attribute to the
+   * engine run, matching the stage-storage scoping. Absent, a run
+   * carrying the input refuses by name before any execution.
+   */
+  universeDepsFor?: (args: {
+    userLogin?: string;
+    runId: string;
+    universe: UniverseDepsStageInput;
+  }) => Promise<NasdaqUniverseDeps>;
 }
 
 /** The options run id is the job id after its first segment (the run id itself may contain colons). */
@@ -254,6 +271,28 @@ export function registerOptionsWorkflowSteps(
     const shape = decodeOptionsRequestShape(request, runId);
     // Refuse unrebuildable shapes/stages before any execution.
     assertOptionsStageRebuildable(shape, stageId, runId);
+    // #4473: the run's universe stage input, resolved per
+    // invocation. Absent, the factory is never called and the
+    // rebuild constructs the screener without deps, as before.
+    // Present with no factory bound, refuse by name before any
+    // execution — a discovery-mode leg would otherwise fail at
+    // the screen stage with the #1378 error, after earlier
+    // stages had already run.
+    const universe = decodeUniverseDepsStageInput(request, runId);
+    let universeDeps: NasdaqUniverseDeps | undefined;
+    if (universe) {
+      if (!deps.universeDepsFor) {
+        throw new OptionsStepPortsError(
+          "stage_port_unavailable",
+          `options run ${runId}: the stored request carries a universe stage input (provider "${universe.provider}") but this residency binds no universe deps factory — the screener cannot resolve its universe; bind universeDepsFor (the #4473 residency factory) and re-dispatch`,
+        );
+      }
+      universeDeps = await deps.universeDepsFor({
+        ...(userLogin ? { userLogin } : {}),
+        runId: ctx.runId,
+        universe,
+      });
+    }
     const stepDeps = rebuildOptionsStepDeps({
       runId,
       ...(userLogin ? { userLogin } : {}),
@@ -268,6 +307,7 @@ export function registerOptionsWorkflowSteps(
         : {}),
       ...(deps.scanRunStore ? { scanRunStore: deps.scanRunStore } : {}),
       ...(deps.queue !== undefined ? { queue: deps.queue } : {}),
+      ...(universeDeps ? { universeDeps } : {}),
       // #4450: the manual delivery factory — the resolving steps
       // are server-only, so they can import the residency module
       // the shared rebuild must not reach (#4066). The factory
