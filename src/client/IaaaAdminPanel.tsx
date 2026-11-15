@@ -59,7 +59,6 @@ import {
 import { ServiceUserSection } from "./ServiceUserSection";
 import { ServiceTokensPanel } from "./ServiceTokensPanel";
 import { RoleGrantsPanel } from "./RoleGrantsPanel";
-import { PolicyProposalsPanel } from "./PolicyProposalsPanel";
 import { BootstrapProposalsPanel } from "./BootstrapProposalsPanel";
 import { LoggedInUsersPanel } from "./LoggedInUsersPanel";
 import { fetchRoleGrants } from "./roleGrantsApi";
@@ -497,16 +496,8 @@ export function IaaaAdminPanel() {
         <h4>Role grants</h4>
         <RoleGrantsPanel />
 
-        {/* Issue #2838: policy proposals live on Overview beside
-        the role-grants section, not a new tab (tab indices
-        unchanged) and not duplicated elsewhere: like them, policy
-        administration is platform state. Tenant-admins never see
-        this section (the limited view above returns early). */}
-        <h4>Policy proposals</h4>
-        <PolicyProposalsPanel />
-
         {/* Issue #3077 (#945 Q3): bootstrap proposals live on Overview beside
-        the policy-proposals section, not a new tab (tab indices
+        the role-grants section, not a new tab (tab indices
         unchanged) and not duplicated elsewhere: like them, bootstrap
         administration is platform state. Tenant-admins never see
         this section (the limited view above returns early). */}
@@ -514,7 +505,7 @@ export function IaaaAdminPanel() {
         <BootstrapProposalsPanel />
 
         {/* Issue #2836: logged-in users live on Overview beside
-        the policy-proposals section, not a new tab (tab indices
+        the role-grants section, not a new tab (tab indices
         unchanged) and not duplicated elsewhere. Unlike policy
         proposals, tenant-admins DO reach this section through
         the limited view above — server-scoped to their tenant. */}
