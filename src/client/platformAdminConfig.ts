@@ -23,8 +23,6 @@ export type PlatformAdminSectionId =
   | "channels"
   | "data-providers"
   | "accounts"
-  | "free-runs"
-  | "products"
   | "iaaa-admin"
   | "users"
   | "data-lifecycle"

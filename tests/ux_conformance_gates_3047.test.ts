@@ -274,6 +274,9 @@ const CONFORMING_ROUTES: Record<string, string> = {
   search: "src/client/search/SearchHub.tsx",
   "workflow-runs": "src/client/WorkflowRunsPanel.tsx",
   "workflow-catalog": "src/client/WorkflowCatalogPage.tsx",
+  // Issue #4575: audit + NLQ moved out of Chat.tsx into the Audit & Vault
+  // page, which renders PageTemplate (shell-conforming).
+  "audit-vault": "src/client/AuditVaultPage.tsx",
   workflows: "src/client/WorkflowsHub.tsx",
   payments: "src/client/PaymentsPage.tsx",
   social: "src/client/SocialPostingPanel.tsx",
@@ -290,7 +293,13 @@ const CONFORMING_ROUTES: Record<string, string> = {
 };
 
 /** Routes rendered inline in Chat.tsx's TAB_CONTENT (entry-slice check). */
-const CHAT_INLINE_ROUTES = ["audit", "nlq"];
+/**
+ * Routes rendered inline in Chat.tsx (measured as slices, not files).
+ * Issue #4575 moved both — audit and NLQ became the Audit & Vault page
+ * (`src/client/AuditVaultPage.tsx`), so the host carries no inline
+ * admin slice any more and there is nothing to measure here.
+ */
+const CHAT_INLINE_ROUTES: string[] = [];
 
 /** Routes rendered by the trading hub (wrapper shell covers them). */
 const TRADING_ROUTES = [
@@ -330,11 +339,10 @@ const CONFORMING_SUB_TABS: Record<string, string> = {
 const EXPECTED_TAB_CONTENT_KEYS = [
   "agents",
   "approvals",
-  "audit",
+  "audit-vault",
   "chat",
   "docs",
   "endpoints",
-  "nlq",
   "options-flows",
   "options-screener",
   "platform-admin",
@@ -466,6 +474,8 @@ const INTERIOR_SURFACE_FILES: string[] = [
   "src/client/search/SearchHub.tsx",
   "src/client/WorkflowRunsPanel.tsx",
   "src/client/WorkflowCatalogPage.tsx",
+  // Issue #4575: the Audit & Vault page (route file, moved out of Chat.tsx).
+  "src/client/AuditVaultPage.tsx",
   "src/client/WorkflowsHub.tsx",
   "src/client/PaymentsPage.tsx",
   "src/client/SocialPostingPanel.tsx",

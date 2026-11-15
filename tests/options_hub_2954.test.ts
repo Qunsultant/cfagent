@@ -108,12 +108,14 @@ describe("sub-menu mapping (#2954)", () => {
     expect(subs.find((s) => s.id === "nlq-options")?.label).toBe("NLQ-options");
   });
 
-  it("removes best-trade from options-screener and keeps docs/workflow-runs in workflow-runs", () => {
+  it("removes best-trade from options-screener; the Workflows menu drops the runs entry (#4575)", () => {
     const ids = SUB_MENU_CONFIGS["options-screener"].map((s) => s.id);
     expect(ids).not.toContain("best-trade");
     const workflowIds = SUB_MENU_CONFIGS["workflow-runs"].map((s) => s.id);
     expect(workflowIds).toContain("docs");
-    expect(workflowIds).toContain("workflow-runs");
+    // Issue #4575: the runs entry is gone — the Schedules run ledger is the
+    // one home, and `?tab=workflow-runs` folds onto it.
+    expect(workflowIds).not.toContain("workflow-runs");
   });
 
   it("adds patterns + presets to the stock-hub menu and all 4 to assets-hub", () => {

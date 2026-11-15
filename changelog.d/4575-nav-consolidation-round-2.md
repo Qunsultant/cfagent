@@ -1,0 +1,3 @@
+### Changed
+
+- Nav consolidation round 2 (#4575). The Workflows menu no longer carries a "Workflow Runs" entry: the Schedules "Run ledger" is the one home, and old `?tab=workflow-runs` links still fold onto it with the workflow filter. Workflow Catalog's two sections became URL-synced sub-tabs (`?tab=workflow-catalog&view=workflows|define`), and the page moved onto `PageTemplate`. Audit Vault and Records NLQ merged into one **Audit & Vault** menu (`?tab=audit-vault&view=audit|nlq`) — the two inline `Chat.tsx` pages became one page file, and `?tab=audit` / `?tab=nlq` redirect onto the matching view. Platform Admin dropped the Free Runs and Products sections the product hub already owns (15 → 13 sections); the `legacyProductRedirect` addresses keep working.

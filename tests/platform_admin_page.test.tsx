@@ -79,8 +79,8 @@ describe("PlatformAdminPage component", () => {
     expect(tablist).toBeTruthy();
 
     const tabs = container.querySelectorAll('[role="tab"]');
-    expect(tabs).toHaveLength(15);
-    expect(PLATFORM_ADMIN_TABS).toHaveLength(15);
+    expect(tabs).toHaveLength(13);
+    expect(PLATFORM_ADMIN_TABS).toHaveLength(13);
 
     // Initial default tab is ads
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
@@ -102,32 +102,21 @@ describe("PlatformAdminPage component", () => {
     expect(container.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();
   });
 
-  it("renders the free-runs section when initialSection is passed (#3315)", async () => {
+  it("retires the free-runs and products sections to the product hub (#4575)", async () => {
+    // Both ids left the PlatformAdminSectionId union when the hub became the
+    // one home, so an old ?tab=platform-admin&view=free-runs address resolves
+    // to the default section here — legacyProductRedirect sends the live
+    // address to the hub before this page mounts.
     await render(
-      <PlatformAdminPage
-        initialSection="free-runs"
-        user={{ login: "operator" }}
-      />
+      <PlatformAdminPage initialSection="free-runs" user={{ login: "operator" }} />
     );
 
-    const tabs = container.querySelectorAll('[role="tab"]');
-    const freeRunsTab = Array.from(tabs).find((t) => t.textContent?.includes("Free Runs"));
-    expect(freeRunsTab?.getAttribute("aria-selected")).toBe("true");
-    expect(container.querySelector('[data-testid="free-runs-panel"]')).toBeTruthy();
-  });
-
-  it("renders the products section when initialSection is passed (#3289 slice 2)", async () => {
-    await render(
-      <PlatformAdminPage
-        initialSection="products"
-        user={{ login: "operator" }}
-      />
-    );
-
-    const tabs = container.querySelectorAll('[role="tab"]');
-    const productsTab = Array.from(tabs).find((t) => t.textContent?.includes("Products"));
-    expect(productsTab?.getAttribute("aria-selected")).toBe("true");
-    expect(container.querySelector('[data-testid="products-panel"]')).toBeTruthy();
+    const tabs = Array.from(container.querySelectorAll('[role="tab"]'));
+    expect(tabs.map((t) => t.textContent ?? "").join(" ")).not.toContain("Free Runs");
+    expect(tabs.map((t) => t.textContent ?? "").join(" ")).not.toContain("Products");
+    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector('[data-testid="free-runs-panel"]')).toBeNull();
+    expect(container.querySelector('[data-testid="products-panel"]')).toBeNull();
   });
 
   it("switches tabs and displays the matching panel on click", async () => {

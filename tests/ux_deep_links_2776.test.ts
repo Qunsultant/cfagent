@@ -89,6 +89,15 @@ describe("Deep-link catalog (issue #2776)", () => {
       "autopilot:job-outcomes",
       "autopilot:actions",
       "autopilot:policy-decisions",
+      // Issue #4575: the two workflow-catalog views and the two Audit &
+      // Vault views are sub-tabs of a page that is not itself a nav node
+      // (workflow-catalog is a Workflows sub-menu entry; audit-vault is a
+      // menu host whose views are addressed by `view`), so their keys are
+      // `view`-param addresses like the autopilot six.
+      "workflow-catalog:workflows",
+      "workflow-catalog:define",
+      "audit-vault:audit",
+      "audit-vault:nlq",
     ]);
     for (const key of Object.keys(DEEP_LINK_OVERRIDES)) {
       expect(keys.has(key) || ids.has(key) || legacyKeys.has(key)).toBe(true);

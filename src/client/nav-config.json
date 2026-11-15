@@ -39,7 +39,7 @@
       "crumb": "Approvals",
       "category": "Execution",
       "icon": "Approvals",
-      "description": "Every consequential action awaiting your decision \u2014 trade drafts and held deliveries, composed in one place",
+      "description": "Every consequential action awaiting your decision — trade drafts and held deliveries, composed in one place",
       "navEntry": {
         "label": "Approvals",
         "shortLabel": "Approvals",
@@ -60,25 +60,25 @@
       "navEntry": {
         "label": "Assets Hub",
         "shortLabel": "Assets",
-        "navOrder": 29,
+        "navOrder": 28,
         "defaultVisible": true,
         "badge": "Assets",
         "badgeType": "pro"
       }
     },
     {
-      "id": "audit",
-      "navGroup": "audit",
-      "crumb": "Audit Vault",
+      "id": "audit-vault",
+      "navGroup": "audit-vault",
+      "crumb": "Audit & Vault",
       "category": "Platform",
       "icon": "Audit",
-      "description": "W3C Agent DID verification, memory vault, and immutable audit logs",
+      "description": "The memory vault, the real-time event log, and natural-language records analytics with the schema and data browser — one menu, two views",
       "navEntry": {
-        "label": "Audit Vault",
-        "shortLabel": "Audit Log",
+        "label": "Audit & Vault",
+        "shortLabel": "Audit & Vault",
         "navOrder": 20,
         "defaultVisible": true,
-        "badge": "DID",
+        "badge": "Vault",
         "badgeType": "pro"
       }
     },
@@ -105,11 +105,11 @@
       "crumb": "Billing",
       "category": "Billing",
       "icon": "Billing",
-      "description": "Your subscription, receipts, plans, and referral-credit balance \u2014 read-only servicing over existing routes",
+      "description": "Your subscription, receipts, plans, and referral-credit balance — read-only servicing over existing routes",
       "navEntry": {
         "label": "Billing",
         "shortLabel": "Billing",
-        "navOrder": 28,
+        "navOrder": 27,
         "defaultVisible": true,
         "badge": "Billing",
         "badgeType": "neutral"
@@ -153,11 +153,11 @@
       "crumb": "Docs & Reports",
       "category": "Platform",
       "icon": "Docs",
-      "description": "Every document set a screener-workflow run produced \u2014 stock, options, goal and strategy \u2014 with its PDF, XLSX and CSV downloads and run id",
+      "description": "Every document set a screener-workflow run produced — stock, options, goal and strategy — with its PDF, XLSX and CSV downloads and run id",
       "navEntry": {
         "label": "Docs & Reports",
         "shortLabel": "Docs",
-        "navOrder": 25,
+        "navOrder": 24,
         "defaultVisible": true,
         "badge": "PDF",
         "badgeType": "neutral"
@@ -173,7 +173,7 @@
       "navEntry": {
         "label": "Developer & MCP",
         "shortLabel": "Endpoints",
-        "navOrder": 24,
+        "navOrder": 23,
         "defaultVisible": true,
         "badge": "MCP",
         "badgeType": "mcp"
@@ -203,22 +203,6 @@
         "defaultVisible": true,
         "badge": "AUDIT",
         "badgeType": "pro"
-      }
-    },
-    {
-      "id": "nlq",
-      "navGroup": "nlq",
-      "crumb": "Records NLQ",
-      "category": "Platform",
-      "icon": "Database",
-      "description": "Natural language records analytics, enterprise schema inspector & data browser",
-      "navEntry": {
-        "label": "Records NLQ",
-        "shortLabel": "Records",
-        "navOrder": 21,
-        "defaultVisible": true,
-        "badge": "NLQ",
-        "badgeType": "neutral"
       }
     },
     {
@@ -257,7 +241,7 @@
       "navEntry": {
         "label": "Options Flows",
         "shortLabel": "Flows",
-        "navOrder": 23,
+        "navOrder": 22,
         "defaultVisible": true,
         "badge": "Sweeps",
         "badgeType": "pro"
@@ -269,7 +253,7 @@
       "crumb": "Options Screener",
       "category": "Intelligence",
       "icon": "Options",
-      "description": "The one options home: contract screen, strategy panel, best-trade, compare, LLM ideas and evaluate, discovery, scheduled runs, IV history, flows, reports, workflow runs, and schedules \u2014 linked to their existing surfaces, not duplicated (issue 2596, slice 1)",
+      "description": "The one options home: contract screen, strategy panel, best-trade, compare, LLM ideas and evaluate, discovery, scheduled runs, IV history, flows, reports, workflow runs, and schedules — linked to their existing surfaces, not duplicated (issue 2596, slice 1)",
       "navEntry": {
         "label": "Options Screener",
         "shortLabel": "Options",
@@ -315,7 +299,7 @@
       "navEntry": {
         "label": "Payment Assurance",
         "shortLabel": "Assurance",
-        "navOrder": 26,
+        "navOrder": 25,
         "defaultVisible": true,
         "badge": "Test",
         "badgeType": "neutral"
@@ -381,7 +365,7 @@
       "navEntry": {
         "label": "Product Hub",
         "shortLabel": "Product Hub",
-        "navOrder": 27,
+        "navOrder": 26,
         "defaultVisible": true,
         "badge": "Catalog",
         "badgeType": "neutral"
@@ -445,7 +429,7 @@
       "crumb": "Proposal Review",
       "category": "Platform",
       "icon": "Review",
-      "description": "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections \u2014 nothing activates without a person"
+      "description": "Decide what the system proposed: goal proposals, adaptation candidates, and strategy re-selections — nothing activates without a person"
     },
     {
       "id": "risk-analysis",
@@ -538,7 +522,7 @@
       "crumb": "Track Record",
       "category": "Platform",
       "icon": "TrackRecord",
-      "description": "What happened to issued recommendations, from the outcome ledger \u2014 Unverified stays Unverified"
+      "description": "What happened to issued recommendations, from the outcome ledger — Unverified stays Unverified"
     },
     {
       "id": "trading",
@@ -600,7 +584,7 @@
       "navEntry": {
         "label": "Workflows & FAQ",
         "shortLabel": "Guides",
-        "navOrder": 22,
+        "navOrder": 21,
         "defaultVisible": true,
         "badge": "14 Guides",
         "badgeType": "neutral"
@@ -670,7 +654,7 @@
         "icon": "StrategyScan",
         "badge": "Patterns",
         "badgeType": "ai",
-        "description": "Stock market setup signatures from the setup catalog \u2014 read-only, apply one to a new screen"
+        "description": "Stock market setup signatures from the setup catalog — read-only, apply one to a new screen"
       },
       {
         "id": "presets",
@@ -782,7 +766,7 @@
         "icon": "Screeners",
         "badge": "Planned",
         "badgeType": "neutral",
-        "description": "Screen foreign-exchange pairs \u2014 planned, no provider adapter yet"
+        "description": "Screen foreign-exchange pairs — planned, no provider adapter yet"
       },
       {
         "id": "futures",
@@ -791,7 +775,7 @@
         "icon": "Screeners",
         "badge": "Planned",
         "badgeType": "neutral",
-        "description": "Screen futures contracts \u2014 planned, no provider adapter yet"
+        "description": "Screen futures contracts — planned, no provider adapter yet"
       },
       {
         "id": "commodities",
@@ -800,7 +784,7 @@
         "icon": "Screeners",
         "badge": "Planned",
         "badgeType": "neutral",
-        "description": "Screen commodities \u2014 planned, no provider adapter yet"
+        "description": "Screen commodities — planned, no provider adapter yet"
       },
       {
         "id": "bonds",
@@ -809,7 +793,7 @@
         "icon": "Screeners",
         "badge": "Planned",
         "badgeType": "neutral",
-        "description": "Screen bonds \u2014 planned, no provider adapter yet"
+        "description": "Screen bonds — planned, no provider adapter yet"
       }
     ],
     "workflow-runs": [
@@ -821,15 +805,6 @@
         "badge": "Docs",
         "badgeType": "pro",
         "description": "Generated options and stock reports with PDF/XLSX/CSV downloads"
-      },
-      {
-        "id": "workflow-runs",
-        "label": "Workflow Runs",
-        "shortLabel": "Runs",
-        "icon": "Runs",
-        "badge": "Runs",
-        "badgeType": "neutral",
-        "description": "Every recorded workflow run with its stages and artifacts"
       },
       {
         "id": "workflows",
@@ -848,8 +823,8 @@
         "badge": "Stages",
         "badgeType": "neutral",
         "description": "Every runnable workflow and each stage's modes, artifacts, checkpoint and approval"
-    },
-    {
+      },
+      {
         "id": "reports",
         "label": "Screener Reports",
         "shortLabel": "Reports",
@@ -1045,7 +1020,7 @@
         "icon": "Billing",
         "badge": "Billing",
         "badgeType": "neutral",
-        "description": "Your subscription, receipts, plans, and referral-credit balance \u2014 read-only servicing"
+        "description": "Your subscription, receipts, plans, and referral-credit balance — read-only servicing"
       },
       {
         "id": "revenue",
@@ -1124,7 +1099,7 @@
         "icon": "Order",
         "badge": "Stock",
         "badgeType": "neutral",
-        "description": "Equity order ticket \u2014 build a stock order with broker preview and human approval"
+        "description": "Equity order ticket — build a stock order with broker preview and human approval"
       },
       {
         "id": "options-order",
@@ -1133,7 +1108,7 @@
         "icon": "Options",
         "badge": "Options",
         "badgeType": "pro",
-        "description": "Manual options order ticket \u2014 build a multi-leg strategy with broker preview and human approval"
+        "description": "Manual options order ticket — build a multi-leg strategy with broker preview and human approval"
       },
       {
         "id": "risk-analysis",
@@ -1142,7 +1117,47 @@
         "icon": "Order",
         "badge": "Risk",
         "badgeType": "neutral",
-        "description": "Symbol-based risk profile \u2014 anatomy, playbook, scenarios, and AI dossier"
+        "description": "Symbol-based risk profile — anatomy, playbook, scenarios, and AI dossier"
+      }
+    ],
+    "workflow-catalog": [
+      {
+        "id": "workflows",
+        "label": "Workflows and their stages",
+        "shortLabel": "Stages",
+        "icon": "Runs",
+        "badge": "Catalog",
+        "badgeType": "neutral",
+        "description": "Every runnable workflow and each stage's modes, artifacts, checkpoint and approval"
+      },
+      {
+        "id": "define",
+        "label": "Define and schedule",
+        "shortLabel": "Define",
+        "icon": "Schedules",
+        "badge": "Define",
+        "badgeType": "neutral",
+        "description": "Pick a definition, give it a job id, choose a cadence"
+      }
+    ],
+    "audit-vault": [
+      {
+        "id": "audit",
+        "label": "Audit Vault",
+        "shortLabel": "Audit log",
+        "icon": "Audit",
+        "badge": "Vault",
+        "badgeType": "pro",
+        "description": "Persistent memory vault and the real-time event log"
+      },
+      {
+        "id": "nlq",
+        "label": "Records NLQ",
+        "shortLabel": "Records",
+        "icon": "Database",
+        "badge": "NLQ",
+        "badgeType": "neutral",
+        "description": "Natural-language records analytics, schema inspector and data browser"
       }
     ]
   },
@@ -1317,18 +1332,17 @@
       "view": "bonds"
     },
     "order:stock-order": {
-    "tab": "order",
-    "params": {
-      "orderTab": "stock"
-    }
-  },
-  "order:options-order": {
+      "tab": "order",
+      "params": {
+        "orderTab": "stock"
+      }
+    },
+    "order:options-order": {
       "tab": "order",
       "params": {
         "assetClass": "options"
       }
-    }
-,
+    },
     "order:risk-analysis": {
       "tab": "order",
       "params": {
@@ -1361,6 +1375,22 @@
     "autopilot:policy-decisions": {
       "tab": "autopilot",
       "view": "policy-decisions"
+    },
+    "workflow-catalog:workflows": {
+      "tab": "workflow-catalog",
+      "view": "workflows"
+    },
+    "workflow-catalog:define": {
+      "tab": "workflow-catalog",
+      "view": "define"
+    },
+    "audit-vault:audit": {
+      "tab": "audit-vault",
+      "view": "audit"
+    },
+    "audit-vault:nlq": {
+      "tab": "audit-vault",
+      "view": "nlq"
     }
   },
   "deepLinkSurfaces": [
@@ -1558,6 +1588,24 @@
         "background-tasks",
         "dead-letter-queue"
       ]
+    },
+    {
+      "surface": "workflow-catalog",
+      "page": "workflow-catalog",
+      "param": "view",
+      "values": [
+        "workflows",
+        "define"
+      ]
+    },
+    {
+      "surface": "audit-vault",
+      "page": "audit-vault",
+      "param": "view",
+      "values": [
+        "audit",
+        "nlq"
+      ]
     }
   ],
   "hostedIds": [
@@ -1620,18 +1668,6 @@
           "label": "Accounts",
           "description": "Self-service account setup, tier, credits, subscriptions & catalogue",
           "icon": "Contracts"
-        },
-        {
-          "id": "free-runs",
-          "label": "Free Runs",
-          "description": "Free-run allowance per product, per month",
-          "icon": "Runs"
-        },
-        {
-          "id": "products",
-          "label": "Products",
-          "description": "Product + version configuration, bulk moves",
-          "icon": "Billing"
         },
         {
           "id": "iaaa-admin",

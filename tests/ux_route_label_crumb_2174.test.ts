@@ -87,10 +87,14 @@ describe("IA: labels, crumbs, shortLabels are collision-free (#2174)", () => {
 
   it("pins the reconciled renames", () => {
     const byId = new Map(ROUTES.map((r) => [r.id, r]));
-    expect(byId.get("audit")!.navEntry!.label).toBe("Audit Vault");
+    // #4575 merged audit + NLQ into the one Audit & Vault entry, so the
+    // two renames below are pinned on that host instead.
+    expect(byId.get("audit-vault")!.navEntry!.label).toBe("Audit & Vault");
+    expect(byId.get("audit-vault")!.crumb).toBe("Audit & Vault");
+    expect(byId.get("audit")).toBeUndefined();
+    expect(byId.get("nlq")).toBeUndefined();
     expect(byId.get("docs")!.navEntry!.label).toBe("Docs & Reports");
     expect(byId.get("docs")!.crumb).toBe("Docs & Reports");
-    expect(byId.get("nlq")!.navEntry!.label).toBe("Records NLQ");
     expect(byId.get("options-flows")!.navEntry!.label).toBe("Options Flows");
     expect(byId.get("options-flows")!.navEntry!.shortLabel).toBe("Flows");
     expect(byId.get("options-flows")!.crumb).toBe("Options Flows");

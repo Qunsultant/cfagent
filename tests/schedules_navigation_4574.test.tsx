@@ -154,7 +154,8 @@ describe("4574-P04 the Queues page is retired (#4574)", () => {
       (r) => r.id,
     );
     expect(routes).not.toContain("queues");
-    expect(routes).toHaveLength(43);
+    // #4575 merged audit + NLQ into the one audit-vault route: 43 → 42.
+    expect(routes).toHaveLength(42);
     const chat = read("src/client/Chat.tsx");
     expect(chat).not.toContain("QueuesPage");
     expect(chat).not.toContain("queues: (");
