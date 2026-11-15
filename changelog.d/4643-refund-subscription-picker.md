@@ -1,0 +1,3 @@
+### Fixed
+
+- **Refund form gains a subscription picker (#4643):** the "Original payment reference" field had no in-app source — the Billing overview shows only counts and the purchase confirmation shows only the mint ids, neither of which the refund resolver accepts. The refund form now lists the requester's subscriptions (plan, amount, status, reference) from the already-fetched GET /subscription rows; selecting one pre-fills the reference and the amount (which must equal the full original payment). The free-text field stays as fallback, with a fixed hint naming where the reference comes from (Stripe subscription id from Stripe Dashboard, or the subscription id).
