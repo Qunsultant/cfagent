@@ -65,7 +65,7 @@ renders inside the `PageShell` primitive (title + scope note +
 sections, with primitive loading/empty/error states). The trading pages
 share one outlet shell in `ETradeTradingHub` whose title follows the
 active page via the route table. The shell standard itself lives in
-`docs/architecture/UX/design-system-01.md` (§2–§3); conformance is
+`docs/archive/design-system-01.md` (§2–§3); conformance is
 pinned by `tests/shell_conformance_1804.json` (25 of 26 — `chat`
 deferred by product decision, ADR-0021). Tab mechanisms are still two
 (the `Tabs` primitive vs hub bespoke tablists); reconciling them into

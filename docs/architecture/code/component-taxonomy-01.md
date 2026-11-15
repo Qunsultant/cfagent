@@ -106,7 +106,7 @@ The matrix below provides a comparative evaluation across all 11 component categ
 * **Key Operational Risks:**
   1. *Slack/Email Webhook Rate Limits:* Exceeding Slack API rate limits during bulk market screening alert triggers.
   2. *Unauthenticated Approval Links:* Security risks in human-in-the-loop trade approval tokens delivered over unencrypted channels.
-* **Page shell (S5, #1804):** the SPA files above share one shell standard: a single route table (`src/client/routes.ts`) drives nav/breadcrumbs/content switch, and every left-nav page except `chat` renders inside the `PageShell` primitive (trading pages via one outlet shell in `ETradeTradingHub`). Home doc: `docs/architecture/UX/design-system-01.md` (§2–§3); conformance pinned by `tests/shell_conformance_1804.json` (25 of 26; `chat` deferred, ADR-0021).
+* **Page shell (S5, #1804):** the SPA files above share one shell standard: a single route table (`src/client/routes.ts`) drives nav/breadcrumbs/content switch, and every left-nav page except `chat` renders inside the `PageShell` primitive (trading pages via one outlet shell in `ETradeTradingHub`). Home doc: `docs/archive/design-system-01.md` (§2–§3); conformance pinned by `tests/shell_conformance_1804.json` (25 of 26; `chat` deferred, ADR-0021).
 
 ### 3.8 Scheduling Components (Job Orchestration & Cron Execution)
 * **Code References:** `src/services/scheduledTasks.ts` (3,545 LOC), `src/agents/orchestrator/asyncJobs.ts` (1,254 LOC), `src/agents/scheduled-agent.ts` (1,085 LOC), `src/orchestrate.ts` (625 LOC), `src/services/shardJobs.ts` (529 LOC), `src/schedule.ts` (266 LOC).

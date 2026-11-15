@@ -11,9 +11,9 @@ pending with its owning issue. Delivery rules live in
 
 - [UX architecture](../agents/ux-architecture.md) — user journeys,
   components, and the token architecture (CPO lane).
-- Related assessments: [assessment-01](./UX/assessment-01.md),
-  [design-system-01](./UX/design-system-01.md),
-  [exceptions-01](./UX/exceptions-01.md).
+- Related assessments: [assessment-01](../archive/assessment-01.md),
+  [design-system-01](../archive/design-system-01.md),
+  [exceptions-01](../archive/exceptions-01.md).
 
 ## Application architecture
 

@@ -10,7 +10,7 @@
 **Governing Architecture Standards:**
 - **Master Enterprise Architecture Standards:** `docs/architecture/standards/standards.md`
 - **UX Architecture Specification:** `docs/agents/ux-architecture.md`
-- **UX Assessment 01:** `docs/architecture/UX/assessment-01.md`
+- **UX Assessment 01:** `docs/archive/assessment-01.md`
 - **Security Assessment 01:** `docs/architecture/security/assessment/assessment-01.md`
 - **Standards Conformance Assessment:** `docs/architecture/standards/assessment/assessment-01.md`
 
