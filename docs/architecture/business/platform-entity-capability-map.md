@@ -549,9 +549,12 @@ capability, not an absence.
 10. **Free-path tenant = the login string itself.** Login-as-tenant and
     real tenant ids share one namespace with no marker distinguishing
     them.
-11. **Tenant create writes only a settings row.** There is no tenant
-    entity creation beyond that; "create" is a settings write with
-    defaults.
+11. **Tenant create writes only a settings row (#4603 — decided: stands by design).**
+    There is no separate tenant entity table or lifecycle state by design;
+    `POST /platform-tenants` (`TENANT_CREATION_MODE = "settings_row_only"` in
+    `src/agents/routes/platformTenants.ts`) writes a settings row with store
+    defaults and `TenantDirectory` derives distinct `tenantId`s across
+    commercial account rows UNION settings rows.
 12. **E*TRADE-shaped defaults are silent:** absent settings row →
     etrade/etrade; absent auto-refresh → OFF/15s. A tenant that never
     selected a provider silently gets E*TRADE behavior.
