@@ -98,6 +98,14 @@ function jsonError(error: string, status: number): Response {
   return Response.json({ error }, { status });
 }
 
+/**
+ * Issue #4603 — decided design: tenant creation stays a settings-row write
+ * (`"settings_row_only"`), with no separate tenant entity table or lifecycle
+ * state. `TenantDirectory` derives distinct `tenantId`s across commercial
+ * account rows UNION settings rows.
+ */
+export const TENANT_CREATION_MODE = "settings_row_only" as const;
+
 /** Same shape rule as isTenantIdShaped (tenantQueueMapping): non-empty, <=512, no whitespace/control. */
 export function isTenantIdShaped(value: unknown): value is string {
   return (
@@ -257,7 +265,10 @@ export async function handlePlatformTenantRoutes(
         // re-creating an existing tenant returns its current
         // settings instead of failing, so a retried create
         // cannot duplicate anything.
-        return Response.json({ tenant: await readSettings(commercial, newTenantId.trim()) });
+        return Response.json({
+          tenant: await readSettings(commercial, newTenantId.trim()),
+          creationMode: TENANT_CREATION_MODE,
+        });
       }
       // A create is a settings row with store defaults; the
       // directory lists it from that row on the next read.
@@ -271,6 +282,7 @@ export async function handlePlatformTenantRoutes(
             { enabled: settings.autoRefreshEnabled, intervalS: settings.autoRefreshIntervalS },
             { dataProviderId: settings.dataProviderId, brokerId: settings.brokerId },
           ),
+          creationMode: TENANT_CREATION_MODE,
         },
         { status: 201 },
       );
