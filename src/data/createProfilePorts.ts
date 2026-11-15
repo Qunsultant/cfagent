@@ -20,7 +20,7 @@ import type { UserProfileStore } from "./profilePorts";
 export function createProfileAdapter(env: { AGENT_DB?: unknown }): D1ProfileAdapter | null {
   if (!env.AGENT_DB) return null;
   const d1 = env.AGENT_DB as D1Database;
-  return new D1ProfileAdapter(createD1ProfileDb(d1), d1);
+  return new D1ProfileAdapter(createD1ProfileDb(d1));
 }
 
 export type { UserProfileStore, ProfileDb };
