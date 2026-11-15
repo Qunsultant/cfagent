@@ -9,6 +9,7 @@ import { publishScreenerCompleted, publishScreenerFailed } from "../../events/sc
 import type { ScreenerRunResult } from "../screener-agent";
 import type { Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
+import { manualDeliveryIdentity } from "../../services/deliveryIdentity";
 
 export async function publishManualScreenerRun(
   env: Env,
@@ -23,7 +24,7 @@ export async function publishManualScreenerRun(
       timestamp: result.timestamp,
       universe: result.universe,
       trigger: "manual",
-      deliveryId: `manual:${result.timestamp}:${result.universe}`,
+      deliveryId: manualDeliveryIdentity({ timestamp: result.timestamp, universe: result.universe }),
       sector: result.sector,
       error: result.error || "E*TRADE unavailable",
       ...(result.emailTo ? { emailTo: result.emailTo } : {}),
@@ -39,7 +40,7 @@ export async function publishManualScreenerRun(
     pdfKey: result.pdfKey,
     pdfStatus: result.pdfStatus,
     pdfError: result.pdfError,
-    deliveryId: `manual:${result.timestamp}:${result.universe}`,
+    deliveryId: manualDeliveryIdentity({ timestamp: result.timestamp, universe: result.universe }),
     sector: result.sector,
     totalScanned: result.totalScanned,
     matchedCount: result.matchedCount,

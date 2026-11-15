@@ -1,0 +1,3 @@
+### Fixed
+
+- Tenant-scoped delivery claims (#4624). A scheduled delivery's identity was `<trigger>:<universe>:<minute>`, so two tenants of one login firing the same trigger and universe in the same minute shared an identity and the second tenant's delivery was suppressed as a duplicate in `mas_delivery_claims`. The identity now carries the tenant (`scheduled:<tenant>:<universe>:<minute>`), resolved before the run so both the completed and the failed delivery carry it; an unresolvable tenant is named `unscoped` and audited, never guessed. Manual deliveries keep their full-resolution timestamp identity (one run = one id, retries still dedupe). One module, `src/services/deliveryIdentity.ts`, owns both shapes.
