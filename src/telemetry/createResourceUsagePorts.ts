@@ -28,8 +28,8 @@
  */
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import {
+  createD1ResourceDb,
   D1ResourceUsageAdapter,
-  type ResourceD1Db,
 } from "./d1ResourceUsageAdapter";
 import { FanOutResourceUsageAdapter } from "./fanOutResourceUsageAdapter";
 import { ObservabilityResourceUsageAdapter } from "./resourceUsageObservabilityAdapter";
@@ -38,14 +38,16 @@ import type { ResourceUsagePort } from "./resourceUsagePorts";
 export function createResourceUsagePort(
   env: {
     OBSERVABILITY?: unknown;
-    AGENT_DB?: ResourceD1Db | null;
+    AGENT_DB?: D1Database | null;
   },
   opts?: { withProjection?: boolean }
 ): ResourceUsagePort | null {
   const ae = env.OBSERVABILITY
     ? new ObservabilityResourceUsageAdapter(createObservabilitySink(env))
     : null;
-  const d1 = env.AGENT_DB ? new D1ResourceUsageAdapter(env.AGENT_DB) : null;
+  const d1 = env.AGENT_DB
+    ? new D1ResourceUsageAdapter(createD1ResourceDb(env.AGENT_DB))
+    : null;
   if (opts?.withProjection && ae && d1) {
     return new FanOutResourceUsageAdapter([ae, d1]);
   }
