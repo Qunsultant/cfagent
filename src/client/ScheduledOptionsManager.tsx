@@ -12,6 +12,7 @@ import {
   triggerSystemJob,
 } from "./jobsApi";
 import { listProfiles } from "./scannerApi";
+import { listPresets, type ScreenerPreset } from "./ScreenerPresetManager";
 import type { StrategyProfile } from "../trading";
 import { etToUtcCron } from "./options/cronTime";
 import "./scheduledOptions.css";
@@ -177,6 +178,14 @@ export function ScheduledOptionsManager({
   const [derivedProfileId, setDerivedProfileId] = useState("");
   const [profiles, setProfiles] = useState<StrategyProfile[]>([]);
   const [profilesError, setProfilesError] = useState<string | null>(null);
+  // Issue #3655 S4b: the caller's stocks presets, for resolving a
+  // stock schedule's presetId to its name in the list row and the
+  // Details dialog. Best-effort, like the profiles load: a failed
+  // load leaves the list empty and the detail falls back to the
+  // stored preset id — the client never invents a preset name.
+  // The create form keeps its own fetch (it predates this slice);
+  // rewiring its ownership is out of scope here.
+  const [stockPresets, setStockPresets] = useState<ScreenerPreset[]>([]);
   // No-view discovery form state (issue #534): the shared constraint
   // editor, plus whether the schedule being edited was armed with
   // per-symbol constraints the shared editor cannot represent
@@ -300,6 +309,20 @@ export function ScheduledOptionsManager({
       cancelled = true;
     };
   }, [activeEnv, userLogin]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listPresets(userLogin)
+      .then((all) => {
+        if (!cancelled) setStockPresets(all.filter((p) => p.assetClass === "stocks"));
+      })
+      .catch(() => {
+        if (!cancelled) setStockPresets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userLogin]);
 
 
   // Issue #4329 S2 (#4331): the page's Edit control carries a request; honor it
@@ -782,6 +805,7 @@ export function ScheduledOptionsManager({
         profiles={profiles}
         activeEnv={activeEnv}
         userLogin={userLogin}
+        presets={stockPresets}
         onRetry={() => {
           if (detailsTarget) void readDetails(detailsTarget);
         }}
@@ -887,6 +911,7 @@ export function ScheduledOptionsManager({
           activeEnv={activeEnv}
           userLogin={userLogin}
           profiles={profiles}
+          presets={stockPresets}
           busyKey={triggeringKey}
           onShowDetails={openDetails}
           onEdit={handleEditSchedule}

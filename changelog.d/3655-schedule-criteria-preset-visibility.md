@@ -1,0 +1,2 @@
+### Changed
+- Schedule list and Details dialog now show which criteria/preset a stock schedule uses: the preset name (or "Custom thresholds" for custom schedules), with the preset's current criteria shown as the Filters. The schedule form states that Min/Max RSI and Min Volume are only available through a saved preset. A stale comment claiming scheduled stock runs never ride the screen workflow is corrected to the one-engine seam (#3655, S4b).

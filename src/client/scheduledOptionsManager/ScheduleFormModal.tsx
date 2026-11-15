@@ -272,6 +272,13 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                   <summary style={{ fontSize: "var(--font-size-body-sm)", cursor: "pointer", color: "var(--color-accent)", fontWeight: 600, userSelect: "none" }}>
                     ⚙️ Custom Screening Criteria &amp; Filters (Optional)
                   </summary>
+                  {/* Issue #3655 S4b (E-13): these custom fields cover
+                      five of the seven panel fields. Min/Max RSI and
+                      Min Volume are only available through a saved
+                      preset above — choose one to screen on them. */}
+                  <p className="hint" id="sched-custom-criteria-note">
+                    Min/Max RSI and Min Volume are only available through a saved preset above — these custom fields cover price, market cap, P/E and momentum.
+                  </p>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)", marginTop: "0.6rem" }}>
                     <div className="sched-form-group">
                       <TextInput label="Min Price ($)" id="sched-filter-min-price"

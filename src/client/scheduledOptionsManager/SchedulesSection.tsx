@@ -28,6 +28,7 @@ export function SchedulesSection({
   profiles,
   activeEnv,
   userLogin,
+  presets,
   busyKey,
   onShowDetails,
   onEdit,
@@ -36,7 +37,7 @@ export function SchedulesSection({
   onCancel,
 }: SchedulesSectionProps) {
   const columns = buildScheduleRowColumns(
-    { profiles, activeEnv, userLogin },
+    { profiles, activeEnv, userLogin, presets },
     { busyKey, onShowDetails, onEdit, onTrigger, onTogglePause, onCancel }
   );
 

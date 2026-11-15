@@ -1377,13 +1377,15 @@ export class ScheduledTasksService {
       // Issue #2373 (slice C): monetization ON gates scheduled
       // stock screens at the tick, mirroring the goal tick's
       // admission stage — but as a payment DECISION, not a
-      // workflow start. Scheduled stock runs execute as CHAINS
-      // (sharded) or as a direct ScreenerAgent.runScreen call
-      // (monolithic); neither rides ScreenerScreenWorkflow, and
-      // CLO G7 (#2914) explicitly rejected migrating sharded
-      // execution onto it, so no payment workflow is ever started
-      // here and no one-off checkout is available for stock
-      // schedules. Covered runs consume FIRST (subscription
+      // workflow start. Scheduled stock runs execute through the
+      // one-engine seam (#4278/#4280): the monolithic path starts
+      // the stock screen workflow via runStockScreenViaEngine and
+      // awaits its collation, and the sharded path submits the
+      // engine job via submitStockScreenViaEngine, whose id is
+      // the chain id — neither path is a direct
+      // ScreenerAgent.runScreen call any more. No payment
+      // workflow is ever started here and no one-off checkout is
+      // available for stock schedules. Covered runs consume FIRST (subscription
       // included run, else credits) through the workflow's own
       // consume ports, then run exactly as today. Uncovered runs
       // skip, audited and explained — never charged unattended,
@@ -1499,12 +1501,14 @@ export class ScheduledTasksService {
           }
           if (!coverage) {
             // Uncovered one-off authorized: resolvePaidScreenAction
-            // says start_payment, but there is no workflow for a
-            // stock chain/monolith to ride, so no checkout can
+            // says start_payment, but there is no payment workflow
+            // for a stock chain/monolith to ride, so no checkout can
             // happen. Skip with an honest explanation — this is
             // the documented #2373 limitation, not a bug to work
-            // around, and the G7-rejected migration is NOT
-            // re-proposed here. (Covered one-off runs take the
+            // around. (The engine cutover (#4280) already moved the
+            // sharded path onto the engine seam, so the remaining
+            // limitation is only the missing payment workflow, not
+            // the screen routing.) (Covered one-off runs take the
             // consume path below; coverage, not the one-off claim,
             // is what lets a stock schedule run.)
             return skipStock(

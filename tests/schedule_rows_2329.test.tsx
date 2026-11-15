@@ -184,7 +184,10 @@ describe("#2329 canonical schedule detail model", () => {
 
   it("keeps one-line row scope summaries per kind", () => {
     expect(scheduleScope(optionsItem, PROFILES)).toBe("NVDA, AAPL · max 100");
-    expect(scheduleScope(screenItem, PROFILES)).toBe("LEV_ETF · Technology");
+    // Issue #3655 S4b: a stock schedule with no preset armed states
+    // "Custom thresholds" in its row scope, so the list shows which
+    // criteria/preset the schedule uses.
+    expect(scheduleScope(screenItem, PROFILES)).toBe("LEV_ETF · Technology · Custom thresholds");
     expect(scheduleScope(savedViewsItem, PROFILES)).toBe("2 saved views · NVDA, MSFT");
     expect(scheduleScope(derivedItem, PROFILES)).toBe("Income (v3) · NVDA, MSFT");
     expect(scheduleScope(noViewItem, PROFILES)).toBe("No-view · NVDA");
