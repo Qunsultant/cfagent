@@ -160,6 +160,19 @@ const KIND_MATRIX: Record<string, QuotaKindVerdict> = {
     reason:
       "Options-research publish runs genuinely produce reports, but their run path lives in the per-login OrchestratorAgent instance; a second counter store there would split the per-user pool, so enforcement is carried to a shared-counter follow-up and research runs are NOT silently counted here.",
   },
+  // Issue #4622: the two premium x402 routes that had no quota. They charge
+  // the same per-payer pool the screen kinds use (one budget per payer), so a
+  // funded payer cannot loop them past the daily/weekly/monthly limits.
+  optionsScan: {
+    verdict: "consumes",
+    reason:
+      "The paid options-scan route runs UnifiedOptionsService — real work that produces a screen result, charged per payer like a screen.",
+  },
+  marketResearch: {
+    verdict: "consumes",
+    reason:
+      "The paid market-research route generates a full research report per call — real work, charged per payer like a screen. (The Options-research publish path keeps its separate consumes-deferred note below.)",
+  },
   "discovery-download": {
     verdict: "no-charge",
     reason: "Serves a stored discovery-report artifact by key; no run executes.",
