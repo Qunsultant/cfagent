@@ -123,6 +123,9 @@ export interface ScreenerCompletedEvent {
    */
   scheduleId?: string;
   workflowId?: string;
+  /** Issue #4608: tenant + run recipient binding carried on the event. */
+  tenantId?: string | null;
+  recipientBinding?: import("../services/channelRecipientVerification").ChannelRecipientBinding | null;
 }
 
 export interface ScreenerFailedEvent {
@@ -143,6 +146,9 @@ export interface ScreenerFailedEvent {
    *  producer knows it (see the completed event). */
   scheduleId?: string;
   workflowId?: string;
+  /** Issue #4608: tenant + run recipient binding carried on the event. */
+  tenantId?: string | null;
+  recipientBinding?: import("../services/channelRecipientVerification").ChannelRecipientBinding | null;
 }
 
 /** One options opportunity as carried on the bus: a summary, not the full row. */

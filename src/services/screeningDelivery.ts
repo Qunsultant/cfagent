@@ -55,6 +55,11 @@ import {
   mapScreeningChannelToTenantChannel,
   type TenantChannelGate,
 } from "./tenantChannelGate";
+import {
+  verifyChannelRecipient,
+  type ChannelRecipientBinding,
+  type ChannelRecipientAuditFn,
+} from "./channelRecipientVerification";
 
 export const SCREENING_DRAFT_FOOTER =
   "Research only — a draft for human review; no trades were placed and no outcome is guaranteed.";
@@ -225,12 +230,20 @@ export async function deliverScreeningContent(input: {
   event: string;
   data?: Record<string, unknown>;
   emailTo?: string;
+  slackChannel?: string;
+  webhookUrl?: string;
   senders: ScreeningDeliverySenders;
   sql?: { exec: (q: string, ...a: unknown[]) => Iterable<unknown> };
   userLogin?: string;
   actor?: string;
   /** Tenant channel gate (#3169); absent = ungated (prior behavior). */
   channelGate?: TenantChannelGate;
+  /** Issue #4608: optional tenant+run scope and recipient binding verified before any sender call. */
+  tenantId?: string | null;
+  runId?: string | null;
+  scheduleId?: string | null;
+  recipientBinding?: ChannelRecipientBinding | null;
+  audit?: ChannelRecipientAuditFn;
 }): Promise<ScreeningChannelResult[]> {
   const results: ScreeningChannelResult[] = [];
   for (const channel of input.channels) {
@@ -255,6 +268,34 @@ export async function deliverScreeningContent(input: {
         channel,
         ok: false,
         error: channelDisabledError(tenantChannel, input.channelGate.tenantId),
+      });
+      continue;
+    }
+    // Issue #4608: verify recipient against the run's tenant+run binding before calling any sender.
+    const recipient =
+      channel === "email"
+        ? input.emailTo
+        : channel === "slack"
+          ? input.slackChannel
+          : input.webhookUrl;
+    const recipientCheck = verifyChannelRecipient({
+      channel,
+      recipient,
+      run: {
+        tenantId: input.tenantId ?? input.channelGate?.tenantId ?? null,
+        userLogin: input.userLogin ?? null,
+        runId: input.runId ?? null,
+        scheduleId: input.scheduleId ?? null,
+      },
+      binding: input.recipientBinding,
+      layer: "screening_content",
+      audit: input.audit,
+    });
+    if (!recipientCheck.allowed) {
+      results.push({
+        channel,
+        ok: false,
+        error: recipientCheck.error,
       });
       continue;
     }
@@ -404,6 +445,9 @@ export async function deliverDiscoveryDirect(input: {
   userLogin: string;
   /** Tenant channel gate (#3169); absent = ungated (prior behavior). */
   channelGate?: TenantChannelGate;
+  /** Issue #4608: optional recipient binding and audit callback for tenant+run verification. */
+  recipientBinding?: ChannelRecipientBinding | null;
+  audit?: ChannelRecipientAuditFn;
 }): Promise<DiscoveryDirectResult[]> {
   const { port, outcome, config, userLogin } = input;
   const channels: AsyncJobChannel[] = [];
@@ -432,11 +476,52 @@ export async function deliverDiscoveryDirect(input: {
       });
       continue;
     }
-    if (channel === "email" && outcome.emailTo && !isEmailAllowed(config, outcome.emailTo, outcome)) {
+    // Issue #4608: verify recipient against the run's tenant+run binding before the port is called.
+    const recipient =
+      channel === "email"
+        ? outcome.emailTo
+        : channel === "slack"
+          ? outcome.slackChannel
+          : outcome.webhookUrl;
+    const recipientCheck = verifyChannelRecipient({
+      channel,
+      recipient,
+      run: {
+        tenantId: outcome.tenantId ?? input.channelGate?.tenantId ?? null,
+        userLogin,
+        runId: outcome.deliveryId ?? outcome.scanRunId ?? outcome.canonicalReportId ?? null,
+        scheduleId: outcome.scheduleId ?? null,
+      },
+      binding: input.recipientBinding ?? outcome.recipientBinding,
+      layer: "discovery_direct",
+      audit: input.audit,
+    });
+    if (!recipientCheck.allowed) {
       results.push({
         channel,
         ok: false,
-        error: codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${outcome.emailTo}`),
+        error: recipientCheck.error,
+      });
+      continue;
+    }
+    if (channel === "email" && outcome.emailTo && !isEmailAllowed(config, outcome.emailTo, outcome)) {
+      const error = codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${outcome.emailTo}`);
+      input.audit?.("delivery.recipient_refused", {
+        channel: "email",
+        recipient: outcome.emailTo,
+        tenantId: outcome.tenantId ?? input.channelGate?.tenantId ?? null,
+        bindingTenantId: outcome.tenantId ?? input.channelGate?.tenantId ?? "allowlist",
+        userLogin,
+        runId: outcome.deliveryId ?? outcome.scanRunId ?? outcome.canonicalReportId ?? null,
+        scheduleId: outcome.scheduleId ?? null,
+        layer: "discovery_direct",
+        reason: "email_recipient_not_in_tenant_run",
+        detail: `recipient ${outcome.emailTo}`,
+      });
+      results.push({
+        channel,
+        ok: false,
+        error,
       });
       continue;
     }

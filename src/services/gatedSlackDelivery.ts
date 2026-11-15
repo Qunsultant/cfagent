@@ -30,6 +30,12 @@
  */
 import { channelDisabledError, resolveTenantChannelGate } from "./tenantChannelGate";
 import { deliverScreenerToSlack, type ScreenerSlackDelivery } from "./screenerSlackDelivery";
+import {
+  resolveEnvChannelRecipientBinding,
+  verifyChannelRecipient,
+  type ChannelRecipientAuditFn,
+  type ChannelRecipientBinding,
+} from "./channelRecipientVerification";
 
 export interface GatedSlackDelivery extends ScreenerSlackDelivery {
   /**
@@ -37,6 +43,12 @@ export interface GatedSlackDelivery extends ScreenerSlackDelivery {
    * alerts) means ungated: the gate is never consulted.
    */
   userLogin?: string | null;
+  /** Issue #4608: optional run tenant/run/schedule scope + recipient binding verified at send time. */
+  tenantId?: string | null;
+  runId?: string | null;
+  scheduleId?: string | null;
+  recipientBinding?: ChannelRecipientBinding | null;
+  audit?: ChannelRecipientAuditFn;
 }
 
 export async function deliverGatedSlack(
@@ -44,6 +56,7 @@ export async function deliverGatedSlack(
   delivery: GatedSlackDelivery,
 ): Promise<{ ok: boolean; error?: string }> {
   const login = typeof delivery.userLogin === "string" ? delivery.userLogin.trim() : "";
+  let resolvedTenantId = delivery.tenantId ?? null;
   if (login) {
     let gate: Awaited<ReturnType<typeof resolveTenantChannelGate>> = null;
     try {
@@ -57,12 +70,34 @@ export async function deliverGatedSlack(
     if (gate && !gate.isEnabled("slack")) {
       return { ok: false, error: channelDisabledError("slack", gate.tenantId) };
     }
+    if (!resolvedTenantId && gate?.tenantId) {
+      resolvedTenantId = gate.tenantId;
+    }
   }
   const e = env as Record<string, unknown>;
   const resolvedChannel =
     delivery.channel ||
     (typeof e.SCREENER_SLACK_CHANNEL === "string" ? e.SCREENER_SLACK_CHANNEL : undefined) ||
     (typeof e.SLACK_CHANNEL === "string" ? e.SLACK_CHANNEL : undefined);
+  const runScope = {
+    tenantId: resolvedTenantId,
+    userLogin: login || null,
+    runId: delivery.runId ?? null,
+    scheduleId: delivery.scheduleId ?? null,
+  };
+  const binding =
+    delivery.recipientBinding ?? resolveEnvChannelRecipientBinding(env, runScope);
+  const recipientCheck = verifyChannelRecipient({
+    channel: "slack",
+    recipient: resolvedChannel,
+    run: runScope,
+    binding,
+    layer: "gated_slack",
+    audit: delivery.audit,
+  });
+  if (!recipientCheck.allowed) {
+    return { ok: false, error: recipientCheck.error };
+  }
   const sent = await deliverScreenerToSlack(env, {
     text: delivery.text,
     ...(resolvedChannel ? { channel: resolvedChannel } : {}),

@@ -184,6 +184,10 @@ export interface ScreenerRunOutcome {
    *  outbound message for the run (failure legs, delivery legs) so a
    *  single message attributes its schedule, run, workflow, and stage. */
   trace?: ScreenerTrace;
+  /** Issue #4608: resolved tenant id for the run, when known at outcome construction. */
+  tenantId?: string | null;
+  /** Issue #4608: optional tenant+run recipient binding verified at every delivery layer. */
+  recipientBinding?: import("./channelRecipientVerification").ChannelRecipientBinding | null;
 }
 
 export interface ScreenerChannelConfig {

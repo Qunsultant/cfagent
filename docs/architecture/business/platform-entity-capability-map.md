@@ -342,15 +342,23 @@ check enforced on every send.
   (per tenant+run?) was not isolated (§8).
 
 Channel verdict for the record: **rendering-from-one-record:
-implemented on the followup path; recipient verification: not
-implemented at any channel layer; Slack is deployment-global; email is
-format/domain only; Copilot card and Docs are not delivery channels on
-main at all (their flags are configuration-only until a dispatch funnel
-exists).** Tenant-level channel enablement SHIPPED under #3169 (PR
-#3196, merged 2026-11-04 as baa674c, migration 0039, enforcement on
-the main funnels); it does not by itself add recipient verification —
-that remains missing (follow-ups #3177 direct Slack publishers, #3178
-Copilot/Docs funnels).
+implemented on the followup path; recipient verification (#4608):
+enforced at delivery time at every channel layer (`executor.deliver`,
+`executor.notify`, `followup_port.deliver`, `followup_port.notify`,
+`discovery_direct`, `screening_content`, `gated_slack`, `publisher`) via
+`src/services/channelRecipientVerification.ts`, refusing any recipient
+outside the run's `tenant + run` binding with
+`FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED` and auditing
+`delivery.recipient_refused`; delivery-claim suppression (G22) scopes
+claims by `tenantId + runId` via `scopedDeliveryClaimRunId`; Copilot
+card and Docs are not delivery channels on main at all (their flags are
+configuration-only until a dispatch funnel exists).** Tenant-level
+channel enablement SHIPPED under #3169 (PR #3196, merged 2026-11-04 as
+baa674c, migration 0039, enforcement on the main funnels); #4608
+establishes the shared delivery-time recipient verification contract
+across all channel layers, with channel-specific slices in #4609
+(email), #4610 (Slack per-tenant channel mapping), and #4611 (webhook
+recipient URL binding).
 
 ### 5.2 Depth: multi-user — owner-scoped reads within tenant
 
