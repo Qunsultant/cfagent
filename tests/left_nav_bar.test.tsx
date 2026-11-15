@@ -77,7 +77,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(titles).toContain("SANDBOX");
   });
 
-  it("holds the final Platform order: Platform Admin, Schedules, Workflows, Agents, Audit & Vault (#2974; Queues retired into Schedules in #4574; audit + NLQ merged into Audit & Vault in #4575)", () => {
+  it("holds the final Platform order: Platform Admin, Schedules, Workflows, Agents, Audit & Vault, DataHub, SecurityHub (#2974; Queues retired into Schedules in #4574; audit + NLQ merged into Audit & Vault in #4575; DataHub + SecurityHub split out of Platform Admin in #4585)", () => {
     const plat = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(plat).toBeDefined();
     expect(plat!.items.map((i) => i.id)).toEqual([
@@ -86,6 +86,8 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
       "workflow-runs",
       "agents",
       "audit-vault",
+      "data-hub",
+      "security-hub",
     ]);
   });
 
@@ -315,18 +317,19 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     await renderNavBar();
     expect(container.textContent).toContain("Goal Screen");
   });
-  it("renders distinct icons for all thirteen Platform Admin sub-menu items", async () => {
+  it("renders distinct icons for all seven Platform Admin sub-menu items", async () => {
     const adminItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "platform-admin");
     expect(adminItem).toBeDefined();
-    expect(adminItem?.subItems).toHaveLength(13);
+    expect(adminItem?.subItems).toHaveLength(7);
     for (const sub of adminItem!.subItems!) {
       expect(sub.icon, `Sub-item ${sub.id} missing icon`).toBeDefined();
       expect(sub.icon!.length).toBeGreaterThan(0);
     }
     const icons = adminItem!.subItems!.map((s) => s.icon);
     // Issue #4561 removed Tasks, ScheduledGoals, and Jobs (all unique);
-    // the one duplicate pair (Agents on Tenants + Users) remains.
-    expect(new Set(icons).size).toBe(12);
+    // issue #4585 moved Users out (the Agents duplicate with Tenants
+    // leaves with it), so all seven remaining icons are distinct.
+    expect(new Set(icons).size).toBe(7);
 
     await renderNavBar();
     const chevronBtn = container.querySelector('[aria-controls="submenu-platform-admin"]') as HTMLButtonElement;
@@ -338,7 +341,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const submenu = container.querySelector('#submenu-platform-admin');
     expect(submenu).toBeTruthy();
     const svgs = submenu!.querySelectorAll('.submenu-item-bullet svg');
-    expect(svgs.length).toBe(13);
+    expect(svgs.length).toBe(7);
   });
   it("renders Schedules under Platform with distinct Schedules icon and handles navigation", async () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");

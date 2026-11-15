@@ -157,7 +157,7 @@ describe("deep-link hygiene (#4576)", () => {
 });
 
 describe("catalog coverage (#4576)", () => {
-  it("names every Platform Admin section in the admin surface", () => {
+  it("names every Platform Admin section in the admin surfaces", () => {
     const adminIds = (navData.platformAdminSections as { items: { id: string }[] }[])[0].items.map((i) => i.id);
     const values = surface("platform-admin").values;
     // free-runs/products leave Platform Admin in #4575 (the product hub owns
@@ -166,9 +166,23 @@ describe("catalog coverage (#4576)", () => {
       if (id === "free-runs" || id === "products") continue;
       expect(values).toContain(id);
     }
-    // The three sections that had no surface entry before this slice.
+    // Issue #4585 moved six sections into the DataHub and SecurityHub hubs;
+    // every section keeps a surface entry, now across the three surfaces.
+    const hubValues = [
+      ...surface("data-hub").values,
+      ...surface("security-hub").values,
+    ];
+    for (const id of ["data-providers", "data-lifecycle", "downloads"]) {
+      expect(hubValues).toContain(id);
+      expect(surface("data-hub").values).toContain(id);
+    }
+    for (const id of ["iaaa-admin", "users", "admin-access"]) {
+      expect(hubValues).toContain(id);
+      expect(surface("security-hub").values).toContain(id);
+    }
+    // The sections that had no surface entry before #4576.
     for (const id of ["users", "data-lifecycle", "engine-tuning", "downloads"]) {
-      expect(values).toContain(id);
+      expect([...values, ...hubValues]).toContain(id);
     }
   });
 

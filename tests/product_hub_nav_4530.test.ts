@@ -30,19 +30,19 @@ describe("Product Hub nav (#4530)", () => {
     const ids = routes.map((r) => r.id);
     expect(ids).toContain("product-hub");
     expect(ids).not.toContain("products");
-    expect(ids.length).toBe(42);
+    expect(ids.length).toBe(44);
     const hub = routes.find((r) => r.id === "product-hub")!;
     expect(hub.navGroup).toBe("product-hub");
     // #4574 retired the queues route (navOrders 12..30 down one) and #4575
     // merged audit + NLQ (navOrders 21..29 down one): the hub keeps the
-    // products route's slot, now 26 in a 0..28 run.
+    // products route's slot, now 26 in a 0..30 run.
     expect(hub.navEntry?.navOrder).toBe(26);
-    // Nav entries are 29 with orders exactly 0..28.
+    // Nav entries are 31 with orders exactly 0..30.
     const orders = routes
       .filter((r) => r.navEntry !== undefined)
       .map((r) => r.navEntry!.navOrder)
       .sort((a, b) => a - b);
-    expect(orders).toEqual(Array.from({ length: 29 }, (_, i) => i));
+    expect(orders).toEqual(Array.from({ length: 31 }, (_, i) => i));
   });
 
   it("nav-config carries a product-hub sub-menu with the five hub tabs", () => {

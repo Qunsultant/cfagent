@@ -79,8 +79,8 @@ describe("PlatformAdminPage component", () => {
     expect(tablist).toBeTruthy();
 
     const tabs = container.querySelectorAll('[role="tab"]');
-    expect(tabs).toHaveLength(13);
-    expect(PLATFORM_ADMIN_TABS).toHaveLength(13);
+    expect(tabs).toHaveLength(7);
+    expect(PLATFORM_ADMIN_TABS).toHaveLength(7);
 
     // Initial default tab is ads
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
@@ -138,28 +138,29 @@ describe("PlatformAdminPage component", () => {
     expect(container.textContent).toContain("Technical Diagnostics & Provenance");
     expect(container.textContent).toContain("did:agent:openaimp:trading");
 
-    // 2. Switch to Data Providers
-    const provsTab = Array.from(tabs).find((t) => t.textContent?.includes("Data Providers")) as HTMLElement;
+    // 2. Switch to API Keys (#4585: Data Providers moved to the DataHub
+    // home, so this step now exercises a remaining tab).
+    const keysTab = Array.from(tabs).find((t) => t.textContent === "API Keys") as HTMLElement;
     await act(async () => {
-      provsTab.click();
+      keysTab.click();
     });
-    expect(container.querySelector('[data-testid="data-providers-panel"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();
 
-    // 3. Switch to IAAA Admin
-    const iaaaTab = Array.from(tabs).find((t) => t.textContent?.includes("IAAA Admin")) as HTMLElement;
+    // 3. Switch to Tenants (#4585: IAAA Admin moved to the SecurityHub home).
+    const tenantsTab = Array.from(tabs).find((t) => t.textContent === "Tenants") as HTMLElement;
     await act(async () => {
-      iaaaTab.click();
+      tenantsTab.click();
     });
-    expect(container.querySelector('[data-testid="iaaa-admin-panel"]')).toBeTruthy();
+    expect(onSelectSection).toHaveBeenCalledWith("tenants");
+    expect(window.location.search).toContain("view=tenants");
 
-    // 4. Switch to Users (#2220: the tab renders its panel shell;
-    // the panel's own fetch resolves asynchronously, so assert the
-    // page-level section copy, not the fetched profile).
-    const usersTab = Array.from(tabs).find((t) => t.textContent === "Users") as HTMLElement;
+    // 4. Switch to Accounts (#4585: Users moved to the SecurityHub home).
+    const accountsTab = Array.from(tabs).find((t) => t.textContent === "Accounts") as HTMLElement;
     await act(async () => {
-      usersTab.click();
+      accountsTab.click();
     });
-    expect(container.textContent).toContain("User profiles, tenant memberships");
+    expect(onSelectSection).toHaveBeenCalledWith("accounts");
+    expect(window.location.search).toContain("view=accounts");
 
     // 5. Switch to Channels (#3169: same shell assertion as Users
     // — the panel's tenant fetch resolves asynchronously).
@@ -171,16 +172,14 @@ describe("PlatformAdminPage component", () => {
     expect(onSelectSection).toHaveBeenCalledWith("channels");
     expect(window.location.search).toContain("view=channels");
 
-    // 6. Switch to Admin Access
-    const accessTab = Array.from(tabs).find((t) => t.textContent?.includes("Admin Access")) as HTMLElement;
+    // 6. Switch to Engine Tuning (#4585: Admin Access moved to the
+    // SecurityHub home, so this step now exercises a remaining tab).
+    const tuningTab = Array.from(tabs).find((t) => t.textContent === "Engine Tuning") as HTMLElement;
     await act(async () => {
-      accessTab.click();
+      tuningTab.click();
     });
-    expect(container.textContent).toContain("Signed in as operator");
-    const reqBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Request admin access")
-    );
-    expect(reqBtn).toBeTruthy();
+    expect(onSelectSection).toHaveBeenCalledWith("engine-tuning");
+    expect(window.location.search).toContain("view=engine-tuning");
   });
 
   it("Chat.tsx wires PlatformAdminPage into TAB_CONTENT", () => {

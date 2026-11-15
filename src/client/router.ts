@@ -209,6 +209,38 @@ export function legacyAuditVaultRedirect(search: string): LegacyProductRedirect 
 }
 
 /**
+ * Issue #4585 — the redirect for a retired Platform Admin section address,
+ * or null when the URL is not one. Six sections moved out of Platform Admin
+ * into the DataHub (`?tab=data-hub`) and SecurityHub (`?tab=security-hub`)
+ * hubs, so their old `?tab=platform-admin&view=<section>` addresses (and the
+ * legacy `?tab=platform-admin:<section>` form) keep landing on the same
+ * content instead of falling back to the Platform Admin default tab. The
+ * caller replaces the URL (so back/forward never re-lands on the retired
+ * address), like the queues, product-domain, and audit-vault retirements
+ * before it.
+ */
+export function legacyPlatformAdminHubRedirect(
+  search: string,
+): LegacyProductRedirect | null {
+  const params = new URLSearchParams(search);
+  const tab = params.get("tab") ?? "";
+  const view = params.get("view") ?? "";
+  const section =
+    tab === "platform-admin"
+      ? view
+      : tab.startsWith("platform-admin:")
+        ? tab.slice("platform-admin:".length)
+        : "";
+  if (section === "data-providers" || section === "data-lifecycle" || section === "downloads") {
+    return { tab: "data-hub", view: section };
+  }
+  if (section === "iaaa-admin" || section === "users" || section === "admin-access") {
+    return { tab: "security-hub", view: section };
+  }
+  return null;
+}
+
+/**
  * Navigate to a tab: resolve (unknown ids fall back), skip when already
  * there (no duplicate history entries for re-clicking the active item),
  * otherwise pushState and notify subscribers synchronously.

@@ -10,12 +10,7 @@ import { NavIcons } from "./components/NavigationMenu";
  *  - provenance: Technical diagnostics, DID, MCP client, and institutional ledger
  *  - api-keys: MCP transport access for external clients
  *  - tenants: Tenant create, list, settings, and read-only membership view (#2221)
- *  - data-providers: Market-data provider provisioning lifecycle
  *  - accounts: Account administration — self-service setup, tier, credits, subscriptions & catalogue
- *  - iaaa-admin: Read-only memberships, genesis, and audit
- *  - users: User profiles, tenant memberships & account linkage
- *  - data-lifecycle: Clean state, platform bootstrap, and tenant bootstrap (#3250)
- *  - admin-access: Request admin access from the platform owner
  *
  * Issue #3121 S2 folded two sections into the schedules home
  * (`?tab=schedules`): `scheduled-goals` → `view=goals`
@@ -28,6 +23,14 @@ import { NavIcons } from "./components/NavigationMenu";
  * ids are gone from platformAdminConfig, so this page simply no
  * longer renders panels for them.
  *
+ * Issue #4585 moved six more sections into their own hubs:
+ * `data-providers`, `data-lifecycle`, and `downloads` → DataHub
+ * (`?tab=data-hub`); `iaaa-admin`, `users`, and `admin-access` →
+ * SecurityHub (`?tab=security-hub`, which also surfaces the user
+ * profile). Their old addresses redirect there (see router.ts
+ * `legacyPlatformAdminHubRedirect`); this page renders the remaining
+ * 7 sections.
+ *
  * Built strictly with src/client/components/ui/ primitives (PageShell, Card, Tabs, TabPanel)
  * and token-only styling per docs/agents/ux-architecture.md §20.
  *
@@ -35,12 +38,12 @@ import { NavIcons } from "./components/NavigationMenu";
  * `products` were reachable from two homes (here and the product hub),
  * and `legacyProductRedirect` already sent the Platform Admin addresses
  * to `?tab=product-hub` — so these panels were unreachable by navigation.
- * The hub owns both views; this page renders the remaining 13 sections.
+ * The hub owns both views; this page renders the remaining 7 sections
+ * after #4585.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Card,
-  Grid,
   PageShell,
   Tabs,
   TabPanel,
@@ -58,20 +61,13 @@ import {
   type AdBannerConfig,
 } from "./adBannerConfig";
 import { ApiKeysPanel } from "./ApiKeysPanel";
-import { DataProvidersPanel } from "./DataProvidersPanel";
-import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { TenantAdminPanel } from "./TenantAdminPanel";
-import { DataLifecyclePanel } from "./DataLifecyclePanel";
 import { ChannelsAdminPanel } from "./ChannelsAdminPanel";
 import { AccountAdminPanel } from "./AccountAdminPanel";
-import { IaaaAdminPanel } from "./IaaaAdminPanel";
-import { UserAdminPanel } from "./UserAdminPanel";
 import { EngineTuningPanel } from "./options/EtapiConfigModal";
-import { DownloadsPanel } from "./DownloadsPanel";
 import {
   AdsSection,
   ProvenanceSection,
-  AdminAccessSection,
   isPlatformAdminSectionId,
   type PlatformAdminUser,
 } from "./PlatformAdminPanel";
@@ -80,7 +76,6 @@ import {
   parseViewFromSearch,
   subscribeToRouteChanges,
 } from "./router";
-import { csrfHeaders } from "./apiFetch";
 
 export interface PlatformAdminPageProps {
   initialSection?: string;
@@ -98,14 +93,8 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
   { id: "tenants", label: "Tenants", icon: <NavIcons.Agents /> },
   { id: "channels", label: "Channels", icon: <NavIcons.Omnichannel /> },
-  { id: "data-providers", label: "Data Providers", icon: <NavIcons.DataProviders /> },
   { id: "accounts", label: "Accounts", icon: <NavIcons.Contracts /> },
-  { id: "iaaa-admin", label: "IAAA Admin", icon: <NavIcons.IaaaAdmin /> },
-  { id: "users", label: "Users", icon: <NavIcons.Agents /> },
-  { id: "data-lifecycle", label: "Data Lifecycle", icon: <NavIcons.Database /> },
   { id: "engine-tuning", label: "Engine Tuning", icon: <NavIcons.Settings /> },
-  { id: "downloads", label: "Parameters & Export", icon: <NavIcons.Database /> },
-  { id: "admin-access", label: "Admin Access", icon: <NavIcons.AdminAccess /> },
 ];
 
 export function PlatformAdminPage({
@@ -131,8 +120,6 @@ export function PlatformAdminPage({
   });
 
   const [ads, setAds] = useState<AdBannerConfig>(() => adBannerConfig ?? getStoredAdBannerConfig());
-  const [requesting, setRequesting] = useState(false);
-  const [accessStatus, setAccessStatus] = useState("");
 
   useEffect(() => {
     if (adBannerConfig) setAds(adBannerConfig);
@@ -177,30 +164,6 @@ export function PlatformAdminPage({
       applyAds({ ...ads, [key]: value }),
     [ads, applyAds]
   );
-
-  const requestAdminAccess = useCallback(async () => {
-    setRequesting(true);
-    setAccessStatus("");
-    try {
-      const res = await globalThis.fetch("/api/iaaa/access-request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...csrfHeaders() },
-        body: JSON.stringify({ requestedRole: "tenant-admin" }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (res.status === 201) {
-        setAccessStatus("Access requested — pending admin approval.");
-      } else if (res.status === 409) {
-        setAccessStatus("You already have a pending access request.");
-      } else {
-        setAccessStatus(data.error || "Access request was not submitted.");
-      }
-    } catch {
-      setAccessStatus("Access request was not submitted.");
-    } finally {
-      setRequesting(false);
-    }
-  }, []);
 
   return (
     <PageShell
@@ -264,26 +227,6 @@ export function PlatformAdminPage({
         </Card>
       </TabPanel>
 
-      <TabPanel idBase="platform-admin" tabId="data-providers" active={active === "data-providers"}>
-        <Card padding="md">
-          <div className="section-label-row">
-            <span>Data Providers</span>
-            <small>Provisioning lifecycle for market-data providers</small>
-          </div>
-          <DataProvidersPanel />
-        </Card>
-        <Card padding="md">
-          <div className="section-label-row">
-            <span>BYOK Provider Credentials</span>
-            <small>Bring Your Own Keys for broker execution and market data</small>
-          </div>
-          <Grid columns={2} gap="3">
-            <AlpacaSignInCard activeEnv="TEST" collapsedWhenConfigured={false} />
-            <AlpacaSignInCard activeEnv="PROD" collapsedWhenConfigured={false} />
-          </Grid>
-        </Card>
-      </TabPanel>
-
       <TabPanel idBase="platform-admin" tabId="accounts" active={active === "accounts"}>
         <Card padding="md">
           <div className="section-label-row">
@@ -294,58 +237,12 @@ export function PlatformAdminPage({
         </Card>
       </TabPanel>
 
-      <TabPanel idBase="platform-admin" tabId="iaaa-admin" active={active === "iaaa-admin"}>
-        <Card padding="md">
-          <div className="section-label-row">
-            <span>IAAA Admin</span>
-            <small>Read-only memberships, genesis &amp; audit</small>
-          </div>
-          <IaaaAdminPanel />
-        </Card>
-      </TabPanel>
-
-      <TabPanel idBase="platform-admin" tabId="users" active={active === "users"}>
-        <Card padding="md">
-          <div className="section-label-row">
-            <span>Users</span>
-            <small>User profiles, tenant memberships &amp; account linkage</small>
-          </div>
-          <UserAdminPanel />
-        </Card>
-      </TabPanel>
-
-      <TabPanel idBase="platform-admin" tabId="data-lifecycle" active={active === "data-lifecycle"}>
-        <Card padding="md">
-          <div className="section-label-row">
-            <span>Data Lifecycle</span>
-            <small>Clean state, platform bootstrap &amp; tenant bootstrap</small>
-          </div>
-          <DataLifecyclePanel />
-        </Card>
-      </TabPanel>
-
       <TabPanel idBase="platform-admin" tabId="engine-tuning" active={active === "engine-tuning"}>
         <Card padding="md">
           <EngineTuningPanel userLogin={user?.login} />
         </Card>
       </TabPanel>
 
-      <TabPanel idBase="platform-admin" tabId="downloads" active={active === "downloads"}>
-        <Card padding="md">
-          <DownloadsPanel userLogin={user?.login} />
-        </Card>
-      </TabPanel>
-
-      <TabPanel idBase="platform-admin" tabId="admin-access" active={active === "admin-access"}>
-        <Card padding="md">
-          <AdminAccessSection
-            requesting={requesting}
-            status={accessStatus}
-            onRequest={() => void requestAdminAccess()}
-            user={user}
-          />
-        </Card>
-      </TabPanel>
     </PageShell>
   );
 }

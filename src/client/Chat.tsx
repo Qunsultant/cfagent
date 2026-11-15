@@ -27,10 +27,12 @@ import { BillingServicingPanel } from "./BillingServicingPanel";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
 import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
-import { legacyAuditVaultRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
+import { legacyAuditVaultRedirect, legacyPlatformAdminHubRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
 import { legacySchedulesRedirect } from "./schedulesHomeView";
 import { SchedulesHome } from "./SchedulesHome";
 import { AuditVaultPage } from "./AuditVaultPage";
+import { DataHubHome } from "./DataHubHome";
+import { SecurityHubHome } from "./SecurityHubHome";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import { getCrumb } from "./routes";
 import { StockSearchBar } from "./components/StockSearchBar";
@@ -108,6 +110,20 @@ export function Chat({ user }: { user: User }) {
         const auditVaultRedirect = legacyAuditVaultRedirect(window.location.search);
         if (auditVaultRedirect) {
           replaceToTab(auditVaultRedirect.tab, auditVaultRedirect.view, auditVaultRedirect.params);
+          return;
+        }
+        // Issue #4585: six Platform Admin sections moved into the DataHub
+        // and SecurityHub hubs, so their old addresses resolve onto the
+        // new hub views.
+        const platformAdminHubRedirect = legacyPlatformAdminHubRedirect(
+          window.location.search,
+        );
+        if (platformAdminHubRedirect) {
+          replaceToTab(
+            platformAdminHubRedirect.tab,
+            platformAdminHubRedirect.view,
+            platformAdminHubRedirect.params,
+          );
           return;
         }
       }
@@ -1073,6 +1089,19 @@ export function Chat({ user }: { user: User }) {
     // cannot live inside a broker hub, #3216).
     schedules: (
       <SchedulesHome userLogin={user.login} onPreviewTrade={handleSchedulesPreviewTrade} />
+    ),
+    // Issue #4585: the DataHub home — data providers, data lifecycle,
+    // and parameters & export, moved out of Platform Admin.
+    "data-hub": (
+      <DataHubHome userLogin={user.login} />
+    ),
+    // Issue #4585: the SecurityHub home — IAAA admin, users, admin
+    // access, and the user profile, moved out of Platform Admin.
+    "security-hub": (
+      <SecurityHubHome
+        userLogin={user.login}
+        user={{ login: user.login, name: user.name, avatar: user.avatar }}
+      />
     ),
     // Issue #4530: the Product Hub is the ONLY place for
     // product-domain URLs — the standalone products entry retired
