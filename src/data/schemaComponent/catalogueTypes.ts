@@ -17,8 +17,8 @@
  */
 export type SchemaPlane = "d1" | "do" | "orm" | "index" | "route";
 
-/** "schema" = DDL (tables, indexes, constraints); "seed" = DML seed data. */
-export type StatementKind = "schema" | "seed";
+/** "schema" = DDL (tables, indexes, constraints); "seed" = DML seed data; "dml" = D1 builder DML (P6a #4384 — entries live in the DML catalogue, dmlCatalogue.ts, not the schema catalogue). */
+export type StatementKind = "schema" | "seed" | "dml";
 
 /**
  * "literal" = the statement text is the statement, verbatim.
