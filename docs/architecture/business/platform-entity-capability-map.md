@@ -158,7 +158,7 @@ capability, not who owns the data.
 
 | Entity | Capability | Sub-capabilities (surface) | Gate |
 |---|---|---|---|
-| Platform (console) | Admin console | 13 sections: ads, background-tasks, scheduled-goals, jobs, provenance, api-keys, tenants, channels, data-providers, accounts, iaaa-admin, users, admin-access (`PlatformAdminPage`, `platformAdminConfig`, `nav-config.json`) | Section-dependent (see rows below) |
+| Platform (console) | Admin console | 15 sections: ads, provenance, api-keys, tenants, channels, data-providers, accounts, free-runs, products, iaaa-admin, users, data-lifecycle, engine-tuning, downloads, admin-access (`PlatformAdminPage`, `platformAdminConfig`, `nav-config.json`) | Section-dependent (see rows below) |
 | Tenant | Tenant administration | List tenants (derived ids + settings + memberCount); create tenant (settings row with defaults, idempotent); detail (settings + account-row members); patch settings: ads, auto-refresh, providers | Store operator (env `COMMERCIAL_STORE_OPERATORS` UNION store list; empty = deny) |
 | Tenant | Tenant settings | Ads flag (tenant ANDed with account tier for ads serving); auto-refresh (enabled, interval); providers (dataProviderId, brokerId) | Store operator |
 | Tenant | Membership view (read-only) | Memberships filtered by tenant, displayed in Tenant Admin | Store operator (view); mutation is CISO lane |

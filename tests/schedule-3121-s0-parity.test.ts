@@ -681,13 +681,18 @@ describe("U-P03 URL inventory (§8 U-03/U-04/U-05): deep links and deep-link sur
     // home, so it is not a tab id on the platform-admin surface
     // (matching "jobs", which was never a value there).
     expect(platformAdmin!.values).not.toContain("scheduled-goals");
-    // "jobs" is a platform-admin section (and a PlatformAdminPage tab),
-    // not a deepLinkSurfaces value — the view is read from ?view= directly.
+    // Issue #4561: the three schedule ids are gone from
+    // platformAdminSections entirely — the sub-menu shortcuts to the
+    // home are removed with them (the retired addresses still
+    // redirect, but no platform-admin entry points at the home
+    // anymore). "jobs" was a platform-admin section (and never a
+    // deepLinkSurfaces value); now neither id is a section at all.
     const sections = (
       config as { platformAdminSections: Array<{ items: Array<{ id: string }> }> }
     ).platformAdminSections.flatMap((s) => s.items.map((i) => i.id));
-    expect(sections).toContain("scheduled-goals");
-    expect(sections).toContain("jobs");
+    expect(sections).not.toContain("scheduled-goals");
+    expect(sections).not.toContain("jobs");
+    expect(sections).not.toContain("background-tasks");
   });
 });
 

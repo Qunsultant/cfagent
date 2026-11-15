@@ -83,6 +83,7 @@ describe("top-strip sub-menu data (issue #2996)", () => {
   it("lists exactly the menu-only parents, in config order", () => {
     expect(topStripMenuOnlyParents().map((p) => p.id)).toEqual([
       "orders",
+      "schedules",
       "sandbox",
     ]);
   });

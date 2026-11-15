@@ -7,7 +7,6 @@ import { NavIcons } from "./components/NavigationMenu";
  *
  * Tabbed interface covers the administration surfaces from platformAdminConfig:
  *  - ads: Workspace Banners & Sponsor Spotlight
- *  - background-tasks: Async execution queue & background jobs
  *  - provenance: Technical diagnostics, DID, MCP client, and institutional ledger
  *  - api-keys: MCP transport access for external clients
  *  - tenants: Tenant create, list, settings, and read-only membership view (#2221)
@@ -23,13 +22,13 @@ import { NavIcons } from "./components/NavigationMenu";
  * Issue #3121 S2 folded two sections into the schedules home
  * (`?tab=schedules`): `scheduled-goals` → `view=goals`
  * (ScheduledGoalsPanel) and `jobs` → `view=runs`
- * (ScheduleRunLedgerPanel). Their old addresses redirect there (see
- * schedulesHome.ts `legacySchedulesRedirect`), and the left-nav
- * entries link straight to the home (nav-config.json deep-link
- * overrides) — so they are gone from this page's tab list, not kept
- * as a second home. The section ids stay valid in
- * platformAdminConfig (the nav entries still exist); this page simply
- * no longer renders panels for them.
+ * (ScheduleRunLedgerPanel). Issue #4561 finished the job: the last
+ * schedule outpost, `background-tasks` → `view=background-tasks`
+ * (AsyncJobsPanel), moved to the home too, and the goals/runs links
+ * left the platform-admin sub-menu. Their old addresses redirect
+ * there (see schedulesHome.ts `legacySchedulesRedirect`); the section
+ * ids are gone from platformAdminConfig, so this page simply no
+ * longer renders panels for them.
  *
  * Built strictly with src/client/components/ui/ primitives (PageShell, Card, Tabs, TabPanel)
  * and token-only styling per docs/agents/ux-architecture.md §20.
@@ -54,7 +53,6 @@ import {
   saveStoredAdBannerConfig,
   type AdBannerConfig,
 } from "./adBannerConfig";
-import { AsyncJobsPanel } from "./AsyncJobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
@@ -94,7 +92,6 @@ export interface PlatformAdminPageProps {
 
 export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "ads", label: "Ads & Banners", icon: <NavIcons.Banners /> },
-  { id: "background-tasks", label: "Background Tasks", icon: <NavIcons.Tasks /> },
   { id: "provenance", label: "Diagnostics & Provenance", icon: <NavIcons.Provenance /> },
   { id: "api-keys", label: "API Keys", icon: <NavIcons.ApiKeys /> },
   { id: "tenants", label: "Tenants", icon: <NavIcons.Agents /> },
@@ -228,16 +225,6 @@ export function PlatformAdminPage({
             onToggleOption={toggleOption}
             {...(onOpenPartnerDeals ? { onOpenPartnerDeals } : {})}
           />
-        </Card>
-      </TabPanel>
-
-      <TabPanel idBase="platform-admin" tabId="background-tasks" active={active === "background-tasks"}>
-        <Card padding="md">
-          <div className="section-label-row">
-            <span>Background Tasks</span>
-            <small>Async jobs &amp; execution queue</small>
-          </div>
-          <AsyncJobsPanel embedded />
         </Card>
       </TabPanel>
 

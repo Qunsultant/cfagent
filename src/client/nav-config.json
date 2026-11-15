@@ -486,7 +486,7 @@
       "crumb": "Schedules",
       "category": "Platform",
       "icon": "Screeners",
-      "description": "The one scheduling surface — schedules, goal schedules, the consolidated run ledger, and the admin queue"
+      "description": "The one scheduling surface — schedules, goal schedules, the consolidated run ledger, the admin queue, and background tasks"
     },
     {
       "id": "screeners",
@@ -922,20 +922,6 @@
         "description": "Workspace banners and sponsor placements"
       },
       {
-        "id": "platform-admin:background-tasks",
-        "label": "Background Tasks",
-        "shortLabel": "Async jobs & execution queue",
-        "icon": "Tasks",
-        "description": "Async jobs & execution queue"
-      },
-      {
-        "id": "platform-admin:scheduled-goals",
-        "label": "Scheduled goals",
-        "shortLabel": "ScheduledAgent goals, ticks & add-goal form",
-        "icon": "ScheduledGoals",
-        "description": "ScheduledAgent goals, ticks & add-goal form"
-      },
-      {
         "id": "platform-admin:provenance",
         "label": "Technical Diagnostics & Provenance",
         "shortLabel": "DID, MCP client, attestation & ledger",
@@ -990,6 +976,43 @@
         "shortLabel": "Ask the platform owner for admin rights",
         "icon": "AdminAccess",
         "description": "Ask the platform owner for admin rights"
+      }
+    ],
+    "schedules": [
+      {
+        "id": "list",
+        "label": "Schedules",
+        "shortLabel": "Schedule list",
+        "icon": "Schedules",
+        "description": "All schedules — create, pause, and inspect scheduled jobs"
+      },
+      {
+        "id": "runs",
+        "label": "Run ledger",
+        "shortLabel": "Every run with its schedule, async-job, and workflow linkage",
+        "icon": "Runs",
+        "description": "Every run with its schedule, async-job, and workflow linkage"
+      },
+      {
+        "id": "goals",
+        "label": "Goal schedules",
+        "shortLabel": "ScheduledAgent goals, ticks & add-goal form",
+        "icon": "ScheduledGoals",
+        "description": "ScheduledAgent goals, ticks & add-goal form"
+      },
+      {
+        "id": "queue",
+        "label": "Queue",
+        "shortLabel": "Admin queue — dump, cancel-all, wipe, and Track 1 recreate",
+        "icon": "Jobs",
+        "description": "Admin queue — dump, cancel-all, wipe, and Track 1 recreate"
+      },
+      {
+        "id": "background-tasks",
+        "label": "Background Tasks",
+        "shortLabel": "Async jobs & execution queue",
+        "icon": "Tasks",
+        "description": "Async jobs & execution queue"
       }
     ],
     "sandbox": [
@@ -1239,13 +1262,25 @@
       "tab": "options",
       "view": "ai-strategy-ideas"
     },
-    "platform-admin:scheduled-goals": {
+    "schedules:list": {
+      "tab": "schedules",
+      "view": "list"
+    },
+    "schedules:runs": {
+      "tab": "schedules",
+      "view": "runs"
+    },
+    "schedules:goals": {
       "tab": "schedules",
       "view": "goals"
     },
-    "platform-admin:jobs": {
+    "schedules:queue": {
       "tab": "schedules",
-      "view": "runs"
+      "view": "queue"
+    },
+    "schedules:background-tasks": {
+      "tab": "schedules",
+      "view": "background-tasks"
     },
     "options-screener:iv-history": {
       "tab": "options",
@@ -1381,7 +1416,6 @@
       "param": "view",
       "values": [
         "ads",
-        "background-tasks",
         "provenance",
         "api-keys",
         "tenants",
@@ -1517,6 +1551,18 @@
         "actions",
         "policy-decisions"
       ]
+    },
+    {
+      "surface": "schedules",
+      "page": "schedules",
+      "param": "view",
+      "values": [
+        "list",
+        "runs",
+        "goals",
+        "queue",
+        "background-tasks"
+      ]
     }
   ],
   "hostedIds": [
@@ -1543,24 +1589,6 @@
           "label": "Ads & Partner Banners",
           "description": "Workspace banners and sponsor placements",
           "icon": "Banners"
-        },
-        {
-          "id": "background-tasks",
-          "label": "Background Tasks",
-          "description": "Async jobs & execution queue",
-          "icon": "Tasks"
-        },
-        {
-          "id": "scheduled-goals",
-          "label": "Scheduled goals",
-          "description": "ScheduledAgent goals, ticks & add-goal form",
-          "icon": "ScheduledGoals"
-        },
-        {
-          "id": "jobs",
-          "label": "Jobs",
-          "description": "All scheduled jobs & per-run results",
-          "icon": "Jobs"
         },
         {
           "id": "provenance",

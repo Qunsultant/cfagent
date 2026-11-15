@@ -58,9 +58,9 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("subMenus: 12 groups, every sub-item has id and label", () => {
+  it("subMenus: 13 groups, every sub-item has id and label", () => {
     const groups = Object.keys(navData.subMenus as Record<string, unknown[]>);
-    expect(groups).toHaveLength(12);
+    expect(groups).toHaveLength(13);
     for (const items of Object.values(navData.subMenus as Record<string, { id: string; label: string }[]>)) {
       for (const item of items) {
         expect(item.id).toBeTruthy();
@@ -84,29 +84,29 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("deepLinkSurfaces: 15 surfaces, unique, pages resolve, values non-empty", () => {
+  it("deepLinkSurfaces: 16 surfaces, unique, pages resolve, values non-empty", () => {
     const ids = new Set((navData.routes as { id: string }[]).map((r) => r.id));
     const surfaces = navData.deepLinkSurfaces as {
       surface: string;
       page: string | null;
       values: string[];
     }[];
-    expect(surfaces).toHaveLength(15);
-    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(15);
+    expect(surfaces).toHaveLength(16);
+    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(16);
     for (const s of surfaces) {
       if (s.page !== null) expect(ids.has(s.page)).toBe(true);
       expect(s.values.length).toBeGreaterThan(0);
     }
   });
 
-  it("platformAdminSections: one section, 18 items, unique ids", () => {
+  it("platformAdminSections: one section, 15 items, unique ids", () => {
     const sections = navData.platformAdminSections as {
       id: string;
       items: { id: string; label: string; description: string }[];
     }[];
     expect(sections).toHaveLength(1);
-    expect(sections[0].items).toHaveLength(18);
-    expect(new Set(sections[0].items.map((i) => i.id)).size).toBe(18);
+    expect(sections[0].items).toHaveLength(15);
+    expect(new Set(sections[0].items.map((i) => i.id)).size).toBe(15);
     for (const item of sections[0].items) {
       expect(item.label).toBeTruthy();
       expect(item.description).toBeTruthy();
@@ -120,7 +120,7 @@ describe("nav-config.json loaders (issue #2977)", () => {
     expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(
       Object.keys(navData.deepLinks as Record<string, unknown>).length,
     );
-    expect(SURFACE_TAB_DEFS).toHaveLength(15);
+    expect(SURFACE_TAB_DEFS).toHaveLength(16);
     // 5 metadata sections + sandbox menu-only section.
     const built = buildDefaultLeftNavConfig().sections;
     expect(built).toHaveLength(6);

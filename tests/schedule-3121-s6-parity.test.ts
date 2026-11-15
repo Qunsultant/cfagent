@@ -30,10 +30,11 @@
  *   #2777/#3163) and the stamped `schedule_id` schedule column
  *   (#3810) are landed; the #3264 read-path gap's remainder is
  *   #3314 (open).
- * - S6-P05 the four surfaces are reachable through the consolidated
- *   path: the home's four views resolve (list/runs/goals/queue,
- *   `ledger` aliasing `runs`), `SchedulesHome` renders each view's
- *   consolidated panel, and the five retired addresses redirect.
+ * - S6-P05 the five surfaces are reachable through the consolidated
+ *   path: the home's five views resolve (list/runs/goals/queue/
+ *   background-tasks, `ledger` aliasing `runs`), `SchedulesHome`
+ *   renders each view's consolidated panel, and the five retired
+ *   addresses redirect.
  * - S6-P06 `worker-cron` is admitted into the `buildJobRunRecord`
  *   SYSTEMS allowlist (S5 decision 9 follow-up).
  * - S6-P07 retired-module determination: every S0 old-home module
@@ -188,15 +189,16 @@ describe("S6-P04 U-08 corrected", () => {
   });
 });
 
-describe("S6-P05 four surfaces reachable through the consolidated path", () => {
-  it("the home resolves exactly the four views, ledger aliasing runs", () => {
+describe("S6-P05 five surfaces reachable through the consolidated path", () => {
+  it("the home resolves exactly the five views, ledger aliasing runs", () => {
     expect([...SCHEDULES_HOME_VIEWS]).toEqual([
       "list",
       "runs",
       "goals",
       "queue",
+      "background-tasks",
     ]);
-    for (const view of ["list", "runs", "goals", "queue"] as const) {
+    for (const view of ["list", "runs", "goals", "queue", "background-tasks"] as const) {
       expect(parseSchedulesDeepLink(`?tab=schedules&view=${view}`).view).toBe(
         view,
       );
@@ -217,10 +219,12 @@ describe("S6-P05 four surfaces reachable through the consolidated path", () => {
     expect(home).toContain("ScheduleRunLedgerPanel");
     expect(home).toContain("ScheduledGoalsPanel");
     expect(home).toContain("ScheduleQueueView");
+    expect(home).toContain("AsyncJobsPanel");
     expect(home).toContain('deepLink.view === "list"');
     expect(home).toContain('deepLink.view === "runs"');
     expect(home).toContain('deepLink.view === "goals"');
     expect(home).toContain('deepLink.view === "queue"');
+    expect(home).toContain('deepLink.view === "background-tasks"');
   });
 
   it("all five retired addresses redirect to the home", () => {

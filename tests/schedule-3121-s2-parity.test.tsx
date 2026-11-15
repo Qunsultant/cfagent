@@ -25,7 +25,7 @@
  * - S2-P06 ledger helpers: merge (newest-first, legacy normalized),
  *   filter (schedule / run), null linkage renders as "—".
  * - S2-P07 queue gate probe: the 403/Forbidden refusal test.
- * - S2-P08 wiring pins: the home renders the four views, the queue
+ * - S2-P08 wiring pins: the home renders the five views, the queue
  *   view probes before mounting, the focus prop exists, the redirect
  *   runs in the shell, the admin deep links land on the home.
  * - S2-P09 ledger panel: a legacy row (no linkage) and a linked row
@@ -33,7 +33,7 @@
  *   as "—" and its trigger as "unknown".
  * - S2-P10 queue view: a 403 overview probe shows the denied state
  *   and never mounts the wipe panel; a passing probe mounts it.
- * - S2-P11 home: the four tabs render, list is the default, the run
+ * - S2-P11 home: the five tabs render, list is the default, the run
  *   ledger view loads over the S1 ledger.
  * - S2-P12 schedule deep link: `focusScheduleId` opens the detail
  *   dialog for a listed schedule and reports a missing id.
@@ -131,8 +131,8 @@ describe("S2-P01 sub-route parsing — view ids, ledger alias, deep links (#3121
     expect(parseSchedulesDeepLink("?tab=schedules&schedule=  ").scheduleId).toBeNull();
   });
 
-  it("the view vocabulary is exactly the four home views", () => {
-    expect([...SCHEDULES_HOME_VIEWS]).toEqual(["list", "runs", "goals", "queue"]);
+  it("the view vocabulary is exactly the five home views", () => {
+    expect([...SCHEDULES_HOME_VIEWS]).toEqual(["list", "runs", "goals", "queue", "background-tasks"]);
     expect(SCHEDULES_HOME_TAB).toBe("schedules");
     expect(isSchedulesHomeView("ledger")).toBe(false);
     expect(normalizeSchedulesHomeView("ledger")).toBe("runs");
@@ -370,12 +370,13 @@ describe("S2-P07 queue gate probe — the 403/Forbidden refusal test (#3121)", (
 });
 
 describe("S2-P08 wiring pins — the home, the gate, the focus, the redirect (#3121)", () => {
-  it("the home renders all four views through the ui primitives", () => {
+  it("the home renders all five views through the ui primitives", () => {
     const home = read("src/client/SchedulesHome.tsx");
     expect(home).toContain("<SchedulesPanel");
     expect(home).toContain("<ScheduleRunLedgerPanel");
     expect(home).toContain("<ScheduledGoalsPanel embedded />");
     expect(home).toContain("<ScheduleQueueView />");
+    expect(home).toContain("<AsyncJobsPanel embedded />");
     expect(home).toContain('idBase="schedules-home"');
     expect(home).toContain("focusScheduleId={deepLink.scheduleId}");
   });
@@ -398,18 +399,23 @@ describe("S2-P08 wiring pins — the home, the gate, the focus, the redirect (#3
     expect(router).toContain("window.history.replaceState");
   });
 
-  it("the admin deep links land straight on the home", () => {
+  it("the schedules deep links land on the home; the admin overrides are gone (#4561)", () => {
     const config = JSON.parse(read("src/client/nav-config.json")) as {
       deepLinks: Record<string, unknown>;
     };
-    expect(config.deepLinks["platform-admin:scheduled-goals"]).toEqual({
-      tab: "schedules",
-      view: "goals",
-    });
-    expect(config.deepLinks["platform-admin:jobs"]).toEqual({
-      tab: "schedules",
-      view: "runs",
-    });
+    // Issue #4561: the Schedules sub-menu entries resolve through
+    // these overrides — one per home view.
+    for (const view of ["list", "runs", "goals", "queue", "background-tasks"]) {
+      expect(config.deepLinks[`schedules:${view}`]).toEqual({
+        tab: "schedules",
+        view,
+      });
+    }
+    // The platform-admin shortcuts are removed with the sub-menu
+    // entries; the retired addresses still redirect (4110-P06), but no
+    // platform-admin override points at the home anymore.
+    expect(config.deepLinks["platform-admin:scheduled-goals"]).toBeUndefined();
+    expect(config.deepLinks["platform-admin:jobs"]).toBeUndefined();
     // U-03's deep link is gone with the mode it pointed at — the
     // address redirects to the home, and the content it carried now
     // lives on the Options Runs tab.
@@ -586,8 +592,8 @@ describe("S2-P10 queue view — denied without the probe, mounted with it (#3121
   });
 });
 
-describe("S2-P11 home — four tabs, list default, ledger view loads (#3121)", () => {
-  it("renders the four view tabs and the list view by default", async () => {
+describe("S2-P11 home — five tabs, list default, ledger view loads (#3121)", () => {
+  it("renders the five view tabs and the list view by default", async () => {
     fetchStub((url) => {
       if (url === "/api/schedules") return { status: 200, body: { schedules: [] } };
       return null;
@@ -601,7 +607,7 @@ describe("S2-P11 home — four tabs, list default, ledger view loads (#3121)", (
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(["Schedules", "Run ledger", "Goal schedules", "Queue"]);
+    expect(tabs).toEqual(["Schedules", "Run ledger", "Goal schedules", "Queue", "Background Tasks"]);
     expect(container.textContent).toContain("The one scheduling surface");
   });
 

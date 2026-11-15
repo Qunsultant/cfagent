@@ -134,6 +134,10 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         badge: "Cron",
         badgeType: "neutral",
         description: "The one scheduling surface for screening runs — create, pause, and inspect scheduled jobs",
+        // Issue #4561: one sub-menu entry per home view, from
+        // nav-config.json — the same attach-by-id idiom as the
+        // route-derived items above.
+        subItems: SUB_MENU_CONFIGS.schedules,
       });
     }
 

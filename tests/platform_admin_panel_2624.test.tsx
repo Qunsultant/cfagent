@@ -77,13 +77,10 @@ function panel(over: Partial<React.ComponentProps<typeof PlatformAdminPanel>> = 
 }
 
 describe("platform admin config (#2624)", () => {
-  it("lists the eighteen extracted items in dropdown order", () => {
+  it("lists the fifteen extracted items in dropdown order", () => {
     const items = platformAdminItems();
     expect(items.map((item) => item.id)).toEqual([
       "ads",
-      "background-tasks",
-      "scheduled-goals",
-      "jobs",
       "provenance",
       "api-keys",
       "tenants",
@@ -116,31 +113,33 @@ describe("platform admin config (#2624)", () => {
       expect(item.icon).toBeDefined();
     }
     const icons = items.map((i) => i.icon);
-    expect(new Set(icons).size).toBe(17);
+    // Issue #4561 removed Tasks, ScheduledGoals, and Jobs (all unique);
+    // the one duplicate pair (Agents on Tenants + Users) remains.
+    expect(new Set(icons).size).toBe(14);
   });
 });
 
 describe("platform admin in the left navigation (#2624)", () => {
   const adminSection = DEFAULT_LEFT_NAV_CONFIG.sections.find((section) => section.id === "section-platform");
 
-  it("is a left-nav item with its own eighteen-item sub-menu", () => {
+  it("is a left-nav item with its own fifteen-item sub-menu", () => {
     expect(adminSection).toBeTruthy();
     expect(adminSection!.title).toBe("PLATFORM");
     const item = adminSection!.items.find((i) => i.id === "platform-admin")!;
     expect(item).toBeTruthy();
     expect(item.id).toBe("platform-admin");
     expect(item.label).toBe("Platform Admin");
-    expect(item.subItems).toHaveLength(18);
+    expect(item.subItems).toHaveLength(15);
     expect(item.subItems![0].id).toBe("platform-admin:ads");
-    expect(item.subItems![7].id).toBe("platform-admin:channels");
-    expect(item.subItems![9].id).toBe("platform-admin:accounts");
-    expect(item.subItems![10].id).toBe("platform-admin:free-runs");
-    expect(item.subItems![11].id).toBe("platform-admin:products");
-    expect(item.subItems![13].id).toBe("platform-admin:users");
-    expect(item.subItems![14].id).toBe("platform-admin:data-lifecycle");
-    expect(item.subItems![15].id).toBe("platform-admin:engine-tuning");
-    expect(item.subItems![16].id).toBe("platform-admin:downloads");
-    expect(item.subItems![17].id).toBe("platform-admin:admin-access");
+    expect(item.subItems![4].id).toBe("platform-admin:channels");
+    expect(item.subItems![6].id).toBe("platform-admin:accounts");
+    expect(item.subItems![7].id).toBe("platform-admin:free-runs");
+    expect(item.subItems![8].id).toBe("platform-admin:products");
+    expect(item.subItems![10].id).toBe("platform-admin:users");
+    expect(item.subItems![11].id).toBe("platform-admin:data-lifecycle");
+    expect(item.subItems![12].id).toBe("platform-admin:engine-tuning");
+    expect(item.subItems![13].id).toBe("platform-admin:downloads");
+    expect(item.subItems![14].id).toBe("platform-admin:admin-access");
   });
 
   it("maps sub-item ids to drawer sections, and nothing else", () => {
@@ -168,17 +167,17 @@ describe("platform admin panel (#2624)", () => {
     expect(container.querySelector(".platform-admin-title")?.textContent).toBe("Platform Admin");
 
     const menuItems = container.querySelectorAll(".platform-admin-menu-item");
-    expect(menuItems).toHaveLength(18);
+    expect(menuItems).toHaveLength(15);
     expect(menuItems[0].textContent).toContain("Ads & Partner Banners");
-    expect(menuItems[7].textContent).toContain("Channels");
-    expect(menuItems[9].textContent).toContain("Accounts");
-    expect(menuItems[10].textContent).toContain("Free Runs");
-    expect(menuItems[11].textContent).toContain("Products");
-    expect(menuItems[13].textContent).toContain("Users");
-    expect(menuItems[14].textContent).toContain("Data Lifecycle");
-    expect(menuItems[15].textContent).toContain("Engine Tuning");
-    expect(menuItems[16].textContent).toContain("Parameters & Export");
-    expect(menuItems[17].textContent).toContain("Request admin access");
+    expect(menuItems[4].textContent).toContain("Channels");
+    expect(menuItems[6].textContent).toContain("Accounts");
+    expect(menuItems[7].textContent).toContain("Free Runs");
+    expect(menuItems[8].textContent).toContain("Products");
+    expect(menuItems[10].textContent).toContain("Users");
+    expect(menuItems[11].textContent).toContain("Data Lifecycle");
+    expect(menuItems[12].textContent).toContain("Engine Tuning");
+    expect(menuItems[13].textContent).toContain("Parameters & Export");
+    expect(menuItems[14].textContent).toContain("Request admin access");
   });
 
   it("opens at the section the nav asked for", async () => {
