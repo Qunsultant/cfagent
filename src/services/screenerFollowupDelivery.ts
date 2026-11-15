@@ -37,6 +37,7 @@ import {
   type TenantChannelGate,
 } from "./tenantChannelGate";
 import {
+  resolveAndVerifySlackRecipientAtDelivery,
   resolveEnvChannelRecipientBinding,
   verifyChannelRecipient,
   verifyEmailRecipientAtDelivery,
@@ -151,27 +152,47 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
         outcome.recipientBinding ??
         (deps.getRecipientBinding ? await deps.getRecipientBinding(runScope) : null) ??
         resolveEnvChannelRecipientBinding(deps.env, runScope);
-      const recipientCheck =
-        channel === "email"
-          ? await verifyEmailRecipientAtDelivery({
-              recipient: effectiveRecipient,
-              env: deps.env,
-              run: runScope,
-              ownerEmail: outcome.ownerEmail,
-              binding,
-              layer: "followup_port.deliver",
-              audit: deps.audit,
-            })
-          : verifyChannelRecipient({
-              channel,
-              recipient: effectiveRecipient,
-              run: runScope,
-              binding,
-              layer: "followup_port.deliver",
-              audit: deps.audit,
-            });
-      if (!recipientCheck.allowed) {
-        return { ok: false, error: recipientCheck.error };
+      let verifiedSlackChannel = outcome.slackChannel ?? config.channels.slack.channel;
+      if (channel === "email") {
+        const recipientCheck = await verifyEmailRecipientAtDelivery({
+          recipient: effectiveRecipient,
+          env: deps.env,
+          run: runScope,
+          ownerEmail: outcome.ownerEmail,
+          binding,
+          layer: "followup_port.deliver",
+          audit: deps.audit,
+        });
+        if (!recipientCheck.allowed) {
+          return { ok: false, error: recipientCheck.error };
+        }
+      } else if (channel === "slack") {
+        const slackCheck = await resolveAndVerifySlackRecipientAtDelivery({
+          requestedChannel: outcome.slackChannel,
+          envFallbackChannel: config.channels.slack.channel,
+          env: deps.env,
+          run: runScope,
+          channelGate: gate,
+          binding,
+          layer: "followup_port.deliver",
+          audit: deps.audit,
+        });
+        if (!slackCheck.allowed) {
+          return { ok: false, error: slackCheck.error };
+        }
+        verifiedSlackChannel = slackCheck.channel;
+      } else {
+        const recipientCheck = verifyChannelRecipient({
+          channel,
+          recipient: effectiveRecipient,
+          run: runScope,
+          binding,
+          layer: "followup_port.deliver",
+          audit: deps.audit,
+        });
+        if (!recipientCheck.allowed) {
+          return { ok: false, error: recipientCheck.error };
+        }
       }
       const text = followupDeliveryText(outcome);
       const agent = deps.getScreenerAgent(userLogin);
@@ -211,7 +232,7 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
         const rest = files.filter((f) => f !== pdfFile);
         const sent = await deliverScreenerToSlack(deps.env, {
           text,
-          channel: outcome.slackChannel ?? config.channels.slack.channel,
+          channel: verifiedSlackChannel,
           ...(pdfFile ? { pdf: { bytes: pdfFile.bytes, fileName: pdfFile.fileName, title: `Screener report — ${outcome.kind} screen`, comment: text } } : {}),
           ...(rest.length > 0 ? { files: rest.map((f) => ({ bytes: f.bytes, fileName: f.fileName, title: f.fileName })) } : {}),
         });
@@ -321,6 +342,7 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
       if (gate && tenantChannel && !gate.isEnabled(tenantChannel)) {
         return { ok: false, error: channelDisabledError(tenantChannel, gate.tenantId) };
       }
+      let verifiedNotifySlackChannel = slackChannel ?? config.channels.slack.channel;
       if (channel === "slack" || channel === "email") {
         const effectiveRecipient =
           channel === "email"
@@ -336,32 +358,39 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
           recipientBinding ??
           (deps.getRecipientBinding ? await deps.getRecipientBinding(runScope) : null) ??
           resolveEnvChannelRecipientBinding(deps.env, runScope);
-        const recipientCheck =
-          channel === "email"
-            ? await verifyEmailRecipientAtDelivery({
-                recipient: effectiveRecipient,
-                env: deps.env,
-                run: runScope,
-                ownerEmail,
-                binding,
-                layer: "followup_port.notify",
-                audit: deps.audit,
-              })
-            : verifyChannelRecipient({
-                channel,
-                recipient: effectiveRecipient,
-                run: runScope,
-                binding,
-                layer: "followup_port.notify",
-                audit: deps.audit,
-              });
-        if (!recipientCheck.allowed) {
-          return { ok: false, error: recipientCheck.error };
+        if (channel === "email") {
+          const recipientCheck = await verifyEmailRecipientAtDelivery({
+            recipient: effectiveRecipient,
+            env: deps.env,
+            run: runScope,
+            ownerEmail,
+            binding,
+            layer: "followup_port.notify",
+            audit: deps.audit,
+          });
+          if (!recipientCheck.allowed) {
+            return { ok: false, error: recipientCheck.error };
+          }
+        } else {
+          const slackCheck = await resolveAndVerifySlackRecipientAtDelivery({
+            requestedChannel: slackChannel,
+            envFallbackChannel: config.channels.slack.channel,
+            env: deps.env,
+            run: runScope,
+            channelGate: gate,
+            binding,
+            layer: "followup_port.notify",
+            audit: deps.audit,
+          });
+          if (!slackCheck.allowed) {
+            return { ok: false, error: slackCheck.error };
+          }
+          verifiedNotifySlackChannel = slackCheck.channel;
         }
       }
       if (channel === "slack") {
-        // Issue #1191: per-task channel wins, mirroring deliveries.
-        return deliverScreenerToSlack(deps.env, { text, channel: slackChannel ?? config.channels.slack.channel });
+        // Issue #1191 & #4610: per-tenant mapped channel (or per-task channel when ungated) wins.
+        return deliverScreenerToSlack(deps.env, { text, channel: verifiedNotifySlackChannel });
       }
       if (channel === "email") {
         // Issue #1191 (#1173 R3): per-task recipient wins, mirroring

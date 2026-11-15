@@ -38,16 +38,25 @@ import { resolvePlatformIdentity } from "./platformIdentity";
 export interface TenantChannelGate {
   tenantId: string;
   isEnabled(channel: TenantChannelId): boolean;
+  /**
+   * Issue #4610 (G15): per-tenant mapped Slack channel.
+   * - `string`: tenant is mapped to this Slack channel id
+   * - `null`: tenant is explicitly unmapped (Slack delivery must be refused + audited)
+   * - `undefined`: mapping was not consulted (legacy 2-arg gate construction)
+   */
+  slackChannel?: string | null;
 }
 
-/** Build a gate from an already-read config. */
+/** Build a gate from an already-read config (and optional #4610 Slack channel mapping). */
 export function channelGateFromConfig(
   tenantId: string,
   config: TenantChannelConfig,
+  slackChannel?: string | null,
 ): TenantChannelGate {
   return {
     tenantId,
     isEnabled: (channel: TenantChannelId) => config[channel] === true,
+    ...(slackChannel !== undefined ? { slackChannel } : {}),
   };
 }
 
@@ -98,7 +107,11 @@ export async function resolveTenantChannelGate(
     );
     if (!identity.tenantId) return null;
     const config = await channels.getTenantChannels(identity.tenantId);
-    return channelGateFromConfig(identity.tenantId, config);
+    const slackChannel =
+      typeof channels.getTenantSlackChannel === "function"
+        ? await channels.getTenantSlackChannel(identity.tenantId)
+        : undefined;
+    return channelGateFromConfig(identity.tenantId, config, slackChannel);
   } catch {
     return null;
   }
