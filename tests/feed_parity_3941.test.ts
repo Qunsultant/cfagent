@@ -34,7 +34,7 @@ import {
 } from "../src/data/d1ProviderCaptureAdapter";
 import { InMemoryProviderCaptureAdapter } from "../src/data/inMemoryProviderCaptureAdapter";
 import { createFeedDatasetAdapter } from "../src/data/createFeedDatasetPorts";
-import { D1IndexListStore } from "../src/data/d1IndexListAdapter";
+import { createD1IndexListDb, D1IndexListStore } from "../src/data/d1IndexListAdapter";
 import { createJobPipelineStoresFromD1 } from "../src/data/createJobPipelinePorts";
 import { createBlobStore } from "../src/services/blobStoreR2Adapter";
 import {
@@ -426,7 +426,7 @@ describe("getCaptureBlob cross-residency read (#3941)", () => {
 
 describe("workflow-residency feed wiring (#3941)", () => {
   async function seedUniverse(mock: MockD1Database) {
-    const store = new D1IndexListStore(mock as never);
+    const store = new D1IndexListStore(createD1IndexListDb(mock as never));
     await store.store({
       index: "nasdaq100",
       snapshotDate: "2026-11-02",
