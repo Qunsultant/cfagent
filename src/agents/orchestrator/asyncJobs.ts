@@ -86,6 +86,7 @@ import {
 } from "../../workflows/screenDeliverySuppression";
 import {
   inferTenantFromDeliveryId,
+  resolveAndVerifySlackRecipientAtDelivery,
   resolveEnvChannelRecipientBinding,
   verifyChannelRecipient,
   verifyEmailRecipientAtDelivery,
@@ -2488,14 +2489,24 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
                   layer: "executor.deliver",
                   audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
                 })
-              : verifyChannelRecipient({
-                  channel,
-                  recipient: effectiveRecipient,
-                  run: runScope,
-                  binding,
-                  layer: "executor.deliver",
-                  audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-                });
+              : channel === "slack"
+                ? await resolveAndVerifySlackRecipientAtDelivery({
+                    requestedChannel: outcome.slackChannel,
+                    envFallbackChannel: config.channels.slack.channel,
+                    env: ctx.env,
+                    run: runScope,
+                    binding,
+                    layer: "executor.deliver",
+                    audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+                  })
+                : verifyChannelRecipient({
+                    channel,
+                    recipient: effectiveRecipient,
+                    run: runScope,
+                    binding,
+                    layer: "executor.deliver",
+                    audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+                  });
           if (!recipientCheck.allowed) {
             suppressor.release(deliveryRunId, deliveryDestination);
             throw new Error(recipientCheck.error);
@@ -2605,14 +2616,24 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
               layer: "executor.notify",
               audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
             })
-          : verifyChannelRecipient({
-              channel,
-              recipient: effectiveRecipient,
-              run: runScope,
-              binding,
-              layer: "executor.notify",
-              audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-            });
+          : channel === "slack"
+            ? await resolveAndVerifySlackRecipientAtDelivery({
+                requestedChannel: outcome.slackChannel,
+                envFallbackChannel: config.channels.slack.channel,
+                env: ctx.env,
+                run: runScope,
+                binding,
+                layer: "executor.notify",
+                audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+              })
+            : verifyChannelRecipient({
+                channel,
+                recipient: effectiveRecipient,
+                run: runScope,
+                binding,
+                layer: "executor.notify",
+                audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+              });
       if (!recipientCheck.allowed) {
         throw new Error(recipientCheck.error);
       }

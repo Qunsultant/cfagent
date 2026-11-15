@@ -54,6 +54,7 @@ import {
 } from "../services/userEmailDestination";
 import {
   inferTenantFromDeliveryId,
+  resolveAndVerifySlackRecipientAtDelivery,
   resolveEnvChannelRecipientBinding,
   verifyChannelRecipient,
   verifyEmailRecipientAtDelivery,
@@ -119,6 +120,41 @@ function checkPublisherChannelRecipient(
     audit: (type, payload) => recordPublisherRecipientRefusal(deps, type, payload),
   });
   return check.allowed;
+}
+
+async function resolveAndVerifyPublisherSlackChannel(
+  deps: ScreenerPublisherDeps,
+  event: {
+    slackChannel?: string;
+    deliveryId?: string;
+    scheduleId?: string;
+    tenantId?: string | null;
+    recipientBinding?: ChannelRecipientBinding | null;
+  },
+): Promise<{ slackChannel?: string; allowed: boolean }> {
+  const envFallback =
+    (deps.env as any).SCREENER_SLACK_CHANNEL || (deps.env as any).SLACK_CHANNEL;
+  const runScope: ChannelRecipientRunScope = {
+    tenantId: event.tenantId ?? inferTenantFromDeliveryId(event.deliveryId),
+    runId: event.deliveryId ?? null,
+    scheduleId: event.scheduleId ?? null,
+    userLogin: deps.userLogin,
+  };
+  const explicitBinding =
+    event.recipientBinding ?? deps.getRecipientBinding?.(runScope) ?? null;
+  const check = await resolveAndVerifySlackRecipientAtDelivery({
+    requestedChannel: event.slackChannel,
+    envFallbackChannel: envFallback,
+    env: deps.env,
+    run: runScope,
+    binding: explicitBinding,
+    layer: "publisher",
+    audit: (type, payload) => recordPublisherRecipientRefusal(deps, type, payload),
+  });
+  return {
+    slackChannel: check.allowed ? check.channel : undefined,
+    allowed: check.allowed,
+  };
 }
 
 const registeredBuses = new WeakSet<ScreenerEventBus>();
@@ -470,7 +506,7 @@ async function publishCompleted(
   // notification. Sending a separate summary and then a file generated a
   // duplicate pair of Slack messages for each screen.
   const cfpay = getCfpayConfig(deps.env);
-  const slackChannel = event.slackChannel || (deps.env as any).SCREENER_SLACK_CHANNEL || (deps.env as any).SLACK_CHANNEL;
+  const { slackChannel, allowed: slackAllowed } = await resolveAndVerifyPublisherSlackChannel(deps, event);
   const pdf = await fetchScreenerPdf(deps, event.pdfKey, event.pdfStatus, event.pdfError);
   const reportUrl = event.pdfKey
     ? screenerReportUrl(deps.env.APP_BASE_URL, event.pdfKey)
@@ -479,7 +515,7 @@ async function publishCompleted(
   const slackBody = pdf || cfpay
     ? plainTextWithDigest
     : `${plainTextWithDigest}${event.pdfKey ? `\n\n📄 PDF report: ${reportUrl}` : ""}`;
-  if (checkPublisherChannelRecipient(deps, "slack", slackChannel, event)) {
+  if (slackAllowed) {
     const slackDelivery = await deliverScreenerToSlack(deps.env, {
       text: slackBody,
       channel: slackChannel,
@@ -602,12 +638,13 @@ async function publishFailed(
   const slackConfigured = Boolean(
     cfpay || deps.env.SLACK_BOT_TOKEN || deps.env.SLACK_WEBHOOK_URL,
   );
-  const slackChannel = event.slackChannel || (deps.env as any).SCREENER_SLACK_CHANNEL || (deps.env as any).SLACK_CHANNEL;
-  if (checkPublisherChannelRecipient(deps, "slack", slackChannel, event)) {
+  const { slackChannel: resolvedSlackChannel, allowed: slackAllowed } =
+    await resolveAndVerifyPublisherSlackChannel(deps, event);
+  if (slackAllowed) {
     const result = await deliverGatedSlack(deps.env, {
       userLogin: deps.userLogin,
       text,
-      channel: event.slackChannel,
+      channel: resolvedSlackChannel,
       tenantId: event.tenantId,
       runId: event.deliveryId,
       scheduleId: event.scheduleId,

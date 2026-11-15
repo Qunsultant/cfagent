@@ -9,6 +9,7 @@
  */
 import {
   DEFAULT_TENANT_CHANNELS,
+  normalizeTenantSlackChannel,
   type TenantChannelConfig,
   type TenantChannelPatch,
   type TenantChannelStore,
@@ -16,6 +17,7 @@ import {
 
 export class InMemoryTenantChannelAdapter implements TenantChannelStore {
   private rows = new Map<string, TenantChannelConfig>();
+  private slackChannels = new Map<string, string>();
 
   async getTenantChannels(tenantId: string): Promise<TenantChannelConfig> {
     return { ...(this.rows.get(tenantId) ?? DEFAULT_TENANT_CHANNELS) };
@@ -25,5 +27,22 @@ export class InMemoryTenantChannelAdapter implements TenantChannelStore {
     const next = { ...(this.rows.get(tenantId) ?? DEFAULT_TENANT_CHANNELS), ...patch };
     this.rows.set(tenantId, next);
     return { ...next };
+  }
+
+  async getTenantSlackChannel(tenantId: string): Promise<string | null> {
+    return this.slackChannels.get(tenantId) ?? null;
+  }
+
+  async setTenantSlackChannel(tenantId: string, slackChannel: string | null): Promise<string | null> {
+    const normalized = normalizeTenantSlackChannel(slackChannel);
+    if (!normalized.ok) {
+      throw new Error(normalized.error);
+    }
+    if (normalized.slackChannel === null) {
+      this.slackChannels.delete(tenantId);
+      return null;
+    }
+    this.slackChannels.set(tenantId, normalized.slackChannel);
+    return normalized.slackChannel;
   }
 }

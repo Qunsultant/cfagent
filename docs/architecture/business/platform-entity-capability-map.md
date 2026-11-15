@@ -331,11 +331,16 @@ check enforced on every send.
   created with someone else's email address is refused at delivery time
   with `FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED` and audited via
   `delivery.recipient_refused`.
-- **Slack:** channel resolved from delivery options or deployment env
-  (`SLACK_CHANNEL_ID` / `SCREENER_SLACK_CHANNEL` / `SLACK_CHANNEL`),
-  token from env — deployment-global config, no per-tenant channel
-  mapping, no recipient check. Any tenant's report delivered via Slack
-  goes to the deployment's channel.
+- **Slack (#4610, G15 — shipped):** per-tenant Slack channel mapping in
+  `TenantChannelStore` (`getTenantSlackChannel` / `setTenantSlackChannel`),
+  `/platform-channels/:id/slack-channel` (and `/platform-channels/:id/channels`),
+  `TenantChannelGate` (`slackChannel`), and `resolveAndVerifySlackRecipientAtDelivery`
+  (`src/services/channelRecipientVerification.ts`). A Slack delivery goes
+  exclusively to the run tenant's mapped Slack channel (ignoring deployment-global
+  `SCREENER_SLACK_CHANNEL` / `SLACK_CHANNEL`); an unmapped tenant's delivery
+  (or a delivery targeting another tenant's channel) is refused with
+  `FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED` (`slack_tenant_channel_unmapped` /
+  `slack_channel_not_in_tenant_run`) and audited via `delivery.recipient_refused`.
 - **Webhook:** HMAC-SHA256 signed, refuses to send with no signing
   secret configured. Signing is a transport-integrity property, not a
   recipient-tenant verification; the webhook URL's tenant binding was
@@ -539,9 +544,10 @@ capability, not an absence.
     tenantId; this one does not.
 14. **R2 report-body keys are not tenant-namespaced**
     (`reports/<reportId>.json`).
-15. **Slack delivery channel is deployment-global** (env channel id —
-    tracked in #4610); email delivery-time recipient verification
-    (`recipient ∈ tenant + owner`) shipped in #4609 (G14).
+15. **Channel recipient verification shipped:** email delivery-time
+    recipient verification (`recipient ∈ tenant + owner`) shipped in
+    #4609 (G14), and per-tenant Slack channel mapping (`resolveAndVerifySlackRecipientAtDelivery`,
+    refusing + auditing unmapped tenants) shipped in #4610 (G15).
 16. **Flag selection is by binding presence, not environment** (FLAGS
     bound → Flagship, else Env adapter). The Env adapter is therefore
     reachable in any runtime without the binding — not code-enforced

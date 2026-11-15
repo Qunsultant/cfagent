@@ -31,8 +31,8 @@
 import { channelDisabledError, resolveTenantChannelGate } from "./tenantChannelGate";
 import { deliverScreenerToSlack, type ScreenerSlackDelivery } from "./screenerSlackDelivery";
 import {
+  resolveAndVerifySlackRecipientAtDelivery,
   resolveEnvChannelRecipientBinding,
-  verifyChannelRecipient,
   type ChannelRecipientAuditFn,
   type ChannelRecipientBinding,
 } from "./channelRecipientVerification";
@@ -57,8 +57,8 @@ export async function deliverGatedSlack(
 ): Promise<{ ok: boolean; error?: string }> {
   const login = typeof delivery.userLogin === "string" ? delivery.userLogin.trim() : "";
   let resolvedTenantId = delivery.tenantId ?? null;
+  let gate: Awaited<ReturnType<typeof resolveTenantChannelGate>> = null;
   if (login) {
-    let gate: Awaited<ReturnType<typeof resolveTenantChannelGate>> = null;
     try {
       gate = await resolveTenantChannelGate(env, login);
     } catch {
@@ -75,8 +75,7 @@ export async function deliverGatedSlack(
     }
   }
   const e = env as Record<string, unknown>;
-  const resolvedChannel =
-    delivery.channel ||
+  const envFallbackChannel =
     (typeof e.SCREENER_SLACK_CHANNEL === "string" ? e.SCREENER_SLACK_CHANNEL : undefined) ||
     (typeof e.SLACK_CHANNEL === "string" ? e.SLACK_CHANNEL : undefined);
   const runScope = {
@@ -87,10 +86,12 @@ export async function deliverGatedSlack(
   };
   const binding =
     delivery.recipientBinding ?? resolveEnvChannelRecipientBinding(env, runScope);
-  const recipientCheck = verifyChannelRecipient({
-    channel: "slack",
-    recipient: resolvedChannel,
+  const recipientCheck = await resolveAndVerifySlackRecipientAtDelivery({
+    requestedChannel: delivery.channel,
+    envFallbackChannel,
+    env,
     run: runScope,
+    channelGate: gate,
     binding,
     layer: "gated_slack",
     audit: delivery.audit,
@@ -98,6 +99,7 @@ export async function deliverGatedSlack(
   if (!recipientCheck.allowed) {
     return { ok: false, error: recipientCheck.error };
   }
+  const resolvedChannel = recipientCheck.channel;
   const sent = await deliverScreenerToSlack(env, {
     text: delivery.text,
     ...(resolvedChannel ? { channel: resolvedChannel } : {}),

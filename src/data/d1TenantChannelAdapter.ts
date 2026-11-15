@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 import { agentTenantChannels } from "./drizzleSchema";
 import {
   DEFAULT_TENANT_CHANNELS,
+  normalizeTenantSlackChannel,
   type TenantChannelConfig,
   type TenantChannelPatch,
   type TenantChannelStore,
@@ -40,7 +41,26 @@ function toConfig(row: typeof agentTenantChannels.$inferSelect): TenantChannelCo
 
 /** Tenant channel flags over D1 via Drizzle. */
 export class D1TenantChannelAdapter implements TenantChannelStore {
+  private slackChannels = new Map<string, string>();
+
   constructor(readonly db: TenantChannelDb) {}
+
+  async getTenantSlackChannel(tenantId: string): Promise<string | null> {
+    return this.slackChannels.get(tenantId) ?? null;
+  }
+
+  async setTenantSlackChannel(tenantId: string, slackChannel: string | null): Promise<string | null> {
+    const normalized = normalizeTenantSlackChannel(slackChannel);
+    if (!normalized.ok) {
+      throw new Error(normalized.error);
+    }
+    if (normalized.slackChannel === null) {
+      this.slackChannels.delete(tenantId);
+      return null;
+    }
+    this.slackChannels.set(tenantId, normalized.slackChannel);
+    return normalized.slackChannel;
+  }
 
   async getTenantChannels(tenantId: string): Promise<TenantChannelConfig> {
     const rows = await this.db

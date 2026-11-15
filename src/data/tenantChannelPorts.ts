@@ -48,9 +48,56 @@ export const DEFAULT_TENANT_CHANNELS: TenantChannelConfig = {
 /** Partial patch: only the supplied flags change. */
 export type TenantChannelPatch = Partial<TenantChannelConfig>;
 
+const MAX_SLACK_CHANNEL_LENGTH = 128;
+
+/**
+ * Issue #4610 (G15): validate and normalize a per-tenant Slack channel id
+ * (or null to clear a tenant's mapping). Rejects empty strings, whitespace/control
+ * characters, and URLs/tokens.
+ */
+export function normalizeTenantSlackChannel(
+  value: unknown,
+): { ok: true; slackChannel: string | null } | { ok: false; error: string } {
+  if (value === null) {
+    return { ok: true, slackChannel: null };
+  }
+  if (typeof value !== "string") {
+    return { ok: false, error: "slackChannel must be a non-empty string or null." };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { ok: false, error: "slackChannel must not be empty." };
+  }
+  if (trimmed.length > MAX_SLACK_CHANNEL_LENGTH) {
+    return {
+      ok: false,
+      error: `slackChannel must be ${MAX_SLACK_CHANNEL_LENGTH} characters or fewer.`,
+    };
+  }
+  if (/[\s\x00-\x1F\x7F]/.test(trimmed)) {
+    return { ok: false, error: "slackChannel must not contain whitespace or control characters." };
+  }
+  if (/^https?:\/\//i.test(trimmed) || /^xox[bpasr]-/i.test(trimmed)) {
+    return {
+      ok: false,
+      error: "slackChannel must be a Slack channel identifier, not a URL or token.",
+    };
+  }
+  return { ok: true, slackChannel: trimmed };
+}
+
 export interface TenantChannelStore {
   /** Current config for a tenant; defaults when no row exists (no row is created). */
   getTenantChannels(tenantId: string): Promise<TenantChannelConfig>;
   /** Merge a partial patch over the current config and return the result. */
   setTenantChannels(tenantId: string, patch: TenantChannelPatch): Promise<TenantChannelConfig>;
+  /**
+   * Issue #4610 (G15): per-tenant Slack channel mapping.
+   * Returns the mapped Slack channel id for the tenant, or null when unmapped.
+   */
+  getTenantSlackChannel?(tenantId: string): Promise<string | null>;
+  /**
+   * Issue #4610 (G15): set or clear (null) the per-tenant Slack channel mapping.
+   */
+  setTenantSlackChannel?(tenantId: string, slackChannel: string | null): Promise<string | null>;
 }

@@ -50,6 +50,7 @@ import { createTenantChannelAdapter } from "../../data/createTenantChannelPorts"
 import type { TenantChannelStore } from "../../data/tenantChannelPorts";
 import {
   TENANT_CHANNEL_IDS,
+  normalizeTenantSlackChannel,
   type TenantChannelConfig,
   type TenantChannelId,
   type TenantChannelPatch,
@@ -156,7 +157,7 @@ export async function handlePlatformChannelRoutes(
   if (!path.includes("/platform-channels/")) return null;
   const rest = path.split("/platform-channels/")[1] ?? "";
   const segments = rest.split("/");
-  let action: "read" | "patch" | null = null;
+  let action: "read" | "patch" | "slack-channel" | null = null;
   let tenantId = "";
   if (segments.length === 1 && segments[0]) {
     tenantId = decodeURIComponent(segments[0]);
@@ -164,6 +165,9 @@ export async function handlePlatformChannelRoutes(
   } else if (segments.length === 2 && segments[0] && segments[1] === "channels") {
     tenantId = decodeURIComponent(segments[0]);
     action = "patch";
+  } else if (segments.length === 2 && segments[0] && segments[1] === "slack-channel") {
+    tenantId = decodeURIComponent(segments[0]);
+    action = "slack-channel";
   } else {
     return null;
   }
@@ -184,32 +188,94 @@ export async function handlePlatformChannelRoutes(
     if (action === "read") {
       if (request.method !== "GET") return jsonError("Method not allowed", 405);
       const config = await channels.getTenantChannels(tenantId);
-      return Response.json({ tenantId, channels: config });
+      const slackChannel =
+        typeof channels.getTenantSlackChannel === "function"
+          ? await channels.getTenantSlackChannel(tenantId)
+          : null;
+      return Response.json({
+        tenantId,
+        channels: config,
+        ...(slackChannel ? { slackChannel } : {}),
+      });
+    }
+
+    if (action === "slack-channel") {
+      if (request.method === "GET") {
+        const slackChannel =
+          typeof channels.getTenantSlackChannel === "function"
+            ? await channels.getTenantSlackChannel(tenantId)
+            : null;
+        return Response.json({ tenantId, slackChannel });
+      }
+      if (request.method !== "PUT" && request.method !== "PATCH") {
+        return jsonError("Method not allowed", 405);
+      }
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!("slackChannel" in body)) {
+        return jsonError("slackChannel is required (non-empty string or null).", 400);
+      }
+      const normalized = normalizeTenantSlackChannel(body["slackChannel"]);
+      if (!normalized.ok) {
+        return jsonError(normalized.error, 400);
+      }
+      if (typeof channels.setTenantSlackChannel !== "function") {
+        return jsonError("Slack channel mapping is not supported by the bound channel store.", 503);
+      }
+      const saved = await channels.setTenantSlackChannel(tenantId, normalized.slackChannel);
+      auditBestEffort(ctx, operator, "update-slack-channel", tenantId);
+      return Response.json({ tenantId, slackChannel: saved });
     }
 
     // action === "patch"
     if (request.method !== "PATCH") return jsonError("Method not allowed", 405);
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const hasSlackChannelField = "slackChannel" in body;
+    let normalizedSlackChannel: string | null | undefined = undefined;
+    if (hasSlackChannelField) {
+      const normalized = normalizeTenantSlackChannel(body["slackChannel"]);
+      if (!normalized.ok) {
+        return jsonError(normalized.error, 400);
+      }
+      normalizedSlackChannel = normalized.slackChannel;
+    }
     const supplied = body["channels"];
-    if (!isRecord(supplied)) {
+    const patch: TenantChannelPatch = {};
+    if (supplied !== undefined) {
+      if (!isRecord(supplied)) {
+        return jsonError("channels must be an object of channel flags.", 400);
+      }
+      for (const [key, value] of Object.entries(supplied)) {
+        if (!(TENANT_CHANNEL_IDS as readonly string[]).includes(key)) {
+          return jsonError(`Unknown channel: ${key}.`, 400);
+        }
+        if (typeof value !== "boolean") {
+          return jsonError(`Channel flag ${key} must be a boolean.`, 400);
+        }
+        patch[key as TenantChannelId] = value;
+      }
+    } else if (!hasSlackChannelField) {
       return jsonError("channels must be an object of channel flags.", 400);
     }
-    const patch: TenantChannelPatch = {};
-    for (const [key, value] of Object.entries(supplied)) {
-      if (!(TENANT_CHANNEL_IDS as readonly string[]).includes(key)) {
-        return jsonError(`Unknown channel: ${key}.`, 400);
-      }
-      if (typeof value !== "boolean") {
-        return jsonError(`Channel flag ${key} must be a boolean.`, 400);
-      }
-      patch[key as TenantChannelId] = value;
-    }
-    if (Object.keys(patch).length === 0) {
+    if (Object.keys(patch).length === 0 && !hasSlackChannelField) {
       return jsonError("No channel flag supplied.", 400);
     }
-    const config: TenantChannelConfig = await channels.setTenantChannels(tenantId, patch);
+    const config: TenantChannelConfig =
+      Object.keys(patch).length > 0
+        ? await channels.setTenantChannels(tenantId, patch)
+        : await channels.getTenantChannels(tenantId);
+    let savedSlackChannel: string | null | undefined = undefined;
+    if (hasSlackChannelField && typeof channels.setTenantSlackChannel === "function") {
+      savedSlackChannel = await channels.setTenantSlackChannel(
+        tenantId,
+        normalizedSlackChannel ?? null,
+      );
+    }
     auditBestEffort(ctx, operator, "update-channels", tenantId);
-    return Response.json({ tenantId, channels: config });
+    return Response.json({
+      tenantId,
+      channels: config,
+      ...(hasSlackChannelField ? { slackChannel: savedSlackChannel ?? null } : {}),
+    });
   } catch (err) {
     return jsonError(err instanceof Error ? err.message : "Channel administration failed.", 500);
   }

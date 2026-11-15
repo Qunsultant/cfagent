@@ -88,6 +88,7 @@ export type ChannelRecipientRefusalReason =
   | "recipient_owner_mismatch"
   | "email_recipient_not_in_tenant_run"
   | "slack_channel_not_in_tenant_run"
+  | "slack_tenant_channel_unmapped"
   | "webhook_url_not_in_tenant_run";
 
 export interface ChannelRecipientAuditPayload extends Record<string, unknown> {
@@ -490,4 +491,169 @@ export async function verifyEmailRecipientAtDelivery(input: {
     layer,
     audit,
   });
+}
+
+/**
+ * Issue #4610 (G15) — Resolve and verify a tenant's Slack channel at delivery time.
+ *
+ * When per-tenant Slack channel mapping is active (via `channelGate.slackChannel`,
+ * `tenantChannelStore.getTenantSlackChannel`, or `env.TENANT_SLACK_CHANNELS_JSON`):
+ * - An unmapped tenant (`slackChannel === null` or missing tenant) is refused with
+ *   `FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED` (`reason: "slack_tenant_channel_unmapped"`)
+ *   and audited via `delivery.recipient_refused` at `layer`.
+ * - A mapped tenant resolves delivery exclusively to its mapped Slack channel
+ *   (ignoring deployment-global `SCREENER_SLACK_CHANNEL` / `SLACK_CHANNEL`), and
+ *   refuses + audits any explicit `requestedChannel` that does not match the
+ *   tenant's mapped channel.
+ */
+export async function resolveAndVerifySlackRecipientAtDelivery(input: {
+  requestedChannel?: string | null;
+  envFallbackChannel?: string | null;
+  env?: unknown;
+  run: ChannelRecipientRunScope;
+  channelGate?: { tenantId: string; slackChannel?: string | null } | null;
+  tenantChannelStore?: {
+    getTenantSlackChannel?: (tenantId: string) => Promise<string | null>;
+  } | null;
+  binding?: ChannelRecipientBinding | null;
+  layer: ChannelVerificationLayer;
+  audit?: ChannelRecipientAuditFn;
+}): Promise<
+  | { allowed: true; channel?: string }
+  | {
+      allowed: false;
+      code: "FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED";
+      reason: ChannelRecipientRefusalReason;
+      detail: string;
+      error: string;
+      auditPayload: ChannelRecipientAuditPayload;
+    }
+> {
+  const {
+    requestedChannel,
+    envFallbackChannel,
+    env,
+    run,
+    channelGate,
+    tenantChannelStore,
+    layer,
+    audit,
+  } = input;
+  const envRecord = env && typeof env === "object" ? (env as Record<string, unknown>) : {};
+  const runTenantId =
+    normalizeTenantId(run.tenantId) ??
+    inferTenantFromDeliveryId(run.runId) ??
+    normalizeTenantId(channelGate?.tenantId) ??
+    null;
+
+  const trimmedRequested =
+    typeof requestedChannel === "string" && requestedChannel.trim()
+      ? requestedChannel.trim()
+      : undefined;
+  const trimmedFallback =
+    typeof envFallbackChannel === "string" && envFallbackChannel.trim()
+      ? envFallbackChannel.trim()
+      : undefined;
+
+  let mappingConsulted = false;
+  let mappedChannel: string | null = null;
+
+  if (channelGate && channelGate.slackChannel !== undefined) {
+    mappingConsulted = true;
+    mappedChannel = channelGate.slackChannel;
+  } else if (tenantChannelStore && typeof tenantChannelStore.getTenantSlackChannel === "function") {
+    mappingConsulted = true;
+    mappedChannel = runTenantId
+      ? await tenantChannelStore.getTenantSlackChannel(runTenantId)
+      : null;
+  } else if (
+    typeof envRecord["TENANT_SLACK_CHANNELS_JSON"] === "string" &&
+    envRecord["TENANT_SLACK_CHANNELS_JSON"].trim()
+  ) {
+    try {
+      const parsed = JSON.parse(envRecord["TENANT_SLACK_CHANNELS_JSON"]) as Record<
+        string,
+        string | null
+      >;
+      if (parsed && typeof parsed === "object") {
+        mappingConsulted = true;
+        const candidate = runTenantId ? parsed[runTenantId] : null;
+        mappedChannel =
+          typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+      }
+    } catch {
+      // Malformed JSON is ignored; falls through to verifyChannelRecipient.
+    }
+  }
+
+  const refuseSlack = (
+    reason: ChannelRecipientRefusalReason,
+    recipient: string | null,
+    detail: string,
+  ) => {
+    const auditPayload: ChannelRecipientAuditPayload = {
+      channel: "slack",
+      recipient,
+      tenantId: runTenantId,
+      bindingTenantId: runTenantId ?? "unmapped-tenant",
+      userLogin: run.userLogin?.trim() || null,
+      runId: run.runId?.trim() || null,
+      scheduleId: run.scheduleId?.trim() || null,
+      layer,
+      reason,
+      detail,
+    };
+    try {
+      audit?.("delivery.recipient_refused", auditPayload);
+    } catch {
+      // Best-effort callback; structured log below always records.
+    }
+    structuredLog.warn("delivery.recipient_refused", auditPayload);
+    return {
+      allowed: false as const,
+      code: "FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED" as const,
+      reason,
+      detail,
+      error: codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", detail),
+      auditPayload,
+    };
+  };
+
+  let effectiveChannel = trimmedRequested ?? trimmedFallback;
+
+  if (mappingConsulted) {
+    if (!runTenantId || !mappedChannel) {
+      return refuseSlack(
+        "slack_tenant_channel_unmapped",
+        trimmedRequested ?? trimmedFallback ?? null,
+        `tenant "${runTenantId ?? "unknown"}" has no mapped Slack channel; Slack delivery refused`,
+      );
+    }
+    if (trimmedRequested && trimmedRequested !== mappedChannel) {
+      return refuseSlack(
+        "slack_channel_not_in_tenant_run",
+        trimmedRequested,
+        `Slack channel "${trimmedRequested}" does not match tenant "${runTenantId}" mapped channel "${mappedChannel}"`,
+      );
+    }
+    effectiveChannel = mappedChannel;
+  }
+
+  const effectiveRun: ChannelRecipientRunScope = {
+    ...run,
+    tenantId: runTenantId ?? run.tenantId,
+  };
+  const explicitBinding = input.binding ?? resolveEnvChannelRecipientBinding(env, effectiveRun);
+  const check = verifyChannelRecipient({
+    channel: "slack",
+    recipient: effectiveChannel,
+    run: effectiveRun,
+    binding: explicitBinding,
+    layer,
+    audit,
+  });
+  if (!check.allowed) {
+    return check;
+  }
+  return { allowed: true, channel: effectiveChannel };
 }

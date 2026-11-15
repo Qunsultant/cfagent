@@ -56,6 +56,7 @@ import {
   type TenantChannelGate,
 } from "./tenantChannelGate";
 import {
+  resolveAndVerifySlackRecipientAtDelivery,
   verifyChannelRecipient,
   verifyEmailRecipientAtDelivery,
   type ChannelRecipientBinding,
@@ -68,7 +69,7 @@ export const SCREENING_DRAFT_FOOTER =
 export type ScreeningChannel = "slack" | "email" | "webhook" | "voice";
 
 export interface ScreeningDeliverySenders {
-  slack?: (input: { text: string }) => Promise<{ ok: boolean; error?: string }>;
+  slack?: (input: { text: string; channel?: string }) => Promise<{ ok: boolean; error?: string }>;
   email?: (input: {
     to: string;
     subject: string;
@@ -288,6 +289,7 @@ export async function deliverScreeningContent(input: {
       runId: input.runId ?? null,
       scheduleId: input.scheduleId ?? null,
     };
+    let verifiedSlackChannel = input.slackChannel;
     const recipientCheck =
       channel === "email"
         ? await verifyEmailRecipientAtDelivery({
@@ -299,14 +301,24 @@ export async function deliverScreeningContent(input: {
             layer: "screening_content",
             audit: input.audit,
           })
-        : verifyChannelRecipient({
-            channel,
-            recipient,
-            run: runScope,
-            binding: input.recipientBinding,
-            layer: "screening_content",
-            audit: input.audit,
-          });
+        : channel === "slack"
+          ? await resolveAndVerifySlackRecipientAtDelivery({
+              requestedChannel: input.slackChannel,
+              env: input.env,
+              run: runScope,
+              channelGate: input.channelGate,
+              binding: input.recipientBinding,
+              layer: "screening_content",
+              audit: input.audit,
+            })
+          : verifyChannelRecipient({
+              channel,
+              recipient,
+              run: runScope,
+              binding: input.recipientBinding,
+              layer: "screening_content",
+              audit: input.audit,
+            });
     if (!recipientCheck.allowed) {
       results.push({
         channel,
@@ -314,6 +326,9 @@ export async function deliverScreeningContent(input: {
         error: recipientCheck.error,
       });
       continue;
+    }
+    if (channel === "slack" && "channel" in recipientCheck && typeof recipientCheck.channel === "string" && recipientCheck.channel) {
+      verifiedSlackChannel = recipientCheck.channel;
     }
     const sender = input.senders[channel];
     if (!sender) {
@@ -326,7 +341,10 @@ export async function deliverScreeningContent(input: {
     }
     try {
       if (channel === "slack") {
-        const r = await sender({ text: input.text } as never);
+        const r = await sender({
+          text: input.text,
+          ...(verifiedSlackChannel ? { channel: verifiedSlackChannel } : {}),
+        } as never);
         results.push({ channel, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
       } else if (channel === "email") {
         if (!input.emailTo) {
@@ -508,6 +526,7 @@ export async function deliverDiscoveryDirect(input: {
       runId: outcome.deliveryId ?? outcome.scanRunId ?? outcome.canonicalReportId ?? null,
       scheduleId: outcome.scheduleId ?? null,
     };
+    let effectiveOutcome = outcome;
     const recipientCheck =
       channel === "email"
         ? await verifyEmailRecipientAtDelivery({
@@ -519,14 +538,25 @@ export async function deliverDiscoveryDirect(input: {
             layer: "discovery_direct",
             audit: input.audit,
           })
-        : verifyChannelRecipient({
-            channel,
-            recipient,
-            run: runScope,
-            binding: input.recipientBinding ?? outcome.recipientBinding,
-            layer: "discovery_direct",
-            audit: input.audit,
-          });
+        : channel === "slack"
+          ? await resolveAndVerifySlackRecipientAtDelivery({
+              requestedChannel: outcome.slackChannel,
+              envFallbackChannel: config.channels.slack.channel,
+              env: input.env,
+              run: runScope,
+              channelGate: input.channelGate,
+              binding: input.recipientBinding ?? outcome.recipientBinding,
+              layer: "discovery_direct",
+              audit: input.audit,
+            })
+          : verifyChannelRecipient({
+              channel,
+              recipient,
+              run: runScope,
+              binding: input.recipientBinding ?? outcome.recipientBinding,
+              layer: "discovery_direct",
+              audit: input.audit,
+            });
     if (!recipientCheck.allowed) {
       results.push({
         channel,
@@ -534,6 +564,9 @@ export async function deliverDiscoveryDirect(input: {
         error: recipientCheck.error,
       });
       continue;
+    }
+    if (channel === "slack" && "channel" in recipientCheck && typeof recipientCheck.channel === "string" && recipientCheck.channel) {
+      effectiveOutcome = { ...outcome, slackChannel: recipientCheck.channel };
     }
     if (channel === "email" && outcome.emailTo && !isEmailAllowed(config, outcome.emailTo, outcome, input.ownerEmail)) {
       const error = codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${outcome.emailTo}`);
@@ -557,7 +590,7 @@ export async function deliverDiscoveryDirect(input: {
       continue;
     }
     try {
-      const delivered = await port.deliver({ channel, userLogin, outcome, artifacts: [] });
+      const delivered = await port.deliver({ channel, userLogin, outcome: effectiveOutcome, artifacts: [] });
       results.push(delivered.ok
         ? { channel, ok: true }
         : { channel, ok: false, error: delivered.error ?? delivered.detail ?? "delivery failed" });
