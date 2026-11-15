@@ -14,6 +14,7 @@ import { resolveScreenerAgentName } from "./screenerAgentName";
 import { actorGateway } from "../services/cloudflareActorGateway";
 import { copilotRegistrationForSourceTab } from "../services/copilotChannels";
 import { runBizCopilotTenantBranch } from "../services/bizCopilotTenants";
+import { runBizCopilotAccountBranch } from "../services/bizCopilotAccounts";
 import { recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import {
@@ -2721,6 +2722,13 @@ export class OrchestratorAgent extends PortThink {
       audit: (type, payload) => this.audit(type, "orchestrator", payload),
     });
 
+    // Issue #4516 (BizCopilot slice 2): the account branch, same shape as the tenant branch above (see src/services/bizCopilotAccounts.ts).
+    const bizCopilotAccountContext = await runBizCopilotAccountBranch({
+      sourceTab, userText, env: this.env, userLogin,
+      getOrm: () => this.getOrm(),
+      audit: (type, payload) => this.audit(type, "orchestrator", payload),
+    });
+
     const { memoryContext, vectorContext } = await this.assembleGrounding(userText);
     // #2488/#2496: the CHAT_NLQ_MODE gate at the Think layer. The
     // discovered catalog arrives through Think's auto-merge and
@@ -2811,9 +2819,11 @@ export class OrchestratorAgent extends PortThink {
         // Issue #4515: the BizCopilot tenant outcome, when the
         // branch executed — the model narrates it, nothing else.
         bizCopilotTenantContext,
+        // Issue #4516: the BizCopilot account outcome — the model narrates it, nothing else.
+        bizCopilotAccountContext,
       }),
       maxSteps: this.maxSteps,
-      ...(isAutoOptionsResearchRequest || bizCopilotTenantContext
+      ...(isAutoOptionsResearchRequest || bizCopilotTenantContext || bizCopilotAccountContext
         ? { activeTools: [] as string[] }
         : nlqGate.activeTools
           ? { activeTools: nlqGate.activeTools }

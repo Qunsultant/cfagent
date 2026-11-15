@@ -368,12 +368,12 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
     tooltip: {
       eyebrow: "Business & Platform",
       title: "BizCopilot Active",
-      description: "BizCopilot Active: Manage tenants through chat — create, list, and configure tenants, and view members. Every result links the Tenants page so you can open and verify it.",
+      description: "BizCopilot Active: Manage tenants and accounts through chat — create, list, and configure tenants, view members, and look up accounts, grant subscriptions and free access, and move accounts to current pricing. Every result links the page so you can open and verify it.",
     },
     hero: {
       icon: "💼",
       title: "BizCopilot & Platform Administration",
-      description: "Manage tenants conversationally: create a tenant, list tenants with settings and member counts, read and update tenant settings, and view account members. Actions run through the same server paths as the Tenants page, with the same operator gate — every result links the Tenants page so you can verify what was done.",
+      description: "Manage tenants and accounts conversationally: create a tenant, list tenants with settings and member counts, read and update tenant settings, and view account members — plus look up an account by login, grant a subscription or free access, and move an account to current pricing. Actions run through the same server paths as the Tenants and Accounts pages, with the same operator gate — every result links the page so you can verify what was done.",
     },
     quickChips: [
       {
@@ -396,13 +396,28 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         prompt: "Show members of tenant acme",
         category: "Tenant Administration",
       },
+      {
+        label: "🔍 Look up an account",
+        prompt: "Show account alice@example.com",
+        category: "Account Administration",
+      },
+      {
+        label: "🎁 Show grants for an account",
+        prompt: "Show grants for alice@example.com",
+        category: "Account Administration",
+      },
+      {
+        label: "💲 Move account to current pricing",
+        prompt: "Move alice@example.com to current pricing",
+        category: "Account Administration",
+      },
     ],
-    composerPlaceholder: "Ask BizCopilot (e.g. 'List tenants', 'Create tenant acme', 'Show settings for tenant acme')…",
+    composerPlaceholder: "Ask BizCopilot (e.g. 'List tenants', 'Create tenant acme', 'Show account alice@example.com')…",
     sourceTab: "BizCopilot",
     banner: {
       icon: "💼",
       headline: "BizCopilot Active:",
-      description: "Manage tenants through chat — create, list, and configure tenants, and view members. Results link the Tenants page for verification.",
+      description: "Manage tenants and accounts through chat — create, list, and configure tenants, view members, and look up accounts, grant subscriptions and free access, and move accounts to current pricing. Results link the Tenants and Accounts pages for verification.",
     },
   },
 ];
