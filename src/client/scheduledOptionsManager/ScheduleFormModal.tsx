@@ -152,9 +152,12 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                   display-only: resolved from the tenant's broker
                   selection in Settings and recorded on the schedule by
                   the server. The data provider feeding the run is the
-                  tenant's data-provider selection. */}
+                  tenant's data-provider selection. The recorded values
+                  are a snapshot, not a pin (D1): at fire time the run
+                  re-resolves both from the live selections, so a later
+                  change in Settings applies to future runs. */}
               <div className="sched-form-group">
-                <Select label="Broker" hint={`Runs under your broker selection from Settings (${tenantProviders.dataProviderId} feeds the data). Recorded on the schedule at creation.`} id="sched-broker"
+                <Select label="Broker" hint={`Runs under your broker selection from Settings (${tenantProviders.dataProviderId} feeds the data). This is the live default, not a pin — the broker is re-resolved from Settings when the schedule fires, so a later change in Settings applies to future runs.`} id="sched-broker"
                   value={dialogBrokerId}
                   disabled
                 >
@@ -166,7 +169,7 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                 </Select>
               </div>
               <div className="sched-form-group">
-                <Select label="Mode" hint={`Live/paper from the broker environment (${brokerEnvironment}). Recorded on the schedule at creation.`} id="sched-mode"
+                <Select label="Mode" hint={`Live/paper from the broker environment (${brokerEnvironment}). This is the live default, not a pin — the effective mode is re-resolved when the schedule fires, so a later change applies to future runs.`} id="sched-mode"
                   value={dialogMode}
                   disabled
                 >
