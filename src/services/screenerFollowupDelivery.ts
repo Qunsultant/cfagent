@@ -39,6 +39,7 @@ import {
 import {
   resolveEnvChannelRecipientBinding,
   verifyChannelRecipient,
+  verifyEmailRecipientAtDelivery,
   type ChannelRecipientBinding,
   type ChannelRecipientRunScope,
 } from "./channelRecipientVerification";
@@ -119,6 +120,7 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
     runId?: string | null;
     scheduleId?: string | null;
     recipientBinding?: ChannelRecipientBinding | null;
+    ownerEmail?: string | null;
   }) => Promise<{ ok: boolean; error?: string; detail?: string }>;
 } {
   return {
@@ -149,14 +151,25 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
         outcome.recipientBinding ??
         (deps.getRecipientBinding ? await deps.getRecipientBinding(runScope) : null) ??
         resolveEnvChannelRecipientBinding(deps.env, runScope);
-      const recipientCheck = verifyChannelRecipient({
-        channel,
-        recipient: effectiveRecipient,
-        run: runScope,
-        binding,
-        layer: "followup_port.deliver",
-        audit: deps.audit,
-      });
+      const recipientCheck =
+        channel === "email"
+          ? await verifyEmailRecipientAtDelivery({
+              recipient: effectiveRecipient,
+              env: deps.env,
+              run: runScope,
+              ownerEmail: outcome.ownerEmail,
+              binding,
+              layer: "followup_port.deliver",
+              audit: deps.audit,
+            })
+          : verifyChannelRecipient({
+              channel,
+              recipient: effectiveRecipient,
+              run: runScope,
+              binding,
+              layer: "followup_port.deliver",
+              audit: deps.audit,
+            });
       if (!recipientCheck.allowed) {
         return { ok: false, error: recipientCheck.error };
       }
@@ -287,7 +300,18 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
       return { ok: true };
     },
     // Issue #1123 S4: text-only lifecycle notifications (no artifact).
-    notify: async ({ channel, userLogin, text, emailTo, slackChannel, tenantId, runId, scheduleId, recipientBinding }) => {
+    notify: async ({ channel, userLogin, text, emailTo, slackChannel, tenantId, runId, scheduleId, recipientBinding, ownerEmail }: {
+      channel: AsyncJobChannel;
+      userLogin: string;
+      text: string;
+      emailTo?: string;
+      slackChannel?: string;
+      tenantId?: string | null;
+      runId?: string | null;
+      scheduleId?: string | null;
+      recipientBinding?: ChannelRecipientBinding | null;
+      ownerEmail?: string | null;
+    }) => {
       const config = resolveScreenerFollowupConfig(deps.env as unknown as Record<string, unknown>);
       // Issue #3169: same gate as deliver() (slack/email only in
       // practice — webhook below keeps its existing error when
@@ -312,14 +336,25 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
           recipientBinding ??
           (deps.getRecipientBinding ? await deps.getRecipientBinding(runScope) : null) ??
           resolveEnvChannelRecipientBinding(deps.env, runScope);
-        const recipientCheck = verifyChannelRecipient({
-          channel,
-          recipient: effectiveRecipient,
-          run: runScope,
-          binding,
-          layer: "followup_port.notify",
-          audit: deps.audit,
-        });
+        const recipientCheck =
+          channel === "email"
+            ? await verifyEmailRecipientAtDelivery({
+                recipient: effectiveRecipient,
+                env: deps.env,
+                run: runScope,
+                ownerEmail,
+                binding,
+                layer: "followup_port.notify",
+                audit: deps.audit,
+              })
+            : verifyChannelRecipient({
+                channel,
+                recipient: effectiveRecipient,
+                run: runScope,
+                binding,
+                layer: "followup_port.notify",
+                audit: deps.audit,
+              });
         if (!recipientCheck.allowed) {
           return { ok: false, error: recipientCheck.error };
         }

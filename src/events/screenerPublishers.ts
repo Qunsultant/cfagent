@@ -56,6 +56,7 @@ import {
   inferTenantFromDeliveryId,
   resolveEnvChannelRecipientBinding,
   verifyChannelRecipient,
+  verifyEmailRecipientAtDelivery,
   type ChannelRecipientBinding,
   type ChannelRecipientRunScope,
 } from "../services/channelRecipientVerification";
@@ -130,16 +131,45 @@ const registeredBuses = new WeakSet<ScreenerEventBus>();
  * to the env fallback inside getStoredEmailDestination, never to a
  * failed delivery.
  */
-async function resolvePublisherEmailTo(
+async function resolveAndVerifyPublisherEmailTo(
   deps: ScreenerPublisherDeps,
-  event: { emailTo?: string }
-): Promise<string | undefined> {
+  event: {
+    emailTo?: string;
+    ownerEmail?: string | null;
+    deliveryId?: string;
+    scheduleId?: string;
+    tenantId?: string | null;
+    recipientBinding?: ChannelRecipientBinding | null;
+  },
+): Promise<{ emailTo?: string; allowed: boolean }> {
   const stored = await getStoredEmailDestination(deps.env, deps.userLogin);
-  return resolveEmailDestination({
+  const emailTo = resolveEmailDestination({
     eventEmailTo: event.emailTo,
     storedEmailTo: stored,
     env: deps.env as unknown as Record<string, unknown>,
   });
+  if (!emailTo) {
+    return { emailTo: undefined, allowed: false };
+  }
+  const runScope: ChannelRecipientRunScope = {
+    tenantId: event.tenantId ?? inferTenantFromDeliveryId(event.deliveryId),
+    runId: event.deliveryId ?? null,
+    scheduleId: event.scheduleId ?? null,
+    userLogin: deps.userLogin,
+  };
+  const explicitBinding =
+    event.recipientBinding ?? deps.getRecipientBinding?.(runScope) ?? null;
+  const check = await verifyEmailRecipientAtDelivery({
+    recipient: emailTo,
+    env: deps.env,
+    run: runScope,
+    ownerEmail: event.ownerEmail,
+    storedEmailTo: stored,
+    binding: explicitBinding,
+    layer: "publisher",
+    audit: (type, payload) => recordPublisherRecipientRefusal(deps, type, payload),
+  });
+  return { emailTo, allowed: check.allowed };
 }
 
 interface ScreenerPdf {
@@ -280,8 +310,8 @@ async function deliverPdfToEmail(
   html: string,
   plainText: string
 ): Promise<void> {
-  const emailTo = await resolvePublisherEmailTo(deps, event);
-  if (!emailTo) return;
+  const { emailTo, allowed } = await resolveAndVerifyPublisherEmailTo(deps, event);
+  if (!emailTo || !allowed) return;
   try {
     let base64 = "";
     const chunk = 8192;
@@ -470,8 +500,8 @@ async function publishCompleted(
   // Issue #1770 (slice B, F-63): when no email transport is
   // configured, skip with the named reason instead of attempting
   // sends that cannot succeed and dropping the failure silently.
-  const emailTo = await resolvePublisherEmailTo(deps, event);
-  if (emailTo && checkPublisherChannelRecipient(deps, "email", emailTo, event)) {
+  const { emailTo, allowed: emailAllowed } = await resolveAndVerifyPublisherEmailTo(deps, event);
+  if (emailTo && emailAllowed) {
     const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
     if (!deliveryConfig.emailConfigured) {
       console.warn(
@@ -587,10 +617,10 @@ async function publishFailed(
   }
   attempted = attempted || slackConfigured;
 
-  const emailTo = await resolvePublisherEmailTo(deps, event);
+  const { emailTo, allowed: emailAllowed } = await resolveAndVerifyPublisherEmailTo(deps, event);
   if (emailTo) {
     attempted = true;
-    if (checkPublisherChannelRecipient(deps, "email", emailTo, event)) {
+    if (emailAllowed) {
       // Issue #1770 (slice B, F-63): same named skip as the completed
       // path — a missing transport must warn with its reason, not
       // silently drop the failure notice.

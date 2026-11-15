@@ -320,15 +320,17 @@ same run record" — but it is a property of the followup job path, not a
 check enforced on every send.
 
 **Recipient ∈ tenant+run verification — not found on any channel:**
-- **Email:** format regex + optional `EMAIL_TO_ALLOWED_DOMAINS`
-  allowlist (and a warning when the allowlist is unset: recipients are
-  format-validated only). No check that the address belongs to the run's
-  tenant or owner. Worse, the address itself is caller-supplied at
-  schedule creation: `emailTo` flows from schedule options into the tick
-  event and into delivery channel selection. A schedule created with
-  someone else's address would deliver to that address after only a
-  format/domain check — the tenant/run binding of the recipient is a
-  schedule-creation property, not a delivery-time verification.
+- **Email (#4609, G14 — shipped):** delivery-time verification via
+  `verifyEmailRecipientAtDelivery` (`src/services/channelRecipientVerification.ts`)
+  and `isEmailAllowed` (`src/services/screenerFollowups.ts`) enforces
+  format + optional `EMAIL_TO_ALLOWED_DOMAINS` allowlist AND verifies
+  that the recipient belongs to the run's `tenant + owner` binding
+  (resolved from explicit `ChannelRecipientBinding`, the run owner's
+  stored email destination in `userEmailDestinationStore`, `ownerEmail`
+  on the run/outcome/event, or `SCREENER_EMAIL_ALLOWLIST`). A schedule
+  created with someone else's email address is refused at delivery time
+  with `FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED` and audited via
+  `delivery.recipient_refused`.
 - **Slack:** channel resolved from delivery options or deployment env
   (`SLACK_CHANNEL_ID` / `SCREENER_SLACK_CHANNEL` / `SLACK_CHANNEL`),
   token from env — deployment-global config, no per-tenant channel
@@ -537,9 +539,9 @@ capability, not an absence.
     tenantId; this one does not.
 14. **R2 report-body keys are not tenant-namespaced**
     (`reports/<reportId>.json`).
-15. **Slack delivery channel is deployment-global** (env channel id);
-    email validation is format + optional domain allowlist only —
-    neither verifies tenant/run membership at the channel layer.
+15. **Slack delivery channel is deployment-global** (env channel id —
+    tracked in #4610); email delivery-time recipient verification
+    (`recipient ∈ tenant + owner`) shipped in #4609 (G14).
 16. **Flag selection is by binding presence, not environment** (FLAGS
     bound → Flagship, else Env adapter). The Env adapter is therefore
     reachable in any runtime without the binding — not code-enforced

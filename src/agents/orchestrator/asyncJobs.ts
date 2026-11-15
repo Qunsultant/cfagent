@@ -88,6 +88,7 @@ import {
   inferTenantFromDeliveryId,
   resolveEnvChannelRecipientBinding,
   verifyChannelRecipient,
+  verifyEmailRecipientAtDelivery,
 } from "../../services/channelRecipientVerification";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
@@ -2476,14 +2477,25 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           };
           const binding =
             outcome.recipientBinding ?? resolveEnvChannelRecipientBinding(ctx.env, runScope);
-          const recipientCheck = verifyChannelRecipient({
-            channel,
-            recipient: effectiveRecipient,
-            run: runScope,
-            binding,
-            layer: "executor.deliver",
-            audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-          });
+          const recipientCheck =
+            channel === "email"
+              ? await verifyEmailRecipientAtDelivery({
+                  recipient: effectiveRecipient,
+                  env: ctx.env,
+                  run: runScope,
+                  ownerEmail: outcome.ownerEmail,
+                  binding,
+                  layer: "executor.deliver",
+                  audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+                })
+              : verifyChannelRecipient({
+                  channel,
+                  recipient: effectiveRecipient,
+                  run: runScope,
+                  binding,
+                  layer: "executor.deliver",
+                  audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+                });
           if (!recipientCheck.allowed) {
             suppressor.release(deliveryRunId, deliveryDestination);
             throw new Error(recipientCheck.error);
@@ -2582,14 +2594,25 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       };
       const binding =
         outcome.recipientBinding ?? resolveEnvChannelRecipientBinding(ctx.env, runScope);
-      const recipientCheck = verifyChannelRecipient({
-        channel,
-        recipient: effectiveRecipient,
-        run: runScope,
-        binding,
-        layer: "executor.notify",
-        audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
-      });
+      const recipientCheck =
+        channel === "email"
+          ? await verifyEmailRecipientAtDelivery({
+              recipient: effectiveRecipient,
+              env: ctx.env,
+              run: runScope,
+              ownerEmail: outcome.ownerEmail,
+              binding,
+              layer: "executor.notify",
+              audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+            })
+          : verifyChannelRecipient({
+              channel,
+              recipient: effectiveRecipient,
+              run: runScope,
+              binding,
+              layer: "executor.notify",
+              audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+            });
       if (!recipientCheck.allowed) {
         throw new Error(recipientCheck.error);
       }

@@ -1,0 +1,2 @@
+### Security & Delivery
+- **Email delivery-time recipient verification (`recipient ∈ tenant + owner`, G14)** (#4609): Enforced `verifyEmailRecipientAtDelivery` across all email delivery layers (`executor.deliver`, `executor.notify`, `followup_port.deliver`, `followup_port.notify`, `discovery_direct`, `screening_content`, `publisher`) and `isEmailAllowed`, verifying format, `EMAIL_TO_ALLOWED_DOMAINS`, and `tenant + owner` email membership (including refusing and auditing schedules created with someone else's `emailTo`).
