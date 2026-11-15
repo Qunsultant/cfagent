@@ -20,6 +20,8 @@
  * change approved in its own issue (recorded here with that issue number).
  * (#4651: GET /api/security/pdp joins the IAAA lifecycle block in
  * handleAuthIaaaRoutes — 148 → 149 descriptors.)
+ * (#4653: GET /api/security/pep joins the same block, next to the PDP
+ * route — 149 → 150 descriptors.)
  *
  * Slice 2 decisions recorded here (see also the Slice 2 progress comment on
  * #2902):
@@ -564,6 +566,7 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/iaaa/deactivate",
   "ANY /api/iaaa/offboard",
   "ANY /api/security/pdp",
+  "ANY /api/security/pep",
   "ANY /api/api-keys",
   "ANY PREFIX /api/api-keys/",
   "ANY /mcp",
