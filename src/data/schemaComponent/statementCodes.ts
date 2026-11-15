@@ -34,6 +34,16 @@ export function statementCodeTable(code: string): string | null {
   return match ? match[1] : null;
 }
 
+/** #4386: the action segment — the parameterized-table catalogue
+ *  resolves an entry by kind + plane + action, so the table
+ *  segment can be the runtime table instead of the registered one. */
+export function statementCodeAction(code: string): string | null {
+  const match = code.match(
+    /^(?:schema|seed|dml)\.(?:d1|do|orm|index|route)\.[a-z0-9_]+\.([a-z0-9_]+)$/,
+  );
+  return match ? match[1] : null;
+}
+
 export function buildStatementCode(
   kind: StatementKind,
   plane: SchemaPlane,
