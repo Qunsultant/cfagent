@@ -32,13 +32,13 @@ describe("nav-config.json shape (issue #2977)", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("routes: navOrders are exactly 0..30 across the 31 nav entries", () => {
+  it("routes: navOrders are exactly 0..28 across the 29 nav entries", () => {
     const orders = (navData.routes as { navEntry?: { navOrder: number } }[])
       .filter((r) => r.navEntry)
       .map((r) => r.navEntry!.navOrder);
-    expect(orders).toHaveLength(31);
+    expect(orders).toHaveLength(29);
     expect([...orders].sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 31 }, (_, i) => i),
+      Array.from({ length: 29 }, (_, i) => i),
     );
   });
 

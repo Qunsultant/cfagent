@@ -8,6 +8,13 @@
  * and the approval door are unchanged — the Approvals page renders
  * the same component with the same props.
  *
+ * Issue #4626 (S1 of #4625) REVERSES the home: the standalone Approvals
+ * page retired onto the order approvals sub-tab
+ * (`?tab=order&orderTab=approvals`), which is now the ONE canonical
+ * home. The queueRail and Queues-page links re-point to the sub-tab;
+ * the ApprovalsPanel component itself is kept, unmounted, per the
+ * no-deletion rule — its parity pins below still guard the component.
+ *
  * Harness follows tests/order_ticket_page_3088.test.tsx (hub render
  * with ToastProvider, stubbed fetch) and tests/approvals_panel.test.tsx
  * (direct panel renders with a stubbed pending draft).
@@ -107,7 +114,7 @@ afterEach(() => {
 
 /** The rail link: the anchor inside the "Pending approvals" section — not the left-nav Approvals entry. */
 function railLink(): HTMLAnchorElement | null {
-  const links = Array.from(container.querySelectorAll('a[href="?tab=approvals"]'));
+  const links = Array.from(container.querySelectorAll('a[href="?tab=order&orderTab=approvals"]'));
   return (
     (links.find((a) => {
       const section = a.closest("section");
@@ -136,21 +143,21 @@ function queueDomMarkersAbsent(expectedHeadings: number) {
 }
 
 describe("Approvals consolidation (issue #4538)", () => {
-  it("stock tab: no queue, link to the Approvals page in its place", async () => {
+  it("stock tab: no queue, link to the approvals sub-tab in its place", async () => {
     await renderOrderPage("stock");
     expect(container.textContent).toContain("Equity / ETF Order Ticket");
     queueDomMarkersAbsent(1);
     expect(railLink()).not.toBeNull();
   });
 
-  it("options tab: no queue, link to the Approvals page in its place", async () => {
+  it("options tab: no queue, link to the approvals sub-tab in its place", async () => {
     await renderOrderPage("options");
     expect(container.textContent).toContain("Options Order Ticket");
     queueDomMarkersAbsent(1);
     expect(railLink()).not.toBeNull();
   });
 
-  it("risk tab: no queue, link to the Approvals page in its place", async () => {
+  it("risk tab: no queue, link to the approvals sub-tab in its place", async () => {
     await renderOrderPage("risk");
     expect(new URLSearchParams(window.location.search).get("orderTab")).toBe("risk");
     queueDomMarkersAbsent(1);
@@ -182,17 +189,21 @@ describe("Approvals consolidation (issue #4538)", () => {
     expect(container.textContent).toContain("No pending approvals");
   });
 
-  it("source pin: one queue component, two homes — the Approvals page and the order sub-tab (#4573)", () => {
+  it("source pin: one queue component, one home — the order approvals sub-tab (#4626)", () => {
     const ticket = readFileSync("src/client/OrderTicketPanel.tsx", "utf8");
     // Issue #4538 made the Approvals page the one home. Issue #4573 adds the
     // queue as an order sub-tab (additive: the page, the #4538 links and the
-    // Queues-page link all stay), so the pin becomes "one COMPONENT, reused",
-    // not "one mount".
+    // Queues-page link all stay). Issue #4626 reverses the home: the
+    // standalone page retires onto the sub-tab, so the pin becomes "one
+    // COMPONENT, one home" — the sub-tab — and every link to the retired
+    // address re-points to it (the sub-tab's own self-link is gone).
     expect(ticket).toContain('import { TradingApprovalsQueue } from "./TradingApprovalsQueue";');
     expect(ticket).toContain("<TradingApprovalsQueue />");
     expect(ticket).not.toContain("function TradingApprovalsQueue");
     expect(ticket).toContain("queueRail=");
-    expect(ticket).toContain('href="?tab=approvals"');
+    expect(ticket).toContain('href="?tab=order&orderTab=approvals"');
+    expect(ticket).not.toContain('href="?tab=approvals"');
+    expect(ticket).not.toContain("Open the full Approvals page");
     // Issue #4574: the Queues page is retired (its DLQ lives on the
     // Schedules dead-letter-queue view); the page file stays, deprecated
     // in place, and carries no queue — the one-home pin for the queue
@@ -200,6 +211,8 @@ describe("Approvals consolidation (issue #4538)", () => {
     const queues = readFileSync("src/client/QueuesPage.tsx", "utf8");
     expect(queues).toContain("@deprecated");
     expect(queues).not.toContain("TradingApprovalsQueue");
+    expect(queues).toContain('href="?tab=order&orderTab=approvals"');
+    expect(queues).not.toContain('href="?tab=approvals"');
     const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
     expect(hub).not.toContain("TradingApprovalsQueue");
     const panel = readFileSync("src/client/ApprovalsPanel.tsx", "utf8");

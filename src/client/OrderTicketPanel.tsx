@@ -430,7 +430,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
       }
       queueRail={
         <PageSection title="Pending approvals">
-          <a href="?tab=approvals">Review pending approvals on the Approvals page</a>
+          <a href="?tab=order&orderTab=approvals">Review pending approvals in the approvals tab</a>
         </PageSection>
       }
     >
@@ -993,12 +993,9 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
         >
           <PageSection
             title="Trade approvals"
-            description="Every trade draft awaiting a decision, the same queue the Approvals page renders — one component, two homes."
+            description="Every trade draft awaiting a decision — the approvals queue lives here, on the order page (issue #4626 retired the standalone Approvals page onto this sub-tab)."
           >
             <TradingApprovalsQueue />
-            <p>
-              <a href="?tab=approvals">Open the full Approvals page (trade drafts and held deliveries)</a>
-            </p>
           </PageSection>
         </TabPanel>
         <TabPanel

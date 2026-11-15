@@ -13,10 +13,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { FirstRunGate } from "./FirstRunGate";
 import { BrokerDynamicMenu, SettingsMenu, type BrokerDynamicMenuProps, type ETradeDynamicMenuProps } from "./BrokerDynamicMenu";
 import { useBrokerEnvironment, switchBrokerEnvironment, fetchBrokerEnvironment, brokerModeLabel } from "./brokerEnvironment";
-import { MarketDataResearchHub } from "./MarketDataResearchHub";
-import { OptionsFlowsHub } from "./options/flows";
 import { OptionsScreenerPage } from "./OptionsScreenerPage";
-import { RiskAnalysisPanel } from "./RiskAnalysisPanel";
 import { PlatformAdminPage } from "./PlatformAdminPage";
 import { WorkflowsHub } from "./WorkflowsHub";
 import { WorkflowCatalogPage } from "./WorkflowCatalogPage";
@@ -27,7 +24,7 @@ import { BillingServicingPanel } from "./BillingServicingPanel";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
 import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
-import { legacyAuditVaultRedirect, legacyPlatformAdminHubRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
+import { legacyAuditVaultRedirect, legacyDualHomeRedirect, legacyPlatformAdminHubRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
 import { legacySchedulesRedirect } from "./schedulesHomeView";
 import { SchedulesHome } from "./SchedulesHome";
 import { AuditVaultPage } from "./AuditVaultPage";
@@ -54,7 +51,6 @@ import { ReferralsTab } from "./chat/tabs/ReferralsTab";
 import { AdsTab } from "./chat/tabs/AdsTab";
 import { RevenueTab } from "./chat/tabs/RevenueTab";
 import { EndpointsTab } from "./chat/tabs/EndpointsTab";
-import { ApprovalsPanel } from "./ApprovalsPanel";
 import { DocsAndReportsPanel } from "./DocsAndReportsPanel";
 import { PaymentWorkflowAssurance } from "./PaymentWorkflowAssurance";
 import { CheckoutPanel } from "./CheckoutPanel";
@@ -70,13 +66,13 @@ export function Chat({ user }: { user: User }) {
   const [tab, setTab] = useState<NavTabId>(() => {
     // S1 (#1808): the URL is the source of truth for navigation.
     const fromUrl = readTabFromLocation();
-    // Issue #1806: Screener-first rollout — if default from url is autopilot, but autopilot is disabled and screener is enabled, start on screeners
+    // Issue #1806: Screener-first rollout — if default from url is autopilot, but autopilot is disabled and screener is enabled, start on assets-hub
     if (fromUrl === "autopilot" && typeof window !== "undefined" && !window.location.search.includes("tab=autopilot")) {
-      if (isTabFeatureEnabled("screeners") && !isTabFeatureEnabled("autopilot")) {
-        return "screeners";
+      if (isTabFeatureEnabled("assets-hub") && !isTabFeatureEnabled("autopilot")) {
+        return "assets-hub";
       }
       if (!isTabFeatureEnabled("autopilot")) {
-        return isTabFeatureEnabled("screeners") ? "screeners" : "chat";
+        return isTabFeatureEnabled("assets-hub") ? "assets-hub" : "chat";
       }
     }
     return fromUrl;
@@ -124,6 +120,13 @@ export function Chat({ user }: { user: User }) {
             platformAdminHubRedirect.view,
             platformAdminHubRedirect.params,
           );
+          return;
+        }
+        // Issue #4626 (S1 of #4625): the five retired dual-homed
+        // addresses resolve onto the home where their workflow lives.
+        const dualHomeRedirect = legacyDualHomeRedirect(window.location.search);
+        if (dualHomeRedirect) {
+          replaceToTab(dualHomeRedirect.tab, dualHomeRedirect.view, dualHomeRedirect.params);
           return;
         }
       }
@@ -991,9 +994,6 @@ export function Chat({ user }: { user: User }) {
         <AgentsPanel />
       </ErrorBoundary>
     ),
-    approvals: (
-          <ApprovalsPanel />
-    ),
     "audit-vault": (
       <AuditVaultPage
         isBusy={isBusy}
@@ -1037,20 +1037,6 @@ export function Chat({ user }: { user: User }) {
 
           />
     ),
-    "options-flows": (
-          <div className="options-flows-view" style={{ width: "100%", height: "100%", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <OptionsFlowsHub
-              user={user}
-              onSendPrompt={(prompt, sourceTab) => {
-                setPendingPrompt({ prompt, sourceTab: sourceTab || "Options Flows" });
-                handleSelectTab("chat");
-              }}
-              onTradeSymbol={(symbol) => {
-                handleSelectTab("order");
-              }}
-            />
-          </div>
-    ),
     // Issue #2596, slice 1: the Options Screener's own page. It is
     // not a retained trading-hub tab, so it lives in TAB_CONTENT
     // like the other standalone pages; its cards link to the
@@ -1060,18 +1046,6 @@ export function Chat({ user }: { user: User }) {
         onSelectTab={(newTab) => {
           handleSelectTab(newTab);
           setTbdMenuOpen(false);
-        }}
-      />
-    ),
-    // Issue #3087: the Risk Analysis page. It is not a retained
-    // trading-hub tab, so it lives in TAB_CONTENT like the other
-    // standalone pages; it renders the risk engine inline, it does
-    // not re-render the hub's RiskAnalysisModal.
-    "risk-analysis": (
-      <RiskAnalysisPanel
-        onSendPrompt={(prompt, sourceTab) => {
-          setPendingPrompt({ prompt, sourceTab: sourceTab || "Risk Analysis" });
-          handleSelectTab("chat");
         }}
       />
     ),
@@ -1123,20 +1097,6 @@ export function Chat({ user }: { user: User }) {
     ),
     "checkout": (
           <CheckoutPanel userLogin={user.login} />
-    ),
-    research: (
-          <div className="research-view">
-            <MarketDataResearchHub
-              user={user}
-              onSendPrompt={(prompt, sourceTab) => {
-                setPendingPrompt({ prompt, sourceTab: sourceTab || "Market Data Research" });
-                handleSelectTab("chat");
-              }}
-              onTradeSymbol={(symbol) => {
-                handleSelectTab("order");
-              }}
-            />
-          </div>
     ),
     search: (
       <ErrorBoundary label="Search">

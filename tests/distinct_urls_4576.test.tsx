@@ -63,20 +63,24 @@ describe("reports panel address (#4576)", () => {
 
 describe("nested sub-tab params (#4576)", () => {
   it("registers the two inner params with their hosts", () => {
-    expect(TAB_PARAM_OWNERS.flowsTab).toEqual(["options", "options-flows"]);
-    expect(TAB_PARAM_OWNERS.researchTab).toEqual(["stock-hub", "research"]);
+    // Issue #4626: the standalone hosts are retired, so each param is
+    // owned by its nested home only.
+    expect(TAB_PARAM_OWNERS.flowsTab).toEqual(["options"]);
+    expect(TAB_PARAM_OWNERS.researchTab).toEqual(["stock-hub"]);
     // `section` stays unowned by design: every value is a schedules address.
     expect(TAB_PARAM_OWNERS.section).toBeUndefined();
   });
 
   it("publishes a surface per panel, with the panel's own values", () => {
     expect(surface("options-flows")).toMatchObject({
-      page: "options-flows",
+      page: "options",
+      pageView: "options-flows",
       param: "flowsTab",
       values: ["summary", "live", "historical", "news", "congress", "insider"],
     });
     expect(surface("research-panel")).toMatchObject({
-      page: "research",
+      page: "stock-hub",
+      pageView: "research",
       param: "researchTab",
       values: ["screener", "report", "quoting", "fundamentals", "bars", "snapshot", "compare"],
     });

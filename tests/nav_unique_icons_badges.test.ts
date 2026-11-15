@@ -36,16 +36,20 @@
  * (#4585 added the DataHub and SecurityHub nav entries, navOrder 29
  * and 30; nav count 29 → 31 and display order stays 0..30; pin updated
  * in the same PR per the §7 pin rule.)
+ * (#4626 S1 of #4625 retired the Approvals + Options Flows nav entries;
+ * nav count 31 → 29 and navOrders 4..21 shift down one, 23..30 down
+ * two, so display order stays 0..28; pin updated in the same PR per
+ * the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 31;
+const NAV_COUNT = 29;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 31-item nav", () => {
+  it("has the full 29-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });
@@ -85,15 +89,17 @@ describe("left-nav unique icons and badges", () => {
     expect(byId.get("docs")!.icon).toBe("Docs");
     expect(byId.get("search")!.icon).toBe("Search");
     expect(byId.get("options-screener")!.icon).toBe("Options");
-    expect(byId.get("options-flows")!.icon).toBe("Flows");
+    // Issue #4626: the options-flows nav entry retired onto the nested
+    // options view, so its icon lives on the route row now (pinned in
+    // tests/canonical_urls_4626.test.ts), not on a nav item.
     expect(byId.get("options-screener")!.navEntry.badge).toBe("Options");
     expect(byId.get("platform-admin")!.icon).toBe("Settings");
     expect(byId.get("platform-admin")!.navEntry.badge).toBe("Admin");
     expect(byId.get("billing")!.icon).toBe("Billing");
     expect(byId.get("billing")!.navEntry.badge).toBe("Billing");
-    expect(byId.get("billing")!.navEntry.navOrder).toBe(27);
+    expect(byId.get("billing")!.navEntry.navOrder).toBe(25);
     expect(byId.get("assets-hub")!.icon).toBe("Screeners");
     expect(byId.get("assets-hub")!.navEntry.badge).toBe("Assets");
-    expect(byId.get("assets-hub")!.navEntry.navOrder).toBe(28);
+    expect(byId.get("assets-hub")!.navEntry.navOrder).toBe(26);
   });
 });

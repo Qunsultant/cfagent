@@ -35,6 +35,11 @@
  * (#4585 added the DataHub and SecurityHub nav entries, navOrder 29
  * and 30, last in display order; pin updated in the same PR per the
  * pin rule.)
+ * (#4626 S1 of #4625 retired the Approvals + Options Flows nav entries
+ * onto their canonical homes (order approvals sub-tab, options nested
+ * view); nav count 31 -> 29 and navOrders 4..21 shift down one,
+ * 23..30 down two, so display order stays 0..28; pin updated in the
+ * same PR per the pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -47,7 +52,6 @@ const EXPECTED_ORDER = [
   "autopilot",
   "order",
   "portfolio",
-  "approvals",
   "voice",
   "omnichannel",
   "stock-hub",
@@ -66,7 +70,6 @@ const EXPECTED_ORDER = [
   "agents",
   "audit-vault",
   "workflows",
-  "options-flows",
   "endpoints",
   "docs",
   "payment-assurance",
@@ -78,7 +81,7 @@ const EXPECTED_ORDER = [
 ];
 
 describe("nav derivation", () => {
-  it("derives the 31 nav items in display order", () => {
+  it("derives the 29 nav items in display order", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).toEqual(EXPECTED_ORDER);
   });
 
@@ -99,7 +102,6 @@ describe("nav derivation", () => {
     expect(byId.get("stock-hub")!.label).toBe("Stock Hub");
     expect(byId.get("assets-hub")!.label).toBe("Assets Hub");
     expect(byId.get("social")!.label).toBe("Social Posting");
-    expect(byId.get("approvals")!.label).toBe("Approvals");
     expect(byId.get("docs")!.label).toBe("Docs & Reports");
   });
 

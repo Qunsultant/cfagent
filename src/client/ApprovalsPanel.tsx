@@ -12,6 +12,12 @@
  * queue exists. A full goal-oriented workspace redesign is explicitly
  * out of scope (needs Ceos's program decision).
  *
+ * @deprecated superseded by the order approvals sub-tab
+ * (`?tab=order&orderTab=approvals`, src/client/OrderTicketPanel.tsx,
+ * issue #4626), which renders the same queues. This file is kept,
+ * unmounted, per the no-deletion rule (Policy Gate check (i)); do not
+ * re-mount it.
+ *
  * UX token architecture compliance is mandatory with no exemptions
  * (ADR-0004): the panel's own chrome is the PageShell primitive, and every
  * control on the surface comes from the primitive-built queues.

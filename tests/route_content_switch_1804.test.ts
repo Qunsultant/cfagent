@@ -6,7 +6,8 @@
  * always-mounted trading hub. The switch is now one table-keyed lookup
  * (TAB_CONTENT[tab]) and these pins keep it that way:
  * - every ROUTES id resolves to a TAB_CONTENT key, a retained (hub) id,
- *   or a shell-retained page id (#2149);
+ *   a shell-retained page id (#2149), or a redirect (the #4626 retired
+ *   addresses, which resolve in applyRoute before adoption);
  * - no per-tab conditional remains in the main region;
  * - the retained set is exactly the historical trading set (see #388);
  * - the shell-retained set is exactly the `shellRetain` route ids.
@@ -47,6 +48,12 @@ function shellContentKeys(src: string): string[] {
 // goal-screen, review, and track-record.
 // #3121 S2: schedules leaves the set — the consolidated home renders
 // from the shell (Chat.tsx TAB_CONTENT), not through the hub.
+// #4626 (S1 of #4625): these routes resolve through a redirect, not
+// content — legacyDualHomeRedirect in Chat.tsx applyRoute sends each
+// retired address to its canonical home before the tab is adopted, so
+// they need no TAB_CONTENT entry, hub branch, or shell page. (screeners
+// needs no exemption: it stays in TRADING_TABS via `retain`.)
+const REDIRECT_RETIRED_IDS = ["research", "risk-analysis", "approvals", "options-flows"];
 const HISTORICAL_TRADING_IDS = [
   "assets-hub",
   "autopilot",
@@ -72,7 +79,10 @@ describe("route-table-derived content switch (#2077)", () => {
     const keys = new Set(tabContentKeys(chatSrc));
     for (const route of ROUTES) {
       expect(
-        keys.has(route.id) || TRADING_TABS.has(route.id) || SHELL_RETAINED_PAGES.has(route.id),
+        keys.has(route.id) ||
+          TRADING_TABS.has(route.id) ||
+          SHELL_RETAINED_PAGES.has(route.id) ||
+          REDIRECT_RETIRED_IDS.includes(route.id),
         `route "${route.id}" has neither TAB_CONTENT entry, retained hub, nor shell page`,
       ).toBe(true);
     }
@@ -80,7 +90,12 @@ describe("route-table-derived content switch (#2077)", () => {
 
   it("the content keys are exactly the non-trading, non-shell route ids", () => {
     const keys = tabContentKeys(chatSrc).sort();
-    const expected = ROUTES.filter((r) => !TRADING_TABS.has(r.id) && !SHELL_RETAINED_PAGES.has(r.id))
+    const expected = ROUTES.filter(
+      (r) =>
+        !TRADING_TABS.has(r.id) &&
+        !SHELL_RETAINED_PAGES.has(r.id) &&
+        !REDIRECT_RETIRED_IDS.includes(r.id),
+    )
       .map((r) => r.id)
       .sort();
     expect(keys).toEqual(expected);

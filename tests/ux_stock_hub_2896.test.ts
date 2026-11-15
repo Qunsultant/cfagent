@@ -50,7 +50,8 @@ describe("Stock Hub split (#2896)", () => {
     // Schedules): 31 → 30.
     // #4575 merged audit + NLQ into the one Audit & Vault entry: 30 → 29.
     // Issue #4585 adds the DataHub and SecurityHub nav entries: 29 → 31.
-    expect(ROUTES.filter(hasNavEntry)).toHaveLength(31);
+    // #4626 retires the Approvals + Options Flows nav entries: 31 → 29.
+    expect(ROUTES.filter(hasNavEntry)).toHaveLength(29);
   });
 
   it("defines the Hub tab set: stocks, new-screen (+run-screen alias), research (+ patterns, presets #2954)", () => {

@@ -6,7 +6,9 @@
  * async jobs and the dead-letter queue — without reimplementing any
  * of them. Trade approvals live on the Approvals page (#4538); this
  * page links there from the Trade approvals section instead of
- * rendering the queue. Pending review stays on the Review page and
+ * rendering the queue. Issue #4626 re-points that link to the approvals
+ * sub-tab (`?tab=order&orderTab=approvals`), the one home now.
+ * Pending review stays on the Review page and
  * must NOT appear here. The DLQ had no client UI before this slice;
  * these tests pin its first surface: listing, replay, and the
  * server-side operator gate rendered as a notice.
@@ -118,8 +120,9 @@ describe("Queues page (issue #2973)", () => {
     expect(text).not.toContain("Held deliveries");
     // #4538: the queue moved to the Approvals page — this section
     // carries a link to it instead, and the page never fetches the
-    // queue endpoint anymore.
-    const link = container!.querySelector('a[href="?tab=approvals"]');
+    // queue endpoint anymore. Issue #4626 re-points that link to the
+    // approvals sub-tab.
+    const link = container!.querySelector('a[href="?tab=order&orderTab=approvals"]');
     expect(link).not.toBeNull();
     expect(link!.closest("section")?.querySelector("h2")?.textContent?.trim()).toBe("Trade approvals");
     expect(text).not.toContain("No pending approvals");

@@ -11,7 +11,7 @@
       "navEntry": {
         "label": "Sponsored Marketplace",
         "shortLabel": "Deals",
-        "navOrder": 12,
+        "navOrder": 11,
         "defaultVisible": true,
         "badge": "Partners",
         "badgeType": "neutral"
@@ -27,7 +27,7 @@
       "navEntry": {
         "label": "Agents",
         "shortLabel": "Agents",
-        "navOrder": 19,
+        "navOrder": 18,
         "defaultVisible": true,
         "badge": "Registry",
         "badgeType": "neutral"
@@ -39,15 +39,7 @@
       "crumb": "Approvals",
       "category": "Execution",
       "icon": "Approvals",
-      "description": "Every consequential action awaiting your decision — trade drafts and held deliveries, composed in one place",
-      "navEntry": {
-        "label": "Approvals",
-        "shortLabel": "Approvals",
-        "navOrder": 3,
-        "defaultVisible": true,
-        "badge": "Queue",
-        "badgeType": "neutral"
-      }
+      "description": "Every consequential action awaiting your decision — trade drafts and held deliveries, composed in one place. Retired in #4626; redirects to ?tab=order&orderTab=approvals."
     },
     {
       "id": "assets-hub",
@@ -60,7 +52,7 @@
       "navEntry": {
         "label": "Assets Hub",
         "shortLabel": "Assets",
-        "navOrder": 28,
+        "navOrder": 26,
         "defaultVisible": true,
         "badge": "Assets",
         "badgeType": "pro"
@@ -76,7 +68,7 @@
       "navEntry": {
         "label": "Audit & Vault",
         "shortLabel": "Audit & Vault",
-        "navOrder": 20,
+        "navOrder": 19,
         "defaultVisible": true,
         "badge": "Vault",
         "badgeType": "pro"
@@ -109,7 +101,7 @@
       "navEntry": {
         "label": "Billing",
         "shortLabel": "Billing",
-        "navOrder": 27,
+        "navOrder": 25,
         "defaultVisible": true,
         "badge": "Billing",
         "badgeType": "neutral"
@@ -125,7 +117,7 @@
       "navEntry": {
         "label": "Copilot Ideas",
         "shortLabel": "Copilot",
-        "navOrder": 8,
+        "navOrder": 7,
         "defaultVisible": true,
         "badge": "AI",
         "badgeType": "ai"
@@ -141,7 +133,7 @@
       "navEntry": {
         "label": "Checkout",
         "shortLabel": "Checkout",
-        "navOrder": 17,
+        "navOrder": 16,
         "defaultVisible": true,
         "badge": "Testnet",
         "badgeType": "pro"
@@ -157,7 +149,7 @@
       "navEntry": {
         "label": "DataHub",
         "shortLabel": "DataHub",
-        "navOrder": 29,
+        "navOrder": 27,
         "defaultVisible": true,
         "badge": "Data",
         "badgeType": "neutral"
@@ -173,7 +165,7 @@
       "navEntry": {
         "label": "Docs & Reports",
         "shortLabel": "Docs",
-        "navOrder": 24,
+        "navOrder": 22,
         "defaultVisible": true,
         "badge": "PDF",
         "badgeType": "neutral"
@@ -189,7 +181,7 @@
       "navEntry": {
         "label": "Developer & MCP",
         "shortLabel": "Endpoints",
-        "navOrder": 23,
+        "navOrder": 21,
         "defaultVisible": true,
         "badge": "MCP",
         "badgeType": "mcp"
@@ -215,7 +207,7 @@
       "navEntry": {
         "label": "Order History Ledger",
         "shortLabel": "Ledger",
-        "navOrder": 16,
+        "navOrder": 15,
         "defaultVisible": true,
         "badge": "AUDIT",
         "badgeType": "pro"
@@ -232,7 +224,7 @@
       "navEntry": {
         "label": "Email & Slack Agents",
         "shortLabel": "Omnichannel",
-        "navOrder": 5,
+        "navOrder": 4,
         "defaultVisible": true,
         "badge": "Relay",
         "badgeType": "new"
@@ -253,15 +245,7 @@
       "crumb": "Options Flows",
       "category": "Intelligence",
       "icon": "Flows",
-      "description": "Options flows, dark pool prints, institutional sweeps, blocks, and insider disclosures",
-      "navEntry": {
-        "label": "Options Flows",
-        "shortLabel": "Flows",
-        "navOrder": 22,
-        "defaultVisible": true,
-        "badge": "Sweeps",
-        "badgeType": "pro"
-      }
+      "description": "Options flows, dark pool prints, institutional sweeps, blocks, and insider disclosures. Retired in #4626; redirects to ?tab=options&view=options-flows."
     },
     {
       "id": "options-screener",
@@ -273,7 +257,7 @@
       "navEntry": {
         "label": "Options Screener",
         "shortLabel": "Options",
-        "navOrder": 7,
+        "navOrder": 6,
         "defaultVisible": true,
         "badge": "Options",
         "badgeType": "ai"
@@ -315,7 +299,7 @@
       "navEntry": {
         "label": "Payment Assurance",
         "shortLabel": "Assurance",
-        "navOrder": 25,
+        "navOrder": 23,
         "defaultVisible": true,
         "badge": "Test",
         "badgeType": "neutral"
@@ -332,7 +316,7 @@
       "navEntry": {
         "label": "Payments",
         "shortLabel": "Payments",
-        "navOrder": 14,
+        "navOrder": 13,
         "defaultVisible": true,
         "badge": "x402",
         "badgeType": "neutral"
@@ -348,7 +332,7 @@
       "navEntry": {
         "label": "Platform Admin",
         "shortLabel": "Admin",
-        "navOrder": 18,
+        "navOrder": 17,
         "defaultVisible": true,
         "badge": "Admin",
         "badgeType": "neutral"
@@ -381,7 +365,7 @@
       "navEntry": {
         "label": "Product Hub",
         "shortLabel": "Product Hub",
-        "navOrder": 26,
+        "navOrder": 24,
         "defaultVisible": true,
         "badge": "Catalog",
         "badgeType": "neutral"
@@ -398,7 +382,7 @@
       "navEntry": {
         "label": "Referrals & Earn",
         "shortLabel": "Referrals",
-        "navOrder": 11,
+        "navOrder": 10,
         "defaultVisible": true,
         "badge": "Earn",
         "badgeType": "new"
@@ -419,7 +403,7 @@
       "crumb": "Research",
       "category": "Intelligence",
       "icon": "Research",
-      "description": "Zero-credential dual market-data feed, fundamental peer comparison"
+      "description": "Zero-credential dual market-data feed, fundamental peer comparison. Retired in #4626; redirects to ?tab=stock-hub&view=research."
     },
     {
       "id": "revenue",
@@ -432,7 +416,7 @@
       "navEntry": {
         "label": "Revenue Analytics",
         "shortLabel": "Revenue",
-        "navOrder": 15,
+        "navOrder": 14,
         "defaultVisible": true,
         "badge": "Yield",
         "badgeType": "new"
@@ -453,7 +437,7 @@
       "crumb": "Risk Analysis",
       "category": "Execution",
       "icon": "Order",
-      "description": "Symbol-based risk profile: anatomy, defense playbook, stress scenarios, and AI risk dossier"
+      "description": "Symbol-based risk profile: anatomy, defense playbook, stress scenarios, and AI risk dossier. Retired in #4626; redirects to ?tab=order&orderTab=risk."
     },
     {
       "id": "scanner",
@@ -479,7 +463,7 @@
       "crumb": "Screeners",
       "category": "Intelligence",
       "icon": "Screeners",
-      "description": "Multi-asset screening hub: forex, futures, commodities, and bonds, plus goal screens, reports, schedules, proposal review, and the recommendation track record"
+      "description": "Multi-asset screening hub: forex, futures, commodities, and bonds, plus goal screens, reports, schedules, proposal review, and the recommendation track record. Retired in #4626; redirects to ?tab=assets-hub."
     },
     {
       "id": "search",
@@ -491,7 +475,7 @@
       "navEntry": {
         "label": "Search",
         "shortLabel": "Search",
-        "navOrder": 9,
+        "navOrder": 8,
         "defaultVisible": true,
         "badge": "Hub",
         "badgeType": "mcp"
@@ -507,7 +491,7 @@
       "navEntry": {
         "label": "SecurityHub",
         "shortLabel": "SecurityHub",
-        "navOrder": 30,
+        "navOrder": 28,
         "defaultVisible": true,
         "badge": "Security",
         "badgeType": "pro"
@@ -524,7 +508,7 @@
       "navEntry": {
         "label": "Social Posting",
         "shortLabel": "Social",
-        "navOrder": 13,
+        "navOrder": 12,
         "defaultVisible": true,
         "badge": "Daily",
         "badgeType": "new"
@@ -541,7 +525,7 @@
       "navEntry": {
         "label": "Stock Hub",
         "shortLabel": "Stocks",
-        "navOrder": 6,
+        "navOrder": 5,
         "defaultVisible": true,
         "badge": "Stocks",
         "badgeType": "pro"
@@ -576,7 +560,7 @@
       "navEntry": {
         "label": "Voice Trading Desk",
         "shortLabel": "Voice Desk",
-        "navOrder": 4,
+        "navOrder": 3,
         "defaultVisible": true,
         "badge": "Audio",
         "badgeType": "ai"
@@ -600,7 +584,7 @@
       "navEntry": {
         "label": "Workflows",
         "shortLabel": "Workflows",
-        "navOrder": 10,
+        "navOrder": 9,
         "defaultVisible": true,
         "badge": "Trace",
         "badgeType": "neutral"
@@ -616,7 +600,7 @@
       "navEntry": {
         "label": "Workflows & FAQ",
         "shortLabel": "Guides",
-        "navOrder": 21,
+        "navOrder": 20,
         "defaultVisible": true,
         "badge": "14 Guides",
         "badgeType": "neutral"
@@ -1623,7 +1607,7 @@
   "deepLinkSurfaces": [
     {
       "surface": "screeners-hub",
-      "page": "screeners",
+      "page": "assets-hub",
       "param": "view",
       "values": [
         "forex",
@@ -1856,7 +1840,8 @@
     },
     {
       "surface": "options-flows",
-      "page": "options-flows",
+      "page": "options",
+      "pageView": "options-flows",
       "param": "flowsTab",
       "values": [
         "summary",
@@ -1869,7 +1854,8 @@
     },
     {
       "surface": "research-panel",
-      "page": "research",
+      "page": "stock-hub",
+      "pageView": "research",
       "param": "researchTab",
       "values": [
         "screener",
