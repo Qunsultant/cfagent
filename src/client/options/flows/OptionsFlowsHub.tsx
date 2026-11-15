@@ -244,8 +244,13 @@ export function OptionsFlowsHub({
   // live in `?view=` (no legacy param — flows never had one). Panels stay
   // conditional (no retention change: hidden panels must not keep polling).
   // The Summary side effects run on every tab change, including back/forward.
+  // Issue #4576: the flows sub-tabs live in their own param. `view`
+  // belongs to the Options hub (which nests this panel under
+  // `view=options-flows`), so writing `view` here overwrote the hub's tab
+  // and a reload fell back to the scanner. `flowsTab` is the panel's own
+  // address; the standalone `?tab=options-flows` reads the same param.
   const { activeTab: subTab, handleTabChange } = useUrlSyncedTabs<FlowSubTab>({
-    param: "view",
+    param: "flowsTab",
     isValid: isValidFlowSubTab,
     defaultTab: "live",
     onTabChange: (tab) => {

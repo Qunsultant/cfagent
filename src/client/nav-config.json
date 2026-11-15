@@ -1447,7 +1447,11 @@
         "data-providers",
         "accounts",
         "iaaa-admin",
-        "admin-access"
+        "admin-access",
+        "users",
+        "data-lifecycle",
+        "engine-tuning",
+        "downloads"
       ]
     },
     {
@@ -1524,7 +1528,8 @@
       "param": "checkoutTab",
       "values": [
         "pay",
-        "subscriptions"
+        "subscriptions",
+        "topup"
       ]
     },
     {
@@ -1543,8 +1548,7 @@
     },
     {
       "surface": "reports-panel",
-      "page": "screeners",
-      "pageView": "reports",
+      "page": "reports",
       "param": "reportsTab",
       "values": [
         "reports",
@@ -1605,6 +1609,33 @@
       "values": [
         "audit",
         "nlq"
+      ]
+    },
+    {
+      "surface": "options-flows",
+      "page": "options-flows",
+      "param": "flowsTab",
+      "values": [
+        "summary",
+        "live",
+        "historical",
+        "news",
+        "congress",
+        "insider"
+      ]
+    },
+    {
+      "surface": "research-panel",
+      "page": "research",
+      "param": "researchTab",
+      "values": [
+        "screener",
+        "report",
+        "quoting",
+        "fundamentals",
+        "bars",
+        "snapshot",
+        "compare"
       ]
     }
   ],
