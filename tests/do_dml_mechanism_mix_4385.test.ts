@@ -7,15 +7,17 @@
  * after the P6b first tranche:
  *
  *  - the 9 tranche files hold ZERO inline raw-DML statements;
- *  - the DO DML catalogue holds exactly 53 entries (42 repository +
- *    11 template) over the 9 tranche tables;
- *  - the remaining inline count is 244 (the 297-statement survey
- *    inventory on 1501f5f4, less the 53 migrated) — a later slice
- *    moves this number down and updates this pin in the same PR;
+ *  - the DO DML catalogue holds exactly 79 entries (64 repository +
+ *    15 template) over the 9 tranche tables + the 5 ORM-core tables
+ *    + the "__table__" parameterized placeholder (P6c, #4386);
+ *  - the remaining inline count is 228 (the 297-statement survey
+ *    inventory on 1501f5f4, less the 53 migrated by P6b and the 16
+ *    migrated by P6c) — a later slice moves this number down and
+ *    updates this pin in the same PR;
  *  - the named exemptions are recorded here with their reasons
  *    (Q4): the doSchema* ledger (5) and the kv_store funnel (7);
- *  - the P6c boundary is pinned: doSqliteOrmAdapters.ts still holds
- *    its 16 statements (10 write / 6 read), which go with P6c (Q5).
+ *  - the P6c boundary is CLOSED by #4386: doSqliteOrmAdapters.ts
+ *    holds ZERO inline statements (its 16 went with P6c, Q5).
  *
  * The scan rule is the survey's, made explicit (the same rule as
  * evidence-p6b/scan-do-dml.mjs): strip block + line comments, then
@@ -129,8 +131,8 @@ describe("DO mechanism mix (#4385)", () => {
     expect(hits, "inline DML survives in a tranche file").toEqual([]);
   });
 
-  it("the catalogue holds the tranche: 53 entries over the 9 tranche tables", () => {
-    expect(DO_DML_CATALOGUE.size()).toBe(53);
+  it("the catalogue holds the tranche + the ORM core: 79 entries", () => {
+    expect(DO_DML_CATALOGUE.size()).toBe(79);
     for (const table of TRANCHE_TABLES) {
       expect(DO_DML_CATALOGUE.findByTable(table).length, table).toBeGreaterThan(0);
     }
@@ -138,25 +140,31 @@ describe("DO mechanism mix (#4385)", () => {
       (acc, e) => ({ ...acc, [e.form]: (acc[e.form] ?? 0) + 1 }),
       {} as Record<string, number>,
     );
-    expect(forms.repository).toBe(42);
-    expect(forms.template).toBe(11);
+    expect(forms.repository).toBe(64);
+    expect(forms.template).toBe(15);
   });
 
-  it("repository-bound tables: 13 ORM-bound + 9 tranche = 22", () => {
-    // The 13 ORM-bound tables live in doSqliteOrmAdapters.ts (5
-    // Repository subclasses + 8 Repository factories, ADR 0032);
-    // the 9 tranche tables are bound through the catalogue's
-    // repository entries. Template-only tables are not counted here.
+  it("repository-bound tables: 9 tranche + 5 ORM-core + 1 parameterized = 15", () => {
+    // The 5 ORM-core tables with catalogue entries are the 4
+    // Repository-bound ones P6c migrated (messages, events,
+    // memory, transactions) plus mas_settings (its port is not
+    // Repository-bound, but its entries are repository-form).
+    // The remaining 9 Repository-bound tables (mas_reports + the
+    // 8 factories) stay plain Repository calls — no inline DML
+    // of their own; their statements live in ormRepositoryCore,
+    // census-pinned at 9 exec sites.
     const catalogueTables = new Set(
       DO_DML_CATALOGUE.entries()
         .filter((e) => e.form === "repository")
         .map((e) => e.table),
     );
-    expect([...catalogueTables].sort()).toEqual([...TRANCHE_TABLES].sort());
-    expect(catalogueTables.size + 13).toBe(22);
+    expect([...catalogueTables].sort()).toEqual(
+      [...TRANCHE_TABLES, "mas_events", "mas_memory", "mas_messages", "mas_settings", "mas_transactions", "__table__"].sort(),
+    );
+    expect(catalogueTables.size).toBe(15);
   });
 
-  it("template-only tables are exactly the 4 with inexpressible shapes", () => {
+  it("template-only tables are exactly the 7 with inexpressible shapes", () => {
     const templateTables = new Set(
       DO_DML_CATALOGUE.entries()
         .filter((e) => e.form === "template")
@@ -165,12 +173,15 @@ describe("DO mechanism mix (#4385)", () => {
     expect([...templateTables].sort()).toEqual([
       "mas_discovery_runs",
       "mas_discovery_setup_runs",
+      "mas_events",
       "mas_iv_history",
+      "mas_memory",
       "mas_opportunity_scans",
+      "mas_transactions",
     ]);
   });
 
-  it("the remaining inline count is 244 (297 surveyed − 53 migrated)", () => {
+  it("the remaining inline count is 228 (297 surveyed − 53 P6b − 16 P6c)", () => {
     let write = 0;
     let read = 0;
     for (const file of doFiles()) {
@@ -178,9 +189,9 @@ describe("DO mechanism mix (#4385)", () => {
       write += counts.write;
       read += counts.read;
     }
-    expect(write).toBe(121);
-    expect(read).toBe(123);
-    expect(write + read).toBe(244);
+    expect(write).toBe(111);
+    expect(read).toBe(117);
+    expect(write + read).toBe(228);
   });
 
   it("the named exemptions hold their recorded counts, with reasons", () => {
@@ -195,9 +206,9 @@ describe("DO mechanism mix (#4385)", () => {
     expect(exemptTotal).toBe(12);
   });
 
-  it("the P6c boundary holds: doSqliteOrmAdapters.ts still has its 16 statements", () => {
+  it("the P6c boundary is closed: doSqliteOrmAdapters.ts holds zero inline statements", () => {
     const { write, read } = scanFile("src/data/doSqliteOrmAdapters.ts");
-    expect(write).toBe(10);
-    expect(read).toBe(6);
+    expect(write).toBe(0);
+    expect(read).toBe(0);
   });
 });
