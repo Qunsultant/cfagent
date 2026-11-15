@@ -88,11 +88,11 @@ import { createSqlCancelPreviewStore } from "../src/services/cancelPreviewStore"
 import { createSqlLadderStateStore } from "../src/services/ladderStateStore";
 import { ensureDeliveryClaimsTable } from "../src/data/deliveryClaimsStore";
 import { ensureStageClaimsTable } from "../src/data/stageClaimsStore";
-import { D1FeedDatasetStore } from "../src/data/d1FeedDatasetAdapter";
-import { D1IndexListStore } from "../src/data/d1IndexListAdapter";
-import { D1QuoteSourceAdapter } from "../src/data/d1QuoteSourceAdapter";
+import { createD1FeedDatasetDb, D1FeedDatasetStore } from "../src/data/d1FeedDatasetAdapter";
+import { createD1IndexListDb, D1IndexListStore } from "../src/data/d1IndexListAdapter";
+import { createD1QuoteSourceDb, D1QuoteSourceAdapter } from "../src/data/d1QuoteSourceAdapter";
 import { D1ResourceRollupStore } from "../src/data/d1ResourceRollupAdapter";
-import { D1ResourceUsageAdapter } from "../src/data/d1ResourceUsageAdapter";
+import { createD1ResourceDb, D1ResourceUsageAdapter } from "../src/data/d1ResourceUsageAdapter";
 import { DatabaseORM } from "../src/orm";
 
 /** sha256 of every remainder entry's statement, byte-for-byte. */
@@ -214,7 +214,13 @@ function callEnsure(store: AnyStore, method: string): void {
   (fn as () => void).call(store);
 }
 
-/** Minimal D1 binding: records prepare() SQL, answers run/bind/first/all. */
+/** Minimal D1 binding: records prepare() SQL, answers run/bind/first/all.
+ *
+ * #4282 P6a (#4384): the D1 adapters now run through the Drizzle
+ * builder, and drizzle-orm 0.45.4's select-with-fields path calls
+ * .raw() on the bound statement (array-mode rows) — the fake
+ * must expose it, or every catalogued select fails with
+ * "this.stmt.bind(...).raw is not a function". */
 class FakeD1 {
   readonly prepared: string[] = [];
   prepare(sql: string): unknown {
@@ -224,6 +230,7 @@ class FakeD1 {
         run: async () => ({}),
         first: async () => null,
         all: async () => ({ results: [] }),
+        raw: async () => [],
       }),
       run: async () => ({}),
       first: async () => null,
@@ -289,7 +296,7 @@ async function driveAll(): Promise<BaseCapture[]> {
   );
   {
     const fake = new FakeD1();
-    const store = new D1FeedDatasetStore(fake as never);
+    const store = new D1FeedDatasetStore(createD1FeedDatasetDb(fake as never));
     await (store as unknown as { ensureTable: () => Promise<void> }).ensureTable();
     captures.push({
       adapter: "D1FeedDatasetEnsure",
@@ -300,7 +307,7 @@ async function driveAll(): Promise<BaseCapture[]> {
   }
   {
     const fake = new FakeD1();
-    const store = new D1IndexListStore(fake as never);
+    const store = new D1IndexListStore(createD1IndexListDb(fake as never));
     await store.store({
       index: "nasdaq100",
       snapshotDate: "2026-11-14",
@@ -318,7 +325,7 @@ async function driveAll(): Promise<BaseCapture[]> {
   }
   {
     const fake = new FakeD1();
-    const adapter = new D1QuoteSourceAdapter(fake as never);
+    const adapter = new D1QuoteSourceAdapter(createD1QuoteSourceDb(fake as never));
     await adapter.ensureSchema();
     captures.push({
       adapter: "D1QuoteSourceEnsure",
@@ -329,7 +336,7 @@ async function driveAll(): Promise<BaseCapture[]> {
   }
   {
     const fake = new FakeD1();
-    const store = new D1ResourceRollupStore(fake as never);
+    const store = new D1ResourceRollupStore(createD1ResourceDb(fake as never));
     await store.ensureSchema();
     captures.push({
       adapter: "D1ResourceRollupEnsure",
@@ -340,7 +347,7 @@ async function driveAll(): Promise<BaseCapture[]> {
   }
   {
     const fake = new FakeD1();
-    const adapter = new D1ResourceUsageAdapter(fake as never);
+    const adapter = new D1ResourceUsageAdapter(createD1ResourceDb(fake as never));
     await adapter.record({} as never);
     captures.push({
       adapter: "D1ResourceUsageRecord",
@@ -709,6 +716,34 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
           d1TableSql("resource_daily_rollups"),
           d1TableSql("resource_alert_state"),
           d1TableSql("resource_comparison_reports"),
+        ]);
+        continue;
+      }
+      if (base[i].adapter === "D1IndexListStore") {
+        // DISCLOSED NORMALIZATION (#4282 P6a, #4384): the store's
+        // DML moved into the DML catalogue and now renders through
+        // the Drizzle builder — lowercase, quoted identifiers —
+        // while the CREATE is unchanged (still the DDL catalogue's
+        // text). The base fixture preserves the raw-SQL "before".
+        expect(actual[i].queries, `capture ${i} (${base[i].adapter})`).toEqual([
+          base[i].queries[0],
+          'insert into "mas_index_lists" ("id", "created_at", "index_id", "snapshot_date", "source", "source_label", "derived_from_holdings", "members_json") values (?, ?, ?, ?, ?, ?, ?, ?)',
+          'select "id" from "mas_index_lists" where "mas_index_lists"."index_id" = ? order by "mas_index_lists"."created_at" desc, "mas_index_lists"."id" desc',
+        ]);
+        continue;
+      }
+      if (base[i].adapter === "D1ResourceUsageRecord") {
+        // DISCLOSED NORMALIZATION (#4282 P6a, #4384): the record
+        // insert moved into the DML catalogue and now renders
+        // through the Drizzle builder — lowercase, quoted
+        // identifiers, same column order as the raw statement.
+        // The capture calls record({}), so the five undefined
+        // values render as literal nulls (drizzle inlines
+        // undefined; the six explicit nulls stay bound params).
+        // The CREATE is unchanged (the DDL catalogue's text).
+        expect(actual[i].queries, `capture ${i} (${base[i].adapter})`).toEqual([
+          base[i].queries[0],
+          'insert into "resource_sql_ops" ("ts_ms", "ns", "op", "rows_read", "rows_written", "caller", "trigger", "statement", "tenant_id", "run_id", "session_ref") values (null, null, null, null, null, ?, ?, ?, ?, ?, ?)',
         ]);
         continue;
       }
