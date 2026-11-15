@@ -786,7 +786,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (679 rows / 6522 lines) ----
+  // ---- INTEGRATION (681 rows / 6530 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -1478,6 +1478,14 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/workflows/manualPanelScreen.ts", "etrade", 2],
   ["src/workflows/optionsScreenPorts.ts", "etrade", 3],
   ["src/workflows/optionsStageControl.ts", "etrade", 5],
+  // #4473 INTEGRATION: the universe stage input's descriptor names
+  // the nasdaq screen-universe provider — the provider literal the
+  // route resolution requires (nasdaqUniverseProviderFromRoute
+  // refuses any other primary), carried as dispatch data and
+  // validated by name. Naming the provider is the descriptor's
+  // job; the row falls back if a second universe source ever
+  // joins the descriptor.
+  ["src/workflows/optionsStepPorts.ts", "nasdaq", 6],
   ["src/workflows/researchSubtabDisposition.ts", "alpaca", 1],
   ["src/workflows/researchSubtabDisposition.ts", "yahoo", 1],
   ["src/workflows/sagaTradeLeg.ts", "etrade", 7],
@@ -1497,6 +1505,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/workflows/stockScreenRunSpec.ts", "yahoo", 4],
   ["src/workflows/strategyScreenPorts.ts", "alpaca", 1],
   ["src/workflows/strategyScreenPorts.ts", "etrade", 3],
+  // #4473 INTEGRATION: the residency factory's refusal text names
+  // the nasdaq provider whose route/adapter failed to resolve —
+  // the provider is the integration's subject, and the refusal
+  // names it so the run record says what could not resolve.
+  ["src/workflows/universeDepsResidency.ts", "nasdaq", 2],
   ["src/workflows/workflowCatalog.ts", "etrade", 2],
   ["src/workflows/workflowPorts.ts", "etrade", 5],
   ["src/workflows/workflowPorts.ts", "yahoo", 5],

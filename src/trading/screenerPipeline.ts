@@ -523,9 +523,22 @@ export interface NasdaqUniverseRouteBundle {
  * degrade to the missing-seam error result, shard/scheduled paths
  * propagate into their failure boundaries, research paths catch
  * and degrade to empty.
+ *
+ * Issue #4473: the sql handle is optional when BOTH D1 ports are
+ * supplied — the workflow residency has no SqlStorage handle, so
+ * the residency factory builds the bundle over the ports alone.
+ * Config reads need sql or the config port; capture/outcome writes
+ * need sql or the capture port; anything less throws by name.
  */
 export interface NasdaqUniverseRouteBundleInput {
-  sql: SqlStorage;
+  /**
+   * DO sql — required for the legacy path; optional when both D1
+   * ports are supplied (#4473). On the ports path it is never
+   * dereferenced: bootstrap/config/route reads go through the
+   * config port and capture/outcome writes through the capture
+   * port.
+   */
+  sql?: SqlStorage;
   /** Blob storage when the caller has a DO storage handle; omitted → outcome-only. */
   storage?: { get: (key: string) => Promise<unknown>; put: (key: string, value: unknown) => Promise<void> };
   env: Env;
@@ -549,11 +562,37 @@ export async function nasdaqUniverseRouteBundle(
 ): Promise<NasdaqUniverseRouteBundle> {
   const { sql, storage, env, userLogin, runId } = input;
   const configPort = input.configPort ?? null;
+  const capturePort = input.capturePort ?? null;
+  // #4473: sql is optional only when both D1 ports are present —
+  // config reads and capture/outcome writes each need a store.
+  if (!configPort && !sql) {
+    throw new Error(
+      "nasdaqUniverseRouteBundle requires a sql handle or a config port — config reads need one of them (the legacy DO-sql path, or the D1 config port, #2303)",
+    );
+  }
+  if (!capturePort && !sql) {
+    throw new Error(
+      "nasdaqUniverseRouteBundle requires a sql handle or a capture port — capture/outcome writes need one of them (the legacy DO-sql path, or the D1 capture port, #2303)",
+    );
+  }
+  // The guards establish the invariant the legacy branches rest
+  // on: wherever a port is absent, sql is defined. The branches
+  // read it through this handle instead of asserting it at every
+  // use site, so the invariant is enforced at one point if the
+  // guards ever change.
+  const sqlHandle = (): SqlStorage => {
+    if (!sql) {
+      throw new Error(
+        "nasdaqUniverseRouteBundle: a legacy-path branch ran without a sql handle — the guards above reject every such configuration",
+      );
+    }
+    return sql;
+  };
   if (configPort) await configPort.bootstrapDataProviders();
-  else bootstrapDataProviders(sql);
+  else bootstrapDataProviders(sqlHandle());
   const config = configPort
     ? await configPort.getProviderConfig("nasdaq")
-    : getProviderConfig(sql, "nasdaq");
+    : getProviderConfig(sqlHandle(), "nasdaq");
   if (!config || config.lifecycleState !== "enabled" || !config.enabled) {
     const verifyDeps = {
       verifier: async () =>
@@ -565,8 +604,8 @@ export async function nasdaqUniverseRouteBundle(
       await transitionProviderViaPort(configPort, "nasdaq", "verify", userLogin, verifyDeps);
       await transitionProviderViaPort(configPort, "nasdaq", "enable", userLogin, {});
     } else {
-      await transitionProvider(sql, "nasdaq", "verify", userLogin, verifyDeps);
-      await transitionProvider(sql, "nasdaq", "enable", userLogin, {});
+      await transitionProvider(sqlHandle(), "nasdaq", "verify", userLogin, verifyDeps);
+      await transitionProvider(sqlHandle(), "nasdaq", "enable", userLogin, {});
     }
   }
   const registry = new DataProviderRegistry();
@@ -579,13 +618,13 @@ export async function nasdaqUniverseRouteBundle(
               sql,
               blobStorage: storage as never,
               env,
-              ...(input.capturePort ? { capturePort: input.capturePort } : {}),
+              ...(capturePort ? { capturePort } : {}),
             },
           }
         : {
-            outcomeRecorder: input.capturePort
-              ? input.capturePort.createFetchOutcomeRecorder()
-              : createCaptureFetchOutcomeRecorder(sql),
+            outcomeRecorder: capturePort
+              ? capturePort.createFetchOutcomeRecorder()
+              : createCaptureFetchOutcomeRecorder(sqlHandle()),
           }
     )
   );
@@ -593,10 +632,10 @@ export async function nasdaqUniverseRouteBundle(
     registry,
     configs: configPort
       ? await configPort.listProviderConfigs()
-      : listProviderConfigs(sql),
+      : listProviderConfigs(sqlHandle()),
     routes: configPort
       ? await configPort.listCapabilityRoutes()
-      : listCapabilityRoutes(sql),
+      : listCapabilityRoutes(sqlHandle()),
     runContext: {
       runId,
       tenantId: input.tenantId ?? "default",

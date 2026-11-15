@@ -140,10 +140,11 @@ function memoryStageClaimStore(): StageClaimStore {
  * definition persists in the workflow residency and the workflow
  * step is the engine's journal. This sync dispatch stays until the
  * cutover gaps land — the residency binds one chain source while
- * this leg's source is broker-aware (#3960), discovery-mode legs
- * need universe deps as a stage input (#4473), and the workflow
- * binding's reachability from this residency is unverified — and
- * the seam refuses discovery-mode legs by name until #4473 lands.
+ * this leg's source is broker-aware (#3960), and the workflow
+ * binding's reachability from this residency is unverified.
+ * Universe deps travel as a stage input since #4473, so the seam
+ * accepts a discovery-mode leg carrying the universe input and
+ * refuses one carrying neither explicit symbols nor the input.
  */
 async function runGoalOptionsLegViaWorkflow(args: {
   workflow: OptionsWorkflowDeps;
