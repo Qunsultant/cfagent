@@ -50,13 +50,19 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // 9 since #4385 added the Repository extensions the DO DML
   // tranche needs: updateWhere + deleteWhere each execute one
   // statement (createOrIgnore reuses insertRecord's site).
+  // Still 9 after #4386: createOrReplace reuses insertRecord's
+  // site too, and the chained tail read stays direct (the frozen
+  // audit chain, gate G-5 — its fixed entry is catalogued but
+  // the create() method does not route through the executor).
   ["src/data/ormRepositoryCore.ts", 9],
   // 9 at 3a; 13 since #2360 (step 4d-2) added the ledger
   // port's four route-transition statements to this adapter;
   // 17 since #2390 (step 4g) added the dedicated settings
   // port's write surface (ensure + DELETE/INSERT set + delete)
   // beside the read adapter in the same module.
-  ["src/data/doSqliteOrmAdapters.ts", 17],
+  // 1 since #4386 (P6c) moved all 16 DML statements to the DO
+  // DML catalogue — only ensureSchema's DDL exec remains.
+  ["src/data/doSqliteOrmAdapters.ts", 1],
   ["src/data/doSqliteMarketplaceAdapter.ts", 2],
   // 15 since #3089 (S3) added the mas_trades broker column's
   // PRAGMA-guarded ALTER (PRAGMA table_info check + ALTER).
@@ -64,7 +70,10 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // PRAGMA-guarded ALTER (same precedent: check + ALTER).
   // 19 since #4532 added the mas_trades mode column's
   // PRAGMA-guarded ALTER (same precedent: check + ALTER).
-  ["src/data/ormFacade.ts", 19],
+  // 17 since #4386 (P6c) moved the two COUNT(*) reads to the
+  // parameterized count entry — the browse SELECT stays (its
+  // WHERE is dynamic; see #4386 and the facade comment).
+  ["src/data/ormFacade.ts", 17],
   // 4 at 3a; 5 since #4412 added the mas_promotions index exec
   // (sql.exec(MAS_PROMOTIONS_INDEX_DDL) in ensurePromotionsIndex());
   // 8 since #3182 added the mas_transactions tenant column's
