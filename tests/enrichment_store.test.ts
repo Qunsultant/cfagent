@@ -41,28 +41,34 @@ function mockSql() {
     runs,
     settings,
     exec(query: string, ...params: unknown[]): Iterable<unknown> {
-      if (query.startsWith("CREATE TABLE") || query.startsWith("CREATE INDEX")) return [];
-      if (query.startsWith(`INSERT INTO mas_enrichment_runs`)) {
+      // #4385 (#4282 P6b): the adapter's reads moved to the DO DML
+      // catalogue's Repository entries, so the Repository's statement
+      // shapes arrive here — SELECT * with the LIMIT inlined — instead
+      // of the old explicit-column statements with a bound LIMIT.
+      // The rows returned are unchanged; only the matched text changes.
+      const q = query.replace(/\s+/g, " ").trim();
+      if (q.startsWith("CREATE TABLE") || q.startsWith("CREATE INDEX")) return [];
+      if (q.startsWith(`INSERT INTO mas_enrichment_runs`)) {
         runs.set(String(params[0]), String(params[4]));
         return [];
       }
-      if (query.startsWith("SELECT record_json FROM mas_enrichment_runs ORDER")) {
-        const limit = Number(params[0]);
+      if (q.startsWith("SELECT * FROM mas_enrichment_runs ORDER")) {
+        const limit = Number(q.match(/LIMIT (\d+)/)?.[1] ?? 0);
         return [...runs.values()].slice(0, limit).map((record_json) => ({ record_json }));
       }
-      if (query.startsWith("SELECT record_json FROM mas_enrichment_runs WHERE")) {
+      if (q.startsWith("SELECT * FROM mas_enrichment_runs WHERE")) {
         const json = runs.get(String(params[0]));
         return json ? [{ record_json: json }] : [];
       }
-      if (query.startsWith("SELECT value FROM mas_settings")) {
+      if (q.startsWith("SELECT value FROM mas_settings")) {
         const v = settings.get(String(params[0]));
         return v !== undefined ? [{ value: v }] : [];
       }
-      if (query.startsWith("DELETE FROM mas_settings")) {
+      if (q.startsWith("DELETE FROM mas_settings")) {
         settings.delete(String(params[0]));
         return [];
       }
-      if (query.startsWith("INSERT INTO mas_settings")) {
+      if (q.startsWith("INSERT INTO mas_settings")) {
         settings.set(String(params[0]), String(params[1]));
         return [];
       }
