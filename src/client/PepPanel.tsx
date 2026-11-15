@@ -140,7 +140,7 @@ export function PepPanel() {
             record lands, this section renders it from pep.decisions. */}
         <EmptyState
           title="No PEP decision record exists yet."
-          description="PEP denials are not written to a queryable audit record yet, so there are no recent decisions to list. This gap is tracked as #4683 (a follow-up under #4653) — no rows are shown here rather than invented ones."
+          description="PEP denials are not written to a queryable audit record yet, so there are no recent decisions to list. This gap is tracked as issue 4683 (a follow-up under issue 4653) — no rows are shown here rather than invented ones."
         />
       </div>
     </Stack>
