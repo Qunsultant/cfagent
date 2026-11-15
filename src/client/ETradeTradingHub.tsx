@@ -58,7 +58,7 @@ import {
   stockScreenEndpoint,
 } from "./brokerEndpoints";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { ScreenersHub, type ScreenersHubTab } from "./ScreenersHub";
+import { ScreenersHub } from "./ScreenersHub";
 import { GoalScreenPanel } from "./GoalScreenPanel";
 import { ReportsPanel } from "./ReportsPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
@@ -69,7 +69,7 @@ import { LedgerPanel } from "./LedgerPanel";
 import { OmnichannelPanel } from "./OmnichannelPanel";
 import { VoicePanel } from "./VoicePanel";
 import { OptionsHub, type OptionsHubTab } from "./OptionsHub";
-import { StockHub, type StockHubTab } from "./StockHub";
+import { StockHub } from "./StockHub";
 import { ETradeDynamicMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
 import {
   fetchBrokerEnvironment,
@@ -247,9 +247,13 @@ export function ETradeTradingHub({
   };
   // C2: every screening subtab renders the one hub on the
   // equivalent tab — the same props the hub has always received
-  // here, with initialTab selecting the asset tab.
-  const renderScreenersHub = (tab: ScreenersHubTab) => (
-    <ScreenersHub activeEnv={activeEnv} userLogin={user?.login} initialTab={tab} />
+  // here. No initialTab is passed: the hub reads the tab from the
+  // URL through the shared hook (issue 4627 — a hardcoded
+  // initialTab won at mount and a fresh load of
+  // ?tab=stock-hub&view=research landed on stocks instead); the
+  // hook's defaultTab covers the bare URL.
+  const renderScreenersHub = () => (
+    <ScreenersHub activeEnv={activeEnv} userLogin={user?.login} />
   );
 
   // Issue #2954: the Options copy hub — the options subtabs render it
@@ -266,13 +270,15 @@ export function ETradeTradingHub({
     />
   );
 
-  const renderStockHub = (tab: StockHubTab) => (
+  // Issue 4627: no initialTab — StockHub reads its tab from the
+  // URL through the shared hook; the hook's defaultTab ("stocks")
+  // covers the bare URL.
+  const renderStockHub = () => (
     <StockHub
       activeEnv={activeEnv}
       userLogin={user?.login}
       user={user}
       onStocksLoaded={setScreenerStocks}
-      initialTab={tab}
       onPreviewTrade={handleTradeOrder}
       onSendPrompt={onSendPrompt}
       onJobStateChange={setOptionsJob}
@@ -2247,8 +2253,8 @@ export function ETradeTradingHub({
           the equivalent tab — no redirect notices. */}
       {effectiveSubTab === "iv-history" && renderOptionsHub("iv-history")}
 
-      {effectiveSubTab === "assets-hub" && renderScreenersHub("forex")}
-      {effectiveSubTab === "stock-hub" && renderStockHub("stocks")}
+      {effectiveSubTab === "assets-hub" && renderScreenersHub()}
+      {effectiveSubTab === "stock-hub" && renderStockHub()}
 
       {/* Issue #2970: reports, schedules, goal-screen, review, and
           track-record render their panels directly — the same props

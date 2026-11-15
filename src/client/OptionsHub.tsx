@@ -136,7 +136,10 @@ export function OptionsHub({
   onTabChange,
 }: OptionsHubProps) {
   // Legacy research= bookmarks resolve through initialTab: the hook
-  // reads the view param first, so a valid view always wins.
+  // adopts a valid initialTab at mount (it wins over the view param),
+  // so a legacy research= bookmark still lands on its tab; a valid
+  // view param wins only when no initialTab is passed — which is how
+  // the Trading Hub mounts the stock / screeners hubs (issue 4627).
   const { activeTab: hubTab, visitedTabs, handleTabChange } =
     useUrlSyncedTabs<OptionsHubTab>({
       param: "view",
