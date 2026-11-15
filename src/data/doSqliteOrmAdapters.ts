@@ -3,8 +3,8 @@
  * 0022 D-A/D-B): the DO-SQLite adapters for the ORM core's
  * DO-resident ports. Each adapter is the generic repository
  * core (ormRepositoryCore.ts) bound to one table's column
- * map — the maps moved verbatim from the pre-port DatabaseORM
- * constructor — plus the range/purge methods its port adds.
+ * map (the maps live in ./ormColumnMaps) — plus the range/purge
+ * methods its port adds.
  * All SQL for the 13 tables lives in this layer now (and in
  * ormRepositoryCore / ormSchema); nothing above it issues
  * statements against these tables.
@@ -31,6 +31,8 @@ import type { MemoryPort } from "./memoryPorts";
 import type { MessagePort } from "./messagePorts";
 import { ChainedAuditRepository, Repository } from "./ormRepositoryCore";
 import { doTableSql } from "./schemaComponent/doCatalogue";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 import type { SqlStorage } from "./repositoryPorts";
 import type {
   SettingsPort,
@@ -46,182 +48,39 @@ import type {
   TransactionRejectionFields,
 } from "./transactionLedgerPorts";
 
-/* Column maps — verbatim from the pre-port ORM constructor. */
-export const CATEGORY_COLUMN_MAP = {
-  id: "id",
-  name: "name",
-  slug: "slug",
-  description: "description",
-  icon: "icon",
-  isActive: "is_active",
-  sortOrder: "sort_order",
-  createdAt: "created_at",
-  updatedAt: "updated_at",
-} as const;
-
-export const REFERRAL_COLUMN_MAP = {
-  id: "id",
-  userLogin: "session_id",
-  title: "title",
-  url: "url",
-  category: "category",
-  rewardText: "reward_text",
-  clicks: "clicks",
-  signups: "signups",
-  createdAt: "created_at",
-} as const;
-
-export const AD_COLUMN_MAP = {
-  id: "id",
-  title: "title",
-  tagline: "tagline",
-  sponsor: "sponsor",
-  badge: "badge",
-  url: "url",
-  ctaText: "cta_text",
-  accentColor: "accent_color",
-  impressions: "impressions",
-  clicks: "clicks",
-  createdAt: "created_at",
-} as const;
-
-export const EXTERNAL_AD_COLUMN_MAP = {
-  id: "id",
-  name: "name",
-  network: "network",
-  placement: "placement",
-  title: "title",
-  tagline: "tagline",
-  ctaText: "cta_text",
-  targetUrl: "target_url",
-  bannerImageUrl: "banner_image_url",
-  cpmRate: "cpm_rate",
-  cpcRate: "cpc_rate",
-  impressions: "impressions",
-  clicks: "clicks",
-  earnings: "earnings",
-  isActive: "is_active",
-  createdAt: "created_at",
-} as const;
-
-export const TRANSACTION_COLUMN_MAP = {
-  id: "id",
-  sessionId: "session_id",
-  action: "action",
-  amount: "amount",
-  currency: "currency",
-  customer: "customer",
-  gateway: "gateway",
-  gatewayRef: "gateway_ref",
-  status: "status",
-  checkoutUrl: "checkout_url",
-  proposerDid: "proposer_did",
-  authorizerDid: "authorizer_did",
-  proofSignature: "proof_signature",
-  note: "note",
-  createdAt: "created_at",
-  updatedAt: "updated_at",
-  // Issue #3182: last in the map, matching the DDL position, so
-  // replace()'s INSERT column order and the PRAGMA column order
-  // agree on fresh and migrated tables alike.
-  tenantId: "tenant_id",
-} as const;
-
-export const MESSAGE_COLUMN_MAP = {
-  id: "id",
-  sessionId: "session_id",
-  role: "role",
-  content: "content",
-  agent: "agent",
-  createdAt: "created_at",
-} as const;
-
-export const MEMORY_COLUMN_MAP = {
-  key: "key",
-  value: "value",
-  updatedAt: "updated_at",
-} as const;
-
-export const EVENT_COLUMN_MAP = {
-  id: "id",
-  sessionId: "session_id",
-  type: "type",
-  agent: "agent",
-  payload: "payload",
-  createdAt: "created_at",
-  previousEventHash: "previous_event_hash",
-  eventHash: "event_hash",
-} as const;
-
-/**
- * The COMPLETED reports map (#2345): the pre-port map's eight
- * columns plus user_login and body_r2_key, which the canonical
- * writer has stored all along (audit V-5).
- */
-export const CANONICAL_REPORT_COLUMN_MAP = {
-  id: "id",
-  runId: "run_id",
-  generationId: "generation_id",
-  title: "title",
-  source: "source",
-  summary: "summary",
-  body: "body",
-  createdAt: "created_at",
-  userLogin: "user_login",
-  bodyR2Key: "body_r2_key",
-  fanoutOutcome: "fanout_outcome",
-} as const;
-
-export const WEBHOOK_REPLAY_COLUMN_MAP = {
-  nonce: "nonce",
-  source: "source",
-  createdAt: "created_at",
-  expiresAt: "expires_at",
-} as const;
-
-export const TRADE_COLUMN_MAP = {
-  id: "id",
-  sessionId: "session_id",
-  symbol: "symbol",
-  action: "action",
-  orderType: "order_type",
-  quantity: "quantity",
-  price: "price",
-  totalValue: "total_value",
-  status: "status",
-  orderRef: "order_ref",
-  proposerDid: "proposer_did",
-  authorizerDid: "authorizer_did",
-  proofSignature: "proof_signature",
-  previewNotes: "preview_notes",
-  expirationScheduleId: "expiration_schedule_id",
-  broker: "broker",
-  priceSourceJson: "price_source",
-  mode: "mode",
-  createdAt: "created_at",
-  updatedAt: "updated_at",
-} as const;
-
-export const WATCHLIST_COLUMN_MAP = {
-  id: "id",
-  name: "name",
-  userLogin: "user_login",
-  symbolsJson: "symbols_json",
-  itemsJson: "items_json",
-  source: "source",
-  createdAt: "created_at",
-  updatedAt: "updated_at",
-} as const;
-
-export const OPTIONS_CHAIN_CACHE_COLUMN_MAP = {
-  id: "id",
-  symbol: "symbol",
-  expirationsJson: "expirations_json",
-  chainsJson: "chains_json",
-  fetchedAt: "fetched_at",
-  expiresAt: "expires_at",
-  contractCount: "contract_count",
-} as const;
+/* The column maps live in ./ormColumnMaps (leaf module — see its
+ * header for why); re-exported here so existing import paths
+ * keep working unchanged. */
+import {
+  AD_COLUMN_MAP,
+  CANONICAL_REPORT_COLUMN_MAP,
+  CATEGORY_COLUMN_MAP,
+  EVENT_COLUMN_MAP,
+  EXTERNAL_AD_COLUMN_MAP,
+  MEMORY_COLUMN_MAP,
+  MESSAGE_COLUMN_MAP,
+  OPTIONS_CHAIN_CACHE_COLUMN_MAP,
+  REFERRAL_COLUMN_MAP,
+  TRADE_COLUMN_MAP,
+  TRANSACTION_COLUMN_MAP,
+  WATCHLIST_COLUMN_MAP,
+  WEBHOOK_REPLAY_COLUMN_MAP,
+} from "./ormColumnMaps";
+export {
+  AD_COLUMN_MAP,
+  CANONICAL_REPORT_COLUMN_MAP,
+  CATEGORY_COLUMN_MAP,
+  EVENT_COLUMN_MAP,
+  EXTERNAL_AD_COLUMN_MAP,
+  MEMORY_COLUMN_MAP,
+  MESSAGE_COLUMN_MAP,
+  OPTIONS_CHAIN_CACHE_COLUMN_MAP,
+  REFERRAL_COLUMN_MAP,
+  TRADE_COLUMN_MAP,
+  TRANSACTION_COLUMN_MAP,
+  WATCHLIST_COLUMN_MAP,
+  WEBHOOK_REPLAY_COLUMN_MAP,
+};
 
 /** mas_messages adapter: repository + retention selector + session purge. */
 export class DoSqliteMessageAdapter
@@ -233,12 +92,11 @@ export class DoSqliteMessageAdapter
   }
 
   idsCreatedBefore(cutoffIso: string, limit: number): string[] {
-    const rows = Array.from(
-      this.sql.exec(
-        "SELECT id FROM mas_messages WHERE created_at < ? ORDER BY created_at ASC LIMIT ?",
-        cutoffIso,
-        limit,
-      ),
+    const rows = executeDoDml<Array<Record<string, unknown>>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_messages.ids_created_before",
+      { where: { createdAt: { $lt: cutoffIso } }, orderBy: "created_at ASC", limit },
     ) as Array<{ id?: unknown }>;
     return rows
       .map((r) => r?.id)
@@ -246,8 +104,13 @@ export class DoSqliteMessageAdapter
   }
 
   deleteBySessionId(sessionId: string): number {
+    // The verified before/after count is kept (the executor's
+    // deleteWhere return is discarded): the return is the rows
+    // actually gone, under every storage, exactly as before.
     const before = this.count({ sessionId });
-    this.sql.exec("DELETE FROM mas_messages WHERE session_id = ?", sessionId);
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_messages.delete_by_session", {
+      where: { sessionId },
+    });
     return before - this.count({ sessionId });
   }
 }
@@ -262,12 +125,11 @@ export class DoSqliteEventLogAdapter
   }
 
   idsCreatedBefore(cutoffIso: string, limit: number): string[] {
-    const rows = Array.from(
-      this.sql.exec(
-        "SELECT id FROM mas_events WHERE created_at < ? ORDER BY created_at ASC LIMIT ?",
-        cutoffIso,
-        limit,
-      ),
+    const rows = executeDoDml<Array<Record<string, unknown>>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_events.ids_created_before",
+      { where: { createdAt: { $lt: cutoffIso } }, orderBy: "created_at ASC", limit },
     ) as Array<{ id?: unknown }>;
     return rows
       .map((r) => r?.id)
@@ -286,17 +148,16 @@ export class DoSqliteMemoryAdapter
 
   clear(): number {
     const removed = this.count();
-    this.sql.exec("DELETE FROM mas_memory");
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_memory.clear", {});
     return removed;
   }
 
   keysUpdatedBefore(cutoffIso: string, limit: number): string[] {
-    const rows = Array.from(
-      this.sql.exec(
-        "SELECT key FROM mas_memory WHERE updated_at < ? ORDER BY updated_at ASC LIMIT ?",
-        cutoffIso,
-        limit,
-      ),
+    const rows = executeDoDml<Array<Record<string, unknown>>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_memory.keys_updated_before",
+      { where: { updatedAt: { $lt: cutoffIso } }, orderBy: "updated_at ASC", limit },
     ) as Array<{ key?: unknown }>;
     return rows
       .map((r) => r?.key)
@@ -305,33 +166,27 @@ export class DoSqliteMemoryAdapter
 
   search(term: string, limit: number): MemoryRecord[] {
     const like = `%${term.toLowerCase()}%`;
-    const rows = Array.from(
-      this.sql.exec(
-        "SELECT key, value, updated_at FROM mas_memory WHERE lower(key) LIKE ? OR lower(value) LIKE ? ORDER BY updated_at DESC LIMIT ?",
-        like,
-        like,
-        limit,
-      ),
-    ) as Array<{ key: string; value: string; updated_at: string }>;
+    const rows = executeDoDml<Array<{ key: string; value: string; updated_at: string }>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_memory.search",
+      { like, limit },
+    );
     return rows.map((r) => ({ key: r.key, value: r.value, updatedAt: r.updated_at }));
   }
 
   listRecent(limit: number): MemoryRecord[] {
-    const rows = Array.from(
-      this.sql.exec(
-        "SELECT key, value, updated_at FROM mas_memory ORDER BY updated_at DESC LIMIT ?",
-        limit,
-      ),
-    ) as Array<{ key: string; value: string; updated_at: string }>;
-    return rows.map((r) => ({ key: r.key, value: r.value, updatedAt: r.updated_at }));
+    // findMany returns mapped records (updatedAt), not raw rows —
+    // the mapping reads the record field, the returned shape is
+    // identical to before.
+    const rows = executeDoDml<MemoryRecord[]>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_memory.list_recent",
+      { orderBy: "updated_at DESC", limit },
+    );
+    return rows.map((r) => ({ key: r.key, value: r.value, updatedAt: r.updatedAt }));
   }
-}
-
-/** Rows matched by an UPDATE cursor (the async-job adapter's
- *  idiom: consume the cursor, then read rowsWritten). */
-function updateRowsWritten(cursor: unknown): number {
-  const c = cursor as { rowsWritten?: number };
-  return typeof c.rowsWritten === "number" ? c.rowsWritten : 0;
 }
 
 /** mas_transactions adapter: repository + INSERT OR REPLACE drafts. */
@@ -344,26 +199,12 @@ export class DoSqliteTransactionLedgerAdapter
   }
 
   replace(record: TransactionRecord): TransactionRecord {
-    const cols = Object.keys(TRANSACTION_COLUMN_MAP) as Array<
-      keyof typeof TRANSACTION_COLUMN_MAP
-    >;
-    const values = cols.map((prop) => {
-      const val = record[prop];
-      // Issue #3182: the map drives every column, so an optional field
-      // a record does not carry (tenantId on pre-stamping rows) would
-      // bind `undefined` — real SQLite rejects that ("Provided value
-      // cannot be bound"). Absent means NULL, exactly like the
-      // nullable columns the DDL already carries.
-      if (val === undefined) return null;
-      return typeof val === "boolean" ? (val ? 1 : 0) : val;
-    });
-    this.sql.exec(
-      `INSERT OR REPLACE INTO mas_transactions (${cols
-        .map((c) => TRANSACTION_COLUMN_MAP[c])
-        .join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
-      ...values,
+    return executeDoDml<TransactionRecord>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_transactions.replace",
+      { record },
     );
-    return record;
   }
 
   /** #3182: tenant-scoped read. `tenant_id = ?` excludes
@@ -372,55 +213,69 @@ export class DoSqliteTransactionLedgerAdapter
     return this.findMany({ where: { tenantId }, orderBy: "created_at DESC" });
   }
 
-  /** #2360: the route's four status transitions, statements
-   *  verbatim from routes/payments.ts (single-line form per
-   *  the MockSqlStorage lesson). No status guard on any of
-   *  them — the legacy UPDATEs have none. */
+  /** #2360: the route's four status transitions, field sets and
+   *  WHERE shapes verbatim from routes/payments.ts (single-line
+   *  form per the MockSqlStorage lesson). No status guard on any
+   *  of them — the legacy UPDATEs have none. The three
+   *  updateWhere entries return rows written (rowsWritten when
+   *  the store reports it, else the verified matched count —
+   *  identical under a reporting store; see the pin test and the
+   *  #2360 conformance suite). The OR-disjunction entry is a
+   *  template whose "run" return is rowsWritten-or-null, so the
+   *  legacy rowsWritten-or-0 is preserved with ?? 0. */
   completeWithGateway(id: string, fields: TransactionCompletionFields): number {
-    const cursor = this.sql.exec(
-      "UPDATE mas_transactions SET status = 'completed', gateway_ref = ?, checkout_url = ?, authorizer_did = ?, note = ?, updated_at = ? WHERE id = ?",
-      fields.gatewayRef,
-      fields.checkoutUrl,
-      fields.authorizerDid,
-      fields.note,
-      fields.updatedAt,
-      id,
+    return executeDoDml<number>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_transactions.complete_with_gateway",
+      {
+        where: { id },
+        set: {
+          status: "completed",
+          gatewayRef: fields.gatewayRef,
+          checkoutUrl: fields.checkoutUrl,
+          authorizerDid: fields.authorizerDid,
+          note: fields.note,
+          updatedAt: fields.updatedAt,
+        },
+      },
     );
-    Array.from(cursor as Iterable<unknown>);
-    return updateRowsWritten(cursor);
   }
 
   rejectWithNote(id: string, fields: TransactionRejectionFields): number {
-    const cursor = this.sql.exec(
-      "UPDATE mas_transactions SET status = 'rejected', authorizer_did = ?, note = ?, updated_at = ? WHERE id = ?",
-      fields.authorizerDid,
-      fields.note,
-      fields.updatedAt,
-      id,
+    return executeDoDml<number>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_transactions.reject_with_note",
+      {
+        where: { id },
+        set: {
+          status: "rejected",
+          authorizerDid: fields.authorizerDid,
+          note: fields.note,
+          updatedAt: fields.updatedAt,
+        },
+      },
     );
-    Array.from(cursor as Iterable<unknown>);
-    return updateRowsWritten(cursor);
   }
 
   completeByIdOrGatewayRef(ref: string, updatedAt: string): number {
-    const cursor = this.sql.exec(
-      "UPDATE mas_transactions SET status = 'completed', updated_at = ? WHERE id = ? OR gateway_ref = ?",
-      updatedAt,
-      ref,
-      ref,
+    const result = executeDoDml<number | null>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_transactions.complete_by_gateway_ref",
+      { updatedAt, ref },
     );
-    Array.from(cursor as Iterable<unknown>);
-    return updateRowsWritten(cursor);
+    return result ?? 0;
   }
 
   completeById(id: string, updatedAt: string): number {
-    const cursor = this.sql.exec(
-      "UPDATE mas_transactions SET status = 'completed', updated_at = ? WHERE id = ?",
-      updatedAt,
-      id,
+    return executeDoDml<number>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_transactions.complete_by_id",
+      { where: { id }, set: { status: "completed", updatedAt } },
     );
-    Array.from(cursor as Iterable<unknown>);
-    return updateRowsWritten(cursor);
   }
 }
 
@@ -436,10 +291,13 @@ export class DoSqliteSettingsReadAdapter implements SettingsReadPort {
   constructor(protected readonly sql: SqlStorage) {}
 
   get(key: string): string | null {
-    const rows = Array.from(
-      this.sql.exec("SELECT value FROM mas_settings WHERE key = ?", key),
-    ) as Array<{ value?: unknown }>;
-    const value = rows[0]?.value;
+    const row = executeDoDml<Record<string, unknown> | null>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_settings.get",
+      { id: key },
+    );
+    const value = row?.value;
     return typeof value === "string" ? value : value == null ? null : String(value);
   }
 
@@ -469,17 +327,14 @@ export class DoSqliteSettingsAdapter
     // DELETE+INSERT (not INSERT OR REPLACE) so
     // MockSqlStorage-shaped stores stay compatible — the
     // incumbent idiom of all four legacy writers.
-    this.sql.exec("DELETE FROM mas_settings WHERE key = ?", key);
-    this.sql.exec(
-      "INSERT INTO mas_settings (key, value, updated_at) VALUES (?, ?, ?)",
-      key,
-      value,
-      updatedAt ?? new Date().toISOString(),
-    );
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_settings.delete", { id: key });
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_settings.insert", {
+      record: { key, value, updated_at: updatedAt ?? new Date().toISOString() },
+    });
   }
 
   delete(key: string): void {
-    this.sql.exec("DELETE FROM mas_settings WHERE key = ?", key);
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_settings.delete", { id: key });
   }
 }
 
