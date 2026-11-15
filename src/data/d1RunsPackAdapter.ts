@@ -8,7 +8,7 @@
  * migrationRunner.ts).
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt } from "drizzle-orm";
 import {
   agentRunsPackBalances,
   agentRunsPackDrafts,
@@ -41,6 +41,8 @@ import {
   type RunsPackVersionStore,
 } from "./runsPackPorts";
 import { assertApproverId, type PlanPriceApprovalStatus } from "./subscriptionPorts";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { dmlFragment } from "./schemaComponent/dmlExecutor";
 
 /** Drizzle D1 database object carrying the runs-pack schema. */
 export type RunsPackDb = DrizzleD1Database<{
@@ -249,7 +251,11 @@ export class D1RunsPackBalanceAdapter implements RunsPackBalancePort {
       .onConflictDoUpdate({
         target: agentRunsPackBalances.login,
         set: {
-          runsRemaining: sql`${agentRunsPackBalances.runsRemaining} + ${validatedRuns}`,
+          runsRemaining: dmlFragment(
+            DML_CATALOGUE,
+            "dml.d1.agent_runs_pack_balances.increment_runs",
+            { delta: validatedRuns },
+          ),
           updatedAtMs: now,
         },
       });
@@ -269,7 +275,10 @@ export class D1RunsPackBalanceAdapter implements RunsPackBalancePort {
     const rows = await this.db
       .update(agentRunsPackBalances)
       .set({
-        runsRemaining: sql`${agentRunsPackBalances.runsRemaining} - 1`,
+        runsRemaining: dmlFragment(
+          DML_CATALOGUE,
+          "dml.d1.agent_runs_pack_balances.decrement_run",
+        ),
         updatedAtMs: Date.now(),
       })
       .where(and(eq(agentRunsPackBalances.login, login), gt(agentRunsPackBalances.runsRemaining, 0)))
