@@ -6,16 +6,20 @@
  * leave the platform-admin sub-menu; Schedules gains a left-nav sub-menu
  * and `schedules:*` deep links. No data consolidation, no view
  * consolidation: the queue view and Background Tasks stay separate tabs,
- * the Queues-page async-jobs copy stays, Workflow Runs and Free Runs stay
- * where they are, and the `legacySchedulesRedirect` shims keep working.
+ * Workflow Runs and Free Runs stay where they are, and the
+ * `legacySchedulesRedirect` shims keep working.
+ * (Issue #4574, later: the Queues-page async-jobs copy this header once
+ * said stays is removed as covered by Background Tasks, and the
+ * dead-letter queue becomes the sixth view — the pins below now assert
+ * six.)
  *
  * Pins:
- * - 4561-P01 the home resolves exactly five views, Background Tasks last.
+ * - 4561-P01 the home resolves exactly six views, Background Tasks last.
  * - 4561-P02 the Schedules left-nav item carries one sub-menu entry per
  *   view, each with a label, description, and a resolvable icon.
  * - 4561-P03 every Schedules view resolves through the deep-link catalog
  *   to `?tab=schedules&view=<view>` — no view falls back to autopilot.
- * - 4561-P04 the schedules surface lists the five views and the home
+ * - 4561-P04 the schedules surface lists the six views and the home
  *   mounts a TabPanel for each.
  * - 4561-P05 background-tasks / scheduled-goals / jobs are gone from the
  *   platform-admin sub-menu, the config items, the deep-link overrides,
@@ -67,27 +71,27 @@ function read(rel: string): string {
   return readFileSync(join(here, rel), "utf8").replace(/\r\n/g, "\n");
 }
 
-const FIVE_VIEWS = ["list", "runs", "goals", "queue", "background-tasks"] as const;
-const FIVE_LABELS = ["Schedules", "Run ledger", "Goal schedules", "Queue", "Background Tasks"];
+const SIX_VIEWS = ["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue"] as const;
+const SIX_LABELS = ["Schedules", "Run ledger", "Goal schedules", "Queue", "Background Tasks", "Dead-letter queue"];
 
-describe("4561-P01 the home resolves exactly five views (#4561)", () => {
-  it("SCHEDULES_HOME_VIEWS lists the five views, Background Tasks last", () => {
-    expect([...SCHEDULES_HOME_VIEWS]).toEqual([...FIVE_VIEWS]);
-    expect(FIVE_VIEWS.map((v) => SCHEDULES_HOME_VIEW_LABELS[v])).toEqual(FIVE_LABELS);
+describe("4561-P01 the home resolves exactly six views (#4561)", () => {
+  it("SCHEDULES_HOME_VIEWS lists the six views, Dead-letter queue last", () => {
+    expect([...SCHEDULES_HOME_VIEWS]).toEqual([...SIX_VIEWS]);
+    expect(SIX_VIEWS.map((v) => SCHEDULES_HOME_VIEW_LABELS[v])).toEqual(SIX_LABELS);
   });
 });
 
 describe("4561-P02 Schedules carries one sub-menu entry per view (#4561)", () => {
-  it("the Schedules item has five sub-items with labels, descriptions, and icons", () => {
+  it("the Schedules item has six sub-items with labels, descriptions, and icons", () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(platform).toBeDefined();
     const item = platform!.items.find((i) => i.id === "schedules");
     expect(item).toBeDefined();
-    expect(item!.subItems).toHaveLength(5);
-    for (const [index, view] of FIVE_VIEWS.entries()) {
+    expect(item!.subItems).toHaveLength(6);
+    for (const [index, view] of SIX_VIEWS.entries()) {
       const sub = item!.subItems![index];
       expect(sub.id).toBe(view);
-      expect(sub.label).toBe(FIVE_LABELS[index]);
+      expect(sub.label).toBe(SIX_LABELS[index]);
       expect(sub.description).toBeTruthy();
       expect(sub.description!.length).toBeGreaterThan(0);
       expect(sub.icon).toBeTruthy();
@@ -100,7 +104,7 @@ describe("4561-P02 Schedules carries one sub-menu entry per view (#4561)", () =>
 
 describe("4561-P03 every Schedules view resolves through the catalog (#4561)", () => {
   it("each view deep-links to ?tab=schedules&view=<view>", () => {
-    for (const view of FIVE_VIEWS) {
+    for (const view of SIX_VIEWS) {
       expect(deepLinkForNavNode("schedules", view)).toEqual({
         tab: "schedules",
         view,
@@ -115,15 +119,15 @@ describe("4561-P03 every Schedules view resolves through the catalog (#4561)", (
   });
 });
 
-describe("4561-P04 the schedules surface lists the five views (#4561)", () => {
-  it("the surface def carries all five values and the home mounts a TabPanel for each", () => {
+describe("4561-P04 the schedules surface lists the six views (#4561)", () => {
+  it("the surface def carries all six values and the home mounts a TabPanel for each", () => {
     const surface = SURFACE_TAB_DEFS.find((d) => d.surface === "schedules");
     expect(surface).toBeDefined();
     expect(surface!.page).toBe("schedules");
     expect(surface!.param).toBe("view");
-    expect([...surface!.values]).toEqual([...FIVE_VIEWS]);
+    expect([...surface!.values]).toEqual([...SIX_VIEWS]);
     const home = read("src/client/SchedulesHome.tsx");
-    for (const view of FIVE_VIEWS) {
+    for (const view of SIX_VIEWS) {
       expect(home).toContain(`tabId="${view}"`);
       expect(home).toContain(`deepLink.view === "${view}"`);
     }
@@ -222,13 +226,13 @@ describe("4561-P07 the home renders the Background Tasks tab (#4561)", () => {
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(FIVE_LABELS);
+    expect(tabs).toEqual(SIX_LABELS);
     expect(container.querySelector('[data-testid="async-jobs-panel"]')).toBeTruthy();
     expect(container.textContent).toContain("Background Tasks");
     expect(container.textContent).toContain("Async jobs & execution queue");
   });
 
-  it("the default list view still renders all five tabs", async () => {
+  it("the default list view still renders all six tabs", async () => {
     window.history.pushState(null, "", "/?tab=schedules");
     await render(
       <ToastProvider>
@@ -239,6 +243,6 @@ describe("4561-P07 the home renders the Background Tasks tab (#4561)", () => {
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(FIVE_LABELS);
+    expect(tabs).toEqual(SIX_LABELS);
   });
 });

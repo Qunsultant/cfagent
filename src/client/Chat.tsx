@@ -58,7 +58,6 @@ import { PaymentWorkflowAssurance } from "./PaymentWorkflowAssurance";
 import { CheckoutPanel } from "./CheckoutPanel";
 import { SocialPostingPanel } from "./SocialPostingPanel";
 import { PaymentsPage } from "./PaymentsPage";
-import { QueuesPage } from "./QueuesPage";
 import { SearchHub } from "./search/SearchHub";
 import {
   isTabFeatureEnabled,
@@ -1002,9 +1001,6 @@ export function Chat({ user }: { user: User }) {
     ),
     approvals: (
           <ApprovalsPanel />
-    ),
-    queues: (
-          <QueuesPage />
     ),
     audit: (
           <div className="audit-view">

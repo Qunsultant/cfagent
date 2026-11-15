@@ -12,7 +12,10 @@
  * provenance + consolidated-ledger runs, no second read path), queue
  * (ScheduleQueueView — platform-admin gated at the route),
  * background-tasks (AsyncJobsPanel — the async execution queue, moved
- * from Platform Admin in #4561; a separate tab from the queue view).
+ * from Platform Admin in #4561; a separate tab from the queue view),
+ * dead-letter-queue (DlqPanel — the dead-letter queue, moved from the
+ * retired Queues page in #4574; the page's async-jobs copy is removed
+ * as covered by Background Tasks).
  *
  * View state follows the URL (`?view=`, plus `?schedule=` / `?run=`
  * deep links), the same pattern as PlatformAdminPage: the component
@@ -39,6 +42,7 @@ import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
 import { ScheduleRunLedgerPanel } from "./ScheduleRunLedgerPanel";
 import { ScheduleQueueView } from "./ScheduleQueueView";
 import { AsyncJobsPanel } from "./AsyncJobsPanel";
+import { DlqPanel } from "./DlqPanel";
 import { useBrokerEnvironment } from "./brokerEnvironment";
 import { navigateToTab, subscribeToRouteChanges } from "./router";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
@@ -89,7 +93,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
   return (
     <PageShell
       title="Schedules"
-      scopeNote="The one scheduling surface — schedules, goal schedules, the consolidated run ledger, the admin queue, and background tasks"
+      scopeNote="The one scheduling surface — schedules, goal schedules, the consolidated run ledger, the admin queue, background tasks, and the dead-letter queue"
     >
       <div className="schedules-home-tabs-wrapper">
         <Tabs<SchedulesHomeView>
@@ -169,6 +173,19 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
             <small>Async jobs &amp; execution queue</small>
           </div>
           <AsyncJobsPanel embedded />
+        </div>
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="schedules-home" tabId="dead-letter-queue" active={deepLink.view === "dead-letter-queue"}>
+        <Card padding="md">
+          {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
+          <div className="ui-scroll-frame">
+          <div className="section-label-row">
+            <span>Dead-letter queue</span>
+            <small>Unreplayed records — replay to the source queue</small>
+          </div>
+          <DlqPanel />
         </div>
         </Card>
       </TabPanel>

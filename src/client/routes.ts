@@ -6,7 +6,7 @@
  * from this table (see NavigationMenu.tsx and Chat.tsx).
  *
  * Shape of an entry:
- * - `id` is the tab id carried in the URL (`?tab=<id>`). All 36 ids Chat
+ * - `id` is the tab id carried in the URL (`?tab=<id>`). All 43 ids Chat
  *   has ever used are entries, including the six legacy/alias ids
  *   (trading, orders, scanner, reports, schedules, options) that never
  *   render as nav items but still land on a page. Issue #2596 added
@@ -15,7 +15,10 @@
  *   Products was added as the 35th id (navOrder 28) as a real page.
  *   Billing was added as the 36th id (navOrder 29) as a real page.
  *   Issue #4530 retired the Products route into the Product Hub, which
- *   took its navOrder 28 slot as the 37th id.
+ *   took its navOrder 28 slot as the 37th id. Issue #4574 retired the
+ *   Queues route into the Schedules home (dead-letter-queue view);
+ *   navOrders 12..30 shift down one, keeping 0..29 across the 30 nav
+ *   entries; the route count is 43.
  * - `navEntry` is present only for the 30 entries that render in the nav.
  *   Its `navOrder` reproduces the historical sidebar/top-strip order, so
  *   deriving NAVIGATION_ITEMS from this table changes nothing visible.

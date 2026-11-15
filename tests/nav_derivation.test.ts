@@ -26,6 +26,9 @@
  * (#2974 moved Workflows + Records NLQ into Platform, removed the
  * Research & Dual Feed nav entry, and reordered queues/nlq into the
  * final Platform order; pin updated in the same PR per the pin rule.)
+ * (#4574 retired the Queues tab into the Schedules home
+ * (dead-letter-queue view) and closed the navOrder gap; pin updated
+ * in the same PR per the pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -46,7 +49,6 @@ const EXPECTED_ORDER = [
   "chat",
   "search",
   "workflow-runs",
-  "queues",
   "referrals",
   "ads",
   "social",
@@ -69,7 +71,7 @@ const EXPECTED_ORDER = [
 ];
 
 describe("nav derivation", () => {
-  it("derives the 31 nav items in display order", () => {
+  it("derives the 30 nav items in display order", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).toEqual(EXPECTED_ORDER);
   });
 

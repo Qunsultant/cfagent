@@ -77,14 +77,13 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(titles).toContain("SANDBOX");
   });
 
-  it("holds the final Platform order: Platform Admin, Schedules, Workflows, Queues, Agents, Audit Vault, Records NLQ (#2974)", () => {
+  it("holds the final Platform order: Platform Admin, Schedules, Workflows, Agents, Audit Vault, Records NLQ (#2974; Queues retired into Schedules in #4574)", () => {
     const plat = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(plat).toBeDefined();
     expect(plat!.items.map((i) => i.id)).toEqual([
       "platform-admin",
       "schedules",
       "workflow-runs",
-      "queues",
       "agents",
       "audit",
       "nlq",

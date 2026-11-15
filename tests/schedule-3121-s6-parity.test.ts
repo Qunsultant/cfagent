@@ -145,11 +145,13 @@ describe("S6-P02 §9 carries the #3361 row", () => {
 });
 
 describe("S6-P03 U-07 corrected", () => {
-  it("§9.6 names the Queues tab as the T4 surface with S4 linkage landed", () => {
+  it("§9.6 names the Queues tab as retired into the home in #4574 (S4 linkage landed)", () => {
     const s96 = section91to97("### 9.6 URL inventory", null);
     expect(s96).not.toContain("S4 (planned)");
     expect(s96).toContain("?tab=queues");
-    expect(s96).toContain("QueuesPage");
+    expect(s96).not.toContain("QueuesPage");
+    expect(s96).toContain("dead-letter-queue");
+    expect(s96).toContain("#4574");
     expect(s96).toContain("S4 — landed");
   });
 
@@ -189,16 +191,17 @@ describe("S6-P04 U-08 corrected", () => {
   });
 });
 
-describe("S6-P05 five surfaces reachable through the consolidated path", () => {
-  it("the home resolves exactly the five views, ledger aliasing runs", () => {
+describe("S6-P05 six surfaces reachable through the consolidated path", () => {
+  it("the home resolves exactly the six views, ledger aliasing runs", () => {
     expect([...SCHEDULES_HOME_VIEWS]).toEqual([
       "list",
       "runs",
       "goals",
       "queue",
       "background-tasks",
+      "dead-letter-queue",
     ]);
-    for (const view of ["list", "runs", "goals", "queue", "background-tasks"] as const) {
+    for (const view of ["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue"] as const) {
       expect(parseSchedulesDeepLink(`?tab=schedules&view=${view}`).view).toBe(
         view,
       );
@@ -220,14 +223,16 @@ describe("S6-P05 five surfaces reachable through the consolidated path", () => {
     expect(home).toContain("ScheduledGoalsPanel");
     expect(home).toContain("ScheduleQueueView");
     expect(home).toContain("AsyncJobsPanel");
+    expect(home).toContain("DlqPanel");
     expect(home).toContain('deepLink.view === "list"');
     expect(home).toContain('deepLink.view === "runs"');
     expect(home).toContain('deepLink.view === "goals"');
     expect(home).toContain('deepLink.view === "queue"');
     expect(home).toContain('deepLink.view === "background-tasks"');
+    expect(home).toContain('deepLink.view === "dead-letter-queue"');
   });
 
-  it("all five retired addresses redirect to the home", () => {
+  it("all six retired addresses redirect to the home", () => {
     expect(legacySchedulesRedirect("?tab=screeners&view=schedules")).toEqual({
       tab: "schedules",
     });
@@ -246,6 +251,12 @@ describe("S6-P05 five surfaces reachable through the consolidated path", () => {
         "?tab=platform-admin&view=iaaa-admin&iaaaTab=queue",
       ),
     ).toEqual({ tab: "schedules", view: "queue" });
+    // Issue #4574 (U-07): the retired Queues tab redirects to the
+    // home's dead-letter-queue view.
+    expect(legacySchedulesRedirect("?tab=queues")).toEqual({
+      tab: "schedules",
+      view: "dead-letter-queue",
+    });
     expect(legacySchedulesRedirect("?tab=schedules&view=list")).toBeNull();
   });
 });

@@ -19,7 +19,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import { ApprovalsPanel } from "../src/client/ApprovalsPanel";
-import { QueuesPage } from "../src/client/QueuesPage";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -158,22 +157,6 @@ describe("Approvals consolidation (issue #4538)", () => {
     expect(railLink()).not.toBeNull();
   });
 
-  it("Queues page: no queue, link to the Approvals page, other queues intact", async () => {
-    await renderNode(<QueuesPage />);
-    const text = container.textContent ?? "";
-    expect(text).toContain("Async jobs");
-    expect(text).toContain("Dead-letter queue");
-    expect(text).toContain("Trade approvals");
-    queueDomMarkersAbsent(0);
-    // On the Queues page the queue was the sole /api/broker/orders
-    // consumer, so the fetch is a valid absence signal here.
-    expect(fetchCalls.filter((c) => c.url.startsWith("/api/broker/orders"))).toHaveLength(0);
-    const link = container.querySelector('a[href="?tab=approvals"]');
-    expect(link).not.toBeNull();
-    const section = link!.closest("section");
-    expect(section?.querySelector("h2")?.textContent?.trim()).toBe("Trade approvals");
-  });
-
   it("Approvals page parity: refresh, approve/reject, and expiry all present on a pending draft", async () => {
     await renderNode(<ApprovalsPanel />);
     const text = container.textContent ?? "";
@@ -204,9 +187,13 @@ describe("Approvals consolidation (issue #4538)", () => {
     expect(ticket).not.toContain("TradingApprovalsQueue");
     expect(ticket).toContain("queueRail=");
     expect(ticket).toContain('href="?tab=approvals"');
+    // Issue #4574: the Queues page is retired (its DLQ lives on the
+    // Schedules dead-letter-queue view); the page file stays, deprecated
+    // in place, and carries no queue — the one-home pin for the queue
+    // itself lives in tests/schedules_navigation_4574.test.tsx.
     const queues = readFileSync("src/client/QueuesPage.tsx", "utf8");
+    expect(queues).toContain("@deprecated");
     expect(queues).not.toContain("TradingApprovalsQueue");
-    expect(queues).toContain('href="?tab=approvals"');
     const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
     expect(hub).not.toContain("TradingApprovalsQueue");
     const panel = readFileSync("src/client/ApprovalsPanel.tsx", "utf8");
