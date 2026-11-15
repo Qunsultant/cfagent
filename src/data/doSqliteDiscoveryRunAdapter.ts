@@ -20,6 +20,8 @@
 import type { DoTransactionStorage } from "../aspects/transactionAspect";
 import { getTransactionRunner } from "./transactionRunnerProvider";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 import {
   DISCOVERY_RUN_MAX_ROWS,
   DISCOVERY_RUN_RETENTION_DAYS,
@@ -35,24 +37,8 @@ import {
   type StoredDiscoveryRun,
 } from "./discoveryRunPorts";
 
-const TABLE = "mas_discovery_runs";
-
 const CREATE_TABLE_SQL = doTableSql("mas_discovery_runs");
 const CREATE_INDEX_SQL = doIndexSql("idx_mas_discovery_runs_created_at");
-const INSERT_SQL =
-  `INSERT INTO ${TABLE} (id, created_at, status, user_login, summary_json, run_json) VALUES (?, ?, ?, ?, ?, ?)`;
-// The visibility predicate lives in the list statement itself (issue
-// #103), exactly as in the scan store: pagination walks only rows the
-// caller may see, and a NULL scope parameter matches only NULL-login
-// rows because `user_login = NULL` is never true in SQLite.
-const LIST_SQL =
-  `SELECT summary_json FROM ${TABLE} WHERE (user_login IS NULL OR user_login = ?) ` +
-  `ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`;
-const GET_SQL = `SELECT summary_json, run_json FROM ${TABLE} WHERE id = ?`;
-const COUNT_SQL = `SELECT COUNT(*) AS count FROM ${TABLE}`;
-const PRUNE_AGE_SQL = `DELETE FROM ${TABLE} WHERE created_at < ?`;
-const PRUNE_CAP_SQL =
-  `DELETE FROM ${TABLE} WHERE id NOT IN (SELECT id FROM ${TABLE} ORDER BY created_at DESC, id DESC LIMIT ?)`;
 
 function summarize(input: DiscoveryRunInput, id: string): DiscoveryRunSummary {
   // An outcome counts as an abstention either by status (the
@@ -138,8 +124,7 @@ export class SqlDiscoveryRunStore implements DiscoveryRunStore {
   }
 
   private count(): number {
-    const rows = Array.from(this.sql.exec(COUNT_SQL)) as Array<{ count: number }>;
-    return Number(rows[0]?.count ?? 0);
+    return executeDoDml<number>(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_runs.count", {});
   }
 
   async save(input: DiscoveryRunInput): Promise<StoredDiscoveryRun> {
@@ -153,19 +138,20 @@ export class SqlDiscoveryRunStore implements DiscoveryRunStore {
       outcomes: input.outcomes,
     };
     const insert = () => {
-      this.sql.exec(
-        INSERT_SQL,
-        id,
-        input.createdAt,
-        input.status,
-        summary.userLogin ?? null,
-        JSON.stringify(summary),
-        JSON.stringify({
-          requests: input.requests,
-          ...(input.constraintSets !== undefined ? { constraintSets: input.constraintSets } : {}),
-          outcomes: input.outcomes,
-        }),
-      );
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_runs.insert", {
+        record: {
+          id,
+          created_at: input.createdAt,
+          status: input.status,
+          user_login: summary.userLogin ?? null,
+          summary_json: JSON.stringify(summary),
+          run_json: JSON.stringify({
+            requests: input.requests,
+            ...(input.constraintSets !== undefined ? { constraintSets: input.constraintSets } : {}),
+            outcomes: input.outcomes,
+          }),
+        },
+      });
     };
     // Retention is enforced on the write path, relative to the run's
     // own timestamp (same discipline as the scan store). The INSERT
@@ -198,14 +184,16 @@ export class SqlDiscoveryRunStore implements DiscoveryRunStore {
     // of returning short pages from a filtered LIMIT — and keeps this adapter
     // at the same number of SQL statements the D-D census pins.
     const brokerScoped = Boolean(options.broker);
-    const rows = Array.from(
-      this.sql.exec(
-        LIST_SQL,
-        options.userLogin ?? null,
-        brokerScoped ? this.maxRows : limit,
-        brokerScoped ? 0 : offset,
-      ),
-    ) as Array<{ summary_json: string }>;
+    const rows = executeDoDml<Array<{ summary_json: string }>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_discovery_runs.list",
+      {
+        userLogin: options.userLogin ?? null,
+        limit: brokerScoped ? this.maxRows : limit,
+        offset: brokerScoped ? 0 : offset,
+      },
+    );
     const summaries = rows.map((r) => JSON.parse(r.summary_json) as DiscoveryRunSummary);
     if (!options.broker) return summaries;
     return summaries
@@ -215,14 +203,19 @@ export class SqlDiscoveryRunStore implements DiscoveryRunStore {
 
   async get(id: string, options: { userLogin?: string; broker?: DiscoveryRunBroker } = {}): Promise<StoredDiscoveryRun | null> {
     this.ensure();
-    const rows = Array.from(this.sql.exec(GET_SQL, id)) as Array<{ summary_json: string; run_json: string }>;
-    if (!rows.length) return null;
-    const summary = JSON.parse(rows[0].summary_json) as DiscoveryRunSummary;
+    const row = executeDoDml<{ summary_json: string; run_json: string } | null>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_discovery_runs.get",
+      { id },
+    );
+    if (!row) return null;
+    const summary = JSON.parse(row.summary_json) as DiscoveryRunSummary;
     // The summary is the scoping authority; an invisible run reads as absent.
     if (!discoveryRunVisibleToCaller(summary, options.userLogin)) return null;
     // Issue #3388: another broker's run reads exactly like a missing one.
     if (options.broker && normalizeDiscoveryRunBroker(summary.broker) !== options.broker) return null;
-    const body = JSON.parse(rows[0].run_json) as Pick<
+    const body = JSON.parse(row.run_json) as Pick<
       StoredDiscoveryRun,
       "requests" | "outcomes" | "constraintSets"
     >;
@@ -237,8 +230,12 @@ export class SqlDiscoveryRunStore implements DiscoveryRunStore {
   private pruneSync(now: Date): number {
     this.ensure();
     const before = this.count();
-    this.sql.exec(PRUNE_AGE_SQL, retentionCutoff(now, this.retentionDays));
-    this.sql.exec(PRUNE_CAP_SQL, this.maxRows);
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_runs.prune_age", {
+      where: { created_at: { $lt: retentionCutoff(now, this.retentionDays) } },
+    });
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_discovery_runs.prune_cap", {
+      maxRows: this.maxRows,
+    });
     return before - this.count();
   }
 
