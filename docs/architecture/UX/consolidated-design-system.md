@@ -800,23 +800,23 @@ not deviations from it.
 | This doc | Consolidates |
 |---|---|
 | §0 rule of three | Owner directive 2026-11-03 (new; no prior doc states it) |
-| §1 page template | `docs/architecture/UX/design-system-01.md` §2–§3 (shell, route table, retained views, tabbed browsing, composition); `docs/agents/ux-architecture.md` §5 (information architecture), §16 (frontend–backend contracts); code: `routes.ts`, `navConfig.ts`, `deepLinks.ts`, `router.ts`, `useUrlSyncedTabs.ts`, `Chat.tsx` outlets, `LeftNavBar.tsx`, `featureFlags.tsx` |
-| §2.1 layers | `design-system-01.md` §1; `docs/plans/UX/ux-token-architecture-plan.md` (phases, 3 layers, one vocabulary); `branding.ts` (#1297); `designTokens.ts`; `tokens.css` |
+| §1 page template | `docs/archive/design-system-01.md` §2–§3 (shell, route table, retained views, tabbed browsing, composition); `docs/agents/ux-architecture.md` §5 (information architecture), §16 (frontend–backend contracts); code: `routes.ts`, `navConfig.ts`, `deepLinks.ts`, `router.ts`, `useUrlSyncedTabs.ts`, `Chat.tsx` outlets, `LeftNavBar.tsx`, `featureFlags.tsx` |
+| §2.1 layers | `../archive/design-system-01.md` §1; `docs/plans/UX/ux-token-architecture-plan.md` (phases, 3 layers, one vocabulary); `branding.ts` (#1297); `designTokens.ts`; `tokens.css` |
 | §2.2 tokens | `ux-architecture.md` §6 (design tokens); plan doc (one vocabulary, shim deletion, 3 themes one mechanism); `tokens.css` header; `designTokens.ts` |
-| §2.3 primitives | `design-system-01.md` §1; `src/client/components/ui/index.ts` inventory; `composable_ui_primitives.test.ts` |
-| §2.4 composition | `ux-architecture.md` §8–§11, §13–§16; `design-system-01.md` §2; `gitops.md` §7 (pin rule) |
+| §2.3 primitives | `../archive/design-system-01.md` §1; `src/client/components/ui/index.ts` inventory; `composable_ui_primitives.test.ts` |
+| §2.4 composition | `ux-architecture.md` §8–§11, §13–§16; `../archive/design-system-01.md` §2; `gitops.md` §7 (pin rule) |
 | §2.5 Toast vs Notice | `ux-architecture.md` §6 (Toasts; global toast standard, #2283 decision: transient → Toast, persistent → Notice, no `alert()`/`confirm()`) |
 | §2.6 ADR-0004 | `docs/architecture/adr/0004-ux-token-architecture-no-exemptions.md` verbatim in substance |
-| §2.7 gates | `design-system-01.md` §1 (gates); `gitops.md` §7, §22; the ratchet/freeze/inventory/contrast/ceiling test files |
+| §2.7 gates | `../archive/design-system-01.md` §1 (gates); `gitops.md` §7, §22; the ratchet/freeze/inventory/contrast/ceiling test files |
 | §2.8 DoD | `ux-architecture.md` §19–§21 |
 | §3 themes | Plan doc (three themes one mechanism, theme axes); `theme.ts`; `tokens.css` theme maps; `landing.ts` theme code |
 | §3.2–§3.4 audit | New work for this draft: JSX-tag scan of `src/client` at `00778ba` + the `ui/` prop types |
-| Not consolidated (out of scope) | `docs/architecture/UX/schedule-surface-01.md` (schedules surface, not the system); `docs/architecture/UX/assessment-01.md` and `exceptions-01.md` (point-in-time audits — see C5, C6, treated as historical, not as rules); `docs/agents/gitops.md` delivery policy (governs process, cited, not absorbed) |
+| Not consolidated (out of scope) | `docs/architecture/UX/schedule-surface-01.md` (schedules surface, not the system); `docs/archive/assessment-01.md` and `../archive/exceptions-01.md` (point-in-time audits — see C5, C6, treated as historical, not as rules); `docs/agents/gitops.md` delivery policy (governs process, cited, not absorbed) |
 
 ### 4.2 Contradictions — both sides, unresolved
 
 **C1. Route and nav-entry counts.**
-`design-system-01.md` §3 says "26 historical tab ids" and "20
+`../archive/design-system-01.md` §3 says "26 historical tab ids" and "20
 entries that render in the nav". The tree at `00778ba` has **41
 route ids and 31 nav entries** (`navOrder` 0–30). The doc is
 stale by 15 routes and 11 nav entries (deep-links sequence,
@@ -825,7 +825,7 @@ follows the tree. The old doc needs a counts refresh, not a
 correction of the architecture.
 
 **C2. Shell conformance frozen at S4.**
-`design-system-01.md` §1/§4 says the shell list is "complete at
+`../archive/design-system-01.md` §1/§4 says the shell list is "complete at
 25 of 26 after S4" with `chat` deferred (ADR-0021). The
 conformance JSON lists **26** migrated ids, but the route table
 has 41 — 15 newer routes (goal-screen, review, track-record,
@@ -838,7 +838,7 @@ draft treats the template (§1) as the conformance mechanism
 for new pages and the JSON as the S4 historical record.
 
 **C3. "Exactly one tab mechanism" vs the ScreenersHub tablist.**
-`design-system-01.md` §2 says S2 "reconciles [the screener
+`../archive/design-system-01.md` §2 says S2 "reconciles [the screener
 hub's bespoke tablist] into the `Tabs` primitive… leaving
 exactly one tab mechanism", with system-wide rollout beginning
 from the hub as exemplar. The tree still has the hub on
@@ -849,7 +849,7 @@ superseded. Unresolved: recorded here as gap §3.4 item 9, not
 as done.
 
 **C4. Inner-view deep-linking "still open" vs landed.**
-`design-system-01.md` §2–§3 says generic inner-tab (`view`)
+`../archive/design-system-01.md` §2–§3 says generic inner-tab (`view`)
 deep-linking "is S2, still open". The tree has
 `SURFACE_TAB_DEFS` (14 surfaces) and the `view` param wired
 through `useUrlSyncedTabs` and the deep-link catalog. The S2
@@ -857,7 +857,7 @@ work (or its successor) landed after the doc froze. This draft
 follows the tree: inner-view deep-linking is done.
 
 **C5. Exceptions-01 vs ADR-0004.**
-`exceptions-01.md` (2026-10-25) audits 85 TSX files and finds
+`../archive/exceptions-01.md` (2026-10-25) audits 85 TSX files and finds
 28 non-compliant (zero primitive imports + raw controls) and 16
 bypassing (imports primitives but still renders raw controls),
 with a remediation roadmap. ADR-0004 (2026-10-26) then made
@@ -871,7 +871,7 @@ allowlist is the live instrument) is the way to close it, not
 an edit to the old report.
 
 **C6. Assessment-01 vs the one-dialog / Toast systems.**
-`assessment-01.md` (2026-10-25) finds modal focus-trapping gaps,
+`../archive/assessment-01.md` (2026-10-25) finds modal focus-trapping gaps,
 live-announcement gaps during streaming, and 24px/44px target
 gaps. The Modal primitive (portal, Escape, focus trap +
 restore, scroll lock) and the Toast live-region rules
@@ -905,7 +905,7 @@ numbers are stale, not a second limit.
 
 **C9. "Every left-nav page renders inside PageShell" vs the
 hub outlet.**
-`design-system-01.md` §2 states the shell rule absolutely.
+`../archive/design-system-01.md` §2 states the shell rule absolutely.
 Hub pages render through the trading-hub outlet (§1.4), and
 `chat` is deferred (ADR-0021). The shell rule is therefore
 "every left-nav page renders inside PageShell, except pages
@@ -926,7 +926,7 @@ recorded as such) or it folds onto `theme.ts`. Unresolved:
 gap §3.4 item 8.
 
 **Reconciled, not contradictions (for the record):**
-`design-system-01.md` says the contrast gate is "25 semantic
+`../archive/design-system-01.md` says the contrast gate is "25 semantic
 pairs × 3 themes" and the plan doc says "75 pairs, 0 below AA"
 — the same 75 checks, counted per theme vs total. The plan
 doc's "93 `--color-*` tokens" vs the 36 typed color roles in
@@ -957,7 +957,7 @@ question anymore:
 - **Decision 5 (placement) — RESOLVED 2026-11-04.** This document
   was placed at `docs/architecture/UX/consolidated-design-system.md`
   via issue #3096 / PR #3097 (merged 3a51d91), with
-  `design-system-01.md` pointing here as its consolidated
+  `../archive/design-system-01.md` pointing here as its consolidated
   successor. No replacement of `ux-architecture.md` was made: it
   remains the live contract.
 - **Decision 6 (C2) — RESOLVED as historical.** The S4

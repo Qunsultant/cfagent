@@ -6,6 +6,17 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-15 — UX docs consolidation D0 retires three stale UX docs to docs/archive/ (#4632)
+
+- File: `docs/architecture/UX/design-system-01.md` → `docs/archive/design-system-01.md`
+- File: `docs/architecture/UX/assessment-01.md` → `docs/archive/assessment-01.md`
+- File: `docs/architecture/UX/exceptions-01.md` → `docs/archive/exceptions-01.md`
+- Date: 2026-11-15
+- Reason: Issue #4632 (sub of #3695, W6 docs consolidation) makes `docs/architecture/UX/` the one home for UX docs. These three are stale: design-system-01 is superseded in substance by the consolidated-design-system draft (#3096) and carries stale counts (C1, C2, C4) plus a self-contradictory header; assessment-01 and exceptions-01 are 2026-10-25 point-in-time snapshots, partially addressed or superseded since (C5, C6). They move to `docs/archive/` (Ceos decision Q4) so the folder holds only live, draft, and pattern docs, indexed by its new README.
+- Replacement: `docs/architecture/UX/consolidated-design-system.md` (DRAFT, #3096) for design-system-01; no successor for the two snapshots — their live state is the gates (`tests/ux_primitive_usage_freeze_1580.test.ts`, token ratchet, contrast gate) and `docs/architecture/security/ux-primitives-1772-verification.md` (44/44 converted).
+- Consumers at deprecation: `docs/architecture/UX/consolidated-design-system.md` §4 source map and C1–C10 analysis (citations updated to the archive paths in this slice); `docs/architecture/ADD.md` (three links updated); `docs/compliance/anti-drift.md` (assessment-01 path updated); `docs/architecture/security/ux-primitives-1772-verification.md` (exceptions-01 audit-source path updated); `docs/architecture/standards/standards.md` §9.1, `docs/architecture/standards/stock-programme-evidence.md`, `docs/architecture/blueprint/blueprint-01.md`, `docs/architecture/code/component-taxonomy-01.md`, `docs/architecture/evolution/evolution-01.md`, `docs/architecture/plan/plan-01.md`, `docs/compliance/facts-n-findings-01.md`, `docs/compliance/system-duplicates-scan-1717-appendix-p-docs-architecture.md` (paths updated in this slice); the neutrality census baseline rows (updated to the archive paths); `tests/ux_primitives_exceptions_1772.test.ts` (comment cite updated). Historical records left as-is: `docs/architecture/adr/0003-messaging-port.md`, `CHANGELOG.md`, `changelog.d/2860-standards-evidence.md`, and bare-name comment cites in code and tests (the filename is unchanged).
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-12 — the scheduled firer routes through the engine panel (#4275)
 
 - Function: `runPanelWithAgents` → `runPanelWithAgentsRetired4275` (`src/trading/options/panelPipeline.ts`)

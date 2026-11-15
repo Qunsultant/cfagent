@@ -95,4 +95,4 @@ Every implementation step governed by this plan must pass the standard system ch
 1. **Design System & Type Check:** `npm run check` (runs design token validation, `tsc --noEmit`, Vitest CI tests, and Vite build).
 2. **Policy Gate Verification:** Compliance with `.github/workflows/policy-gate.yml` (linked issue, `lane:*` label, agent hashtag, `CHANGELOG.md` entry).
 3. **Pre-Merge Integrity Script:** Passing `./scripts/verify-before-merge.sh`.
-4. **Page-Shell Conformance:** SPA pages render inside the `PageShell` standard (`docs/architecture/UX/design-system-01.md`); conformance is pinned by `tests/shell_conformance_1804.json` (25 of 26 after S4; `chat` deferred per ADR-0021).
+4. **Page-Shell Conformance:** SPA pages render inside the `PageShell` standard (`docs/archive/design-system-01.md`); conformance is pinned by `tests/shell_conformance_1804.json` (25 of 26 after S4; `chat` deferred per ADR-0021).

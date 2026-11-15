@@ -5,7 +5,7 @@ import * as ts from "typescript";
 
 /**
  * UX primitives exceptions pin (#1772, parent #1717; source row F-53,
- * docs/architecture/UX/exceptions-01.md).
+ * docs/archive/exceptions-01.md).
  *
  * The doc's audit listed 44 exception files bypassing UX primitives:
  * 28 zero-primitive + 16 partial. Re-audit against current main shows

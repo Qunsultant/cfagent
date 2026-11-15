@@ -93,7 +93,7 @@ source of truth for navigation, one `PageShell` primitive as the route
 outlet wrapper, composition over monoliths. Its conformance list
 (`tests/shell_conformance_1804.json`, 25 of 26 — `chat` deferred per
 ADR-0021) is the registry that makes structural drift visible instead
-of silent. Home doc: `docs/architecture/UX/design-system-01.md`.
+of silent. Home doc: `docs/archive/design-system-01.md`.
 
 ---
 

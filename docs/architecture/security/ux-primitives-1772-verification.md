@@ -1,7 +1,7 @@
 # UX primitives #1772 — re-audit verification record
 
 **Issue:** Qunsultant/cfagent#1772 (parent #1717, source row F-53)
-**Audit source:** `docs/architecture/UX/exceptions-01.md` (44 exception files:
+**Audit source:** `docs/archive/exceptions-01.md` (44 exception files:
 28 zero-primitive + 16 partial)
 **Re-audit base:** main `6245be52` (2026-11-02)
 **Lane:** #CISO-bhdm
