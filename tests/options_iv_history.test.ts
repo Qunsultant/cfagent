@@ -121,6 +121,13 @@ class FakeIvSql implements IvSqlExecutor {
       return [];
     }
     if (q.startsWith("SELECT COUNT(*)")) {
+      // #4385 (#4282 P6b): the Repository's no-where count() arrives
+      // with no params (a total count for the createOrIgnore fallback);
+      // the coverage templates still arrive with [symbol] (or
+      // [symbol, broker], broker-blind as before).
+      if (params.length === 0) {
+        return [{ count: this.rows.length, first_date: null, last_date: null }];
+      }
       const [symbol] = params as [string];
       const mine = this.rows.filter((r) => r.symbol === symbol);
       const dates = mine.map((r) => r.date).sort();
@@ -138,7 +145,12 @@ class FakeIvSql implements IvSqlExecutor {
       return this.rows.filter((r) => r.symbol === symbol && r.date === date);
     }
     if (q.includes("FROM mas_iv_history WHERE symbol = ? ORDER BY date DESC")) {
-      const [symbol, limit] = params as [string, number?];
+      // #4385 (#4282 P6b): the Repository inlines the LIMIT as a
+      // literal (LIMIT 2) instead of binding it (LIMIT ?), so the
+      // limit is read off the statement text, not the params.
+      const [symbol] = params as [string, number?];
+      const limitMatch = q.match(/LIMIT (\d+)/);
+      const limit = limitMatch ? Number(limitMatch[1]) : undefined;
       const mine = this.rows
         .filter((r) => r.symbol === symbol)
         .sort((a, b) => (a.date < b.date ? 1 : -1));
