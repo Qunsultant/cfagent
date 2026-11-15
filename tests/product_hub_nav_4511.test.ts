@@ -26,6 +26,8 @@ describe("Product Hub menu (#4511, superseded by #4530)", () => {
       "marketing-draft-preview",
       "admin-products",
       "free-runs",
+      "create-product",
+      "create-version",
     ]);
   });
 
@@ -41,6 +43,8 @@ describe("Product Hub menu (#4511, superseded by #4530)", () => {
       "marketing-draft-preview",
       "admin-products",
       "free-runs",
+      "create-product",
+      "create-version",
     ]);
   });
 

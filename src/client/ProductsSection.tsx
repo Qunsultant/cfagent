@@ -32,6 +32,7 @@
  * rules anywhere in this file.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { Button, Notice, Select, Stack, TextInput } from "./components/ui";
 import { Tabs, TabPanel, type TabOption } from "./components/ui/Tabs";
 import { apiFetch } from "./apiFetch";
@@ -275,23 +276,43 @@ function ProductRankEditor({
 }
 
 /** Issue #4511 — ProductsSection sub-tabs: the product list, the
- *  product-creation form, and the new-version form. Local state, not
- *  URL-synced, so the tabs never fight the parent PlatformAdminPage
- *  "view" param. */
-type ProductsSectionTab = "products" | "create-product" | "create-version";
+ *  product-creation form, and the new-version form.
+ *  Issue #4689 — URL-synced on the nested `adminTab` param (the hub
+ *  owns `view`): every lifecycle stage gets an exact link. The old
+ *  local state never fought a parent param because no parent owned
+ *  one; the hub now does, and the section only reads `adminTab`
+ *  while mounted under the hub's admin-products view. */
+export type ProductsSectionTab = "products" | "create-product" | "create-version";
+export function isValidProductsSectionTab(value: unknown): value is ProductsSectionTab {
+  return value === "products" || value === "create-product" || value === "create-version";
+}
 const PRODUCTS_SECTION_TABS: TabOption<ProductsSectionTab>[] = [
   { id: "products", label: "Products" },
   { id: "create-product", label: "Create product" },
   { id: "create-version", label: "Create version" },
 ];
 
-export function ProductsSection() {
+export function ProductsSection({ isActive = true }: { isActive?: boolean } = {}) {
   const [entries, setEntries] = useState<ProductEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ProductsSectionTab>("products");
+  const { activeTab, handleTabChange, resetToDefault } =
+    useUrlSyncedTabs<ProductsSectionTab>({
+      param: "adminTab",
+      isValid: isValidProductsSectionTab,
+      defaultTab: "products",
+    });
+
+  // The hub keeps this section mounted-hidden after the first visit
+  // (retain panels), so when the hub tab moves away the in-memory
+  // sub-tab must reset — otherwise a stale create-version selection
+  // resurfaces the next time admin-products opens, even though the
+  // URL no longer names it (#4689, the #4582 leak lesson).
+  useEffect(() => {
+    if (!isActive) resetToDefault();
+  }, [isActive, resetToDefault]);
   const [versionProductId, setVersionProductId] = useState("");
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState<"subscription" | "per_run" | "runs_pack">("subscription");
@@ -355,7 +376,7 @@ export function ProductsSection() {
       setNote(`Product "${newName.trim()}" created. Add a version to make it sellable.`);
       // Issue #4511 — creation lives in its own sub-tab; a successful
       // create returns to the Products tab so the new row is visible.
-      setActiveTab("products");
+      handleTabChange("products");
       await load();
     } catch (err: any) {
       setCreateError(err.message || "Failed to create product.");
@@ -382,7 +403,7 @@ export function ProductsSection() {
           ariaLabel="Product sections"
           tabs={PRODUCTS_SECTION_TABS}
           value={activeTab}
-          onChange={setActiveTab}
+          onChange={handleTabChange}
         />
         <TabPanel
           idBase="platform-admin-products"
@@ -478,7 +499,7 @@ export function ProductsSection() {
               <Button loading={creating} onClick={() => void createProduct()}>
                 Create product
               </Button>{" "}
-              <Button variant="secondary" onClick={() => setActiveTab("products")}>
+              <Button variant="secondary" onClick={() => handleTabChange("products")}>
                 Cancel
               </Button>
             </div>

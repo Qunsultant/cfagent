@@ -89,6 +89,25 @@ export function ProductHub() {
       param: "view",
       isValid: isValidProductHubTab,
       defaultTab: "products",
+      // Issue #4689 — the Admin Products section's nested `adminTab`
+      // param belongs to admin-products only. The hook calls this
+      // BEFORE its own pushState, so the strip (replaceState) lands
+      // first and the push keeps a clean URL when the hub tab moves
+      // away — the #4582 leak, where the old nested `productTab`
+      // persisted across hub tabs, does not recur.
+      onTabChange: (nextTab) => {
+        if (nextTab !== "admin-products" && typeof window !== "undefined") {
+          try {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has("adminTab")) {
+              url.searchParams.delete("adminTab");
+              window.history.replaceState(null, "", url.toString());
+            }
+          } catch {
+            // Safe fallback for environments with restricted history
+          }
+        }
+      },
     });
 
   // Selling tab state: the products prop for the SellingSection (lazy
@@ -236,7 +255,7 @@ export function ProductHub() {
           retain
         >
           <ErrorBoundary label="Admin Products panel">
-            <ProductsSection />
+            <ProductsSection isActive={activeTab === "admin-products"} />
           </ErrorBoundary>
         </TabPanel>
       )}
