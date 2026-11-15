@@ -143,7 +143,7 @@ describe("#3741 one resolver — registry and identity", () => {
 describe("#3741 production preservation — the defaults register holds (c)", () => {
   it("channels under production env, nothing stored", () => {
     const deps = { env: PRODUCTION_ENV };
-    for (const registrationId of ["general", "options", "stock"] as const) {
+    for (const registrationId of ["general", "options", "stock", "biz"] as const) {
       const chat = resolveAgentConfig("channel:chat", { registrationId }, deps);
       expect(chat.value).toBe(true);
       for (const channel of ["webhooks", "email", "slack"] as const) {
@@ -155,13 +155,13 @@ describe("#3741 production preservation — the defaults register holds (c)", ()
     const stockVoice = resolveAgentConfig("channel:voice", { registrationId: "stock" }, deps);
     expect(stockVoice.value).toBe(true);
     expect(stockVoice.source).toBe("env");
-    for (const registrationId of ["general", "options"] as const) {
+    for (const registrationId of ["general", "options", "biz"] as const) {
       const r = resolveAgentConfig("channel:voice", { registrationId }, deps);
       expect(r.value).toBe(false);
       expect(r.source).toBe("default");
     }
     // The delegating family resolver agrees, pair by pair.
-    for (const registrationId of ["general", "options", "stock"] as const) {
+    for (const registrationId of ["general", "options", "stock", "biz"] as const) {
       const viaFamily = resolveCopilotChannels({ registrationId, env: PRODUCTION_ENV });
       for (const channel of ["chat", "webhooks", "email", "slack", "voice"] as const) {
         const viaResolver = resolveAgentConfig(`channel:${channel}`, { registrationId }, deps);
@@ -172,7 +172,7 @@ describe("#3741 production preservation — the defaults register holds (c)", ()
   });
 
   it("voice backend is webspeech on every surface (default), family resolvers agree", () => {
-    for (const surfaceId of ["general", "options", "stock", "trading-desk"] as const) {
+    for (const surfaceId of ["general", "options", "stock", "biz", "trading-desk"] as const) {
       const r = resolveAgentConfig("voiceBackend", { surfaceId }, { env: PRODUCTION_ENV });
       expect(r.value).toBe("webspeech");
       expect(r.source).toBe("default");

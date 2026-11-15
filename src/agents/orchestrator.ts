@@ -13,6 +13,7 @@ import { getWorkersAIModel } from "./model";
 import { resolveScreenerAgentName } from "./screenerAgentName";
 import { actorGateway } from "../services/cloudflareActorGateway";
 import { copilotRegistrationForSourceTab } from "../services/copilotChannels";
+import { runBizCopilotTenantBranch } from "../services/bizCopilotTenants";
 import { recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import {
@@ -2707,6 +2708,19 @@ export class OrchestratorAgent extends PortThink {
       }
     }
 
+    // Issue #4515 (BizCopilot slice 1): the BizCopilot tenant
+    // branch — the auto-options-research branch's shape. The
+    // branch lives in src/services/bizCopilotTenants.ts (the
+    // orchestrator stays within its #992 size budget); the
+    // deterministic outcome below is narrated by the model.
+    const bizCopilotTenantContext = await runBizCopilotTenantBranch({
+      sourceTab,
+      userText,
+      env: this.env,
+      userLogin,
+      audit: (type, payload) => this.audit(type, "orchestrator", payload),
+    });
+
     const { memoryContext, vectorContext } = await this.assembleGrounding(userText);
     // #2488/#2496: the CHAT_NLQ_MODE gate at the Think layer. The
     // discovered catalog arrives through Think's auto-merge and
@@ -2794,9 +2808,12 @@ export class OrchestratorAgent extends PortThink {
         // the gate; its steering stays the flagged-off default.
         chatNlqEnabled: nlqGate.mode === "on",
         copilotExecutionMode,
+        // Issue #4515: the BizCopilot tenant outcome, when the
+        // branch executed — the model narrates it, nothing else.
+        bizCopilotTenantContext,
       }),
       maxSteps: this.maxSteps,
-      ...(isAutoOptionsResearchRequest
+      ...(isAutoOptionsResearchRequest || bizCopilotTenantContext
         ? { activeTools: [] as string[] }
         : nlqGate.activeTools
           ? { activeTools: nlqGate.activeTools }

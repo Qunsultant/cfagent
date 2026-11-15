@@ -801,7 +801,7 @@ describe("issue #3773 — the voice backend switch resolves stored > env > defau
     settings.get(key) ?? null;
 
   it("code default is webspeech for every registration", () => {
-    for (const registrationId of ["general", "options", "stock"] as const) {
+    for (const registrationId of ["general", "options", "stock", "biz"] as const) {
       const resolved = resolveCopilotVoiceBackend({ registrationId });
       expect(resolved.backend).toBe("webspeech");
       expect(resolved.source).toBe("default");

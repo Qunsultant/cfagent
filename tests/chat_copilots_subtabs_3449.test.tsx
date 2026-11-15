@@ -9,7 +9,7 @@
  * mode may replace or suppress the chat surface.
  *
  * Verifies:
- * 1. Copilot Registry contains the 3 default copilots: General, Options, Stock.
+ * 1. Copilot Registry contains the 4 default copilots: General, Options, Stock, Biz.
  * 2. URL syncing and sub-view validation for all 3 copilots.
  * 3. Extensibility: external copilots can register/unregister dynamically.
  * 4. Uniform composition (#3454): the messages stream and composer
@@ -79,18 +79,20 @@ const mockUser = {
 } as any;
 
 describe("Copilot Registry & Extensibility (#3449)", () => {
-  it("includes the 3 core copilots by default", () => {
+  it("includes the 4 core copilots by default", () => {
     const copilots = getRegisteredCopilots();
     const ids = copilots.map((c) => c.id);
     expect(ids).toContain("general");
     expect(ids).toContain("options");
     expect(ids).toContain("stock");
+    expect(ids).toContain("biz");
   });
 
   it("identifies valid sub-views accurately", () => {
     expect(isValidChatSubView("general")).toBe(true);
     expect(isValidChatSubView("options")).toBe(true);
     expect(isValidChatSubView("stock")).toBe(true);
+    expect(isValidChatSubView("biz")).toBe(true);
     expect(isValidChatSubView("non_existent_view")).toBe(false);
     expect(isValidChatSubView(null)).toBe(false);
     expect(isValidChatSubView(123)).toBe(false);
@@ -121,13 +123,16 @@ describe("Copilot Registry & Extensibility (#3449)", () => {
   });
 
   it("declares uniform chat mode across all copilots (#3454, #3557)", () => {
-    // Issue #3557: all 3 core copilots share the uniform 'chat' mode
+    // Issue #3557: all 4 core copilots share the uniform 'chat' mode
     expect(findCopilot("stock")?.mode).toBe("chat");
     expect(findCopilot("general")?.mode).toBe("chat");
     expect(findCopilot("options")?.mode).toBe("chat");
+    expect(findCopilot("biz")?.mode).toBe("chat");
+    expect(findCopilot("biz")?.sourceTab).toBe("BizCopilot");
     expect(hasCustomSurface(findCopilot("stock")!)).toBe(false);
     expect(hasCustomSurface(findCopilot("general")!)).toBe(false);
     expect(hasCustomSurface(findCopilot("options")!)).toBe(false);
+    expect(hasCustomSurface(findCopilot("biz")!)).toBe(false);
   });
 });
 
@@ -175,15 +180,16 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     }
   });
 
-  it("renders all 3 copilot tabs in CapabilityNavBar", async () => {
+  it("renders all 4 copilot tabs in CapabilityNavBar", async () => {
     await renderChat();
 
     const tabs = container!.querySelectorAll(".chat-capability-subnav [role='tab']");
-    expect(tabs.length).toBeGreaterThanOrEqual(3);
+    expect(tabs.length).toBeGreaterThanOrEqual(4);
     const tabTexts = Array.from(tabs).map((t) => t.textContent || "");
     expect(tabTexts.some((txt) => txt.includes("General Copilot"))).toBe(true);
     expect(tabTexts.some((txt) => txt.includes("Options Copilot"))).toBe(true);
     expect(tabTexts.some((txt) => txt.includes("Stock Copilot"))).toBe(true);
+    expect(tabTexts.some((txt) => txt.includes("BizCopilot"))).toBe(true);
   });
 
   it("in default/general view: StockCopilotPanel is NOT rendered, chat composer is active", async () => {
@@ -225,6 +231,23 @@ describe("AgentChatTabContent Multi-Copilot Sub-Tabs & View Isolation (#3449)", 
     // Stock Copilot welcome hero and quick chips are present
     expect(container!.textContent).toContain("Stock Copilot & Autonomous Loop");
     expect(container!.textContent).toContain("Open Positions & Exits");
+    // Chat composer and stream ARE rendered uniformly with sticky bottom composer
+    expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
+    expect(container!.querySelector(".messages-stream")).not.toBeNull();
+  });
+
+  it("in biz view: renders uniform copilot chat surface with banner, welcome hero, and bottom chatbox (#4515)", async () => {
+    window.history.replaceState({}, "", "/?tab=chat&view=biz");
+
+    await renderChat();
+
+    // Uniform shell: no stock panel on the biz tab
+    expect(container!.querySelector("[data-testid='stock-copilot-panel']")).toBeNull();
+    // BizCopilot banner is present
+    expect(container!.textContent).toContain("BizCopilot Active:");
+    // BizCopilot welcome hero and quick chips are present
+    expect(container!.textContent).toContain("BizCopilot & Platform Administration");
+    expect(container!.textContent).toContain("List tenants");
     // Chat composer and stream ARE rendered uniformly with sticky bottom composer
     expect(container!.querySelector(".chat-input-bar")).not.toBeNull();
     expect(container!.querySelector(".messages-stream")).not.toBeNull();
