@@ -61,6 +61,16 @@ export interface ScheduleDetailModel {
   payload: unknown;
 }
 
+/** A stored screener preset, as listed for the schedule form — the
+ *  detail resolves a schedule's presetId against this list. Only
+ *  id, name and criteria are read here, so any compatible record
+ *  (the shared listPresets helper's ScreenerPreset included) fits. */
+export interface PresetRef {
+  id: string;
+  name: string;
+  criteria?: Record<string, unknown>;
+}
+
 /** Canonical order of the Scope section's labels (see the module note). */
 export const SCHEDULE_SCOPE_LABEL_ORDER = [
   "Input model",
@@ -69,6 +79,9 @@ export const SCHEDULE_SCOPE_LABEL_ORDER = [
   "Watchlist",
   "Max items",
   "Sector",
+  // Issue #3655 S4b: which preset arms a stock schedule — the preset
+  // replaces the filters, so it sits directly before them.
+  "Preset",
   "Filters",
   "Thesis",
   "Risk profile",
@@ -172,8 +185,18 @@ export function scheduleTitle(item: ScheduledTaskItem, _profiles?: StrategyProfi
  * The row's Scope cell: one short line naming what the schedule acts
  * on. Booleans and absent values are left out — a row states the
  * target, and the dialog explains the rest.
+ *
+ * Issue #3655 S4b: a stock row also names its preset — "Preset:
+ * <name>" when the armed preset resolves, "Preset: <id> (no longer
+ * exists)" when the id is gone, "Preset: <id>" when the preset list
+ * is unavailable (the raw id, never an invented name), and "Custom
+ * thresholds" when no preset is armed. Non-stock kinds are untouched.
  */
-export function scheduleScope(item: ScheduledTaskItem, profiles?: StrategyProfile[]): string {
+export function scheduleScope(
+  item: ScheduledTaskItem,
+  profiles?: StrategyProfile[],
+  presets?: PresetRef[]
+): string {
   const payload = payloadOf(item);
   const kind = scheduleKind(item);
   const symbols = targetSymbols(item);
@@ -228,7 +251,29 @@ export function scheduleScope(item: ScheduledTaskItem, profiles?: StrategyProfil
   if (symbols.length > 0 && typeof payload.maxItems === "number") {
     parts.push(`max ${payload.maxItems}`);
   }
+  if (kind === "stock") {
+    const presetId =
+      typeof payload.presetId === "string" && payload.presetId ? payload.presetId : "";
+    parts.push(presetId ? `Preset: ${presetValue(payload, presets)}` : "Custom thresholds");
+  }
   return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
+/**
+ * Issue #3655 S4b: what a stock schedule screens on, in the row's
+ * and the dialog's shared vocabulary. A preset-armed schedule names
+ * its preset; a custom schedule states "Custom thresholds". The
+ * preset name comes from the caller's preset list — a missing list
+ * yields the raw id, never an invented name.
+ */
+function presetValue(payload: Record<string, any>, presets?: PresetRef[]): string {
+  const presetId =
+    typeof payload.presetId === "string" && payload.presetId ? payload.presetId : "";
+  if (!presetId) return "Custom thresholds";
+  const resolved = presets?.find((p) => p.id === presetId);
+  if (resolved) return resolved.name;
+  if (presets) return `${presetId} (no longer exists)`;
+  return presetId;
 }
 
 function titleCase(value: string): string {
@@ -248,6 +293,10 @@ export function buildScheduleDetail(
     activeEnv?: string;
     userLogin?: string;
     detail?: any | null;
+    /** Issue #3655 S4b: the caller's stocks presets, for resolving a
+     *  stock schedule's presetId to its name (and its current
+     *  criteria). Absent, the Preset field falls back to the raw id. */
+    presets?: PresetRef[];
   } = {}
 ): ScheduleDetailModel {
   const payload = payloadObject(item, ctx.detail);
@@ -322,7 +371,19 @@ export function buildScheduleDetail(
         : undefined,
     "Max items": typeof payload.maxItems === "number" ? String(payload.maxItems) : undefined,
     Sector: typeof payload.sector === "string" ? payload.sector : undefined,
-    Filters: filterText(payload.filters),
+    // Issue #3655 S4b: which criteria/preset the schedule uses. A
+    // preset-armed schedule carries presetId and no frozen filters
+    // (#1499 — the run resolves the preset's CURRENT criteria at
+    // fire time), so the Preset field names the preset and the
+    // Filters field shows its current criteria — the criteria the
+    // run will use. A custom schedule shows "Custom thresholds"
+    // and its stored filters, as before. Stock kind only: no other
+    // kind arms a preset.
+    Preset: kind === "stock" ? presetValue(payload, ctx.presets) : undefined,
+    Filters:
+      kind === "stock" && typeof payload.presetId === "string" && payload.presetId
+        ? filterText(ctx.presets?.find((p) => p.id === payload.presetId)?.criteria)
+        : filterText(payload.filters),
     Thesis: typeof payload.thesis === "string" ? titleCase(payload.thesis) : undefined,
     "Risk profile": typeof payload.riskProfile === "string" ? payload.riskProfile : undefined,
     Profile: isDiscovery ? profileText(item, ctx.profiles) : undefined,
@@ -397,7 +458,7 @@ export function buildScheduleDetail(
     title: scheduleTitle(item, ctx.profiles),
     cadence: cadenceText(item),
     statusLabel: item.paused ? "Paused" : "Active",
-    scope: scheduleScope(item, ctx.profiles),
+    scope: scheduleScope(item, ctx.profiles, ctx.presets),
     note: modelNote(item, model),
     sections,
     payload: detailPayload(item, ctx.detail),

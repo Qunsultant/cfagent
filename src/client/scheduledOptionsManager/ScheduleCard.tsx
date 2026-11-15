@@ -3,7 +3,7 @@ import { Badge, Button, type TableColumn } from "../components/ui";
 import type { StrategyProfile } from "../../trading";
 import type { ScheduledTaskItem } from "./types";
 import { cadenceText, formatNextRun, payloadOf } from "./format";
-import { buildScheduleDetail, scheduleKind } from "./scheduleDetail";
+import { buildScheduleDetail, scheduleKind, type PresetRef } from "./scheduleDetail";
 
 /**
  * One schedule = one table row (issue #2329).
@@ -34,6 +34,10 @@ export interface ScheduleRowContext {
   profiles: StrategyProfile[];
   activeEnv: string;
   userLogin: string;
+  /** Issue #3655 S4b: the caller's stocks presets, for resolving a
+   *  stock schedule's presetId to its name in the row scope and the
+   *  detail. Absent, the row/detail fall back to the raw id. */
+  presets?: PresetRef[];
 }
 
 const KIND_TONE = { options: "accent", stock: "success", discovery: "purple", system: "neutral" } as const;

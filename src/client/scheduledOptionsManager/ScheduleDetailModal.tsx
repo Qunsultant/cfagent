@@ -2,7 +2,7 @@ import React from "react";
 import { Badge, Button, Modal, Notice, Spinner } from "../components/ui";
 import type { StrategyProfile } from "../../trading";
 import type { ScheduledTaskItem } from "./types";
-import { buildScheduleDetail } from "./scheduleDetail";
+import { buildScheduleDetail, type PresetRef } from "./scheduleDetail";
 
 export interface ScheduleDetailModalProps {
   item: ScheduledTaskItem | null;
@@ -13,6 +13,10 @@ export interface ScheduleDetailModalProps {
   profiles: StrategyProfile[];
   activeEnv: string;
   userLogin: string;
+  /** Issue #3655 S4b: the caller's stocks presets, for resolving a
+   *  stock schedule's presetId to its name (and its current
+   *  criteria). Absent, the Preset field falls back to the raw id. */
+  presets?: PresetRef[];
   onRetry: () => void;
   onClose: () => void;
 }
@@ -32,11 +36,12 @@ export function ScheduleDetailModal({
   profiles,
   activeEnv,
   userLogin,
+  presets,
   onRetry,
   onClose,
 }: ScheduleDetailModalProps) {
   if (!item) return null;
-  const model = buildScheduleDetail(item, { profiles, activeEnv, userLogin, detail });
+  const model = buildScheduleDetail(item, { profiles, activeEnv, userLogin, detail, presets });
 
   return (
     <Modal
