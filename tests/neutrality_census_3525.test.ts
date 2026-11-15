@@ -611,6 +611,15 @@ function measure(): Map<string, number> {
  * #290) and 1 raise (discoveryService.ts etrade 2 -> 4: the case
  * line and the descriptor line). The derivation's comments name
  * no provider. Totals move 1191/9346 -> 1192/9350.
+ * Baseline update (#4653, 2026-11-15): the SecHub PEP tab's gate
+ * inventory names the routes the PEP gates, verbatim — the three
+ * E*TRADE OAuth routes are data-bearing route literals, not
+ * platform framing (the #3911 precedent: an id named verbatim is
+ * baselined, its prose neutralized, never the id rewritten) —
+ * dispositioned INTEGRATION. 1 raise (pepGateway.ts etrade 1 -> 5:
+ * the three route literals plus the two mentions in the inventory
+ * comment naming the shared start branch). Totals move 1192/9350
+ * -> 1192/9354.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -1237,7 +1246,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/security/openapiSpec.ts", "yahoo", 4],
   ["src/security/outboundRateLimiter.ts", "alpaca", 7],
   ["src/security/outboundRateLimiter.ts", "etrade", 8],
-  ["src/security/pepGateway.ts", "etrade", 1],
+  ["src/security/pepGateway.ts", "etrade", 5],
   ["src/security/publicOAuth.ts", "etrade", 3],
   ["src/security/publicOAuth.ts", "public.com", 3],
   ["src/security/serviceIdentity.ts", "etrade", 4],
