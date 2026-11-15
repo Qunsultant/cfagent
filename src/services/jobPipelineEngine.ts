@@ -793,7 +793,7 @@ export class JobPipelineControl {
    */
   async runJob(
     jobId: string,
-    opts?: { trigger?: JobRunTrigger; scopePath?: string; scheduleId?: string; asyncJobId?: string },
+    opts?: { trigger?: JobRunTrigger; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string },
   ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
@@ -816,6 +816,7 @@ export class JobPipelineControl {
       scopePath: opts?.scopePath ?? "",
       scheduleId: opts?.scheduleId ?? null,
       asyncJobId: opts?.asyncJobId ?? null,
+      workflowInstanceId: opts?.workflowInstanceId ?? null,
       resuming: false,
     });
     this.inflight.set(runId, completion);
@@ -875,6 +876,74 @@ export class JobPipelineControl {
       scheduleId: instance.runScheduleId ?? null,
       // ... and the async job id that dispatched it (#4357 join key).
       asyncJobId: instance.runAsyncJobId ?? null,
+      // ... but NOT the workflow instance id: a resume is a new
+      // executor, and the dispatching workflow instance settled
+      // with the paused outcome — the stamp clears (#4454).
+      workflowInstanceId: null,
+      resuming: true,
+    });
+    this.inflight.set(runId, completion);
+    if (definition.config.executionMode.delivery === "sync") {
+      const outcome = await completion;
+      return { jobId, runId, state: outcome.state };
+    }
+    return { jobId, runId, state: "queued", completion };
+  }
+
+  /**
+   * Issue #4454 — replay a still-`running` instance after a
+   * workflow eviction. A replayed workflow flow re-enters
+   * through runJob, which refuses `job_already_running` — the
+   * instance never settled, because the evicted process wrote
+   * nothing on its way out. The replay is safe ONLY when the
+   * caller proves it is the same workflow instance that
+   * dispatched the run: the recorded workflow instance id must
+   * equal the caller's. A different instance, an unstamped run,
+   * or a non-running state refuses by name — the guard's
+   * protection against concurrent executors is never weakened.
+   * The resumed run keeps its engine run id, its trigger, its
+   * schedule and async-job links, and its scope (the
+   * checkpoint's when one was written, else the caller's —
+   * the replay carries the dispatch payload, so the scope is
+   * the dispatch's own). The journal + persisted artifacts
+   * carry the resume position, exactly as for a paused resume.
+   */
+  async replayJob(
+    jobId: string,
+    opts: { workflowInstanceId: string; scopePath?: string },
+  ): Promise<JobDispatchResult> {
+    const definition = await this.requireDefinition(jobId);
+    const instance = await this.requireInstance(jobId);
+    if (instance.state !== "running") {
+      throw new JobPipelineError(
+        "job_not_resumable",
+        `Job "${jobId}" is ${instance.state}; only a still-running instance can be replayed.`,
+      );
+    }
+    if (!instance.currentRunId) {
+      throw new JobPipelineError(
+        "job_no_checkpoint",
+        `Job "${jobId}" is running without a run id; there is no run to replay.`,
+      );
+    }
+    if (instance.runWorkflowInstanceId !== opts.workflowInstanceId) {
+      throw new JobPipelineError(
+        "job_already_running",
+        `Job "${jobId}" is running (run ${instance.currentRunId}) under a different executor; ` +
+          `this replay cannot prove it dispatched the run, so it cannot resume it.`,
+      );
+    }
+    assertExecutionModeSupported(definition.config.executionMode);
+    const runId = instance.currentRunId;
+    const completion = this.executeRun(definition, {
+      runId,
+      trigger: instance.runTrigger ?? "manual",
+      scopePath: instance.checkpoint?.scopePath ?? opts.scopePath ?? "",
+      scheduleId: instance.runScheduleId ?? null,
+      asyncJobId: instance.runAsyncJobId ?? null,
+      // The replay re-stamps the same id: the proof survives a
+      // second eviction of the same workflow instance.
+      workflowInstanceId: opts.workflowInstanceId,
       resuming: true,
     });
     this.inflight.set(runId, completion);
@@ -955,6 +1024,7 @@ export class JobPipelineControl {
       runStartedAt: null,
       runTrigger: null,
       runScheduleId: null,
+      runWorkflowInstanceId: null,
       lastError: null,
       updatedAt: this.iso(),
     };
@@ -1944,6 +2014,7 @@ export class JobPipelineControl {
       runTrigger: null,
       runScheduleId: null,
       runAsyncJobId: null,
+      runWorkflowInstanceId: null,
       checkpoint: null,
       stageCheckpoint: null,
       stageDesired: null,
@@ -2074,6 +2145,7 @@ export class JobPipelineControl {
       scopePath: string;
       scheduleId: string | null;
       asyncJobId: string | null;
+      workflowInstanceId: string | null;
       resuming: boolean;
     },
   ): Promise<JobRunOutcome> {
@@ -2093,6 +2165,12 @@ export class JobPipelineControl {
       // this run, persisted on the instance so the terminal record
       // (and any settle path) stamps it.
       runAsyncJobId: opts.asyncJobId,
+      // Issue #4454 — the replay proof: the workflow instance
+      // that dispatched this run, persisted on the instance so
+      // a replayed flow can prove it dispatched the run it
+      // resumes. Null for a non-workflow dispatch; a resume
+      // clears it (a new executor).
+      runWorkflowInstanceId: opts.workflowInstanceId,
       stageCheckpoint: opts.resuming
         ? instance.stageCheckpoint
         : { runId: opts.runId, units: [] },

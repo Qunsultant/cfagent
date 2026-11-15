@@ -170,7 +170,7 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
   "schema.do.job_generated_datasets.create_table": "ff6c2c27c5d78fa8f43e69823ab661957db54e23f1184a3e84468fc8fc04ca84",
   "schema.do.job_pipeline_artifacts.create_table": "7b6f844398cf553abd6377e3f5a0e6d024945cc5a7a1995ff2cfa562479c715a",
   "schema.do.job_pipeline_definitions.create_table": "63e75c48b6a9568f8b746518374b1ea721667aa8c19f6911589ace3db38d59c6",
-  "schema.do.job_pipeline_instances.create_table": "f69e0f462cb1418c687b6a970bd9ef035c8280f8a0a2b22a20e1e93b44bcf704",
+  "schema.do.job_pipeline_instances.create_table": "0f25e6a8c9861f24a934cd21c82e8974d6f7e6756fcc94973fad6ebec9c1b11a",
   "schema.do.job_run_records.create_table": "13ece01aa0866f3c8ae8c317ab922c8a6491aa6cd6bd4963b0e259fbfa2c915b",
   "schema.do.job_stage_events.create_table": "35c76adfe72cfa7a970a51db32c0c53ea7e3d3a97a50f3d631882f9448840aca",
   "schema.do.kv_store.create_table": "516aa66d405986dc7230f7154a6b0365cb02a91f2ddd1972033286553634e661",

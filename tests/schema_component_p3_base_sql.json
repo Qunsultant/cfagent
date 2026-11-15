@@ -274,12 +274,13 @@
       "trigger": "ensureSchema() [private, legacy]",
       "queries": [
         "CREATE TABLE IF NOT EXISTS job_pipeline_definitions (\n      job_id TEXT PRIMARY KEY,\n      name TEXT NOT NULL,\n      definition_json TEXT NOT NULL,\n      version INTEGER NOT NULL,\n      updated_at TEXT NOT NULL\n    )",
-        "CREATE TABLE IF NOT EXISTS job_pipeline_instances (\n      job_id TEXT PRIMARY KEY,\n      state TEXT NOT NULL,\n      desired_state TEXT NOT NULL,\n      current_run_id TEXT,\n      run_started_at TEXT,\n      run_trigger TEXT,\n      run_schedule_id TEXT,\n      run_async_job_id TEXT,\n      checkpoint_json TEXT,\n      stage_checkpoint_json TEXT,\n      stage_desired_json TEXT,\n      last_error TEXT,\n      updated_at TEXT NOT NULL\n    )",
+        "CREATE TABLE IF NOT EXISTS job_pipeline_instances (\n      job_id TEXT PRIMARY KEY,\n      state TEXT NOT NULL,\n      desired_state TEXT NOT NULL,\n      current_run_id TEXT,\n      run_started_at TEXT,\n      run_trigger TEXT,\n      run_schedule_id TEXT,\n      run_async_job_id TEXT,\n      run_workflow_instance_id TEXT,\n      checkpoint_json TEXT,\n      stage_checkpoint_json TEXT,\n      stage_desired_json TEXT,\n      last_error TEXT,\n      updated_at TEXT NOT NULL\n    )",
         "CREATE TABLE IF NOT EXISTS job_pipeline_artifacts (\n      id TEXT PRIMARY KEY,\n      run_id TEXT NOT NULL,\n      artifact_key TEXT NOT NULL,\n      value_json TEXT NOT NULL\n    )",
         "CREATE INDEX IF NOT EXISTS idx_job_pipeline_artifacts_run\n      ON job_pipeline_artifacts (run_id, artifact_key)",
         "PRAGMA table_info(job_pipeline_instances)",
         "ALTER TABLE job_pipeline_instances ADD COLUMN run_schedule_id TEXT",
-        "ALTER TABLE job_pipeline_instances ADD COLUMN run_async_job_id TEXT"
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_async_job_id TEXT",
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_workflow_instance_id TEXT"
       ]
     },
     {

@@ -1177,6 +1177,19 @@ export const MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID: DataMigration = {
   sql: d1MigrationSql(65),
 };
 
+/**
+ * Issue #4454 — the replay proof: the engine instance carries the
+ * id of the workflow instance that dispatched its run, so a
+ * replayed workflow flow resumes a still-`running` instance only
+ * when the recorded id matches its own. Additive column only;
+ * existing rows read back as NULL (unstamped, never replayable).
+ */
+export const MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID: DataMigration = {
+  version: 67,
+  name: "0067_job_pipeline_run_workflow_instance_id",
+  sql: d1MigrationSql(67),
+};
+
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1409,6 +1422,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0064_FREE_ACCESS_GRANTS,
   MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
   MIGRATION_0066_REFERRAL_CODES,
+  MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
 ];
 
 function splitStatements(sqlText: string): string[] {

@@ -25,13 +25,13 @@
  *    a defect, not a cleanup (same discipline as the grep baseline).
  *
  * Scope correction (measured on the tip, not the filing counts): the
- * runner carries 215 statements, not the filed ~148 + 5. The filing
+ * runner carries 216 statements, not the filed ~148 + 5. The filing
  * counts counted only CREATE TABLE / CREATE INDEX / CREATE UNIQUE
- * INDEX lines; the runner also carries 49 ALTER TABLE statements, 1
+ * INDEX lines; the runner also carries 50 ALTER TABLE statements, 1
  * DROP TABLE, and 10 seed-DML lines (the survey's 5 named seeds plus
  * 5 more in the v58 product-versions data migration, plus 10 more in
  * the v66 referral-codes migration that landed on main (534e8903) after
- * the P1 build base. All 215 are
+ * the P1 build base. All 216 are
  * catalogued here — a partial catalogue could not satisfy the
  * byte-identical acceptance pin. The `_migrations` bookkeeping table
  * (created by applyMigrations, not by a migration) is runner
@@ -132,6 +132,7 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   64: "05351b7cc2e974a65e566e225a87d84a34318c1ac6c66311acb12d381c790121",
   65: "8ae8db73d068294023dddf8f77bba1f330a034a08ea31d70e53a8871e4a61fa3",
   66: "bc6889fe632afcd5f76a8998668a4d0a09aedb690aac5a876a367751d5b6b2d4",
+  67: "651071233310241645a5a826fcca8c0b3de60c47eedbfa0ec5625428e54a3913",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -202,6 +203,7 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   64: 2,
   65: 1,
   66: 10,
+  67: 1,
 };
 
 /** The 11 seed-DML statements, exact text, measured from the base runner. */
@@ -241,11 +243,11 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 215 runner statements: 204 schema + 11 seed", () => {
+  it("catalogues all 216 runner statements: 205 schema + 11 seed", () => {
     const catalogue = buildD1Catalogue();
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(221);
-    expect(catalogue.size()).toBe(221);
-    expect(catalogue.byKind("schema").length).toBe(210);
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(222);
+    expect(catalogue.size()).toBe(222);
+    expect(catalogue.byKind("schema").length).toBe(211);
     expect(catalogue.byKind("seed").length).toBe(11);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -273,7 +275,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     expect(verbs.get("CREATE TABLE")).toBe(101);
     expect(verbs.get("CREATE INDEX")).toBe(52);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(7);
-    expect(verbs.get("ALTER TABLE")).toBe(49);
+    expect(verbs.get("ALTER TABLE")).toBe(50);
     expect(verbs.get("DROP TABLE")).toBe(1);
     expect(verbs.get("INSERT OR IGNORE")).toBe(7);
     expect(verbs.get("INSERT INTO")).toBe(1);
@@ -285,7 +287,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       .map(Number)
       .sort((a, b) => a - b);
     expect(versions).toEqual(
-      Array.from({ length: 66 }, (_, i) => i + 1),
+      Array.from({ length: 67 }, (_, i) => i + 1),
     );
     const allCodes = new Set<string>();
     for (const version of versions) {

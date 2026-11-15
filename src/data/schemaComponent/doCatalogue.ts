@@ -173,6 +173,7 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
       run_trigger TEXT,
       run_schedule_id TEXT,
       run_async_job_id TEXT,
+      run_workflow_instance_id TEXT,
       checkpoint_json TEXT,
       stage_checkpoint_json TEXT,
       stage_desired_json TEXT,
