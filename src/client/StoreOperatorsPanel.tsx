@@ -15,7 +15,7 @@
  * note at the bottom of this file).
  *
  * Built only from src/client/components/ui/ primitives with
- * token-only styling (docs/agents/ux-architecture.md §20).
+ * token-only styling (docs/architecture/UX/ux-architecture.md §20).
  * Server calls go through /api/payments/agentic/commercial/*
  * so the server sets x-user-login from the session; the
  * component never supplies an identity of its own.

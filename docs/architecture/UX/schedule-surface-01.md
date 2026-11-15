@@ -4,7 +4,7 @@
 |---|---|
 | Status | Implemented (issue #2329; row controls, sorting and filters #4389) |
 | Scope | The Schedules tab (`SchedulesPanel` → `ScheduledOptionsManager` / `ScheduledOptionsSection`) |
-| Governs | `docs/agents/ux-architecture.md` §6 (primitives, tokens) and §20 (definition of done) |
+| Governs | `docs/architecture/UX/ux-architecture.md` §6 (primitives, tokens) and §20 (definition of done) |
 | Pins | `tests/schedule_rows_2329.test.tsx`, `tests/schedule_ui_s7.test.tsx`, `tests/scheduled_options_manager.test.ts`, `tests/schedules_panel.test.tsx`, `tests/schedule_list_controls_4389.test.ts` |
 
 ## Decision

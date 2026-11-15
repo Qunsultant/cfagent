@@ -39,7 +39,7 @@
  * text, never color-only; focus rings come from the primitives.
  *
  * Built strictly with src/client/components/ui/ primitives and
- * token-only styling per docs/agents/ux-architecture.md §20.
+ * token-only styling per docs/architecture/UX/ux-architecture.md §20.
  * All calls go through approvedFreeQuotaApi.ts (the #71 rule).
  */
 import { useCallback, useEffect, useState } from "react";

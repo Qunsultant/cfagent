@@ -13,7 +13,7 @@
  * older failed row the refresh reveals the healed latest run instead.
  * The button text never claims more than the endpoint does.
  *
- * Compliance (docs/agents/ux-architecture.md): built only from
+ * Compliance (docs/architecture/UX/ux-architecture.md): built only from
  * src/client/components/ui/ primitives; server state is authoritative
  * (the parent refresh re-reads the list); failures render a business
  * error notice, never a technical message.

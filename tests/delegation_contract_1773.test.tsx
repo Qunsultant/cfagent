@@ -15,7 +15,7 @@ import {
  * before execution — what will be done, what will not be done,
  * which systems will be accessed, which actions require approval,
  * budget and duration limits, and expected outputs
- * (docs/agents/ux-architecture.md §7). The builder is pure so the
+ * (docs/architecture/UX/ux-architecture.md §7). The builder is pure so the
  * contract text is pinned independently of the panel render: the
  * preview may never invent a system, a budget, or an authority the
  * form did not state.

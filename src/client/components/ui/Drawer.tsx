@@ -21,7 +21,7 @@ const FOCUSABLE =
 
 /**
  * Drawer (#2283 stream 5)
- * Side panel on the Modal behavior contract (docs/agents/ux-architecture.md
+ * Side panel on the Modal behavior contract (docs/architecture/UX/ux-architecture.md
  * section 13): portal to body, Escape/backdrop close, initial focus inside,
  * Tab kept inside (focus trap), focus restored to the opener on close, and
  * body scroll locked while open. Token z-order: backdrop below the modal

@@ -10,7 +10,7 @@
  * unsent). Expired rows never appear: the list endpoint marks them
  * expired before returning.
  *
- * Compliance (docs/agents/ux-architecture.md): built only from
+ * Compliance (docs/architecture/UX/ux-architecture.md): built only from
  * src/client/components/ui/ primitives on semantic tokens; status is
  * never carried by color alone (the countdown text is always present);
  * server state is authoritative (the list refreshes after every action);

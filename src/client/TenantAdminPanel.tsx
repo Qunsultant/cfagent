@@ -3,7 +3,7 @@
  *
  * Operator surface for tenant create / list / settings, plus a
  * membership VIEW. Built strictly with src/client/components/ui/
- * primitives and token-only styling per docs/agents/ux-architecture.md §20.
+ * primitives and token-only styling per docs/architecture/UX/ux-architecture.md §20.
  *
  * Boundaries, stated on the surface so an operator cannot mistake
  * them:

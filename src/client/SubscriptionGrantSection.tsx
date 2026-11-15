@@ -18,7 +18,7 @@
  * stays disabled with a hint pointing at the lookup section.
  *
  * Built strictly with src/client/components/ui/ primitives and
- * token-only styling per docs/agents/ux-architecture.md §20.
+ * token-only styling per docs/architecture/UX/ux-architecture.md §20.
  * All calls go through src/client/apiFetch.ts (the #71 rule) and
  * the shared commercialApi listPlans helper.
  */

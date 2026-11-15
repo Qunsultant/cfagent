@@ -32,7 +32,7 @@ import { NavIcons } from "./components/NavigationMenu";
  * 7 sections.
  *
  * Built strictly with src/client/components/ui/ primitives (PageShell, Card, Tabs, TabPanel)
- * and token-only styling per docs/agents/ux-architecture.md §20.
+ * and token-only styling per docs/architecture/UX/ux-architecture.md §20.
  *
  * Issue #4575 removed the last two duplicate sections: `free-runs` and
  * `products` were reachable from two homes (here and the product hub),

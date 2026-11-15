@@ -22,7 +22,7 @@ export interface TabsProps<T extends string = string> {
 
 /**
  * Tabs (#492)
- * WAI-ARIA tablist (docs/agents/ux-architecture.md section 13): roving
+ * WAI-ARIA tablist (docs/architecture/UX/ux-architecture.md section 13): roving
  * tabindex, arrow/Home/End keyboard navigation with automatic
  * activation, aria-selected + aria-controls wired to TabPanel.
  * SegmentedControl is the sibling for non-navigation selection.

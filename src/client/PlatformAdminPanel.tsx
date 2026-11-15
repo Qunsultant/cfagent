@@ -17,7 +17,7 @@ import { NAV_ICON_MAP } from "./components/NavigationMenu";
  * The panel is self-contained: ad-banner preferences come from
  * `adBannerConfig` (localStorage, optional parent override) and the
  * request-admin-access action posts the same endpoint the settings menu used
- * to post. Styling follows docs/agents/ux-architecture.md §20 — primitives,
+ * to post. Styling follows docs/architecture/UX/ux-architecture.md §20 — primitives,
  * tokens, scoped classes, no inline layout styles.
  */
 

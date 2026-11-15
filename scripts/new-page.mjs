@@ -64,7 +64,7 @@
  *   --root <path>            repo root (default: parent of scripts/)
  *   --help                   print usage
  *
- * Conformance references: docs/agents/ux-architecture.md §20,
+ * Conformance references: docs/architecture/UX/ux-architecture.md §20,
  * docs/agents/gitops.md §5 (issue template) and §7 (pins in the same PR).
  * This script writes files only; it does not open the PR. Run the
  * targeted tests after scaffolding:

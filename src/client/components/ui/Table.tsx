@@ -37,7 +37,7 @@ export interface TableProps<T> {
 
 /**
  * Table (#492)
- * Semantic data table from a column config (docs/agents/ux-architecture.md
+ * Semantic data table from a column config (docs/architecture/UX/ux-architecture.md
  * section 6: task table; section 13: charts/tables need text alternatives
  * — a real <table> is the accessible baseline). Styles: ./primitives.css.
  */

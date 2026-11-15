@@ -20,7 +20,7 @@
  * silently diverge from the source of truth. A field the registry
  * does not record renders as absent — never invented.
  *
- * Compliance (docs/agents/ux-architecture.md §20): ui/ primitives
+ * Compliance (docs/architecture/UX/ux-architecture.md §20): ui/ primitives
  * only, semantic tokens only, server state is authoritative, the
  * view issues no mutations.
  */

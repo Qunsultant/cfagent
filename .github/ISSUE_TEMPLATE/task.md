@@ -103,7 +103,7 @@ For each doc, write `applies (evidence: …)` or `N/A (reason: …)`:
 - [ ] `docs/agents/gitops.md` — applies (evidence: ) / N/A (reason: )
 - [ ] `docs/agents/tech-standards.md` — applies (evidence: ) / N/A (reason: )
 - [ ] `docs/compliance/anti-drift.md` — applies (evidence: ) / N/A (reason: )
-- [ ] `docs/agents/ux-architecture.md` — applies (evidence: ) / N/A (reason: )
+- [ ] `docs/architecture/UX/ux-architecture.md` — applies (evidence: ) / N/A (reason: )
 
 ## Agentic design (docs/agents)
 Allocation is a decision, not a default — do NOT turn every service into an agent.

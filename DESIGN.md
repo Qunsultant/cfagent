@@ -140,6 +140,6 @@ Rules for new work:
   `tests/ui_primitives_inventory.test.ts` in the same PR; the pin fails on
   unreviewed component files in `components/ui/` and on any same-named
   component defined elsewhere in `src/client`.
-- Accessibility follows `docs/agents/ux-architecture.md` §13: visible focus,
+- Accessibility follows `docs/architecture/UX/ux-architecture.md` §13: visible focus,
   keyboard patterns per WAI-ARIA, status never carried by color alone,
   `prefers-reduced-motion` honored.

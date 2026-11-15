@@ -13,7 +13,7 @@
  *  - delivery status per channel: the run's confirmations incl.
  *    held (pending) / approved / rejected / expired state
  *
- * Compliance (docs/agents/ux-architecture.md): built only from
+ * Compliance (docs/architecture/UX/ux-architecture.md): built only from
  * src/client/components/ui/ primitives; server state is authoritative
  * (confirmations come from GET /trading/reports/confirmations, joined
  * exactly via the run's canonical row); a field the store does not
