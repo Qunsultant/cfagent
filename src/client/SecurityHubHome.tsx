@@ -7,7 +7,7 @@
  * hub now. Its views are the sub-route scheme in `securityHubView.ts`:
  * iaaa-admin (IaaaAdminPanel), users (UserAdminPanel), admin-access
  * (AdminAccessSection, with its request state), profile (ProfileSection),
- * pdp (PdpPanel, issue #4651).
+ * pdp (PdpPanel, issue #4651), pep (PepPanel, issue #4653).
  *
  * View state follows the URL (`?view=`), the same pattern as
  * PlatformAdminPage and SchedulesHome: the component re-reads the URL on
@@ -21,6 +21,7 @@ import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
 import { ProfileSection } from "./ProfileSection";
 import { PdpPanel } from "./PdpPanel";
+import { PepPanel } from "./PepPanel";
 import {
   AdminAccessSection,
   type PlatformAdminUser,
@@ -96,7 +97,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
   return (
     <PageShell
       title="SecurityHub"
-      scopeNote="IAAA admin, users, admin access, your profile, and the Policy Decision Point"
+      scopeNote="IAAA admin, users, admin access, your profile, the Policy Decision Point, and the Policy Enforcement Point"
     >
       <div className="security-hub-tabs-wrapper">
         <Tabs<SecurityHubView>
@@ -156,6 +157,16 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
             <small>Live policy state: active snapshot, source &amp; obligations</small>
           </div>
           <PdpPanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="security-hub" tabId="pep" active={deepLink.view === "pep"}>
+        <Card padding="md">
+          <div className="section-label-row">
+            <span>PEP</span>
+            <small>Live enforcement state: gated routes, enforcement &amp; grace</small>
+          </div>
+          <PepPanel />
         </Card>
       </TabPanel>
     </PageShell>
