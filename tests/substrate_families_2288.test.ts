@@ -380,7 +380,7 @@ ledgerSuite("D1 adapter", async () => {
   const mock = new MockD1Database();
   const db = createD1ProposalLedgerDb(mock as any);
   await ensureProposalLedgerSchema(db);
-  return new D1ProposalLedgerAdapter(db, mock as any);
+  return new D1ProposalLedgerAdapter(db);
 });
 ledgerSuite("in-memory adapter", async () => new InMemoryProposalLedgerAdapter());
 
