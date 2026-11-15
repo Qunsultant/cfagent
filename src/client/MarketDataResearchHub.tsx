@@ -98,11 +98,14 @@ export function isValidResearchSubTab(tab: unknown): tab is ResearchSubTab {
 
 export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: MarketDataResearchHubProps) {
   // Navigation subtabs via the shared hook (S2, #2027): inner tabs live
-  // in `?view=` (no legacy param — research never had one). Panels stay
+  // in `?researchTab=` (no legacy param — research never had one). Panels stay
   // conditional (no retention change). The lazy-load side effects run on
   // every tab change, including back/forward.
+  // Issue #4576: the param is distinct from the Stock hub's `view`, which
+  // nests this panel under `view=research` — sharing `view` made the inner
+  // tab overwrite the hub tab, so a reload landed on the scanner.
   const { activeTab: subTab, handleTabChange } = useUrlSyncedTabs<ResearchSubTab>({
-    param: "view",
+    param: "researchTab",
     isValid: isValidResearchSubTab,
     defaultTab: "screener",
     onTabChange: (targetTab) => {

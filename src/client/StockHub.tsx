@@ -854,7 +854,7 @@ export function StockHub({
                   document.getElementById("selected-run-detail")?.scrollIntoView?.({ block: "start" });
                 }
               }}
-              onViewQueue={() => navigateToTab("screeners", "reports")}
+              onViewQueue={() => navigateToTab("reports")}
             />
           </div>
           {/* Issue #212: autonomous screener panel — retained run history. */}

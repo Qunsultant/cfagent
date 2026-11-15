@@ -84,15 +84,15 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("deepLinkSurfaces: 18 surfaces, unique, pages resolve, values non-empty", () => {
+  it("deepLinkSurfaces: 20 surfaces, unique, pages resolve, values non-empty", () => {
     const ids = new Set((navData.routes as { id: string }[]).map((r) => r.id));
     const surfaces = navData.deepLinkSurfaces as {
       surface: string;
       page: string | null;
       values: string[];
     }[];
-    expect(surfaces).toHaveLength(18);
-    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(18);
+    expect(surfaces).toHaveLength(20);
+    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(20);
     for (const s of surfaces) {
       if (s.page !== null) expect(ids.has(s.page)).toBe(true);
       expect(s.values.length).toBeGreaterThan(0);
@@ -120,7 +120,7 @@ describe("nav-config.json loaders (issue #2977)", () => {
     expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(
       Object.keys(navData.deepLinks as Record<string, unknown>).length,
     );
-    expect(SURFACE_TAB_DEFS).toHaveLength(18);
+    expect(SURFACE_TAB_DEFS).toHaveLength(20);
     // 5 metadata sections + sandbox menu-only section.
     const built = buildDefaultLeftNavConfig().sections;
     expect(built).toHaveLength(6);

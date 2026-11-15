@@ -50,7 +50,13 @@ export function parseTabFromSearch(search: string): RouteId {
  * `schedule` on the schedules home (#3121 S2, one schedule);
  * `screenerTab` is the legacy alias the three screener hubs read for
  * `view`; `research`/`discoveryView` on the options hub; `checkoutTab`
- * on checkout.
+ * on checkout. Issue #4576 adds the two nested-panel params (`flowsTab`,
+ * `researchTab`) and records the schedules home's `section`:
+ * `?tab=schedules&section=goals|queue` is that page's own inner address
+ * (read by `scheduleSections.ts`, written by the panel's own hooks). It is
+ * deliberately unlisted here: every `section` value is a schedules-page
+ * address, so it must not survive a tab change — the same outcome an
+ * unowned param gets, stated explicitly instead of by omission.
  */
 export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   orderTab: ["order"],
@@ -68,6 +74,14 @@ export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   research: ["options"],
   discoveryView: ["options"],
   checkoutTab: ["checkout"],
+  // Issue #4576: the nested hub panels get their own params, so an inner
+  // sub-tab never overwrites the hub tab it is nested inside. `flowsTab`
+  // is OptionsFlowsHub's tab set (host: the options hub's `view=options-flows`,
+  // or the standalone `?tab=options-flows`); `researchTab` is
+  // MarketDataResearchHub's (host: `?tab=stock-hub&view=research`, or the
+  // standalone `?tab=research`).
+  flowsTab: ["options", "options-flows"],
+  researchTab: ["stock-hub", "research"],
   // Issue #3121 S2: the schedules home's deep links — `schedule=<id>`
   // (one schedule) and `run=<id>` (one job's run history) — are owned
   // by the home, so they survive navigation to it and drop on the way
