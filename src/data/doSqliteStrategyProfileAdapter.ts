@@ -26,20 +26,15 @@ import type {
 } from "../trading";
 import type { ScanSqlExecutor } from "./scanRunPorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 import type {
   StrategyProfileStore,
   StrategyProfileStoreOptions,
 } from "./strategyProfilePorts";
 
-const TABLE = "mas_strategy_profiles";
-
 const CREATE_TABLE_SQL = doTableSql("mas_strategy_profiles");
 const CREATE_INDEX_SQL = doIndexSql("idx_mas_strategy_profiles_user_name");
-const INSERT_SQL = `INSERT INTO ${TABLE} (id, user_login, name, version, spec_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`;
-const SELECT_BY_USER_SQL = `SELECT id, user_login, name, version, spec_json, created_at, updated_at FROM ${TABLE} WHERE user_login = ?`;
-const SELECT_BY_ID_SQL = `SELECT id, user_login, name, version, spec_json, created_at, updated_at FROM ${TABLE} WHERE user_login = ? AND id = ?`;
-const UPDATE_SQL = `UPDATE ${TABLE} SET name = ?, version = ?, spec_json = ?, updated_at = ? WHERE user_login = ? AND id = ?`;
-const DELETE_SQL = `DELETE FROM ${TABLE} WHERE user_login = ? AND id = ?`;
 
 interface ProfileRow {
   id: string;
@@ -145,13 +140,22 @@ export class SqlStrategyProfileStore implements StrategyProfileStore {
 
   private listRows(userLogin: string): ProfileRow[] {
     this.ensure();
-    return Array.from(this.sql.exec(SELECT_BY_USER_SQL, userLogin) as Iterable<ProfileRow>);
+    return executeDoDml<ProfileRow[]>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_strategy_profiles.select_by_user",
+      { where: { user_login: userLogin } },
+    );
   }
 
   private getRow(userLogin: string, id: string): ProfileRow | null {
     this.ensure();
-    const rows = Array.from(this.sql.exec(SELECT_BY_ID_SQL, userLogin, id) as Iterable<ProfileRow>);
-    return rows[0] ?? null;
+    return executeDoDml<ProfileRow | null>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_strategy_profiles.select_by_id",
+      { where: { user_login: userLogin, id } },
+    );
   }
 
   async create(userLogin: string, name: string, spec: StrategyProfileSpec): Promise<StrategyProfile> {
@@ -164,7 +168,17 @@ export class SqlStrategyProfileStore implements StrategyProfileStore {
       }
       const id = this.idFactory();
       const stamp = this.now().toISOString();
-      this.sql.exec(INSERT_SQL, id, userLogin, trimmed, 1, JSON.stringify(spec), stamp, stamp);
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_strategy_profiles.insert", {
+        record: {
+          id,
+          user_login: userLogin,
+          name: trimmed,
+          version: 1,
+          spec_json: JSON.stringify(spec),
+          created_at: stamp,
+          updated_at: stamp,
+        } satisfies ProfileRow,
+      });
       return { ...spec, id, userLogin, name: trimmed, version: 1, createdAt: stamp, updatedAt: stamp };
     });
   }
@@ -199,7 +213,10 @@ export class SqlStrategyProfileStore implements StrategyProfileStore {
       const stamp = this.now().toISOString();
       const version = existing.version + 1;
       const specJson = JSON.stringify(spec);
-      this.sql.exec(UPDATE_SQL, nextName, version, specJson, stamp, userLogin, id);
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_strategy_profiles.update", {
+        where: { user_login: userLogin, id },
+        set: { name: nextName, version, spec_json: specJson, updated_at: stamp },
+      });
       this.verifyWrittenRow(userLogin, id, { name: nextName, version, specJson, updatedAt: stamp });
       return { ...spec, id, userLogin, name: nextName, version, createdAt: existing.created_at, updatedAt: stamp };
     });
@@ -207,7 +224,9 @@ export class SqlStrategyProfileStore implements StrategyProfileStore {
 
   async delete(userLogin: string, id: string): Promise<boolean> {
     if (!this.getRow(userLogin, id)) return false;
-    this.sql.exec(DELETE_SQL, userLogin, id);
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_strategy_profiles.delete", {
+      where: { user_login: userLogin, id },
+    });
     // D-E.2: a delete that leaves the row behind is a
     // silently-wrong write — verify by read-back.
     if (this.getRow(userLogin, id)) {
