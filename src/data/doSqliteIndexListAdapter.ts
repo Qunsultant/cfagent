@@ -14,18 +14,11 @@ import type {
   IndexListStoreOptions,
 } from "./indexListPorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
-
-const TABLE = "mas_index_lists";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 
 const CREATE_TABLE_SQL = doTableSql("mas_index_lists");
 const CREATE_INDEX_SQL = doIndexSql("idx_mas_index_lists_lookup");
-const INSERT_SQL =
-  `INSERT INTO ${TABLE} (id, created_at, index_id, snapshot_date, source, source_label, derived_from_holdings, members_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-const IDS_SQL =
-  `SELECT id FROM ${TABLE} WHERE index_id = ? ORDER BY created_at DESC, id DESC`;
-const LATEST_SQL =
-  `SELECT id, snapshot_date, source, source_label, derived_from_holdings, members_json, created_at FROM ${TABLE} WHERE index_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`;
-const DELETE_SQL = `DELETE FROM ${TABLE} WHERE id = ?`;
 
 interface IndexListRow {
   id: string;
@@ -79,22 +72,28 @@ export class SqlIndexListStore implements IndexListStore {
     this.ensureTables();
     const id = this.idFactory();
     const createdAt = input.nowIso ?? new Date().toISOString();
-    this.sql.exec(
-      INSERT_SQL,
-      id,
-      createdAt,
-      input.index,
-      input.snapshotDate,
-      input.source,
-      input.sourceLabel,
-      input.derivedFromHoldings ? 1 : 0,
-      JSON.stringify(input.symbols),
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_index_lists.insert", {
+      record: {
+        id,
+        created_at: createdAt,
+        index_id: input.index,
+        snapshot_date: input.snapshotDate,
+        source: input.source,
+        source_label: input.sourceLabel,
+        derived_from_holdings: input.derivedFromHoldings ? 1 : 0,
+        members_json: JSON.stringify(input.symbols),
+      },
+    });
+    const ids = executeDoDml<Array<{ id: string }>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_index_lists.ids",
+      { where: { index_id: input.index }, orderBy: "created_at DESC, id DESC" },
     );
-    const ids = Array.from(
-      this.sql.exec(IDS_SQL, input.index),
-    ) as Array<{ id: string }>;
     for (const excess of ids.slice(this.keepPerIndex)) {
-      this.sql.exec(DELETE_SQL, excess.id);
+      executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_index_lists.delete", {
+        id: excess.id,
+      });
     }
     return {
       id,
@@ -110,9 +109,12 @@ export class SqlIndexListStore implements IndexListStore {
 
   async latest(index: IndexId): Promise<IndexListArtifact | undefined> {
     this.ensureTables();
-    const rows = Array.from(
-      this.sql.exec(LATEST_SQL, index),
-    ) as IndexListRow[];
+    const rows = executeDoDml<IndexListRow[]>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_index_lists.latest",
+      { where: { index_id: index }, orderBy: "created_at DESC, id DESC", limit: 1 },
+    );
     const row = rows[0];
     if (!row) return undefined;
     return parseRow(row, index);
