@@ -1,0 +1,3 @@
+### Added
+
+- **ORM-core DML catalogue (P6c, #4386):** the 16 `doSqliteOrmAdapters.ts` statements, the 9 `ormRepositoryCore.ts` generator templates (as parameterized operation entries, table as a parameter), and the facade's browse/count reads now live in the existing DO DML catalogue (26 new entries; catalogue 53 → 79) and execute only through `executeDoDml` — reuse, no sibling catalogue or executor. The Repository gains `createOrReplace` (INSERT OR REPLACE) on both legs (DO + in-memory twin), so the ledger's `replace()` is a repository-form entry. The facade's browse SELECT stays inline: its WHERE is dynamic (runtime-discovered TEXT columns), which no static template or repository entry can express.
