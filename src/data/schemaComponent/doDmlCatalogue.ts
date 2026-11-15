@@ -8,13 +8,26 @@
  *    RepositoryPort method to dispatch, with the table's column map.
  *    There is no SQL text in a repository entry at all: the executor
  *    builds the Repository and calls the method. This is the entry
- *    shape for the 42 tranche statements the mini-ORM can express.
+ *    shape for the 42 tranche statements the mini-ORM can express,
+ *    and for the P6c (#4386) ORM-core statements.
  *  - "template": a NAMED RAW TEMPLATE — statement text + param names
  *    in binding order + mode ("all" for reads, "run" for writes).
  *    The residual for the 11 tranche statements the Repository cannot
  *    express (visibility disjunctions, NOT IN subquery prunes,
  *    aggregates, DISTINCT). The statement text is byte-identical to
  *    the constant it replaces (the pin test asserts this).
+ *
+ * #4386 (P6c): a third, parameterized-table form of the repository
+ * entry — one entry per Repository operation, registered once with
+ * the placeholder table "__table__" and parameterizedTable: true.
+ * The executor resolves the runtime table from the caller's code
+ * and params at execution (code table == runtime table, enforced
+ * there) and logs the full resolved code as the AOP operationName.
+ * This is the form the 9 generator templates and the facade's
+ * browse/count reads take: the table is a parameter, not a second
+ * catalogue per table. A parameterized entry carries no columnMap
+ * and no idField (both are table-specific) and is never callable
+ * under the placeholder code itself.
  *
  * The registry is the statement-code authority for DO DML exactly as
  * dmlCatalogue.ts is for D1: one code identifies exactly one entry,
@@ -31,10 +44,12 @@
  * - The doSchema* ledger DML and the kv_store funnel — named
  *   exemptions recorded in the mix pin (tests/do_dml_mechanism_mix_4385.test.ts),
  *   not catalogue entries (Q4).
- * - The 16 doSqliteOrmAdapters.ts statements — they go with P6c (Q5).
+ * - The 16 doSqliteOrmAdapters.ts statements — they went with P6c
+ *   (#4386): this registry holds them now (Q5, closed by P6c).
  */
 import {
   isValidStatementCode,
+  statementCodeAction,
   statementCodeKind,
   statementCodePlane,
   statementCodeTable,
@@ -60,6 +75,7 @@ export type DoDmlEntryForm = "repository" | "template";
 export type DoDmlRepositoryMethod =
   | "create"
   | "createOrIgnore"
+  | "createOrReplace"
   | "update"
   | "updateWhere"
   | "upsert"
@@ -70,11 +86,22 @@ export type DoDmlRepositoryMethod =
   | "findOne"
   | "count";
 
+/** #4386: the placeholder table segment of a parameterized-table entry. */
+export const PARAMETERIZED_TABLE = "__table__";
+
 export interface DoDmlCatalogueEntry {
   /** Canonical code: dml.do.<table>.<action>, e.g. dml.do.mas_discovery_runs.prune_age. */
   code: string;
   /** Target table. */
   table: string;
+  /**
+   * #4386: parameterized-table form — true when this entry is
+   * registered once per operation with table "__table__" and the
+   * runtime table comes from the caller's code + params (the
+   * executor enforces code table == runtime table). A
+   * parameterized entry carries no columnMap and no idField.
+   */
+  parameterizedTable?: boolean;
   operation: DmlOperation;
   form: DoDmlEntryForm;
   /** Repository form: the RepositoryPort method to dispatch. */
@@ -108,6 +135,7 @@ const OPERATIONS: ReadonlySet<string> = new Set([
 const REPOSITORY_METHODS: ReadonlySet<string> = new Set([
   "create",
   "createOrIgnore",
+  "createOrReplace",
   "update",
   "updateWhere",
   "upsert",
@@ -170,6 +198,15 @@ export function validateDoDmlEntry(
       reason: `table "${String(candidate.table)}" must be a lowercase word`,
     };
   }
+  if (
+    candidate.parameterizedTable !== undefined &&
+    typeof candidate.parameterizedTable !== "boolean"
+  ) {
+    return {
+      valid: false,
+      reason: "parameterizedTable must be a boolean when present",
+    };
+  }
   if (typeof candidate.operation !== "string" || !OPERATIONS.has(candidate.operation)) {
     return {
       valid: false,
@@ -186,18 +223,39 @@ export function validateDoDmlEntry(
         reason: `repository entry method "${String(candidate.method)}" must be a RepositoryPort method`,
       };
     }
+    // #4386: the parameterized-table form — registered once per
+    // operation with the placeholder table; the column map and
+    // id field are table-specific, so a parameterized entry
+    // carries neither (the executor uses the defaults).
+    if (candidate.parameterizedTable === true) {
+      if (candidate.table !== PARAMETERIZED_TABLE) {
+        return {
+          valid: false,
+          reason: `parameterized-table entry table must be "${PARAMETERIZED_TABLE}"`,
+        };
+      }
+      if (candidate.columnMap !== undefined || candidate.idField !== undefined) {
+        return {
+          valid: false,
+          reason: "parameterized-table entry must not carry a columnMap or idField",
+        };
+      }
+    }
     if (candidate.columnMap !== undefined) {
       if (
         typeof candidate.columnMap !== "object" ||
         candidate.columnMap === null ||
         Array.isArray(candidate.columnMap) ||
         Object.entries(candidate.columnMap).some(
-          ([k, v]) => !WORD.test(k) || typeof v !== "string" || !WORD.test(v),
+          // #4386: keys are JS record props (camelCase), values are
+          // storage columns (lowercase words) — the P6b rule
+          // assumed identity maps; the ORM-core maps translate.
+          ([k, v]) => !PARAM_NAME.test(k) || typeof v !== "string" || !WORD.test(v),
         )
       ) {
         return {
           valid: false,
-          reason: "repository entry columnMap must map lowercase words to lowercase words",
+          reason: "repository entry columnMap must map JS-identifier props to lowercase-word columns",
         };
       }
     }
@@ -214,6 +272,12 @@ export function validateDoDmlEntry(
       };
     }
   } else if (candidate.form === "template") {
+    if (candidate.parameterizedTable === true) {
+      return {
+        valid: false,
+        reason: "parameterized-table entries must be repository-form",
+      };
+    }
     if (typeof candidate.statement !== "string" || candidate.statement.trim().length === 0) {
       return { valid: false, reason: "template entry must carry a non-empty statement" };
     }
@@ -269,6 +333,35 @@ export function createDoDmlCatalogue(): DoDmlCatalogue {
   const byCode = new Map<string, DoDmlCatalogueEntry>();
   const ordered: DoDmlCatalogueEntry[] = [];
 
+  /**
+   * #4386: resolve a code to its entry — exact first, then the
+   * parameterized-table fallback: a registered parameterized
+   * entry matches any code with the same kind/plane/action, so
+   * one entry serves every table. The executor enforces the
+   * execution-time check (code table == runtime table); the
+   * placeholder code itself never resolves to a callable entry
+   * for a runtime table (see the executor).
+   */
+  const resolve = (code: string): DoDmlCatalogueEntry | undefined => {
+    const exact = byCode.get(code);
+    if (exact) return exact;
+    const kind = statementCodeKind(code);
+    const plane = statementCodePlane(code);
+    const action = statementCodeAction(code);
+    if (!kind || !plane || !action) return undefined;
+    for (const entry of ordered) {
+      if (
+        entry.parameterizedTable === true &&
+        statementCodeKind(entry.code) === kind &&
+        statementCodePlane(entry.code) === plane &&
+        statementCodeAction(entry.code) === action
+      ) {
+        return entry;
+      }
+    }
+    return undefined;
+  };
+
   return {
     register(entry: DoDmlCatalogueEntry): void {
       const validation = validateDoDmlEntry(entry);
@@ -293,7 +386,7 @@ export function createDoDmlCatalogue(): DoDmlCatalogue {
     },
 
     get(code: string): DoDmlCatalogueEntry {
-      const entry = byCode.get(code);
+      const entry = resolve(code);
       if (!entry) {
         throw createSchemaError(
           SchemaErrorCode.UNKNOWN_CODE,
@@ -304,7 +397,7 @@ export function createDoDmlCatalogue(): DoDmlCatalogue {
     },
 
     has(code: string): boolean {
-      return byCode.has(code);
+      return resolve(code) !== undefined;
     },
 
     entries(): DoDmlCatalogueEntry[] {
