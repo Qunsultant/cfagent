@@ -27,7 +27,10 @@
 import { codedMessage } from "../outcomes/outcomeAspects";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
+import { validateEmailRecipient } from "../security/webhookReplay";
+import type { Env } from "../types";
 import { UNRESOLVED_DELIVERY_TENANT } from "./deliveryIdentity";
+import { getStoredEmailDestination } from "./userEmailDestination";
 
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/channelRecipientVerification",
@@ -319,4 +322,172 @@ export function verifyChannelRecipient(input: {
   }
 
   return { allowed: true };
+}
+
+/**
+ * Issue #4609 (G14) — Resolve the authoritative tenant+owner email recipient
+ * binding at delivery time.
+ *
+ * Combines:
+ * 1. Explicit `ChannelRecipientBinding` (from caller/outcome or `CHANNEL_RECIPIENT_BINDINGS_JSON`),
+ * 2. The run owner's stored email destination (`userEmailDestinationStore(env).get(userLogin)`),
+ * 3. Explicit `ownerEmail` carried on the run/outcome/event,
+ * 4. Explicit `SCREENER_EMAIL_ALLOWLIST` in `env`.
+ *
+ * When any owner/tenant email binding is present, caller-supplied `emailTo`
+ * from schedule creation is verified against this binding at delivery time
+ * instead of being trusted by self-comparison.
+ */
+export async function resolveTenantOwnerEmailBinding(input: {
+  env?: unknown;
+  run: ChannelRecipientRunScope;
+  ownerEmail?: string | null;
+  storedEmailTo?: string | null;
+  binding?: ChannelRecipientBinding | null;
+}): Promise<{
+  binding: ChannelRecipientBinding | null;
+  effectiveRun: ChannelRecipientRunScope;
+}> {
+  const { env, run, ownerEmail, storedEmailTo } = input;
+  const envRecord = env && typeof env === "object" ? (env as Record<string, unknown>) : {};
+  const explicitBinding = input.binding ?? resolveEnvChannelRecipientBinding(env, run);
+
+  let resolvedStored = typeof storedEmailTo === "string" && storedEmailTo.trim()
+    ? storedEmailTo.trim()
+    : undefined;
+  if (!resolvedStored && run.userLogin?.trim() && envRecord["SESSION_STORE"]) {
+    resolvedStored = await getStoredEmailDestination(env as Env, run.userLogin.trim());
+  }
+
+  const ownerBoundEmails = new Set<string>();
+  if (typeof ownerEmail === "string" && ownerEmail.trim()) {
+    ownerBoundEmails.add(normalizeEmail(ownerEmail));
+  }
+  if (resolvedStored) {
+    ownerBoundEmails.add(normalizeEmail(resolvedStored));
+  }
+  const allowlistRaw =
+    typeof envRecord["SCREENER_EMAIL_ALLOWLIST"] === "string"
+      ? envRecord["SCREENER_EMAIL_ALLOWLIST"].trim()
+      : "";
+  if (allowlistRaw) {
+    for (const entry of allowlistRaw.split(",")) {
+      const trimmed = entry.trim();
+      if (trimmed) ownerBoundEmails.add(normalizeEmail(trimmed));
+    }
+  }
+
+  if (explicitBinding) {
+    if (explicitBinding.emailRecipients !== undefined || ownerBoundEmails.size === 0) {
+      return { binding: explicitBinding, effectiveRun: run };
+    }
+    return {
+      binding: {
+        ...explicitBinding,
+        emailRecipients: Array.from(ownerBoundEmails),
+      },
+      effectiveRun: run,
+    };
+  }
+
+  if (ownerBoundEmails.size === 0) {
+    return { binding: null, effectiveRun: run };
+  }
+
+  const resolvedTenantId =
+    normalizeTenantId(run.tenantId) ??
+    inferTenantFromDeliveryId(run.runId) ??
+    (run.userLogin?.trim() ? `owner:${run.userLogin.trim()}` : "owner-scope");
+
+  return {
+    binding: {
+      tenantId: resolvedTenantId,
+      userLogin: run.userLogin?.trim() || null,
+      emailRecipients: Array.from(ownerBoundEmails),
+    },
+    effectiveRun: {
+      ...run,
+      tenantId: normalizeTenantId(run.tenantId) ?? inferTenantFromDeliveryId(run.runId) ?? resolvedTenantId,
+    },
+  };
+}
+
+/**
+ * Issue #4609 (G14) — Delivery-time email recipient verification against
+ * format/domain rules AND the run's `tenant + owner` email binding.
+ *
+ * Refuses with `FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED` and audits
+ * `delivery.recipient_refused` at `layer` whenever:
+ * - the address fails format or `EMAIL_TO_ALLOWED_DOMAINS` validation, or
+ * - the address is outside the run's `tenant + owner` binding (including a
+ *   schedule created with someone else's email address).
+ */
+export async function verifyEmailRecipientAtDelivery(input: {
+  recipient?: string | null;
+  env?: unknown;
+  run: ChannelRecipientRunScope;
+  ownerEmail?: string | null;
+  storedEmailTo?: string | null;
+  binding?: ChannelRecipientBinding | null;
+  layer: ChannelVerificationLayer;
+  audit?: ChannelRecipientAuditFn;
+}): Promise<ChannelRecipientVerificationResult> {
+  const { recipient, env, run, ownerEmail, storedEmailTo, binding, layer, audit } = input;
+  const trimmedRecipient = typeof recipient === "string" ? recipient.trim() : "";
+  const envRecord = env && typeof env === "object" ? (env as Record<string, unknown>) : {};
+
+  if (trimmedRecipient) {
+    const allowedDomainsCsv =
+      typeof envRecord["EMAIL_TO_ALLOWED_DOMAINS"] === "string"
+        ? envRecord["EMAIL_TO_ALLOWED_DOMAINS"]
+        : undefined;
+    const formatCheck = validateEmailRecipient(trimmedRecipient, allowedDomainsCsv);
+    if (!formatCheck.ok) {
+      const runTenantId = normalizeTenantId(run.tenantId) ?? inferTenantFromDeliveryId(run.runId);
+      const detail = formatCheck.reason ?? `recipient ${trimmedRecipient} failed email validation`;
+      const auditPayload: ChannelRecipientAuditPayload = {
+        channel: "email",
+        recipient: trimmedRecipient,
+        tenantId: runTenantId,
+        bindingTenantId: binding?.tenantId ?? runTenantId ?? "domain-policy",
+        userLogin: run.userLogin?.trim() || null,
+        runId: run.runId?.trim() || null,
+        scheduleId: run.scheduleId?.trim() || null,
+        layer,
+        reason: "email_recipient_not_in_tenant_run",
+        detail,
+      };
+      try {
+        audit?.("delivery.recipient_refused", auditPayload);
+      } catch {
+        // Best-effort callback; structured log below always records.
+      }
+      structuredLog.warn("delivery.recipient_refused", auditPayload);
+      return {
+        allowed: false,
+        code: "FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED",
+        reason: "email_recipient_not_in_tenant_run",
+        detail,
+        error: codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", detail),
+        auditPayload,
+      };
+    }
+  }
+
+  const { binding: resolvedBinding, effectiveRun } = await resolveTenantOwnerEmailBinding({
+    env,
+    run,
+    ownerEmail,
+    storedEmailTo,
+    binding,
+  });
+
+  return verifyChannelRecipient({
+    channel: "email",
+    recipient: trimmedRecipient,
+    run: effectiveRun,
+    binding: resolvedBinding,
+    layer,
+    audit,
+  });
 }

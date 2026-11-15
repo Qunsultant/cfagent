@@ -188,6 +188,8 @@ export interface ScreenerRunOutcome {
   tenantId?: string | null;
   /** Issue #4608: optional tenant+run recipient binding verified at every delivery layer. */
   recipientBinding?: import("./channelRecipientVerification").ChannelRecipientBinding | null;
+  /** Issue #4609 (G14): optional owner email bound to the run's tenant+owner, verified at delivery time. */
+  ownerEmail?: string | null;
 }
 
 export interface ScreenerChannelConfig {
@@ -251,18 +253,26 @@ export function resolveScreenerFollowupConfig(
 }
 
 /** True when an email recipient is permitted for screener delivery:
- *  the configured allowlist — plus, when the list is only the default
- *  (derived from SCREENER_EMAIL_TO, not set explicitly), the run's
- *  own per-task recipient: schedule definitions are owner-configured,
- *  the same trust level as the env recipient (S5b). An explicitly
- *  configured allowlist gates every recipient. */
+ *  the configured allowlist — plus, when no owner email or explicit
+ *  allowlist is bound, the run's own per-task recipient (S5b).
+ *  Issue #4609 (G14): when an ownerEmail is bound on the run/outcome,
+ *  a schedule created with someone else's emailTo is refused at
+ *  delivery time unless it matches ownerEmail or the explicit allowlist. */
 export function isEmailAllowed(
   config: ScreenerFollowupConfig,
   address: string,
   outcome?: ScreenerRunOutcome,
+  ownerEmail?: string | null,
 ): boolean {
   const normalized = address.trim().toLowerCase();
-  if (config.emailAllowlist.includes(normalized)) return true;
+  if (!normalized) return false;
+  const boundOwnerEmail = (ownerEmail ?? outcome?.ownerEmail)?.trim().toLowerCase();
+  const allowlist = config.emailAllowlist ?? [];
+  if (boundOwnerEmail) {
+    if (normalized === boundOwnerEmail) return true;
+    return Boolean(config.emailAllowlistExplicit) && allowlist.includes(normalized);
+  }
+  if (allowlist.includes(normalized)) return true;
   if (config.emailAllowlistExplicit) return false;
   return Boolean(outcome?.emailTo && outcome.emailTo.trim().toLowerCase() === normalized);
 }
