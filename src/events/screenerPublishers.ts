@@ -52,11 +52,72 @@ import {
   getStoredEmailDestination,
   resolveEmailDestination,
 } from "../services/userEmailDestination";
+import {
+  inferTenantFromDeliveryId,
+  resolveEnvChannelRecipientBinding,
+  verifyChannelRecipient,
+  type ChannelRecipientBinding,
+  type ChannelRecipientRunScope,
+} from "../services/channelRecipientVerification";
+import type { AsyncJobChannel } from "../types";
 
 export interface ScreenerPublisherDeps {
   env: Env;
   orm?: DatabaseORM;
   userLogin: string;
+  /** Issue #4608: optional recipient binding lookup for publisher-layer verification. */
+  getRecipientBinding?: (run: ChannelRecipientRunScope) => ChannelRecipientBinding | null | undefined;
+}
+
+function recordPublisherRecipientRefusal(
+  deps: ScreenerPublisherDeps,
+  type: "delivery.recipient_refused",
+  payload: Record<string, unknown>,
+): void {
+  try {
+    deps.orm?.events?.create({
+      id: crypto.randomUUID(),
+      sessionId: deps.userLogin,
+      type,
+      agent: "orchestrator",
+      payload,
+      createdAt: new Date().toISOString(),
+    });
+  } catch {
+    // verifyChannelRecipient always emits structuredLog.warn("delivery.recipient_refused", ...).
+  }
+}
+
+function checkPublisherChannelRecipient(
+  deps: ScreenerPublisherDeps,
+  channel: AsyncJobChannel,
+  recipient: string | undefined,
+  event: {
+    deliveryId?: string;
+    scheduleId?: string;
+    tenantId?: string | null;
+    recipientBinding?: ChannelRecipientBinding | null;
+  },
+): boolean {
+  const runScope: ChannelRecipientRunScope = {
+    tenantId: event.tenantId ?? inferTenantFromDeliveryId(event.deliveryId),
+    runId: event.deliveryId ?? null,
+    scheduleId: event.scheduleId ?? null,
+    userLogin: deps.userLogin,
+  };
+  const binding =
+    event.recipientBinding ??
+    deps.getRecipientBinding?.(runScope) ??
+    resolveEnvChannelRecipientBinding(deps.env, runScope);
+  const check = verifyChannelRecipient({
+    channel,
+    recipient,
+    run: runScope,
+    binding,
+    layer: "publisher",
+    audit: (type, payload) => recordPublisherRecipientRefusal(deps, type, payload),
+  });
+  return check.allowed;
 }
 
 const registeredBuses = new WeakSet<ScreenerEventBus>();
@@ -388,19 +449,21 @@ async function publishCompleted(
   const slackBody = pdf || cfpay
     ? plainTextWithDigest
     : `${plainTextWithDigest}${event.pdfKey ? `\n\n📄 PDF report: ${reportUrl}` : ""}`;
-  const slackDelivery = await deliverScreenerToSlack(deps.env, {
-    text: slackBody,
-    channel: slackChannel,
-    ...(pdf ? {
-      pdf: {
-        ...pdf,
-        title: `Market Screen — ${event.universe || "TECH"} ${event.timestamp.slice(0, 10)}`,
-        comment: plainTextWithDigest,
-      },
-    } : {}),
-  });
-  if (!slackDelivery.ok) {
-    console.warn("[ScreenerPublishers] Slack delivery failed:", slackDelivery.error);
+  if (checkPublisherChannelRecipient(deps, "slack", slackChannel, event)) {
+    const slackDelivery = await deliverScreenerToSlack(deps.env, {
+      text: slackBody,
+      channel: slackChannel,
+      ...(pdf ? {
+        pdf: {
+          ...pdf,
+          title: `Market Screen — ${event.universe || "TECH"} ${event.timestamp.slice(0, 10)}`,
+          comment: plainTextWithDigest,
+        },
+      } : {}),
+    });
+    if (!slackDelivery.ok) {
+      console.warn("[ScreenerPublishers] Slack delivery failed:", slackDelivery.error);
+    }
   }
 
   // 2. Email — try cfpay via A2A first, fall back to local.
@@ -408,7 +471,7 @@ async function publishCompleted(
   // configured, skip with the named reason instead of attempting
   // sends that cannot succeed and dropping the failure silently.
   const emailTo = await resolvePublisherEmailTo(deps, event);
-  if (emailTo) {
+  if (emailTo && checkPublisherChannelRecipient(deps, "email", emailTo, event)) {
     const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
     if (!deliveryConfig.emailConfigured) {
       console.warn(
@@ -465,7 +528,7 @@ async function publishCompleted(
 
   // 3. Webhook
   const webhookUrl = event.webhookUrl || (deps.env as any).OUTBOUND_WEBHOOK_URL;
-  if (webhookUrl) {
+  if (webhookUrl && checkPublisherChannelRecipient(deps, "webhook", webhookUrl, event)) {
     try {
       const webhook = new ETradeWebhookService(deps.orm, deps.env, deps.userLogin);
       await webhook.dispatchOutboundWebhook(
@@ -509,37 +572,46 @@ async function publishFailed(
   const slackConfigured = Boolean(
     cfpay || deps.env.SLACK_BOT_TOKEN || deps.env.SLACK_WEBHOOK_URL,
   );
-  const result = await deliverGatedSlack(deps.env, {
-    userLogin: deps.userLogin,
-    text,
-    channel: event.slackChannel,
-  });
+  const slackChannel = event.slackChannel || (deps.env as any).SCREENER_SLACK_CHANNEL || (deps.env as any).SLACK_CHANNEL;
+  if (checkPublisherChannelRecipient(deps, "slack", slackChannel, event)) {
+    const result = await deliverGatedSlack(deps.env, {
+      userLogin: deps.userLogin,
+      text,
+      channel: event.slackChannel,
+      tenantId: event.tenantId,
+      runId: event.deliveryId,
+      scheduleId: event.scheduleId,
+      recipientBinding: event.recipientBinding,
+    });
+    if (!result.ok) console.warn("[ScreenerPublishers] Slack failure-notify failed:", result.error);
+  }
   attempted = attempted || slackConfigured;
-  if (!result.ok) console.warn("[ScreenerPublishers] Slack failure-notify failed:", result.error);
 
   const emailTo = await resolvePublisherEmailTo(deps, event);
   if (emailTo) {
     attempted = true;
-    // Issue #1770 (slice B, F-63): same named skip as the completed
-    // path — a missing transport must warn with its reason, not
-    // silently drop the failure notice.
-    const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
-    if (!deliveryConfig.emailConfigured) {
-      console.warn(
-        `[ScreenerPublishers] Email failure-notify skipped for ${event.universe || "TECH"}: ${deliveryConfig.emailMissingReason}`
-      );
-    } else if (cfpay) {
-      const r = await cfpaySendEmail(cfpay, emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, text);
-      if (!r.ok) console.warn("[ScreenerPublishers] cfpay Email failure-notify failed:", r.error);
-    } else {
-      try {
-        const email = new ETradeEmailTradingService(deps.env, deps.orm, deps.userLogin);
-        const sent = await email.sendOutboundEmail(emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, `<p>${text}</p>`, text);
-        if (!sent) {
-          console.warn("[ScreenerPublishers] Local email failure-notify failed (env.EMAIL binding is not configured or send failed) — notice not delivered.");
+    if (checkPublisherChannelRecipient(deps, "email", emailTo, event)) {
+      // Issue #1770 (slice B, F-63): same named skip as the completed
+      // path — a missing transport must warn with its reason, not
+      // silently drop the failure notice.
+      const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
+      if (!deliveryConfig.emailConfigured) {
+        console.warn(
+          `[ScreenerPublishers] Email failure-notify skipped for ${event.universe || "TECH"}: ${deliveryConfig.emailMissingReason}`
+        );
+      } else if (cfpay) {
+        const r = await cfpaySendEmail(cfpay, emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, text);
+        if (!r.ok) console.warn("[ScreenerPublishers] cfpay Email failure-notify failed:", r.error);
+      } else {
+        try {
+          const email = new ETradeEmailTradingService(deps.env, deps.orm, deps.userLogin);
+          const sent = await email.sendOutboundEmail(emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, `<p>${text}</p>`, text);
+          if (!sent) {
+            console.warn("[ScreenerPublishers] Local email failure-notify failed (env.EMAIL binding is not configured or send failed) — notice not delivered.");
+          }
+        } catch (err) {
+          console.warn("[ScreenerPublishers] Email failure-notify failed:", err instanceof Error ? err.message : String(err));
         }
-      } catch (err) {
-        console.warn("[ScreenerPublishers] Email failure-notify failed:", err instanceof Error ? err.message : String(err));
       }
     }
   }
@@ -547,15 +619,17 @@ async function publishFailed(
   const webhookUrl = event.webhookUrl || (deps.env as any).OUTBOUND_WEBHOOK_URL;
   if (webhookUrl) {
     attempted = true;
-    try {
-      const webhook = new ETradeWebhookService(deps.orm, deps.env, deps.userLogin);
-      await webhook.dispatchOutboundWebhook(
-        "screener.failed",
-        { sector: event.sector, error: event.error, timestamp: event.timestamp },
-        webhookUrl
-      );
-    } catch (err) {
-      console.warn("[ScreenerPublishers] Webhook failure-notify failed:", err instanceof Error ? err.message : String(err));
+    if (checkPublisherChannelRecipient(deps, "webhook", webhookUrl, event)) {
+      try {
+        const webhook = new ETradeWebhookService(deps.orm, deps.env, deps.userLogin);
+        await webhook.dispatchOutboundWebhook(
+          "screener.failed",
+          { sector: event.sector, error: event.error, timestamp: event.timestamp },
+          webhookUrl
+        );
+      } catch (err) {
+        console.warn("[ScreenerPublishers] Webhook failure-notify failed:", err instanceof Error ? err.message : String(err));
+      }
     }
   }
 

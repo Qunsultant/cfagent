@@ -36,6 +36,12 @@ import {
   resolveTenantChannelGate,
   type TenantChannelGate,
 } from "./tenantChannelGate";
+import {
+  resolveEnvChannelRecipientBinding,
+  verifyChannelRecipient,
+  type ChannelRecipientBinding,
+  type ChannelRecipientRunScope,
+} from "./channelRecipientVerification";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -55,6 +61,14 @@ export interface FollowupDeliveryDeps {
    * null result means ungated (prior behavior).
    */
   getTenantChannelGate?: (userLogin: string) => Promise<TenantChannelGate | null>;
+  /**
+   * Issue #4608 — optional recipient binding resolver and audit callback
+   * for delivery-time tenant+run recipient verification.
+   */
+  getRecipientBinding?: (
+    run: ChannelRecipientRunScope,
+  ) => Promise<ChannelRecipientBinding | null> | ChannelRecipientBinding | null;
+  audit?: (type: string, payload: Record<string, unknown>) => void;
 }
 
 /** Resolve the tenant channel gate for one delivery, never throwing. */
@@ -95,7 +109,17 @@ const CSV_CONTENT_TYPE = "text/csv";
 
 export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
   deliver: (input: FollowupDeliveryInput) => Promise<{ ok: boolean; error?: string; detail?: string }>;
-  notify: (input: { channel: AsyncJobChannel; userLogin: string; text: string; emailTo?: string; slackChannel?: string }) => Promise<{ ok: boolean; error?: string; detail?: string }>;
+  notify: (input: {
+    channel: AsyncJobChannel;
+    userLogin: string;
+    text: string;
+    emailTo?: string;
+    slackChannel?: string;
+    tenantId?: string | null;
+    runId?: string | null;
+    scheduleId?: string | null;
+    recipientBinding?: ChannelRecipientBinding | null;
+  }) => Promise<{ ok: boolean; error?: string; detail?: string }>;
 } {
   return {
     deliver: async ({ channel, userLogin, outcome, artifacts }) => {
@@ -109,6 +133,33 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
         return { ok: false, error: channelDisabledError(tenantChannel, gate.tenantId) };
       }
       const config = resolveScreenerFollowupConfig(deps.env as unknown as Record<string, unknown>);
+      const effectiveRecipient =
+        channel === "email"
+          ? (outcome.emailTo ?? config.channels.email.to)
+          : channel === "slack"
+            ? (outcome.slackChannel ?? config.channels.slack.channel)
+            : (outcome.webhookUrl ?? config.channels.webhook.url);
+      const runScope: ChannelRecipientRunScope = {
+        tenantId: outcome.tenantId ?? gate?.tenantId ?? null,
+        userLogin,
+        runId: outcome.deliveryId ?? outcome.scanRunId ?? outcome.canonicalReportId ?? null,
+        scheduleId: outcome.scheduleId ?? null,
+      };
+      const binding =
+        outcome.recipientBinding ??
+        (deps.getRecipientBinding ? await deps.getRecipientBinding(runScope) : null) ??
+        resolveEnvChannelRecipientBinding(deps.env, runScope);
+      const recipientCheck = verifyChannelRecipient({
+        channel,
+        recipient: effectiveRecipient,
+        run: runScope,
+        binding,
+        layer: "followup_port.deliver",
+        audit: deps.audit,
+      });
+      if (!recipientCheck.allowed) {
+        return { ok: false, error: recipientCheck.error };
+      }
       const text = followupDeliveryText(outcome);
       const agent = deps.getScreenerAgent(userLogin);
       // Issue #1191 (#1173 R3): fetch bytes per artifact kind — PDF
@@ -236,7 +287,7 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
       return { ok: true };
     },
     // Issue #1123 S4: text-only lifecycle notifications (no artifact).
-    notify: async ({ channel, userLogin, text, emailTo, slackChannel }) => {
+    notify: async ({ channel, userLogin, text, emailTo, slackChannel, tenantId, runId, scheduleId, recipientBinding }) => {
       const config = resolveScreenerFollowupConfig(deps.env as unknown as Record<string, unknown>);
       // Issue #3169: same gate as deliver() (slack/email only in
       // practice — webhook below keeps its existing error when
@@ -245,6 +296,33 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
       const tenantChannel = mapScreeningChannelToTenantChannel(channel);
       if (gate && tenantChannel && !gate.isEnabled(tenantChannel)) {
         return { ok: false, error: channelDisabledError(tenantChannel, gate.tenantId) };
+      }
+      if (channel === "slack" || channel === "email") {
+        const effectiveRecipient =
+          channel === "email"
+            ? (emailTo ?? config.channels.email.to)
+            : (slackChannel ?? config.channels.slack.channel);
+        const runScope: ChannelRecipientRunScope = {
+          tenantId: tenantId ?? gate?.tenantId ?? null,
+          userLogin,
+          runId: runId ?? null,
+          scheduleId: scheduleId ?? null,
+        };
+        const binding =
+          recipientBinding ??
+          (deps.getRecipientBinding ? await deps.getRecipientBinding(runScope) : null) ??
+          resolveEnvChannelRecipientBinding(deps.env, runScope);
+        const recipientCheck = verifyChannelRecipient({
+          channel,
+          recipient: effectiveRecipient,
+          run: runScope,
+          binding,
+          layer: "followup_port.notify",
+          audit: deps.audit,
+        });
+        if (!recipientCheck.allowed) {
+          return { ok: false, error: recipientCheck.error };
+        }
       }
       if (channel === "slack") {
         // Issue #1191: per-task channel wins, mirroring deliveries.

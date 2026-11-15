@@ -81,8 +81,14 @@ import { createAsyncJobPorts, type AsyncJobPorts } from "../../data/createAsyncJ
 import {
   createDeliverySuppressor,
   deliveryDestinationFor,
+  scopedDeliveryClaimRunId,
   type DeliverySuppressor,
 } from "../../workflows/screenDeliverySuppression";
+import {
+  inferTenantFromDeliveryId,
+  resolveEnvChannelRecipientBinding,
+  verifyChannelRecipient,
+} from "../../services/channelRecipientVerification";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { createDiscoveryService } from "../../services/discoveryService";
@@ -2433,7 +2439,14 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         // silent drop and never a second send.
         const suppressor =
           ctx.deliverySuppressor ?? (ctx.deliverySuppressor = createDeliverySuppressor());
-        const deliveryRunId = outcome.deliveryId ?? jobId;
+        const resolvedTenantId =
+          job.tenant_id ??
+          outcome.tenantId ??
+          inferTenantFromDeliveryId(outcome.deliveryId ?? jobId);
+        const deliveryRunId = scopedDeliveryClaimRunId(
+          outcome.deliveryId ?? jobId,
+          resolvedTenantId,
+        );
         const deliveryDestination = deliveryDestinationFor(channel, outcome.emailTo);
         if (!suppressor.tryClaim(deliveryRunId, deliveryDestination)) {
           ctx.audit("followup.delivery_suppressed", "orchestrator", {
@@ -2448,14 +2461,58 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
             channel,
           };
         } else {
+          const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
+          const effectiveRecipient =
+            channel === "email"
+              ? outcome.emailTo ?? config.channels.email.to
+              : channel === "slack"
+                ? outcome.slackChannel ?? config.channels.slack.channel
+                : outcome.webhookUrl ?? config.channels.webhook.url;
+          const runScope = {
+            tenantId: resolvedTenantId,
+            runId: outcome.deliveryId ?? jobId,
+            scheduleId: outcome.scheduleId ?? null,
+            userLogin,
+          };
+          const binding =
+            outcome.recipientBinding ?? resolveEnvChannelRecipientBinding(ctx.env, runScope);
+          const recipientCheck = verifyChannelRecipient({
+            channel,
+            recipient: effectiveRecipient,
+            run: runScope,
+            binding,
+            layer: "executor.deliver",
+            audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+          });
+          if (!recipientCheck.allowed) {
+            suppressor.release(deliveryRunId, deliveryDestination);
+            throw new Error(recipientCheck.error);
+          }
           if (channel === "email") {
-            const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
             // Per-task override wins over the env recipient (S5b); the
             // allowlist applies to the effective recipient either way.
             const to = outcome.emailTo ?? config.channels.email.to;
-            if (!to) throw new Error("Email delivery is not configured (SCREENER_EMAIL_TO is unset).");
+            if (!to) {
+              suppressor.release(deliveryRunId, deliveryDestination);
+              throw new Error("Email delivery is not configured (SCREENER_EMAIL_TO is unset).");
+            }
             if (!isEmailAllowed(config, to, outcome)) {
-              throw new Error(codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${to}`));
+              const error = codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${to}`);
+              ctx.audit("delivery.recipient_refused", "orchestrator", {
+                jobId,
+                channel: "email",
+                recipient: to,
+                tenantId: resolvedTenantId,
+                runId: outcome.deliveryId ?? jobId,
+                scheduleId: outcome.scheduleId ?? null,
+                userLogin,
+                reason: "recipient_not_in_tenant_run",
+                detail: `recipient ${to}`,
+                error,
+                layer: "executor.deliver",
+              });
+              suppressor.release(deliveryRunId, deliveryDestination);
+              throw new Error(error);
             }
           }
           // Issue #2867: a failed send releases the claim, so
@@ -2506,14 +2563,57 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       if (!shouldNotify(notifyPolicy, event, channel)) {
         result = { status: "skipped", reason: `Pipeline policy disables ${event} notifications on ${channel}.`, channel, event };
       } else {
+      const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
+      const resolvedTenantId =
+        job.tenant_id ??
+        outcome.tenantId ??
+        inferTenantFromDeliveryId(outcome.deliveryId ?? jobId);
+      const effectiveRecipient =
+        channel === "email"
+          ? outcome.emailTo ?? config.channels.email.to
+          : channel === "slack"
+            ? outcome.slackChannel ?? config.channels.slack.channel
+            : outcome.webhookUrl ?? config.channels.webhook.url;
+      const runScope = {
+        tenantId: resolvedTenantId,
+        runId: outcome.deliveryId ?? jobId,
+        scheduleId: outcome.scheduleId ?? null,
+        userLogin,
+      };
+      const binding =
+        outcome.recipientBinding ?? resolveEnvChannelRecipientBinding(ctx.env, runScope);
+      const recipientCheck = verifyChannelRecipient({
+        channel,
+        recipient: effectiveRecipient,
+        run: runScope,
+        binding,
+        layer: "executor.notify",
+        audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
+      });
+      if (!recipientCheck.allowed) {
+        throw new Error(recipientCheck.error);
+      }
       if (channel === "email") {
-        const config = resolveScreenerFollowupConfig(ctx.env as unknown as Record<string, unknown>);
         // Issue #1191: per-task recipient wins (mirrors deliveries);
         // the allowlist applies to the effective recipient.
         const to = outcome.emailTo ?? config.channels.email.to;
         if (!to) throw new Error("Email notification is not configured (SCREENER_EMAIL_TO is unset).");
         if (!isEmailAllowed(config, to, outcome)) {
-          throw new Error(codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `notification recipient ${to}`));
+          const error = codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `notification recipient ${to}`);
+          ctx.audit("delivery.recipient_refused", "orchestrator", {
+            jobId,
+            channel: "email",
+            recipient: to,
+            tenantId: resolvedTenantId,
+            runId: outcome.deliveryId ?? jobId,
+            scheduleId: outcome.scheduleId ?? null,
+            userLogin,
+            reason: "recipient_not_in_tenant_run",
+            detail: `notification recipient ${to}`,
+            error,
+            layer: "executor.notify",
+          });
+          throw new Error(error);
         }
       }
       const text = formatLifecycleNotification(

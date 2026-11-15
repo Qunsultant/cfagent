@@ -71,6 +71,39 @@ export function deliverySuppressionKey(runId: string, destination: string): stri
   return `${runId.trim()}::${destination.trim()}`;
 }
 
+/**
+ * Issue #4608 (G22 verification): ensure a delivery claim's `runId` is
+ * tenant+run scoped whenever a resolved `tenantId` is known.
+ *
+ * - If `tenantId` is absent or `"unscoped"`, returns `runId` unchanged
+ *   (preserving existing behavior for single-tenant / unscoped tests).
+ * - If `runId` already embeds the tenant (`scheduled:<tenant>:...` from
+ *   #4624 or `tenant:<tenant>:...`), returns `runId` unchanged.
+ * - Otherwise prefixes `tenant:<tenantId>:<runId>` so two tenants sharing
+ *   a bare or manual `runId` never collide in `mas_delivery_claims`.
+ */
+export function scopedDeliveryClaimRunId(
+  runId: string,
+  tenantId?: string | null,
+): string {
+  const trimmedRunId = runId.trim();
+  const trimmedTenant = typeof tenantId === "string" ? tenantId.trim() : "";
+  if (!trimmedTenant || trimmedTenant === "unscoped") {
+    return trimmedRunId;
+  }
+  if (
+    trimmedRunId.startsWith(`tenant:${trimmedTenant}:`) ||
+    trimmedRunId.startsWith(`scheduled:${trimmedTenant}:`)
+  ) {
+    return trimmedRunId;
+  }
+  const parts = trimmedRunId.split(":");
+  if (parts.length >= 4 && parts[1] === trimmedTenant) {
+    return trimmedRunId;
+  }
+  return `tenant:${trimmedTenant}:${trimmedRunId}`;
+}
+
 /** The destination for a followup.deliver send: channel, or email:<recipient> for email. */
 export function deliveryDestinationFor(
   channel: "slack" | "email" | "webhook",
