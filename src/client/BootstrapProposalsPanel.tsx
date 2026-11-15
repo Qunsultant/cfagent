@@ -2,8 +2,8 @@
  * Bootstrap proposals section for the IAAA admin panel (issue 3077,
  * 945 Q3).
  *
- * Rendered on the Overview tab beside PolicyProposalsPanel: like
- * policy proposals, bootstrap administration is platform state, so
+ * Rendered on the Overview tab beside RoleGrantsPanel: like
+ * role grants, bootstrap administration is platform state, so
  * the section lives with them instead of growing a new tab (tab
  * indices unchanged) and is not duplicated anywhere else.
  * Tenant-admins never reach this section: the panel's limited view

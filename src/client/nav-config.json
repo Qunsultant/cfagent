@@ -486,7 +486,7 @@
       "crumb": "SecurityHub",
       "category": "Platform",
       "icon": "IaaaAdmin",
-      "description": "IAAA admin, users, admin access, and your profile — one menu, seven views",
+      "description": "IAAA admin, users, admin access, and your profile — one menu, eight views",
       "navEntry": {
         "label": "SecurityHub",
         "shortLabel": "SecurityHub",
@@ -987,6 +987,13 @@
         "shortLabel": "Live attribute state: schema, sources & your attributes",
         "icon": "IaaaAdmin",
         "description": "Live attribute state: schema, sources & your attributes"
+      },
+      {
+        "id": "pap",
+        "label": "PAP",
+        "shortLabel": "Live policy administration: proposals, preview, approval & promotion",
+        "icon": "IaaaAdmin",
+        "description": "Live policy administration: proposals, preview, approval & promotion"
       }
     ],
     "schedules": [
@@ -1799,6 +1806,10 @@
     "security-hub:pip": {
       "tab": "security-hub",
       "view": "pip"
+    },
+    "security-hub:pap": {
+      "tab": "security-hub",
+      "view": "pap"
     }
   },
   "deepLinkSurfaces": [
@@ -1877,7 +1888,8 @@
         "profile",
         "pdp",
         "pep",
-        "pip"
+        "pip",
+        "pap"
       ]
     },
     {

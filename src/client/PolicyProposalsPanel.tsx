@@ -1,10 +1,10 @@
 /**
  * Policy proposals section for the IAAA admin panel (issue #2838).
  *
- * Rendered on the Overview tab beside RoleGrantsPanel: like role
- * grants, policy administration is platform state, so the section
- * lives with them instead of growing a new tab (tab indices
- * unchanged) and is not duplicated anywhere else. Tenant-admins
+ * Rendered on the SecurityHub PAP tab (`?tab=security-hub&view=pap`,
+ * issue 4658): moved here from the IAAA Admin Overview in issue 4658
+ * — the panel mounts in exactly one place, on this tab. Like role
+ * grants, policy administration is platform state. Tenant-admins
  * never reach this section: the panel's limited view returns
  * before it, and the server refuses non-platform callers with 403.
  *

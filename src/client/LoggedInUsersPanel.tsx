@@ -1,8 +1,8 @@
 /**
  * Logged-in users section for the IAAA admin panel (issue #2836).
  *
- * Rendered on the Overview tab beside ServiceTokensPanel,
- * RoleGrantsPanel, and PolicyProposalsPanel: like them, this is
+ * Rendered on the Overview tab beside ServiceTokensPanel and
+ * RoleGrantsPanel: like them, this is
  * admin state, so the section lives with them instead of growing
  * a new tab (tab indices unchanged) and is not duplicated
  * anywhere else. Tenant-admins who reach this panel through the
