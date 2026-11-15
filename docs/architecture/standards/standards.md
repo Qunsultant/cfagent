@@ -207,7 +207,7 @@ The user interface must deliver seamless, accessible, and performant interaction
 ### 9.1 Design Systems & Token Synchronization
 * **Single Source of Truth for Tokens:** Design tokens (colors, typography, spacing, elevation) must be managed centrally (e.g., in `tokens.css`) and programmatically compiled into code structures (TypeScript definitions, Tailwind configs) using automated generators (`gen-design-tokens.mjs`).
 * **Component-Driven UI:** UI must be constructed using composable, modular components conforming to atomic design principles.
-* **Page Shell Standard:** left-nav pages render inside the `PageShell` primitive under the route-table navigation standard (`docs/archive/design-system-01.md` §2–§3); the tab-mechanism reconciliation (one mechanism, S2) is still open.
+* **Page Shell Standard:** left-nav pages render inside the `PageShell` primitive under the route-table navigation standard (`docs/architecture/UX/ux-architecture.md` §1.5–§1.6a, the live contract); inner-view deep-linking has landed (28 surfaces in the deep-link catalog), and hub tab chrome migration onto the `Tabs` primitive is fix work (issue #4632, C3; no exceptions per Q6), not an open design question.
 
 ### 9.2 Accessibility & Usability (WCAG 2.1 / 2.2 AA)
 * **Contrast & Color:** All text and interactive elements must satisfy minimum WCAG AA contrast ratios (4.5:1 for normal text, 3:1 for large text).

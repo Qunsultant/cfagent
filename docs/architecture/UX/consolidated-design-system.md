@@ -7,6 +7,14 @@
 > anything on its own, and `docs/architecture/UX/ux-architecture.md` remains the
 > live contract until the §5 decisions land.
 >
+> **D2 (2026-11-15, issue #4632) resolved contradictions C1–C10 in §4**
+> except the four open #3052 folds, which stay open. The §3.6
+> exceptions register is VOID per Q6 (2026-11-15, no exceptions —
+> one consistent implementation): §5 decision 7, which had resolved
+> C3/C10 as recorded exceptions, is superseded — C3/C10 are fix
+> work, not exceptions. This document is still DRAFT: Q2 (whether
+> it goes live) is still open.
+>
 > **What this document is.** One holistic replacement for the
 > scattered UX documentation: the page template (§1), the design
 > system and its rules (§2), and the simplified theme system under
@@ -34,10 +42,15 @@ guideline):**
 > as a guideline: 3 button types, 3 panel types, and so on for
 > every element family.
 
-**Anything that doesn't or cannot conform must be identified
-as an exception with justification** (§3.6). A documented
-exception is compliant with the guideline; an undocumented
-deviation is not.
+**Anything that doesn't or cannot conform is collapsed, not
+excepted (§2.6 — the same all-or-none logic as ADR-0004).**
+There is no exceptions register: §3.6 is VOID per Q6
+(2026-11-15, no exceptions — one consistent implementation).
+A family over the limit collapses to three; a fold that changes
+the standard itself is a standard-change proposal under #3052
+(decisions 1–4), and while the proposal is open the current
+variants stand — the standard as it exists today is what
+conformance means, not a violation left open.
 
 How to read it:
 
@@ -48,13 +61,14 @@ How to read it:
   invented per page.
 - **3 is a ceiling, not a target.** A family with 2 types is fine.
   A family with 3 types is at the guideline limit — a fourth is
-  a documented exception (§3.6), not an addition by default.
+  not added by default: either the family collapses to three, or
+  the addition is a standard-change proposal under #3052.
 - The guideline applies to **new work immediately** and to existing
   families via the collapse list in §3.4. A collapse that changes
   rendered output is a behavior change: it updates its pins in the
-  same PR (the pin rule, §2.7). A collapse the owner rejects does
-  not leave the family in violation — it becomes an exception
-  entry in §3.6 with its justification recorded.
+  same PR (the pin rule, §2.7). A collapse the owner rejects leaves
+  the current variants standing — the standard as it exists today;
+  no exception entry is created, because there is no register.
 - **Nothing in this rule weakens ADR-0004.** A merge that leaves a
   surface without a genuine primitive use is still non-compliant;
   the surface is reworked, not exempted (§2.6).
@@ -80,10 +94,14 @@ One entry in the route table (`src/client/routes.ts` at `00778ba`;
 | `category` | One of `Execution`, `Intelligence`, `Playbooks`, `Platform`, `Billing`, `Marketing`. Determines the left-nav section. |
 | `icon` | A `NavIcons` key; icons resolve through a key-to-component map so the table stays pure data. |
 | `description` | One-line scope text for the page. |
-| `retain` | `true` → the page renders in the always-mounted trading hub (§1.4). Derived set `TRADING_TABS` (18 ids at `00778ba`). |
+| `retain` | `true` → the page renders in the always-mounted trading hub (§1.4). Derived set `TRADING_TABS` (18 ids at `00778ba`; 17 ids on main `cd14a57`, refreshed D2 2026-11-15). |
 | `shellRetain` | `true` → the page renders from mounted-hidden shell content (§1.4). Deliberately not `retain`: it must not route to the trading hub. |
 
 At `00778ba`: **41 route ids, 31 nav entries** (`navOrder` 0–30).
+Refreshed 2026-11-15 (D2, issue #4632) on main `cd14a57`:
+**44 route ids, 29 nav entries** (`navOrder` 0–28) — the S1
+retirements removed two nav entries while new routes landed
+(see §4, C1).
 
 ### 1.2 Navigation — derived, never hand-maintained
 
@@ -113,10 +131,15 @@ At `00778ba`: **41 route ids, 31 nav entries** (`navOrder` 0–30).
 - **Deep links** (`src/client/deepLinks.ts`): every nav node maps
   to a shareable URL. Keyed override → bare-id override →
   `platform-admin:<section>` rule → default `?tab=<resolved id>`.
-  The surface-tab catalog (14 surfaces: the three hubs, platform
-  admin, payments, social, ads, referrals, revenue, workflows,
-  checkout, iaaa-admin, reports-panel, risk-analysis) maps surfaces
-  to `?tab=<page>&<param>=<value>`.
+  The surface-tab catalog (28 surfaces on main `cd14a57`,
+  refreshed D2 2026-11-15 — was 14 at `00778ba`: the three hubs,
+  platform admin, data-hub, security-hub, payments, social, ads,
+  referrals, revenue, workflows, checkout, iaaa-admin,
+  reports-panel, risk-analysis, autopilot, schedules,
+  workflow-catalog, audit-vault, options-flows, research-panel,
+  order, admin-products, search, payment-assurance,
+  schedules-goals, schedules-queue) maps surfaces to
+  `?tab=<page>&<param>=<value>`.
 
 ### 1.3 URL contract — the URL is the source of truth
 
@@ -179,8 +202,9 @@ Every left-nav page renders inside `PageShell`
   wrapper class as page root, no hand-rolled `h3` + inline-margin
   section headers, no raw `<div>Loading…</div>` state.
 
-The one recorded exception is `chat` itself, deferred by product
-decision (ADR-0021) — deferred, not grandfathered. Hub pages
+The one recorded deferral is `chat` itself, deferred by product
+decision (ADR-0021) — deferred, not grandfathered, and not a
+register entry (there is no register; §3.6 is VOID per Q6). Hub pages
 (StockHub, OptionsHub, ScreenersHub) render through the trading
 hub outlet, not PageShell; that is architecture (§1.4), not an
 exemption from it.
@@ -199,7 +223,10 @@ exemption from it.
 - Multi-view pages use tabs: URL-synced, visited tabs
   mounted-hidden, ARIA tablist/tabpanel with roving tabindex.
   The `Tabs` primitive is the one tab mechanism for new work;
-  ScreenersHub's bespoke tablist is the known leftover (§4, C3).
+  hub tabs render through the shared `CapabilityNavBar`
+  (`src/client/components/CapabilityNavBar.tsx`), which is the
+  hub tab mechanism across all hubs (§4, C3) — migrating hub
+  chrome onto the `Tabs` primitive is fix work, not an exception.
 - Panels separate content from chrome: a panel's content renders
   bare inside another page's tab, and the route owns the
   `PageShell`. A panel that can only render inside its own shell
@@ -291,8 +318,9 @@ Composition rules for slots:
   a bespoke wrapper class or inline style.
 - The rule of three (§0) applies at every level: ≤3 button types,
   ≤3 card treatments, ≤3 header treatments — and ≤3 slot variants
-  per slot. A fourth variant is an exceptions-register entry (§3.6),
-  not a quiet addition.
+  per slot. A fourth variant is not added: either the family
+  collapses to three, or the addition is a standard-change
+  proposal under #3052.
 - Slot spacing is the template's, not the page's: slots render in a
   `Stack` at the order-workspace gap. A slot never sets its own
   outer margin.
@@ -379,8 +407,8 @@ Three layers, in dependency order:
 The landing page is vanilla (no React) and renders its own
 theme-aware markup from the same generated tokens
 (`src/client/landing.ts` imports `generatedThemeTokens`). It is
-the one sanctioned second renderer, and its theme toggle is a
-known duplication (§4, C10).
+the one second renderer, and its theme toggle duplicates
+`theme.ts` (§4, C10) — fix work, not a sanctioned exception.
 
 ### 2.2 Tokens — semantic names, never raw values
 
@@ -435,7 +463,8 @@ known duplication (§4, C10).
 - **Legacy mapping (#3135):** every legacy class the
   order/options/autopilot layouts use is triaged in
   `docs/architecture/UX/token-mapping-order-options-autopilot.md`
-  (647 classes; 109 Token, 538 deletion candidate) — the pin test
+  (650 classes on main `cd14a57`, refreshed D2 2026-11-15 — was
+  647 at draft time; 113 Token, 538 deletion candidate) — the pin test
   asserts coverage. Deletion candidates are not deleted in the
   triage slice; removal follows the deprecation process (S-U7).
 - **Density** is a user preference with two modes, `compact` /
@@ -578,7 +607,7 @@ the pin rule).
 | Primitive usage freeze | Raw `button, input, select, textarea, table` JSX tags outside `ui/` counted against an allowlist; unlisted files must be zero; counts ratchet down, never up | `tests/ux_primitive_usage_freeze_1580.test.ts` (+ `ux_primitive_usage_allowlist_1580.json`) |
 | Primitives inventory | A reviewed inventory of `ui/` source file → exported components; a new primitive joins in its own PR with tests | `tests/ui_primitives_inventory.test.ts` (+ `tests/ui_primitives_1337.json`, exemptions `[]`) |
 | Contrast drift | Semantic color pairs at WCAG 2.2 AA 4.5:1 across all 3 themes | `tests/ux_token_contrast_drift.test.ts` (25 pairs × 3 themes = 75 checks) |
-| Bespoke ceiling | Caps on hand-rolled client surface: braces ≤ 3920, classes ≤ 2686, inline styles ≤ 807, raw labels ≤ 0 (values as written in the test at draft time; the #2177 close bumped braces/classes) | `tests/ux_bespoke_ceiling_2177.test.ts` |
+| Bespoke ceiling | Caps on hand-rolled client surface: braces ≤ 3968, classes ≤ 2734, inline styles ≤ 807, raw labels ≤ 0 (values as written in the test on main `cd14a57`, refreshed D2 2026-11-15 — was braces ≤ 3920, classes ≤ 2686 at draft time; the test file's own comments record each bump) | `tests/ux_bespoke_ceiling_2177.test.ts` |
 | Token parity | The `designTokens.ts` mirror is in sync with `tokens.css` | `npm run tokens:gen -- --check` |
 | Token coverage | TOTAL raw = 0 for client changes | `node scripts/token-coverage.mjs` |
 | Route table + nav derivation | Route completeness and nav derivation from the table | `tests/route_table.test.ts`, `tests/nav_derivation.test.ts` |
@@ -752,12 +781,23 @@ change and updates its pins in the same PR):
    Merge or document the split (multi-select vs single-select).
 8. **Landing-page theme duplication (code gap, §4 C10).**
    The landing page re-implements theme toggling around the
-   same generated tokens; fold it onto `theme.ts` or record it
-   as the sanctioned vanilla exception.
-9. **ScreenersHub bespoke tablist (code gap, §4 C3).** The
-   "exactly one tab mechanism" direction is unfulfilled; the
-   hub still renders its own tabs instead of the `Tabs`
-   primitive.
+   same generated tokens; fold it onto `theme.ts` — fix work,
+   not an exception (Q6). The fold needs a landing client entry
+   or a generated inline script (the theme code lives in an
+   inline `<script>` string in the server-rendered HTML, not in
+   the TS module graph) plus a storage-key decision (landing
+   `theme` vs app `nextgentp_theme`, landing default `dark` vs
+   app default `system`).
+9. **ScreenersHub bespoke tablist (code gap, §4 C3).** Hub tab
+   chrome renders through the shared `CapabilityNavBar` (one
+   mechanism across 8 hub surfaces, ARIA tablist/tab), not the
+   `Tabs` primitive. The fix work is migrating hub chrome onto
+   the `Tabs` primitive — which first needs icon/badge/tooltip/
+   rightContent support the primitive does not have — plus
+   fixing `CapabilityNavBar`'s hardcoded
+   `aria-controls="screener-tabpanel-<id>"`, which dangles on
+   6 of its 8 consumers (only ScreenersHub and StockHub render
+   panels with `screener-tabpanel-*` ids).
 
 ### 3.5 What the rule does NOT collapse
 
@@ -775,21 +815,32 @@ change and updates its pins in the same PR):
   10) are content, not element types. The rule governs the tab
   component's variants, not how many tabs a hub has.
 
-### 3.6 Exceptions register — guideline deviations, identified with justification
+### 3.6 Exceptions register — VOID (Q6, 2026-11-15)
 
-The rule of three is a guideline (§0). These are the families
-and mechanisms that don't conform, each with its justification
-or with the justification still owed. §3.5 above is scope, not
-exceptions: the items there are outside the guideline entirely,
-not deviations from it.
+This register is void. There are no exceptions to the rule of
+three and no exceptions to one consistent implementation
+(Ceos, 2026-11-15 09:15 and 09:46: "no exceptions — one
+consistent implementation"). A family over the limit is
+collapsed (§0, §2.6); a fold that changes the standard itself
+is a standard-change proposal under #3052 (§5, decisions 1–4),
+and while the proposal is open the current variants stand.
 
-| Non-conforming case | Status | Justification |
-|---|---|---|
-| **Nav badge metadata types (6)** — `pro`, `live`, `ai`, `mcp`, `new`, `neutral` | Proposal for #3052 (standard change; current types stand) | They encode product metadata (capability flags, freshness), not severity; the visual treatments map to 3 (default / live-accent / new). Collapsing the metadata to 3 is a standard change needing explicit owner approval per fold. |
-| **PillGroup vs SegmentedControl overlap** | Proposal for #3052 (standard change; both stand) | The split is multi-select vs single-select. Merging them is a standard change needing explicit owner approval. |
-| **C10: landing-page theme code** (`landing.ts` own theme maps + toggle cycle) | Recorded exception (decision 7 resolved, #3099) | The landing page is vanilla (no component runtime, so it cannot import `theme.ts`); it consumes the same generated tokens, so it cannot drift in color. |
-| **C3: ScreenersHub bespoke tablist** (own tab rendering, no `Tabs` primitive, no `role="tablist"`) | Recorded exception (decision 7 resolved, #3099) | Hub tab chrome is the hub's shape by design (see the uniformity audit: hubs are divergent by shape, not non-conforming): hubs render their own URL-synced tab chrome rather than the `Tabs` primitive, and migrating it would change hub chrome behavior. Recorded as an exception to the "one mechanism" direction, not a violation. |
-| **Any collapse proposal the owner rejects** (decisions 1, 4) | Becomes an exception on rejection | Justification owed at the moment of rejection — the reason the family cannot collapse, written into this register. |
+What used to be listed here, and where it went:
+
+- **Nav badge metadata types (6)** and **PillGroup vs
+  SegmentedControl overlap** — #3052 standard-change
+  proposals (§5, decisions 1–4). They stand as proposals, not
+  as exception entries.
+- **C10: landing-page theme code** and **C3: ScreenersHub
+  bespoke tablist** — fix work, not exceptions (§3.4 items
+  8–9; §4 C3/C10). §5 decision 7, which had resolved them as
+  recorded exceptions, is superseded by Q6.
+- **Any collapse proposal the owner rejects** — the current
+  variants stand; no entry is created, because there is no
+  register.
+
+The §3.6 heading is kept so existing cross-references still
+resolve; nothing may cite it as a live mechanism.
 
 ---
 
@@ -824,11 +875,19 @@ StockHub/OptionsHub rework, Billing, own-pages). This draft
 follows the tree. The old doc needs a counts refresh, not a
 correction of the architecture.
 
+**Resolved (D2, 2026-11-15).** The old doc stays stale in
+`docs/archive/` (historical — not edited). The draft's counts
+are refreshed to main `cd14a57`: **44 route ids, 29 nav
+entries** (`navOrder` 0–28), `TRADING_TABS` 17 ids, and the
+surface-tab catalog **28 surfaces** (§1.1–§1.2). The S1
+retirements removed two nav entries while new routes landed;
+no architecture changed.
+
 **C2. Shell conformance frozen at S4.**
 `../archive/design-system-01.md` §1/§4 says the shell list is "complete at
 25 of 26 after S4" with `chat` deferred (ADR-0021). The
-conformance JSON lists **26** migrated ids, but the route table
-has 41 — 15 newer routes (goal-screen, review, track-record,
+conformance JSON lists **25** migrated ids, but the route table
+has 44 — 19 newer routes (goal-screen, review, track-record,
 assets-hub, stock-hub, platform-admin, agents, billing,
 checkout, payment-assurance, and others) were never added to
 the list. Either the list's job ended at S4 (and the doc should
@@ -836,6 +895,16 @@ say so, with new pages conforming by the template instead of
 by the list) or the list must grow to 41. Unresolved: this
 draft treats the template (§1) as the conformance mechanism
 for new pages and the JSON as the S4 historical record.
+
+**Resolved (D2, 2026-11-15) — as §5 decision 6 already
+stated.** The S4 list is a historical record: the JSON lists
+**25** migrated ids (not 26 as this entry first said — the
+"25 of 26" in the old doc is 25 migrated with `chat` deferred
+per ADR-0021), against a 44-route table on main `cd14a57`.
+New pages conform by construction via the page template (§1)
+and the #3047 gate map, which is the list that grows. The
+"26" in this entry's first paragraph is corrected to 25
+above; nothing else in C2 changes.
 
 **C3. "Exactly one tab mechanism" vs the ScreenersHub tablist.**
 `../archive/design-system-01.md` §2 says S2 "reconciles [the screener
@@ -848,6 +917,32 @@ Either S2 never landed for the hub, or the direction was
 superseded. Unresolved: recorded here as gap §3.4 item 9, not
 as done.
 
+**Resolved (D2, 2026-11-15) — fix work, not an exception
+(Q6).** The entry's premise is corrected by measurement on
+main `cd14a57`: the hub does not render its own tablist —
+ScreenersHub renders tabs through the **shared
+`CapabilityNavBar`** (`src/client/components/CapabilityNavBar.tsx`),
+one mechanism across 8 hub surfaces (ScreenersHub, StockHub,
+OptionsHub, MarketDataResearchHub, OptionsFlowsHub, SearchHub,
+AgentChatTabContent, OptionsResearchPanel), with proper ARIA
+(`role="tablist"`, `role="tab"`, `aria-selected`, roving
+tabindex, arrow/Home/End keys) and URL sync via
+`useUrlSyncedTabs`. The "exactly one tab mechanism" direction
+from the old doc is superseded: pages use the `Tabs`
+primitive, hub capability chrome uses `CapabilityNavBar`
+(§1.6a already records the split). The fix work is migrating
+hub chrome onto the `Tabs` primitive — which first needs
+icon/badge/tooltip/rightContent support the primitive does not
+have — so it is filed as a follow-up, not done here. The same
+follow-up carries a defect found while measuring: the
+component hardcodes `aria-controls="screener-tabpanel-<id>"`,
+which dangles on 6 of its 8 consumers (only ScreenersHub and
+StockHub render panels with `screener-tabpanel-*` ids;
+OptionsHub renders `options-tabpanel-*`; the other five render
+no tabpanel ids at all). §5 decision 7, which had resolved
+this as a recorded exception, is superseded by Q6; §3.6 is
+VOID.
+
 **C4. Inner-view deep-linking "still open" vs landed.**
 `../archive/design-system-01.md` §2–§3 says generic inner-tab (`view`)
 deep-linking "is S2, still open". The tree has
@@ -855,6 +950,18 @@ deep-linking "is S2, still open". The tree has
 through `useUrlSyncedTabs` and the deep-link catalog. The S2
 work (or its successor) landed after the doc froze. This draft
 follows the tree: inner-view deep-linking is done.
+
+**Resolved (D2, 2026-11-15).** Inner-view deep-linking is
+done: 28 surfaces in the deep-link catalog on main `cd14a57`
+(§1.2), `view` wired through `useUrlSyncedTabs` and the
+catalog. The stale claim is also fixed where it still stands
+in a live doc: `docs/architecture/standards/standards.md`
+§9.1 no longer cites the retired design-system doc as the
+PageShell standard nor calls the S2 tab-mechanism work "still
+open" — it now points at the live contract
+(`docs/architecture/UX/ux-architecture.md` §1.5) and records
+that inner-view deep-linking landed while hub tab chrome
+migration is fix work (C3, Q6).
 
 **C5. Exceptions-01 vs ADR-0004.**
 `../archive/exceptions-01.md` (2026-10-25) audits 85 TSX files and finds
@@ -870,6 +977,16 @@ rule. Unresolved in the sense that no doc records which of the
 allowlist is the live instrument) is the way to close it, not
 an edit to the old report.
 
+**Resolved (D2, 2026-11-15).** The fresh audit is done by
+measurement: the freeze allowlist
+(`tests/ux_primitive_usage_allowlist_1580.json`) is **empty**
+(`{"files": {}}`) on main `cd14a57` — zero files are permitted
+raw controls, and the freeze test fails any unlisted file with
+any raw control. The pre-ADR-0004 snapshot's 28 are remediated
+as a class; the report itself stays historical in
+`docs/archive/` and is not edited. ADR-0004's "rework until
+compliant" rule is the live rule (§2.6).
+
 **C6. Assessment-01 vs the one-dialog / Toast systems.**
 `../archive/assessment-01.md` (2026-10-25) finds modal focus-trapping gaps,
 live-announcement gaps during streaming, and 24px/44px target
@@ -880,6 +997,20 @@ the assessment. The assessment's findings are therefore
 partially addressed; which findings remain open is not recorded
 anywhere. This draft treats the assessment as historical and
 the primitives as current.
+
+**Resolved (D2, 2026-11-15).** The assessment stays
+historical in `docs/archive/` (not edited). The three named
+findings each have a current-mechanism answer on main
+`cd14a57`: modal focus-trapping — the Modal primitive
+(portals, Escape, focus trap with initial focus and restore,
+scroll lock; live contract §6 "Dialogs: one system");
+live-announcement gaps during streaming — the Toast
+live-region rules (`role="alert"`/`role="status"`, no focus
+steal; §2.5); 24px/44px target gaps — the 44×44 CSS px
+preference with the 24×24 AA minimum stated explicitly (§2.4).
+Which findings beyond the named three remain open is still
+not recorded anywhere; that is a fresh-audit question, not a
+doc edit — the assessment is not a live rule.
 
 **C7. Aspirational component list vs implemented primitives.**
 `ux-architecture.md` §6 "Required reusable components" lists
@@ -895,6 +1026,23 @@ compositions). Unresolved: this draft lists the implemented
 inventory as the system and the §6 list as requirements those
 compositions must satisfy.
 
+**Resolved (D2, 2026-11-15).** The §6 list in the live
+contract (`docs/architecture/UX/ux-architecture.md` §6,
+"Required reusable components": Task card, Status badge,
+Goal/constraint form, Plan outline, Progress summary, Activity
+timeline, Evidence/source panel, Artifact viewer/editor,
+Approval card, Budget indicator, Error and recovery panel,
+Connection-status banner, Empty state, Notification item,
+Memory record editor, Change-comparison view) is a **product
+requirements list, not a primitive inventory**: approval cards
+and evidence panels are fulfilled today by compositions of
+`Card` + `Table` + `Notice` and the other §2.3 primitives,
+and a list item becomes a dedicated primitive only through
+its own PR + inventory pin (§2.3). The live contract's §6 text
+is left untouched in this slice — the issue excludes changes
+to the contract's content — and this resolution is recorded
+here, in the draft, as the governing reading.
+
 **C8. Bespoke-ceiling numbers.**
 An earlier summary of this program cited braces ≤ 3867 and
 classes ≤ 2646. The test file at draft time
@@ -902,6 +1050,16 @@ classes ≤ 2646. The test file at draft time
 and classes ≤ 2686 (bumped by the #2177 close), inline styles
 ≤ 807, raw labels ≤ 0. This draft follows the file. The older
 numbers are stale, not a second limit.
+
+**Resolved (D2, 2026-11-15).** The draft's numbers are
+refreshed to the test file on main `cd14a57` (§2.7): braces
+≤ **3968**, classes ≤ **2734**, inline styles ≤ 807, raw
+labels ≤ 0. The older numbers (3867/2646, and the draft-time
+3920/2686) are stale, not a second limit — the test file's own
+comments record each bump (#2836, #3422, #3535, #3530,
+#3738). The companion stale numbers in §2.2 are refreshed in
+the same pass: legacy-mapping 647 → **650** classes, 109 →
+**113** Token (538 deletion candidates unchanged).
 
 **C9. "Every left-nav page renders inside PageShell" vs the
 hub outlet.**
@@ -912,6 +1070,14 @@ Hub pages render through the trading-hub outlet (§1.4), and
 whose outlet is a retained hub by architecture and except
 `chat` by product decision" — the doc's absolute phrasing
 overstates it. This draft states the qualified rule.
+
+**Resolved (D2, 2026-11-15).** The qualified rule stands in
+§1.5: every left-nav page renders inside `PageShell`, except
+pages whose outlet is a retained hub by architecture (§1.4)
+and except `chat`, deferred by product decision (ADR-0021).
+The old doc's absolute phrasing stays in `docs/archive/`
+(historical — not edited); the draft is the governing
+reading.
 
 **C10. Landing-page theme code vs one mechanism.**
 The plan doc says "three themes, one mechanism: root
@@ -924,6 +1090,24 @@ it is a second theme implementation, not the one mechanism.
 Either it is the sanctioned vanilla exception (and should be
 recorded as such) or it folds onto `theme.ts`. Unresolved:
 gap §3.4 item 8.
+
+**Resolved (D2, 2026-11-15) — fix work, not an exception
+(Q6).** The landing page (`src/client/landing.ts`, 1,880
+lines) re-implements theme toggling in an inline `<script>`
+string in the server-rendered HTML (dark → light →
+high-contrast cycle, storage key `theme`, default `dark`),
+separate from `theme.ts` (90 lines, React-free, storage key
+`nextgentp_theme`, default `system`). It consumes the same
+generated tokens, so it cannot drift in color — but the toggle
+logic is a second implementation. The fold is filed as a
+follow-up, not done here: the theme code lives in the inline
+script string, not in the TS module graph (the page loads no
+client bundle — the inline `<script>` is the only script), so
+sharing code needs a landing client entry or a generated
+inline script, plus the storage-key decision (`theme` vs
+`nextgentp_theme`) and the default decision (`dark` vs
+`system`). §5 decision 7, which had resolved this as a
+recorded exception, is superseded by Q6; §3.6 is VOID.
 
 **Reconciled, not contradictions (for the record):**
 `../archive/design-system-01.md` says the contrast gate is "25 semantic
@@ -966,13 +1150,17 @@ question anymore:
   plus the page template (§1): new pages conform by construction
   (see the page scaffold), and the gate map is the list that
   grows.
-- **Decision 7 (C3/C10) — RESOLVED as recorded exceptions
-  (§3.6).** The ScreenersHub tablist and the landing theme are
-  exceptions with justification recorded in §3.6, which under §0
-  is compliant with the guideline — a documented exception is not
-  a violation. Neither is wanted rework unless the owner later
-  directs it as #3052 work.
+- **Decision 7 (C3/C10) — SUPERSEDED by Q6 (2026-11-15).**
+  This section previously resolved C3/C10 as recorded
+  exceptions in §3.6 (per #3099). That resolution is withdrawn:
+  the §3.6 register is VOID (no exceptions — one consistent
+  implementation), and C3/C10 are fix work, not exceptions.
+  The fix work is scoped in §3.4 items 8–9 and §4 C3/C10
+  (filed as follow-ups in D2). Neither is wanted rework
+  "unless the owner later directs it" — the owner has directed
+  it: Q6 makes them fix work now.
 
-A rejection of any #3052 fold likewise becomes an exception entry
-in §3.6 with its justification recorded, not a violation left
-open (§0).
+A rejection of any #3052 fold leaves the current variants
+standing (conformance means the standard as it exists today);
+no exception entry is created — there is no register (§3.6 is
+VOID per Q6).
