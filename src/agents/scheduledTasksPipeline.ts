@@ -65,7 +65,7 @@ import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts
 import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";
 import { stageQueueSendFromEnv } from "../workflows/stageQueueTransport";
 import { createSqlDeliverySuppressionStore } from "../data/deliveryClaimsStore";
-import { D1IndexListStore } from "../data/d1IndexListAdapter";
+import { createD1IndexListDb, D1IndexListStore } from "../data/d1IndexListAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
 import {
   JobPipelineControl,
@@ -190,9 +190,7 @@ export function feedStepDepsForScheduledAgent(
   const sql = pipelineSql(ctx);
   const capturePort = createProviderCaptureAdapter(ctx.env);
   const universeStore = ctx.env.AGENT_DB
-    ? new D1IndexListStore(
-        ctx.env.AGENT_DB as ConstructorParameters<typeof D1IndexListStore>[0],
-      )
+    ? new D1IndexListStore(createD1IndexListDb(ctx.env.AGENT_DB as D1Database))
     : null;
   return {
     registry: buildFeedJobRegistry(envStrings(ctx.env)),
