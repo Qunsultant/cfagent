@@ -12,6 +12,11 @@
  *     keys and the bare `sandbox` node-id fallback stay;
  *  4. the platform-admin and checkout surfaces cover the tabs that had no
  *     catalog entry.
+ *
+ * Issue #4629 (S4 of #4625) reverses the recorded `section` decision
+ * below: the param is now owned by the schedules home (scoped to
+ * ["schedules"]), which preserves the drop-on-tab-change behavior while
+ * making the section surfaces addressable.
  */
 import { describe, it, expect } from "vitest";
 import React from "react";
@@ -67,8 +72,10 @@ describe("nested sub-tab params (#4576)", () => {
     // owned by its nested home only.
     expect(TAB_PARAM_OWNERS.flowsTab).toEqual(["options"]);
     expect(TAB_PARAM_OWNERS.researchTab).toEqual(["stock-hub"]);
-    // `section` stays unowned by design: every value is a schedules address.
-    expect(TAB_PARAM_OWNERS.section).toBeUndefined();
+    // Issue #4629 (S4 of #4625): `section` is owned by the schedules
+    // home — scoped to ["schedules"] it still drops on a tab change,
+    // and the section surfaces are addressable through the registry.
+    expect(TAB_PARAM_OWNERS.section).toEqual(["schedules"]);
   });
 
   it("publishes a surface per panel, with the panel's own values", () => {

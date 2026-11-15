@@ -7,6 +7,7 @@ import {
   deepLinkForNavNode,
   deepLinkHref,
   DEEP_LINK_OVERRIDES,
+  getSurfaceTabDefs,
   navNodeKey,
   surfaceTabHref,
   SURFACE_TAB_DEFS,
@@ -98,6 +99,15 @@ describe("Deep-link catalog (issue #2776)", () => {
       "workflow-catalog:define",
       "audit-vault:audit",
       "audit-vault:nlq",
+      // Issue #4629 (S4 of #4625): the four Payment Assurance tabs are
+      // `view`-param addresses the same way — Payment Assurance is
+      // itself a sub-menu entry of Payments (hostedIds), so its tabs
+      // have no nav node of their own. The page's own tab bar is the
+      // navigation; the keys exist so deepLinkForNavNode resolves them.
+      "payment-assurance:simulation",
+      "payment-assurance:live",
+      "payment-assurance:prices",
+      "payment-assurance:operators",
     ]);
     for (const key of Object.keys(DEEP_LINK_OVERRIDES)) {
       expect(keys.has(key) || ids.has(key) || legacyKeys.has(key)).toBe(true);
@@ -239,7 +249,10 @@ describe("Surface wiring (issue #2776)", () => {
 describe("Surface-tab catalog (issue #2776, expanded scope)", () => {
   it("every surface tab has exactly one entry, keys unique", () => {
     const catalog = buildSurfaceTabCatalog();
-    const expected = SURFACE_TAB_DEFS.reduce((n, d) => n + d.values.length, 0);
+    // Issue #4629: the catalog also carries the registry-generated chat
+    // surface, so the expected count reads from the combined defs, not
+    // the static JSON list alone.
+    const expected = getSurfaceTabDefs().reduce((n, d) => n + d.values.length, 0);
     expect(catalog.length).toBe(expected);
     expect(new Set(catalog.map((e) => e.key)).size).toBe(expected);
   });

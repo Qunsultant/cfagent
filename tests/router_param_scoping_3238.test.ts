@@ -119,6 +119,7 @@ describe("router param scoping (#3238)", () => {
       "run",
       "q",
       "schedule",
+      "section",
       "screenerTab",
       "research",
       "discoveryView",
