@@ -23,6 +23,7 @@ import {
 } from "./navConfig";
 import { navigateToTab } from "./router";
 import { resolveRouteId, type RouteId } from "./routes";
+import { getRegisteredCopilots } from "./chat/copilotRegistry";
 import navConfigData from "./nav-config.json";
 
 export type DeepLink =
@@ -161,6 +162,29 @@ export interface SurfaceTabDef {
 export const SURFACE_TAB_DEFS: SurfaceTabDef[] =
   navConfigData.deepLinkSurfaces as unknown as SurfaceTabDef[];
 
+/**
+ * Issue #4629 (S4 of #4625) — the chat copilot surface, generated from
+ * the registry at runtime. The copilot tabs derive from
+ * `getRegisteredCopilots()` (AgentChatTabContent.tsx), so the surface
+ * reads the same registry: a new registration gets its URL automatically,
+ * with no catalog edit. The registry module carries only type imports,
+ * so this import cannot cycle back through the nav (verified: no value
+ * imports in copilotRegistry.ts).
+ */
+export function chatSurfaceTabDef(): SurfaceTabDef {
+  return {
+    surface: "chat",
+    page: "chat",
+    param: "view",
+    values: getRegisteredCopilots().map((copilot) => copilot.id),
+  };
+}
+
+/** Every surface-tab def: the static catalog plus the registry-generated chat surface. */
+export function getSurfaceTabDefs(): SurfaceTabDef[] {
+  return [...SURFACE_TAB_DEFS, chatSurfaceTabDef()];
+}
+
 export interface SurfaceTabEntry {
   surface: string;
   page: RouteId | null;
@@ -189,7 +213,7 @@ export function surfaceTabHref(
 /** Every surface tab, each with its href (host pages filled in where fixed). */
 export function buildSurfaceTabCatalog(): SurfaceTabEntry[] {
   const entries: SurfaceTabEntry[] = [];
-  for (const def of SURFACE_TAB_DEFS) {
+  for (const def of getSurfaceTabDefs()) {
     for (const value of def.values) {
       entries.push({
         surface: def.surface,

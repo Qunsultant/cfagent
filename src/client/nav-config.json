@@ -1300,6 +1300,101 @@
         "badgeType": "neutral",
         "description": "Natural-language records analytics, schema inspector and data browser"
       }
+    ],
+    "search": [
+      {
+        "id": "nlq",
+        "label": "NLQ",
+        "shortLabel": "NLQ",
+        "icon": "Search",
+        "description": "Records answers over POST /nlq"
+      },
+      {
+        "id": "search-agent",
+        "label": "Search Agent",
+        "shortLabel": "Search Agent",
+        "icon": "Search",
+        "description": "AI Search instance results"
+      },
+      {
+        "id": "ai-search-agent",
+        "label": "AI Search Agent",
+        "shortLabel": "AI Search",
+        "icon": "Search",
+        "description": "The real AiSearchAgent over its Durable Object binding"
+      },
+      {
+        "id": "semantic-search",
+        "label": "Semantic Search",
+        "shortLabel": "Semantic",
+        "icon": "Search",
+        "description": "Report search, Vectorize + lexical"
+      },
+      {
+        "id": "memory",
+        "label": "Memory",
+        "shortLabel": "Memory",
+        "icon": "Search",
+        "description": "Agent memory (plans, outcomes)"
+      },
+      {
+        "id": "knowledge",
+        "label": "Knowledge",
+        "shortLabel": "Knowledge",
+        "icon": "Search",
+        "description": "Platform capability catalog"
+      },
+      {
+        "id": "tools",
+        "label": "Tools",
+        "shortLabel": "Tools",
+        "icon": "Search",
+        "description": "MCP tool + endpoint catalog"
+      },
+      {
+        "id": "mas-search",
+        "label": "MAS Search",
+        "shortLabel": "MAS Search",
+        "icon": "Search",
+        "description": "Merged scheduled reports + AI Search results"
+      },
+      {
+        "id": "corpus",
+        "label": "Corpus",
+        "shortLabel": "Corpus",
+        "icon": "Search",
+        "description": "Corpus integrity, sync, and upload"
+      }
+    ],
+    "payment-assurance": [
+      {
+        "id": "simulation",
+        "label": "Simulator & Presets",
+        "shortLabel": "Simulator",
+        "icon": "Assurance",
+        "description": "Simulated PaymentWorkflow runs with presets"
+      },
+      {
+        "id": "live",
+        "label": "Live Workflow",
+        "shortLabel": "Live",
+        "icon": "Assurance",
+        "description": "Real workflow instance on Cloudflare"
+      },
+      {
+        "id": "prices",
+        "label": "Store Prices",
+        "shortLabel": "Prices",
+        "icon": "Assurance",
+        "description": "Store price families and approvals"
+      },
+      {
+        "id": "operators",
+        "label": "Store Operators",
+        "shortLabel": "Operators",
+        "icon": "Assurance",
+        "description": "Store operator allowlist"
+      }
     ]
   },
   "deepLinks": {
@@ -1630,7 +1725,58 @@
       "params": {
         "adminTab": "create-version"
       }
-    }
+    },
+    "search:nlq": {
+      "tab": "search",
+      "view": "nlq"
+    },
+    "search:search-agent": {
+      "tab": "search",
+      "view": "search-agent"
+    },
+    "search:ai-search-agent": {
+      "tab": "search",
+      "view": "ai-search-agent"
+    },
+    "search:semantic-search": {
+      "tab": "search",
+      "view": "semantic-search"
+    },
+    "search:memory": {
+      "tab": "search",
+      "view": "memory"
+    },
+    "search:knowledge": {
+      "tab": "search",
+      "view": "knowledge"
+    },
+    "search:tools": {
+      "tab": "search",
+      "view": "tools"
+    },
+    "search:mas-search": {
+      "tab": "search",
+      "view": "mas-search"
+    },
+    "search:corpus": {
+      "tab": "search",
+      "view": "corpus"
+    },
+    "payment-assurance:simulation": {
+      "tab": "payment-assurance",
+      "view": "simulation"
+    },
+    "payment-assurance:live": {
+      "tab": "payment-assurance",
+      "view": "live"
+    },
+    "payment-assurance:prices": {
+      "tab": "payment-assurance",
+      "view": "prices"
+    },
+    "payment-assurance:operators": {
+      "tab": "payment-assurance",
+      "view": "operators"    }
   },
   "deepLinkSurfaces": [
     {
@@ -1917,6 +2063,58 @@
         "create-product",
         "create-version"
       ]
+    },
+    {
+      "surface": "search",
+      "page": "search",
+      "param": "view",
+      "values": [
+        "nlq",
+        "search-agent",
+        "ai-search-agent",
+        "semantic-search",
+        "memory",
+        "knowledge",
+        "tools",
+        "mas-search",
+        "corpus"
+      ]
+    },
+    {
+      "surface": "payment-assurance",
+      "page": "payment-assurance",
+      "param": "view",
+      "values": [
+        "simulation",
+        "live",
+        "prices",
+        "operators"
+      ]
+    },
+    {
+      "surface": "schedules-goals",
+      "page": "schedules",
+      "pageView": "goals",
+      "param": "section",
+      "values": [
+        "goals",
+        "add",
+        "resources",
+        "seed",
+        "ticks",
+        "runs"
+      ]
+    },
+    {
+      "surface": "schedules-queue",
+      "page": "schedules",
+      "pageView": "queue",
+      "param": "section",
+      "values": [
+        "queue",
+        "cancel",
+        "wipe",
+        "recreate"      ]
     }
   ],
   "hostedIds": [

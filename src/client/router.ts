@@ -53,10 +53,12 @@ export function parseTabFromSearch(search: string): RouteId {
  * on checkout. Issue #4576 adds the two nested-panel params (`flowsTab`,
  * `researchTab`) and records the schedules home's `section`:
  * `?tab=schedules&section=goals|queue` is that page's own inner address
- * (read by `scheduleSections.ts`, written by the panel's own hooks). It is
- * deliberately unlisted here: every `section` value is a schedules-page
- * address, so it must not survive a tab change — the same outcome an
- * unowned param gets, stated explicitly instead of by omission.
+ * (read by `scheduleSections.ts`, written by the panel's own hooks).
+ * Issue #4629 (S4 of #4625) registers it, scoped to ["schedules"]:
+ * owning it preserves the drop-on-tab-change behavior (a `section`
+ * value never survives a move off the schedules home) while making the
+ * param explicit in the registry, so the section surfaces are
+ * addressable and the registry pin covers it.
  */
 export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   orderTab: ["order"],
@@ -92,6 +94,13 @@ export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   // (products / create-product / create-version) is owned by the
   // product hub, host of the admin-products view.
   adminTab: ["product-hub"],
+  // Issue #4629 (S4 of #4625): the schedules home's section param —
+  // `?tab=schedules&view=goals&section=add`,
+  // `?tab=schedules&view=queue&section=cancel`, and the rest of the
+  // goals/queue section sets. Owned scoped to ["schedules"], so it
+  // survives navigation to the home and drops on the way out, like
+  // every other page-owned param (#3238).
+  section: ["schedules"],
 };
 
 /** Query string with `tab` set, keeping only the destination's own params. */
