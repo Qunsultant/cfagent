@@ -128,6 +128,7 @@ export const COPILOT_VOICE_BACKEND_DEFAULTS: Record<
   general: "webspeech",
   options: "webspeech",
   stock: "webspeech",
+  biz: "webspeech",
 };
 
 /**

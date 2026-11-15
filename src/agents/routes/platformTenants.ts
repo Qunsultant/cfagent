@@ -99,7 +99,7 @@ function jsonError(error: string, status: number): Response {
 }
 
 /** Same shape rule as isTenantIdShaped (tenantQueueMapping): non-empty, <=512, no whitespace/control. */
-function isTenantIdShaped(value: unknown): value is string {
+export function isTenantIdShaped(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.trim().length > 0 &&

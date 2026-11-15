@@ -360,6 +360,51 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
       description: "Autonomous paper-trading loop on Alpaca (Paper). 24/7 continuous session execution with CVaR risk management.",
     },
   },
+  {
+    id: "biz",
+    label: "BizCopilot",
+    icon: "💼",
+    mode: "chat",
+    tooltip: {
+      eyebrow: "Business & Platform",
+      title: "BizCopilot Active",
+      description: "BizCopilot Active: Manage tenants through chat — create, list, and configure tenants, and view members. Every result links the Tenants page so you can open and verify it.",
+    },
+    hero: {
+      icon: "💼",
+      title: "BizCopilot & Platform Administration",
+      description: "Manage tenants conversationally: create a tenant, list tenants with settings and member counts, read and update tenant settings, and view account members. Actions run through the same server paths as the Tenants page, with the same operator gate — every result links the Tenants page so you can verify what was done.",
+    },
+    quickChips: [
+      {
+        label: "📋 List tenants",
+        prompt: "List tenants",
+        category: "Tenant Administration",
+      },
+      {
+        label: "➕ Create a tenant",
+        prompt: "Create a tenant",
+        category: "Tenant Administration",
+      },
+      {
+        label: "⚙️ Show tenant settings",
+        prompt: "Show settings for tenant acme",
+        category: "Tenant Administration",
+      },
+      {
+        label: "👥 Show tenant members",
+        prompt: "Show members of tenant acme",
+        category: "Tenant Administration",
+      },
+    ],
+    composerPlaceholder: "Ask BizCopilot (e.g. 'List tenants', 'Create tenant acme', 'Show settings for tenant acme')…",
+    sourceTab: "BizCopilot",
+    banner: {
+      icon: "💼",
+      headline: "BizCopilot Active:",
+      description: "Manage tenants through chat — create, list, and configure tenants, and view members. Results link the Tenants page for verification.",
+    },
+  },
 ];
 
 const copilotRegistry: CopilotConfig[] = [...DEFAULT_COPILOTS];

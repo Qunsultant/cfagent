@@ -6,7 +6,7 @@
  * webhooks, email, slack, voice). Capabilities are built once on
  * the shared PortThink base so every Think agent inherits them;
  * this module is the per-REGISTRATION counterpart: whether a given
- * copilot registration (general / options / stock — the client
+ * copilot registration (general / options / stock / biz — the client
  * registry in src/client/chat/copilotRegistry.ts) may be reached
  * through a given channel is a configuration decision, externalized
  * in the platform's AOP idiom and resolved, per (registration,
@@ -35,10 +35,10 @@
  *
  * Code defaults — today's effective states, pair by pair:
  * - chat: ON for every registration. Chat is the base channel:
- *   all three registrations render the one conversation today.
+ *   all four registrations render the one conversation today.
  * - voice: ON for stock only — the #3720 activation serves
  *   stock-context voice turns; no voice channel is wired for the
- *   general or options registrations.
+ *   general, options, or biz registrations.
  * - webhooks / email / slack: OFF for every registration. Those
  *   channels terminate on the agent CLASS (the PortThink webhook
  *   tail, the shared channel desks) — no registration-scoped
@@ -62,7 +62,7 @@ import {
 import type { Env } from "../types";
 
 /** The copilot registrations (ids pin against the client registry). */
-export const COPILOT_REGISTRATION_IDS = ["general", "options", "stock"] as const;
+export const COPILOT_REGISTRATION_IDS = ["general", "options", "stock", "biz"] as const;
 export type CopilotRegistrationId = (typeof COPILOT_REGISTRATION_IDS)[number];
 
 export function isCopilotRegistrationId(
@@ -87,6 +87,7 @@ export const COPILOT_REGISTRATION_SOURCE_TABS: Record<
   general: "Chat & Agents",
   options: "Broker · Auto Options Research",
   stock: "Stock Copilot",
+  biz: "BizCopilot",
 };
 
 /**
@@ -147,6 +148,7 @@ export const COPILOT_CHANNEL_DEFAULTS: Record<
   general: { chat: true, webhooks: false, email: false, slack: false, voice: false },
   options: { chat: true, webhooks: false, email: false, slack: false, voice: false },
   stock: { chat: true, webhooks: false, email: false, slack: false, voice: true },
+  biz: { chat: true, webhooks: false, email: false, slack: false, voice: false },
 };
 
 function parseSwitchValue(token: string): boolean | null {
