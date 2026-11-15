@@ -26,16 +26,20 @@
  * (#2974 removed the Research & Dual Feed nav entry (route stays,
  * surface tab stays); nav count 32 → 31; pin updated in the same
  * PR per the §7 pin rule.)
+ * (#4574 retired the Queues nav entry as Queues merged into Schedules
+ * (route removed, `dead-letter-queue` view added); nav count 31 → 30
+ * and navOrders 12..30 shifted down one, so display order stays
+ * 0..29; pin updated in the same PR per the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 
 const navRoutes = ROUTES.filter(hasNavEntry);
-const NAV_COUNT = 31;
+const NAV_COUNT = 30;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 31-item nav", () => {
+  it("has the full 30-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });
@@ -81,9 +85,9 @@ describe("left-nav unique icons and badges", () => {
     expect(byId.get("platform-admin")!.navEntry.badge).toBe("Admin");
     expect(byId.get("billing")!.icon).toBe("Billing");
     expect(byId.get("billing")!.navEntry.badge).toBe("Billing");
-    expect(byId.get("billing")!.navEntry.navOrder).toBe(29);
+    expect(byId.get("billing")!.navEntry.navOrder).toBe(28);
     expect(byId.get("assets-hub")!.icon).toBe("Screeners");
     expect(byId.get("assets-hub")!.navEntry.badge).toBe("Assets");
-    expect(byId.get("assets-hub")!.navEntry.navOrder).toBe(30);
+    expect(byId.get("assets-hub")!.navEntry.navOrder).toBe(29);
   });
 });

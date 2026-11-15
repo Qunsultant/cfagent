@@ -64,6 +64,28 @@ function cleanup(tmp: string): void {
   rmSync(tmp, { recursive: true, force: true });
 }
 
+/**
+ * Baseline counts, derived from the repo copies this test clones into its
+ * temp tree — never hardcoded. A count literal here rots every time a lane
+ * adds or retires a nav entry (#4574 retired the queues entry, which is
+ * exactly how the old literals broke). Derived, the pins the generator
+ * writes are still asserted exactly: baseline for the no-nav case,
+ * baseline + 1 for the --nav case.
+ */
+const REPO_NAV_ROUTES = (
+  JSON.parse(readFileSync(join(HERE, "src/client/nav-config.json"), "utf8")) as {
+    routes: { navEntry?: unknown }[];
+  }
+).routes.filter((r) => r.navEntry !== undefined);
+const BASELINE_NAV_COUNT = REPO_NAV_ROUTES.length;
+const BASELINE_TEMPLATE_ENTRIES = Object.keys(
+  (
+    JSON.parse(readFileSync(join(HERE, "tests/ux_shell_exceptions_3047.json"), "utf8")) as {
+      template: Record<string, unknown>;
+    }
+  ).template,
+).length;
+
 describe("new-page scaffold (issues #3080, #3137)", () => {
   it("scaffolds a conformant page without a nav entry", () => {
     const tmp = makeTmp();
@@ -117,7 +139,9 @@ describe("new-page scaffold (issues #3080, #3137)", () => {
         file: "src/client/ScaffoldProbePanel.tsx",
         reason: "Scaffolded by scripts/new-page.mjs; renders PageTemplate.",
       });
-      expect(Object.keys(register.template)).toHaveLength(45);
+      expect(Object.keys(register.template)).toHaveLength(
+        BASELINE_TEMPLATE_ENTRIES + 1,
+      );
       const templatePin = read(tmp, "tests/template_conformance_3136.test.ts");
       expect(templatePin).toContain('"scaffold-probe"');
       // The emitted pin asserts the template shape of its own panel.
@@ -128,14 +152,18 @@ describe("new-page scaffold (issues #3080, #3137)", () => {
       // No nav entry: the nav-count pins are untouched (route count itself is
       // asserted dynamically, ROUTES vs nav-config.json, so it needs no bump).
       const navData = read(tmp, "tests/nav_config_data_2977.test.ts");
-      expect(navData).toContain("expect(orders).toHaveLength(31);");
+      expect(navData).toContain(
+        `expect(orders).toHaveLength(${BASELINE_NAV_COUNT});`,
+      );
       const routeTable = read(tmp, "tests/route_table.test.ts");
-      expect(routeTable).toContain("expect(nav).toHaveLength(31);");
+      expect(routeTable).toContain(
+        `expect(nav).toHaveLength(${BASELINE_NAV_COUNT});`,
+      );
       // EXPECTED_IDS gains the new id in sorted position (between
       // risk-analysis and scanner).
       expect(routeTable.replace(/\r\n/g, "\n")).toContain('  "scaffold-probe",\n  "scanner",');
       const badges = read(tmp, "tests/nav_unique_icons_badges.test.ts");
-      expect(badges).toContain("const NAV_COUNT = 31;");
+      expect(badges).toContain(`const NAV_COUNT = ${BASELINE_NAV_COUNT};`);
       // Duplicate id fails instead of overwriting.
       expect(() =>
         run(tmp, [
@@ -167,18 +195,22 @@ describe("new-page scaffold (issues #3080, #3137)", () => {
         routes: { id: string; navEntry?: { navOrder: number; badge: string; badgeType: string } }[];
       };
       const entry = nav.routes.find((r) => r.id === "scaffold-nav-probe")!.navEntry!;
-      expect(entry.navOrder).toBe(31);
+      expect(entry.navOrder).toBe(BASELINE_NAV_COUNT);
       expect(entry.badge).toBe("Probe");
       expect(entry.badgeType).toBe("neutral");
       const navData = read(tmp, "tests/nav_config_data_2977.test.ts");
-      expect(navData).toContain("expect(orders).toHaveLength(32);");
-      expect(navData).toContain("Array.from({ length: 32 }");
+      expect(navData).toContain(
+        `expect(orders).toHaveLength(${BASELINE_NAV_COUNT + 1});`,
+      );
+      expect(navData).toContain(`Array.from({ length: ${BASELINE_NAV_COUNT + 1} }`);
       const routeTable = read(tmp, "tests/route_table.test.ts");
-      expect(routeTable).toContain("expect(nav).toHaveLength(32);");
-      expect(routeTable).toContain("Array.from({ length: 32 }");
+      expect(routeTable).toContain(
+        `expect(nav).toHaveLength(${BASELINE_NAV_COUNT + 1});`,
+      );
+      expect(routeTable).toContain(`Array.from({ length: ${BASELINE_NAV_COUNT + 1} }`);
       expect(routeTable.replace(/\r\n/g, "\n")).toContain('  "scaffold-nav-probe",\n  "scanner",');
       const badges = read(tmp, "tests/nav_unique_icons_badges.test.ts");
-      expect(badges).toContain("const NAV_COUNT = 32;");
+      expect(badges).toContain(`const NAV_COUNT = ${BASELINE_NAV_COUNT + 1};`);
       const register = JSON.parse(
         read(tmp, "tests/ux_shell_exceptions_3047.json"),
       ) as {
