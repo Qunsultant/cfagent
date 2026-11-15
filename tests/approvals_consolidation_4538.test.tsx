@@ -157,11 +157,11 @@ describe("Approvals consolidation (issue #4538)", () => {
     expect(railLink()).not.toBeNull();
   });
 
-  it("risk tab: no queue, link to the approvals sub-tab in its place", async () => {
+  it("risk tab: no queue, no rail — the rail lives on the asset tabs only (issue 4628)", async () => {
     await renderOrderPage("risk");
     expect(new URLSearchParams(window.location.search).get("orderTab")).toBe("risk");
-    queueDomMarkersAbsent(1);
-    expect(railLink()).not.toBeNull();
+    queueDomMarkersAbsent(0);
+    expect(railLink()).toBeNull();
   });
 
   it("Approvals page parity: refresh, approve/reject, and expiry all present on a pending draft", async () => {
