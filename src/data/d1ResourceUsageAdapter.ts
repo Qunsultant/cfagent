@@ -20,34 +20,50 @@
  * a query path, not an op path, so they do throw on DB
  * errors — a failed comparison query must be visible, not
  * silently empty. Totals do NOT self-create (characterized).
+ *
+ * #4282 P6a (#4384): the insert + totals read are catalogue
+ * entries (dml.d1.resource_sql_ops.insert / .read_totals),
+ * executed through the DML executor. The CREATE stays the DDL
+ * catalogue's text, issued via db.run(sql.raw(...)).
  */
+import { sql } from "drizzle-orm";
+import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import {
   type ResourceBucketTotal,
   type ResourceUsageEvent,
   type ResourceUsagePort,
 } from "../telemetry/resourceUsagePorts";
+import {
+  resourceAlertState,
+  resourceComparisonReports,
+  resourceDailyRollups,
+  resourceSqlOps,
+} from "./drizzleSchema";
 import { d1TableSql } from "./schemaComponent/d1Catalogue";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { executeDml } from "./schemaComponent/dmlExecutor";
 
-/** Minimal D1 surface the adapter needs (structural, so fakes can stand in). */
-export interface ResourceD1Db {
-  prepare(sql: string): {
-    bind(...params: unknown[]): {
-      run(): Promise<unknown>;
-      all(): Promise<{ results: unknown[] }>;
-    };
-  };
+/** Drizzle D1 database object carrying the resource schemas. */
+export type ResourceD1Db = DrizzleD1Database<{
+  resourceSqlOps: typeof resourceSqlOps;
+  resourceDailyRollups: typeof resourceDailyRollups;
+  resourceAlertState: typeof resourceAlertState;
+  resourceComparisonReports: typeof resourceComparisonReports;
+}>;
+
+/** Build the Drizzle D1 database object from a bound D1 client. */
+export function createD1ResourceDb(d1: D1Database): ResourceD1Db {
+  return drizzle(d1, {
+    schema: {
+      resourceSqlOps,
+      resourceDailyRollups,
+      resourceAlertState,
+      resourceComparisonReports,
+    },
+  });
 }
 
 const CREATE_TABLE_SQL = d1TableSql("resource_sql_ops");
-
-const INSERT_SQL = `INSERT INTO resource_sql_ops
-  (ts_ms, ns, op, rows_read, rows_written, caller, trigger, statement, tenant_id, run_id, session_ref)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-
-const TOTALS_SQL = `SELECT (CAST(ts_ms / ? AS INTEGER)) AS bucket, ns, op, caller, trigger,
-  COUNT(*) AS ops, SUM(rows_read) AS rows_read, SUM(rows_written) AS rows_written
-  FROM resource_sql_ops WHERE ts_ms >= ? AND ts_ms < ?
-  GROUP BY bucket, ns, op, caller, trigger ORDER BY bucket, ns, op, caller, trigger`;
 
 export class D1ResourceUsageAdapter implements ResourceUsagePort {
   private ensured = false;
@@ -57,25 +73,24 @@ export class D1ResourceUsageAdapter implements ResourceUsagePort {
   async record(event: ResourceUsageEvent): Promise<void> {
     try {
       if (!this.ensured) {
-        await this.db.prepare(CREATE_TABLE_SQL).bind().run();
+        await this.db.run(sql.raw(CREATE_TABLE_SQL));
         this.ensured = true;
       }
-      await this.db
-        .prepare(INSERT_SQL)
-        .bind(
-          event.timestampMs,
-          event.ns,
-          event.op,
-          event.rowsRead,
-          event.rowsWritten,
-          event.caller ?? null,
-          event.trigger ?? null,
-          event.statement ?? null,
-          event.tenantId ?? null,
-          event.runId ?? null,
-          event.sessionRef ?? null
-        )
-        .run();
+      await executeDml(DML_CATALOGUE, this.db, "dml.d1.resource_sql_ops.insert", {
+        values: {
+          tsMs: event.timestampMs,
+          ns: event.ns,
+          op: event.op,
+          rowsRead: event.rowsRead,
+          rowsWritten: event.rowsWritten,
+          caller: event.caller ?? null,
+          trigger: event.trigger ?? null,
+          statement: event.statement ?? null,
+          tenantId: event.tenantId ?? null,
+          runId: event.runId ?? null,
+          sessionRef: event.sessionRef ?? null,
+        },
+      });
     } catch (error) {
       console.warn(
         "[resource-usage] D1 record failed:",
@@ -85,8 +100,13 @@ export class D1ResourceUsageAdapter implements ResourceUsagePort {
   }
 
   async totals(fromMs: number, toMs: number, bucketMs: number): Promise<ResourceBucketTotal[]> {
-    const result = await this.db.prepare(TOTALS_SQL).bind(bucketMs, fromMs, toMs).all();
-    return (result.results as Array<Record<string, unknown>>).map((row) => ({
+    const rows = (await executeDml(
+      DML_CATALOGUE,
+      this.db,
+      "dml.d1.resource_sql_ops.read_totals",
+      { bucketMs, fromMs, toMs },
+    )) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
       bucketStartMs: Number(row.bucket) * bucketMs,
       ns: String(row.ns),
       op: String(row.op),
