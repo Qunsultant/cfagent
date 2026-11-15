@@ -131,6 +131,13 @@ function stubSqlWithSettings(rows: Array<Record<string, unknown>>) {
         const v = settings.get(String(args[0]));
         return v === undefined ? [] : [{ value: v }];
       }
+      // #4386 (#4282 P6c): the settings get() now dispatches the
+      // catalogue's Repository findById entry, so the Repository's
+      // SELECT * shape arrives here; the row is the mapped record.
+      if (q.startsWith("SELECT * FROM mas_settings WHERE")) {
+        const v = settings.get(String(args[0]));
+        return v === undefined ? [] : [{ key: String(args[0]), value: v }];
+      }
       if (q.startsWith("DELETE FROM mas_settings")) {
         settings.delete(String(args[0]));
         return [];
@@ -400,6 +407,13 @@ describe("C. sweep route behaviour (#3527 S4)", () => {
         if (q.startsWith("SELECT value FROM mas_settings")) {
           const v = settings.get(String(args[0]));
           return v === undefined ? [] : [{ value: v }];
+        }
+        // #4386 (#4282 P6c): the settings get() now dispatches the
+        // catalogue's Repository findById entry, so the Repository's
+        // SELECT * shape arrives here; the row is the mapped record.
+        if (q.startsWith("SELECT * FROM mas_settings WHERE")) {
+          const v = settings.get(String(args[0]));
+          return v === undefined ? [] : [{ key: String(args[0]), value: v }];
         }
         if (q.startsWith("DELETE FROM mas_settings")) {
           settings.delete(String(args[0]));
