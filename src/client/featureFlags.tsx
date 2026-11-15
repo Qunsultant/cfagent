@@ -18,6 +18,10 @@ declare global {
  */
 export const TAB_TO_FEATURE_MAP: Partial<Record<NavTabId, FeatureFlag>> = {
   screeners: "screener",
+  // Issue #4626: the screeners address retired onto the Assets Hub, so
+  // the hub carries the screener gate now (the screeners entry stays
+  // for the redirect source's fallback check).
+  "assets-hub": "screener",
   scanner: "screener",
   reports: "screener",
   docs: "screener",

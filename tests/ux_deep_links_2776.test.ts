@@ -299,8 +299,11 @@ describe("Surface-tab catalog (issue #2776, expanded scope)", () => {
     expect(risk.page).toBeNull();
     expect(risk.param).toBe("riskTab");
     // With a host page supplied, its href carries tab + riskTab.
-    expect(surfaceTabHref(risk, "scenarios", "screeners")).toBe(
-      "?tab=screeners&riskTab=scenarios",
+    // Issue #4626: the standalone risk page retired onto the order
+    // sub-tab, so the example host is an options screen (where the
+    // modal opens), not the retired `?tab=screeners` address.
+    expect(surfaceTabHref(risk, "scenarios", "options")).toBe(
+      "?tab=options&riskTab=scenarios",
     );
   });
 });

@@ -43,8 +43,10 @@ export function mapTabToTradingSubTab(targetTab: string): TradingSubTab {
       return "portfolio";
     case "ledger":
       return "ledger";
+    // Issue #4626: the screeners address retired onto the Assets Hub
+    // (S1 of #4625), so the legacy tab id maps to the hub sub-tab.
     case "screeners":
-      return "screeners";
+      return "assets-hub";
     case "stock-hub":
       return "stock-hub";
     case "scanner":

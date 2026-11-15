@@ -112,7 +112,7 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
     expect(search).toBeDefined();
     expect(search?.category).toBe("Intelligence");
     expect(search?.icon).toBe("Search");
-    expect(search?.navEntry?.navOrder).toBe(9);
+    expect(search?.navEntry?.navOrder).toBe(8);
     expect(search?.navEntry?.defaultVisible).toBe(true);
   });
 
@@ -145,8 +145,9 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
     // the remaining keys; the shell keys pin below.
     // Issue #4575: the two inline entries became the one audit-vault entry
     // (quoted key — the only hyphenated TAB_CONTENT key).
+    // Issue #4626: the research entry retired onto the stock-hub view.
     expect(chat).toContain('    "audit-vault": (');
-    for (const key of ["chat:", "docs:", "endpoints:", "research:", "workflows:"]) {
+    for (const key of ["chat:", "docs:", "endpoints:", "workflows:"]) {
       expect(chat).toContain(`    ${key} (`);
     }
   });

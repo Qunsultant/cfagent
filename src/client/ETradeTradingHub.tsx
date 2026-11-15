@@ -107,7 +107,6 @@ export interface User {
 export type TradingSubTab =
   | "autopilot"
   | "scanner"
-  | "screeners"
   | "stock-hub"
   | "reports"
   | "goal-screen"
@@ -1833,7 +1832,6 @@ export function ETradeTradingHub({
     const tabLabels: Record<typeof effectiveSubTab, string> = {
       autopilot: "Autopilot Control Center",
       scanner: "Strategy/Symbol Scanner",
-      screeners: "Multi-Asset Screeners",
       "stock-hub": "Stock Hub",
       reports: "Reports",
       "goal-screen": "Goal Screen",
@@ -2249,7 +2247,6 @@ export function ETradeTradingHub({
           the equivalent tab — no redirect notices. */}
       {effectiveSubTab === "iv-history" && renderOptionsHub("iv-history")}
 
-      {effectiveSubTab === "screeners" && renderScreenersHub("forex")}
       {effectiveSubTab === "assets-hub" && renderScreenersHub("forex")}
       {effectiveSubTab === "stock-hub" && renderStockHub("stocks")}
 

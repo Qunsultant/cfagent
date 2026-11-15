@@ -61,7 +61,7 @@ export function parseTabFromSearch(search: string): RouteId {
 export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   orderTab: ["order"],
   assetClass: ["order"],
-  riskTab: ["risk-analysis", "order"],
+  riskTab: ["order"],
   reportsTab: ["reports"],
   iaaaTab: ["platform-admin"],
   // Issue #3978: the data-providers inner tabs (`providerTab`) live on
@@ -76,12 +76,13 @@ export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   checkoutTab: ["checkout"],
   // Issue #4576: the nested hub panels get their own params, so an inner
   // sub-tab never overwrites the hub tab it is nested inside. `flowsTab`
-  // is OptionsFlowsHub's tab set (host: the options hub's `view=options-flows`,
-  // or the standalone `?tab=options-flows`); `researchTab` is
-  // MarketDataResearchHub's (host: `?tab=stock-hub&view=research`, or the
-  // standalone `?tab=research`).
-  flowsTab: ["options", "options-flows"],
-  researchTab: ["stock-hub", "research"],
+  // is OptionsFlowsHub's tab set (host: the options hub's `view=options-flows`);
+  // `researchTab` is MarketDataResearchHub's (host: `?tab=stock-hub&view=research`).
+  // Issue #4626: both standalone hosts are retired — the flows and research
+  // addresses redirect onto those nested homes, so the retired ids no
+  // longer own their param.
+  flowsTab: ["options"],
+  researchTab: ["stock-hub"],
   // Issue #3121 S2: the schedules home's deep links — `schedule=<id>`
   // (one schedule) and `run=<id>` (one job's run history) — are owned
   // by the home, so they survive navigation to it and drop on the way
@@ -236,6 +237,59 @@ export function legacyPlatformAdminHubRedirect(
   }
   if (section === "iaaa-admin" || section === "users" || section === "admin-access") {
     return { tab: "security-hub", view: section };
+  }
+  return null;
+}
+
+/**
+ * Issue #4626 (S1 of #4625) — the redirect for the five retired
+ * dual-homed addresses, decided 2026-11-15 09:28 EST. One rule: a
+ * surface lives where its workflow lives, so the standalone address
+ * folds onto the nested home and the nested param carries the inner
+ * view through (`flowsTab`, `researchTab`, `riskTab`, `reportsTab`).
+ * Runs after legacyPlatformAdminHubRedirect in Chat.tsx applyRoute,
+ * before the tab is adopted.
+ * `?tab=screeners&view=schedules` is NOT claimed here — it stays
+ * owned by legacySchedulesRedirect, which runs first.
+ */
+export function legacyDualHomeRedirect(search: string): LegacyProductRedirect | null {
+  const params = new URLSearchParams(search);
+  const tab = params.get("tab") ?? "";
+  const view = params.get("view") ?? "";
+  if (tab === "screeners") {
+    if (view === "schedules") return null;
+    const assetViews = ["forex", "futures", "commodities", "bonds"];
+    const assetView = view || params.get("screenerTab") || "";
+    if (assetViews.includes(assetView)) return { tab: "assets-hub", view: assetView };
+    if (view === "reports") {
+      const reportsTab = params.get("reportsTab") ?? "";
+      return reportsTab ? { tab: "reports", params: { reportsTab } } : { tab: "reports" };
+    }
+    if (view === "goal-screen") return { tab: "goal-screen" };
+    if (view === "review") return { tab: "review" };
+    if (view === "track-record") return { tab: "track-record" };
+    return { tab: "assets-hub" };
+  }
+  if (tab === "research") {
+    const researchTab = params.get("researchTab") ?? "";
+    return researchTab
+      ? { tab: "stock-hub", view: "research", params: { researchTab } }
+      : { tab: "stock-hub", view: "research" };
+  }
+  if (tab === "options-flows") {
+    const flowsTab = params.get("flowsTab") ?? "";
+    return flowsTab
+      ? { tab: "options", view: "options-flows", params: { flowsTab } }
+      : { tab: "options", view: "options-flows" };
+  }
+  if (tab === "risk-analysis") {
+    const riskTab = params.get("riskTab") ?? "";
+    return riskTab
+      ? { tab: "order", params: { orderTab: "risk", riskTab } }
+      : { tab: "order", params: { orderTab: "risk" } };
+  }
+  if (tab === "approvals") {
+    return { tab: "order", params: { orderTab: "approvals" } };
   }
   return null;
 }

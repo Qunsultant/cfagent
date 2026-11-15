@@ -13,6 +13,8 @@
  *   header in document order — the bottom of the order page, not
  *   above it. The queue itself moved to the Approvals page (#4538);
  *   what renders here is the link to it, in the same rail position.
+ *   Issue #4626 re-points that link to the approvals sub-tab
+ *   (`?tab=order&orderTab=approvals`), the one home now.
  *
  * Harness follows tests/etradeDisconnect2386.test.tsx: react-dom/client
  * in jsdom, stubbed fetch, ToastProvider.
@@ -146,7 +148,8 @@ describe("Order page sub-menu and layout (issue #3038)", () => {
     expect(ticket!.compareDocumentPosition(approvals!) & 4).toBe(4);
     // #4538: the queue itself moved to the Approvals page — what
     // renders here is the link to it, in the same rail position.
-    expect(document.querySelector('a[href="?tab=approvals"]')).not.toBeNull();
+    // Issue #4626 re-points that link to the approvals sub-tab.
+    expect(document.querySelector('a[href="?tab=order&orderTab=approvals"]')).not.toBeNull();
     expect(document.body.textContent).not.toContain("No pending approvals");
   });
 });

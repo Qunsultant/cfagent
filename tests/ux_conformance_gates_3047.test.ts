@@ -343,12 +343,10 @@ const CONFORMING_SUB_TABS: Record<string, string> = {
 
 const EXPECTED_TAB_CONTENT_KEYS = [
   "agents",
-  "approvals",
   "audit-vault",
   "chat",
   "docs",
   "endpoints",
-  "options-flows",
   "options-screener",
   "platform-admin",
   "workflow-catalog",
@@ -358,11 +356,12 @@ const EXPECTED_TAB_CONTENT_KEYS = [
   "billing",
   "payment-assurance",
   "checkout",
-  "research",
   "search",
   "workflow-runs",
   "workflows",
-  "risk-analysis",
+  // Issue #4626 (S1 of #4625): the approvals, options-flows, research
+  // and risk-analysis TAB_CONTENT entries retired onto their canonical
+  // homes (order sub-tabs, options nested view, stock-hub research view).
   // Issue #3121 S2: schedules renders from the shell — its
   // TAB_CONTENT entry joins the shell-conforming keys.
   "schedules",
@@ -375,7 +374,8 @@ const EXPECTED_TAB_CONTENT_KEYS = [
 const EXPECTED_SUB_TABS = [
   "autopilot",
   "scanner",
-  "screeners",
+  // Issue #4626 (S1 of #4625): the screeners sub-tab retired onto
+  // assets-hub; the hub renders ScreenersHub on assets-hub only.
   "stock-hub",
   "reports",
   "goal-screen",

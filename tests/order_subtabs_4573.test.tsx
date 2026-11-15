@@ -175,8 +175,9 @@ describe("order sub-tabs (#4573)", () => {
     const text = container.textContent ?? "";
     expect(text).toContain("Proposed orders awaiting human authorization");
     expect(text).toContain("BUY 10 × NVDA");
-    // The Approvals page keeps its own home (#4538 stays additive).
-    expect(text).toContain("Open the full Approvals page");
+    // Issue #4626: the sub-tab IS the one home now — the standalone
+    // Approvals page retired onto it, so no self-link renders.
+    expect(container.querySelector('a[href="?tab=approvals"]')).toBeNull();
   });
 
   it("renders the guarantee and the NLQ prompts only on their sub-tab", async () => {

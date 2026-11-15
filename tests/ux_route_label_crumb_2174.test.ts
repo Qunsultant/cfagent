@@ -95,8 +95,9 @@ describe("IA: labels, crumbs, shortLabels are collision-free (#2174)", () => {
     expect(byId.get("nlq")).toBeUndefined();
     expect(byId.get("docs")!.navEntry!.label).toBe("Docs & Reports");
     expect(byId.get("docs")!.crumb).toBe("Docs & Reports");
-    expect(byId.get("options-flows")!.navEntry!.label).toBe("Options Flows");
-    expect(byId.get("options-flows")!.navEntry!.shortLabel).toBe("Flows");
+    // Issue #4626: the options-flows nav entry retired onto the nested
+    // options view, so only its crumb (route metadata) stays pinned.
+    expect(byId.get("options-flows")!.navEntry).toBeUndefined();
     expect(byId.get("options-flows")!.crumb).toBe("Options Flows");
     expect(byId.get("payments")!.navEntry!.label).toBe("Payments");
     expect(byId.get("payments")!.navEntry!.shortLabel).toBe("Payments");

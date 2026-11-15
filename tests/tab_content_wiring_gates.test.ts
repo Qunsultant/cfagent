@@ -103,6 +103,11 @@ const KNOWN_ORPHANS = [
   // TAB_CONTENT) was removed with the page. Preserved under the
   // zero-deletions policy gate (§22).
   "src/client/QueuesPage.tsx",
+  // Deprecated in place in #4626 (superseded by the order approvals
+  // sub-tab `?tab=order&orderTab=approvals`); the Approvals page's
+  // last mount (Chat.tsx TAB_CONTENT) was removed with the page.
+  // Preserved under the zero-deletions policy gate (§22).
+  "src/client/ApprovalsPanel.tsx",
 ];
 
 describe("tab content wiring gates (#2083)", () => {
