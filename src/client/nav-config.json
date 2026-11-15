@@ -1415,10 +1415,6 @@
     "goal-screen": {
       "tab": "goal-screen"
     },
-    "sandbox": {
-      "href": "/checkout/sandbox",
-      "newTab": true
-    },
     "sandbox-checkout": {
       "href": "/checkout/sandbox",
       "newTab": true
@@ -1600,26 +1596,6 @@
     },
     "workflow-runs:track-record": {
       "tab": "track-record"
-    },
-    "planned": {
-      "tab": "assets-hub",
-      "view": "forex"
-    },
-    "planned:forex": {
-      "tab": "assets-hub",
-      "view": "forex"
-    },
-    "planned:futures": {
-      "tab": "assets-hub",
-      "view": "futures"
-    },
-    "planned:commodities": {
-      "tab": "assets-hub",
-      "view": "commodities"
-    },
-    "planned:bonds": {
-      "tab": "assets-hub",
-      "view": "bonds"
     },
     "order:stock-order": {
       "tab": "order",
