@@ -88,6 +88,10 @@ export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   // by the home, so they survive navigation to it and drop on the way
   // out, like every other page-owned param (#3238).
   schedule: ["schedules"],
+  // Issue #4689: the Admin Products section's nested `adminTab` param
+  // (products / create-product / create-version) is owned by the
+  // product hub, host of the admin-products view.
+  adminTab: ["product-hub"],
 };
 
 /** Query string with `tab` set, keeping only the destination's own params. */

@@ -1178,6 +1178,20 @@
         "shortLabel": "Free Runs",
         "icon": "Runs",
         "description": "Free-run allowance per product, per month"
+      },
+      {
+        "id": "create-product",
+        "label": "Create product",
+        "shortLabel": "Create product",
+        "icon": "Billing",
+        "description": "Add a product (Admin Products)"
+      },
+      {
+        "id": "create-version",
+        "label": "Create version",
+        "shortLabel": "Create version",
+        "icon": "Billing",
+        "description": "Add another price — a new version (Admin Products)"
       }
     ],
     "payments": [
@@ -1602,6 +1616,20 @@
       "params": {
         "orderTab": "nlq-guarantee"
       }
+    },
+    "product-hub:create-product": {
+      "tab": "product-hub",
+      "view": "admin-products",
+      "params": {
+        "adminTab": "create-product"
+      }
+    },
+    "product-hub:create-version": {
+      "tab": "product-hub",
+      "view": "admin-products",
+      "params": {
+        "adminTab": "create-version"
+      }
     }
   },
   "deepLinkSurfaces": [
@@ -1877,6 +1905,17 @@
         "risk",
         "approvals",
         "nlq-guarantee"
+      ]
+    },
+    {
+      "surface": "admin-products",
+      "page": "product-hub",
+      "pageView": "admin-products",
+      "param": "adminTab",
+      "values": [
+        "products",
+        "create-product",
+        "create-version"
       ]
     }
   ],

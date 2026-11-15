@@ -82,6 +82,26 @@ describe("router param scoping (#3238)", () => {
     );
   });
 
+  it("scopes the Admin Products nested param to the product hub (#4689)", () => {
+    // adminTab names a sub-tab of the hub's admin-products view: it
+    // survives navigation within the hub and drops on the way out,
+    // like every other page-owned param. (buildSearchWithTab keeps
+    // `view` itself — the destination's own view handling drops it in
+    // navigateToTab — so the drop cases below carry no view.)
+    expect(
+      buildSearchWithTab(
+        "?tab=product-hub&view=admin-products&adminTab=create-version",
+        "product-hub",
+      ),
+    ).toBe("?tab=product-hub&view=admin-products&adminTab=create-version");
+    expect(buildSearchWithTab("?tab=product-hub&adminTab=create-version", "portfolio")).toBe(
+      "?tab=portfolio",
+    );
+    expect(buildSearchWithTab("?tab=portfolio&adminTab=create-product", "product-hub")).toBe(
+      "?tab=product-hub&adminTab=create-product",
+    );
+  });
+
   it("drops unknown params on a tab change", () => {
     expect(buildSearchWithTab("?tab=order&orderTab=risk&mystery=1", "portfolio")).toBe(
       "?tab=portfolio",
@@ -103,6 +123,7 @@ describe("router param scoping (#3238)", () => {
       "research",
       "discoveryView",
       "checkoutTab",
+      "adminTab",
     ]) {
       expect(Object.keys(TAB_PARAM_OWNERS)).toContain(key);
     }

@@ -316,3 +316,72 @@ describe("Product Hub (#4530)", () => {
     expect(container.querySelector('[id^="products-tab-"]')).toBeNull();
   });
 });
+
+describe("Admin Products sub-tabs are URL-synced on adminTab (#4689)", () => {
+  function adminTabButton(id: string): HTMLButtonElement {
+    const found = container.querySelector(`#platform-admin-products-tab-${id}`);
+    if (!found) throw new Error(`admin sub-tab not found: ${id}`);
+    return found as HTMLButtonElement;
+  }
+
+  async function clickAdminTab(id: string) {
+    await act(async () => {
+      adminTabButton(id).click();
+    });
+    await flush();
+  }
+
+  it.each([
+    ["create-product", "Product name"],
+    ["create-version", "No products yet. Create a product first."],
+  ])(
+    "a ?tab=product-hub&view=admin-products&adminTab=%s URL opens that sub-tab on mount",
+    async (subTab, marker) => {
+      const { impl } = hubFetch();
+      await renderHub(impl, `/?tab=product-hub&view=admin-products&adminTab=${subTab}`);
+      expect(hubTabButton("admin-products").getAttribute("aria-selected")).toBe("true");
+      expect(adminTabButton(subTab).getAttribute("aria-selected")).toBe("true");
+      expect(adminTabButton("products").getAttribute("aria-selected")).toBe("false");
+      expect(text()).toContain(marker);
+    },
+  );
+
+  it("admin-products with no adminTab opens the Products sub-tab", async () => {
+    const { impl } = hubFetch();
+    await renderHub(impl, "/?tab=product-hub&view=admin-products");
+    expect(hubTabButton("admin-products").getAttribute("aria-selected")).toBe("true");
+    expect(adminTabButton("products").getAttribute("aria-selected")).toBe("true");
+    expect(adminTabButton("create-product").getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("clicking an admin sub-tab writes adminTab to the URL", async () => {
+    const { impl } = hubFetch();
+    await renderHub(impl, "/?tab=product-hub&view=admin-products");
+    await clickAdminTab("create-product");
+    expect(new URLSearchParams(window.location.search).get("adminTab")).toBe("create-product");
+    await clickAdminTab("create-version");
+    expect(new URLSearchParams(window.location.search).get("adminTab")).toBe("create-version");
+  });
+
+  it("the nested adminTab param does not leak across hub tabs (#4582 lesson)", async () => {
+    // Leave Admin Products with a sub-tab open: the URL must drop
+    // adminTab, and coming back must show the Products sub-tab — not
+    // the stale in-memory one.
+    const { impl } = hubFetch();
+    await renderHub(impl, "/?tab=product-hub&view=admin-products&adminTab=create-version");
+    expect(adminTabButton("create-version").getAttribute("aria-selected")).toBe("true");
+    await act(async () => {
+      hubTabButton("products").click();
+    });
+    await flush();
+    expect(hubTabButton("products").getAttribute("aria-selected")).toBe("true");
+    expect(window.location.search).not.toContain("adminTab=");
+    await act(async () => {
+      hubTabButton("admin-products").click();
+    });
+    await flush();
+    expect(hubTabButton("admin-products").getAttribute("aria-selected")).toBe("true");
+    expect(adminTabButton("products").getAttribute("aria-selected")).toBe("true");
+    expect(adminTabButton("create-version").getAttribute("aria-selected")).toBe("false");
+  });
+});

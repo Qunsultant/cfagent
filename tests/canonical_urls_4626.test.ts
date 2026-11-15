@@ -210,6 +210,29 @@ describe("deep-link surfaces follow the canonical home (#4626)", () => {
   });
 });
 
+describe("admin-products surface follows the nested pattern (#4689)", () => {
+  it("lives on product-hub under view=admin-products with its own adminTab param", () => {
+    const def = SURFACE_TAB_DEFS.find((d) => d.surface === "admin-products")!;
+    expect(def.page).toBe("product-hub");
+    expect(def.pageView).toBe("admin-products");
+    expect(def.param).toBe("adminTab");
+    expect(def.values).toEqual(["products", "create-product", "create-version"]);
+    expect(surfaceTabHref(def, "create-product")).toBe(
+      "?tab=product-hub&view=admin-products&adminTab=create-product",
+    );
+    expect(surfaceTabHref(def, "create-version")).toBe(
+      "?tab=product-hub&view=admin-products&adminTab=create-version",
+    );
+    expect(surfaceTabHref(def, "products")).toBe(
+      "?tab=product-hub&view=admin-products&adminTab=products",
+    );
+  });
+
+  it("adminTab is owned by product-hub only", () => {
+    expect(TAB_PARAM_OWNERS.adminTab).toEqual(["product-hub"]);
+  });
+});
+
 describe("retired mounts and links are gone from the sources (#4626)", () => {
   it("Chat.tsx applies the dual-home redirect and mounts no retired page", () => {
     const chat = read("src/client/Chat.tsx");

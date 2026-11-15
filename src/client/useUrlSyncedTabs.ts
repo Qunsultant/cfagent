@@ -40,6 +40,8 @@ export interface UseUrlSyncedTabsResult<T extends string> {
   activeTab: T;
   visitedTabs: ReadonlySet<T>;
   handleTabChange: (tab: string) => void;
+  /** Reset the selection to the default WITHOUT writing the URL. */
+  resetToDefault: () => void;
 }
 
 function readTabFromHref<T extends string>(
@@ -157,5 +159,15 @@ export function useUrlSyncedTabs<T extends string>(
     return subscribeToRouteChanges(handleRouteSync);
   }, [activeTab, defaultTab, onTabChange, readFromLocation]);
 
-  return { activeTab, visitedTabs, handleTabChange };
+  // Reset the selection to the default WITHOUT writing the URL.
+  // A nested section calls this when its host stops showing it (its
+  // TabPanel is hidden but retained), so a stale in-memory selection
+  // never resurfaces on the next visit — the host's own URL write
+  // (or the lack of the param) is the source of truth.
+  const resetToDefault = useCallback(() => {
+    setActiveTab((current) => (current === defaultTab ? current : defaultTab));
+    setVisitedTabs((prev) => (prev.has(defaultTab) ? prev : new Set(prev).add(defaultTab)));
+  }, [defaultTab]);
+
+  return { activeTab, visitedTabs, handleTabChange, resetToDefault };
 }

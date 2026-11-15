@@ -71,7 +71,8 @@ function productsFetch(state: MockState) {
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
-async function renderSection(state: MockState) {
+async function renderSection(state: MockState, search = "/") {
+  window.history.pushState(null, "", search);
   vi.stubGlobal("fetch", productsFetch(state));
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -90,6 +91,7 @@ afterEach(() => {
   root = null;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.history.pushState(null, "", "/");
 });
 
 function baseState(): MockState {
@@ -216,5 +218,60 @@ describe("ProductsSection sub-tabs (#4511)", () => {
     expect(creates).toHaveLength(1);
     expect(creates[0].body).toMatchObject({ priceUSD: 2, periodDays: 30 });
     expect(text()).toContain("Version v2 created");
+  });
+});
+
+describe("ProductsSection sub-tabs are URL-synced on adminTab (#4689)", () => {
+  const ADMIN_SEARCH = "/?tab=product-hub&view=admin-products";
+
+  it("adminTab=create-product opens the Create product tab directly by URL", async () => {
+    const state = baseState();
+    await renderSection(state, `${ADMIN_SEARCH}&adminTab=create-product`);
+    expect(tabButton("Create product").getAttribute("aria-selected")).toBe("true");
+    expect(tabButton("Products").getAttribute("aria-selected")).toBe("false");
+    expect(text()).toContain("Product name");
+  });
+
+  it("adminTab=create-version opens the Create version tab directly by URL", async () => {
+    const state = baseState();
+    await renderSection(state, `${ADMIN_SEARCH}&adminTab=create-version`);
+    expect(tabButton("Create version").getAttribute("aria-selected")).toBe("true");
+    expect(tabButton("Products").getAttribute("aria-selected")).toBe("false");
+    expect(text()).toContain("New version of Test-Subs");
+  });
+
+  it("an unknown adminTab value falls back to the Products tab", async () => {
+    const state = baseState();
+    await renderSection(state, `${ADMIN_SEARCH}&adminTab=delete-everything`);
+    expect(tabButton("Products").getAttribute("aria-selected")).toBe("true");
+    expect(tabButton("Create product").getAttribute("aria-selected")).toBe("false");
+    expect(tabButton("Create version").getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("clicking a sub-tab writes adminTab to the URL; clicking Products names it explicitly", async () => {
+    const state = baseState();
+    await renderSection(state, ADMIN_SEARCH);
+    await clickTab("Create product");
+    expect(new URLSearchParams(window.location.search).get("adminTab")).toBe("create-product");
+    await clickTab("Create version");
+    expect(new URLSearchParams(window.location.search).get("adminTab")).toBe("create-version");
+    await clickTab("Products");
+    expect(new URLSearchParams(window.location.search).get("adminTab")).toBe("products");
+  });
+
+  it("creating a product returns to the Products tab and the URL names it", async () => {
+    const state = baseState();
+    await renderSection(state, `${ADMIN_SEARCH}&adminTab=create-product`);
+    await act(async () => {
+      setInputValue(inputForLabel("Product name"), "Enterprise");
+    });
+    await act(async () => {
+      buttonByText("Create product").click();
+    });
+    await act(async () => {});
+    await act(async () => {});
+    expect(tabButton("Products").getAttribute("aria-selected")).toBe("true");
+    expect(new URLSearchParams(window.location.search).get("adminTab")).toBe("products");
+    expect(text()).toContain("Enterprise");
   });
 });

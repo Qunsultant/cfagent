@@ -428,7 +428,7 @@ describe("4585-P06 the homes render their tabs and mount the panels (#4585)", ()
 });
 
 describe("4585-P07 nav counts move (#4585)", () => {
-  it("routes 44, navOrders 0..28, sub-menu groups 17, surfaces 23", () => {
+  it("routes 44, navOrders 0..28, sub-menu groups 17, surfaces 24", () => {
     const routes = navConfigData.routes as {
       id: string;
       navEntry?: { navOrder: number };
@@ -445,7 +445,7 @@ describe("4585-P07 nav counts move (#4585)", () => {
     expect(dataHub?.navEntry?.navOrder).toBe(27);
     expect(securityHub?.navEntry?.navOrder).toBe(28);
     expect(Object.keys(navConfigData.subMenus as Record<string, unknown>)).toHaveLength(17);
-    expect(SURFACE_TAB_DEFS).toHaveLength(23);
+    expect(SURFACE_TAB_DEFS).toHaveLength(24);
     const platformAdmin = SURFACE_TAB_DEFS.find((d) => d.surface === "platform-admin");
     expect([...platformAdmin!.values]).toEqual([...REMAINING_PLATFORM_ADMIN]);
   });

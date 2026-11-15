@@ -48,7 +48,7 @@ describe("Product Hub nav (#4530)", () => {
     expect(orders).toEqual(Array.from({ length: 29 }, (_, i) => i));
   });
 
-  it("nav-config carries a product-hub sub-menu with the five hub tabs", () => {
+  it("nav-config carries a product-hub sub-menu with the five hub tabs plus the two admin sub-tabs (#4689)", () => {
     const group = subMenus["product-hub"];
     expect(group).toBeDefined();
     expect(group.map((item) => item.id)).toEqual([
@@ -57,6 +57,8 @@ describe("Product Hub nav (#4530)", () => {
       "marketing-draft-preview",
       "admin-products",
       "free-runs",
+      "create-product",
+      "create-version",
     ]);
     for (const item of group) {
       expect(item.label).toBeTruthy();
@@ -74,6 +76,8 @@ describe("Product Hub nav (#4530)", () => {
       "marketing-draft-preview",
       "admin-products",
       "free-runs",
+      "create-product",
+      "create-version",
     ]);
     expect(navItem("products")).toBeUndefined();
   });
@@ -95,6 +99,14 @@ describe("Product Hub nav (#4530)", () => {
     );
     expect(deepLinkHref(deepLinkForNavNode("product-hub", "free-runs"))).toBe(
       "?tab=product-hub&view=free-runs",
+    );
+    // #4689: the Admin Products sub-tabs are deep-linkable — the
+    // nested adminTab param names the sub-tab under admin-products.
+    expect(deepLinkHref(deepLinkForNavNode("product-hub", "create-product"))).toBe(
+      "?tab=product-hub&view=admin-products&adminTab=create-product",
+    );
+    expect(deepLinkHref(deepLinkForNavNode("product-hub", "create-version"))).toBe(
+      "?tab=product-hub&view=admin-products&adminTab=create-version",
     );
   });
 
