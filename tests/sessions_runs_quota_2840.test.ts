@@ -92,6 +92,7 @@ import {
   buildTierAlertText,
 } from "../src/telemetry/resourceRollup";
 import { runResourceCapAlert } from "../src/agents/resourceGoals";
+import { createD1ResourceDb } from "../src/data/d1ResourceUsageAdapter";
 import { createInMemoryScreenRunLockPort } from "../src/data/createScreenRunLockPorts";
 import { createInMemoryAsyncJobPorts } from "../src/data/createAsyncJobPorts";
 import { startWorkflowInstance } from "../src/workflows/cfWorkflowAdapter";
@@ -571,26 +572,46 @@ describe("quota tiers (#2840 Q3)", () => {
     const projectionRows = [
       { bucket: 0, ns: "sessions", op: "get", caller: "requireAuth", trigger: "user", ops: 1000, rows_read: 4_600_000, rows_written: 10 },
     ];
+    // #4282 P6a (#4384): the alert-state upsert and the totals
+    // read now render through the Drizzle builder (lowercase,
+    // quoted identifiers, `insert ... on conflict` instead of
+    // `INSERT OR REPLACE`), and drizzle-orm 0.45.4's
+    // select-with-fields path reads array-mode rows via .raw(),
+    // never .all() — the fake matches the builder rendering and
+    // exposes .raw() with arrays in SELECT-list order.
     const db = {
       prepare(sql: string) {
         return {
           bind(...params: unknown[]) {
             return {
               run: async () => {
-                if (sql.includes("INSERT OR REPLACE INTO resource_alert_state")) {
+                if (/insert into "resource_alert_state"/i.test(sql)) {
                   const [budget, day, alerted_at, delivered, note] = params as [string, string, number, number, string | null];
                   alertState.set([budget, day].join("\0"), { budget, day, alerted_at, delivered, note });
                 }
                 return { success: true };
               },
               all: async () => {
-                if (sql.includes("FROM resource_alert_state")) {
+                if (/from "resource_alert_state"/i.test(sql)) {
                   const [budget, day] = params as [string, string];
                   const row = alertState.get([budget, day].join("\0"));
                   return { results: row ? [row] : [] };
                 }
-                if (sql.includes("FROM resource_sql_ops")) return { results: projectionRows };
+                if (/from "resource_sql_ops"/i.test(sql)) return { results: projectionRows };
                 return { results: [] };
+              },
+              raw: async () => {
+                if (/from "resource_alert_state"/i.test(sql)) {
+                  const [budget, day] = params as [string, string];
+                  const row = alertState.get([budget, day].join("\0"));
+                  return row ? [[row.budget, row.day, row.alerted_at, row.delivered, row.note]] : [];
+                }
+                if (/from "resource_sql_ops"/i.test(sql)) {
+                  return projectionRows.map((r) => [
+                    r.bucket, r.ns, r.op, r.caller, r.trigger, r.ops, r.rows_read, r.rows_written,
+                  ]);
+                }
+                return [];
               },
             };
           },
@@ -599,11 +620,11 @@ describe("quota tiers (#2840 Q3)", () => {
     };
     const env = { SLACK_WEBHOOK_URL: "https://hooks.slack.test/services/XXX" };
     const nowMs = Date.parse("2026-11-03T12:00:00Z");
-    const first = await runResourceCapAlert({ db: db as never, nowMs, post: post as never, env: env as never });
+    const first = await runResourceCapAlert({ db: createD1ResourceDb(db as never), nowMs, post: post as never, env: env as never });
     expect(first.tierAlerted).toContain("rowsRead:90");
     const postedAfterFirst = posts.length;
     expect(postedAfterFirst).toBeGreaterThanOrEqual(2); // 70% watch + 90% escalation
-    const second = await runResourceCapAlert({ db: db as never, nowMs, post: post as never, env: env as never });
+    const second = await runResourceCapAlert({ db: createD1ResourceDb(db as never), nowMs, post: post as never, env: env as never });
     expect(second.tierAlerted).toEqual([]);
     expect(posts.length).toBe(postedAfterFirst);
   });
