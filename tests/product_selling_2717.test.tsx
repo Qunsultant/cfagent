@@ -498,6 +498,36 @@ describe("selling panel section (#2717)", () => {
     expect(text).not.toContain("Subscription activated.");
   });
 
+  it.each([
+    { code: "FAILURE_BILLING_PRICE_MAPPING_MISSING", status: 503, match: /No Stripe Price is mapped for this plan/ },
+    { code: "FAILURE_BILLING_IDENTITY_UNAVAILABLE", status: 503, match: /sign-in could not be confirmed/ },
+    { code: "FAILURE_BILLING_STRIPE_NOT_CONFIGURED", status: 503, match: /Ask the operator to configure Stripe/ },
+    { code: "FAILURE_BILLING_CHECKOUT_SESSION_INVALID", status: 503, match: /no checkout link/ },
+    { code: "FAILURE_PLAN_NOT_EFFECTIVE_FOR_SEGMENT", status: 409, match: /not available for your account/ },
+    { code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", status: 503, match: /commercial store is unavailable/ },
+    { code: "FAILURE_PLAN_PRICE_NOT_APPROVED", status: 402, match: /price has not been approved yet/ },
+  ])(
+    "mint failure $code shows its own what/where/why message, never the generic 'not configured' (#4692)",
+    async ({ code, status, match }) => {
+      const { impl } = sellingFetch({
+        mintStatus: status,
+        mintErrorBody: { code, message: "server message" },
+      });
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      await openSelling(impl);
+      await act(async () => {
+        buttonByText("Start checkout").click();
+      });
+      await flush();
+      expect(openSpy).not.toHaveBeenCalled();
+      const text = container.textContent ?? "";
+      expect(text).toMatch(match);
+      expect(text).not.toMatch(/Subscription checkout is not configured yet/);
+      expect(text).toContain("Activation: none");
+      expect(text).not.toContain("Subscription activated.");
+    },
+  );
+
   it("confirm 402 fails closed: nothing activated", async () => {
     const { impl } = sellingFetch({ purchaseStatus: 402 });
     vi.spyOn(window, "open").mockImplementation(() => null);

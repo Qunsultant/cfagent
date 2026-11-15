@@ -518,8 +518,13 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     // + 69 (#2846: the commercial outcome codes) + 1 (#2373 S1b:
     // FAILURE_PROVIDER_MISMATCH) + 1 (#3655 F6:
     // FAILURE_NO_SCREENING_PROVIDER) + 1 (#4642:
-    // FAILURE_BILLING_CHECKOUT_REJECTED).
-    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(239);
+    // FAILURE_BILLING_CHECKOUT_REJECTED) + 5 (#4692:
+    // FAILURE_BILLING_PRICE_MAPPING_MISSING +
+    // FAILURE_BILLING_IDENTITY_UNAVAILABLE +
+    // FAILURE_BILLING_STRIPE_NOT_CONFIGURED +
+    // FAILURE_BILLING_CHECKOUT_SESSION_INVALID +
+    // FAILURE_PLAN_NOT_EFFECTIVE_FOR_SEGMENT).
+    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(244);
   });
 
   it("the OAuth scopes request trading.write (the connect grant must cover placement)", () => {

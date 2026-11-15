@@ -402,6 +402,8 @@ function stubBillingStripe(overrides: {
   session?: Record<string, unknown>;
   provider?: Record<string, unknown>;
   sessionCreateError?: { status: number; message: string };
+  /** Issue #4692: script the session-create payload itself (e.g. no url) — the mint must code that distinctly. */
+  sessionCreateResult?: Record<string, unknown> | null;
 } = {}) {
   const calls: Array<{ url: string; method: string; body: string }> = [];
   const sessionEvidence = {
@@ -437,6 +439,13 @@ function stubBillingStripe(overrides: {
             ok: false,
             status: overrides.sessionCreateError.status,
             json: async () => ({ error: { message: overrides.sessionCreateError!.message } }),
+          } as any;
+        }
+        if (overrides.sessionCreateResult !== undefined) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => overrides.sessionCreateResult,
           } as any;
         }
         return {
@@ -495,12 +504,16 @@ describe("billing-checkout route", () => {
     ).toBe(403);
     const noStripe = await setup({ monetization: true });
     await seedPlanAndPrice(noStripe);
-    expect(
-      (await call(noStripe.ctx, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {
-        planId: "plan-pro",
-        tenantId: "t1",
-      }))?.status,
-    ).toBe(503);
+    const noStripeRes = await call(noStripe.ctx, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {
+      planId: "plan-pro",
+      tenantId: "t1",
+    });
+    expect(noStripeRes?.status).toBe(503);
+    // Issue #4692: Stripe unconfigured has its own coded outcome — the
+    // generic 503 code no longer stands for a known cause.
+    const noStripeBody = await bodyOf(noStripeRes);
+    expect(noStripeBody.code).toBe("FAILURE_BILLING_STRIPE_NOT_CONFIGURED");
+    expect(noStripeBody.message).toMatch(/Stripe checkout is not configured/);
   });
 
   it("refuses unknown/inactive plans and a missing operator price mapping", async () => {
@@ -532,9 +545,13 @@ describe("billing-checkout route", () => {
       tenantId: "t1",
     });
     expect(noMapRes?.status).toBe(503);
-    // Issue #4642: the unset-mapping path keeps the generic 503 code — the
-    // distinct rejection code is only for a Stripe rejection of a mapped price.
-    expect((await bodyOf(noMapRes)).code).toBe("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE");
+    // Issue #4692: the unset-mapping path has its own coded outcome —
+    // the generic 503 code no longer stands for a known cause (this
+    // supersedes the #4642 comment that kept the generic code here).
+    const noMapBody = await bodyOf(noMapRes);
+    expect(noMapBody.code).toBe("FAILURE_BILLING_PRICE_MAPPING_MISSING");
+    expect(noMapBody.message).toMatch(/No Stripe Price id is mapped for this plan/);
+    expect(noMapBody.message).toMatch(/Billing tab/);
   });
 
   it("a Stripe rejection of the mapped price returns the distinct rejection code, not the generic 503 (#4642)", async () => {
@@ -557,6 +574,80 @@ describe("billing-checkout route", () => {
     expect(body.code).not.toBe("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE");
     // The raw Stripe reason never reaches the client.
     expect(JSON.stringify(body)).not.toContain("You cannot use a one-time price");
+  });
+
+  it("an identity-resolution failure returns its own coded outcome, not the generic 503 (#4692)", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBillingStripe();
+    await seedPlanAndPrice(s);
+    // Corrupt the buyer's account row: the identity read throws while
+    // mapping it (invalid tier), which is the production failure mode
+    // for an account store that cannot be read.
+    s.mock.sqlite
+      .prepare(
+        "INSERT INTO agent_commercial_accounts (id, tenant_id, tier, credits_usd, included_runs, segment, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run("u1", "t1", "Bogus", 0, 0, "default", Date.now());
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {
+      planId: "plan-pro",
+      tenantId: "t1",
+    });
+    const body = await bodyOf(res);
+    expect(res?.status).toBe(503);
+    expect(body.code).toBe("FAILURE_BILLING_IDENTITY_UNAVAILABLE");
+    expect(body.message).toMatch(/identity could not be resolved/);
+    // The raw store reason never reaches the client.
+    expect(JSON.stringify(body)).not.toContain("Invalid tier");
+  });
+
+  it("a session created with no checkout URL returns its own coded outcome, not the generic 503 (#4692)", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBillingStripe({ sessionCreateResult: { id: "cs_test_bill_1" } });
+    await seedPlanAndPrice(s);
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {
+      planId: "plan-pro",
+      tenantId: "t1",
+    });
+    const body = await bodyOf(res);
+    expect(res?.status).toBe(503);
+    expect(body.code).toBe("FAILURE_BILLING_CHECKOUT_SESSION_INVALID");
+    expect(body.message).toMatch(/no checkout link/);
+  });
+
+  it("a plan that is not the effective version for the buyer's segment returns a coded 409, not a raw message (#4692)", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBillingStripe();
+    await seedPlanAndPrice(s);
+    // A newer version of the same product (same name → same product id)
+    // becomes effective, so plan-pro is no longer the effective version.
+    await s.subs.createPlan({ id: "plan-pro2", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 0 });
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {
+      planId: "plan-pro",
+      tenantId: "t1",
+    });
+    const body = await bodyOf(res);
+    expect(res?.status).toBe(409);
+    expect(body.code).toBe("FAILURE_PLAN_NOT_EFFECTIVE_FOR_SEGMENT");
+    expect(body.message).toMatch(/not the effective approved version/);
+    // The raw segment-check reason never reaches the client.
+    expect(JSON.stringify(body)).not.toContain("refusing to activate");
+  });
+
+  it("an unbound commercial store returns the store code, not the generic 503 (#4692)", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBillingStripe();
+    await seedPlanAndPrice(s);
+    const ctxNoDb = { ...s.ctx, env: { ...s.env, AGENT_DB: undefined } } as unknown as AgenticPaymentsRouteContext;
+    const res = await call(ctxNoDb, "POST", "/payments/agentic/commercial/subscription/billing-checkout", "u1", {
+      planId: "plan-pro",
+      tenantId: "t1",
+    });
+    const body = await bodyOf(res);
+    expect(res?.status).toBe(503);
+    expect(body.code).toBe("FAILURE_COMMERCIAL_STORE_UNAVAILABLE");
+    // The require* failures carry the coded message in `error` (their
+    // pre-existing shape), not `message`.
+    expect(body.error).toMatch(/commercial store is unavailable/);
   });
 
   it("mints a subscription-mode session and audits, without creating a row", async () => {
