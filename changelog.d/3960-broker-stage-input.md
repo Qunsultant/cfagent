@@ -1,0 +1,5 @@
+### Provider/broker selection travels as a stage input (#3960)
+
+- A run may now carry a serializable (broker, mode) descriptor (`classInput.broker`) as a stage input: the start seams validate and stamp it, the resolving steps decode it before execution, and the residency factory (`resolveChainSourceForRequest`, over the trading platform registry) resolves the chain source per invocation from the pair — so two runs may carry different brokers at the same time, and the mode (paper | live, the #3451 first-class mode) rides the resolution as the environment token. Runs carrying no input keep the legacy direct client construction, byte-identically.
+- The feed-job half of the issue body (registry-fixed `sourceId` on feed jobs) is a distinct mechanism and is NOT covered by this slice: feed jobs resolve their source from the registry at definition time, a different family from the options resolving steps. This slice covers the options residency instance the #4289 evidence names, which unblocks the strategy/goal/comparison cutovers.
+- The manual route's dispatch gate stands unchanged — lifting it belongs to the cutover slices.

@@ -43,6 +43,7 @@ import {
   type DataProviderPorts,
 } from "../data/buildDataProviderPorts";
 import { resolveUniverseDepsFromStageInput } from "./universeDepsResidency";
+import { resolveChainSourceForRequest } from "./brokerChainSourceResidency";
 import { stageQueueSendFromEnv } from "./stageQueueTransport";
 import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
 import { screenerStepDepsForWorkflow } from "../services/screenerPipelineJobs";
@@ -70,7 +71,6 @@ import { createD1IndexListDb, D1IndexListStore } from "../data/d1IndexListAdapte
 import {
   createIndexMembershipService,
   createWikipediaIndexMembershipAdapter,
-  ETradeRestClient,
 } from "../trading";
 import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
 import { fetchWikipediaIndexHtml } from "../services/indexListJob";
@@ -202,16 +202,19 @@ export function optionsStepDepsForWorkflow(
     definitions: stores.definitions,
     artifacts: stores.artifacts,
     env,
-    // The chain source is the tenant's broker client: tokens
-    // resolve from KV via env + login (getValidTokens), so the
-    // client is constructible in workflow residency exactly as on
-    // the host. No login ⇒ no source ⇒ the chain fetch fails
-    // honestly with the screener's no-source error, never a
-    // crash. Provider/broker selection is #3960's gap: until it
-    // lands, the workflow host fetches the tenant's broker
-    // chains, as every options leg does today.
-    chainSourceFor: (userLogin) =>
-      userLogin ? new ETradeRestClient(env, userLogin) : undefined,
+    // The chain source is the run's broker client, resolved per
+    // invocation from the run's broker stage input (#3960): the
+    // factory decodes the (broker, mode) descriptor from the
+    // stored request and resolves through the platform registry,
+    // so two runs may carry different brokers at the same time.
+    // Runs carrying no input keep the legacy direct client
+    // construction. Tokens resolve from KV via env + login
+    // (getValidTokens), so the client is constructible in
+    // workflow residency exactly as on the host. No login ⇒ no
+    // source ⇒ the chain fetch fails honestly with the
+    // screener's no-source error, never a crash.
+    chainSourceFor: (userLogin, request, runId) =>
+      resolveChainSourceForRequest(env, { userLogin, request, runId }),
     // Issue #4453: the stage-message queue, built from env — the
     // residency publishes one boundary message per stage through
     // the same queue the production legs publish through. Null

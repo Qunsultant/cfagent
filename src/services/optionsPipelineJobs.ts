@@ -45,7 +45,8 @@
  * stage_request_unrecognized, stage_port_unavailable (comparison
  * shapes; a goal request with no stamped goal run id; a manual
  * rebuild with no bound environment; a universe stage input with
- * no bound factory, #4473).
+ * no bound factory, #4473; a broker stage input with no bound
+ * chain source, #3960).
  */
 import type { JobArtifactStore, JobDefinitionStore } from "../data/jobPipelinePorts";
 import type { ScanRunStore } from "../data/scanRunPorts";
@@ -76,6 +77,7 @@ import {
 } from "../workflows/optionsScreenEngine";
 import {
   assertOptionsStageRebuildable,
+  decodeBrokerStageInput,
   decodeOptionsRequestShape,
   decodeUniverseDepsStageInput,
   rebuildOptionsStepDeps,
@@ -101,13 +103,18 @@ export interface OptionsWorkflowStepDeps {
   env?: Env;
   /**
    * The chain source one invocation fetches through, resolved from
-   * the acting login + request. Absent, or returning undefined, the
-   * stages fetch through no source and fail honestly at the first
-   * chain fetch (the screener's no-source error, never a crash).
+   * the acting login + request + run id. The factory decodes the
+   * run's broker stage input (#3960) from the request and resolves
+   * per invocation; absent, or returning undefined, the stages
+   * fetch through no source and fail honestly at the first chain
+   * fetch (the screener's no-source error, never a crash). A run
+   * carrying a broker input with no factory bound refuses by name
+   * before any execution (the resolving steps enforce it).
    */
   chainSourceFor?: (
     userLogin: string | undefined,
     request: unknown,
+    runId: string,
   ) => OptionChainSource | undefined;
   /** The scan-run store, when the residency has one (scanner-shape persist). */
   scanRunStore?: ScanRunStore;
@@ -271,6 +278,21 @@ export function registerOptionsWorkflowSteps(
     const shape = decodeOptionsRequestShape(request, runId);
     // Refuse unrebuildable shapes/stages before any execution.
     assertOptionsStageRebuildable(shape, stageId, runId);
+    // #3960: the run's broker stage input, decoded before any
+    // resolution work — a malformed descriptor refuses by name
+    // here, with the run named, rather than at the first chain
+    // fetch. Present with no chain source bound, refuse by name
+    // too: a run that names its broker must never silently fetch
+    // through no source (the #4473 no-factory discipline).
+    // Absent, the factory resolves the legacy direct client, as
+    // before.
+    const brokerInput = decodeBrokerStageInput(request, runId);
+    if (brokerInput && !deps.chainSourceFor) {
+      throw new OptionsStepPortsError(
+        "stage_port_unavailable",
+        `options run ${runId}: the stored request carries a broker stage input (broker "${brokerInput.broker}", ${brokerInput.mode} mode) but this residency binds no chain source — the screener cannot resolve its chains; bind chainSourceFor (the #3960 residency factory) and re-dispatch`,
+      );
+    }
     // #4473: the run's universe stage input, resolved per
     // invocation. Absent, the factory is never called and the
     // rebuild constructs the screener without deps, as before.
@@ -303,7 +325,7 @@ export function registerOptionsWorkflowSteps(
       storage: optionsStageStorageFromArtifacts(deps.artifacts, ctx.runId),
       ...(deps.env ? { env: deps.env } : {}),
       ...(deps.chainSourceFor
-        ? { chainSource: deps.chainSourceFor(userLogin, request) }
+        ? { chainSource: deps.chainSourceFor(userLogin, request, runId) }
         : {}),
       ...(deps.scanRunStore ? { scanRunStore: deps.scanRunStore } : {}),
       ...(deps.queue !== undefined ? { queue: deps.queue } : {}),
@@ -337,6 +359,18 @@ export function registerOptionsWorkflowSteps(
       request,
       runId,
     );
+    // #3960: the run's broker stage input, decoded before any
+    // execution — the same discipline as the screen step above:
+    // a malformed descriptor refuses by name here, and an input
+    // with no chain source bound refuses rather than fetching
+    // through no source.
+    const brokerInput = decodeBrokerStageInput(request, runId);
+    if (brokerInput && !deps.chainSourceFor) {
+      throw new OptionsStepPortsError(
+        "stage_port_unavailable",
+        `comparison run ${runId}: the stored request carries a broker stage input (broker "${brokerInput.broker}", ${brokerInput.mode} mode) but this residency binds no chain source — the comparison cannot load its snapshot; bind chainSourceFor (the #3960 residency factory) and re-dispatch`,
+      );
+    }
     // Env is REQUIRED: without it the llm arm cannot generate and
     // the hybrid arm cannot rank; a quant-only "comparison" would
     // silently equal the quant order and misrepresent itself as
@@ -348,7 +382,7 @@ export function registerOptionsWorkflowSteps(
       );
     }
     const dataAgent = new OptionsDataAgent(
-      new DynamicOptionsScreener(deps.chainSourceFor?.(userLogin, request)),
+      new DynamicOptionsScreener(deps.chainSourceFor?.(userLogin, request, runId)),
     );
     const snapshot = kernelSnapshotFromDataSnapshot(
       await dataAgent.loadSnapshot(strategyRequest),
