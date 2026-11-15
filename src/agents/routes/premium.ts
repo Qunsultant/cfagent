@@ -73,6 +73,7 @@ import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import type { MeteredGateOptions } from "../../services/meteredPaymentGate";
 import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
 import { quotaExceededDetails } from "../../security/userRequestQuota";
+import { PREMIUM_QUOTA_KINDS, chargePremiumQuota, premiumQuotaRefusalBody } from "../../services/premiumQuota";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -357,6 +358,20 @@ export async function handlePremiumRoutes(
         // under a caller-asserted login. The previous fallbacks
         // (sessionId, then a shared "premium_subscriber") are gone.
         const userLogin = request.headers.get("x-user-login") || payerScopeId(receipt.payer);
+        // Issue #4622: per-payer request quota — the same #2842 pool the
+        // stock-signals route charges, so a funded payer cannot loop this
+        // route with only a per-call payment in the way. Fail closed: an
+        // unattributable request does not run unaccounted.
+        const quota = await chargePremiumQuota({
+          env: ctx.env,
+          sql: ctx.sql,
+          userLogin,
+          kind: PREMIUM_QUOTA_KINDS.optionsScan,
+          runId: crypto.randomUUID(),
+        });
+        if (!quota.ok) {
+          return { success: false, service: tier.name, receipt, ...premiumQuotaRefusalBody(quota) };
+        }
         const rawEnvHdr = (request.headers.get("x-environment") || url.searchParams.get("env") || "").toUpperCase().trim();
         const reqEnvLocal = (rawEnvHdr === "TEST" || rawEnvHdr === "PROD") ? rawEnvHdr : undefined;
         // Issue #982 (screening consolidation S2): the paid scan
@@ -488,6 +503,18 @@ export async function handlePremiumRoutes(
         // Multi-tenant owner for the canonical research row (#183 identity
         // rule, same as the paid options scan above).
         const userLogin = request.headers.get("x-user-login") || payerScopeId(receipt.payer);
+        // Issue #4622: same per-payer quota as the paid options scan — one
+        // budget per payer across the premium routes, never an unaccounted run.
+        const quota = await chargePremiumQuota({
+          env: ctx.env,
+          sql: ctx.sql,
+          userLogin,
+          kind: PREMIUM_QUOTA_KINDS.marketResearch,
+          runId: crypto.randomUUID(),
+        });
+        if (!quota.ok) {
+          return { success: false, service: tier.name, receipt, ...premiumQuotaRefusalBody(quota) };
+        }
         let symbol = "NVDA";
         if (request.method === "POST") {
           const body = (await request.json().catch(() => ({}))) as any;

@@ -1,0 +1,3 @@
+### Fixed
+
+- Per-payer quota on the premium routes (#4622). The paid **options-scan** and **market-research** routes had no quota at all — stock-signals was the only premium route charging the #2842 per-user request quota. Both now charge that same gate before they run (`optionsScan`, `marketResearch` are consuming kinds in the #2842 matrix), partitioned per payer, so one funded payer or a runaway client loop hits the daily/weekly/monthly limits instead of only a per-call payment. The refusal body is the one stock-signals already returns. A quota-store failure still refuses as `quota unavailable` (fail closed); tenant attribution is best effort and never turns a payer away — the payer login is the partition.
