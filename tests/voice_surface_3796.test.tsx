@@ -89,7 +89,7 @@ describe("issue #3796 — the voice backend switch resolves per SURFACE", () => 
       "copilot_voice_backend:trading-desk",
     );
     // Copilot keys are byte-identical to the #3773 keys.
-    for (const registrationId of ["general", "options", "stock"] as const) {
+    for (const registrationId of ["general", "options", "stock", "biz"] as const) {
       expect(voiceBackendSettingKey(registrationId)).toBe(
         copilotVoiceBackendSettingKey(registrationId),
       );

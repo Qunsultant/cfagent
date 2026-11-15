@@ -156,7 +156,7 @@ describe("issue #3738 — copilot channel switch defaults record current behavio
     // No scattered fallbacks: the exported COPILOT_CHANNEL_DEFAULTS
     // table is the code-default layer, and every resolver default
     // resolution must agree with it cell for cell.
-    for (const registrationId of ["general", "options", "stock"] as const) {
+    for (const registrationId of ["general", "options", "stock", "biz"] as const) {
       for (const channel of CAPABILITY_CHANNELS) {
         const cell = COPILOT_CHANNEL_DEFAULTS[registrationId][channel];
         expect(typeof cell, `${registrationId}:${channel}`).toBe("boolean");
@@ -170,24 +170,26 @@ describe("issue #3738 — copilot channel switch defaults record current behavio
       general: { chat: true, webhooks: false, email: false, slack: false, voice: false },
       options: { chat: true, webhooks: false, email: false, slack: false, voice: false },
       stock: { chat: true, webhooks: false, email: false, slack: false, voice: true },
+      biz: { chat: true, webhooks: false, email: false, slack: false, voice: false },
     });
   });
 
   it("chat is ON for every registration (the base channel each renders today)", () => {
-    for (const registrationId of ["general", "options", "stock"] as const) {
+    for (const registrationId of ["general", "options", "stock", "biz"] as const) {
       const r = resolveCopilotChannel({ registrationId, channel: "chat" });
       expect(r).toMatchObject({ enabled: true, source: "default" });
     }
   });
 
-  it("voice is ON only for stock (the #3720 activation); general/options have no voice channel wired", () => {
+  it("voice is ON only for stock (the #3720 activation); general/options/biz have no voice channel wired", () => {
     expect(resolveCopilotChannel({ registrationId: "stock", channel: "voice" }).enabled).toBe(true);
     expect(resolveCopilotChannel({ registrationId: "general", channel: "voice" }).enabled).toBe(false);
     expect(resolveCopilotChannel({ registrationId: "options", channel: "voice" }).enabled).toBe(false);
+    expect(resolveCopilotChannel({ registrationId: "biz", channel: "voice" }).enabled).toBe(false);
   });
 
   it("webhooks/email/slack are OFF per registration (class-level channels, no registration surface)", () => {
-    for (const registrationId of ["general", "options", "stock"] as const) {
+    for (const registrationId of ["general", "options", "stock", "biz"] as const) {
       for (const channel of ["webhooks", "email", "slack"] as const) {
         const r = resolveCopilotChannel({ registrationId, channel });
         expect(r, `${registrationId}:${channel}`).toMatchObject({
@@ -199,7 +201,7 @@ describe("issue #3738 — copilot channel switch defaults record current behavio
   });
 
   it("the model covers every registration × every manifest channel", () => {
-    for (const registrationId of ["general", "options", "stock"] as const) {
+    for (const registrationId of ["general", "options", "stock", "biz"] as const) {
       const all = resolveCopilotChannels({ registrationId });
       expect(Object.keys(all).sort()).toEqual([...CAPABILITY_CHANNELS].sort());
     }
@@ -207,7 +209,7 @@ describe("issue #3738 — copilot channel switch defaults record current behavio
 
   it("registration ids and sourceTab carriers pin against the client registry", () => {
     const registryIds = getRegisteredCopilots().map((c) => c.id).sort();
-    expect(registryIds).toEqual(["general", "options", "stock"]);
+    expect(registryIds).toEqual(["biz", "general", "options", "stock"]);
     for (const id of registryIds) {
       expect(isCopilotRegistrationId(id)).toBe(true);
       expect(COPILOT_REGISTRATION_SOURCE_TABS[id as keyof typeof COPILOT_REGISTRATION_SOURCE_TABS]).toBe(

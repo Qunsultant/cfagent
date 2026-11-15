@@ -431,6 +431,20 @@ describe("#686 carried-forward 3a pins — prompt builder byte-identity + clamp"
     ).toBe(EXPECTED_PROMPTS.autoResearch);
   });
 
+  it("bizCopilotTenants fixture: the BizCopilot tenant-result prompt (#4515)", () => {
+    expect(
+      buildOrchestratorSystemPrompt({
+        route: { agent: "trading", confidence: 1, reason: "Direct execution" },
+        memoryContext: "",
+        vectorContext: "",
+        optionsResearchContext: "",
+        isAutoOptionsResearchRequest: false,
+        bizCopilotTenantContext:
+          'BIZCOPILOT_TENANT_RESULT: {"action":"list","tenantId":null,"pageUrl":"https://agent.openaimp.com/?tab=platform-admin&view=tenants","result":{"tenants":[]}}',
+      })
+    ).toBe(EXPECTED_PROMPTS.bizCopilotTenants);
+  });
+
   it("R8: the sanitized clamp is now the production resolver for the class", () => {
     expect(makeAgent({ AI: {} }).agent.maxSteps).toBe(6);
     expect(makeAgent({ AI: {}, MAS_MAX_STEPS: "99" }).agent.maxSteps).toBe(10);
