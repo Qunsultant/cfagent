@@ -23,11 +23,23 @@
  * - resource_comparison_reports: one row per day, the
  *   comparison report JSON for the latest completed rollup
  *   day.
+ *
+ * #4282 P6a (#4384): the reads + upserts are catalogue
+ * entries (dml.d1.resource_daily_rollups.*,
+ * dml.d1.resource_alert_state.*,
+ * dml.d1.resource_comparison_reports.*), executed through the
+ * DML executor. INSERT OR REPLACE becomes
+ * insert().onConflictDoUpdate() setting every column (row
+ * content identical). The CREATEs stay the DDL catalogue's
+ * text, issued via db.run(sql.raw(...)).
  */
+import { sql } from "drizzle-orm";
 import type { ResourceD1Db } from "./d1ResourceUsageAdapter";
 import type { AlertState, ResourceRollupStorePort } from "./resourceRollupPorts";
 import type { DailyRollupRow } from "../telemetry/resourceRollup";
 import { d1TableSql } from "./schemaComponent/d1Catalogue";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { executeDml } from "./schemaComponent/dmlExecutor";
 
 export type { ResourceD1Db };
 
@@ -41,33 +53,36 @@ export class D1ResourceRollupStore implements ResourceRollupStorePort {
   constructor(private readonly db: ResourceD1Db) {}
 
   async ensureSchema(): Promise<void> {
-    for (const sql of CREATE_TABLES_SQL) {
-      await this.db.prepare(sql).bind().run();
+    for (const createSql of CREATE_TABLES_SQL) {
+      await this.db.run(sql.raw(createSql));
     }
   }
 
   async writeDailyRollup(day: string, rows: readonly DailyRollupRow[]): Promise<void> {
     for (const row of rows) {
-      await this.db
-        .prepare(
-          `INSERT OR REPLACE INTO resource_daily_rollups
-         (day, ns, op, caller, trigger, ops, rows_read, rows_written)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(row.day, row.ns, row.op, row.caller, row.trigger, row.ops, row.rowsRead, row.rowsWritten)
-        .run();
+      await executeDml(DML_CATALOGUE, this.db, "dml.d1.resource_daily_rollups.upsert", {
+        values: {
+          day: row.day,
+          ns: row.ns,
+          op: row.op,
+          caller: row.caller,
+          trigger: row.trigger,
+          ops: row.ops,
+          rowsRead: row.rowsRead,
+          rowsWritten: row.rowsWritten,
+        },
+      });
     }
   }
 
   async readDailyRollup(day: string): Promise<DailyRollupRow[]> {
-    const result = await this.db
-      .prepare(
-        `SELECT day, ns, op, caller, trigger, ops, rows_read, rows_written
-       FROM resource_daily_rollups WHERE day = ? ORDER BY ns, op, caller, trigger`
-      )
-      .bind(day)
-      .all();
-    return (result.results as Array<Record<string, unknown>>).map((r) => ({
+    const rows = (await executeDml(
+      DML_CATALOGUE,
+      this.db,
+      "dml.d1.resource_daily_rollups.read_day",
+      { day },
+    )) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
       day: String(r.day),
       ns: String(r.ns),
       op: String(r.op),
@@ -81,23 +96,24 @@ export class D1ResourceRollupStore implements ResourceRollupStorePort {
 
   /** Latest day with any rollup row, or null before the first rollup lands. */
   async latestCompletedRollupDay(): Promise<string | null> {
-    const result = await this.db
-      .prepare(`SELECT MAX(day) AS day FROM resource_daily_rollups`)
-      .bind()
-      .all();
-    const day = (result.results[0] as { day?: unknown } | undefined)?.day;
+    const rows = (await executeDml(
+      DML_CATALOGUE,
+      this.db,
+      "dml.d1.resource_daily_rollups.latest_day",
+      {},
+    )) as Array<{ day?: unknown }>;
+    const day = rows[0]?.day;
     return typeof day === "string" ? day : null;
   }
 
   async getAlertState(budget: string, day: string): Promise<AlertState | null> {
-    const result = await this.db
-      .prepare(
-        `SELECT budget, day, alerted_at, delivered, note FROM resource_alert_state
-       WHERE budget = ? AND day = ?`
-      )
-      .bind(budget, day)
-      .all();
-    const row = result.results[0] as Record<string, unknown> | undefined;
+    const rows = (await executeDml(
+      DML_CATALOGUE,
+      this.db,
+      "dml.d1.resource_alert_state.read",
+      { budget, day },
+    )) as Array<Record<string, unknown>>;
+    const row = rows[0];
     if (!row) return null;
     return {
       budget: String(row.budget),
@@ -114,31 +130,40 @@ export class D1ResourceRollupStore implements ResourceRollupStorePort {
     delivered: boolean,
     note: string | null
   ): Promise<void> {
-    await this.db
-      .prepare(
-        `INSERT OR REPLACE INTO resource_alert_state
-       (budget, day, alerted_at, delivered, note) VALUES (?, ?, ?, ?, ?)`
-      )
-      .bind(budget, day, Date.now(), delivered ? 1 : 0, note)
-      .run();
+    await executeDml(DML_CATALOGUE, this.db, "dml.d1.resource_alert_state.upsert", {
+      values: {
+        budget,
+        day,
+        alertedAt: Date.now(),
+        delivered: delivered ? 1 : 0,
+        note,
+      },
+    });
   }
 
   async writeComparisonReport(day: string, report: unknown): Promise<void> {
-    await this.db
-      .prepare(
-        `INSERT OR REPLACE INTO resource_comparison_reports
-       (day, generated_at, report_json) VALUES (?, ?, ?)`
-      )
-      .bind(day, Date.now(), JSON.stringify(report))
-      .run();
+    await executeDml(
+      DML_CATALOGUE,
+      this.db,
+      "dml.d1.resource_comparison_reports.upsert",
+      {
+        values: {
+          day,
+          generatedAt: Date.now(),
+          reportJson: JSON.stringify(report),
+        },
+      },
+    );
   }
 
   async readComparisonReport(day: string): Promise<unknown | null> {
-    const result = await this.db
-      .prepare(`SELECT report_json FROM resource_comparison_reports WHERE day = ?`)
-      .bind(day)
-      .all();
-    const row = result.results[0] as { report_json?: unknown } | undefined;
+    const rows = (await executeDml(
+      DML_CATALOGUE,
+      this.db,
+      "dml.d1.resource_comparison_reports.read",
+      { day },
+    )) as Array<{ report_json?: unknown }>;
+    const row = rows[0];
     if (!row || typeof row.report_json !== "string") return null;
     return JSON.parse(row.report_json) as unknown;
   }
