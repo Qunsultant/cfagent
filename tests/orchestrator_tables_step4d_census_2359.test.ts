@@ -154,7 +154,19 @@ function fileWritesTable(file: string, table: string): boolean {
   for (const [name, t] of constants) {
     if (t === table) names.push(`\\$\\{${name}\\}`);
   }
-  return new RegExp(`${WRITE_VERB}\\s+(?:${names.join("|")})`, "gi").test(text);
+  if (new RegExp(`${WRITE_VERB}\\s+(?:${names.join("|")})`, "gi").test(text)) return true;
+  // #4282 P6c (#4386): the DO DML catalogue's repository entries
+  // are method descriptors, not write-verb + table-name text —
+  // the catalogue declares each table it writes with a
+  // `table: "<name>"` entry field. That declaration counts as
+  // writing the table, scoped to the catalogue file so no other
+  // table's pin moves. (Template entries already match through
+  // the write-verb path; the carve-out makes the set uniform.)
+  // Mirrors the global census's P6b carve-out.
+  if (file === "src/data/schemaComponent/doDmlEntries.ts") {
+    return new RegExp(`table:\\s*"${table}"`, "i").test(text);
+  }
+  return false;
 }
 
 function writerSet(table: string): string[] {
@@ -279,21 +291,29 @@ describe("4d family census: writer sets", () => {
     // masRetentionIndexes bypass was retired by #2362
     // (step 4f) — the index helper now lives in the data
     // layer.
+    // #4386 (P6c): the DML moved from the adapters into the DO
+    // DML catalogue as repository entries — the writer set is
+    // unchanged in kind (DML home + schema authority), only the
+    // file moved.
     expect(writerSet("mas_messages")).toEqual([
-      "src/data/doSqliteOrmAdapters.ts",
+      "src/data/schemaComponent/doDmlEntries.ts",
       "src/data/schemaComponent/ormCatalogue.ts",
     ]);
     // mas_memory: unchanged — the layer was already its only
     // writer; this slice closed its READ bypasses instead.
+    // #4386 (P6c): the DML moved into the DO DML catalogue
+    // (see mas_messages above).
     expect(writerSet("mas_memory")).toEqual([
-      "src/data/doSqliteOrmAdapters.ts",
+      "src/data/schemaComponent/doDmlEntries.ts",
       "src/data/schemaComponent/ormCatalogue.ts",
     ]);
     // mas_transactions: orchestrator.ts seed-purge bypass
     // CLOSED by 4d; the payments route bypass was closed by
     // #2360 (step 4d-2) — the writer set is layer-only.
+    // #4386 (P6c): the DML moved into the DO DML catalogue
+    // (see mas_messages above).
     expect(writerSet("mas_transactions")).toEqual([
-      "src/data/doSqliteOrmAdapters.ts",
+      "src/data/schemaComponent/doDmlEntries.ts",
       "src/data/schemaComponent/ormCatalogue.ts",
     ]);
     // mas_ads: orchestrator.ts seed bypass CLOSED.
