@@ -1,0 +1,3 @@
+### Added
+
+- **NLQ panel leg dispatches through the strategy workflow host (#4468):** discovery panel expressions now run through `startStrategyScreenWorkflow` when the gate holds — the leg's (broker, mode) pair derives from the platform the run executes on (mirroring each platform's own environment resolution, so the residency fetches the same environment's chains the sync dispatch would) and the residency bindings are configured. Gated-out runs stay on the unchanged sync dispatch; the run's job record shows which dispatch served it. Host-path expressions record over the residency's durable stores, so per-stage control from the copilot turn awaits #4505.

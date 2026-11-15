@@ -602,6 +602,15 @@ function measure(): Map<string, number> {
  * reconciled to measured here. No new rows; the catalog entry
  * adds no brand line (outcomeCatalog.json is one line, counts
  * unchanged). Totals move 1191/9356 -> 1191/9346.
+ * Baseline update (#4468, 2026-11-15): the NLQ panel leg's
+ * (broker, mode) derivation names each catalog broker to mirror
+ * that platform's own environment resolution — naming the
+ * provider is the derivation's job, dispositioned INTEGRATION.
+ * 1 new row (discoveryService.ts alpaca 2: the case line and the
+ * descriptor line; the side resolver rides the trading barrel,
+ * #290) and 1 raise (discoveryService.ts etrade 2 -> 4: the case
+ * line and the descriptor line). The derivation's comments name
+ * no provider. Totals move 1191/9346 -> 1192/9350.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -1264,7 +1273,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/deliverJobs.ts", "etrade", 3],
   ["src/services/deliverPipelineJobs.ts", "alpaca", 2],
   ["src/services/deliverPipelineJobs.ts", "yahoo", 2],
-  ["src/services/discoveryService.ts", "etrade", 2],
+  ["src/services/discoveryService.ts", "alpaca", 2],
+  ["src/services/discoveryService.ts", "etrade", 4],
   ["src/services/discoveryService.ts", "yahoo", 1],
   ["src/services/durableFibers.ts", "etrade", 2],
   ["src/services/enrichJobs.ts", "yahoo", 4],
