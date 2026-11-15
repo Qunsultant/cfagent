@@ -43,10 +43,15 @@
  *   COMMERCIAL_STORE_OPERATORS list (which gates money writes
  *   in the payment routes and would exclude the platform admins
  *   this panel is built for).
- * - Reads emit no audit events (the service-user status and
- *   tenant-queue preview rule); an unbound store answers 503
- *   rather than a guessed Free, and no schema is ensured on a
- *   read path (mirroring the pricing GET).
+ * - Audit (#4605):
+ *   - Self-view (`me`) emits no audit events by recorded decision
+ *     (high-frequency self-status read, matching pricing GET).
+ *   - Operator lookup (`lookup`) emits a best-effort audit event
+ *     (`platform.user_admin.lookup`) via `ctx.audit` and, when
+ *     tenant-scoped, appends a Q7 chain link (`agent_audit_chain`)
+ *     via `appendAuditChainBestEffort`; an unbound store still
+ *     answers 503 rather than a guessed Free, and no schema is
+ *     ensured on a read path (mirroring the pricing GET).
  */
 
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
@@ -69,16 +74,21 @@ import type {
 } from "../../security/authorization";
 import type { KvLike } from "../../security/kvResilience";
 import type { Env } from "../../types";
+import { createEnsuredAuditPolicyAdapter } from "../../data/createAuditPolicyPorts";
+import type { AuditPolicyPort } from "../../data/auditPolicyPorts";
+import { appendAuditChainBestEffort } from "../../services/auditGate";
 
 export interface PlatformUsersRouteContext {
   /** Worker env (carries the SESSION_STORE + AGENT_DB bindings). */
   env: Env;
-  /** Audit funnel (owner: OrchestratorAgent.audit). Reads emit nothing. */
+  /** Audit funnel (owner: OrchestratorAgent.audit). Operator lookups emit; self-view (`me`) emits nothing. */
   audit(
     type: string,
     agent: "orchestrator",
     payload: Record<string, unknown>,
   ): void;
+  /** Test seam: use this audit-policy port for Q7 chain appends instead of AGENT_DB. */
+  auditPolicy?: AuditPolicyPort | null;
   /** Test seam: use these ports instead of the composition-root adapters. */
   commercial?: CommercialStore | null;
   /** Test seam: use these ports instead of the composition-root adapters. */
@@ -259,7 +269,33 @@ export async function handlePlatformUsersRoutes(
     if (!isLoginShaped(targetLogin)) {
       return jsonError("login is required and must be a shaped login.", 400);
     }
-    return Response.json(await buildUserView(ctx, targetLogin));
+    const view = await buildUserView(ctx, targetLogin);
+    const tenantId = view.currentTenantId ?? view.tenantId;
+    const auditPayload = {
+      actorLogin: caller,
+      targetLogin,
+      tenantId,
+      hasAccount: view.hasAccount,
+    };
+    try {
+      ctx.audit("platform.user_admin.lookup", "orchestrator", auditPayload);
+    } catch {
+      // Best-effort audit on operator read: never fail the read.
+    }
+    if (tenantId) {
+      void appendAuditChainBestEffort(
+        () =>
+          ctx.auditPolicy !== undefined
+            ? Promise.resolve(ctx.auditPolicy)
+            : createEnsuredAuditPolicyAdapter(ctx.env as { AGENT_DB?: unknown }),
+        {
+          tenantId,
+          action: "platform.user_admin.lookup",
+          payload: auditPayload,
+        },
+      );
+    }
+    return Response.json(view);
   } catch {
     return jsonError("Platform user administration unavailable.", 503);
   }

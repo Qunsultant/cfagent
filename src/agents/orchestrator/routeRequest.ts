@@ -484,9 +484,11 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
   });
   if (platformUsersResponse) return platformUsersResponse;
-  // Issue #2221: tenant admin routes, after agentic-payments.
+  // Issue #2221 + #4605: tenant admin routes, after agentic-payments,
+  // with the orchestrator audit funnel supplied.
   const platformTenantResponse = await handlePlatformTenantRoutes(request, url, path, sessionId, {
     env: deps.env,
+    audit: (type, agent, payload) => deps.audit(type, agent, payload),
   });
   if (platformTenantResponse) return platformTenantResponse;
 

@@ -10,7 +10,8 @@
  *   OPERATOR read: the caller must hold a live platform-admin
  *   membership (the same gate the IAAA panel's overview route
  *   enforces server-side). Tenant admins and unwired callers
- *   get 403 with no data. Reads emit no audit events.
+ *   get 403 with no data. Self-view (`me`) emits no audit events;
+ *   operator lookup (`lookup`) emits `platform.user_admin.lookup` (#4605).
  * - Both views are READ-ONLY displays built from existing ports
  *   only: resolvePlatformIdentity for identity + account
  *   linkage, the IAAA membership store for memberships. No user
@@ -298,7 +299,16 @@ describe("platform user admin routes (#2220)", () => {
     expect(body!.tier).toBe("Subscribed");
     expect(body!.includedRunsRemaining).toBe(10);
     expect((body!.memberships as Array<Record<string, unknown>>).map((m) => m.tenantId)).toEqual(["acme"]);
-    expect(audit).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledWith(
+      "platform.user_admin.lookup",
+      "orchestrator",
+      expect.objectContaining({
+        actorLogin: CALLER_LOGIN,
+        targetLogin: TARGET_LOGIN,
+        tenantId: "acme",
+        hasAccount: true,
+      }),
+    );
   });
 
   it("operator lookup: tenant admins, unwired callers, and anonymous callers get 403/401 with no data", async () => {
