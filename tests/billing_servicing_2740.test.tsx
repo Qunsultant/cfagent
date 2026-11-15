@@ -192,16 +192,32 @@ describe("billing servicing panel", () => {
     container?.remove();
     container = null;
     vi.restoreAllMocks();
+    window.history.pushState(null, "", "/");
   });
 
-  it("renders subscription, receipts, plans, referral balance, and support snapshot", async () => {
+  it("renders subscription, receipts, plans, and referral balance on the Overview tab", async () => {
     const restore = await renderPanel(billingFetch());
     try {
       const text = container!.textContent ?? "";
       expect(text).toMatch(/Subscribed/);
       expect(text).toMatch(/Pro/);
       expect(text).toMatch(/referrer-1/);
+      // The Support snapshot lives in its own tab now (#4638) — its
+      // card (the "Account: owner" line) is not mounted on the default
+      // Overview tab. (The tab row itself still carries the label.)
+      expect(text).not.toMatch(/Account: owner/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders the support snapshot in its own tab (#4638)", async () => {
+    window.history.pushState(null, "", "/?tab=billing&view=support-snapshot");
+    const restore = await renderPanel(billingFetch());
+    try {
+      const text = container!.textContent ?? "";
       expect(text).toMatch(/Support snapshot/);
+      expect(text).toMatch(/Account: owner/);
     } finally {
       restore();
     }

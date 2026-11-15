@@ -21,11 +21,21 @@
  * server error bodies are never rendered. Referral rule values render as
  * operator-set PROPOSED, pending owner approval (per #2657 §15).
  * ui primitives only, token-only styling.
+ *
+ * Issue #4638 — the sections render as URL-synced sub-tabs (ProductHub
+ * pattern: `useUrlSyncedTabs` on "view" + Tabs/TabPanel + visitedTabs
+ * gating), Overview first and default; each section appears exactly
+ * once, in its own tab. Tabs change navigation only, never who sees
+ * what: operator-only sections keep their existing non-operator
+ * behaviour inside their tab.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
 import { PageShell, PageSection } from "./components/ui/PageShell";
+import { Tabs, TabPanel, type TabOption } from "./components/ui";
+import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { fetchPlatformIdentity } from "./firstRunApi";
 import { receiptKindLabel } from "./agenticWalletApi";
 import { RefundPolicySection } from "./RefundPolicySection";
@@ -60,7 +70,58 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export type BillingTab =
+  | "overview"
+  | "refund-policy"
+  | "refund-flow"
+  | "usage-billing"
+  | "referral-codes"
+  | "approved-free-quota"
+  | "top-up-limits"
+  | "offer-rules"
+  | "plan-stripe-price"
+  | "support-snapshot";
+
+export const BILLING_TABS: readonly BillingTab[] = [
+  "overview",
+  "refund-policy",
+  "refund-flow",
+  "usage-billing",
+  "referral-codes",
+  "approved-free-quota",
+  "top-up-limits",
+  "offer-rules",
+  "plan-stripe-price",
+  "support-snapshot",
+] as const;
+
+export function isValidBillingTab(tab: unknown): tab is BillingTab {
+  return (
+    typeof tab === "string" &&
+    (BILLING_TABS as readonly string[]).includes(tab)
+  );
+}
+
+const BILLING_TAB_OPTIONS: TabOption<BillingTab>[] = [
+  { id: "overview", label: "Overview" },
+  { id: "refund-policy", label: "Refund policy" },
+  { id: "refund-flow", label: "Refund flow" },
+  { id: "usage-billing", label: "Usage billing" },
+  { id: "referral-codes", label: "Referral codes" },
+  { id: "approved-free-quota", label: "Approved free quota" },
+  { id: "top-up-limits", label: "Top-up limits" },
+  { id: "offer-rules", label: "Offer rules" },
+  { id: "plan-stripe-price", label: "Plan Stripe Price mappings" },
+  { id: "support-snapshot", label: "Support snapshot" },
+];
+
 export function BillingServicingPanel() {
+  const { activeTab, visitedTabs, handleTabChange } =
+    useUrlSyncedTabs<BillingTab>({
+      param: "view",
+      isValid: isValidBillingTab,
+      defaultTab: "overview",
+    });
   const [view, setView] = useState<BillingView | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -148,86 +209,215 @@ export function BillingServicingPanel() {
       )}
       {!loading && !loadError && view && (
         <>
-          <Card>
-            <p>Current tier: {view.tier}</p>
-            <p>Subscription: {view.subscriptionStatus}</p>
-            {view.periodEndISO && <p>Current period ends: {view.periodEndISO}</p>}
-            <p>Subscriptions on file: {view.subscriptionCount}</p>
-            <p>
-              To cancel a subscription, go to{" "}
-              <a href="?tab=checkout&checkoutTab=subscriptions">Checkout → Subscriptions</a>. This view never
-              cancels — cancellation lives in Checkout (2.14).
-            </p>
-          </Card>
-          <Card>
-            <p>Paid-call receipts ({view.receipts.length})</p>
-            {receiptsError && <p>{receiptsError}</p>}
-            {!receiptsError && view.receipts.length === 0 && <p>No receipts recorded yet.</p>}
-            {view.receipts.map((entry) => (
-              <p key={entry.id}>
-                {receiptKindLabel(entry)} — {entry.amountUSD !== null ? `$${entry.amountUSD.toFixed(2)} USD` : "—"} —{" "}
-                {entry.provenance}
-              </p>
-            ))}
-          </Card>
-          <Card>
-            <p>Active plans</p>
-            {view.plans.length === 0 && <p>No active subscription plan — operator data missing.</p>}
-            {view.plans.map((plan) => (
-              <p key={plan.id}>
-                {plan.name} — ${plan.priceUSD.toFixed(2)} / {plan.periodDays} days
-              </p>
-            ))}
-          </Card>
-          <Card>
-            <p>Bundle purchases ({view.bundles.activePurchaseCount} active)</p>
-            {view.bundles.purchases.length === 0 && <p>No bundle purchases recorded yet.</p>}
-            {view.bundles.purchases.map((purchase) => (
-              <p key={purchase.id}>
-                Bundle {purchase.bundleId} — {purchase.status} — period ends{" "}
-                {new Date(purchase.periodEndMs).toISOString()}
-              </p>
-            ))}
-            {view.bundles.liveEntitlementCount > 0 && (
-              <p>
-                Live member entitlements: {view.bundles.liveEntitlementCount} —{" "}
-                {view.bundles.entitlements
-                  .filter((e) => e.status === "active")
-                  .map((e) => e.productId)
-                  .join(", ")}
-              </p>
-            )}
-            <p>
-              Bundle purchases are not refundable through the refund flow — the refund decision
-              for bundles is undecided (owner decision pending).
-            </p>
-          </Card>
-          <Card>
-            <p>Referral credits</p>
-            <p>Redeemable: ${view.referral.redeemableUSD.toFixed(2)} USD</p>
-            <p>Total earned: ${view.referral.totalEarnedUSD.toFixed(2)} USD</p>
-            <p>Attributed referrer: {view.referral.attributedReferrer ?? "none"}</p>
-            <p>{view.referral.rulesNote}</p>
-          </Card>
-          <RefundPolicySection />
-          <RefundFlowSection />
-          <UsageBillingSection />
-          <ReferralCodesSection />
-          <ApprovedFreeQuotaSection />
-          <TopUpLimitsSection />
-          <OfferRulesSection />
-          <PlanStripePriceSection />
-          <Card>
-            <p>Support snapshot</p>
-            <p>Account: {view.supportSnapshot.login}</p>
-            <p>Tier: {view.supportSnapshot.tier}</p>
-            <p>Subscription: {view.supportSnapshot.subscriptionStatus}</p>
-            <p>Receipts on file: {view.supportSnapshot.receiptsCount}</p>
-            <p>
-              Include these details when contacting the operator. No in-product support channel is
-              configured; support scope stays an owner decision.
-            </p>
-          </Card>
+          <Tabs<BillingTab>
+            idBase="billing"
+            ariaLabel="Billing sections"
+            tabs={BILLING_TAB_OPTIONS}
+            value={activeTab}
+            onChange={handleTabChange}
+          />
+
+          {/* Tabbed sections — mount on first visit, stay preserved. */}
+
+          {visitedTabs.has("overview") && (
+            <TabPanel
+              idBase="billing"
+              tabId="overview"
+              active={activeTab === "overview"}
+              retain
+            >
+              <ErrorBoundary label="Overview panel">
+                <Card>
+                  <p>Current tier: {view.tier}</p>
+                  <p>Subscription: {view.subscriptionStatus}</p>
+                  {view.periodEndISO && <p>Current period ends: {view.periodEndISO}</p>}
+                  <p>Subscriptions on file: {view.subscriptionCount}</p>
+                  <p>
+                    To cancel a subscription, go to{" "}
+                    <a href="?tab=checkout&checkoutTab=subscriptions">Checkout → Subscriptions</a>. This view never
+                    cancels — cancellation lives in Checkout (2.14).
+                  </p>
+                </Card>
+                <Card>
+                  <p>Paid-call receipts ({view.receipts.length})</p>
+                  {receiptsError && <p>{receiptsError}</p>}
+                  {!receiptsError && view.receipts.length === 0 && <p>No receipts recorded yet.</p>}
+                  {view.receipts.map((entry) => (
+                    <p key={entry.id}>
+                      {receiptKindLabel(entry)} — {entry.amountUSD !== null ? `$${entry.amountUSD.toFixed(2)} USD` : "—"} —{" "}
+                      {entry.provenance}
+                    </p>
+                  ))}
+                </Card>
+                <Card>
+                  <p>Active plans</p>
+                  {view.plans.length === 0 && <p>No active subscription plan — operator data missing.</p>}
+                  {view.plans.map((plan) => (
+                    <p key={plan.id}>
+                      {plan.name} — ${plan.priceUSD.toFixed(2)} / {plan.periodDays} days
+                    </p>
+                  ))}
+                </Card>
+                <Card>
+                  <p>Bundle purchases ({view.bundles.activePurchaseCount} active)</p>
+                  {view.bundles.purchases.length === 0 && <p>No bundle purchases recorded yet.</p>}
+                  {view.bundles.purchases.map((purchase) => (
+                    <p key={purchase.id}>
+                      Bundle {purchase.bundleId} — {purchase.status} — period ends{" "}
+                      {new Date(purchase.periodEndMs).toISOString()}
+                    </p>
+                  ))}
+                  {view.bundles.liveEntitlementCount > 0 && (
+                    <p>
+                      Live member entitlements: {view.bundles.liveEntitlementCount} —{" "}
+                      {view.bundles.entitlements
+                        .filter((e) => e.status === "active")
+                        .map((e) => e.productId)
+                        .join(", ")}
+                    </p>
+                  )}
+                  <p>
+                    Bundle purchases are not refundable through the refund flow — the refund decision
+                    for bundles is undecided (owner decision pending).
+                  </p>
+                </Card>
+                <Card>
+                  <p>Referral credits</p>
+                  <p>Redeemable: ${view.referral.redeemableUSD.toFixed(2)} USD</p>
+                  <p>Total earned: ${view.referral.totalEarnedUSD.toFixed(2)} USD</p>
+                  <p>Attributed referrer: {view.referral.attributedReferrer ?? "none"}</p>
+                  <p>{view.referral.rulesNote}</p>
+                </Card>
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("refund-policy") && (
+            <TabPanel
+              idBase="billing"
+              tabId="refund-policy"
+              active={activeTab === "refund-policy"}
+              retain
+            >
+              <ErrorBoundary label="Refund policy panel">
+                <RefundPolicySection />
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("refund-flow") && (
+            <TabPanel
+              idBase="billing"
+              tabId="refund-flow"
+              active={activeTab === "refund-flow"}
+              retain
+            >
+              <ErrorBoundary label="Refund flow panel">
+                <RefundFlowSection />
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("usage-billing") && (
+            <TabPanel
+              idBase="billing"
+              tabId="usage-billing"
+              active={activeTab === "usage-billing"}
+              retain
+            >
+              <ErrorBoundary label="Usage billing panel">
+                <UsageBillingSection />
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("referral-codes") && (
+            <TabPanel
+              idBase="billing"
+              tabId="referral-codes"
+              active={activeTab === "referral-codes"}
+              retain
+            >
+              <ErrorBoundary label="Referral codes panel">
+                <ReferralCodesSection />
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("approved-free-quota") && (
+            <TabPanel
+              idBase="billing"
+              tabId="approved-free-quota"
+              active={activeTab === "approved-free-quota"}
+              retain
+            >
+              <ErrorBoundary label="Approved free quota panel">
+                <ApprovedFreeQuotaSection />
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("top-up-limits") && (
+            <TabPanel
+              idBase="billing"
+              tabId="top-up-limits"
+              active={activeTab === "top-up-limits"}
+              retain
+            >
+              <ErrorBoundary label="Top-up limits panel">
+                <TopUpLimitsSection />
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("offer-rules") && (
+            <TabPanel
+              idBase="billing"
+              tabId="offer-rules"
+              active={activeTab === "offer-rules"}
+              retain
+            >
+              <ErrorBoundary label="Offer rules panel">
+                <OfferRulesSection />
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("plan-stripe-price") && (
+            <TabPanel
+              idBase="billing"
+              tabId="plan-stripe-price"
+              active={activeTab === "plan-stripe-price"}
+              retain
+            >
+              <ErrorBoundary label="Plan Stripe Price mappings panel">
+                <PlanStripePriceSection />
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("support-snapshot") && (
+            <TabPanel
+              idBase="billing"
+              tabId="support-snapshot"
+              active={activeTab === "support-snapshot"}
+              retain
+            >
+              <ErrorBoundary label="Support snapshot panel">
+                <Card>
+                  <p>Support snapshot</p>
+                  <p>Account: {view.supportSnapshot.login}</p>
+                  <p>Tier: {view.supportSnapshot.tier}</p>
+                  <p>Subscription: {view.supportSnapshot.subscriptionStatus}</p>
+                  <p>Receipts on file: {view.supportSnapshot.receiptsCount}</p>
+                  <p>
+                    Include these details when contacting the operator. No in-product support channel is
+                    configured; support scope stays an owner decision.
+                  </p>
+                </Card>
+              </ErrorBoundary>
+            </TabPanel>
+          )}
         </>
       )}
       </PageSection>
