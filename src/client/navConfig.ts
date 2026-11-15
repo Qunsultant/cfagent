@@ -285,12 +285,15 @@ export function isNavItemOrSubItemActive(
         // adds the Audit & Vault host: its two entries are the audit
         // and nlq views of `?tab=audit-vault`. Issue #4638 adds the
         // Billing page the same way: its sub-menu items are the
-        // section tabs of `?tab=billing&view=<id>`.
+        // section tabs of `?tab=billing&view=<id>`. Issue 4682 adds
+        // the Marketing Hub the same way: its three entries are the
+        // referrals, ads, and social views of `?tab=marketing-hub`.
         if (
           (currentTab === "screeners" ||
             currentTab === "stock-hub" ||
             currentTab === "product-hub" ||
             currentTab === "audit-vault" ||
+            currentTab === "marketing-hub" ||
             currentTab === "billing") &&
           view === sub.id
         )

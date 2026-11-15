@@ -3,6 +3,7 @@
   "audit": false,
   "chat": false,
   "endpoints": false,
+  "marketing-hub": false,
   "nlq": false,
   "options-flows": false,
   "payments": false,

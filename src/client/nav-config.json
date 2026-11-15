@@ -2,20 +2,11 @@
   "routes": [
     {
       "id": "ads",
-      "shellRetain": true,
       "navGroup": "ads",
       "crumb": "Marketplace",
       "category": "Marketing",
       "icon": "Ads",
-      "description": "Curated partner marketplace, developer sponsorships, and deal feed",
-      "navEntry": {
-        "label": "Sponsored Marketplace",
-        "shortLabel": "Deals",
-        "navOrder": 11,
-        "defaultVisible": true,
-        "badge": "Partners",
-        "badgeType": "neutral"
-      }
+      "description": "Curated partner marketplace, developer sponsorships, and deal feed. Retired in #4682; redirects to ?tab=marketing-hub&view=ads."
     },
     {
       "id": "agents",
@@ -27,7 +18,7 @@
       "navEntry": {
         "label": "Agents",
         "shortLabel": "Agents",
-        "navOrder": 18,
+        "navOrder": 16,
         "defaultVisible": true,
         "badge": "Registry",
         "badgeType": "neutral"
@@ -52,7 +43,7 @@
       "navEntry": {
         "label": "Assets Hub",
         "shortLabel": "Assets",
-        "navOrder": 26,
+        "navOrder": 24,
         "defaultVisible": true,
         "badge": "Assets",
         "badgeType": "pro"
@@ -68,7 +59,7 @@
       "navEntry": {
         "label": "Audit & Vault",
         "shortLabel": "Audit & Vault",
-        "navOrder": 19,
+        "navOrder": 17,
         "defaultVisible": true,
         "badge": "Vault",
         "badgeType": "pro"
@@ -101,7 +92,7 @@
       "navEntry": {
         "label": "Billing",
         "shortLabel": "Billing",
-        "navOrder": 25,
+        "navOrder": 23,
         "defaultVisible": true,
         "badge": "Billing",
         "badgeType": "neutral"
@@ -133,7 +124,7 @@
       "navEntry": {
         "label": "Checkout",
         "shortLabel": "Checkout",
-        "navOrder": 16,
+        "navOrder": 14,
         "defaultVisible": true,
         "badge": "Testnet",
         "badgeType": "pro"
@@ -149,7 +140,7 @@
       "navEntry": {
         "label": "DataHub",
         "shortLabel": "DataHub",
-        "navOrder": 27,
+        "navOrder": 25,
         "defaultVisible": true,
         "badge": "Data",
         "badgeType": "neutral"
@@ -165,7 +156,7 @@
       "navEntry": {
         "label": "Docs & Reports",
         "shortLabel": "Docs",
-        "navOrder": 22,
+        "navOrder": 20,
         "defaultVisible": true,
         "badge": "PDF",
         "badgeType": "neutral"
@@ -181,7 +172,7 @@
       "navEntry": {
         "label": "Developer & MCP",
         "shortLabel": "Endpoints",
-        "navOrder": 21,
+        "navOrder": 19,
         "defaultVisible": true,
         "badge": "MCP",
         "badgeType": "mcp"
@@ -207,10 +198,27 @@
       "navEntry": {
         "label": "Order History Ledger",
         "shortLabel": "Ledger",
-        "navOrder": 15,
+        "navOrder": 13,
         "defaultVisible": true,
         "badge": "AUDIT",
         "badgeType": "pro"
+      }
+    },
+    {
+      "id": "marketing-hub",
+      "shellRetain": true,
+      "navGroup": "marketing-hub",
+      "crumb": "Marketing Hub",
+      "category": "Marketing",
+      "icon": "Banners",
+      "description": "Referrals, sponsored offers, and social posting in one hub",
+      "navEntry": {
+        "label": "Marketing Hub",
+        "shortLabel": "Marketing",
+        "navOrder": 10,
+        "defaultVisible": true,
+        "badge": "Marketing",
+        "badgeType": "neutral"
       }
     },
     {
@@ -299,7 +307,7 @@
       "navEntry": {
         "label": "Payment Assurance",
         "shortLabel": "Assurance",
-        "navOrder": 23,
+        "navOrder": 21,
         "defaultVisible": true,
         "badge": "Test",
         "badgeType": "neutral"
@@ -316,7 +324,7 @@
       "navEntry": {
         "label": "Payments",
         "shortLabel": "Payments",
-        "navOrder": 13,
+        "navOrder": 11,
         "defaultVisible": true,
         "badge": "x402",
         "badgeType": "neutral"
@@ -332,7 +340,7 @@
       "navEntry": {
         "label": "Platform Admin",
         "shortLabel": "Admin",
-        "navOrder": 17,
+        "navOrder": 15,
         "defaultVisible": true,
         "badge": "Admin",
         "badgeType": "neutral"
@@ -365,7 +373,7 @@
       "navEntry": {
         "label": "Product Hub",
         "shortLabel": "Product Hub",
-        "navOrder": 24,
+        "navOrder": 22,
         "defaultVisible": true,
         "badge": "Catalog",
         "badgeType": "neutral"
@@ -373,20 +381,11 @@
     },
     {
       "id": "referrals",
-      "shellRetain": true,
       "navGroup": "referrals",
       "crumb": "Referrals",
       "category": "Marketing",
       "icon": "Referrals",
-      "description": "Community referral engine, reward tracking, and social share links",
-      "navEntry": {
-        "label": "Referrals & Earn",
-        "shortLabel": "Referrals",
-        "navOrder": 10,
-        "defaultVisible": true,
-        "badge": "Earn",
-        "badgeType": "new"
-      }
+      "description": "Community referral engine, reward tracking, and social share links. Retired in #4682; redirects to ?tab=marketing-hub&view=referrals."
     },
     {
       "id": "reports",
@@ -416,7 +415,7 @@
       "navEntry": {
         "label": "Revenue Analytics",
         "shortLabel": "Revenue",
-        "navOrder": 14,
+        "navOrder": 12,
         "defaultVisible": true,
         "badge": "Yield",
         "badgeType": "new"
@@ -491,7 +490,7 @@
       "navEntry": {
         "label": "SecurityHub",
         "shortLabel": "SecurityHub",
-        "navOrder": 28,
+        "navOrder": 26,
         "defaultVisible": true,
         "badge": "Security",
         "badgeType": "pro"
@@ -499,20 +498,11 @@
     },
     {
       "id": "social",
-      "shellRetain": true,
       "navGroup": "social",
       "crumb": "Social",
       "category": "Marketing",
       "icon": "Social",
-      "description": "Today's social brief editor, manual daily-post trigger, pending approvals, and per-channel token health",
-      "navEntry": {
-        "label": "Social Posting",
-        "shortLabel": "Social",
-        "navOrder": 12,
-        "defaultVisible": true,
-        "badge": "Daily",
-        "badgeType": "new"
-      }
+      "description": "Today's social brief editor, manual daily-post trigger, pending approvals, and per-channel token health. Retired in #4682; redirects to ?tab=marketing-hub&view=social."
     },
     {
       "id": "stock-hub",
@@ -600,7 +590,7 @@
       "navEntry": {
         "label": "Workflows & FAQ",
         "shortLabel": "Guides",
-        "navOrder": 20,
+        "navOrder": 18,
         "defaultVisible": true,
         "badge": "14 Guides",
         "badgeType": "neutral"
@@ -1208,6 +1198,29 @@
         "description": "Add another price — a new version (Admin Products)"
       }
     ],
+    "marketing-hub": [
+      {
+        "id": "referrals",
+        "label": "Referrals & Earn",
+        "shortLabel": "Referrals",
+        "icon": "Referrals",
+        "description": "Community referral engine, reward tracking, and social share links"
+      },
+      {
+        "id": "ads",
+        "label": "Sponsored Marketplace",
+        "shortLabel": "Deals",
+        "icon": "Ads",
+        "description": "Curated partner marketplace, developer sponsorships, and deal feed"
+      },
+      {
+        "id": "social",
+        "label": "Social Posting",
+        "shortLabel": "Social",
+        "icon": "Social",
+        "description": "Today's social brief editor, manual daily-post trigger, pending approvals, and per-channel token health"
+      }
+    ],
     "payments": [
       {
         "id": "payments",
@@ -1482,6 +1495,18 @@
     "product-hub:free-runs": {
       "tab": "product-hub",
       "view": "free-runs"
+    },
+    "marketing-hub:referrals": {
+      "tab": "marketing-hub",
+      "view": "referrals"
+    },
+    "marketing-hub:ads": {
+      "tab": "marketing-hub",
+      "view": "ads"
+    },
+    "marketing-hub:social": {
+      "tab": "marketing-hub",
+      "view": "social"
     },
     "stock-hub:screeners": {
       "tab": "stock-hub",
@@ -1869,8 +1894,9 @@
     },
     {
       "surface": "social",
-      "page": "social",
-      "param": "view",
+      "page": "marketing-hub",
+      "pageView": "social",
+      "param": "socialTab",
       "values": [
         "approvals",
         "brief",
@@ -1881,8 +1907,9 @@
     },
     {
       "surface": "ads",
-      "page": "ads",
-      "param": "view",
+      "page": "marketing-hub",
+      "pageView": "ads",
+      "param": "adsTab",
       "values": [
         "offers",
         "submit"
@@ -1890,13 +1917,24 @@
     },
     {
       "surface": "referrals",
-      "page": "referrals",
-      "param": "view",
+      "page": "marketing-hub",
+      "pageView": "referrals",
+      "param": "referralsTab",
       "values": [
         "activity",
         "community",
         "links",
         "share"
+      ]
+    },
+    {
+      "surface": "marketing-hub",
+      "page": "marketing-hub",
+      "param": "view",
+      "values": [
+        "referrals",
+        "ads",
+        "social"
       ]
     },
     {

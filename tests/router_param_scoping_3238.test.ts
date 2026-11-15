@@ -108,6 +108,34 @@ describe("router param scoping (#3238)", () => {
     );
   });
 
+  it("scopes the Marketing Hub's nested params to the hub (issue 4682)", () => {
+    // adsTab / referralsTab / socialTab name the inner tab of the
+    // hub's ads / referrals / social section: they survive navigation
+    // to the hub and drop on the way out, like every other page-owned
+    // param.
+    expect(
+      buildSearchWithTab("?tab=marketing-hub&view=ads&adsTab=submit", "marketing-hub"),
+    ).toBe("?tab=marketing-hub&view=ads&adsTab=submit");
+    expect(
+      buildSearchWithTab(
+        "?tab=marketing-hub&view=referrals&referralsTab=activity",
+        "marketing-hub",
+      ),
+    ).toBe("?tab=marketing-hub&view=referrals&referralsTab=activity");
+    expect(
+      buildSearchWithTab("?tab=marketing-hub&view=social&socialTab=posts", "marketing-hub"),
+    ).toBe("?tab=marketing-hub&view=social&socialTab=posts");
+    // buildSearchWithTab keeps `view` itself (the destination's own
+    // view handling drops it in navigateToTab), so the drop cases
+    // below carry no view — the nested param is what must drop.
+    expect(
+      buildSearchWithTab("?tab=marketing-hub&adsTab=submit", "portfolio"),
+    ).toBe("?tab=portfolio");
+    expect(
+      buildSearchWithTab("?tab=portfolio&adsTab=submit", "marketing-hub"),
+    ).toBe("?tab=marketing-hub&adsTab=submit");
+  });
+
   it("the registry covers every page-owned param the client reads", () => {
     for (const key of [
       "orderTab",
@@ -125,6 +153,10 @@ describe("router param scoping (#3238)", () => {
       "discoveryView",
       "checkoutTab",
       "adminTab",
+      // Issue 4682: the Marketing Hub's nested section params.
+      "adsTab",
+      "referralsTab",
+      "socialTab",
     ]) {
       expect(Object.keys(TAB_PARAM_OWNERS)).toContain(key);
     }

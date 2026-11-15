@@ -35,6 +35,9 @@ describe("Navbar Visible Tabs Settings", () => {
     // Non-core administrative tabs are disabled in traderFocus
     expect(NAV_TAB_PRESETS.traderFocus.ads).toBe(false);
     expect(NAV_TAB_PRESETS.traderFocus.referrals).toBe(false);
+    // Issue 4682: the Marketing Hub replaces the retired ads +
+    // referrals entries in the presets too.
+    expect(NAV_TAB_PRESETS.traderFocus["marketing-hub"]).toBe(false);
     expect(NAV_TAB_PRESETS.traderFocus.revenue).toBe(false);
 
     // In minimal preset, only essential desk tools are active
@@ -50,8 +53,9 @@ describe("Navbar Visible Tabs Settings", () => {
   it("filters navigation items dynamically based on visibleTabs map", () => {
     const customVisibility: Record<string, boolean> = {
       ...DEFAULT_VISIBLE_NAV_TABS,
-      ads: false,
-      referrals: false,
+      // Issue 4682: the retired ads + referrals entries are one
+      // Marketing Hub entry now, so hiding the hub hides both.
+      "marketing-hub": false,
       revenue: false,
       payments: false,
     };
@@ -65,11 +69,10 @@ describe("Navbar Visible Tabs Settings", () => {
     // research route no longer renders as a nav item; chat stands in
     // as the always-visible Intelligence item here.
     expect(visibleIds).toContain("chat");
-    expect(visibleIds).not.toContain("ads");
-    expect(visibleIds).not.toContain("referrals");
+    expect(visibleIds).not.toContain("marketing-hub");
     expect(visibleIds).not.toContain("revenue");
     expect(visibleIds).not.toContain("payments");
-    expect(filtered.length).toBe(NAVIGATION_ITEMS.length - 4);
+    expect(filtered.length).toBe(NAVIGATION_ITEMS.length - 3);
   });
 
   it("toggles single tab visibility state correctly", () => {

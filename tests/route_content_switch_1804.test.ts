@@ -39,7 +39,10 @@ function shellContentKeys(src: string): string[] {
   const end = src.indexOf("\n  };", start);
   expect(end).toBeGreaterThan(start);
   const slice = src.slice(start, end);
-  return [...slice.matchAll(/^    ([a-z0-9-]+): /gm)].map((m) => m[1]);
+  // Issue 4682: the marketing-hub key is quoted (a hyphenated id
+  // cannot be a bare object key), so the pattern allows the quotes,
+  // like tabContentKeys above.
+  return [...slice.matchAll(/^    "?([a-z0-9-]+)"?: /gm)].map((m) => m[1]);
 }
 
 // #2896: the Stock Hub route is shell-retained, so the set gains stock-hub.
@@ -53,7 +56,10 @@ function shellContentKeys(src: string): string[] {
 // retired address to its canonical home before the tab is adopted, so
 // they need no TAB_CONTENT entry, hub branch, or shell page. (screeners
 // needs no exemption: it stays in TRADING_TABS via `retain`.)
-const REDIRECT_RETIRED_IDS = ["research", "risk-analysis", "approvals", "options-flows"];
+// Issue 4682: the three standalone marketing addresses resolve the
+// same way — legacyMarketingHubRedirect sends each to its Marketing
+// Hub section before the tab is adopted.
+const REDIRECT_RETIRED_IDS = ["research", "risk-analysis", "approvals", "options-flows", "ads", "referrals", "social"];
 const HISTORICAL_TRADING_IDS = [
   "assets-hub",
   "autopilot",

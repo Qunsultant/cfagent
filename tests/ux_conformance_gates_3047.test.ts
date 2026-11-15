@@ -289,6 +289,11 @@ const CONFORMING_ROUTES: Record<string, string> = {
   // which carry the PageShell.
   "data-hub": "src/client/DataHubHome.tsx",
   "security-hub": "src/client/SecurityHubHome.tsx",
+  // Issue 4682: the Marketing Hub renders from the shell (Chat.tsx
+  // SHELL_CONTENT → MarketingHubHome), which carries the PageShell.
+  // The three section panels keep their own entries below — they
+  // still render PageShell inside the hub's tab chrome.
+  "marketing-hub": "src/client/MarketingHubHome.tsx",
   ads: "src/client/chat/tabs/AdsTab.tsx",
   referrals: "src/client/chat/tabs/ReferralsTab.tsx",
   revenue: "src/client/chat/tabs/RevenueTab.tsx",
@@ -458,6 +463,9 @@ const CONFORMING_INTERIORS: string[] = [
   // Issue #4530: the Product Hub page (PageTemplate + PageSection,
   // primitives only).
   "src/client/ProductHub.tsx",
+  // Issue 4682: the Marketing Hub home (PageShell + PageSection,
+  // primitives only).
+  "src/client/MarketingHubHome.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):
@@ -492,6 +500,8 @@ const INTERIOR_SURFACE_FILES: string[] = [
   // Issue #4585: the DataHub and SecurityHub homes (route files).
   "src/client/DataHubHome.tsx",
   "src/client/SecurityHubHome.tsx",
+  // Issue 4682: the Marketing Hub home (route file).
+  "src/client/MarketingHubHome.tsx",
   "src/client/chat/tabs/AdsTab.tsx",
   "src/client/chat/tabs/ReferralsTab.tsx",
   "src/client/chat/tabs/RevenueTab.tsx",

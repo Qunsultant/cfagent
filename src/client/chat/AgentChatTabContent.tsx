@@ -188,7 +188,7 @@ interface AgentChatTabContentProps {
   ads: AdItem[];
   onAdClick: (ad: AdItem) => void;
   onOpenAdsTab: () => void;
-  onNavigateTab?: (tab: "chat" | "nlq" | "audit" | "payments" | "referrals" | "ads" | "revenue" | "endpoints" | "trading" | "research" | "options-flows" | "workflows") => void;
+  onNavigateTab?: (tab: "chat" | "nlq" | "audit" | "payments" | "referrals" | "ads" | "marketing-hub" | "revenue" | "endpoints" | "trading" | "research" | "options-flows" | "workflows") => void;
   onStatusChange: (status: "ready" | "streaming" | "submitted" | "error") => void;
   onResetSession: (purge?: boolean) => Promise<void>;
   isResetting: boolean;

@@ -207,6 +207,14 @@ export function LeftNavBar({
     if (section && activeTab === "platform-admin") {
       return (currentView ?? "ads") === section;
     }
+    // Issue 4682: the Marketing Hub's sub-menu items are its views —
+    // referrals (the hub default), ads, social — so the sub-item is
+    // active when the hub's view names it, like the screeners branch
+    // above (the bare `activeTab === subId` check cannot match: the
+    // tab is "marketing-hub", the sub-item is the view).
+    if (activeTab === "marketing-hub") {
+      return (currentView ?? "referrals") === subId;
+    }
     return false;
   };
 

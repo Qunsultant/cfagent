@@ -59,9 +59,9 @@ const EXPECTED_ORDER = [
   "chat",
   "search",
   "workflow-runs",
-  "referrals",
-  "ads",
-  "social",
+  // Issue 4682: the referrals, ads, and social nav entries retired
+  // into the one Marketing Hub route at navOrder 10.
+  "marketing-hub",
   "payments",
   "revenue",
   "ledger",
@@ -81,7 +81,7 @@ const EXPECTED_ORDER = [
 ];
 
 describe("nav derivation", () => {
-  it("derives the 29 nav items in display order", () => {
+  it("derives the 27 nav items in display order", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).toEqual(EXPECTED_ORDER);
   });
 
@@ -101,7 +101,7 @@ describe("nav derivation", () => {
     expect(byId.get("order")!.label).toBe("Fast Order Ticket");
     expect(byId.get("stock-hub")!.label).toBe("Stock Hub");
     expect(byId.get("assets-hub")!.label).toBe("Assets Hub");
-    expect(byId.get("social")!.label).toBe("Social Posting");
+    expect(byId.get("marketing-hub")!.label).toBe("Marketing Hub");
     expect(byId.get("docs")!.label).toBe("Docs & Reports");
   });
 
@@ -120,7 +120,7 @@ describe("nav derivation", () => {
     expect(isTabActive("platform-admin", "schedules")).toBe(false);
     expect(isTabActive("portfolio", "portfolio")).toBe(true);
     expect(isTabActive("portfolio", "ledger")).toBe(false);
-    expect(isTabActive("screeners", "social")).toBe(false);
+    expect(isTabActive("screeners", "marketing-hub")).toBe(false);
   });
 
   it("visibility defaults come from the table", () => {

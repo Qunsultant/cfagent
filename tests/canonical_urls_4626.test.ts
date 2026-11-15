@@ -18,7 +18,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { legacyDualHomeRedirect, TAB_PARAM_OWNERS } from "../src/client/router";
+import { legacyDualHomeRedirect, legacyMarketingHubRedirect, TAB_PARAM_OWNERS } from "../src/client/router";
 import { isTabFeatureEnabled } from "../src/client/featureFlags";
 import { mapTabToTradingSubTab } from "../src/client/chat/types";
 import { SURFACE_TAB_DEFS, surfaceTabHref } from "../src/client/deepLinks";
@@ -139,6 +139,91 @@ describe("legacyDualHomeRedirect (#4626)", () => {
       "?tab=reports",
     ]) {
       expect(legacyDualHomeRedirect(search)).toBeNull();
+    }
+  });
+});
+
+/**
+ * Issue 4682: the three standalone marketing addresses retire onto
+ * their Marketing Hub section — the same one-rule shape as #4626
+ * (a surface lives where its workflow lives). The old standalone
+ * form carried the inner tab in `view`; the new nested-param form
+ * carries it in its own param; both map onto the nested param.
+ */
+describe("legacyMarketingHubRedirect (issue 4682)", () => {
+  it("retires ?tab=ads onto the hub ads section, carrying the inner tab", () => {
+    expect(legacyMarketingHubRedirect("?tab=ads")).toEqual({
+      tab: "marketing-hub",
+      view: "ads",
+    });
+    expect(legacyMarketingHubRedirect("?tab=ads&view=submit")).toEqual({
+      tab: "marketing-hub",
+      view: "ads",
+      params: { adsTab: "submit" },
+    });
+    expect(legacyMarketingHubRedirect("?tab=ads&adsTab=submit")).toEqual({
+      tab: "marketing-hub",
+      view: "ads",
+      params: { adsTab: "submit" },
+    });
+    expect(legacyMarketingHubRedirect("?tab=ads&view=bogus")).toEqual({
+      tab: "marketing-hub",
+      view: "ads",
+    });
+  });
+
+  it("retires ?tab=referrals onto the hub referrals section, carrying the inner tab", () => {
+    expect(legacyMarketingHubRedirect("?tab=referrals")).toEqual({
+      tab: "marketing-hub",
+      view: "referrals",
+    });
+    expect(legacyMarketingHubRedirect("?tab=referrals&view=activity")).toEqual({
+      tab: "marketing-hub",
+      view: "referrals",
+      params: { referralsTab: "activity" },
+    });
+    expect(legacyMarketingHubRedirect("?tab=referrals&referralsTab=links")).toEqual({
+      tab: "marketing-hub",
+      view: "referrals",
+      params: { referralsTab: "links" },
+    });
+    expect(legacyMarketingHubRedirect("?tab=referrals&view=bogus")).toEqual({
+      tab: "marketing-hub",
+      view: "referrals",
+    });
+  });
+
+  it("retires ?tab=social onto the hub social section, carrying the inner tab", () => {
+    expect(legacyMarketingHubRedirect("?tab=social")).toEqual({
+      tab: "marketing-hub",
+      view: "social",
+    });
+    expect(legacyMarketingHubRedirect("?tab=social&view=posts")).toEqual({
+      tab: "marketing-hub",
+      view: "social",
+      params: { socialTab: "posts" },
+    });
+    expect(legacyMarketingHubRedirect("?tab=social&socialTab=tokens")).toEqual({
+      tab: "marketing-hub",
+      view: "social",
+      params: { socialTab: "tokens" },
+    });
+    expect(legacyMarketingHubRedirect("?tab=social&view=bogus")).toEqual({
+      tab: "marketing-hub",
+      view: "social",
+    });
+  });
+
+  it("leaves every canonical address alone", () => {
+    for (const search of [
+      "?tab=marketing-hub",
+      "?tab=marketing-hub&view=ads&adsTab=submit",
+      "?tab=marketing-hub&view=referrals&referralsTab=activity",
+      "?tab=marketing-hub&view=social&socialTab=posts",
+      "?tab=product-hub",
+      "?tab=revenue",
+    ]) {
+      expect(legacyMarketingHubRedirect(search)).toBeNull();
     }
   });
 });
@@ -269,7 +354,8 @@ describe("nav-config keeps the retired routes, drops their nav entries (#4626)",
     const data = JSON.parse(read("src/client/nav-config.json")) as {
       routes: { id: string; navEntry?: unknown }[];
     };
-    expect(data.routes).toHaveLength(44);
+    // Issue 4682: the Marketing Hub route joins the table; 44 → 45.
+    expect(data.routes).toHaveLength(45);
     const byId = new Map(data.routes.map((r) => [r.id, r]));
     for (const id of ["screeners", "research", "options-flows", "risk-analysis", "approvals"]) {
       expect(byId.has(id)).toBe(true);
@@ -287,9 +373,30 @@ describe("nav-config keeps the retired routes, drops their nav entries (#4626)",
     const orders = data.routes
       .filter((r) => r.navEntry)
       .map((r) => (r.navEntry as { navOrder: number }).navOrder);
-    expect(orders).toHaveLength(29);
+    expect(orders).toHaveLength(27);
     expect([...orders].sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 29 }, (_, i) => i),
+      Array.from({ length: 27 }, (_, i) => i),
     );
+  });
+});
+
+describe("nav-config keeps the retired marketing routes, drops their nav entries (issue 4682)", () => {
+  it("ads, referrals, and social stay as routes, lose navEntry + shellRetain, keep their icons", () => {
+    const data = JSON.parse(read("src/client/nav-config.json")) as {
+      routes: { id: string; icon: string; navEntry?: unknown; shellRetain?: boolean }[];
+    };
+    const byId = new Map(data.routes.map((r) => [r.id, r]));
+    for (const id of ["ads", "referrals", "social"]) {
+      expect(byId.has(id)).toBe(true);
+      expect(byId.get(id)!.navEntry).toBeUndefined();
+      expect(byId.get(id)!.shellRetain).toBeUndefined();
+    }
+    expect(byId.get("ads")!.icon).toBe("Ads");
+    expect(byId.get("referrals")!.icon).toBe("Referrals");
+    expect(byId.get("social")!.icon).toBe("Social");
+    // The hub carries the retain flag now; payments and revenue keep theirs.
+    expect(byId.get("marketing-hub")!.shellRetain).toBe(true);
+    expect(byId.get("payments")!.shellRetain).toBe(true);
+    expect(byId.get("revenue")!.shellRetain).toBe(true);
   });
 });

@@ -216,10 +216,12 @@ const revenueProps: RevenueTabProps = {
 };
 
 describe("shell wiring (issue #2161)", () => {
-  it("referrals, ads and revenue carry shellRetain and nothing else gains it", () => {
+  it("marketing-hub and revenue carry shellRetain and nothing else gains it", () => {
     const shellIds = ROUTES.filter((r) => "shellRetain" in r && (r as any).shellRetain).map((r) => r.id);
-    expect([...shellIds].sort()).toEqual(["ads", "payments", "referrals", "revenue", "social"]);
-    expect([...SHELL_RETAINED_PAGES].sort()).toEqual(["ads", "payments", "referrals", "revenue", "social"]);
+    // Issue 4682: the ads, referrals, and social shellRetain flags
+    // moved onto the one Marketing Hub route.
+    expect([...shellIds].sort()).toEqual(["marketing-hub", "payments", "revenue"]);
+    expect([...SHELL_RETAINED_PAGES].sort()).toEqual(["marketing-hub", "payments", "revenue"]);
   });
 
   it("trading set is unchanged by the shell move (#2896 adds stock-hub, #2954 adds assets-hub, #2970 adds goal-screen, review, track-record; #3121 S2 removes schedules — it renders from the shell, not the hub)", () => {
@@ -228,14 +230,21 @@ describe("shell wiring (issue #2161)", () => {
     );
   });
 
-  it("Chat renders the three pages from SHELL_CONTENT, not TAB_CONTENT", () => {
+  it("Chat renders the hub + revenue from SHELL_CONTENT, not TAB_CONTENT", () => {
     const chat = read("src/client/Chat.tsx");
     const tabSlice = chat.slice(chat.indexOf("const TAB_CONTENT"), chat.indexOf("const SHELL_CONTENT"));
     const shellSlice = chat.slice(chat.indexOf("const SHELL_CONTENT"));
-    for (const comp of ["ReferralsTab", "AdsTab", "RevenueTab"]) {
-      expect(tabSlice).not.toContain(`<${comp}`);
-      expect(shellSlice).toContain(`<${comp}`);
-    }
+    // RevenueTab stays a standalone shell page.
+    expect(tabSlice).not.toContain("<RevenueTab");
+    expect(shellSlice).toContain("<RevenueTab");
+    // Issue 4682: AdsTab and ReferralsTab render from the Marketing
+    // Hub now, so Chat's shell entry is the hub itself.
+    expect(tabSlice).not.toContain("<MarketingHubHome");
+    expect(shellSlice).toContain("<MarketingHubHome");
+    const hub = read("src/client/MarketingHubHome.tsx");
+    expect(hub).toContain("<AdsTab");
+    expect(hub).toContain("<ReferralsTab");
+    expect(hub).toContain("<SocialPostingPanel");
   });
 });
 
