@@ -473,11 +473,16 @@ capability, not an absence.
   tenant/user/provider/broker/channel appear only if the caller puts
   them in the JSON payload (not schema-enforced). Single insert owner:
   `OrchestratorAgent.recordAudit`. Q7 chain (`agent_audit_chain`) is
-  tenant-scoped but covers only Q7 policy actions. Audit gaps: user
-  admin reads emit NO audit events (documented rule); tenant admin audit
-  is best-effort annotation only, with no funnel supplying it today
-  (a follow-up, not a control); account setup DOES emit
-  `platform.account.created`; commercial writes emit `commercial.*`
+  tenant-scoped (`#4605` wires it best-effort for tenant-admin writes
+  and tenant-scoped user-admin lookups alongside Q7 policy actions).
+  User-admin reads (`#4605` recorded decision): `GET /api/admin/platform-users/lookup`
+  emits `platform.user_admin.lookup` (and a Q7 chain link when
+  tenant-scoped); `GET /api/admin/platform-users/me` remains
+  non-auditing (high-frequency self-status read, matching pricing GET).
+  Tenant-admin writes (`platformTenants.ts`) receive the `audit` funnel
+  from `routeRequest.ts` and emit both `platform-tenant-admin` and a
+  tenant-scoped Q7 chain link (`platform.tenant_admin.*`). Account setup
+  emits `platform.account.created`; commercial writes emit `commercial.*`
   events.
 - **Quotas / limits — per what?** x402 endpoint prices/rate hints live
   in #2405's body (OPTIONS $0.05 60/min, MARKET_RESEARCH $0.10 30/min,

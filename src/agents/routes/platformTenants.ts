@@ -50,10 +50,10 @@
  *   write when the caller supplies an audit funnel (an audit
  *   failure never fails the write); the audit-before-write
  *   obligation channel is an IAAA property and does not apply
- *   to these commercial-settings writes. The orchestrator
- *   dispatch keeps its block minimal and supplies no funnel
- *   today, so this annotation is a follow-up, not a control —
- *   the gate above is the control.
+ *   to these commercial-settings writes. Issue #4605 wires the
+ *   orchestrator audit funnel in routeRequest.ts and also appends
+ *   a tenant-scoped tamper-evidence link to the Q7 chain
+ *   (agent_audit_chain) best-effort via appendAuditChainBestEffort.
  * - The payment screen is untouched: it keeps showing
  *   tenant/user/account AUTOMATICALLY and READ-ONLY from
  *   resolvePlatformIdentity, with no tenant-id input, and
@@ -67,6 +67,9 @@ import { createTenantDirectoryAdapter } from "../../data/createTenantDirectoryPo
 import type { TenantDirectory } from "../../data/tenantDirectoryPorts";
 import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
 import type { StoreOperators } from "../../data/storeOperatorsPorts";
+import { createEnsuredAuditPolicyAdapter } from "../../data/createAuditPolicyPorts";
+import type { AuditPolicyPort } from "../../data/auditPolicyPorts";
+import { appendAuditChainBestEffort } from "../../services/auditGate";
 import { isLoginTenantId } from "../../services/platformIdentity";
 
 export interface PlatformTenantRouteContext {
@@ -78,6 +81,8 @@ export interface PlatformTenantRouteContext {
     agent: "orchestrator",
     payload: Record<string, unknown>,
   ) => void;
+  /** Test seam: use this audit-policy port for Q7 chain appends instead of AGENT_DB. */
+  auditPolicy?: AuditPolicyPort | null;
   /** Test seam: use this store instead of the AGENT_DB adapter. */
   commercial?: CommercialStore | null;
   /** Test seam: use this directory instead of the AGENT_DB adapter. */
@@ -192,11 +197,23 @@ function auditBestEffort(
   action: string,
   tenantId: string,
 ): void {
+  const payload = { actorLogin: login, action, tenantId };
   try {
-    ctx.audit?.("platform-tenant-admin", "orchestrator", { actorLogin: login, action, tenantId });
+    ctx.audit?.("platform-tenant-admin", "orchestrator", payload);
   } catch {
     // Best-effort annotation only; see the module header.
   }
+  void appendAuditChainBestEffort(
+    () =>
+      ctx.auditPolicy !== undefined
+        ? Promise.resolve(ctx.auditPolicy)
+        : createEnsuredAuditPolicyAdapter(ctx.env),
+    {
+      tenantId,
+      action: `platform.tenant_admin.${action}`,
+      payload,
+    },
+  );
 }
 
 export async function handlePlatformTenantRoutes(

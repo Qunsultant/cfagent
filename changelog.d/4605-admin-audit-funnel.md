@@ -1,0 +1,2 @@
+### Changed
+- Wired the orchestrator `audit` funnel into `handlePlatformTenantRoutes` in `src/agents/orchestrator/routeRequest.ts`, added best-effort Q7 `agent_audit_chain` appends (`platform.tenant_admin.*`) in `src/agents/routes/platformTenants.ts`, and enabled `platform.user_admin.lookup` audit + Q7 chain appends (while keeping self-view `me` non-auditing by recorded decision) in `src/agents/routes/platformUsers.ts` (#4605).
