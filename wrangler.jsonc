@@ -4,6 +4,9 @@
   "main": "src/server.ts",
   "compatibility_date": "2026-10-31",
   "compatibility_flags": ["nodejs_compat"],
+  // Issue #4708: preserve CI/CD-synced Worker secrets/vars across `wrangler deploy`
+  // before the `sync-secrets` job runs.
+  "keep_vars": true,
   // Issue #4128 - least-cost (C:/Users/spr9s/nextgentp-full-least-cost):
   // no source maps in the upload; nothing at runtime reads them.
   "upload_source_maps": false,
@@ -424,6 +427,11 @@
     "CF_WALLET_NETWORK": "base-sepolia",
     "CF_WALLET_FACILITATOR": "https://x402.org/facilitator",
     "_comment_wallet": "Set CF_WALLET_RECIPIENT via: wrangler secret put CF_WALLET_RECIPIENT",
+    // Issue #4708: Stripe secrets (STRIPE_TEST_SECRET_KEY, STRIPE_LIVE_SECRET_KEY,
+    // STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET) are synced via CI/CD
+    // (.github/workflows/deploy.yml sync-secrets) and preserved via keep_vars —
+    // never hardcoded in wrangler.jsonc or set directly in Cloudflare dashboard.
+    "_comment_stripe": "Set STRIPE_TEST_SECRET_KEY / STRIPE_LIVE_SECRET_KEY / STRIPE_SECRET_KEY via CI/CD (.github/workflows/deploy.yml sync-secrets)",
     // Issue #945, Wiring Phase 1 enablement (PR #965 merged the code
     // default-off): GitHub login/session wiring ON in production.
     // Rollback is removing these two vars (or setting
