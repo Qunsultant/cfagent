@@ -55,6 +55,7 @@ import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import type { SubscriptionStore } from "../../data/subscriptionPorts";
 import {
   resolvePlatformIdentity,
+  type CurrentTenantAuthoritySource,
   type PlatformIdentity,
 } from "../../services/platformIdentity";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
@@ -107,6 +108,9 @@ export interface PlatformUserAccountView {
 export interface PlatformUserView {
   userLogin: string;
   tenantId: string | null;
+  currentTenantId: string | null;
+  currentTenantSource: CurrentTenantAuthoritySource;
+  candidateMembershipTenants: string[];
   hasAccount: boolean;
   tier: string;
   creditsUSD: number;
@@ -154,25 +158,28 @@ async function buildUserView(
   login: string,
 ): Promise<PlatformUserView> {
   const ports = resolvePorts(ctx);
-  const identity: PlatformIdentity = await resolvePlatformIdentity(
-    { commercial: ports.commercial, subscriptions: ports.subscriptions },
-    { userId: login, nowMs: Date.now() },
-  );
   const kv = ctx.aliasKv ?? sessionStore(ctx.env);
   const internalUserId = await lookupInternalUserIdByLogin(kv, login);
+  let rawMemberships: Membership[] = [];
   let memberships: PlatformUserMembershipView[] = [];
   let membershipSource: "wired" | "unmapped" = "unmapped";
   if (internalUserId !== null) {
     const store =
       ctx.membershipStore ?? createKvMembershipStore(sessionStore(ctx.env));
-    memberships = (await store.getMembershipsByUser(internalUserId)).map(
-      toMembershipView,
-    );
+    rawMemberships = await store.getMembershipsByUser(internalUserId);
+    memberships = rawMemberships.map(toMembershipView);
     membershipSource = "wired";
   }
+  const identity: PlatformIdentity = await resolvePlatformIdentity(
+    { commercial: ports.commercial, subscriptions: ports.subscriptions },
+    { userId: login, nowMs: Date.now(), memberships: rawMemberships },
+  );
   return {
     userLogin: identity.userLogin,
     tenantId: identity.tenantId,
+    currentTenantId: identity.currentTenantId,
+    currentTenantSource: identity.currentTenantSource,
+    candidateMembershipTenants: identity.candidateMembershipTenants,
     hasAccount: identity.hasAccount,
     tier: identity.tier,
     creditsUSD: identity.creditsUSD,

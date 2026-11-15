@@ -114,10 +114,18 @@ erDiagram
 ```
 
 The structural tension to hold in mind for the rest of this page: a login
-has **one** account tenant but **many** membership tenants. There is no
-defined "current tenant" for a multi-membership login — the payment path
-uses the account tenant, the IAAA panel shows all membership tenants.
-That is inconsistency 1 in §7, and it shapes every dimension below.
+has **one** account tenant but **many** membership tenants. Issue #4600
+defines and records the canonical "current tenant" resolution rule across
+the three authorities (`resolveCurrentTenant` in
+`src/services/platformIdentity.ts`, surfaced as `currentTenantId` +
+`currentTenantSource` + `candidateMembershipTenants` on `PlatformIdentity`
+and `PlatformUserView`): (1) the commercial account row's `tenantId` wins
+first (`currentTenantSource: "account"`); (2) when no account row exists,
+active (unrevoked) tenant-scoped IAAA memberships (`tenantId !== "platform"`)
+are ordered deterministically by `(createdAtMs ASC, tenantId ASC, membershipId ASC)`
+and the first membership's `tenantId` wins (`currentTenantSource: "membership"`);
+(3) when neither exists, `currentTenantId` is `null` (`currentTenantSource: "unresolved"`)
+— no path silently falls back to the deployment env default (`IAAA_TENANT_ID` / `"primary"`).
 
 ## 2. Sign-in → scope resolution
 
@@ -508,10 +516,14 @@ capability, not an absence.
 
 ## 7. Inconsistencies found (stated, not smoothed over)
 
-1. **Three tenant authorities.** Commercial account tenant (one per
-   login) vs IAAA memberships (many per login) vs env default tenant
-   (`IAAA_TENANT_ID` or `IAAA_DEFAULT_TENANT_ID`). No defined "current
-   tenant" for a multi-membership login.
+1. **Three tenant authorities (#4600 — resolved and pinned).** Commercial
+   account tenant (one per login) vs IAAA memberships (many per login) vs
+   env default tenant (`IAAA_TENANT_ID` or `IAAA_DEFAULT_TENANT_ID`).
+   `resolveCurrentTenant` (`src/services/platformIdentity.ts`) defines the
+   single winning authority and records it via `currentTenantId` and
+   `currentTenantSource` (`"account"` > `"membership"` ordered by
+   `createdAtMs ASC, tenantId ASC, membershipId ASC` > `"unresolved"` with
+   `currentTenantId: null`), never silently falling back to the env default.
 2. **Two admin gates.** Tenant/account admin = store-operator list; user
    admin lookup = IAAA platform-admin membership. A platform-admin who
    is not a store operator can look up users but cannot administer

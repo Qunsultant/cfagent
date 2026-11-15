@@ -1,0 +1,2 @@
+### Added
+- Defined and pinned the canonical `resolveCurrentTenant` rule across the three tenant authorities (`"account"` > active IAAA `"membership"` ordered by `createdAtMs ASC, tenantId ASC, membershipId ASC` > `"unresolved"` with `currentTenantId: null`, never silently falling back to the env default), recorded `currentTenantId`, `currentTenantSource`, and `candidateMembershipTenants` on `PlatformIdentity` and `PlatformUserView`, and updated `docs/architecture/business/platform-entity-capability-map.md` (#4600).
