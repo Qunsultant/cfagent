@@ -6,7 +6,8 @@
  * (#4561/#4574 pattern): DataHub (`?tab=data-hub`: data-providers,
  * data-lifecycle, downloads) and SecurityHub (`?tab=security-hub`:
  * iaaa-admin, users, admin-access, profile, pdp — the pdp view added
- * by #4651 — pep, added by #4653 — and pip, added by #4655). Platform
+ * by #4651 — pep, added by #4653 — pip, added by #4655 — and pap,
+ * added by #4658). Platform
  * Admin keeps the remaining seven sections. Old
  * addresses redirect; nothing is deleted
  * (Policy Gate (i)); the panels keep their single live mount, now in the
@@ -102,8 +103,8 @@ function read(rel: string): string {
 
 const DATA_HUB_VIEWS_EXPECTED = ["data-providers", "data-lifecycle", "downloads"] as const;
 const DATA_HUB_LABELS = ["Data Providers", "Data Lifecycle", "Parameters & Export"];
-const SECURITY_HUB_VIEWS_EXPECTED = ["iaaa-admin", "users", "admin-access", "profile", "pdp", "pep", "pip"] as const;
-const SECURITY_HUB_LABELS = ["IAAA Admin", "Users", "Admin Access", "Profile", "PDP", "PEP", "PIP"];
+const SECURITY_HUB_VIEWS_EXPECTED = ["iaaa-admin", "users", "admin-access", "profile", "pdp", "pep", "pip", "pap"] as const;
+const SECURITY_HUB_LABELS = ["IAAA Admin", "Users", "Admin Access", "Profile", "PDP", "PEP", "PIP", "PAP"];
 const REMAINING_PLATFORM_ADMIN = [
   "ads",
   "provenance",
@@ -120,7 +121,7 @@ describe("4585-P01 the hubs resolve exactly their views (#4585)", () => {
     expect(DATA_HUB_VIEWS_EXPECTED.map((v) => DATA_HUB_VIEW_LABELS[v])).toEqual(DATA_HUB_LABELS);
   });
 
-  it("SECURITY_HUB_VIEWS lists the seven security views, in order (#4655 adds pip after pep)", () => {
+  it("SECURITY_HUB_VIEWS lists the eight security views, in order (#4658 adds pap after pip)", () => {
     expect([...SECURITY_HUB_VIEWS]).toEqual([...SECURITY_HUB_VIEWS_EXPECTED]);
     expect(SECURITY_HUB_VIEWS_EXPECTED.map((v) => SECURITY_HUB_VIEW_LABELS[v])).toEqual(
       SECURITY_HUB_LABELS,
@@ -147,12 +148,12 @@ describe("4585-P02 each hub carries one sub-menu entry per view (#4585)", () => 
     expect(findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "data-hub")).toBeDefined();
   });
 
-  it("the SecurityHub item has seven sub-items with labels, descriptions, and icons", () => {
+  it("the SecurityHub item has eight sub-items with labels, descriptions, and icons", () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(platform).toBeDefined();
     const item = platform!.items.find((i) => i.id === "security-hub");
     expect(item).toBeDefined();
-    expect(item!.subItems).toHaveLength(7);
+    expect(item!.subItems).toHaveLength(8);
     for (const [index, view] of SECURITY_HUB_VIEWS_EXPECTED.entries()) {
       const sub = item!.subItems![index];
       expect(sub.id).toBe(view);
@@ -215,6 +216,7 @@ describe("4585-P03 each view resolves through the catalog (#4585)", () => {
     expect(home).toContain("PdpPanel");
     expect(home).toContain("PepPanel");
     expect(home).toContain("PipPanel");
+    expect(home).toContain("PolicyProposalsPanel");
   });
 });
 
@@ -340,6 +342,15 @@ describe("4585-P05 each moved panel has one live mount (#4585)", () => {
       if (read(`src/client/${file}`).includes("<PipPanel")) pip.push(file);
     }
     expect(pip).toEqual(["SecurityHubHome.tsx"]);
+    // PolicyProposalsPanel (#4658) has its one live mount: the
+    // SecurityHub PAP tab (moved off the IAAA Admin Overview).
+    const pap: string[] = [];
+    for (const file of files) {
+      if (read(`src/client/${file}`).includes("<PolicyProposalsPanel")) pap.push(file);
+    }
+    expect(pap).toEqual(["SecurityHubHome.tsx"]);
+    const overview = read("src/client/IaaaAdminPanel.tsx");
+    expect(overview).not.toContain("<PolicyProposalsPanel");
   });
 });
 
@@ -426,7 +437,7 @@ describe("4585-P06 the homes render their tabs and mount the panels (#4585)", ()
     expect(container.querySelector('[data-testid="profile-section"]')).toBeTruthy();
   });
 
-  it("the SecurityHub default view renders all seven tabs", async () => {
+  it("the SecurityHub default view renders all eight tabs", async () => {
     window.history.pushState(null, "", "/?tab=security-hub");
     await render(
       <ToastProvider>

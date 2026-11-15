@@ -123,7 +123,7 @@ const PDP_STATE = {
 };
 
 describe("4651 view: pdp joins the SecurityHub views (#4651)", () => {
-  it("SECURITY_HUB_VIEWS lists the seven security views, in order, PDP fifth (#4655 adds pip last)", () => {
+  it("SECURITY_HUB_VIEWS lists the eight security views, in order, PDP fifth (#4658 adds pap last)", () => {
     expect([...SECURITY_HUB_VIEWS]).toEqual([
       "iaaa-admin",
       "users",
@@ -132,6 +132,7 @@ describe("4651 view: pdp joins the SecurityHub views (#4651)", () => {
       "pdp",
       "pep",
       "pip",
+      "pap",
     ]);
     expect(SECURITY_HUB_VIEW_LABELS["pdp"]).toBe("PDP");
   });
@@ -149,12 +150,12 @@ describe("4651 view: pdp joins the SecurityHub views (#4651)", () => {
 });
 
 describe("4651 nav: PDP has a sub-menu entry, deep link, and surface value (#4651)", () => {
-  it("the SecurityHub item has seven sub-items, PDP fifth, each with a resolvable icon (#4655 adds pip last)", () => {
+  it("the SecurityHub item has eight sub-items, PDP fifth, each with a resolvable icon (#4658 adds pap last)", () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(platform).toBeDefined();
     const item = platform!.items.find((i) => i.id === "security-hub");
     expect(item).toBeDefined();
-    expect(item!.subItems).toHaveLength(7);
+    expect(item!.subItems).toHaveLength(8);
     const sub = item!.subItems![4];
     expect(sub.id).toBe("pdp");
     expect(sub.label).toBe("PDP");
@@ -185,6 +186,7 @@ describe("4651 nav: PDP has a sub-menu entry, deep link, and surface value (#465
       "pdp",
       "pep",
       "pip",
+      "pap",
     ]);
   });
 });
@@ -223,7 +225,7 @@ describe("4651 hub: SecurityHub renders seven tabs and mounts the PDP panel (#46
     vi.unstubAllGlobals();
   });
 
-  it("the PDP tab mounts the PDP panel and the hub shows seven tabs (#4655 adds the PIP tab)", async () => {
+  it("the PDP tab mounts the PDP panel and the hub shows eight tabs (#4658 adds the PAP tab)", async () => {
     mockedFetchActivePolicy.mockResolvedValue({ active: ACTIVE, source: "compiled" });
     mockedFetchPdpState.mockResolvedValue(PDP_STATE);
     window.history.pushState(null, "", "/?tab=security-hub&view=pdp");
@@ -236,7 +238,7 @@ describe("4651 hub: SecurityHub renders seven tabs and mounts the PDP panel (#46
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(["IAAA Admin", "Users", "Admin Access", "Profile", "PDP", "PEP", "PIP"]);
+    expect(tabs).toEqual(["IAAA Admin", "Users", "Admin Access", "Profile", "PDP", "PEP", "PIP", "PAP"]);
     // The real PdpPanel mounts under the PDP tab and renders live state.
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
