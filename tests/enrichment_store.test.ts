@@ -64,6 +64,15 @@ function mockSql() {
         const v = settings.get(String(params[0]));
         return v !== undefined ? [{ value: v }] : [];
       }
+      // #4386 (#4282 P6c): the settings get() now dispatches the
+      // catalogue's Repository findById entry, so the Repository's
+      // SELECT * shape arrives here (same table, same key lookup —
+      // the row is returned as the mapped record { key, value }).
+      // The DELETE's D-E.2 existence check issues the same shape.
+      if (q.startsWith("SELECT * FROM mas_settings WHERE")) {
+        const v = settings.get(String(params[0]));
+        return v !== undefined ? [{ key: String(params[0]), value: v }] : [];
+      }
       if (q.startsWith("DELETE FROM mas_settings")) {
         settings.delete(String(params[0]));
         return [];
