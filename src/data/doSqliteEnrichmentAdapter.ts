@@ -26,6 +26,8 @@ import {
   type EnrichmentRunStore,
 } from "../enrichment/enrichmentPorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 import { createSettingsPort } from "./createSettingsPorts";
 import type { SettingsPort } from "./settingsReadPorts";
 
@@ -39,16 +41,8 @@ export type EnrichmentAuditFn = (
   payload: Record<string, unknown>,
 ) => unknown;
 
-const RUNS_TABLE = "mas_enrichment_runs";
-
 const CREATE_RUNS_SQL = doTableSql("mas_enrichment_runs");
 const CREATE_RUNS_INDEX_SQL = doIndexSql("idx_mas_enrichment_runs_job");
-const INSERT_RUN_SQL =
-  `INSERT INTO ${RUNS_TABLE} (id, created_at, job_id, stage, record_json) VALUES (?, ?, ?, ?, ?)`;
-const LIST_RUNS_SQL =
-  `SELECT record_json FROM ${RUNS_TABLE} ORDER BY created_at DESC, id DESC LIMIT ?`;
-const GET_RUN_SQL =
-  `SELECT record_json FROM ${RUNS_TABLE} WHERE id = ?`;
 
 export class SqlEnrichmentStore implements EnrichmentRunStore {
   /** The settings port over the same handle (killswitch key only). */
@@ -68,31 +62,38 @@ export class SqlEnrichmentStore implements EnrichmentRunStore {
 
   recordRun(run: EnrichmentRunRecord): void {
     this.ensureTables();
-    this.sql.exec(
-      INSERT_RUN_SQL,
-      run.id,
-      run.createdAt,
-      run.jobId,
-      run.stage,
-      JSON.stringify(run),
-    );
+    executeDoDml(DO_DML_CATALOGUE, this.sql, "dml.do.mas_enrichment_runs.insert_run", {
+      record: {
+        id: run.id,
+        created_at: run.createdAt,
+        job_id: run.jobId,
+        stage: run.stage,
+        record_json: JSON.stringify(run),
+      },
+    });
   }
 
   listRuns(limit = 20): EnrichmentRunRecord[] {
     this.ensureTables();
-    const rows = Array.from(this.sql.exec(LIST_RUNS_SQL, limit)) as Array<{
-      record_json: string;
-    }>;
+    const rows = executeDoDml<Array<{ record_json: string }>>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_enrichment_runs.list_runs",
+      { orderBy: "created_at DESC, id DESC", limit },
+    );
     return rows.map((r) => JSON.parse(r.record_json) as EnrichmentRunRecord);
   }
 
   getRun(id: string): EnrichmentRunRecord | null {
     this.ensureTables();
-    const rows = Array.from(this.sql.exec(GET_RUN_SQL, id)) as Array<{
-      record_json: string;
-    }>;
-    if (rows.length === 0) return null;
-    return JSON.parse(rows[0].record_json) as EnrichmentRunRecord;
+    const row = executeDoDml<{ record_json: string } | null>(
+      DO_DML_CATALOGUE,
+      this.sql,
+      "dml.do.mas_enrichment_runs.get_run",
+      { id },
+    );
+    if (row === null) return null;
+    return JSON.parse(row.record_json) as EnrichmentRunRecord;
   }
 
   qualitySummary(limit = 200): EnrichmentQualitySummary {
