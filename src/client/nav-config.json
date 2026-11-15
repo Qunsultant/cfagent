@@ -487,7 +487,7 @@
       "crumb": "SecurityHub",
       "category": "Platform",
       "icon": "IaaaAdmin",
-      "description": "IAAA admin, users, admin access, and your profile — one menu, five views",
+      "description": "IAAA admin, users, admin access, and your profile — one menu, six views",
       "navEntry": {
         "label": "SecurityHub",
         "shortLabel": "SecurityHub",
@@ -983,6 +983,13 @@
         "shortLabel": "Live policy state: active snapshot, source & obligations",
         "icon": "IaaaAdmin",
         "description": "Live policy state: active snapshot, source & obligations"
+      },
+      {
+        "id": "pep",
+        "label": "PEP",
+        "shortLabel": "Live enforcement state: gated routes, enforcement & grace",
+        "icon": "IaaaAdmin",
+        "description": "Live enforcement state: gated routes, enforcement & grace"
       }
     ],
     "schedules": [
@@ -1700,6 +1707,10 @@
       "tab": "security-hub",
       "view": "pdp"
     },
+    "security-hub:pep": {
+      "tab": "security-hub",
+      "view": "pep"
+    },
     "order:approvals": {
       "tab": "order",
       "params": {
@@ -1852,7 +1863,8 @@
         "users",
         "admin-access",
         "profile",
-        "pdp"
+        "pdp",
+        "pep"
       ]
     },
     {
