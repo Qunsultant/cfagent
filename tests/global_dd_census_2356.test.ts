@@ -550,13 +550,13 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   mas_data_providers: { layer: ["src/data/doSqliteProviderConfigAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_data_provider_routes: { layer: ["src/data/doSqliteProviderConfigAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_data_captures: { layer: ["src/data/doSqliteProviderCaptureAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
-  mas_opportunity_scans: { layer: ["src/data/doSqliteScanRunAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
-  mas_discovery_runs: { layer: ["src/data/doSqliteDiscoveryRunAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
-  mas_discovery_setup_runs: { layer: ["src/data/doSqliteDiscoverySetupAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
-  mas_discovery_alerts: { layer: ["src/data/doSqliteDiscoveryAlertAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
-  mas_iv_history: { layer: ["src/data/doSqliteIvHistoryAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
-  mas_strategy_profiles: { layer: ["src/data/doSqliteStrategyProfileAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
-  mas_feed_snapshots: { layer: ["src/data/doSqliteFeedSnapshotAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_opportunity_scans: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_discovery_runs: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_discovery_setup_runs: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_discovery_alerts: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_iv_history: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_strategy_profiles: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_feed_snapshots: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   paused_schedules: {
     // #3123: the legacy table is frozen — its only writer is the
     // deprecated adapter; live pause state lives in unified_schedules.
@@ -570,7 +570,7 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
     // catalogue (src/data/schemaComponent/ormCatalogue.ts).
     layer: ["src/data/doSqliteUnifiedScheduleAdapter.ts", "src/data/schemaComponent/ormCatalogue.ts", "src/data/schemaComponent/doCatalogue.ts"],
   },
-  mas_enrichment_runs: { layer: ["src/data/doSqliteEnrichmentAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_enrichment_runs: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_messages: {
     layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/schemaComponent/ormCatalogue.ts"],
   },
@@ -697,6 +697,16 @@ function fileWritesTable(file: string, table: string): boolean {
   // entry field. That declaration counts as writing the table,
   // scoped to the catalogue file so no other table's pin moves.
   if (file === "src/data/schemaComponent/dmlEntries.ts") {
+    return new RegExp(`table:\\s*"${table}"`, "i").test(text);
+  }
+  // #4282 P6b (#4385): the DO DML catalogue's repository entries
+  // are method descriptors, not write-verb + table-name text —
+  // the catalogue declares each table it writes with a
+  // `table: "<name>"` entry field. That declaration counts as
+  // writing the table, scoped to the catalogue file so no other
+  // table's pin moves. (Template entries already match through
+  // the write-verb path; the carve-out makes the set uniform.)
+  if (file === "src/data/schemaComponent/doDmlEntries.ts") {
     return new RegExp(`table:\\s*"${table}"`, "i").test(text);
   }
   return false;
