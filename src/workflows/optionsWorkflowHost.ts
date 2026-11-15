@@ -30,12 +30,12 @@
  * and validates the request's shape before defining anything (a
  * non-strategy shape is refused synchronously by name, with no job
  * defined), and awaitOptionsWorkflowRun polls the read-back until
- * the run settles (the vehicle a future sync-leg cutover awaits on).
- * No production strategy leg dispatches through the host yet — every strategy
- * leg is blocked by a named gap (#4453 scan-run store + stage queue
- * in the residency; universe deps travel as a stage input since
- * #4473, broker selection since #3960); the legs stay on the sync
- * dispatch until the cutover slices land, and this surface is what
+ * the run settles (the vehicle a sync-leg cutover awaits on).
+ * Issue #4468 — the NLQ panel leg dispatches through the host,
+ * gated (the gate and the unchanged sync fallback live in
+ * discoveryService.ts); the remaining strategy legs stay on the
+ * sync dispatch until their cutover slices land (scan #4469, firer
+ * #4470, shard #4471, evaluate #4472), and this surface is what
  * they cut over onto.
  *
  * Issue #4290 — the goal leg's dispatch surface over this host:

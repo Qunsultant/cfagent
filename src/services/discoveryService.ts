@@ -26,8 +26,9 @@
  * #1639 (D3, retained with stated reason): this service is a
  * universe-scan / characterization / inference / persistence
  * pre-stage, not a parallel recommendation engine — every name it
- * expresses goes through runOptionsPanelViaEngine (the engine-routed
- * panel; the direct runPanelPipelineRetired4068 call was retired by #4068), i.e.
+ * expresses goes through the engine-routed panel (runOptionsPanelViaEngine,
+ * or the strategy workflow host's dispatch of the same stages since
+ * #4468; the direct runPanelPipelineRetired4068 call was retired by #4068), i.e.
  * the kernel's discoverPanel. It is therefore retained alongside the
  * kernel,
  * not removed as a duplicate path.
@@ -39,6 +40,7 @@ import {
   getOpportunityScannerConfig,
   type EtapiDiscoveryConfig,
 } from "../config/etapiConfig";
+import { resolveEnvironmentConfig } from "../config/environment";
 import type { Env } from "../types";
 import type { DatabaseORM } from "../orm";
 import { platformChainSource, type ITradingPlatform } from "../trading";
@@ -105,6 +107,21 @@ import {
 } from "../trading";
 import type { PipelineResult } from "../trading";
 import type { StrategyRequest } from "../trading";
+import type { OptionChainSource } from "../trading";
+// Issue #290: the trading boundary index is the only path out of src/trading.
+import { alpacaTradingSide } from "../trading";
+import type { JobPipelineStores } from "../data/jobPipelinePorts";
+import type { JobRunRecorder } from "./jobPipelineEngine";
+import type { BrokerStageInput } from "../workflows/optionsStepPorts";
+import {
+  awaitOptionsWorkflowRun,
+  optionsWorkflowRunDepsFromEnv,
+  startStrategyScreenWorkflow,
+  type AwaitOptionsWorkflowRunOpts,
+  type StartOptionsScreenWorkflowOpts,
+} from "../workflows/optionsWorkflowHost";
+import { panelResultToPipelineResult } from "../workflows/strategyScreenPorts";
+import type { PanelDiscoveryResult } from "./recommendationKernel";
 
 export interface DiscoveryServiceDeps {
   loadSnapshot(symbol: string): Promise<OptionsDataSnapshot>;
@@ -353,6 +370,215 @@ export async function runDiscovery(
   return { run, deltas, errors, ...(alerts ? { alerts } : {}) };
 }
 
+/**
+ * Issue #4468 — the (broker, mode) stage input (#3960) for a
+ * discovery run, derived from the platform the run executes on.
+ * The mode mirrors the platform's own environment resolution with
+ * the same (env, overrideEnv) the platform was constructed with,
+ * so the residency fetches the same environment's chains the sync
+ * dispatch would. The platform id must match a catalog broker
+ * exactly — no case folding, no legacy alias — and a platform the
+ * catalog does not know derives nothing, so the leg stays on the
+ * sync dispatch instead of borrowing another broker's chains
+ * (#3388). A future broker derives nothing until its own mode
+ * resolution is added here; that is the fail-closed default.
+ */
+export function discoveryBrokerStageInput(
+  platformId: string,
+  env: Env,
+  overrideEnv?: string,
+): BrokerStageInput | null {
+  switch (platformId) {
+    case "etrade":
+      return {
+        broker: "etrade",
+        mode: resolveEnvironmentConfig(env, overrideEnv).isLive ? "live" : "paper",
+      };
+    case "alpaca":
+      return { broker: "alpaca", mode: alpacaTradingSide(env, overrideEnv) };
+    case "public":
+      return { broker: "public", mode: overrideEnv === "PROD" ? "live" : "paper" };
+    default:
+      return null;
+  }
+}
+
+/** The panel leg's dispatch decision: the host, or the unchanged sync dispatch. */
+export interface DiscoveryPanelDispatchDecision {
+  route: "host" | "sync";
+  reason: string;
+}
+
+/**
+ * Issue #4468 — the panel leg's dispatch gate (the #4450
+ * manual-route gate's shape). The host only when the leg's
+ * (broker, mode) pair derived from its platform and the residency
+ * bindings are configured; anything else stays on the unchanged
+ * sync dispatch. No symbol gate: every discovery expression is
+ * symbol-scoped. No universe gate: the panel shape needs no
+ * universe input — the strategy screen builds its filter from the
+ * request itself. The decision is per service instance — the
+ * platform, env, and bindings are fixed at construction — so it is
+ * taken once, when the panel runner is built, not per expression.
+ * No gate decision is logged; the run's job record shows which
+ * dispatch served it.
+ */
+export function discoveryPanelDispatchRoute(input: {
+  broker: BrokerStageInput | null;
+  env: Env;
+}): DiscoveryPanelDispatchDecision {
+  if (!input.broker) {
+    return {
+      route: "sync",
+      reason:
+        "no broker stage input derives from the platform, so the residency could not resolve the run's own chain source",
+    };
+  }
+  const workflow = input.env.JOB_PIPELINE_WORKFLOW;
+  if (!input.env.AGENT_DB || !workflow || typeof workflow.create !== "function") {
+    return {
+      route: "sync",
+      reason: "the workflow residency bindings are not configured in this deployment",
+    };
+  }
+  return {
+    route: "host",
+    reason: "broker pair derived, residency bindings configured",
+  };
+}
+
+/**
+ * Issue #4468 — the host dispatch's injectable seams (the
+ * #4291/#4450 idiom): the workflow create call, the residency
+ * stores, and the await options. Tests inject fakes; production
+ * passes nothing and the dispatch derives from env.
+ */
+export interface DiscoveryPanelHostSeams {
+  startWorkflow?: StartOptionsScreenWorkflowOpts["startWorkflow"];
+  stores?: JobPipelineStores;
+  runRecorder?: JobRunRecorder;
+  awaitOptions?: AwaitOptionsWorkflowRunOpts;
+}
+
+/**
+ * Issue #4468 — one discovery panel expression through the strategy
+ * workflow host: define the strategy job with the leg's broker pair
+ * stamped on the stored request, create the workflow instance,
+ * await settlement, and map the shapeReport back to the
+ * PipelineResult the expression consumes. The envelope is the sync
+ * dispatch's envelope (runOptionsPanelViaEngineWithAgents) plus the
+ * broker pair, and the run id mints on the sync dispatch's
+ * template, so a host run and a sync run are the same job shape in
+ * Workflow Runs. The await bound is the manual route's (300s,
+ * #4450): a panel screen over live chains is the same shape of
+ * work. A failed run throws the sync path's failure shape; a run
+ * that completes without a report refuses to answer from nothing,
+ * as the sync path does.
+ *
+ * The caller's engine stores do not thread here: the host run
+ * records over the residency's durable stores, not the caller's
+ * stores, so a host-path expression is not addressable by
+ * per-stage control from the copilot turn until control moves to
+ * the durable stores (#4505). The sync fallback keeps the #4276
+ * threading for gated-out runs.
+ */
+export async function runDiscoveryPanelViaHost(args: {
+  env: Env;
+  request: StrategyRequest;
+  userLogin: string;
+  broker: BrokerStageInput;
+  runId?: string;
+  seams?: DiscoveryPanelHostSeams;
+}): Promise<PipelineResult> {
+  const runId =
+    args.runId ?? `options-panel:service:${args.request.symbol}:${new Date().toISOString()}`;
+  const deps =
+    args.seams?.stores && args.seams?.runRecorder
+      ? { stores: args.seams.stores, runRecorder: args.seams.runRecorder }
+      : optionsWorkflowRunDepsFromEnv(args.env);
+  const started = await startStrategyScreenWorkflow(
+    args.env,
+    {
+      runId,
+      request: {
+        assetClass: "options",
+        runIdentity: { runId },
+        trigger: "manual",
+        classInput: {
+          strategyRequest: args.request,
+          strategyFilter: undefined,
+          riskProfile: undefined,
+          alternatives: undefined,
+          snapshotOverride: undefined,
+        },
+      },
+      userLogin: args.userLogin,
+      broker: args.broker,
+    },
+    {
+      ...deps,
+      ...(args.seams?.startWorkflow ? { startWorkflow: args.seams.startWorkflow } : {}),
+    },
+  );
+  const view = await awaitOptionsWorkflowRun(deps, started.jobId, {
+    timeoutMs: 300_000,
+    ...(args.seams?.awaitOptions ?? {}),
+  });
+  if (view.state === "failed") {
+    const failed = view.stages.find((stage) => stage.status === "failed");
+    throw new Error(
+      `Options strategy screen failed at ${failed?.stageId ?? "unknown"}: ${failed?.error ?? "unknown reason"}`,
+    );
+  }
+  if (view.state !== "completed") {
+    throw new Error(`Options strategy screen run ${runId} ended ${view.state} without a result`);
+  }
+  const panelResult = view.shapeReport as PanelDiscoveryResult | undefined;
+  if (!panelResult) {
+    throw new Error(
+      "Options strategy screen completed without a report artifact; refusing to answer from nothing.",
+    );
+  }
+  return panelResultToPipelineResult(panelResult);
+}
+
+/**
+ * Issue #4468 — the discovery panel runner: the runPipeline dep
+ * createDiscoveryService threads into runDiscovery. The dispatch
+ * decision is taken once, here, from the derived pair and the env;
+ * each expression then dispatches through the host or through the
+ * unchanged sync call. The sync branch is the #4068/#4276 call
+ * verbatim, so a gated-out run is byte-identical to before.
+ */
+export function createDiscoveryPanelRunner(args: {
+  env: Env;
+  userLogin: string;
+  chainSource: OptionChainSource;
+  broker: BrokerStageInput | null;
+  seams?: DiscoveryPanelHostSeams;
+}): DiscoveryServiceDeps["runPipeline"] {
+  const decision = discoveryPanelDispatchRoute({ broker: args.broker, env: args.env });
+  return (request, options) => {
+    if (decision.route === "host" && args.broker) {
+      return runDiscoveryPanelViaHost({
+        env: args.env,
+        request,
+        userLogin: args.userLogin,
+        broker: args.broker,
+        ...(args.seams ? { seams: args.seams } : {}),
+      });
+    }
+    return runOptionsPanelViaEngine(
+      args.chainSource,
+      request,
+      {},
+      args.userLogin,
+      undefined,
+      options?.engineStores,
+    );
+  };
+}
+
 /** Production wiring: ETrade chains (the unified service's own
  *  construction discipline), Yahoo bars, the env-aware IV history
  *  store (D1 when AGENT_DB is bound, #2337) and the SQL run
@@ -403,6 +629,10 @@ export function createDiscoveryService(args: {
       `${args.platform.platformId} has no options chain source, so no discovery run can execute on it. No other broker's chains were used.`,
     );
   }
+  // Issue #4468: the leg's (broker, mode) pair, derived from the
+  // platform the run executes on — the gate's first input. Null
+  // keeps the leg on the sync dispatch (see discoveryPanelDispatchRoute).
+  const broker = discoveryBrokerStageInput(args.platform.platformId, args.env, args.overrideEnv);
   const screener = new DynamicOptionsScreener(chainSource);
   const dataAgent = new OptionsDataAgent(screener);
   // #2337 (#1976 step 2): the family stores come from the data
@@ -505,8 +735,16 @@ export function createDiscoveryService(args: {
     // Issue #4276: the run's engine stores ride as the panel's 6th
     // argument, so the expression records durably over the caller's
     // stores; absent, the panel builds in-memory stores explicitly.
-    runPipeline: (request, options) =>
-      runOptionsPanelViaEngine(chainSource, request, {}, args.userLogin, undefined, options?.engineStores),
+    // Issue #4468: the panel dispatches through the strategy
+    // workflow host when the gate holds, else the sync call above
+    // verbatim — the runner decides once, from the derived pair
+    // and the bindings.
+    runPipeline: createDiscoveryPanelRunner({
+      env: args.env,
+      userLogin: args.userLogin,
+      chainSource,
+      broker,
+    }),
     store: ports.discoverySetupRuns,
     ...(args.alerts
       ? {

@@ -1128,14 +1128,15 @@ export async function runOptionsScreenViaEngine(
  * executed by JobPipelineWorkflow with the workflow step as the
  * engine's journal; awaitOptionsWorkflowRun awaits settlement). This
  * sync/in-process dispatch is KEPT, not retired, for the legs that
- * cannot move yet: every strategy leg is blocked by a named gap —
- * broker selection (#3960: the discovery, shard, and NLQ legs read
- * broker-aware chain sources the residency cannot rebuild), the
- * scan-run store + stage queue in the residency (#4453: the NLQ scan
- * leg, the scheduled firer, and the shard executor bind one or both),
- * and universe deps that do not travel (the firer and the evaluate
- * route). New callers must dispatch through the host; a leg moves
- * here only when its ports are rebuildable per invocation (see
+ * cannot move yet and as the gated fallback for the legs that moved:
+ * the NLQ panel leg dispatches through the host since #4468 and
+ * falls back here when its gate holds it on sync; the scan, shard,
+ * firer, and evaluate legs stay here until their cutovers (#4469,
+ * #4471, #4470, #4472) — the scan-run store + stage queue in the
+ * residency (#4453) and universe deps that do not travel for the
+ * firer and evaluate route are still open for those legs. New
+ * callers must dispatch through the host; a leg moves here only
+ * when its ports are rebuildable per invocation (see
  * optionsStepPorts.ts) and its gap has landed.
  */
 export async function runStrategyScreenViaEngine(
