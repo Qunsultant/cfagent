@@ -67,7 +67,7 @@ import {
 import { InMemoryProviderCaptureAdapter } from "../src/data/inMemoryProviderCaptureAdapter";
 import { createFeedDatasetAdapter } from "../src/data/createFeedDatasetPorts";
 import { InMemoryFeedDatasetStore } from "../src/data/inMemoryFeedDatasetAdapter";
-import { D1IndexListStore } from "../src/data/d1IndexListAdapter";
+import { createD1IndexListDb, D1IndexListStore } from "../src/data/d1IndexListAdapter";
 import { InMemoryIndexListStore } from "../src/data/inMemoryIndexListAdapter";
 import { createJobPipelineStoresFromD1 } from "../src/data/createJobPipelinePorts";
 import { createFeedStepRegistry, ensureFeedPipelineJobs, resolveFeedJob } from "../src/services/feedPipelineJobs";
@@ -841,7 +841,7 @@ afterAll(() => {
 
 describe("the chains job across residencies (#4065)", () => {
   async function seedUniverse(mock: MockD1Database) {
-    const store = new D1IndexListStore(mock as never);
+    const store = new D1IndexListStore(createD1IndexListDb(mock as never));
     await store.store({
       index: "nasdaq100",
       snapshotDate: "2026-11-02",
