@@ -61,7 +61,7 @@ import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
 import { createDeliveryDatasetPorts } from "../data/createDeliveryDatasetPorts";
-import { D1IndexListStore } from "../data/d1IndexListAdapter";
+import { createD1IndexListDb, D1IndexListStore } from "../data/d1IndexListAdapter";
 import {
   createIndexMembershipService,
   createWikipediaIndexMembershipAdapter,
@@ -145,9 +145,7 @@ export function feedStepDepsForWorkflow(
   stores: JobPipelineStores,
 ): FeedStepDeps {
   const db = env.AGENT_DB;
-  const universeStore = new D1IndexListStore(
-    db as ConstructorParameters<typeof D1IndexListStore>[0],
-  );
+  const universeStore = new D1IndexListStore(createD1IndexListDb(db as D1Database));
   const fetchHtml = fetchWikipediaIndexHtml;
   const capturePort = createProviderCaptureAdapter(env) ?? undefined;
   const blobStorage = createR2CaptureBlobStorage(env) ?? undefined;
