@@ -123,6 +123,12 @@ function stubSyncSql(initialMarker: string | null) {
       if (q.startsWith("SELECT value FROM mas_settings")) {
         return marker === null ? [] : [{ value: marker }];
       }
+      // #4386 (#4282 P6c): the settings get() now dispatches the
+      // catalogue's Repository findById entry, so the Repository's
+      // SELECT * shape arrives here; the row is the mapped record.
+      if (q.startsWith("SELECT * FROM mas_settings WHERE")) {
+        return marker === null ? [] : [{ key: String(args[0]), value: marker }];
+      }
       if (q.startsWith("DELETE FROM mas_settings")) {
         marker = null;
         return [];
