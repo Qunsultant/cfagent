@@ -34,7 +34,8 @@ import type {
 } from "../src/data/indexListPorts";
 import { InMemoryIndexListStore } from "../src/data/inMemoryIndexListAdapter";
 import { SqlIndexListStore } from "../src/data/doSqliteIndexListAdapter";
-import { D1IndexListStore } from "../src/data/d1IndexListAdapter";
+import { createD1IndexListDb, D1IndexListStore } from "../src/data/d1IndexListAdapter";
+import { MockD1Database } from "./mock-d1";
 import { produceIndexListSnapshot } from "../src/services/indexListProducer";
 import {
   executeIndexListRefreshJob,
@@ -87,72 +88,13 @@ function makeSqlExecutor() {
 }
 
 /** Minimal fake D1Database: supports exactly the statements the D1 adapter issues. */
-function makeFakeD1() {
-  type Row = Record<string, unknown>;
-  const rows: Row[] = [];
-  const db = {
-    prepare(sql: string) {
-      return {
-        bind(...params: unknown[]) {
-          return {
-            run: async () => {
-              if (/^\s*CREATE TABLE/i.test(sql)) return { success: true };
-              if (/^\s*INSERT INTO/i.test(sql)) {
-                const [id, created_at, index_id, snapshot_date, source, source_label, derived, members_json] =
-                  params as [string, string, string, string, string, string, number, string];
-                rows.push({ id, created_at, index_id, snapshot_date, source, source_label, derived_from_holdings: derived, members_json });
-              } else if (/^\s*DELETE FROM/i.test(sql)) {
-                const [id] = params as [string];
-                const at = rows.findIndex((r) => r.id === id);
-                if (at !== -1) rows.splice(at, 1);
-              }
-              return { success: true };
-            },
-            first: async <T>() => {
-              if (/ORDER BY created_at DESC, id DESC LIMIT 1/i.test(sql)) {
-                const [index_id] = params as [string];
-                const mine = rows
-                  .filter((r) => r.index_id === index_id)
-                  .sort((a, b) =>
-                    a.created_at !== b.created_at
-                      ? (a.created_at as string) < (b.created_at as string) ? 1 : -1
-                      : (b.id as string).localeCompare(a.id as string),
-                  );
-                return (mine[0] ?? null) as T | null;
-              }
-              return null as T | null;
-            },
-            all: async () => {
-              if (/SELECT id FROM/i.test(sql)) {
-                const [index_id] = params as [string];
-                const mine = rows
-                  .filter((r) => r.index_id === index_id)
-                  .sort((a, b) =>
-                    a.created_at !== b.created_at
-                      ? (a.created_at as string) < (b.created_at as string) ? 1 : -1
-                      : (b.id as string).localeCompare(a.id as string),
-                  );
-                return { results: mine.map((r) => ({ id: r.id })) };
-              }
-              return { results: [] };
-            },
-          };
-        },
-        run: async () => ({ success: true }),
-      };
-    },
-    _rows: rows,
-  };
-  return db;
-}
-
 function makeStores(): Array<{ name: string; store: IndexListStore }> {
   let seq = 0;
   const idFactory = () => `id-${++seq}`;
   return [
     { name: "in-memory", store: new InMemoryIndexListStore({ idFactory }) },
     { name: "do-sqlite", store: new SqlIndexListStore(makeSqlExecutor(), { idFactory }) },
-    { name: "d1", store: new D1IndexListStore(makeFakeD1() as never, { idFactory }) },
+    { name: "d1", store: new D1IndexListStore(createD1IndexListDb(new MockD1Database() as never), { idFactory }) },
   ];
 }
 
@@ -206,7 +148,7 @@ describe("index-list store conformance (#1980)", () => {
         ? new InMemoryIndexListStore({ keepPerIndex: 2 })
         : name === "do-sqlite"
           ? new SqlIndexListStore(makeSqlExecutor(), { keepPerIndex: 2 })
-          : new D1IndexListStore(makeFakeD1() as never, { keepPerIndex: 2 });
+          : new D1IndexListStore(createD1IndexListDb(new MockD1Database() as never), { keepPerIndex: 2 });
       for (let i = 1; i <= 4; i++) {
         await small.store({
           index: "sp500",
