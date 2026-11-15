@@ -23,11 +23,11 @@
  *   is corrected: the platform-admin surface no longer lists it as a
  *   tab id (it redirects to the home, so it is not a tab on that
  *   surface — matching `jobs`, which was never a value there).
- * - 4110-P05 the left-nav catalog still admits both ids
- *   (`platformAdminSections` / `PLATFORM_ADMIN_NAV_ITEMS`): the
- *   sub-menu shortcuts to the home stay, so this is dead-block removal
- *   only — no behavior change, and `PlatformAdminSectionId` is NOT
- *   narrowed (the ids are still admitted by the nav catalog).
+ * - 4110-P05 (superseded by #4561): the left-nav catalog NO LONGER
+ *   admits the ids — #4561 removed the sub-menu shortcuts to the home
+ *   entirely, so `platformAdminSections` / `PLATFORM_ADMIN_NAV_ITEMS`
+ *   carry neither id, the deep-link overrides are deleted, and
+ *   `PlatformAdminSectionId` IS narrowed.
  * - 4110-P06 the retired addresses still redirect to the home (the
  *   redirect is what makes the removal safe).
  */
@@ -113,8 +113,10 @@ describe("4110-P01/P02 the dead render blocks and their imports are gone (#4110)
     expect(panelSource).not.toContain('from "./JobsPanel"');
     expect(panelSource).not.toContain("<ScheduledGoalsPanel");
     expect(panelSource).not.toContain("<JobsPanel");
-    // AsyncJobsPanel (background-tasks) is a different, live panel.
-    expect(panelSource).toContain("AsyncJobsPanel");
+    // Issue #4561: AsyncJobsPanel (background-tasks) moved to the
+    // schedules home with the other two ids — the drawer mounts no
+    // async-jobs panel anymore.
+    expect(panelSource).not.toContain("AsyncJobsPanel");
   });
 });
 
@@ -131,28 +133,22 @@ describe("4110-P03 an open drawer at a retired section mounts neither panel (#41
     expect(container.querySelector('[data-testid="jobs-panel"]')).toBeNull();
   });
 
-  it("menu selection of a retired section mounts neither panel", async () => {
+  it("the drawer menu no longer lists the retired sections", async () => {
     await render(panel());
-    const scheduledGoals = Array.from(
+    const menuLabels = Array.from(
       container.querySelectorAll(".platform-admin-menu-item"),
-    ).find((item) => item.textContent?.includes("Scheduled goals")) as HTMLElement;
-    expect(scheduledGoals).toBeTruthy();
-    await act(async () => {
-      scheduledGoals.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(container.querySelector('[data-testid="scheduled-goals-panel"]')).toBeNull();
-    const jobs = Array.from(container.querySelectorAll(".platform-admin-menu-item")).find(
-      (item) => item.textContent?.includes("Jobs") && !item.textContent?.includes("Background"),
-    ) as HTMLElement;
-    expect(jobs).toBeTruthy();
-    await act(async () => {
-      jobs.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(container.querySelector('[data-testid="jobs-panel"]')).toBeNull();
+    ).map((item) => item.textContent ?? "");
+    expect(menuLabels.some((label) => label.includes("Scheduled goals"))).toBe(false);
+    expect(
+      menuLabels.some(
+        (label) => label.includes("Jobs") && !label.includes("Background"),
+      ),
+    ).toBe(false);
+    expect(menuLabels.some((label) => label.includes("Background Tasks"))).toBe(false);
   });
 });
 
-describe("4110-P04 the stale deepLinkSurfaces entry is corrected (#4110)", () => {
+describe("4110-P04 the stale deepLinkSurfaces entries are corrected (#4110)", () => {
   it("the platform-admin surface no longer lists scheduled-goals as a tab id", () => {
     const config = navConfig();
     const platformAdmin = config.deepLinkSurfaces.find((s) => s.page === "platform-admin");
@@ -160,30 +156,29 @@ describe("4110-P04 the stale deepLinkSurfaces entry is corrected (#4110)", () =>
     expect(platformAdmin!.values).not.toContain("scheduled-goals");
     // jobs was never a value there; the entry stays non-empty.
     expect(platformAdmin!.values).not.toContain("jobs");
+    // Issue #4561: background-tasks left the surface with the move —
+    // its tab id lives on the schedules surface now.
+    expect(platformAdmin!.values).not.toContain("background-tasks");
     expect(platformAdmin!.values.length).toBeGreaterThan(0);
   });
 });
 
-describe("4110-P05 the left-nav catalog still admits both ids (#4110)", () => {
-  it("platformAdminSections and the nav sub-menu still carry both ids", () => {
+describe("4110-P05 the left-nav catalog no longer admits the ids (#4561)", () => {
+  it("platformAdminSections and the nav sub-menu carry neither id", () => {
     const ids = platformAdminItems().map((item) => item.id);
-    expect(ids).toContain("scheduled-goals");
-    expect(ids).toContain("jobs");
+    expect(ids).not.toContain("scheduled-goals");
+    expect(ids).not.toContain("jobs");
+    expect(ids).not.toContain("background-tasks");
     const navIds = PLATFORM_ADMIN_NAV_ITEMS.map((item) => item.id);
-    expect(navIds).toContain("platform-admin:scheduled-goals");
-    expect(navIds).toContain("platform-admin:jobs");
+    expect(navIds).not.toContain("platform-admin:scheduled-goals");
+    expect(navIds).not.toContain("platform-admin:jobs");
+    expect(navIds).not.toContain("platform-admin:background-tasks");
   });
 
-  it("the deep-link overrides still land straight on the home", () => {
+  it("the deep-link overrides are deleted", () => {
     const config = navConfig();
-    expect(config.deepLinks["platform-admin:scheduled-goals"]).toEqual({
-      tab: "schedules",
-      view: "goals",
-    });
-    expect(config.deepLinks["platform-admin:jobs"]).toEqual({
-      tab: "schedules",
-      view: "runs",
-    });
+    expect(config.deepLinks["platform-admin:scheduled-goals"]).toBeUndefined();
+    expect(config.deepLinks["platform-admin:jobs"]).toBeUndefined();
   });
 });
 

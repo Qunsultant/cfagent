@@ -5,7 +5,7 @@
  * Home: `?tab=schedules` (owner-decided, inventory §8.3). Sub-route
  * scheme, following the app's existing `?tab=` + `?view=` deep-link
  * pattern (`src/client/router.ts` `parseViewFromSearch`):
- * `?tab=schedules&view=list|runs|ledger|goals|queue&schedule=<id>&run=<id>`.
+ * `?tab=schedules&view=list|runs|ledger|goals|queue|background-tasks&schedule=<id>&run=<id>`.
  *
  * - `view=list` (default): the schedule list (today's `SchedulesPanel`
  *   capabilities, incl. the embedded `ScheduledOptionsManager`).
@@ -24,6 +24,10 @@
  * - `view=queue`: the admin queue (`AdminQueueWipePanel`), role-gated at
  *   the route — the same platform-admin overview probe that gated it
  *   inside IAAA Admin (see `ScheduleQueueView`); the server is the gate.
+ * - `view=background-tasks` (issue #4561): the async execution queue
+ *   (`AsyncJobsPanel`) — moved here from Platform Admin, which no longer
+ *   mounts it. The queue view and Background Tasks stay separate tabs:
+ *   admin-queue table ops vs the async execution queue list.
  *
  * Retired addresses (each maps to the home, or to null with the reason
  * recorded here — never silently kept):
@@ -66,14 +70,15 @@ import {
 /** The one schedules home tab id. */
 export const SCHEDULES_HOME_TAB = "schedules";
 
-/** The consolidated home's views; `ledger` is an alias of `runs`, not a fifth view. */
-export type SchedulesHomeView = "list" | "runs" | "goals" | "queue";
+/** The consolidated home's views; `ledger` is an alias of `runs`, not a sixth view. */
+export type SchedulesHomeView = "list" | "runs" | "goals" | "queue" | "background-tasks";
 
 export const SCHEDULES_HOME_VIEWS: readonly SchedulesHomeView[] = [
   "list",
   "runs",
   "goals",
   "queue",
+  "background-tasks",
 ];
 
 export const SCHEDULES_HOME_VIEW_LABELS: Record<SchedulesHomeView, string> = {
@@ -81,6 +86,7 @@ export const SCHEDULES_HOME_VIEW_LABELS: Record<SchedulesHomeView, string> = {
   runs: "Run ledger",
   goals: "Goal schedules",
   queue: "Queue",
+  "background-tasks": "Background Tasks",
 };
 
 /** `ledger` is accepted as an alias of `runs` (inventory §8.3 (ii)). */

@@ -28,7 +28,6 @@ import {
   saveStoredAdBannerConfig,
   type AdBannerConfig,
 } from "./adBannerConfig";
-import { AsyncJobsPanel } from "./AsyncJobsPanel";
 import { ApiKeysPanel } from "./ApiKeysPanel";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
@@ -418,21 +417,15 @@ export function PlatformAdminPanel({
                 {...(onOpenPartnerDeals ? { onOpenPartnerDeals } : {})}
               />
             )}
-            {active === "background-tasks" && (
-              <div className="etrade-panel-section settings-async-tasks-section">
-                <div className="section-label-row">
-                  <span>Background Tasks</span>
-                  <small>Async jobs &amp; execution queue</small>
-                </div>
-                <AsyncJobsPanel embedded />
-              </div>
-            )}
-            {/* Issue #4110 (#3121 S6 comb): the scheduled-goals / jobs
-                outposts were folded into the schedules home in S2, so
-                this drawer mounts no panels for them — the left-nav
-                entries link straight to the home (nav-config.json
-                deep-link overrides) and the retired addresses redirect
-                there (legacySchedulesRedirect). */}
+            {/* Issue #4561: the last schedule outpost moved to the
+                schedules home — `background-tasks` renders there as
+                `?tab=schedules&view=background-tasks` (the async-jobs
+                panel), and `scheduled-goals` / `jobs` left the
+                platform-admin sub-menu with it (their panels were
+                already folded into the home in #3121 S2, #4110). This
+                drawer mounts no panels for any of the three; the
+                retired addresses redirect to the home
+                (legacySchedulesRedirect). */}
             {active === "provenance" && <ProvenanceSection />}
             {active === "api-keys" && (
               <div className="etrade-panel-section settings-api-keys-section">

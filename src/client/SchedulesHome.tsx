@@ -10,7 +10,9 @@
  * (ScheduleRunLedgerPanel over the S1 ledger), goals
  * (ScheduledGoalsPanel — S3: goal schedules on the S1 primitives,
  * provenance + consolidated-ledger runs, no second read path), queue
- * (ScheduleQueueView — platform-admin gated at the route).
+ * (ScheduleQueueView — platform-admin gated at the route),
+ * background-tasks (AsyncJobsPanel — the async execution queue, moved
+ * from Platform Admin in #4561; a separate tab from the queue view).
  *
  * View state follows the URL (`?view=`, plus `?schedule=` / `?run=`
  * deep links), the same pattern as PlatformAdminPage: the component
@@ -36,6 +38,7 @@ import { SchedulesPanel } from "./SchedulesPanel";
 import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
 import { ScheduleRunLedgerPanel } from "./ScheduleRunLedgerPanel";
 import { ScheduleQueueView } from "./ScheduleQueueView";
+import { AsyncJobsPanel } from "./AsyncJobsPanel";
 import { useBrokerEnvironment } from "./brokerEnvironment";
 import { navigateToTab, subscribeToRouteChanges } from "./router";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
@@ -86,7 +89,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
   return (
     <PageShell
       title="Schedules"
-      scopeNote="The one scheduling surface — schedules, goal schedules, the consolidated run ledger, and the admin queue"
+      scopeNote="The one scheduling surface — schedules, goal schedules, the consolidated run ledger, the admin queue, and background tasks"
     >
       <div className="schedules-home-tabs-wrapper">
         <Tabs<SchedulesHomeView>
@@ -153,6 +156,19 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
             <small>Admin queue — dump, cancel-all, wipe, and Track 1 recreate</small>
           </div>
           <ScheduleQueueView />
+        </div>
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="schedules-home" tabId="background-tasks" active={deepLink.view === "background-tasks"}>
+        <Card padding="md">
+          {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
+          <div className="ui-scroll-frame">
+          <div className="section-label-row">
+            <span>Background Tasks</span>
+            <small>Async jobs &amp; execution queue</small>
+          </div>
+          <AsyncJobsPanel embedded />
         </div>
         </Card>
       </TabPanel>

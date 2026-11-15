@@ -5,7 +5,7 @@
  * Verifies:
  *  - Platform Admin renders as a dedicated full page inside PageShell;
  *  - renders a tab list with all ten administration surfaces;
- *  - tab switching activates corresponding panel (ads, background-tasks,
+ *  - tab switching activates corresponding panel (ads,
  *    provenance, api-keys, data-providers, iaaa-admin, users, admin-access);
  *  - respects initialSection prop and ?view= query parameter;
  *  - updates URL view param on tab selection;
@@ -14,8 +14,10 @@
  * Issue #3121 S2: the scheduled-goals and jobs sections folded into
  * the schedules home (`?tab=schedules&view=goals` / `view=runs`) — they
  * are gone from this page's tab list (13 tabs), and their old
- * addresses redirect to the home. The left-nav entries still exist
- * and link straight to the home.
+ * addresses redirect to the home. Issue #4561: the background-tasks
+ * section moved to the home too (`?tab=schedules&view=background-tasks`)
+ * and the goals/runs links left the platform-admin sub-menu — 15 tabs
+ * remain, and no platform-admin entry points at the home anymore.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
@@ -23,9 +25,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-vi.mock("../src/client/AsyncJobsPanel", () => ({
-  AsyncJobsPanel: () => <div data-testid="async-jobs-panel">async jobs content</div>,
-}));
 vi.mock("../src/client/ApiKeysPanel", () => ({
   ApiKeysPanel: () => <div data-testid="api-keys-panel">api keys content</div>,
 }));
@@ -80,8 +79,8 @@ describe("PlatformAdminPage component", () => {
     expect(tablist).toBeTruthy();
 
     const tabs = container.querySelectorAll('[role="tab"]');
-    expect(tabs).toHaveLength(16);
-    expect(PLATFORM_ADMIN_TABS).toHaveLength(16);
+    expect(tabs).toHaveLength(15);
+    expect(PLATFORM_ADMIN_TABS).toHaveLength(15);
 
     // Initial default tab is ads
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
@@ -142,16 +141,7 @@ describe("PlatformAdminPage component", () => {
 
     const tabs = container.querySelectorAll('[role="tab"]');
 
-    // 1. Switch to Background Tasks
-    const bgTab = Array.from(tabs).find((t) => t.textContent?.includes("Background Tasks")) as HTMLElement;
-    await act(async () => {
-      bgTab.click();
-    });
-    expect(container.querySelector('[data-testid="async-jobs-panel"]')).toBeTruthy();
-    expect(onSelectSection).toHaveBeenCalledWith("background-tasks");
-    expect(window.location.search).toContain("view=background-tasks");
-
-    // 2. Switch to Diagnostics & Provenance
+    // 1. Switch to Diagnostics & Provenance
     const provTab = Array.from(tabs).find((t) => t.textContent?.includes("Diagnostics & Provenance")) as HTMLElement;
     await act(async () => {
       provTab.click();
@@ -159,21 +149,21 @@ describe("PlatformAdminPage component", () => {
     expect(container.textContent).toContain("Technical Diagnostics & Provenance");
     expect(container.textContent).toContain("did:agent:openaimp:trading");
 
-    // 3. Switch to Data Providers
+    // 2. Switch to Data Providers
     const provsTab = Array.from(tabs).find((t) => t.textContent?.includes("Data Providers")) as HTMLElement;
     await act(async () => {
       provsTab.click();
     });
     expect(container.querySelector('[data-testid="data-providers-panel"]')).toBeTruthy();
 
-    // 4. Switch to IAAA Admin
+    // 3. Switch to IAAA Admin
     const iaaaTab = Array.from(tabs).find((t) => t.textContent?.includes("IAAA Admin")) as HTMLElement;
     await act(async () => {
       iaaaTab.click();
     });
     expect(container.querySelector('[data-testid="iaaa-admin-panel"]')).toBeTruthy();
 
-    // 5. Switch to Users (#2220: the tab renders its panel shell;
+    // 4. Switch to Users (#2220: the tab renders its panel shell;
     // the panel's own fetch resolves asynchronously, so assert the
     // page-level section copy, not the fetched profile).
     const usersTab = Array.from(tabs).find((t) => t.textContent === "Users") as HTMLElement;
@@ -182,7 +172,7 @@ describe("PlatformAdminPage component", () => {
     });
     expect(container.textContent).toContain("User profiles, tenant memberships");
 
-    // 6. Switch to Channels (#3169: same shell assertion as Users
+    // 5. Switch to Channels (#3169: same shell assertion as Users
     // — the panel's tenant fetch resolves asynchronously).
     const channelsTab = Array.from(tabs).find((t) => t.textContent === "Channels") as HTMLElement;
     await act(async () => {
@@ -192,7 +182,7 @@ describe("PlatformAdminPage component", () => {
     expect(onSelectSection).toHaveBeenCalledWith("channels");
     expect(window.location.search).toContain("view=channels");
 
-    // 7. Switch to Admin Access
+    // 6. Switch to Admin Access
     const accessTab = Array.from(tabs).find((t) => t.textContent?.includes("Admin Access")) as HTMLElement;
     await act(async () => {
       accessTab.click();

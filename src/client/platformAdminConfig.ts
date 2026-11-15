@@ -17,9 +17,6 @@ import navConfigData from "./nav-config.json";
 
 export type PlatformAdminSectionId =
   | "ads"
-  | "background-tasks"
-  | "scheduled-goals"
-  | "jobs"
   | "provenance"
   | "api-keys"
   | "tenants"
