@@ -701,10 +701,10 @@ class FakeSql implements DiscoverySqlExecutor {
       }
       return [];
     }
-    if (q.startsWith("SELECT summary_json, run_json FROM mas_discovery_runs WHERE id = ?")) {
+    if (q.startsWith("SELECT * FROM mas_discovery_runs WHERE id = ?")) {
       return this.discoveryRows
         .filter((r) => r.id === params[0])
-        .map((r) => ({ summary_json: r.summary_json, run_json: r.run_json }));
+        .map((r) => ({ ...r }));
     }
     if (q.startsWith("SELECT summary_json FROM mas_discovery_runs WHERE")) {
       const [scope, limit, offset] = params as [string | null, number, number];
@@ -734,10 +734,10 @@ class FakeSql implements DiscoverySqlExecutor {
       this.profileRows.push({ id, user_login, name, version, spec_json, created_at, updated_at });
       return [];
     }
-    if (q.startsWith("SELECT id, user_login, name, version, spec_json, created_at, updated_at FROM mas_strategy_profiles WHERE user_login = ? AND id = ?")) {
+    if (q.startsWith("SELECT * FROM mas_strategy_profiles WHERE user_login = ? AND id = ?")) {
       return this.profileRows.filter((r) => r.user_login === params[0] && r.id === params[1]);
     }
-    if (q.startsWith("SELECT id, user_login, name, version, spec_json, created_at, updated_at FROM mas_strategy_profiles WHERE user_login = ?")) {
+    if (q.startsWith("SELECT * FROM mas_strategy_profiles WHERE user_login = ?")) {
       return this.profileRows.filter((r) => r.user_login === params[0]);
     }
     if (q.startsWith("UPDATE mas_strategy_profiles")) {
