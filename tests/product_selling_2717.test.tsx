@@ -365,6 +365,7 @@ describe("selling panel section (#2717)", () => {
     plans?: unknown;
     mint?: unknown;
     mintStatus?: number;
+    mintErrorBody?: unknown;
     purchase?: unknown;
     purchaseStatus?: number;
   } = {}) {
@@ -372,7 +373,7 @@ describe("selling panel section (#2717)", () => {
     const impl = async (url: string, init?: RequestInit) => {
       seen.push({ url, method: init?.method ?? "GET" });
       const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-      const err = (status: number) => ({ ok: false, status, json: async () => ({ error: "typed" }) });
+      const err = (status: number, body?: unknown) => ({ ok: false, status, json: async () => body ?? { error: "typed" } });
       if (url === "/api/payments/agentic/commercial/identity") {
         return ok({ userLogin: "owner", tenantId: null, hasAccount: true, tier: "Free", creditsUSD: 0, includedRunsRemaining: 0 });
       }
@@ -385,7 +386,7 @@ describe("selling panel section (#2717)", () => {
         return ok(overrides.plans ?? { plans: [PRO_PLAN] });
       }
       if (url === "/api/payments/agentic/commercial/subscription/billing-checkout") {
-        if (overrides.mintStatus) return err(overrides.mintStatus);
+        if (overrides.mintStatus) return err(overrides.mintStatus, overrides.mintErrorBody);
         return ok(
           overrides.mint ?? {
             checkoutRequestId: "bill-1",
@@ -474,6 +475,25 @@ describe("selling panel section (#2717)", () => {
     // The catalog table itself renders a Subscribed tier row, so the
     // assertion must target activation state, not the tier string:
     // no activation, no success message.
+    expect(text).toContain("Activation: none");
+    expect(text).not.toContain("Subscription activated.");
+  });
+
+  it("mint rejection of the mapped price shows the honest message, not 'not configured' (#4642)", async () => {
+    const { impl } = sellingFetch({
+      mintStatus: 400,
+      mintErrorBody: { code: "FAILURE_BILLING_CHECKOUT_REJECTED", message: "Stripe rejected the mapped price." },
+    });
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    await openSelling(impl);
+    await act(async () => {
+      buttonByText("Start checkout").click();
+    });
+    await flush();
+    expect(openSpy).not.toHaveBeenCalled();
+    const text = container.textContent ?? "";
+    expect(text).toMatch(/recurring price/);
+    expect(text).not.toMatch(/not configured/);
     expect(text).toContain("Activation: none");
     expect(text).not.toContain("Subscription activated.");
   });

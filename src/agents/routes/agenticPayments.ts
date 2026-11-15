@@ -4858,7 +4858,12 @@ export async function handleAgenticPaymentsRoutes(
           metadata: { userId: login, planId: plan.id, tenantId },
         });
       } catch (err: any) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
+        // Issue #4642: a Stripe rejection of the mapped price (e.g. a
+        // one-time price in a subscription-mode session) is NOT "not
+        // configured" — return the distinct rejection code so the caller
+        // sees the honest reason. The raw provider message never reaches
+        // the client: the coded outcome carries the fixed catalog message.
+        return codedOutcomeResponse("FAILURE_BILLING_CHECKOUT_REJECTED");
       }
       if (!created.url || !created.id) {
         return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });

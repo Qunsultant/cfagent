@@ -162,8 +162,14 @@ const linkStyle: React.CSSProperties = {
 };
 
 /** Fixed caller-facing selling messages per HTTP status. Server bodies
- *  are never rendered — they can carry internal detail. */
-function sellingMintError(status: number): string {
+ *  are never rendered — they can carry internal detail. The one exception
+ *  is the outcome CODE: a coded rejection (issue #4642) maps to its own
+ *  fixed message, so a Stripe rejection of the mapped price never reads
+ *  as "not configured". */
+function sellingMintError(status: number, code?: string): string {
+  if (code === "FAILURE_BILLING_CHECKOUT_REJECTED") {
+    return "Stripe rejected the price mapped for this plan — a subscription checkout needs a recurring price. Ask the operator to map a recurring price for the plan.";
+  }
   if (status === 503) {
     return "Subscription checkout is not configured yet (no active plan, price mapping, or Stripe configuration).";
   }
@@ -497,7 +503,7 @@ export function SellingSection({
     try {
       const res = await postJson(`${SELLING_BASE}/subscription/billing-checkout`, { planId: selectedPlanId });
       if (res.status !== 200) {
-        setActionError(sellingMintError(res.status));
+        setActionError(sellingMintError(res.status, typeof res.body.code === "string" ? res.body.code : undefined));
         return;
       }
       const checkoutRequestId = typeof res.body.checkoutRequestId === "string" ? res.body.checkoutRequestId : "";
