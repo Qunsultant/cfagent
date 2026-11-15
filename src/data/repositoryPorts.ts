@@ -21,6 +21,22 @@
  *    unconditionally; see ormRepositoryCore.ts);
  *  - boolean record fields map to 0/1 columns named is_*.
  *
+ * #4385 (#4282 P6b): three predicate extensions, both legs
+ * (DO Repository + InMemoryRepository, ADR 0032 Decision 6's
+ * "use the mini-ORM wherever possible"):
+ *  - updateWhere applies a set to every row matching a
+ *    predicate and returns the rows written (rowsWritten when
+ *    the store reports it, else a verified count — D-E.2);
+ *  - deleteWhere removes every row matching a predicate and
+ *    returns the rows written (same two-path rule);
+ *  - createOrIgnore INSERTs OR IGNOREs and returns whether a
+ *    row was inserted (first-write-wins, the IvHistory shape).
+ *  Where values may be plain scalars (equality) or a
+ *  comparison-operator object ({ $lt, $lte, $gt, $gte }) —
+ *  one operator language shared by findMany/count/
+ *  updateWhere/deleteWhere, so the prune shape (created_at < ?)
+ *  is a Repository call, not a template.
+ *
  * Port modules import no store client (ADR 0022 D-B): this file
  * is types + the seam interface only.
  *
@@ -32,9 +48,22 @@ export interface SqlStorage {
   exec: (query: string, ...args: unknown[]) => Iterable<unknown>;
 }
 
+/**
+ * A where value: a plain scalar (equality — the legacy shape) or a
+ * comparison-operator object. The `$` prefix distinguishes an
+ * operator object from a plain record value. Multiple operators on
+ * one column combine with AND ({ $gte: a, $lt: b }).
+ */
+export type RepositoryWhereValue =
+  | unknown
+  | { $lt?: unknown; $lte?: unknown; $gt?: unknown; $gte?: unknown };
+
+/** A where predicate: a conjunction of per-column values. */
+export type RepositoryWhere = Record<string, RepositoryWhereValue>;
+
 /** Read options for repository finds (the legacy QueryOptions). */
 export interface RepositoryQueryOptions {
-  where?: Record<string, unknown>;
+  where?: RepositoryWhere;
   orderBy?: string;
   limit?: number;
   offset?: number;
@@ -45,10 +74,16 @@ export interface RepositoryPort<T extends Record<string, any>> {
   readonly tableName: string;
   findMany(options?: RepositoryQueryOptions): T[];
   findById(id: string): T | null;
-  findOne(where: Record<string, unknown>): T | null;
+  findOne(where: RepositoryWhere): T | null;
   create(record: T): T;
   update(id: string, updates: Partial<T>): T | null;
   upsert(record: T): T;
   delete(id: string): boolean;
-  count(where?: Record<string, unknown>): number;
+  count(where?: RepositoryWhere): number;
+  /** #4385: UPDATE … SET … WHERE <predicate>; returns rows written. */
+  updateWhere(where: RepositoryWhere, set: Partial<T>): number;
+  /** #4385: DELETE … WHERE <predicate>; returns rows written. */
+  deleteWhere(where: RepositoryWhere): number;
+  /** #4385: INSERT OR IGNORE; true when a row was inserted. */
+  createOrIgnore(record: T): boolean;
 }
