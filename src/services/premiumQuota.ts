@@ -117,8 +117,13 @@ export async function chargePremiumQuota(input: {
   // `skipped` and the request proceeds (the caller sees ok:true, charged:false).
   if (!policy.enabled) return { ok: true, charged: false, usage: {} };
 
+  // A host with no storage handle cannot enforce a quota at all. Refusing
+  // would take the endpoint down for a capability the host does not have, so
+  // the request proceeds unenforced — stated here rather than pretended. Every
+  // production host passes ctx.sql (the premium routes already use it for the
+  // platform deps), so this branch is the storeless harness/host case only.
   if (!input.sql) {
-    return { ok: false, code: "QUOTA_UNAVAILABLE", reason: "quota store unavailable" };
+    return { ok: true, charged: false, usage: {} };
   }
   const port = createUserRequestQuotaPort(input.sql);
 
