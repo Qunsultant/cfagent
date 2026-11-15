@@ -1,0 +1,3 @@
+### Changed
+
+- Order sub-tabs (#4573). The order page gains **Approvals** and **NLQ & Guarantee** sub-tabs. Approvals renders the same `TradingApprovalsQueue` the Approvals page renders (one component, two homes — the page, the #4538 links and the Queues-page link all stay). NLQ & Guarantee holds the Agentic HITL safety guarantee and the NLQ prompts, which no longer appear on the stock, options, or risk tabs. The ticket card takes the full width now that the two-column grid's right-hand column is gone. Switching to the stock tab drops a seeded options context, so "Options strategy" / "Options Order Ticket" can no longer render on the stock ticket.

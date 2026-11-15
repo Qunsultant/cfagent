@@ -182,9 +182,15 @@ describe("Approvals consolidation (issue #4538)", () => {
     expect(container.textContent).toContain("No pending approvals");
   });
 
-  it("source pin: the queue renders in exactly one place — the Approvals page", () => {
+  it("source pin: one queue component, two homes — the Approvals page and the order sub-tab (#4573)", () => {
     const ticket = readFileSync("src/client/OrderTicketPanel.tsx", "utf8");
-    expect(ticket).not.toContain("TradingApprovalsQueue");
+    // Issue #4538 made the Approvals page the one home. Issue #4573 adds the
+    // queue as an order sub-tab (additive: the page, the #4538 links and the
+    // Queues-page link all stay), so the pin becomes "one COMPONENT, reused",
+    // not "one mount".
+    expect(ticket).toContain('import { TradingApprovalsQueue } from "./TradingApprovalsQueue";');
+    expect(ticket).toContain("<TradingApprovalsQueue />");
+    expect(ticket).not.toContain("function TradingApprovalsQueue");
     expect(ticket).toContain("queueRail=");
     expect(ticket).toContain('href="?tab=approvals"');
     // Issue #4574: the Queues page is retired (its DLQ lives on the

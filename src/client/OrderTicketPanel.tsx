@@ -28,6 +28,7 @@ import type {
 } from "./options/riskManagementEngine";
 import { RiskAnalysisPanel } from "./RiskAnalysisPanel";
 import { PageChromeContext } from "./components/ui/PageShell";
+import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import { buildTradeLegs, describeTradeLeg } from "./trading/strategyAutobuild";
 import { brokerModeBadge, brokerPresentation } from "../trading";
@@ -51,7 +52,7 @@ import { safeNumberFormat, safePriceFormat } from "./formatters";
  * never disagree with the ticket it shows.
  */
 
-export type OrderTicketTab = "stock" | "options" | "risk";
+export type OrderTicketTab = "stock" | "options" | "risk" | "approvals" | "nlq-guarantee";
 
 export interface OrderTicketModel {
   orderSymbol: string;
@@ -161,22 +162,33 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
   const brokerLabel = presentation.label;
 
   const applyTab = (tab: OrderTicketTab) => {
-    // The Risk tab analyzes the ticket; it never changes the ticket's
-    // asset class. Leaving Risk for an asset tab applies that tab below.
-    if (tab === "risk") return;
+    // Issue #4573: three tabs are not asset classes — Risk analysis
+    // analyzes the ticket, Approvals lists the pending decisions, and
+    // NLQ & Guarantee explains the human-in-the-loop path and the
+    // conversational entry points. None of them changes the ticket;
+    // leaving one for an asset tab applies that tab below.
+    if (tab === "risk" || tab === "approvals" || tab === "nlq-guarantee") return;
     if (tab === "options" && !orderContext) {
       seedManualOptions(orderSymbol);
       return;
     }
     // Tabs say stock/options; the ticket's asset class says equity/options.
     const asset: TradeAssetClass = tab === "options" ? "options" : "equity";
+    // Issue #4573: switching to the stock tab drops an options context.
+    // It used to survive the switch, so its CardHeader kept rendering
+    // "Options strategy" / "Options Order Ticket" on the stock ticket.
+    if (asset === "equity" && orderContext?.assetClass === "options") setOrderContext(null);
     if (asset !== orderAssetClass) setOrderAssetClass(asset);
   };
 
   const { activeTab, handleTabChange } = useUrlSyncedTabs<OrderTicketTab>({
     param: "orderTab",
-    isValid: (value: unknown): value is OrderTicketTab =>
-      value === "stock" || value === "options" || value === "risk",
+    isValid: (value: unknown): value is OrderTicketTab =>
+      value === "stock" ||
+      value === "options" ||
+      value === "risk" ||
+      value === "approvals" ||
+      value === "nlq-guarantee",
     defaultTab: "stock",
     onTabChange: applyTab,
   });
@@ -196,8 +208,11 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const urlTab = new URLSearchParams(window.location.search).get("orderTab");
-    if (urlTab === "risk") {
-      // The Risk tab is not an asset class: show it, touch nothing.
+    if (urlTab === "risk" || urlTab === "approvals" || urlTab === "nlq-guarantee") {
+      // Non-asset tabs (Risk analysis, Approvals, NLQ & Guarantee) are not
+      // asset classes: show them, touch nothing. Before #4573 this branch
+      // only knew Risk, so a reload on either new tab was yanked back to
+      // the ticket's asset tab.
       return;
     }
     if (urlTab === "stock" || urlTab === "options") {
@@ -388,6 +403,8 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
           { id: "stock", label: "Stock order" },
           { id: "options", label: "Options order" },
           { id: "risk", label: "Risk analysis" },
+          { id: "approvals", label: "Approvals" },
+          { id: "nlq-guarantee", label: "NLQ & Guarantee" },
         ]}
         value={activeTab}
         onChange={(tab) => handleTabChange(tab)}
@@ -400,8 +417,8 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
           retain
         >
           <PageSection>
-            <Grid columns={2} gap="2">
-              {/* Left: Interactive Order Ticket Form */}
+              {/* Issue #4573: the ticket takes the full width — the 2-column
+                  grid went with the HITL/NLQ move to their own sub-tab. */}
               {/* Issue #3669: broker + mode badges, as the portfolio
                     branch has — the ticket used to show neither, so a
                     tenant could not tell which broker or mode an order
@@ -880,70 +897,6 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                 </form>
               </WorkCard>
 
-              {/* Right: Security & Architecture Specs */}
-              <Stack gap="2">
-                <Card padding="md">
-                  <Stack gap="2">
-                  <h5>🛡️ Agentic HITL Safety Guarantee</h5>
-                  <p>
-                    Every trade initiated by the Multi-Agent System is saved to the institutional ledger in <code>previewed</code> status.
-                    No funds are moved, and no order is routed to {brokerLabel} until you review the order details and click <strong>Approve &amp; Submit</strong>.
-                  </p>
-                  <Stack gap="2">
-                    <Flex gap="2" align="start">
-                      <span>🔒</span>
-                      <div>
-                        <strong>Cryptographic DID Attestation:</strong> All orders are stamped with Trading Agent DID (<code>did:agent:openaimp:trading</code>) and reviewer user DID.
-                      </div>
-                    </Flex>
-                    <Flex gap="2" align="start">
-                      <span>⚖️</span>
-                      <div>
-                        <strong>GoF &amp; SOLID Enforcement:</strong> Executes via the Command &amp; Strategy pattern with protected variations over live OAuth and simulated endpoints.
-                      </div>
-                    </Flex>
-                    <Flex gap="2" align="start">
-                      <span>⚡</span>
-                      <div>
-                        <strong>Instant Broker Cancellation:</strong> You can reject or cancel draft orders with one click at any time before execution.
-                      </div>
-                    </Flex>
-                  </Stack>
-                  </Stack>
-                </Card>
-
-                {/* Sample Quick Action Box */}
-                <Card padding="md">
-                  <Stack gap="2">
-                  <h5>💬 NLQ Voice &amp; Text Prompts</h5>
-                  <p>You can also place trades effortlessly through conversational natural language:</p>
-                  <Stack gap="1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => sendNlqToChat("Preview buy 10 shares of NVDA limit 125.50")}
-                    >
-                      👉 "Preview buy 10 shares of NVDA limit 125.50"
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => sendNlqToChat("Screen oversold tech stocks")}
-                    >
-                      👉 "Screen oversold tech stocks"
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => sendNlqToChat("Show my portfolio positions")}
-                    >
-                      👉 "Show my portfolio positions"
-                    </Button>
-                  </Stack>
-                  </Stack>
-                </Card>
-              </Stack>
-            </Grid>
           </PageSection>
         </TabPanel>
         <TabPanel
@@ -967,6 +920,92 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
               onSendPrompt={(prompt) => sendNlqToChat(prompt)}
             />
           </PageChromeContext.Provider>
+        </TabPanel>
+        <TabPanel
+          idBase="order-ticket"
+          tabId="approvals"
+          active={activeTab === "approvals"}
+        >
+          <PageSection
+            title="Trade approvals"
+            description="Every trade draft awaiting a decision, the same queue the Approvals page renders — one component, two homes."
+          >
+            <TradingApprovalsQueue />
+            <p>
+              <a href="?tab=approvals">Open the full Approvals page (trade drafts and held deliveries)</a>
+            </p>
+          </PageSection>
+        </TabPanel>
+        <TabPanel
+          idBase="order-ticket"
+          tabId="nlq-guarantee"
+          active={activeTab === "nlq-guarantee"}
+        >
+          <PageSection
+            title="Human-in-the-loop and natural language"
+            description="The safety guarantee behind every order, and the conversational entry points that draft one."
+          >
+<Card padding="md">
+                  <Stack gap="2">
+                  <h5>🛡️ Agentic HITL Safety Guarantee</h5>
+                  <p>
+                    Every trade initiated by the Multi-Agent System is saved to the institutional ledger in <code>previewed</code> status.
+                    No funds are moved, and no order is routed to {brokerLabel} until you review the order details and click <strong>Approve &amp; Submit</strong>.
+                  </p>
+                  <Stack gap="2">
+                    <Flex gap="2" align="start">
+                      <span>🔒</span>
+                      <div>
+                        <strong>Cryptographic DID Attestation:</strong> All orders are stamped with Trading Agent DID (<code>did:agent:openaimp:trading</code>) and reviewer user DID.
+                      </div>
+                    </Flex>
+                    <Flex gap="2" align="start">
+                      <span>⚖️</span>
+                      <div>
+                        <strong>GoF &amp; SOLID Enforcement:</strong> Executes via the Command &amp; Strategy pattern with protected variations over live OAuth and simulated endpoints.
+                      </div>
+                    </Flex>
+                    <Flex gap="2" align="start">
+                      <span>⚡</span>
+                      <div>
+                        <strong>Instant Broker Cancellation:</strong> You can reject or cancel draft orders with one click at any time before execution.
+                      </div>
+                    </Flex>
+                  </Stack>
+                  </Stack>
+                </Card>
+
+                {/* Sample Quick Action Box */}
+                <Card padding="md">
+                  <Stack gap="2">
+                  <h5>💬 NLQ Voice &amp; Text Prompts</h5>
+                  <p>You can also place trades effortlessly through conversational natural language:</p>
+                  <Stack gap="1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => sendNlqToChat("Preview buy 10 shares of NVDA limit 125.50")}
+                    >
+                      👉 "Preview buy 10 shares of NVDA limit 125.50"
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => sendNlqToChat("Screen oversold tech stocks")}
+                    >
+                      👉 "Screen oversold tech stocks"
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => sendNlqToChat("Show my portfolio positions")}
+                    >
+                      👉 "Show my portfolio positions"
+                    </Button>
+                  </Stack>
+                  </Stack>
+                </Card>
+          </PageSection>
         </TabPanel>
       </Stack>
     </PageTemplate>
