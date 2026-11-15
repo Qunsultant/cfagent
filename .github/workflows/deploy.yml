@@ -381,6 +381,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          STRIPE_LIVE_SECRET_KEY: ${{ secrets.STRIPE_LIVE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           PAYPAL_CLIENT_ID: ${{ secrets.PAYPAL_CLIENT_ID }}
           PAYPAL_CLIENT_SECRET: ${{ secrets.PAYPAL_CLIENT_SECRET }}
@@ -395,7 +397,14 @@ jobs:
 
           # Gateways differ per deployment, so each key stays optional — but
           # absence is now a warning plus a summary line, never a silent skip.
-          optional_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
+          # Issue #4708: sync STRIPE_TEST_SECRET_KEY and STRIPE_LIVE_SECRET_KEY
+          # alongside STRIPE_SECRET_KEY, falling back STRIPE_SECRET_KEY to
+          # STRIPE_TEST_SECRET_KEY when STRIPE_SECRET_KEY is not separately set.
+          EFFECTIVE_STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY"
+          if [ -z "$EFFECTIVE_STRIPE_SECRET_KEY" ]; then EFFECTIVE_STRIPE_SECRET_KEY="$STRIPE_TEST_SECRET_KEY"; fi
+          optional_secret STRIPE_SECRET_KEY "$EFFECTIVE_STRIPE_SECRET_KEY"
+          optional_secret STRIPE_TEST_SECRET_KEY "$STRIPE_TEST_SECRET_KEY"
+          optional_secret STRIPE_LIVE_SECRET_KEY "$STRIPE_LIVE_SECRET_KEY"
           optional_secret STRIPE_WEBHOOK_SECRET "$STRIPE_WEBHOOK_SECRET"
           optional_secret PAYPAL_CLIENT_ID "$PAYPAL_CLIENT_ID"
           optional_secret PAYPAL_CLIENT_SECRET "$PAYPAL_CLIENT_SECRET"

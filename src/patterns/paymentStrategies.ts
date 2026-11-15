@@ -76,9 +76,11 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
     const envConfig = resolveEnvironmentConfig(env);
     const isTestMode = envConfig.name === "TEST" || !envConfig.isLive;
 
-    // Check environment-specific secrets first
-    const testKey = (env as any).STRIPE_TEST_SECRET_KEY || (typeof process !== "undefined" ? (process?.env as any)?.STRIPE_TEST_SECRET_KEY : undefined);
-    const liveKey = (env as any).STRIPE_LIVE_SECRET_KEY || (typeof process !== "undefined" ? (process?.env as any)?.STRIPE_LIVE_SECRET_KEY : undefined);
+    // Check environment-specific secrets first, then fall back to whichever
+    // Stripe secret key is configured (Issue #4708: STRIPE_TEST_SECRET_KEY
+    // synced via CI/CD works in both TEST and PROD when no live/generic key is set).
+    const testKey = env.STRIPE_TEST_SECRET_KEY || (typeof process !== "undefined" ? (process?.env as any)?.STRIPE_TEST_SECRET_KEY : undefined);
+    const liveKey = env.STRIPE_LIVE_SECRET_KEY || (typeof process !== "undefined" ? (process?.env as any)?.STRIPE_LIVE_SECRET_KEY : undefined);
     const genericKey = env.STRIPE_SECRET_KEY || (typeof process !== "undefined" ? (process?.env as any)?.STRIPE_SECRET_KEY : undefined);
 
     let apiKey = genericKey;
@@ -86,9 +88,14 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
       apiKey = testKey;
     } else if (!isTestMode && liveKey) {
       apiKey = liveKey;
+    } else if (!apiKey && testKey) {
+      apiKey = testKey;
+    } else if (!apiKey && liveKey) {
+      apiKey = liveKey;
     }
 
-    const mode = isMcp ? "mcp_remote" : (apiKey?.startsWith("sk_test") || isTestMode) ? "sandbox" : "live";
+    const isSandbox = Boolean(apiKey?.startsWith("sk_test") || (apiKey && apiKey === testKey) || isTestMode);
+    const mode = isMcp ? "mcp_remote" : isSandbox ? "sandbox" : "live";
     return { apiKey, mode: mode === "sandbox" ? "sandbox" : "live" };
   }
 

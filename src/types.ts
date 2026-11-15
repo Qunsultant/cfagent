@@ -717,6 +717,8 @@ export interface Env {
   SCHEMA_MIGRATION_MODE?: string;
   // Payment Gateway Secrets (Stripe, PayPal, Lemon Squeezy)
   STRIPE_SECRET_KEY?: string;
+  STRIPE_TEST_SECRET_KEY?: string;
+  STRIPE_LIVE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   PAYPAL_CLIENT_ID?: string;
   PAYPAL_CLIENT_SECRET?: string;
