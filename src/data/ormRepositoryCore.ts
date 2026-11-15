@@ -165,24 +165,51 @@ export class Repository<T extends Record<string, any>>
     return results.length > 0 ? results[0] : null;
   }
 
-  /** #4385: the single INSERT shape — create() and createOrIgnore() differ only in the OR IGNORE. */
-  private insertRecord(record: T, orIgnore: boolean): Iterable<unknown> {
+  /** #4385: the single INSERT shape — create(), createOrIgnore()
+   *  and createOrReplace() differ only in the OR clause and, for
+   *  OR REPLACE, in the column source (the map, not the record). */
+  private insertRecord(
+    record: T,
+    mode: "insert" | "orIgnore" | "orReplace" = "insert",
+  ): Iterable<unknown> {
+    // #4386: OR REPLACE is a full-row replace — the column map
+    // drives the columns (map order, absent fields bind NULL),
+    // the legacy replace() semantics (#3182). Plain and OR IGNORE
+    // keep the record's own keys, exactly as before.
+    const props: string[] =
+      mode === "orReplace"
+        ? [
+            ...Object.keys(this.columnMap),
+            ...Object.keys(record).filter((k) => !(k in this.columnMap)),
+          ]
+        : Object.keys(record);
     const cols: string[] = [];
     const placeholders: string[] = [];
     const values: unknown[] = [];
 
-    for (const [prop, val] of Object.entries(record)) {
+    for (const prop of props) {
+      const val = (record as Record<string, unknown>)[prop];
       cols.push(this.toDbCol(prop));
       placeholders.push("?");
-      values.push(typeof val === "boolean" ? (val ? 1 : 0) : val);
+      values.push(
+        val === undefined && mode === "orReplace"
+          ? null
+          : typeof val === "boolean"
+            ? val
+              ? 1
+              : 0
+            : val,
+      );
     }
 
-    const query = `INSERT${orIgnore ? " OR IGNORE" : ""} INTO ${this.tableName} (${cols.join(", ")}) VALUES (${placeholders.join(", ")})`;
+    const orClause =
+      mode === "orIgnore" ? " OR IGNORE" : mode === "orReplace" ? " OR REPLACE" : "";
+    const query = `INSERT${orClause} INTO ${this.tableName} (${cols.join(", ")}) VALUES (${placeholders.join(", ")})`;
     return this.sql.exec(query, ...values);
   }
 
   create(record: T): T {
-    this.insertRecord(record, false);
+    this.insertRecord(record);
     return record;
   }
 
@@ -195,9 +222,20 @@ export class Repository<T extends Record<string, any>>
    */
   createOrIgnore(record: T): boolean {
     const before = this.count();
-    const rowsWritten = Repository.rowsWrittenOf(this.insertRecord(record, true));
+    const rowsWritten = Repository.rowsWrittenOf(this.insertRecord(record, "orIgnore"));
     if (rowsWritten !== null) return rowsWritten > 0;
     return this.count() - before > 0;
+  }
+
+  /**
+   * #4386: INSERT OR REPLACE the full record — the draft-payment
+   * write as a first-class Repository method. Returns the record.
+   * The column map drives the INSERT (map order, absent optional
+   * fields bind NULL), the legacy replace() semantics (#3182).
+   */
+  createOrReplace(record: T): T {
+    this.insertRecord(record, "orReplace");
+    return record;
   }
 
   /**
