@@ -45,18 +45,33 @@ export interface TenantChannelGate {
    * - `undefined`: mapping was not consulted (legacy 2-arg gate construction)
    */
   slackChannel?: string | null;
+  /**
+   * Issue #4611 (G21): per-tenant bound outbound webhook URL.
+   * - `string`: tenant is bound to this outbound webhook URL
+   * - `null`: tenant has no default bound webhook URL (must match a per-schedule URL or be refused + audited)
+   * - `undefined`: webhook URL binding was not consulted (legacy gate construction)
+   */
+  webhookUrl?: string | null;
+  /**
+   * Issue #4611 (G21): per-schedule outbound webhook URL bindings for this tenant (`scheduleId -> webhookUrl`).
+   */
+  scheduleWebhookUrls?: Readonly<Record<string, string>>;
 }
 
-/** Build a gate from an already-read config (and optional #4610 Slack channel mapping). */
+/** Build a gate from an already-read config (and optional #4610 Slack channel / #4611 webhook URL bindings). */
 export function channelGateFromConfig(
   tenantId: string,
   config: TenantChannelConfig,
   slackChannel?: string | null,
+  webhookUrl?: string | null,
+  scheduleWebhookUrls?: Readonly<Record<string, string>>,
 ): TenantChannelGate {
   return {
     tenantId,
     isEnabled: (channel: TenantChannelId) => config[channel] === true,
     ...(slackChannel !== undefined ? { slackChannel } : {}),
+    ...(webhookUrl !== undefined ? { webhookUrl } : {}),
+    ...(scheduleWebhookUrls !== undefined ? { scheduleWebhookUrls } : {}),
   };
 }
 
@@ -111,7 +126,21 @@ export async function resolveTenantChannelGate(
       typeof channels.getTenantSlackChannel === "function"
         ? await channels.getTenantSlackChannel(identity.tenantId)
         : undefined;
-    return channelGateFromConfig(identity.tenantId, config, slackChannel);
+    const webhookUrl =
+      typeof channels.getTenantWebhookUrl === "function"
+        ? await channels.getTenantWebhookUrl(identity.tenantId)
+        : undefined;
+    const scheduleWebhookUrls =
+      typeof channels.getTenantScheduleWebhookUrls === "function"
+        ? await channels.getTenantScheduleWebhookUrls(identity.tenantId)
+        : undefined;
+    return channelGateFromConfig(
+      identity.tenantId,
+      config,
+      slackChannel,
+      webhookUrl,
+      scheduleWebhookUrls,
+    );
   } catch {
     return null;
   }

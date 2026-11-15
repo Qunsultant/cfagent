@@ -87,8 +87,8 @@ import {
 import {
   inferTenantFromDeliveryId,
   resolveAndVerifySlackRecipientAtDelivery,
+  resolveAndVerifyWebhookRecipientAtDelivery,
   resolveEnvChannelRecipientBinding,
-  verifyChannelRecipient,
   verifyEmailRecipientAtDelivery,
 } from "../../services/channelRecipientVerification";
 import { createOptionsDiscoveryPorts } from "../../data/createOptionsDiscoveryPorts";
@@ -2499,9 +2499,10 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
                     layer: "executor.deliver",
                     audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
                   })
-                : verifyChannelRecipient({
-                    channel,
-                    recipient: effectiveRecipient,
+                : await resolveAndVerifyWebhookRecipientAtDelivery({
+                    requestedUrl: outcome.webhookUrl,
+                    envFallbackUrl: config.channels.webhook.url,
+                    env: ctx.env,
                     run: runScope,
                     binding,
                     layer: "executor.deliver",
@@ -2510,6 +2511,9 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           if (!recipientCheck.allowed) {
             suppressor.release(deliveryRunId, deliveryDestination);
             throw new Error(recipientCheck.error);
+          }
+          if (channel === "webhook" && "url" in recipientCheck && typeof recipientCheck.url === "string" && recipientCheck.url) {
+            outcome.webhookUrl = recipientCheck.url;
           }
           if (channel === "email") {
             // Per-task override wins over the env recipient (S5b); the
@@ -2626,9 +2630,10 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
                 layer: "executor.notify",
                 audit: (type, p) => ctx.audit(type, "orchestrator", { jobId, ...p }),
               })
-            : verifyChannelRecipient({
-                channel,
-                recipient: effectiveRecipient,
+            : await resolveAndVerifyWebhookRecipientAtDelivery({
+                requestedUrl: outcome.webhookUrl,
+                envFallbackUrl: config.channels.webhook.url,
+                env: ctx.env,
                 run: runScope,
                 binding,
                 layer: "executor.notify",

@@ -38,8 +38,8 @@ import {
 } from "./tenantChannelGate";
 import {
   resolveAndVerifySlackRecipientAtDelivery,
+  resolveAndVerifyWebhookRecipientAtDelivery,
   resolveEnvChannelRecipientBinding,
-  verifyChannelRecipient,
   verifyEmailRecipientAtDelivery,
   type ChannelRecipientBinding,
   type ChannelRecipientRunScope,
@@ -117,6 +117,7 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
     text: string;
     emailTo?: string;
     slackChannel?: string;
+    webhookUrl?: string;
     tenantId?: string | null;
     runId?: string | null;
     scheduleId?: string | null;
@@ -153,6 +154,7 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
         (deps.getRecipientBinding ? await deps.getRecipientBinding(runScope) : null) ??
         resolveEnvChannelRecipientBinding(deps.env, runScope);
       let verifiedSlackChannel = outcome.slackChannel ?? config.channels.slack.channel;
+      let verifiedWebhookUrl = outcome.webhookUrl ?? config.channels.webhook.url;
       if (channel === "email") {
         const recipientCheck = await verifyEmailRecipientAtDelivery({
           recipient: effectiveRecipient,
@@ -182,16 +184,21 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
         }
         verifiedSlackChannel = slackCheck.channel;
       } else {
-        const recipientCheck = verifyChannelRecipient({
-          channel,
-          recipient: effectiveRecipient,
+        const webhookCheck = await resolveAndVerifyWebhookRecipientAtDelivery({
+          requestedUrl: outcome.webhookUrl,
+          envFallbackUrl: config.channels.webhook.url,
+          env: deps.env,
           run: runScope,
+          channelGate: gate,
           binding,
           layer: "followup_port.deliver",
           audit: deps.audit,
         });
-        if (!recipientCheck.allowed) {
-          return { ok: false, error: recipientCheck.error };
+        if (!webhookCheck.allowed) {
+          return { ok: false, error: webhookCheck.error };
+        }
+        if (typeof webhookCheck.url === "string" && webhookCheck.url) {
+          verifiedWebhookUrl = webhookCheck.url;
         }
       }
       const text = followupDeliveryText(outcome);
@@ -302,7 +309,7 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
         }
         return { ok: true, ...(missingNote ? { detail: missingNote } : {}) };
       }
-      const webhookUrl = outcome.webhookUrl ?? config.channels.webhook.url;
+      const webhookUrl = verifiedWebhookUrl ?? outcome.webhookUrl ?? config.channels.webhook.url;
       if (!webhookUrl) return { ok: false, error: "Webhook delivery is not configured (SCREENER_WEBHOOK_URL is unset)." };
       const webhook = new ETradeWebhookService(deps.getOrm(), deps.env, userLogin);
       await webhook.dispatchOutboundWebhook(
@@ -321,12 +328,13 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
       return { ok: true };
     },
     // Issue #1123 S4: text-only lifecycle notifications (no artifact).
-    notify: async ({ channel, userLogin, text, emailTo, slackChannel, tenantId, runId, scheduleId, recipientBinding, ownerEmail }: {
+    notify: async ({ channel, userLogin, text, emailTo, slackChannel, webhookUrl, tenantId, runId, scheduleId, recipientBinding, ownerEmail }: {
       channel: AsyncJobChannel;
       userLogin: string;
       text: string;
       emailTo?: string;
       slackChannel?: string;
+      webhookUrl?: string;
       tenantId?: string | null;
       runId?: string | null;
       scheduleId?: string | null;
@@ -343,11 +351,13 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
         return { ok: false, error: channelDisabledError(tenantChannel, gate.tenantId) };
       }
       let verifiedNotifySlackChannel = slackChannel ?? config.channels.slack.channel;
-      if (channel === "slack" || channel === "email") {
+      if (channel === "slack" || channel === "email" || channel === "webhook") {
         const effectiveRecipient =
           channel === "email"
             ? (emailTo ?? config.channels.email.to)
-            : (slackChannel ?? config.channels.slack.channel);
+            : channel === "slack"
+              ? (slackChannel ?? config.channels.slack.channel)
+              : (webhookUrl ?? config.channels.webhook.url);
         const runScope: ChannelRecipientRunScope = {
           tenantId: tenantId ?? gate?.tenantId ?? null,
           userLogin,
@@ -371,7 +381,7 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
           if (!recipientCheck.allowed) {
             return { ok: false, error: recipientCheck.error };
           }
-        } else {
+        } else if (channel === "slack") {
           const slackCheck = await resolveAndVerifySlackRecipientAtDelivery({
             requestedChannel: slackChannel,
             envFallbackChannel: config.channels.slack.channel,
@@ -386,6 +396,20 @@ export function createFollowupDeliveryPort(deps: FollowupDeliveryDeps): {
             return { ok: false, error: slackCheck.error };
           }
           verifiedNotifySlackChannel = slackCheck.channel;
+        } else {
+          const webhookCheck = await resolveAndVerifyWebhookRecipientAtDelivery({
+            requestedUrl: webhookUrl,
+            envFallbackUrl: config.channels.webhook.url,
+            env: deps.env,
+            run: runScope,
+            channelGate: gate,
+            binding,
+            layer: "followup_port.notify",
+            audit: deps.audit,
+          });
+          if (!webhookCheck.allowed) {
+            return { ok: false, error: webhookCheck.error };
+          }
         }
       }
       if (channel === "slack") {

@@ -46,7 +46,8 @@ export type ChannelVerificationLayer =
   | "discovery_direct"
   | "screening_content"
   | "gated_slack"
-  | "publisher";
+  | "publisher"
+  | "webhook_service";
 
 /** The run identity a delivery is executing on behalf of. */
 export interface ChannelRecipientRunScope {
@@ -89,7 +90,8 @@ export type ChannelRecipientRefusalReason =
   | "email_recipient_not_in_tenant_run"
   | "slack_channel_not_in_tenant_run"
   | "slack_tenant_channel_unmapped"
-  | "webhook_url_not_in_tenant_run";
+  | "webhook_url_not_in_tenant_run"
+  | "webhook_tenant_url_unmapped";
 
 export interface ChannelRecipientAuditPayload extends Record<string, unknown> {
   channel: VerifiedDeliveryChannel;
@@ -656,4 +658,266 @@ export async function resolveAndVerifySlackRecipientAtDelivery(input: {
     return check;
   }
   return { allowed: true, channel: effectiveChannel };
+}
+
+/**
+ * Issue #4611 (G21) — Per-tenant / per-schedule webhook URL entry in
+ * `TENANT_WEBHOOK_URLS_JSON`.
+ */
+export interface TenantWebhookUrlConfigEntry {
+  webhookUrl?: string | null;
+  defaultUrl?: string | null;
+  schedules?: Readonly<Record<string, string>>;
+  runId?: string | null;
+}
+
+/**
+ * Issue #4611 (G21) — Resolve and verify an outbound webhook URL against its
+ * `tenant + schedule + run` binding at send time.
+ *
+ * Signing (`dispatchOutboundWebhook` in `src/services/tradingWebhooks.ts`) is transport-integrity
+ * only; recipient authorization is enforced here before any payload is signed or
+ * transmitted:
+ * - When per-tenant / per-schedule webhook URL mapping is active (via `channelGate`,
+ *   `tenantChannelStore`, or `env.TENANT_WEBHOOK_URLS_JSON`), the webhook fires
+ *   ONLY to the URL bound to the run's `tenant + schedule + run` (ignoring
+ *   deployment-global `OUTBOUND_WEBHOOK_URL` / `SCREENER_WEBHOOK_URL`).
+ * - An unmapped tenant/schedule, a mismatched caller-supplied URL, or a mismatched
+ *   `tenantId` / `scheduleId` / `runId` is refused with
+ *   `FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED` and audited via
+ *   `delivery.recipient_refused` at `layer`.
+ */
+export async function resolveAndVerifyWebhookRecipientAtDelivery(input: {
+  requestedUrl?: string | null;
+  envFallbackUrl?: string | null;
+  env?: unknown;
+  run: ChannelRecipientRunScope;
+  channelGate?: {
+    tenantId: string;
+    webhookUrl?: string | null;
+    scheduleWebhookUrls?: Readonly<Record<string, string>>;
+  } | null;
+  tenantChannelStore?: {
+    getTenantWebhookUrl?: (tenantId: string, scheduleId?: string | null) => Promise<string | null>;
+    getTenantScheduleWebhookUrls?: (tenantId: string) => Promise<Readonly<Record<string, string>>>;
+  } | null;
+  binding?: ChannelRecipientBinding | null;
+  layer: ChannelVerificationLayer;
+  audit?: ChannelRecipientAuditFn;
+}): Promise<
+  | { allowed: true; url?: string }
+  | {
+      allowed: false;
+      code: "FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED";
+      reason: ChannelRecipientRefusalReason;
+      detail: string;
+      error: string;
+      auditPayload: ChannelRecipientAuditPayload;
+    }
+> {
+  const {
+    requestedUrl,
+    envFallbackUrl,
+    env,
+    run,
+    channelGate,
+    tenantChannelStore,
+    layer,
+    audit,
+  } = input;
+  const envRecord = env && typeof env === "object" ? (env as Record<string, unknown>) : {};
+  const runTenantId =
+    normalizeTenantId(run.tenantId) ??
+    inferTenantFromDeliveryId(run.runId) ??
+    normalizeTenantId(channelGate?.tenantId) ??
+    null;
+  const runScheduleId =
+    typeof run.scheduleId === "string" && run.scheduleId.trim() ? run.scheduleId.trim() : null;
+
+  const trimmedRequested =
+    typeof requestedUrl === "string" && requestedUrl.trim() ? requestedUrl.trim() : undefined;
+  const trimmedFallback =
+    typeof envFallbackUrl === "string" && envFallbackUrl.trim() ? envFallbackUrl.trim() : undefined;
+
+  let mappingConsulted = false;
+  let mappedUrl: string | null = null;
+  let scheduleMismatchReason = false;
+  let mappedRunId: string | null = null;
+
+  if (
+    channelGate &&
+    (channelGate.webhookUrl !== undefined || channelGate.scheduleWebhookUrls !== undefined)
+  ) {
+    mappingConsulted = true;
+    const scheduleMap = channelGate.scheduleWebhookUrls ?? {};
+    const hasScheduleEntries = Object.keys(scheduleMap).length > 0;
+    if (runScheduleId && scheduleMap[runScheduleId]) {
+      mappedUrl = scheduleMap[runScheduleId].trim() || null;
+    } else if (hasScheduleEntries && !channelGate.webhookUrl) {
+      mappedUrl = null;
+      scheduleMismatchReason = true;
+    } else {
+      mappedUrl =
+        typeof channelGate.webhookUrl === "string" && channelGate.webhookUrl.trim()
+          ? channelGate.webhookUrl.trim()
+          : null;
+    }
+  } else if (tenantChannelStore && typeof tenantChannelStore.getTenantWebhookUrl === "function") {
+    mappingConsulted = true;
+    if (runTenantId) {
+      const scheduleMap =
+        typeof tenantChannelStore.getTenantScheduleWebhookUrls === "function"
+          ? await tenantChannelStore.getTenantScheduleWebhookUrls(runTenantId)
+          : {};
+      mappedUrl = await tenantChannelStore.getTenantWebhookUrl(runTenantId, runScheduleId);
+      if (!mappedUrl && Object.keys(scheduleMap).length > 0) {
+        scheduleMismatchReason = true;
+      }
+    }
+  } else if (
+    typeof envRecord["TENANT_WEBHOOK_URLS_JSON"] === "string" &&
+    envRecord["TENANT_WEBHOOK_URLS_JSON"].trim()
+  ) {
+    try {
+      const parsed = JSON.parse(envRecord["TENANT_WEBHOOK_URLS_JSON"]) as Record<
+        string,
+        string | null | TenantWebhookUrlConfigEntry
+      >;
+      if (parsed && typeof parsed === "object") {
+        mappingConsulted = true;
+        const entry = runTenantId ? parsed[runTenantId] : null;
+        if (typeof entry === "string" && entry.trim()) {
+          mappedUrl = entry.trim();
+        } else if (entry && typeof entry === "object") {
+          const scheduleMap = entry.schedules ?? {};
+          const defaultUrl =
+            (typeof entry.webhookUrl === "string" && entry.webhookUrl.trim()) ||
+            (typeof entry.defaultUrl === "string" && entry.defaultUrl.trim()) ||
+            null;
+          if (typeof entry.runId === "string" && entry.runId.trim()) {
+            mappedRunId = entry.runId.trim();
+          }
+          if (runScheduleId && scheduleMap[runScheduleId]) {
+            mappedUrl = scheduleMap[runScheduleId].trim() || null;
+          } else if (Object.keys(scheduleMap).length > 0 && !defaultUrl) {
+            mappedUrl = null;
+            scheduleMismatchReason = true;
+          } else {
+            mappedUrl = defaultUrl;
+          }
+        }
+      }
+    } catch {
+      // Malformed JSON is ignored; falls through to verifyChannelRecipient.
+    }
+  }
+
+  const refuseWebhook = (
+    reason: ChannelRecipientRefusalReason,
+    recipient: string | null,
+    detail: string,
+    bindingTenantIdOverride?: string,
+  ) => {
+    const auditPayload: ChannelRecipientAuditPayload = {
+      channel: "webhook",
+      recipient,
+      tenantId: runTenantId,
+      bindingTenantId: bindingTenantIdOverride ?? runTenantId ?? "unmapped-tenant",
+      userLogin: run.userLogin?.trim() || null,
+      runId: run.runId?.trim() || null,
+      scheduleId: runScheduleId,
+      layer,
+      reason,
+      detail,
+    };
+    try {
+      audit?.("delivery.recipient_refused", auditPayload);
+    } catch {
+      // Best-effort callback; structured log below always records.
+    }
+    structuredLog.warn("delivery.recipient_refused", auditPayload);
+    return {
+      allowed: false as const,
+      code: "FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED" as const,
+      reason,
+      detail,
+      error: codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", detail),
+      auditPayload,
+    };
+  };
+
+  let effectiveUrl = trimmedRequested ?? trimmedFallback;
+
+  if (mappingConsulted) {
+    if (!runTenantId) {
+      return refuseWebhook(
+        "run_tenant_missing",
+        trimmedRequested ?? trimmedFallback ?? null,
+        "run carries no verified tenant for bound webhook delivery",
+      );
+    }
+    if (mappedRunId) {
+      const actualRunId = run.runId?.trim() || "";
+      if (!actualRunId || actualRunId !== mappedRunId) {
+        return refuseWebhook(
+          "recipient_run_mismatch",
+          trimmedRequested ?? mappedUrl ?? null,
+          `webhook URL bound to run "${mappedRunId}", attempted on run "${actualRunId || "none"}"`,
+          runTenantId,
+        );
+      }
+    }
+    if (!mappedUrl) {
+      if (scheduleMismatchReason) {
+        return refuseWebhook(
+          "recipient_schedule_mismatch",
+          trimmedRequested ?? trimmedFallback ?? null,
+          `tenant "${runTenantId}" has no webhook URL bound to schedule "${runScheduleId ?? "none"}"; webhook delivery refused`,
+          runTenantId,
+        );
+      }
+      return refuseWebhook(
+        "webhook_tenant_url_unmapped",
+        trimmedRequested ?? trimmedFallback ?? null,
+        `tenant "${runTenantId}" has no bound webhook URL; webhook delivery refused`,
+        runTenantId,
+      );
+    }
+    if (trimmedRequested && normalizeWebhookUrl(trimmedRequested) !== normalizeWebhookUrl(mappedUrl)) {
+      return refuseWebhook(
+        "webhook_url_not_in_tenant_run",
+        trimmedRequested,
+        `webhook URL "${trimmedRequested}" does not match tenant "${runTenantId}"${runScheduleId ? ` schedule "${runScheduleId}"` : ""} bound URL "${mappedUrl}"`,
+        runTenantId,
+      );
+    }
+    effectiveUrl = mappedUrl;
+  }
+
+  const effectiveRun: ChannelRecipientRunScope = {
+    ...run,
+    tenantId: runTenantId ?? run.tenantId,
+  };
+  const explicitBinding = input.binding ?? resolveEnvChannelRecipientBinding(env, effectiveRun);
+  if (
+    !effectiveUrl &&
+    explicitBinding?.webhookUrls &&
+    explicitBinding.webhookUrls.length === 1 &&
+    explicitBinding.webhookUrls[0]?.trim()
+  ) {
+    effectiveUrl = explicitBinding.webhookUrls[0].trim();
+  }
+
+  const check = verifyChannelRecipient({
+    channel: "webhook",
+    recipient: effectiveUrl,
+    run: effectiveRun,
+    binding: explicitBinding,
+    layer,
+    audit,
+  });
+  if (!check.allowed) {
+    return check;
+  }
+  return { allowed: true, url: effectiveUrl };
 }
