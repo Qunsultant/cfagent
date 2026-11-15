@@ -1,0 +1,3 @@
+### Added
+
+- **SecHub PEP tab shows the Policy Enforcement Point's live state (#4653):** a sixth `PEP` sub-tab at `?tab=security-hub&view=pep` renders the gated-route inventory (every `evaluateRoutePep` / `evaluateAgentSchedulePdp` call site — the four `integration:connect` routes, the `action:approve` schedule-approval route, and the two schedule gates — with permission, gateway, and denied response) and the enforcement state for the caller's session (PDP flag, enforced on/off, legacy-grace state) from the new session-gated `GET /api/security/pep` (platform-admin only, 403 audited) — read-only, no gate behavior changed. The recent-decisions section renders an honest empty state: no queryable PEP decision record exists yet (gap filed as follow-up #4683). #CISO-bhdm
