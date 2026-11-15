@@ -2023,3 +2023,35 @@ export const jobDeliveryDatasets = sqliteTable("job_delivery_datasets", {
   inputArtifactId: text("input_artifact_id").notNull(),
   artifactJson: text("artifact_json").notNull(),
 });
+
+/**
+ * #4282 P6a (#4384) — mappings for the two tables the D1 builder-DML
+ * migration needs and no adapter had mapped yet. Columns are verbatim
+ * from the catalogued CREATE DDL (remainder catalogue
+ * schema.d1.mas_feed_datasets.create_table; DO catalogue
+ * schema.do.mas_index_lists.create_table). This schema MAPS tables;
+ * it does not create them.
+ */
+export const masFeedDatasets = sqliteTable("mas_feed_datasets", {
+  id: text("id").primaryKey(),
+  createdAt: text("created_at").notNull(),
+  sourceId: text("source_id").notNull(),
+  dataset: text("dataset").notNull(),
+  jobId: text("job_id").notNull(),
+  runId: text("run_id").notNull(),
+  status: text("status").notNull(),
+  asOf: text("as_of").notNull(),
+  rowsPersisted: integer("rows_persisted").notNull(),
+  artifactJson: text("artifact_json").notNull(),
+});
+
+export const masIndexLists = sqliteTable("mas_index_lists", {
+  id: text("id").primaryKey(),
+  createdAt: text("created_at").notNull(),
+  indexId: text("index_id").notNull(),
+  snapshotDate: text("snapshot_date").notNull(),
+  source: text("source").notNull(),
+  sourceLabel: text("source_label").notNull(),
+  derivedFromHoldings: integer("derived_from_holdings").notNull(),
+  membersJson: text("members_json").notNull(),
+});
