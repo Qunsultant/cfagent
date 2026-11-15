@@ -972,11 +972,11 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
         >
           {/*
             Composition without component changes (#3125): the Risk tab
-            renders the SAME RiskAnalysisPanel the standalone route
-            renders. The tab host applies chrome via context, so the
-            panel's PageShell collapses to content only here and renders
-            fully on its own route — the panel itself is never edited
-            for the host it lands in.
+            renders the SAME RiskAnalysisPanel the standalone route used
+            to render (issue 4626 retired that route onto this sub-tab).
+            The tab host applies chrome via context, so the panel's
+            PageShell collapses to content only here — the panel itself
+            is never edited for the host it lands in.
           */}
           <PageChromeContext.Provider value="tab">
             <RiskAnalysisPanel
@@ -993,7 +993,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
         >
           <PageSection
             title="Trade approvals"
-            description="Every trade draft awaiting a decision — the approvals queue lives here, on the order page (issue #4626 retired the standalone Approvals page onto this sub-tab)."
+            description="Every trade draft awaiting a decision — the approvals queue lives here, on the order page (issue 4626 retired the standalone Approvals page onto this sub-tab)."
           >
             <TradingApprovalsQueue />
           </PageSection>

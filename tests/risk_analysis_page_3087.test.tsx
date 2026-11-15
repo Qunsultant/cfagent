@@ -4,8 +4,9 @@
  * Order Ticket nav item.
  * - Nav config: a `risk-analysis` route (no nav entry, like the other
  *   sub-menu pages), a `risk-analysis` sub-menu entry under `order`,
- *   and the deep-link override order:risk-analysis -> ?tab=risk-analysis.
- * - Chat: a TAB_CONTENT entry renders RiskAnalysisPanel.
+ *   and the deep-link override order:risk-analysis -> ?tab=order&orderTab=risk.
+ * - Order: the order page's Risk sub-tab renders RiskAnalysisPanel
+ *   (the standalone tab was retired onto it by #4626).
  * - Gate: the panel is shell-conforming (PageTemplate over the
  *   PageShell chrome since #3131, primitives only, no inline styles,
  *   no bespoke classes) and does not touch the hub's
@@ -85,9 +86,17 @@ describe("risk analysis page (#3087)", () => {
     );
   });
 
-  it("renders RiskAnalysisPanel from Chat TAB_CONTENT", () => {
-    expect(tabContentKeys(CHAT_SRC)).toContain("risk-analysis");
-    expect(CHAT_SRC).toContain("RiskAnalysisPanel");
+  it("renders RiskAnalysisPanel from the order page's Risk tab (#4626)", () => {
+    // S1 #4626 retired the standalone risk-analysis tab onto the
+    // order page's Risk sub-tab: Chat TAB_CONTENT no longer carries
+    // it; the order ticket mounts the same panel.
+    expect(tabContentKeys(CHAT_SRC)).not.toContain("risk-analysis");
+    const ticket = readFileSync(
+      join(HERE, "..", "src", "client", "OrderTicketPanel.tsx"),
+      "utf8",
+    );
+    expect(ticket).toContain('tabId="risk"');
+    expect(ticket).toContain("<RiskAnalysisPanel");
   });
 
   it("is shell-conforming with primitives only", () => {
