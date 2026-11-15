@@ -1118,6 +1118,24 @@
         "badge": "Risk",
         "badgeType": "neutral",
         "description": "Symbol-based risk profile — anatomy, playbook, scenarios, and AI dossier"
+      },
+      {
+        "id": "approvals",
+        "label": "Approvals",
+        "shortLabel": "Pending trade drafts",
+        "icon": "Approvals",
+        "badge": "Approvals",
+        "badgeType": "pro",
+        "description": "Every trade draft awaiting a human decision — the same queue the Approvals page renders"
+      },
+      {
+        "id": "nlq-guarantee",
+        "label": "NLQ & Guarantee",
+        "shortLabel": "HITL path and prompts",
+        "icon": "Chat",
+        "badge": "Guarantee",
+        "badgeType": "neutral",
+        "description": "The HITL safety guarantee behind every order, and the natural-language entry points"
       }
     ],
     "workflow-catalog": [
@@ -1391,6 +1409,18 @@
     "audit-vault:nlq": {
       "tab": "audit-vault",
       "view": "nlq"
+    },
+    "order:approvals": {
+      "tab": "order",
+      "params": {
+        "orderTab": "approvals"
+      }
+    },
+    "order:nlq-guarantee": {
+      "tab": "order",
+      "params": {
+        "orderTab": "nlq-guarantee"
+      }
     }
   },
   "deepLinkSurfaces": [
@@ -1636,6 +1666,18 @@
         "bars",
         "snapshot",
         "compare"
+      ]
+    },
+    {
+      "surface": "order",
+      "page": "order",
+      "param": "orderTab",
+      "values": [
+        "stock",
+        "options",
+        "risk",
+        "approvals",
+        "nlq-guarantee"
       ]
     }
   ],
