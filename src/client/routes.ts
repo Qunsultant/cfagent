@@ -6,7 +6,7 @@
  * from this table (see NavigationMenu.tsx and Chat.tsx).
  *
  * Shape of an entry:
- * - `id` is the tab id carried in the URL (`?tab=<id>`). All 43 ids Chat
+ * - `id` is the tab id carried in the URL (`?tab=<id>`). All 42 ids Chat
  *   has ever used are entries, including the six legacy/alias ids
  *   (trading, orders, scanner, reports, schedules, options) that never
  *   render as nav items but still land on a page. Issue #2596 added
@@ -18,8 +18,12 @@
  *   took its navOrder 28 slot as the 37th id. Issue #4574 retired the
  *   Queues route into the Schedules home (dead-letter-queue view);
  *   navOrders 12..30 shift down one, keeping 0..29 across the 30 nav
- *   entries; the route count is 43.
- * - `navEntry` is present only for the 30 entries that render in the nav.
+ *   entries; the route count is 43. Issue #4575 retired the two
+ *   top-level ids `audit` and `nlq` into the one "Audit & Vault" route
+ *   (`?tab=audit-vault&view=audit|nlq`), which took the audit slot;
+ *   navOrders 21..29 shift down one, keeping 0..28 across the 29 nav
+ *   entries; the route count is 42.
+ * - `navEntry` is present only for the 29 entries that render in the nav.
  *   Its `navOrder` reproduces the historical sidebar/top-strip order, so
  *   deriving NAVIGATION_ITEMS from this table changes nothing visible.
  * - `navGroup` is the nav entry highlighted when this tab is active. It

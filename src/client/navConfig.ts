@@ -281,11 +281,14 @@ export function isNavItemOrSubItemActive(
       if (typeof window !== "undefined") {
         const view = new URLSearchParams(window.location.search).get("view");
         // Issue #4530: the Product Hub's sub-menu items are views of
-        // the hub tab, like the stock-hub precedent above.
+        // the hub tab, like the stock-hub precedent above. Issue #4575
+        // adds the Audit & Vault host: its two entries are the audit
+        // and nlq views of `?tab=audit-vault`.
         if (
           (currentTab === "screeners" ||
             currentTab === "stock-hub" ||
-            currentTab === "product-hub") &&
+            currentTab === "product-hub" ||
+            currentTab === "audit-vault") &&
           view === sub.id
         )
           return true;

@@ -94,6 +94,16 @@ slice owns those surfaces yet; the wave is assigned when a migration
 slice is filed. `workflows` / `workflow-catalog` are S-U4 by family
 (sibling WorkflowRunsPanel is S-U4) — a judgment call, recorded here.
 
+Issue #4575 moved two of those surfaces and migrated one more: `audit`
+and `nlq` are no longer inline `Chat.tsx` entries — they are the two
+views of the new `audit-vault` page (`src/client/AuditVaultPage.tsx`),
+which renders `PageTemplate` and is registered in the interior bucket
+(5 PageSections, 27 bespoke class tokens, #3695 burn-down); the two
+inline entries left the register with the move. `workflow-catalog`
+migrated to `PageTemplate` in the same slice (its register state flipped
+`shell` → `template`) when its sections became sub-tabs, so it joins the
+conforming template routes rather than the S-U4 migration list.
+
 ## Borderline calls
 
 - **Component-internal flex rows are frozen.** The definition is

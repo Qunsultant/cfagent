@@ -1,9 +1,8 @@
 {
   "migrated": [
     "social",
-    "audit",
+    "audit-vault",
     "payments",
-    "nlq",
     "endpoints",
     "approvals",
     "referrals",

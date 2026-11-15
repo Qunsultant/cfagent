@@ -48,7 +48,8 @@ describe("Stock Hub split (#2896)", () => {
     // Issue #2974 removes the Research & Dual Feed nav entry: 32 → 31.
     // Issue #4574 retires the queues nav entry (Queues merges into
     // Schedules): 31 → 30.
-    expect(ROUTES.filter(hasNavEntry)).toHaveLength(30);
+    // #4575 merged audit + NLQ into the one Audit & Vault entry: 30 → 29.
+    expect(ROUTES.filter(hasNavEntry)).toHaveLength(29);
   });
 
   it("defines the Hub tab set: stocks, new-screen (+run-screen alias), research (+ patterns, presets #2954)", () => {

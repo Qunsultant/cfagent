@@ -129,9 +129,13 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
       routes: { id: string }[];
     };
     const ids = new Set(data.routes.map((r) => r.id));
-    for (const id of ["nlq", "screeners", "social", "docs", "chat", "endpoints", "audit", "payments", "referrals", "research", "revenue", "workflows"]) {
+    // Issue #4575 merged audit + NLQ into the one audit-vault route; the
+    // superset check keeps every other pre-hub id.
+    for (const id of ["audit-vault", "screeners", "social", "docs", "chat", "endpoints", "payments", "referrals", "research", "revenue", "workflows"]) {
       expect(ids.has(id)).toBe(true);
     }
+    expect(ids.has("audit")).toBe(false);
+    expect(ids.has("nlq")).toBe(false);
   });
 
   it("pre-hub TAB_CONTENT keys are all still present (superset)", () => {
@@ -139,7 +143,10 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
     // #2149: payments/social left TAB_CONTENT for SHELL_CONTENT, and
     // #2161: ads/referrals/revenue followed — the superset holds for
     // the remaining keys; the shell keys pin below.
-    for (const key of ["audit:", "chat:", "docs:", "endpoints:", "nlq:", "research:", "workflows:"]) {
+    // Issue #4575: the two inline entries became the one audit-vault entry
+    // (quoted key — the only hyphenated TAB_CONTENT key).
+    expect(chat).toContain('    "audit-vault": (');
+    for (const key of ["chat:", "docs:", "endpoints:", "research:", "workflows:"]) {
       expect(chat).toContain(`    ${key} (`);
     }
   });
@@ -153,10 +160,14 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
     expect(chat).toContain("    revenue: (");
   });
 
-  it("Chat NLQ view is unchanged (still pending-prompt submit)", () => {
+  it("NLQ view is unchanged (still pending-prompt submit), now on the Audit & Vault page", () => {
+    // Issue #4575 moved the NLQ section out of Chat.tsx into AuditVaultPage;
+    // the shell still mounts it, and the ask path is unchanged.
     const chat = src("client/Chat.tsx");
-    expect(chat).toContain("nlq-view");
-    expect(chat).toContain('setPendingPrompt({ prompt: nlqInput.trim(), sourceTab: "Records Explorer" })');
+    expect(chat).toContain("<AuditVaultPage");
+    const page = src("client/AuditVaultPage.tsx");
+    expect(page).toContain("nlq-presets");
+    expect(page).toContain('onAsk?.(trimmed, "Records Explorer")');
   });
 });
 

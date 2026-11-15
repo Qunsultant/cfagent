@@ -141,7 +141,9 @@ describe("4561-P05 the three ids are gone from Platform Admin (#4561)", () => {
     expect(ids).not.toContain("background-tasks");
     expect(ids).not.toContain("scheduled-goals");
     expect(ids).not.toContain("jobs");
-    expect(ids).toHaveLength(15);
+    // 15 → 13 in #4575: free-runs and products left Platform Admin for the
+    // product hub, which already owned both views.
+    expect(ids).toHaveLength(13);
     const navIds = PLATFORM_ADMIN_NAV_ITEMS.map((item) => item.id);
     expect(navIds).not.toContain("platform-admin:background-tasks");
     expect(navIds).not.toContain("platform-admin:scheduled-goals");

@@ -27,15 +27,15 @@ import { BillingServicingPanel } from "./BillingServicingPanel";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
 import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
-import { legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
+import { legacyAuditVaultRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
 import { legacySchedulesRedirect } from "./schedulesHomeView";
 import { SchedulesHome } from "./SchedulesHome";
+import { AuditVaultPage } from "./AuditVaultPage";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import { getCrumb } from "./routes";
 import { StockSearchBar } from "./components/StockSearchBar";
 import { MarketTickerTape } from "./components/MarketTickerTape";
 import { useTickerEnabled } from "./quotes/tickerVisibility";
-import { AuditEventCard } from "./components/AuditEventCard";
 import { MarketStatusPill } from "./components/MarketStatusPill";
 import { AskAgentWidget } from "./components/AskAgentWidget";
 import { getStoredTheme, applyTheme, ThemeMode, initThemeListener } from "./theme";
@@ -103,6 +103,13 @@ export function Chat({ user }: { user: User }) {
           replaceToTab(productRedirect.tab, productRedirect.view, productRedirect.params);
           return;
         }
+        // Issue #4575: audit + NLQ are the two views of the Audit & Vault
+        // menu, so their old top-level addresses resolve onto those views.
+        const auditVaultRedirect = legacyAuditVaultRedirect(window.location.search);
+        if (auditVaultRedirect) {
+          replaceToTab(auditVaultRedirect.tab, auditVaultRedirect.view, auditVaultRedirect.params);
+          return;
+        }
       }
       setTab(readTabFromLocation());
     };
@@ -131,7 +138,7 @@ export function Chat({ user }: { user: User }) {
   const [brokerProps, setBrokerProps] = useState<ETradeDynamicMenuProps | null>(null);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [tbdMenuOpen, setTbdMenuOpen] = useState(false);
-  const isTbdTab = tab === "chat" || tab === "nlq" || tab === "audit" || tab === "payments" || tab === "referrals" || tab === "ads" || tab === "revenue";
+  const isTbdTab = tab === "chat" || tab === "payments" || tab === "referrals" || tab === "ads" || tab === "revenue";
 
   // Navigation Layout state (flexible top or left sidebar)
   const [navLayout, setNavLayout] = useState<NavLayoutMode>(() => {
@@ -497,14 +504,8 @@ export function Chat({ user }: { user: User }) {
     }
   };
 
-  // NLQ state
-  const [nlqInput, setNlqInput] = useState("");
-  const [nlqResult] = useState<any>(null);
-
-  // Audit state
-  const [auditEvents, setAuditEvents] = useState<AuditLogEvent[]>([]);
-  const [memories, setMemories] = useState<MemoryItem[]>([]);
-  const [auditLoading, setAuditLoading] = useState(false);
+  // The audit vault, the event log and the NLQ surface own their state in
+  // AuditVaultPage (#4575) — the shell keeps none of it.
 
   // Referrals state
   const [referrals, setReferrals] = useState<ReferralItem[]>([]);
@@ -580,9 +581,7 @@ export function Chat({ user }: { user: User }) {
 
   // Load tab-specific data when tab changes
   useEffect(() => {
-    if (tab === "audit") {
-      fetchAuditData();
-    } else if (tab === "referrals") {
+    if (tab === "referrals") {
       fetchReferrals();
       fetchCategories();
     } else if (tab === "ads") {
@@ -592,24 +591,8 @@ export function Chat({ user }: { user: User }) {
       fetchExternalAds();
       fetchCategories();
       fetchTables();
-    } else if (tab === "nlq") {
-      fetchTables();
     }
   }, [tab]);
-
-  const fetchAuditData = async () => {
-    setAuditLoading(true);
-    try {
-      const [auditResp, memResp] = await Promise.all([
-        fetch("/api/audit?limit=30").then((r) => r.json() as Promise<{ events?: AuditLogEvent[] }>).catch(() => ({ events: [] })),
-        fetch("/api/memory").then((r) => r.json() as Promise<{ memories?: MemoryItem[] }>).catch(() => ({ memories: [] })),
-      ]);
-      setAuditEvents(auditResp.events || []);
-      setMemories(memResp.memories || []);
-    } finally {
-      setAuditLoading(false);
-    }
-  };
 
   const fetchReferrals = async () => {
     setReferralsLoading(true);
@@ -959,10 +942,6 @@ export function Chat({ user }: { user: User }) {
     }
   };
 
-  const handleDeleteMemory = async (key: string) => {
-    setDeleteTarget({ kind: "memory", id: key, label: key });
-  };
-
   const confirmDeleteTarget = async () => {
     const target = deleteTarget;
     setDeleteTarget(null);
@@ -974,9 +953,6 @@ export function Chat({ user }: { user: User }) {
       } else if (target.kind === "category") {
         await fetch(`/api/categories?id=${encodeURIComponent(target.id)}`, { method: "DELETE" });
         setCategories((prev) => prev.filter((c) => c.id !== target.id));
-      } else {
-        await fetch(`/api/memory?key=${encodeURIComponent(target.id)}`, { method: "DELETE" });
-        setMemories((prev) => prev.filter((m) => m.key !== target.id));
       }
     } catch {
       // Ignore
@@ -1002,73 +978,14 @@ export function Chat({ user }: { user: User }) {
     approvals: (
           <ApprovalsPanel />
     ),
-    audit: (
-          <div className="audit-view">
-            <PageShell
-              title="System Audit & Memory Vault"
-              scopeNote="Live observability stream into router decisions, sub-agent executions, AI decision evaluations, and firm memory state."
-            >
-            <div>
-              <Button variant="secondary" size="sm" onClick={fetchAuditData} disabled={auditLoading} loading={auditLoading}>
-                {"🔄 Refresh Data"}
-              </Button>
-            </div>
-
-            <div className="audit-grid">
-              {/* Memory Vault Panel */}
-              <PageSection>
-              <Card padding="none" className="audit-panel memory-panel">
-                <div className="panel-title">
-                  <span>🧠 Persistent Memory Vault</span>
-                  <Badge size="xs" tone="info">{memories.length} facts</Badge>
-                </div>
-                <div className="memory-list">
-                  {memories.length === 0 ? (
-                    <EmptyState icon="🧠" title="No memories saved yet" description='Try asking the assistant to "Remember that..."' />
-                  ) : (
-                    memories.map((m) => (
-                      <Card padding="none" key={m.key} className="memory-card-item">
-                        <div className="mem-header">
-                          <span className="mem-key">🔑 {m.key}</span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteMemory(m.key)}
-                            title="Delete memory"
-                          >
-                            ×
-                          </Button>
-                        </div>
-                        <div className="mem-value">{m.value}</div>
-                        <div className="mem-date">{new Date(m.updatedAt).toLocaleString()}</div>
-                      </Card>
-                    ))
-                  )}
-                </div>
-              </Card>
-              </PageSection>
-
-              {/* Audit Events Panel */}
-              <PageSection>
-              <Card padding="none" className="audit-panel events-panel">
-                <div className="panel-title">
-                  <span>📋 Real-time Event Log</span>
-                  <Badge size="xs" tone="info">{auditEvents.length} events</Badge>
-                </div>
-                <div className="events-stream">
-                  {auditEvents.length === 0 ? (
-                    <EmptyState icon="📋" title="No audit events logged yet" />
-                  ) : (
-                    auditEvents.map((e) => (
-                      <AuditEventCard key={e.id} event={e} />
-                    ))
-                  )}
-                </div>
-              </Card>
-              </PageSection>
-            </div>
-            </PageShell>
-          </div>
+    "audit-vault": (
+      <AuditVaultPage
+        isBusy={isBusy}
+        onAsk={(prompt, sourceTab) => {
+          setPendingPrompt({ prompt, sourceTab });
+          handleSelectTab("chat");
+        }}
+      />
     ),
     chat: (
           <AgentChatTabContent
@@ -1103,298 +1020,6 @@ export function Chat({ user }: { user: User }) {
           <EndpointsTab
 
           />
-    ),
-    nlq: (
-          <div className="nlq-view">
-            <PageShell
-              title="Natural Language Records & Audit Analytics"
-              scopeNote="Query business records, inspect enterprise data schemas, retrieve transaction records, and manage commercial categories with natural language or interactive record browsing."
-            >
-            <PageSection>
-
-            <div className="nlq-presets">
-              <span className="preset-label">Natural Language Queries:</span>
-              <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
-                onClick={() => setNlqInput("List all database tables and schema")}
-              >
-                🗄️ List tables & schema
-              </Button>
-              <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
-                onClick={() => setNlqInput("Show referral categories in categories table")}
-              >
-                🏷️ Show categories table data
-              </Button>
-              <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
-                onClick={() => setNlqInput("Add category 'Web3 & Crypto' to categories table")}
-              >
-                ➕ Add category 'Web3 & Crypto'
-              </Button>
-              <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
-                onClick={() => setNlqInput("Show external ads inventory and earnings")}
-              >
-                📢 Show external ads & earnings
-              </Button>
-              <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
-                onClick={() => setNlqInput("Show transactions and payment records")}
-              >
-                💳 Show transaction ledger
-              </Button>
-              <Button
-                variant="secondary"
-                tone="subtle"
-                size="sm"
-                onClick={() => setNlqInput("List all user questions asked")}
-              >
-                💬 List user questions
-              </Button>
-            </div>
-
-            <form className="chat-input-bar nlq-bar" onSubmit={(event) => {
-              event.preventDefault();
-              if (nlqInput.trim()) {
-                setPendingPrompt({ prompt: nlqInput.trim(), sourceTab: "Records Explorer" });
-                setNlqInput("");
-                handleSelectTab("chat");
-              }
-            }}>
-              <TextInput
-                type="text"
-                value={nlqInput}
-                onChange={(e) => setNlqInput(e.target.value)}
-                placeholder="Ask the shared chat about database records or categories…"
-              />
-              <Button type="submit" variant="primary" disabled={!nlqInput.trim() || isBusy}>
-                Ask in Chat
-              </Button>
-            </form>
-            </PageSection>
-
-            <PageSection>
-            {/* Direct ORM Table Explorer Toolbar */}
-            <div className="nlq-orm-toolbar">
-              <span className="orm-tag">⚡ RECORD EXPLORER:</span>
-              <Select
-                value={selectedBrowseTable}
-                onChange={(e) => setSelectedBrowseTable(e.target.value)}
-                className="orm-table-select"
-              >
-                <option value="mas_categories">🏷️ mas_categories (Referral Categories)</option>
-                <option value="mas_referrals">🔗 mas_referrals (Referral Links)</option>
-                <option value="mas_external_ads">📡 mas_external_ads (Ad Networks)</option>
-                <option value="mas_ads">🚀 mas_ads (Sponsored Deals)</option>
-                <option value="mas_transactions">💳 mas_transactions (Payments & DIDs)</option>
-                <option value="mas_messages">💬 mas_messages (Conversation History)</option>
-                <option value="mas_memory">🧠 mas_memory (Session Facts)</option>
-                <option value="mas_events">🛡️ mas_events (Audit Log)</option>
-              </Select>
-
-              <TextInput
-                value={browseSearch}
-                onChange={(e) => setBrowseSearch(e.target.value)}
-                placeholder="Search table text…"
-                aria-label="Search table text"
-                style={{ flex: 1, minWidth: 180 }}
-              />
-
-              <Button
-                variant="primary"
-                onClick={() => browseTable(selectedBrowseTable, browseSearch)}
-                loading={browsingLoading}
-              >
-                {"🔍 Browse Records"}
-              </Button>
-            </div>
-
-            {/* Direct Table Browsing Results (if opened) */}
-            {browsedData && (
-              <Card padding="none" className="nlq-results-card orm-browsed-card">
-                <div className="browsed-card-header">
-                  <div className="browsed-title">
-                    <span>🗄️ Table Data: <strong>{browsedData.tableName}</strong></span>
-                    <Badge size="xs" tone="neutral">{browsedData.total} Total Records</Badge>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setBrowsedData(null)}
-                    title="Close browsed table"
-                  >
-                    ✕ Close
-                  </Button>
-                </div>
-
-                {browsedData.rows && browsedData.rows.length > 0 ? (
-                  <div className="results-table-container">
-                    <Table
-                      columns={Object.keys(browsedData.rows[0]).map((col) => ({
-                        key: col,
-                        header: col,
-                        cellClassName: "table-data-cell",
-                        render: (row: any) => (typeof row[col] === "object" && row[col] !== null ? JSON.stringify(row[col]) : String(row[col] ?? "—")),
-                      }))}
-                      rows={browsedData.rows.map((row: any, i: number) => ({ ...row, __rowKey: String(i) }))}
-                      rowKey={(row: any) => row.__rowKey}
-                      onRowClick={(row: any) => setBrowsedDetailRow(row)}
-                    />
-                  </div>
-                ) : (
-                  <EmptyState title={`No records found in table ${browsedData.tableName}`} />
-                )}
-              </Card>
-            )}
-            {/* #1968: full-payload detail view. Table cells show one-line
-                values; a JSON TEXT column (e.g. mas_events.payload) is only
-                usable expanded, so clicking a row opens the whole record
-                as pretty JSON — string values that parse as JSON are
-                expanded one level (payload text becomes an object). */}
-            {browsedDetailRow && (
-              <Modal
-                open={true}
-                onClose={() => setBrowsedDetailRow(null)}
-                title={`Record detail: ${browsedData?.tableName ?? "row"}`}
-              >
-                <pre className="event-payload">{(() => {
-                  const expanded: Record<string, unknown> = {};
-                  for (const [k, v] of Object.entries(browsedDetailRow)) {
-                    if (k === "__rowKey") continue;
-                    if (typeof v === "string") {
-                      try { expanded[k] = JSON.parse(v); } catch { expanded[k] = v; }
-                    } else {
-                      expanded[k] = v;
-                    }
-                  }
-                  return JSON.stringify(expanded, null, 2);
-                })()}</pre>
-              </Modal>
-            )}
-            </PageSection>
-
-            {/* Natural Language Query Planner & Execution Results */}
-            {nlqResult && (
-              <PageSection>
-              <Card padding="none" className="nlq-results-card">
-                {nlqResult.plan && (
-                  <div className="plan-badge-group">
-                    <Badge size="md" tone="neutral">Domain: <strong>{nlqResult.domain || nlqResult.plan.domain}</strong></Badge>
-                    <Badge size="md" tone="neutral">Operation: <strong>{nlqResult.plan.operation}</strong></Badge>
-                    {nlqResult.plan.terms && <Badge size="md" tone="neutral">Terms: <strong>"{nlqResult.plan.terms}"</strong></Badge>}
-                    <Badge size="md" tone="trade">Matched: <strong>{nlqResult.count}</strong></Badge>
-                  </div>
-                )}
-
-                {nlqResult.summary && (
-                  <Notice tone="info">
-                    ℹ️ {nlqResult.summary}
-                  </Notice>
-                )}
-
-                {/* Domain: Tables & Schemas Rendering */}
-                {nlqResult.domain === "tables" && nlqResult.rows && nlqResult.rows.length > 0 && (
-                  <div className="tables-schema-grid">
-                    {nlqResult.rows.map((tbl: any, idx: number) => (
-                      <Card padding="none" key={idx} className="table-schema-card">
-                        <div className="schema-card-top">
-                          <span className="schema-table-icon">🗄️</span>
-                          <h5><code>{tbl.tableName}</code></h5>
-                          <Badge size="xs" tone="neutral">{tbl.rowCount} rows</Badge>
-                        </div>
-                        <p className="schema-desc">{tbl.description}</p>
-                        <div className="schema-cols-preview">
-                          <span className="cols-count-label">{tbl.columnCount} columns:</span>
-                          <span className="cols-string">{tbl.columns}</span>
-                        </div>
-                        <Button
-                          className="browse-data-btn"
-                          variant="primary"
-                          tone="subtle"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedBrowseTable(tbl.tableName);
-                            browseTable(tbl.tableName);
-                          }}
-                        >
-                          🔍 Browse Records →
-                        </Button>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-
-                {/* Domain: Category Mutation Rendering */}
-                {nlqResult.domain === "category_mutation" && nlqResult.rows && (
-                  <div className="category-mutation-result">
-                    <div className="results-table-container">
-                      <Table
-                      columns={[
-                        { key: "icon", header: "Icon", align: "center", render: (cat: any) => <span style={{ fontSize: "1.25rem", textAlign: "center" }}>{cat.icon}</span> },
-                        { key: "name", header: "Category", render: (cat: any) => <strong>{cat.name}</strong> },
-                        { key: "slug", header: "Slug", render: (cat: any) => <code>{cat.slug}</code> },
-                        { key: "desc", header: "Description", render: (cat: any) => <>{cat.description}</> },
-                        { key: "order", header: "Order", render: (cat: any) => <>{cat.sortOrder}</> },
-                        { key: "status", header: "Status", render: (cat: any) => <Badge size="xs" uppercase tone={cat.status === "ACTIVE" ? "success" : "neutral"}>{cat.status}</Badge> },
-                      ]}
-                      rows={nlqResult.rows.map((cat: any, i: number) => ({ ...cat, __rowKey: String(i) }))}
-                      rowKey={(row: any) => row.__rowKey}
-                    />
-                    </div>
-                  </div>
-                )}
-
-                {/* Domain: Table Data Dynamic Rendering */}
-                {nlqResult.domain === "table_data" && nlqResult.rows && nlqResult.rows.length > 0 && (
-                  <div className="results-table-container">
-                    <Table
-                      columns={Object.keys(nlqResult.rows[0]).map((col) => ({
-                        key: col,
-                        header: col,
-                        cellClassName: "table-data-cell",
-                        render: (row: any) => (typeof row[col] === "object" && row[col] !== null ? JSON.stringify(row[col]) : String(row[col] ?? "—")),
-                      }))}
-                      rows={nlqResult.rows.map((row: any, i: number) => ({ ...row, __rowKey: String(i) }))}
-                      rowKey={(row: any) => row.__rowKey}
-                    />
-                  </div>
-                )}
-
-                {/* Domain: Conversation History Rendering */}
-                {nlqResult.domain === "conversation" && nlqResult.rows && nlqResult.rows.length > 0 && (
-                  <div className="results-table-container">
-                    <Table
-                      columns={[
-                        { key: "role", header: "Role", render: (row: any) => <Badge size="xs" tone={row.role === "user" || row.role === "assistant" ? "info" : "neutral"}>{row.role || (row.count !== undefined ? "count" : "")}</Badge> },
-                        { key: "agent", header: "Agent", render: (row: any) => <>{row.agent || "—"}</> },
-                        { key: "content", header: "Content", cellClassName: "content-cell", render: (row: any) => <>{row.content || (row.count !== undefined ? `Count: ${row.count}` : JSON.stringify(row))}</> },
-                        { key: "timestamp", header: "Timestamp", cellClassName: "timestamp-cell", render: (row: any) => <>{row.created_at ? new Date(row.created_at).toLocaleTimeString() : "—"}</> },
-                      ]}
-                      rows={nlqResult.rows.map((row: any, i: number) => ({ ...row, __rowKey: String(i) }))}
-                      rowKey={(row: any) => row.__rowKey}
-                    />
-                  </div>
-                )}
-
-                {(!nlqResult.rows || nlqResult.rows.length === 0) && (
-                  <EmptyState title="No records matched the natural language query criteria." />
-                )}
-              </Card>
-              </PageSection>
-            )}
-            </PageShell>
-          </div>
     ),
     "options-flows": (
           <div className="options-flows-view" style={{ width: "100%", height: "100%", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>

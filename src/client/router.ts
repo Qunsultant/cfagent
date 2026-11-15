@@ -178,6 +178,23 @@ export function legacyProductRedirect(search: string): LegacyProductRedirect | n
 }
 
 /**
+ * Issue #4575 — the redirect for the retired audit / NLQ addresses, or
+ * null when the URL is not one. Audit and NLQ are now the two views of one
+ * "Audit & Vault" menu (`?tab=audit-vault&view=audit|nlq`), so the old
+ * top-level addresses keep landing on the same content instead of 404ing
+ * or falling back to the default tab. The caller replaces the URL (so
+ * back/forward never re-lands on the retired address), like the queues and
+ * product-domain retirements before it.
+ */
+export function legacyAuditVaultRedirect(search: string): LegacyProductRedirect | null {
+  const params = new URLSearchParams(search);
+  const tab = params.get("tab") ?? "";
+  if (tab === "audit") return { tab: "audit-vault", view: "audit" };
+  if (tab === "nlq") return { tab: "audit-vault", view: "nlq" };
+  return null;
+}
+
+/**
  * Navigate to a tab: resolve (unknown ids fall back), skip when already
  * there (no duplicate history entries for re-clicking the active item),
  * otherwise pushState and notify subscribers synchronously.
