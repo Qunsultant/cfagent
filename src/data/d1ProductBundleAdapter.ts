@@ -41,6 +41,8 @@ import {
   type ProductBundleRecord,
   type ProductBundleStore,
 } from "./productBundles";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { executeDml } from "./schemaComponent/dmlExecutor";
 
 /** Drizzle D1 database object carrying the bundle tables. */
 export type ProductBundleDb = DrizzleD1Database<{
@@ -126,12 +128,9 @@ function toEntitlement(raw: typeof agentBundleEntitlements.$inferSelect): Bundle
   };
 }
 
-/** Product bundles over D1 via Drizzle (+ raw-SQL batch for the atomic purchase write). */
+/** Product bundles over D1 via Drizzle (the atomic purchase write runs through the DML catalogue batch entry). */
 export class D1ProductBundleAdapter implements ProductBundleStore {
-  constructor(
-    readonly db: ProductBundleDb,
-    private readonly d1: D1Database,
-  ) {}
+  constructor(readonly db: ProductBundleDb) {}
 
   async createBundle(input: {
     id?: unknown;
@@ -313,49 +312,12 @@ export class D1ProductBundleAdapter implements ProductBundleStore {
       updatedAtMs: nowMs,
     }));
     try {
-      await this.d1.batch([
-        this.d1
-          .prepare(
-            `INSERT INTO agent_bundle_purchases (id, user_id, tenant_id, bundle_id, provider, provider_payment_ref, stripe_session_id, stripe_payment_intent_id, provider_subscription_id, provider_status, status, period_start_ms, period_end_ms, canceled_at_ms, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .bind(
-            purchaseRecord.id,
-            purchaseRecord.userId,
-            purchaseRecord.tenantId,
-            purchaseRecord.bundleId,
-            purchaseRecord.provider,
-            purchaseRecord.providerPaymentRef,
-            purchaseRecord.stripeSessionId,
-            purchaseRecord.stripePaymentIntentId,
-            purchaseRecord.providerSubscriptionId,
-            purchaseRecord.providerStatus,
-            purchaseRecord.status,
-            purchaseRecord.periodStartMs,
-            purchaseRecord.periodEndMs,
-            purchaseRecord.canceledAtMs,
-            purchaseRecord.createdAtMs,
-            purchaseRecord.updatedAtMs,
-          ),
-        ...entitlementRecords.map((e) =>
-          this.d1
-            .prepare(
-              `INSERT INTO agent_bundle_entitlements (id, bundle_purchase_id, user_id, tenant_id, product_id, included_runs, period_start_ms, period_end_ms, status, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .bind(
-              e.id,
-              e.bundlePurchaseId,
-              e.userId,
-              e.tenantId,
-              e.productId,
-              e.includedRuns,
-              e.periodStartMs,
-              e.periodEndMs,
-              e.status,
-              e.createdAtMs,
-              e.updatedAtMs,
-            ),
-        ),
-      ]);
+      await executeDml(
+        DML_CATALOGUE,
+        this.db,
+        "dml.d1.agent_bundle_purchases.record_purchase",
+        { values: purchaseRecord, entitlements: entitlementRecords },
+      );
     } catch (err) {
       // Race: another delivery recorded this provider id between
       // the guard check and the batch (the UNIQUE index refused
