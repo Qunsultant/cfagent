@@ -35,13 +35,13 @@ import {
   resourceDailyRollups,
   resourceSqlOps,
 } from "../src/data/drizzleSchema";
-import { D1QuoteSourceAdapter } from "../src/data/d1QuoteSourceAdapter";
+import { createD1QuoteSourceDb, D1QuoteSourceAdapter } from "../src/data/d1QuoteSourceAdapter";
 import { InMemoryQuoteSourceAdapter } from "../src/data/inMemoryQuoteSourceAdapter";
 import type { QuoteSourcePort } from "../src/data/quoteSourcePorts";
 import { D1ResourceRollupStore } from "../src/data/d1ResourceRollupAdapter";
 import { InMemoryResourceRollupStore } from "../src/data/inMemoryResourceRollupAdapter";
 import type { ResourceRollupStorePort } from "../src/data/resourceRollupPorts";
-import { D1ResourceUsageAdapter } from "../src/data/d1ResourceUsageAdapter";
+import { createD1ResourceDb, D1ResourceUsageAdapter } from "../src/data/d1ResourceUsageAdapter";
 import { ensureMasRetentionIndexes } from "../src/data/masRetentionIndexSchema";
 import { ensureFrameworkQueueIndexes } from "../src/data/frameworkQueueIndexSchema";
 import type { SqlStorage } from "../src/orm";
@@ -60,6 +60,11 @@ class SqliteD1 {
           return {};
         },
         all: async () => ({ results: stmt.all(...(args as never[])) }),
+        // drizzle-orm 0.45.4's select-with-fields path reads
+        // array-mode rows via .raw(); without it every catalogued
+        // select fails with ".raw is not a function".
+        raw: async () =>
+          stmt.all(...(args as never[])).map((row) => Object.values(row as Record<string, unknown>)),
       }),
       run: async () => {
         stmt.run();
@@ -107,10 +112,10 @@ function shapeOf(raw: DatabaseSync, table: string): unknown {
 /** Create the five tables the legacy way: the adapters' own ensures. */
 async function selfCreate(raw: DatabaseSync): Promise<void> {
   const db = new SqliteD1(raw);
-  await new D1QuoteSourceAdapter(db as never).ensureSchema();
-  const usage = new D1ResourceUsageAdapter(db as never);
+  await new D1QuoteSourceAdapter(createD1QuoteSourceDb(db as never)).ensureSchema();
+  const usage = new D1ResourceUsageAdapter(createD1ResourceDb(db as never));
   await usage.record({ ns: "n", op: "get", rowsRead: 0, rowsWritten: 0, timestampMs: 1 });
-  await new D1ResourceRollupStore(db as never).ensureSchema();
+  await new D1ResourceRollupStore(createD1ResourceDb(db as never)).ensureSchema();
 }
 
 describe("migration 0022 registration", () => {
@@ -189,7 +194,7 @@ describe("QuoteSourcePort contract (both adapters)", () => {
   const makers: Array<[string, () => Promise<QuoteSourcePort>]> = [
     [
       "D1",
-      async () => new D1QuoteSourceAdapter(new SqliteD1(new DatabaseSync(":memory:")) as never),
+      async () => new D1QuoteSourceAdapter(createD1QuoteSourceDb(new SqliteD1(new DatabaseSync(":memory:")) as never)),
     ],
     ["in-memory", async () => new InMemoryQuoteSourceAdapter()],
   ];
@@ -216,7 +221,7 @@ describe("QuoteSourcePort contract (both adapters)", () => {
         throw new Error("d1 unavailable");
       },
     };
-    const port = new D1QuoteSourceAdapter(broken as never);
+    const port = new D1QuoteSourceAdapter(createD1QuoteSourceDb(broken as never));
     expect(await port.get()).toBe("auto");
     await expect(port.set("yahoo")).rejects.toThrow();
   });
@@ -226,7 +231,7 @@ describe("ResourceRollupStorePort contract (both adapters)", () => {
   const makers: Array<[string, () => Promise<ResourceRollupStorePort>]> = [
     [
       "D1",
-      async () => new D1ResourceRollupStore(new SqliteD1(new DatabaseSync(":memory:")) as never),
+      async () => new D1ResourceRollupStore(createD1ResourceDb(new SqliteD1(new DatabaseSync(":memory:")) as never)),
     ],
     ["in-memory", async () => new InMemoryResourceRollupStore()],
   ];
@@ -279,7 +284,7 @@ describe("ResourceRollupStorePort contract (both adapters)", () => {
 
   it("D1 adapter: ops before ensure throw (the declared goal-path direction)", async () => {
     const store = new D1ResourceRollupStore(
-      new SqliteD1(new DatabaseSync(":memory:")) as never,
+      createD1ResourceDb(new SqliteD1(new DatabaseSync(":memory:")) as never),
     );
     await expect(store.readDailyRollup("2026-10-26")).rejects.toThrow();
     await expect(store.latestCompletedRollupDay()).rejects.toThrow();
@@ -310,9 +315,13 @@ describe("family census surface (the global pin's own patterns)", () => {
   });
 
   it("the statements live in the layer at exact counts", () => {
-    expect(count(PREPARE_PATTERN, "src/data/d1QuoteSourceAdapter.ts")).toBe(3);
-    expect(count(PREPARE_PATTERN, "src/data/d1ResourceUsageAdapter.ts")).toBe(3);
-    expect(count(PREPARE_PATTERN, "src/data/d1ResourceRollupAdapter.ts")).toBe(8);
+    // #4282 P6a (#4384): the three adapters' raw .prepare( calls
+    // moved into the DML catalogue by design — zero remain in
+    // the adapters. The catalogue's own census (entries per
+    // table) is pinned by tests/dml_d1_catalogue_4384.test.ts.
+    expect(count(PREPARE_PATTERN, "src/data/d1QuoteSourceAdapter.ts")).toBe(0);
+    expect(count(PREPARE_PATTERN, "src/data/d1ResourceUsageAdapter.ts")).toBe(0);
+    expect(count(PREPARE_PATTERN, "src/data/d1ResourceRollupAdapter.ts")).toBe(0);
     expect(count(STORAGE_EXEC_PATTERN, "src/data/masRetentionIndexSchema.ts")).toBe(3);
     expect(count(STORAGE_EXEC_PATTERN, "src/data/frameworkQueueIndexSchema.ts")).toBe(1);
     for (const file of [
