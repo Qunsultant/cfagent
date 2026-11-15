@@ -240,7 +240,10 @@ describe("step-4g family census (surface-1 pattern, exact counts)", () => {
     // In-layer homes after the move:
     ["src/data/doSqliteOrmAdapters.ts", 17],
     ["src/data/doSqliteStrategyWeightsAdapter.ts", 11],
-    ["src/data/doSqliteEnrichmentAdapter.ts", 5],
+    // 2 since #4385: the adapter's 3 DML statements moved into
+    // the DO DML catalogue; the CREATE TABLE + CREATE INDEX DDL
+    // sites stay.
+    ["src/data/doSqliteEnrichmentAdapter.ts", 2],
     ["src/data/inMemoryOrmAdapters.ts", 0],
     ["src/data/settingsReadPorts.ts", 0],
     ["src/data/createSettingsPorts.ts", 0],
