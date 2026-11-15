@@ -116,49 +116,6 @@ function toRouteRecord(raw: RouteRow): CapabilityRouteRecord {
   };
 }
 
-const UPSERT_PROVIDER_SQL = `INSERT INTO agent_data_providers
-  (id, adapter_kind, lifecycle_state, enabled, precedence, credential_ref, config_json, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(id) DO UPDATE SET adapter_kind = excluded.adapter_kind,
-    lifecycle_state = excluded.lifecycle_state, enabled = excluded.enabled,
-    precedence = excluded.precedence, credential_ref = excluded.credential_ref,
-    config_json = excluded.config_json, created_at = excluded.created_at,
-    updated_at = excluded.updated_at`;
-
-const UPSERT_ROUTE_SQL = `INSERT INTO agent_data_provider_routes
-  (capability, primary_provider_id, gap_fill_provider_id, min_tier, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?)
-  ON CONFLICT(capability) DO UPDATE SET primary_provider_id = excluded.primary_provider_id,
-    gap_fill_provider_id = excluded.gap_fill_provider_id, min_tier = excluded.min_tier,
-    created_at = excluded.created_at, updated_at = excluded.updated_at`;
-
-const DELETE_ROUTE_SQL = `DELETE FROM agent_data_provider_routes WHERE capability = ?`;
-
-function providerParams(record: ProviderConfigRecord): unknown[] {
-  return [
-    record.id,
-    record.adapterKind,
-    record.lifecycleState,
-    record.enabled ? 1 : 0,
-    record.precedence,
-    record.credentialRef,
-    JSON.stringify(record.config),
-    record.createdAt,
-    record.updatedAt,
-  ];
-}
-
-function routeParams(record: CapabilityRouteRecord): unknown[] {
-  return [
-    record.capability,
-    record.primaryProviderId,
-    record.gapFillProviderId,
-    record.minTier,
-    record.createdAt,
-    record.updatedAt,
-  ];
-}
-
 /** Provider-configuration store over D1 via Drizzle. */
 export class D1ProviderConfigAdapter implements ProviderConfigStore {
   constructor(
@@ -374,6 +331,13 @@ export class D1ProviderConfigAdapter implements ProviderConfigStore {
   /**
    * Apply a write set as ONE unit of work through the
    * transaction aspect (D1 batch leg — see the module header).
+   *
+   * #4282 P6a (#4384): the write statements are built with the
+   * Drizzle builder and rendered via .toSQL() into the unit —
+   * no hand-written SQL text remains in this adapter. The unit
+   * carries the code "dataProviders.applyConfigWrites"; the
+   * statements never execute individually, so they carry no
+   * catalogue entries of their own.
    */
   async applyConfigWrites(
     writes: readonly ProviderConfigWrite[],
@@ -385,11 +349,52 @@ export class D1ProviderConfigAdapter implements ProviderConfigStore {
       (unit) => {
         for (const write of writes) {
           if (write.kind === "upsertProvider") {
-            unit.exec(UPSERT_PROVIDER_SQL, ...providerParams(write.record));
+            const record = write.record;
+            const values = {
+              id: record.id,
+              adapterKind: record.adapterKind,
+              lifecycleState: record.lifecycleState,
+              enabled: record.enabled ? 1 : 0,
+              precedence: record.precedence,
+              credentialRef: record.credentialRef,
+              configJson: JSON.stringify(record.config),
+              createdAt: record.createdAt,
+              updatedAt: record.updatedAt,
+            };
+            const upsert = this.db
+              .insert(agentDataProviders)
+              .values(values)
+              .onConflictDoUpdate({
+                target: agentDataProviders.id,
+                set: { ...values },
+              })
+              .toSQL();
+            unit.exec(upsert.sql, ...upsert.params);
           } else if (write.kind === "upsertRoute") {
-            unit.exec(UPSERT_ROUTE_SQL, ...routeParams(write.record));
+            const record = write.record;
+            const values = {
+              capability: record.capability,
+              primaryProviderId: record.primaryProviderId,
+              gapFillProviderId: record.gapFillProviderId,
+              minTier: record.minTier,
+              createdAt: record.createdAt,
+              updatedAt: record.updatedAt,
+            };
+            const upsert = this.db
+              .insert(agentDataProviderRoutes)
+              .values(values)
+              .onConflictDoUpdate({
+                target: agentDataProviderRoutes.capability,
+                set: { ...values },
+              })
+              .toSQL();
+            unit.exec(upsert.sql, ...upsert.params);
           } else {
-            unit.exec(DELETE_ROUTE_SQL, write.capability);
+            const del = this.db
+              .delete(agentDataProviderRoutes)
+              .where(eq(agentDataProviderRoutes.capability, write.capability))
+              .toSQL();
+            unit.exec(del.sql, ...del.params);
           }
         }
       },
