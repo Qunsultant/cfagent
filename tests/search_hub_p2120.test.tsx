@@ -155,10 +155,22 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
   it("pre-hub shell pages are still present (SHELL_CONTENT, #2149, #2161)", () => {
     const chat = src("client/Chat.tsx");
     expect(chat).toContain("    payments: <PaymentsPage");
-    expect(chat).toContain("    social: <SocialPostingPanel");
-    expect(chat).toContain("    ads: (");
-    expect(chat).toContain("    referrals: (");
     expect(chat).toContain("    revenue: (");
+  });
+
+  it("marketing sections moved into the Marketing Hub (issue 4682)", () => {
+    // #4682 retires the standalone social/ads/referrals shell entries:
+    // they render as Marketing Hub sections now, not as SHELL_CONTENT
+    // pages. The hub entry is the one marketing surface in Chat.
+    const chat = src("client/Chat.tsx");
+    expect(chat).toContain('    "marketing-hub": (');
+    expect(chat).not.toContain("    social: <SocialPostingPanel");
+    expect(chat).not.toContain("    ads: (");
+    expect(chat).not.toContain("    referrals: (");
+    const hub = src("client/MarketingHubHome.tsx");
+    expect(hub).toContain("<ReferralsTab");
+    expect(hub).toContain("<AdsTab");
+    expect(hub).toContain("<SocialPostingPanel");
   });
 
   it("NLQ view is unchanged (still pending-prompt submit), now on the Audit & Vault page", () => {
