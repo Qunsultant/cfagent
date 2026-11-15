@@ -29,7 +29,8 @@ import {
   getQuoteSource,
   setQuoteSource,
 } from "../src/services/quoteSourceSetting";
-import { D1ResourceUsageAdapter } from "../src/telemetry/d1ResourceUsageAdapter";
+import { createD1QuoteSourceDb } from "../src/data/d1QuoteSourceAdapter";
+import { createD1ResourceDb, D1ResourceUsageAdapter } from "../src/telemetry/d1ResourceUsageAdapter";
 import {
   ensureResourceRollupTables,
   getAlertState,
@@ -60,6 +61,11 @@ class SqliteD1 {
           return {};
         },
         all: async () => ({ results: stmt.all(...(args as never[])) }),
+        // drizzle-orm 0.45.4's select-with-fields path reads
+        // array-mode rows via .raw(); without it every catalogued
+        // select fails with ".raw is not a function".
+        raw: async () =>
+          stmt.all(...(args as never[])).map((row) => Object.values(row as Record<string, unknown>)),
       }),
       run: async () => {
         stmt.run();
@@ -132,7 +138,7 @@ describe("characterization: quote source setting (legacy surface)", () => {
   it("get on a store whose table does not exist returns auto and does NOT create the table", async () => {
     const raw = new DatabaseSync(":memory:");
     const db = new SqliteD1(raw);
-    expect(await getQuoteSource(db as never)).toBe("auto");
+    expect(await getQuoteSource(createD1QuoteSourceDb(db as never))).toBe("auto");
     const tables = raw
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'quote_source_setting'")
       .all();
@@ -147,7 +153,7 @@ describe("characterization: quote source setting (legacy surface)", () => {
         throw new Error("no such table: quote_source_setting");
       },
     };
-    expect(await getQuoteSource(throwing as never)).toBe("auto");
+    expect(await getQuoteSource(createD1QuoteSourceDb(throwing as never))).toBe("auto");
     expect(prepared).toHaveLength(1);
     expect(prepared[0]).toMatch(/^\s*SELECT/i);
   });
@@ -155,33 +161,33 @@ describe("characterization: quote source setting (legacy surface)", () => {
   it("get with the table present but no row returns auto; an invalid stored value returns auto", async () => {
     const raw = new DatabaseSync(":memory:");
     const db = new SqliteD1(raw);
-    await ensureQuoteSourceTable(db as never);
-    expect(await getQuoteSource(db as never)).toBe("auto");
+    await ensureQuoteSourceTable(createD1QuoteSourceDb(db as never));
+    expect(await getQuoteSource(createD1QuoteSourceDb(db as never))).toBe("auto");
     raw
       .prepare("INSERT INTO quote_source_setting (id, source, updated_at) VALUES (1, 'bogus', 1)")
       .run();
-    expect(await getQuoteSource(db as never)).toBe("auto");
+    expect(await getQuoteSource(createD1QuoteSourceDb(db as never))).toBe("auto");
   });
 
   it("set creates the table before inserting, normalizes, and reads back", async () => {
     const raw = new DatabaseSync(":memory:");
     const log: string[] = [];
     const db = recording(new SqliteD1(raw), log);
-    expect(await setQuoteSource(db as never, "yahoo")).toBe("yahoo");
+    expect(await setQuoteSource(createD1QuoteSourceDb(db as never), "yahoo")).toBe("yahoo");
     const createAt = log.findIndex((s) => /CREATE TABLE/i.test(s));
     const insertAt = log.findIndex((s) => /INSERT INTO/i.test(s));
     expect(createAt).toBeGreaterThanOrEqual(0);
     expect(insertAt).toBeGreaterThan(createAt);
-    expect(await getQuoteSource(db as never)).toBe("yahoo");
-    expect(await setQuoteSource(db as never, "nope" as never)).toBe("auto");
-    expect(await getQuoteSource(db as never)).toBe("auto");
+    expect(await getQuoteSource(createD1QuoteSourceDb(db as never))).toBe("yahoo");
+    expect(await setQuoteSource(createD1QuoteSourceDb(db as never), "nope" as never)).toBe("auto");
+    expect(await getQuoteSource(createD1QuoteSourceDb(db as never))).toBe("auto");
   });
 
   it("the self-created quote_source_setting shape is exact", async () => {
     const raw = new DatabaseSync(":memory:");
     const db = new SqliteD1(raw);
-    await ensureQuoteSourceTable(db as never);
-    await ensureQuoteSourceTable(db as never); // idempotent
+    await ensureQuoteSourceTable(createD1QuoteSourceDb(db as never));
+    await ensureQuoteSourceTable(createD1QuoteSourceDb(db as never)); // idempotent
     expect(tableInfo(raw, "quote_source_setting")).toEqual([
       { name: "id", type: "INTEGER", notnull: 0, pk: 1 },
       { name: "source", type: "TEXT", notnull: 1, pk: 0 },
@@ -216,12 +222,12 @@ describe("characterization: D1 resource usage adapter (legacy surface)", () => {
         };
       },
     };
-    const adapter = new D1ResourceUsageAdapter(stub as never);
+    const adapter = new D1ResourceUsageAdapter(createD1ResourceDb(stub as never));
     await adapter.record(event);
     await adapter.record(event);
     expect(prepared.filter((s) => /CREATE TABLE/i.test(s))).toHaveLength(1);
     expect(prepared.filter((s) => /INSERT INTO/i.test(s))).toHaveLength(2);
-    const second = new D1ResourceUsageAdapter(stub as never);
+    const second = new D1ResourceUsageAdapter(createD1ResourceDb(stub as never));
     await second.record(event);
     expect(prepared.filter((s) => /CREATE TABLE/i.test(s))).toHaveLength(2);
   });
@@ -233,7 +239,7 @@ describe("characterization: D1 resource usage adapter (legacy surface)", () => {
         throw new Error("d1 unavailable");
       },
     };
-    const adapter = new D1ResourceUsageAdapter(broken as never);
+    const adapter = new D1ResourceUsageAdapter(createD1ResourceDb(broken as never));
     await expect(adapter.record(event)).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -242,14 +248,14 @@ describe("characterization: D1 resource usage adapter (legacy surface)", () => {
   it("totals does NOT self-create and throws on DB error", async () => {
     const raw = new DatabaseSync(":memory:");
     const db = new SqliteD1(raw);
-    const adapter = new D1ResourceUsageAdapter(db as never);
+    const adapter = new D1ResourceUsageAdapter(createD1ResourceDb(db as never));
     await expect(adapter.totals(0, 3_600_000, 3_600_000)).rejects.toThrow();
   });
 
   it("the self-created resource_sql_ops shape is exact, and record->totals round-trips", async () => {
     const raw = new DatabaseSync(":memory:");
     const db = new SqliteD1(raw);
-    const adapter = new D1ResourceUsageAdapter(db as never);
+    const adapter = new D1ResourceUsageAdapter(createD1ResourceDb(db as never));
     await adapter.record(event);
     await adapter.record({ ...event, timestampMs: 2_000, rowsRead: 3 });
     expect(tableInfo(raw, "resource_sql_ops")).toEqual([
@@ -285,8 +291,8 @@ describe("characterization: resource rollup store (legacy surface)", () => {
   it("ensure creates exactly the three rollup tables with exact shapes, idempotently", async () => {
     const raw = new DatabaseSync(":memory:");
     const db = new SqliteD1(raw);
-    await ensureResourceRollupTables(db as never);
-    await ensureResourceRollupTables(db as never);
+    await ensureResourceRollupTables(createD1ResourceDb(db as never));
+    await ensureResourceRollupTables(createD1ResourceDb(db as never));
     const tables = (
       raw
         .prepare(
@@ -326,26 +332,26 @@ describe("characterization: resource rollup store (legacy surface)", () => {
   it("the op paths do NOT self-ensure: reads and writes throw before ensure (goal-path contract)", async () => {
     const raw = new DatabaseSync(":memory:");
     const db = new SqliteD1(raw);
-    await expect(readDailyRollup(db as never, "2026-10-26")).rejects.toThrow();
+    await expect(readDailyRollup(createD1ResourceDb(db as never), "2026-10-26")).rejects.toThrow();
     await expect(
-      writeDailyRollup(db as never, "2026-10-26", [
+      writeDailyRollup(createD1ResourceDb(db as never), "2026-10-26", [
         { day: "2026-10-26", ns: "sessions", op: "get", caller: "c", trigger: "t", ops: 1, rowsRead: 1, rowsWritten: 0 },
       ]),
     ).rejects.toThrow();
-    await expect(getAlertState(db as never, "rowsRead", "2026-10-26")).rejects.toThrow();
-    await expect(latestCompletedRollupDay(db as never)).rejects.toThrow();
+    await expect(getAlertState(createD1ResourceDb(db as never), "rowsRead", "2026-10-26")).rejects.toThrow();
+    await expect(latestCompletedRollupDay(createD1ResourceDb(db as never))).rejects.toThrow();
   });
 
   it("readDailyRollup returns rows ordered by ns, op, caller, trigger", async () => {
     const raw = new DatabaseSync(":memory:");
     const db = new SqliteD1(raw);
-    await ensureResourceRollupTables(db as never);
-    await writeDailyRollup(db as never, "2026-10-26", [
+    await ensureResourceRollupTables(createD1ResourceDb(db as never));
+    await writeDailyRollup(createD1ResourceDb(db as never), "2026-10-26", [
       { day: "2026-10-26", ns: "sessions", op: "put", caller: "b", trigger: "t", ops: 1, rowsRead: 0, rowsWritten: 1 },
       { day: "2026-10-26", ns: "sessions", op: "get", caller: "a", trigger: "t", ops: 2, rowsRead: 2, rowsWritten: 0 },
       { day: "2026-10-26", ns: "auth", op: "get", caller: "a", trigger: "t", ops: 3, rowsRead: 3, rowsWritten: 0 },
     ]);
-    const rows = await readDailyRollup(db as never, "2026-10-26");
+    const rows = await readDailyRollup(createD1ResourceDb(db as never), "2026-10-26");
     expect(rows.map((r) => `${r.ns}/${r.op}/${r.caller}`)).toEqual([
       "auth/get/a",
       "sessions/get/a",

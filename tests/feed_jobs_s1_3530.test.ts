@@ -29,12 +29,13 @@
  */
 import { describe, it, expect } from "vitest";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import type {
   FeedDatasetArtifact,
   FeedDatasetStore,
 } from "../src/data/feedDatasetPorts";
 import { InMemoryFeedDatasetStore } from "../src/data/inMemoryFeedDatasetAdapter";
-import { D1FeedDatasetStore } from "../src/data/d1FeedDatasetAdapter";
+import { createD1FeedDatasetDb, D1FeedDatasetStore } from "../src/data/d1FeedDatasetAdapter";
 import { InMemoryIndexListStore } from "../src/data/inMemoryIndexListAdapter";
 import type { IndexListStore } from "../src/data/indexListPorts";
 import {
@@ -123,86 +124,6 @@ function fakeProvider(result: QuoteResult[] | Error): {
 }
 
 /** Minimal fake D1Database: supports exactly the statements the D1 feed-dataset adapter issues. */
-function makeFakeD1() {
-  type Row = Record<string, unknown>;
-  const rows: Row[] = [];
-  let tableExists = false;
-  const byNewest = (a: Row, b: Row) =>
-    a.created_at !== b.created_at
-      ? (a.created_at as string) < (b.created_at as string)
-        ? 1
-        : -1
-      : (b.id as string).localeCompare(a.id as string);
-  const mine = (params: unknown[]) =>
-    rows.filter(
-      (r) => r.source_id === params[0] && r.dataset === params[1],
-    );
-  const db = {
-    prepare(sql: string) {
-      return {
-        bind(...params: unknown[]) {
-          return {
-            run: async () => {
-              if (/^\s*CREATE TABLE/i.test(sql)) {
-                tableExists = true;
-                return { success: true };
-              }
-              if (!tableExists) throw new Error("no such table: mas_feed_datasets");
-              if (/^\s*INSERT INTO/i.test(sql)) {
-                const [id, created_at, source_id, dataset, job_id, run_id, status, as_of, rows_persisted, artifact_json] =
-                  params as [string, string, string, string, string, string, string, string, number, string];
-                rows.push({ id, created_at, source_id, dataset, job_id, run_id, status, as_of, rows_persisted, artifact_json });
-              } else if (/^\s*DELETE FROM/i.test(sql)) {
-                const at = rows.findIndex((r) => r.id === params[0]);
-                if (at !== -1) rows.splice(at, 1);
-              }
-              return { success: true };
-            },
-            first: async <T>() => {
-              if (!tableExists) throw new Error("no such table: mas_feed_datasets");
-              if (/ORDER BY created_at DESC, id DESC LIMIT 1/i.test(sql)) {
-                let found = mine(params);
-                if (/status != 'failed'/i.test(sql)) {
-                  found = found.filter(
-                    (r) => r.status !== "failed" && (r.rows_persisted as number) > 0,
-                  );
-                }
-                const top = found.sort(byNewest)[0];
-                return (top ? { artifact_json: top.artifact_json } : null) as T | null;
-              }
-              return null as T | null;
-            },
-            all: async <T>() => {
-              if (!tableExists) throw new Error("no such table: mas_feed_datasets");
-              if (/SELECT id FROM/i.test(sql)) {
-                return {
-                  results: mine(params).sort(byNewest).map((r) => ({ id: r.id })),
-                } as T;
-              }
-              if (/SELECT artifact_json FROM/i.test(sql)) {
-                const limit = params[2] as number;
-                return {
-                  results: mine(params)
-                    .sort(byNewest)
-                    .slice(0, limit)
-                    .map((r) => ({ artifact_json: r.artifact_json })),
-                } as T;
-              }
-              return { results: [] } as T;
-            },
-          };
-        },
-        run: async () => {
-          if (/^\s*CREATE TABLE/i.test(sql)) tableExists = true;
-          return { success: true };
-        },
-      };
-    },
-    _rows: rows,
-  };
-  return db;
-}
-
 function artifactInput(overrides?: Partial<FeedDatasetArtifact>): {
   jobId: string;
   sourceId: "yahoo";
@@ -254,7 +175,7 @@ function artifactInput(overrides?: Partial<FeedDatasetArtifact>): {
 describe("feed dataset store conformance (#3530 S1)", () => {
   const stores: Array<{ name: string; make: () => FeedDatasetStore }> = [
     { name: "in-memory", make: () => new InMemoryFeedDatasetStore() },
-    { name: "d1", make: () => new D1FeedDatasetStore(makeFakeD1() as never) },
+    { name: "d1", make: () => new D1FeedDatasetStore(createD1FeedDatasetDb(new MockD1Database() as never)) },
   ];
 
   for (const { name, make } of stores) {
@@ -333,7 +254,7 @@ describe("feed dataset store conformance (#3530 S1)", () => {
   }
 
   it("d1: reads against a missing table resolve to undefined instead of throwing", async () => {
-    const store = new D1FeedDatasetStore(makeFakeD1() as never);
+    const store = new D1FeedDatasetStore(createD1FeedDatasetDb(new MockD1Database() as never));
     expect(await store.latest("yahoo", "quotes")).toBeUndefined();
     expect(await store.latestUsable("yahoo", "quotes")).toBeUndefined();
     expect(await store.listRuns("yahoo", "quotes")).toEqual([]);

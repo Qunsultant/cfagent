@@ -324,7 +324,7 @@ describe("D1ProductBundleAdapter (real Drizzle over node:sqlite)", () => {
     const mock = new MockD1Database();
     const db = createD1ProductBundleDb(mock as unknown as D1Database);
     await ensureProductBundleSchema(db);
-    return { mock, db, store: new D1ProductBundleAdapter(db, mock as unknown as D1Database) };
+    return { mock, db, store: new D1ProductBundleAdapter(db) };
   }
 
   it("creates, approves, and reads back through D1", async () => {

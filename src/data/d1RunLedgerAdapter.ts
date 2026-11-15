@@ -11,7 +11,7 @@
  * write lands. Single statement: INSERT … ON CONFLICT DO UPDATE …
  * WHERE stored.updated_at < excluded.updated_at.
  */
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import {
   agentAsyncJobs,
@@ -31,6 +31,8 @@ import type {
   RunLedgerReadMode,
   TenantProjectionCarriersRow,
 } from "./runLedgerPorts";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { dmlFragment } from "./schemaComponent/dmlExecutor";
 
 export type D1RunLedgerDb = ReturnType<typeof createD1RunLedgerDb>;
 
@@ -145,7 +147,10 @@ export class D1RunLedgerAdapter {
       .onConflictDoUpdate({
         target: agentAsyncJobs.jobId,
         set: { ...values, jobId: row.jobId },
-        where: sql`${agentAsyncJobs.updatedAt} < ${sql.raw("excluded.updated_at")}`,
+        where: lt(
+          agentAsyncJobs.updatedAt,
+          dmlFragment(DML_CATALOGUE, "dml.d1.agent_async_jobs.stale_guard"),
+        ),
       })) as unknown as { meta?: { changes?: number } };
     const changes = result?.meta?.changes;
     return typeof changes === "number" ? changes > 0 : true;

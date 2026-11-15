@@ -28,6 +28,7 @@ import {
   type CapCumulative,
 } from "../src/telemetry/resourceRollup";
 import { FanOutResourceUsageAdapter } from "../src/telemetry/fanOutResourceUsageAdapter";
+import { createD1ResourceDb } from "../src/data/d1ResourceUsageAdapter";
 import {
   ensureResourceRollupTables,
   writeDailyRollup,
@@ -37,8 +38,8 @@ import {
   markAlerted,
   writeComparisonReport,
   readComparisonReport,
-  type ResourceD1Db,
 } from "../src/telemetry/resourceRollupStore";
+import { MockD1Database } from "./mock-d1";
 
 describe("budgets and thresholds (#1819)", () => {
   it("uses the verified Free-plan DO budgets", () => {
@@ -152,71 +153,22 @@ describe("FanOutResourceUsageAdapter", () => {
   });
 });
 
-/** Minimal fake D1: dispatches on the table/statement markers in the SQL. */
-function makeFakeD1() {
-  const rollups = new Map<string, Record<string, unknown>>();
-  const alertState = new Map<string, Record<string, unknown>>();
-  const reports = new Map<string, Record<string, unknown>>();
-  const projectionTotals: Array<Record<string, unknown>> = [];
-  const db: ResourceD1Db = {
-    prepare(sql: string) {
-      return {
-        bind(...params: unknown[]) {
-          return {
-            run: async () => {
-              if (sql.includes("INSERT OR REPLACE INTO resource_daily_rollups")) {
-                const [day, ns, op, caller, trigger, ops, rows_read, rows_written] = params as [
-                  string, string, string, string, string, number, number, number,
-                ];
-                rollups.set([day, ns, op, caller, trigger].join("\0"), {
-                  day, ns, op, caller, trigger, ops, rows_read, rows_written,
-                });
-              } else if (sql.includes("INSERT OR REPLACE INTO resource_alert_state")) {
-                const [budget, day, alerted_at, delivered, note] = params as [
-                  string, string, number, number, string | null,
-                ];
-                alertState.set([budget, day].join("\0"), { budget, day, alerted_at, delivered, note });
-              } else if (sql.includes("INSERT OR REPLACE INTO resource_comparison_reports")) {
-                const [day, generated_at, report_json] = params as [string, number, string];
-                reports.set(day, { day, generated_at, report_json });
-              }
-              return { success: true };
-            },
-            all: async () => {
-              if (sql.includes("FROM resource_daily_rollups") && sql.includes("MAX(day)")) {
-                const days = [...rollups.values()].map((r) => r.day as string);
-                return { results: days.length ? [{ day: days.sort().at(-1) }] : [] };
-              }
-              if (sql.includes("FROM resource_daily_rollups")) {
-                const [day] = params as [string];
-                return { results: [...rollups.values()].filter((r) => r.day === day) };
-              }
-              if (sql.includes("FROM resource_alert_state")) {
-                const [budget, day] = params as [string, string];
-                const row = alertState.get([budget, day].join("\0"));
-                return { results: row ? [row] : [] };
-              }
-              if (sql.includes("FROM resource_comparison_reports")) {
-                const [day] = params as [string];
-                const row = reports.get(day);
-                return { results: row ? [row] : [] };
-              }
-              if (sql.includes("FROM resource_sql_ops")) {
-                return { results: projectionTotals };
-              }
-              return { results: [] };
-            },
-          };
-        },
-      };
-    },
-  };
-  return { db, rollups, alertState, reports, projectionTotals };
+/**
+ * #4282 P6a (#4384): the rollup store no longer issues raw
+ * .prepare( calls — its statements live in the DML catalogue
+ * and run through the Drizzle builder — so the old
+ * SQL-text-dispatch fake cannot see them. The two store tests
+ * below now run over the shared MockD1Database (real
+ * node:sqlite) via createD1ResourceDb; the assertions are
+ * unchanged behaviour (round-trip, idempotent re-run).
+ */
+function makeDb() {
+  return createD1ResourceDb(new MockD1Database() as never);
 }
 
 describe("resourceRollupStore (fake D1)", () => {
   it("round-trips rollup rows, latest day, alert state, and comparison reports", async () => {
-    const { db } = makeFakeD1();
+    const db = makeDb();
     await ensureResourceRollupTables(db);
     expect(await latestCompletedRollupDay(db)).toBeNull();
     await writeDailyRollup(db, "2026-10-26", [
@@ -237,7 +189,7 @@ describe("resourceRollupStore (fake D1)", () => {
   });
 
   it("rollup rewrite for the same day replaces rows (idempotent re-run)", async () => {
-    const { db } = makeFakeD1();
+    const db = makeDb();
     await ensureResourceRollupTables(db);
     const row = { day: "2026-10-26", ns: "sessions", op: "get", caller: "requireAuth", trigger: "user", ops: 5, rowsRead: 5, rowsWritten: 0 };
     await writeDailyRollup(db, "2026-10-26", [row]);

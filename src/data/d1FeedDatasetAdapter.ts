@@ -1,20 +1,25 @@
 /**
  * Issue #3530 (S1) — the D1 implementation of the feed-dataset
- * port, raw prepare/bind (the d1IndexListAdapter pattern, not
- * Drizzle: one table, a handful of statements). Semantics
- * identical to the in-memory adapter: newest-first per (source,
- * dataset), keep-per-dataset prune via per-row DELETEs,
- * latestUsable skipping failed/empty runs.
+ * port, Drizzle over the DML catalogue (the d1IndexListAdapter
+ * pattern). Semantics identical to the in-memory adapter:
+ * newest-first per (source, dataset), keep-per-dataset prune via
+ * per-row DELETEs, latestUsable skipping failed/empty runs.
  *
- * Statements are single-line (the feed-seam idiom); the CREATE
- * is idempotent and issued on the write path only, so reads
- * against a missing table resolve to undefined (no stored
+ * The CREATE is idempotent and issued on the write path only, so
+ * reads against a missing table resolve to undefined (no stored
  * dataset) rather than inventing one — the same tolerance the
  * D1 index-list adapter declares. The full artifact rides in
  * artifact_json (the index-list members_json pattern); status
  * and row count are denormalized columns so latestUsable can
  * filter without parsing every row.
+ *
+ * #4282 P6a (#4384): the insert + reads + prune DELETE are
+ * catalogue entries (dml.d1.mas_feed_datasets.*), executed
+ * through the DML executor. The CREATE stays the DDL
+ * catalogue's text, issued via db.run(sql.raw(...)).
  */
+import { sql } from "drizzle-orm";
+import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import type { DataProviderId } from "../trading";
 import type {
   FeedDatasetArtifact,
@@ -23,32 +28,24 @@ import type {
   FeedDatasetStoreOptions,
 } from "./feedDatasetPorts";
 import { feedDatasetRowCount } from "./feedDatasetPorts";
+import { masFeedDatasets } from "./drizzleSchema";
 import { remainderD1TableSql } from "./schemaComponent/remainderCatalogue";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { executeDml } from "./schemaComponent/dmlExecutor";
 
-/** Minimal structural shape of the D1 binding this family needs. */
-export interface FeedDatasetD1Db {
-  prepare(sql: string): {
-    bind(...args: unknown[]): {
-      first<T = Record<string, unknown>>(): Promise<T | null>;
-      all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
-      run(): Promise<unknown>;
-    };
-    run(): Promise<unknown>;
-  };
+/** Drizzle D1 database object carrying the feed-dataset schema. */
+export type FeedDatasetD1Db = DrizzleD1Database<{
+  masFeedDatasets: typeof masFeedDatasets;
+}>;
+
+/** Build the Drizzle D1 database object from a bound D1 client. */
+export function createD1FeedDatasetDb(d1: D1Database): FeedDatasetD1Db {
+  return drizzle(d1, {
+    schema: { masFeedDatasets },
+  });
 }
 
 const CREATE_TABLE_SQL = remainderD1TableSql("mas_feed_datasets");
-const INSERT_SQL =
-  "INSERT INTO mas_feed_datasets (id, created_at, source_id, dataset, job_id, run_id, status, as_of, rows_persisted, artifact_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-const IDS_SQL =
-  "SELECT id FROM mas_feed_datasets WHERE source_id = ? AND dataset = ? ORDER BY created_at DESC, id DESC";
-const LATEST_SQL =
-  "SELECT artifact_json FROM mas_feed_datasets WHERE source_id = ? AND dataset = ? ORDER BY created_at DESC, id DESC LIMIT 1";
-const LATEST_USABLE_SQL =
-  "SELECT artifact_json FROM mas_feed_datasets WHERE source_id = ? AND dataset = ? AND status != 'failed' AND rows_persisted > 0 ORDER BY created_at DESC, id DESC LIMIT 1";
-const LIST_SQL =
-  "SELECT artifact_json FROM mas_feed_datasets WHERE source_id = ? AND dataset = ? ORDER BY created_at DESC, id DESC LIMIT ?";
-const DELETE_SQL = "DELETE FROM mas_feed_datasets WHERE id = ?";
 
 interface ArtifactJsonRow {
   artifact_json: string;
@@ -71,7 +68,7 @@ export class D1FeedDatasetStore implements FeedDatasetStore {
   }
 
   private async ensureTable(): Promise<void> {
-    await this.db.prepare(CREATE_TABLE_SQL).run();
+    await this.db.run(sql.raw(CREATE_TABLE_SQL));
   }
 
   async store(input: FeedDatasetStoreInput): Promise<FeedDatasetArtifact> {
@@ -82,28 +79,31 @@ export class D1FeedDatasetStore implements FeedDatasetStore {
       createdAt: nowIso ?? new Date().toISOString(),
     };
     await this.ensureTable();
-    await this.db
-      .prepare(INSERT_SQL)
-      .bind(
-        artifact.id,
-        artifact.createdAt,
-        artifact.sourceId,
-        artifact.dataset,
-        artifact.jobId,
-        artifact.run.runId,
-        artifact.run.status,
-        artifact.asOf,
-        feedDatasetRowCount(artifact),
-        JSON.stringify(artifact),
-      )
-      .run();
+    await executeDml(DML_CATALOGUE, this.db, "dml.d1.mas_feed_datasets.insert", {
+      values: {
+        id: artifact.id,
+        createdAt: artifact.createdAt,
+        sourceId: artifact.sourceId,
+        dataset: artifact.dataset,
+        jobId: artifact.jobId,
+        runId: artifact.run.runId,
+        status: artifact.run.status,
+        asOf: artifact.asOf,
+        rowsPersisted: feedDatasetRowCount(artifact),
+        artifactJson: JSON.stringify(artifact),
+      },
+    });
     // Prune: keep the newest keepPerDataset rows for (source, dataset).
-    const ids = await this.db
-      .prepare(IDS_SQL)
-      .bind(artifact.sourceId, artifact.dataset)
-      .all<{ id: string }>();
-    for (const row of ids.results.slice(this.keepPerDataset)) {
-      await this.db.prepare(DELETE_SQL).bind(row.id).run();
+    const ids = (await executeDml(
+      DML_CATALOGUE,
+      this.db,
+      "dml.d1.mas_feed_datasets.list_ids",
+      { sourceId: artifact.sourceId, dataset: artifact.dataset },
+    )) as Array<{ id: string }>;
+    for (const row of ids.slice(this.keepPerDataset)) {
+      await executeDml(DML_CATALOGUE, this.db, "dml.d1.mas_feed_datasets.prune_delete", {
+        id: row.id,
+      });
     }
     return artifact;
   }
@@ -113,11 +113,13 @@ export class D1FeedDatasetStore implements FeedDatasetStore {
     dataset: string,
   ): Promise<FeedDatasetArtifact | undefined> {
     try {
-      const row = await this.db
-        .prepare(LATEST_SQL)
-        .bind(sourceId, dataset)
-        .first<ArtifactJsonRow>();
-      return row ? parseArtifact(row) : undefined;
+      const rows = (await executeDml(
+        DML_CATALOGUE,
+        this.db,
+        "dml.d1.mas_feed_datasets.read_latest",
+        { sourceId, dataset },
+      )) as ArtifactJsonRow[];
+      return rows[0] ? parseArtifact(rows[0]) : undefined;
     } catch {
       // Missing table ⇒ no stored dataset (see the header).
       return undefined;
@@ -129,11 +131,13 @@ export class D1FeedDatasetStore implements FeedDatasetStore {
     dataset: string,
   ): Promise<FeedDatasetArtifact | undefined> {
     try {
-      const row = await this.db
-        .prepare(LATEST_USABLE_SQL)
-        .bind(sourceId, dataset)
-        .first<ArtifactJsonRow>();
-      return row ? parseArtifact(row) : undefined;
+      const rows = (await executeDml(
+        DML_CATALOGUE,
+        this.db,
+        "dml.d1.mas_feed_datasets.read_latest_usable",
+        { sourceId, dataset },
+      )) as ArtifactJsonRow[];
+      return rows[0] ? parseArtifact(rows[0]) : undefined;
     } catch {
       return undefined;
     }
@@ -145,11 +149,13 @@ export class D1FeedDatasetStore implements FeedDatasetStore {
     limit = 10,
   ): Promise<FeedDatasetArtifact[]> {
     try {
-      const rows = await this.db
-        .prepare(LIST_SQL)
-        .bind(sourceId, dataset, limit)
-        .all<ArtifactJsonRow>();
-      return rows.results.map(parseArtifact);
+      const rows = (await executeDml(
+        DML_CATALOGUE,
+        this.db,
+        "dml.d1.mas_feed_datasets.read_list",
+        { sourceId, dataset, limit },
+      )) as ArtifactJsonRow[];
+      return rows.map(parseArtifact);
     } catch {
       return [];
     }

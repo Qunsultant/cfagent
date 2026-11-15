@@ -22,7 +22,7 @@ export function createProposalLedgerAdapter(env: {
 }): D1ProposalLedgerAdapter | null {
   if (!env.AGENT_DB) return null;
   const d1 = env.AGENT_DB as D1Database;
-  return new D1ProposalLedgerAdapter(createD1ProposalLedgerDb(d1), d1);
+  return new D1ProposalLedgerAdapter(createD1ProposalLedgerDb(d1));
 }
 
 export { ensureProposalLedgerSchema };

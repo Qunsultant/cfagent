@@ -12,8 +12,8 @@
  * binding the capture log and the index lists live on.
  */
 import {
+  createD1FeedDatasetDb,
   D1FeedDatasetStore,
-  type FeedDatasetD1Db,
 } from "./d1FeedDatasetAdapter";
 import type { FeedDatasetStore } from "./feedDatasetPorts";
 
@@ -22,7 +22,7 @@ export function createFeedDatasetAdapter(env: {
   AGENT_DB?: unknown;
 }): D1FeedDatasetStore | null {
   if (!env.AGENT_DB) return null;
-  return new D1FeedDatasetStore(env.AGENT_DB as FeedDatasetD1Db);
+  return new D1FeedDatasetStore(createD1FeedDatasetDb(env.AGENT_DB as D1Database));
 }
 
 export type { FeedDatasetStore };

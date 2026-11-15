@@ -23,7 +23,7 @@ import {
   type ResourceUsageEvent,
 } from "../src/telemetry/resourceUsagePorts";
 import { InMemoryResourceUsageAdapter } from "../src/telemetry/inMemoryResourceUsageAdapter";
-import { D1ResourceUsageAdapter } from "../src/telemetry/d1ResourceUsageAdapter";
+import { createD1ResourceDb, D1ResourceUsageAdapter } from "../src/telemetry/d1ResourceUsageAdapter";
 import { ObservabilityResourceUsageAdapter } from "../src/telemetry/resourceUsageObservabilityAdapter";
 
 const SENSITIVE_KEY =
@@ -165,6 +165,21 @@ describe("D1ResourceUsageAdapter (fake D1, no migration-runner coupling)", () =>
                 return { success: true };
               },
               all: async () => ({ results: totalsRows }),
+              // drizzle-orm 0.45.4's select-with-fields path reads
+              // array-mode rows via .raw(); the totals select lists
+              // bucket, ns, op, caller, trigger, ops, rows_read,
+              // rows_written in that order.
+              raw: async () =>
+                totalsRows.map((r) => [
+                  r.bucket,
+                  r.ns,
+                  r.op,
+                  r.caller,
+                  r.trigger,
+                  r.ops,
+                  r.rows_read,
+                  r.rows_written,
+                ]),
             };
           },
         };
@@ -175,9 +190,13 @@ describe("D1ResourceUsageAdapter (fake D1, no migration-runner coupling)", () =>
 
   it("creates its table idempotently and inserts one row per event", async () => {
     const { db, inserts } = makeFakeD1();
-    const adapter = new D1ResourceUsageAdapter(db as never);
+    const adapter = new D1ResourceUsageAdapter(createD1ResourceDb(db as never));
     await adapter.record(sampleEvent());
-    const insert = inserts.find((i) => i.sql.includes("INSERT INTO resource_sql_ops"));
+    // #4282 P6a (#4384): the insert is built by the Drizzle
+    // builder (catalogue entry), so its rendering is lowercase
+    // with the table name quoted — match that, not the old raw
+    // "INSERT INTO resource_sql_ops" text.
+    const insert = inserts.find((i) => /insert into "resource_sql_ops"/i.test(i.sql));
     expect(insert).toBeDefined();
     expect(insert!.params).toContain("sessions");
     expect(insert!.params).toContain(1); // rows_read
@@ -188,7 +207,7 @@ describe("D1ResourceUsageAdapter (fake D1, no migration-runner coupling)", () =>
     const { db } = makeFakeD1([
       { bucket: 0, ns: "sessions", op: "get", caller: "requireAuth", trigger: "user", ops: 5, rows_read: 5, rows_written: 0 },
     ]);
-    const adapter = new D1ResourceUsageAdapter(db as never);
+    const adapter = new D1ResourceUsageAdapter(createD1ResourceDb(db as never));
     const totals = await adapter.totals(0, 3_600_000, 3_600_000);
     expect(totals).toEqual([
       {

@@ -33,18 +33,20 @@
  * the run settles (the vehicle a future sync-leg cutover awaits on).
  * No production strategy leg dispatches through the host yet — every strategy
  * leg is blocked by a named gap (#3960 broker selection, #4453
- * scan-run store + stage queue in the residency, universe deps that
- * do not travel); the legs stay on the sync dispatch until those
- * land, and this surface is what they cut over onto.
+ * scan-run store + stage queue in the residency; universe deps
+ * travel as a stage input since #4473); the legs stay on the sync
+ * dispatch until those land, and this surface is what they cut
+ * over onto.
  *
  * Issue #4290 — the goal leg's dispatch surface over this host:
  * startGoalOptionsLegWorkflow validates the goal shape, the goal
- * run id, and the symbol-scoped filter BEFORE defining anything,
+ * run id, and the filter (explicit underlyingSymbols, or a
+ * universe stage input, #4473) BEFORE defining anything,
  * stamps the goal run id on the stored request (the resolving steps
  * rebuild the leg's delivery builders from it), and dispatches
  * under the options job identity — the same identity the leg's sync
  * dispatch defines today. The goal leg itself stays on the sync
- * dispatch until its cutover gaps land (#3960, #4473, binding
+ * dispatch until its cutover gaps land (#3960, binding
  * reachability); this surface is what it cuts over onto.
  *
  * Issue #4451 — the comparison leg's dispatch surface over this
@@ -57,7 +59,7 @@
  * stage, not eight, and writes no shapeReport. No production
  * comparison leg dispatches through the host yet — the comparison
  * leg's cutover is not filed separately (see the #4451 report), and
- * the legs stay blocked by the named gaps (#3960, #4473).
+ * the legs stay blocked by the named gap (#3960).
  *
  * Issue #4450 — the first production leg dispatches through the
  * host: the manual route sends gated symbol-scoped screens through
@@ -65,7 +67,9 @@
  * awaitOptionsWorkflowRun, reading the screen + report artifacts
  * back through the artifact-store adapter. The gate (the route's
  * manualScreenDispatchRoute) keeps every other manual screen on
- * the unchanged sync dispatch until #3960 / #4473 land.
+ * the unchanged sync dispatch until the cutover slices lift it
+ * (#4473 landed: universe deps travel as a stage input; #3960
+ * still gates broker selection).
  */
 import {
   createJobPipelineStoresFromD1,
@@ -96,6 +100,9 @@ import { optionsArtifactKey } from "./optionsScreenPorts";
 import {
   decodeOptionsRequestShape,
   OptionsStepPortsError,
+  stampUniverseDepsStageInput,
+  validateUniverseDepsStageInput,
+  type UniverseDepsStageInput,
 } from "./optionsStepPorts";
 import { OPTIONS_PIPELINE_STAGES } from "./stageRuntimeIds";
 
@@ -108,6 +115,16 @@ export interface StartOptionsScreenWorkflowInput {
   /** The acting login — rides the raw config beside the request. */
   userLogin?: string;
   trigger?: "manual" | "scheduled";
+  /**
+   * The universe stage input (#4473): a serializable descriptor
+   * stamped on the stored request's classInput, from which the
+   * resolving steps rebuild live universe deps per invocation —
+   * so a discovery-mode leg resolves its underlyings through the
+   * host. Absent, no key is stamped and the run dispatches
+   * exactly as before. A malformed descriptor refuses by name
+   * before anything is defined.
+   */
+  universe?: UniverseDepsStageInput;
   /**
    * The job identity: the options job (default), the strategy job
    * (#4271), or the comparison job (#4276, #4451).
@@ -178,6 +195,18 @@ export async function startOptionsScreenWorkflow(
   opts: StartOptionsScreenWorkflowOpts = {},
 ): Promise<{ instanceId: string; jobId: string }> {
   const trigger = input.trigger ?? "manual";
+  // #4473: validate + stamp the universe stage input BEFORE
+  // defining anything — a malformed descriptor refuses by name
+  // with no job defined, like the shape validations in the named
+  // seams. The stored request carries the stamped copy; the
+  // caller's request is never mutated.
+  const request =
+    input.universe !== undefined
+      ? stampUniverseDepsStageInput(
+          input.request,
+          validateUniverseDepsStageInput(input.universe, input.runId),
+        )
+      : input.request;
   const jobId =
     input.jobKind === "strategy-screen"
       ? strategyScreenJobId(input.runId)
@@ -186,10 +215,10 @@ export async function startOptionsScreenWorkflow(
         : optionsScreenJobId(input.runId);
   const definition =
     input.jobKind === "strategy-screen"
-      ? strategyScreenJobDefinition(jobId, input.request, input.userLogin)
+      ? strategyScreenJobDefinition(jobId, request, input.userLogin)
       : input.jobKind === "comparison"
-        ? comparisonJobDefinition(jobId, input.request, input.userLogin)
-        : optionsScreenJobDefinition(jobId, input.request, input.userLogin);
+        ? comparisonJobDefinition(jobId, request, input.userLogin)
+        : optionsScreenJobDefinition(jobId, request, input.userLogin);
 
   const stores = opts.stores ?? (env.AGENT_DB ? createJobPipelineStoresFromD1(env.AGENT_DB) : null);
   if (!stores) {
@@ -329,6 +358,13 @@ export interface StartGoalOptionsLegWorkflowInput {
   /** The acting login — rides the raw config beside the request. */
   userLogin?: string;
   trigger?: "manual" | "scheduled";
+  /**
+   * The universe stage input (#4473): stamped on the stored
+   * request's classInput beside the goal run id, so a
+   * discovery-mode goal leg resolves its underlyings through the
+   * host. Without it, a discovery-mode leg is refused by name.
+   */
+  universe?: UniverseDepsStageInput;
 }
 
 /**
@@ -348,10 +384,10 @@ export interface StartGoalOptionsLegWorkflowInput {
  *   refused by name, with its own seam to dispatch through);
  * - the composing goal run's id must be supplied (goalRunId) — it
  *   is stamped on the stored request for the resolving steps;
- * - the goal filter must carry explicit underlyingSymbols: a
- *   discovery-mode leg needs universe deps to resolve its
- *   underlyings, and universe deps do not travel as a stage input
- *   yet (#4473) — refused by name until #4473 lands.
+ * - the goal filter must carry explicit underlyingSymbols, or the
+ *   dispatch must carry a universe stage input: a discovery-mode
+ *   leg needs universe deps to resolve its underlyings, and
+ *   without either it cannot — refused by name (#4473).
  * The resolving steps re-check the shape and the stamped id per
  * invocation, so the two can never drift.
  */
@@ -394,10 +430,10 @@ export async function startGoalOptionsLegWorkflow(
   const hasSymbols =
     Array.isArray(symbols) &&
     symbols.some((symbol) => typeof symbol === "string" && symbol.trim().length > 0);
-  if (!hasSymbols) {
+  if (!hasSymbols && input.universe === undefined) {
     throw new OptionsStepPortsError(
       "stage_port_unavailable",
-      `goal screen ${input.runId}: a discovery-mode goal leg (no underlyingSymbols in the goal filter) needs universe deps to resolve its underlyings, and universe deps do not travel as a stage input yet (#4473) — re-dispatch with explicit underlyingSymbols, or after #4473 lands`,
+      `goal screen ${input.runId}: a discovery-mode goal leg (no underlyingSymbols in the goal filter) needs universe deps to resolve its underlyings — re-dispatch with explicit underlyingSymbols, or with a universe stage input (the universe input, #4473) so the resolving steps rebuild the deps per invocation`,
     );
   }
   const stampedRequest = {
@@ -411,6 +447,7 @@ export async function startGoalOptionsLegWorkflow(
       request: stampedRequest,
       ...(input.userLogin ? { userLogin: input.userLogin } : {}),
       ...(input.trigger ? { trigger: input.trigger } : {}),
+      ...(input.universe ? { universe: input.universe } : {}),
     },
     opts,
   );

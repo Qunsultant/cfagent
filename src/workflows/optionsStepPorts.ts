@@ -55,6 +55,19 @@
  * adapter, so a resumed invocation reads the earlier stages'
  * artifacts from the durable store.
  *
+ * Issue #4473 — the universe stage input: a run may carry a
+ * serializable universe descriptor on classInput.universeDeps
+ * (UniverseDepsStageInput, decoded by decodeUniverseDepsStageInput,
+ * stamped by the start seams). The live deps are a function-valued
+ * seam and can never be stored, so the resolving steps rebuild
+ * them per invocation from the descriptor (the residency factory,
+ * universeDepsResidency.ts, bound as universeDepsFor) and hand
+ * them to the rebuild, which constructs every screener with them.
+ * The control path hands none: a control re-run of a discovery-mode
+ * stage keeps the #1378 refusal, as it has no residency to resolve
+ * over. #3960 mirrors this contract for broker selection with a
+ * sibling classInput key.
+ *
  * Refusals throw OptionsStepPortsError, a JobPipelineError — the
  * engine rethrows a JobPipelineError from a step handler with its
  * code intact (anything else becomes job_step_failed), and control's
@@ -65,7 +78,7 @@
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import type { Env } from "../types";
-import { DynamicOptionsScreener } from "../trading";
+import { DynamicOptionsScreener, type NasdaqUniverseDeps } from "../trading";
 import type { OptionsScreenStepDeps } from "./optionsScreenEngine";
 import {
   createOptionsScreenPorts,
@@ -191,6 +204,113 @@ export function assertOptionsStageRebuildable(
   }
 }
 
+/**
+ * The classInput key carrying the universe descriptor. One constant
+ * for every writer (the start seams) and the one reader (decode),
+ * so the key cannot drift between them.
+ */
+export const UNIVERSE_DEPS_STAGE_INPUT_KEY = "universeDeps";
+
+/**
+ * The universe descriptor a run carries as a stage input (#4473).
+ * It is serializable dispatch data, not the deps themselves: the
+ * live {@link NasdaqUniverseDeps} are a function-valued seam and
+ * can never be stored, so the run carries this descriptor and the
+ * resolving step rebuilds live deps from it per invocation (the
+ * residency factory in `./universeDepsResidency`).
+ *
+ * The provider is the nasdaq screen-universe provider — the only
+ * universe source the screener consumes today
+ * (`nasdaqUniverseProviderFromRoute` requires the route to name
+ * nasdaq and refuses any substitution). The tenant rides along
+ * because the bundle's run context is tenant-scoped; absent, the
+ * bundle defaults it to `"default"`, as the call-site builders do.
+ *
+ * This is the seam #3960 mirrors for provider/broker selection: a
+ * sibling classInput key carrying a (broker, mode) descriptor, a
+ * sibling decoder, and a sibling factory on the resolving steps.
+ * That slice is distinct and owns its own key; nothing here reads
+ * or writes it.
+ */
+export interface UniverseDepsStageInput {
+  provider: "nasdaq";
+  tenantId?: string;
+}
+
+/**
+ * Validate a caller-supplied universe descriptor. A malformed
+ * descriptor refuses by name at the seam that received it — the
+ * decoder never guesses a provider or a tenant.
+ */
+export function validateUniverseDepsStageInput(
+  value: unknown,
+  runId: string,
+): UniverseDepsStageInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new OptionsStepPortsError(
+      "stage_request_unrecognized",
+      `options run ${runId}: the universe stage input is not an object — refusing to guess the universe provider`,
+    );
+  }
+  const candidate = value as { provider?: unknown; tenantId?: unknown };
+  if (candidate.provider !== "nasdaq") {
+    throw new OptionsStepPortsError(
+      "stage_request_unrecognized",
+      `options run ${runId}: the universe stage input names an unrecognized provider ${JSON.stringify(candidate.provider)} — only "nasdaq" is a universe source today`,
+    );
+  }
+  if (
+    candidate.tenantId !== undefined &&
+    (typeof candidate.tenantId !== "string" || candidate.tenantId.trim() === "")
+  ) {
+    throw new OptionsStepPortsError(
+      "stage_request_unrecognized",
+      `options run ${runId}: the universe stage input carries a non-string or empty tenantId — refusing to guess the tenant`,
+    );
+  }
+  return {
+    provider: "nasdaq",
+    ...(typeof candidate.tenantId === "string" ? { tenantId: candidate.tenantId } : {}),
+  };
+}
+
+/**
+ * Decode the universe descriptor from a stored dispatch request.
+ * Absent (no classInput, or no key) decodes to `undefined`: runs
+ * dispatched before #4473, and runs that carry no universe input,
+ * are untouched. Present-but-malformed refuses by name.
+ */
+export function decodeUniverseDepsStageInput(
+  request: unknown,
+  runId: string,
+): UniverseDepsStageInput | undefined {
+  const classInput = (
+    request as { classInput?: Record<string, unknown> } | null | undefined
+  )?.classInput;
+  const value = classInput?.[UNIVERSE_DEPS_STAGE_INPUT_KEY];
+  if (value === undefined) return undefined;
+  return validateUniverseDepsStageInput(value, runId);
+}
+
+/**
+ * Stamp a validated universe descriptor onto a copy of a dispatch
+ * request. The caller's request is never mutated (the goal seam's
+ * goalRunId stamp has the same copy semantics).
+ */
+export function stampUniverseDepsStageInput(
+  request: unknown,
+  universe: UniverseDepsStageInput,
+): unknown {
+  const req = (
+    request && typeof request === "object" && !Array.isArray(request) ? request : {}
+  ) as Record<string, unknown>;
+  const classInput = (req.classInput as Record<string, unknown> | undefined) ?? {};
+  return {
+    ...req,
+    classInput: { ...classInput, [UNIVERSE_DEPS_STAGE_INPUT_KEY]: universe },
+  };
+}
+
 /** What one port rebuild needs: the run's identity + request, the shape, and the seams. */
 export interface RebuildOptionsStepDepsInput {
   runId: string;
@@ -222,6 +342,17 @@ export interface RebuildOptionsStepDepsInput {
     shapeReport: OptionsShapeReportFn;
     deliver: OptionsDeliverFn;
   };
+  /**
+   * Resolved universe deps for this invocation (#4473). The
+   * resolving step rebuilds them from the run's universe stage
+   * input (when the run carries one) and hands them here; the
+   * rebuild constructs every screener with them, so a stage
+   * resolves its universe from the run inputs, never from
+   * call-site construction. Absent, the screener is constructed
+   * without deps and discovery-mode legs throw the #1378 error
+   * at the screen stage, as they always have.
+   */
+  universeDeps?: NasdaqUniverseDeps;
 }
 
 /**
@@ -266,12 +397,12 @@ export function rebuildOptionsStepDeps(
   const stages =
     shape === "panel"
       ? createStrategyScreenPorts({
-          agents: createStrategyScreenAgents(input.chainSource),
+          agents: createStrategyScreenAgents(input.chainSource, input.universeDeps),
           storage,
         })
       : shape === "scan"
         ? createScannerScreenPorts({
-            agents: createStrategyScreenAgents(input.chainSource),
+            agents: createStrategyScreenAgents(input.chainSource, input.universeDeps),
             storage,
             ...(input.scanRunStore ? { scanRunStore: input.scanRunStore } : {}),
           })
@@ -280,21 +411,37 @@ export function rebuildOptionsStepDeps(
               // The goal leg's ports, rebuilt per invocation from
               // the stored request (#4290): the leg's delivery
               // builders are pure functions of the stamped goal run
-              // id, and the screener is constructed without universe
-              // deps — discovery-mode legs (no explicit symbols)
-              // fail at the screen stage with the #1378 error, and
-              // the goal seam refuses them earlier, by name (#4473).
+              // id, and the screener is constructed with the
+              // resolved universe deps when the run carries a
+              // universe stage input (#4473) — discovery-mode legs
+              // then discover through them; without the input the
+              // screener has no deps and discovery-mode legs fail
+              // at the screen stage with the #1378 error, and the
+              // goal seam refuses them earlier, by name.
               // No canonical store, matching the production leg's
               // decided omission (#4060, #783): the composing goal
               // run's row is the single canonical home.
-              screener: new DynamicOptionsScreener(input.chainSource),
+              screener: new DynamicOptionsScreener(
+                input.chainSource,
+                undefined,
+                input.universeDeps,
+              ),
               storage,
               ...createGoalOptionsLegDelivery({
                 goalRunId: goalRunIdFromGoalRequest(input.request, input.runId),
               }),
             })
           : createOptionsScreenPorts({
-            screener: new DynamicOptionsScreener(input.chainSource),
+            // The manual leg's screener, constructed with the
+            // resolved universe deps when the run carries a
+            // universe stage input (#4473), as the goal shape
+            // above; without the input, discovery-mode screens
+            // fail at the screen stage with the #1378 error.
+            screener: new DynamicOptionsScreener(
+              input.chainSource,
+              undefined,
+              input.universeDeps,
+            ),
             storage,
             ...(input.env
               ? {

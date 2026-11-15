@@ -11,7 +11,7 @@
  * transaction.
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import {
   agentCodeRedemptionCounts,
   agentCodeRedemptions,
@@ -51,6 +51,8 @@ import {
   type ReferralCodeRuleStore,
   type ReferralCodeStore,
 } from "./referralCodePorts";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { dmlFragment } from "./schemaComponent/dmlExecutor";
 
 /** Drizzle D1 database object carrying the referral-code schema. */
 export type ReferralCodeDb = DrizzleD1Database<{
@@ -367,7 +369,7 @@ export class D1ReferralCodeAdapter implements ReferralCodeStore {
       .update(agentReferralCodes)
       .set({ revokedAtMs: nowMs })
       .where(
-        and(eq(agentReferralCodes.id, codeId), sql`${agentReferralCodes.revokedAtMs} IS NULL`),
+        and(eq(agentReferralCodes.id, codeId), isNull(agentReferralCodes.revokedAtMs)),
       )
       .returning();
     if (rows.length === 0) {
@@ -425,10 +427,13 @@ export class D1ReferralCodeAdapter implements ReferralCodeStore {
         .onConflictDoUpdate({
           target: [agentCodeRedemptionCounts.codeId, agentCodeRedemptionCounts.redeemerLogin],
           set: {
-            redemptionCount: sql`${agentCodeRedemptionCounts.redemptionCount} + 1`,
+            redemptionCount: dmlFragment(
+              DML_CATALOGUE,
+              "dml.d1.agent_code_redemption_counts.increment_redemption_count",
+            ),
             updatedAtMs: input.nowMs,
           },
-          where: sql`${agentCodeRedemptionCounts.redemptionCount} < ${input.maxPerLogin}`,
+          where: lt(agentCodeRedemptionCounts.redemptionCount, input.maxPerLogin),
         });
       const after = await this.getPerLoginCount(input.codeId, input.redeemerLogin);
       if (after !== before + 1) return { ok: false, failed: "per_login" };
@@ -437,7 +442,12 @@ export class D1ReferralCodeAdapter implements ReferralCodeStore {
     if (input.maxPerCode !== null) {
       const rows = await this.db
         .update(agentReferralCodes)
-        .set({ redemptionCount: sql`${agentReferralCodes.redemptionCount} + 1` })
+        .set({
+          redemptionCount: dmlFragment(
+            DML_CATALOGUE,
+            "dml.d1.agent_referral_codes.increment_redemption_count",
+          ),
+        })
         .where(
           and(
             eq(agentReferralCodes.id, input.codeId),
@@ -452,7 +462,10 @@ export class D1ReferralCodeAdapter implements ReferralCodeStore {
       const rows = await this.db
         .update(agentReferralCodeRules)
         .set({
-          redemptionCount: sql`${agentReferralCodeRules.redemptionCount} + 1`,
+          redemptionCount: dmlFragment(
+            DML_CATALOGUE,
+            "dml.d1.agent_referral_code_rules.increment_redemption_count",
+          ),
           updatedAtMs: input.nowMs,
         })
         .where(
@@ -562,7 +575,11 @@ export class D1CodeRunsBalanceAdapter implements CodeRunsBalancePort {
       .onConflictDoUpdate({
         target: agentCodeRunBalances.login,
         set: {
-          runsRemaining: sql`${agentCodeRunBalances.runsRemaining} + ${validatedRuns}`,
+          runsRemaining: dmlFragment(
+            DML_CATALOGUE,
+            "dml.d1.agent_code_run_balances.increment_runs",
+            { delta: validatedRuns },
+          ),
           updatedAtMs: now,
         },
       });
@@ -582,13 +599,16 @@ export class D1CodeRunsBalanceAdapter implements CodeRunsBalancePort {
     const rows = await this.db
       .update(agentCodeRunBalances)
       .set({
-        runsRemaining: sql`${agentCodeRunBalances.runsRemaining} - 1`,
+        runsRemaining: dmlFragment(
+          DML_CATALOGUE,
+          "dml.d1.agent_code_run_balances.decrement_run",
+        ),
         updatedAtMs: Date.now(),
       })
       .where(
         and(
           eq(agentCodeRunBalances.login, login),
-          sql`${agentCodeRunBalances.runsRemaining} > 0`,
+          gt(agentCodeRunBalances.runsRemaining, 0),
         ),
       )
       .returning();

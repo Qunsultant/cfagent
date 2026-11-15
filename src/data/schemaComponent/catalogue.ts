@@ -73,6 +73,13 @@ export function validateCatalogueEntry(
       reason: `code table "${statementCodeTable(candidate.code)}" does not match entry table "${String(candidate.table)}"`,
     };
   }
+  if (candidate.kind === "dml") {
+    return {
+      valid: false,
+      reason:
+        'kind "dml" entries belong to the DML catalogue (dmlCatalogue.ts), not the schema catalogue',
+    };
+  }
   if (typeof candidate.table !== "string" || !WORD.test(candidate.table)) {
     return {
       valid: false,

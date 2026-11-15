@@ -38,6 +38,11 @@ import {
   D1JobRunRecordStore,
 } from "../data/d1JobRunRecordAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
+import {
+  buildDataProviderPorts,
+  type DataProviderPorts,
+} from "../data/buildDataProviderPorts";
+import { resolveUniverseDepsFromStageInput } from "./universeDepsResidency";
 import { stageQueueSendFromEnv } from "./stageQueueTransport";
 import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
 import { screenerStepDepsForWorkflow } from "../services/screenerPipelineJobs";
@@ -61,7 +66,7 @@ import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
 import { createDeliveryDatasetPorts } from "../data/createDeliveryDatasetPorts";
-import { D1IndexListStore } from "../data/d1IndexListAdapter";
+import { createD1IndexListDb, D1IndexListStore } from "../data/d1IndexListAdapter";
 import {
   createIndexMembershipService,
   createWikipediaIndexMembershipAdapter,
@@ -145,9 +150,7 @@ export function feedStepDepsForWorkflow(
   stores: JobPipelineStores,
 ): FeedStepDeps {
   const db = env.AGENT_DB;
-  const universeStore = new D1IndexListStore(
-    db as ConstructorParameters<typeof D1IndexListStore>[0],
-  );
+  const universeStore = new D1IndexListStore(createD1IndexListDb(db as D1Database));
   const fetchHtml = fetchWikipediaIndexHtml;
   const capturePort = createProviderCaptureAdapter(env) ?? undefined;
   const blobStorage = createR2CaptureBlobStorage(env) ?? undefined;
@@ -188,6 +191,13 @@ export function optionsStepDepsForWorkflow(
   env: Env,
   stores: JobPipelineStores,
 ): OptionsWorkflowStepDeps {
+  // #4473: the D1 data-provider ports, built once per deps object
+  // and memoized (the build schema-ensures the platform tables;
+  // the resolving steps resolve universe deps per stage step, and
+  // each resolution must not re-run the build). The promise is
+  // created lazily, on the first factory call, so deps objects
+  // for runs carrying no universe input never touch D1.
+  let portsPromise: Promise<DataProviderPorts> | undefined;
   return {
     definitions: stores.definitions,
     artifacts: stores.artifacts,
@@ -212,6 +222,17 @@ export function optionsStepDepsForWorkflow(
     // reads, and no residency-side home exists — the persist
     // stage's named degradation is the contract.
     queue: stageQueueSendFromEnv(env),
+    // #4473: the universe deps factory — the resolving steps call
+    // it only when the stored request carries a universe stage
+    // input. The ports build once (memoized above); the factory
+    // itself resolves per invocation over those ports, with the
+    // R2 capture store when REPORTS_BUCKET is bound.
+    universeDepsFor: async (args) => {
+      portsPromise ??= buildDataProviderPorts(env);
+      return resolveUniverseDepsFromStageInput(env, args, {
+        ports: await portsPromise,
+      });
+    },
   };
 }
 

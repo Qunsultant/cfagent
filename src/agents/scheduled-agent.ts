@@ -201,7 +201,7 @@ import {
   runResourceComparison,
   runResourceRollup,
 } from "./resourceGoals";
-import type { ResourceD1Db } from "../telemetry/d1ResourceUsageAdapter";
+import { createD1ResourceDb } from "../data/d1ResourceUsageAdapter";
 import {
   deliverPendingApprovals,
   fetchSlackPost,
@@ -2040,7 +2040,8 @@ export class ScheduledAgent extends PortThink {
           //
           // AGENT_DB unbound means there is no projection to query:
           // fail visible, goal stays due, never stamp a success.
-          const db = (env as unknown as { AGENT_DB?: ResourceD1Db }).AGENT_DB;
+          const rawDb = (env as unknown as { AGENT_DB?: D1Database }).AGENT_DB;
+          const db = rawDb ? createD1ResourceDb(rawDb) : undefined;
           if (!db) {
             tick.errors.push(`${goal.id}: AGENT_DB binding unavailable, goal left due`);
             tick.jobsSkipped++;
@@ -2165,7 +2166,9 @@ export class ScheduledAgent extends PortThink {
               await recordGoalRun("skipped", { detail: "AGENT_DB binding unavailable, goal left due" });
               continue;
             }
-            const { D1IndexListStore } = await import("../data/d1IndexListAdapter");
+            const { createD1IndexListDb, D1IndexListStore } = await import(
+              "../data/d1IndexListAdapter"
+            );
             const {
               createIndexMembershipService,
               createWikipediaIndexMembershipAdapter,
@@ -2185,7 +2188,7 @@ export class ScheduledAgent extends PortThink {
               },
             });
             refreshResult = await createIndexListRefreshExecutor({
-              store: new D1IndexListStore(db as never),
+              store: new D1IndexListStore(createD1IndexListDb(db as D1Database)),
               service,
             })(goal.operation as IndexRefreshOperation);
           }

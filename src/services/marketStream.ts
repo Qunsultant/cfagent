@@ -15,6 +15,7 @@ import {
   getQuoteSource,
   type QuoteSource,
 } from "./quoteSourceSetting";
+import { createD1QuoteSourceDb } from "../data/d1QuoteSourceAdapter";
 import {
   isAlpacaConfigured,
   levelsForQuoteSwitch,
@@ -317,7 +318,9 @@ export async function fetchRealMarketQuote(
  * so both the WS stream and the HTTP fallback honor one setting.
  */
 export async function refreshQuotesInBackground(symbols: string[], env?: Env): Promise<void> {
-  const provider = await getQuoteSource(env?.AGENT_DB);
+  const provider = await getQuoteSource(
+    env?.AGENT_DB ? createD1QuoteSourceDb(env.AGENT_DB) : undefined,
+  );
   await Promise.all(
     symbols.map(async (s) => {
       try {

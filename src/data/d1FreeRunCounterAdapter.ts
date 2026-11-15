@@ -23,7 +23,7 @@
  * exceeds the allowance.
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { agentFreeRunAllowances, agentFreeRunCounts } from "./drizzleSchema";
 import {
   applyMigrations,
@@ -37,6 +37,8 @@ import {
   type FreeRunCounter,
   type FreeRunUsageInput,
 } from "./freeRunCounterPorts";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { dmlFragment } from "./schemaComponent/dmlExecutor";
 import { assertPriceFamily } from "./priceCataloguePorts";
 
 /** Drizzle D1 database object carrying the free-run counter schema. */
@@ -121,8 +123,22 @@ export class D1FreeRunCounterAdapter implements FreeRunCounter {
       .values({ userLogin: input.login, family, month: input.month, used: 1, updatedAtMs: now })
       .onConflictDoUpdate({
         target: [agentFreeRunCounts.userLogin, agentFreeRunCounts.family, agentFreeRunCounts.month],
-        set: { used: sql`${agentFreeRunCounts.used} + 1`, updatedAtMs: now },
-        where: sql`${agentFreeRunCounts.used} < (SELECT ${agentFreeRunAllowances.runs} FROM ${agentFreeRunAllowances} WHERE ${agentFreeRunAllowances.family} = ${agentFreeRunCounts.family})`,
+        set: {
+          used: dmlFragment(
+            DML_CATALOGUE,
+            "dml.d1.agent_free_run_counts.increment_used",
+          ),
+          updatedAtMs: now,
+        },
+        where: lt(
+          agentFreeRunCounts.used,
+          this.db
+            .select({ runs: agentFreeRunAllowances.runs })
+            .from(agentFreeRunAllowances)
+            .where(
+              eq(agentFreeRunAllowances.family, agentFreeRunCounts.family),
+            ),
+        ),
       });
     // Applied-check: the increment landed exactly when the
     // count grew by one. When the conditional upsert did not
