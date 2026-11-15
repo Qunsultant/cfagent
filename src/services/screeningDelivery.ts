@@ -57,7 +57,7 @@ import {
 } from "./tenantChannelGate";
 import {
   resolveAndVerifySlackRecipientAtDelivery,
-  verifyChannelRecipient,
+  resolveAndVerifyWebhookRecipientAtDelivery,
   verifyEmailRecipientAtDelivery,
   type ChannelRecipientBinding,
   type ChannelRecipientAuditFn,
@@ -290,6 +290,7 @@ export async function deliverScreeningContent(input: {
       scheduleId: input.scheduleId ?? null,
     };
     let verifiedSlackChannel = input.slackChannel;
+    let verifiedWebhookUrl = input.webhookUrl;
     const recipientCheck =
       channel === "email"
         ? await verifyEmailRecipientAtDelivery({
@@ -311,10 +312,11 @@ export async function deliverScreeningContent(input: {
               layer: "screening_content",
               audit: input.audit,
             })
-          : verifyChannelRecipient({
-              channel,
-              recipient,
+          : await resolveAndVerifyWebhookRecipientAtDelivery({
+              requestedUrl: input.webhookUrl,
+              env: input.env,
               run: runScope,
+              channelGate: input.channelGate,
               binding: input.recipientBinding,
               layer: "screening_content",
               audit: input.audit,
@@ -329,6 +331,9 @@ export async function deliverScreeningContent(input: {
     }
     if (channel === "slack" && "channel" in recipientCheck && typeof recipientCheck.channel === "string" && recipientCheck.channel) {
       verifiedSlackChannel = recipientCheck.channel;
+    }
+    if (channel === "webhook" && "url" in recipientCheck && typeof recipientCheck.url === "string" && recipientCheck.url) {
+      verifiedWebhookUrl = recipientCheck.url;
     }
     const sender = input.senders[channel];
     if (!sender) {
@@ -365,7 +370,8 @@ export async function deliverScreeningContent(input: {
         const r = await (sender as NonNullable<ScreeningDeliverySenders["webhook"]>)({
           event: input.event,
           data: input.data ?? { subject: input.subject, text: input.text },
-        });
+          ...(verifiedWebhookUrl ? { url: verifiedWebhookUrl } : {}),
+        } as never);
         results.push({ channel, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
       }
     } catch (err) {
@@ -429,9 +435,9 @@ export function createScreeningDeliverySenders(
     return sent ? { ok: true } : { ok: false, error: "Outbound email service reported a send failure." };
   };
 
-  senders.webhook = async ({ event, data }) => {
+  senders.webhook = async ({ event, data, url }: { event: string; data: Record<string, unknown>; url?: string }) => {
     const service = new ETradeWebhookService(orm, env as never, userLogin);
-    const r = await service.dispatchOutboundWebhook(event, data);
+    const r = await service.dispatchOutboundWebhook(event, data, url);
     return r.success
       ? { ok: true }
       : { ok: false, error: r.error ?? `Webhook dispatch failed (status ${r.status ?? "n/a"}).` };
@@ -549,10 +555,12 @@ export async function deliverDiscoveryDirect(input: {
               layer: "discovery_direct",
               audit: input.audit,
             })
-          : verifyChannelRecipient({
-              channel,
-              recipient,
+          : await resolveAndVerifyWebhookRecipientAtDelivery({
+              requestedUrl: outcome.webhookUrl,
+              envFallbackUrl: config.channels.webhook.url,
+              env: input.env,
               run: runScope,
+              channelGate: input.channelGate,
               binding: input.recipientBinding ?? outcome.recipientBinding,
               layer: "discovery_direct",
               audit: input.audit,
@@ -567,6 +575,9 @@ export async function deliverDiscoveryDirect(input: {
     }
     if (channel === "slack" && "channel" in recipientCheck && typeof recipientCheck.channel === "string" && recipientCheck.channel) {
       effectiveOutcome = { ...outcome, slackChannel: recipientCheck.channel };
+    }
+    if (channel === "webhook" && "url" in recipientCheck && typeof recipientCheck.url === "string" && recipientCheck.url) {
+      effectiveOutcome = { ...outcome, webhookUrl: recipientCheck.url };
     }
     if (channel === "email" && outcome.emailTo && !isEmailAllowed(config, outcome.emailTo, outcome, input.ownerEmail)) {
       const error = codedMessage("FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED", `recipient ${outcome.emailTo}`);

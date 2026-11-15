@@ -51,6 +51,7 @@ import type { TenantChannelStore } from "../../data/tenantChannelPorts";
 import {
   TENANT_CHANNEL_IDS,
   normalizeTenantSlackChannel,
+  normalizeTenantWebhookUrl,
   type TenantChannelConfig,
   type TenantChannelId,
   type TenantChannelPatch,
@@ -152,12 +153,11 @@ export async function handlePlatformChannelRoutes(
   sessionId: string,
   ctx: PlatformChannelRouteContext,
 ): Promise<Response | null> {
-  void url;
   void sessionId;
   if (!path.includes("/platform-channels/")) return null;
   const rest = path.split("/platform-channels/")[1] ?? "";
   const segments = rest.split("/");
-  let action: "read" | "patch" | "slack-channel" | null = null;
+  let action: "read" | "patch" | "slack-channel" | "webhook-url" | null = null;
   let tenantId = "";
   if (segments.length === 1 && segments[0]) {
     tenantId = decodeURIComponent(segments[0]);
@@ -168,6 +168,9 @@ export async function handlePlatformChannelRoutes(
   } else if (segments.length === 2 && segments[0] && segments[1] === "slack-channel") {
     tenantId = decodeURIComponent(segments[0]);
     action = "slack-channel";
+  } else if (segments.length === 2 && segments[0] && segments[1] === "webhook-url") {
+    tenantId = decodeURIComponent(segments[0]);
+    action = "webhook-url";
   } else {
     return null;
   }
@@ -192,10 +195,69 @@ export async function handlePlatformChannelRoutes(
         typeof channels.getTenantSlackChannel === "function"
           ? await channels.getTenantSlackChannel(tenantId)
           : null;
+      const webhookUrl =
+        typeof channels.getTenantWebhookUrl === "function"
+          ? await channels.getTenantWebhookUrl(tenantId)
+          : null;
+      const scheduleWebhookUrls =
+        typeof channels.getTenantScheduleWebhookUrls === "function"
+          ? await channels.getTenantScheduleWebhookUrls(tenantId)
+          : {};
       return Response.json({
         tenantId,
         channels: config,
         ...(slackChannel ? { slackChannel } : {}),
+        ...(webhookUrl ? { webhookUrl } : {}),
+        ...(Object.keys(scheduleWebhookUrls).length > 0 ? { scheduleWebhookUrls } : {}),
+      });
+    }
+
+    if (action === "webhook-url") {
+      const queryScheduleId = url.searchParams.get("scheduleId")?.trim() || null;
+      if (request.method === "GET") {
+        const webhookUrl =
+          typeof channels.getTenantWebhookUrl === "function"
+            ? await channels.getTenantWebhookUrl(tenantId, queryScheduleId)
+            : null;
+        const scheduleWebhookUrls =
+          typeof channels.getTenantScheduleWebhookUrls === "function"
+            ? await channels.getTenantScheduleWebhookUrls(tenantId)
+            : {};
+        return Response.json({
+          tenantId,
+          ...(queryScheduleId ? { scheduleId: queryScheduleId } : {}),
+          webhookUrl,
+          ...(Object.keys(scheduleWebhookUrls).length > 0 ? { scheduleWebhookUrls } : {}),
+        });
+      }
+      if (request.method !== "PUT" && request.method !== "PATCH") {
+        return jsonError("Method not allowed", 405);
+      }
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!("webhookUrl" in body)) {
+        return jsonError("webhookUrl is required (non-empty HTTPS/HTTP URL string or null).", 400);
+      }
+      const normalized = normalizeTenantWebhookUrl(body["webhookUrl"]);
+      if (!normalized.ok) {
+        return jsonError(normalized.error, 400);
+      }
+      const bodyScheduleId =
+        typeof body["scheduleId"] === "string" && body["scheduleId"].trim()
+          ? body["scheduleId"].trim()
+          : queryScheduleId;
+      if (typeof channels.setTenantWebhookUrl !== "function") {
+        return jsonError("Webhook URL binding is not supported by the bound channel store.", 503);
+      }
+      const saved = await channels.setTenantWebhookUrl(
+        tenantId,
+        normalized.webhookUrl,
+        bodyScheduleId,
+      );
+      auditBestEffort(ctx, operator, "update-webhook-url", tenantId);
+      return Response.json({
+        tenantId,
+        ...(bodyScheduleId ? { scheduleId: bodyScheduleId } : {}),
+        webhookUrl: saved,
       });
     }
 

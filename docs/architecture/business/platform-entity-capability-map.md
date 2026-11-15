@@ -342,9 +342,13 @@ check enforced on every send.
   `FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED` (`slack_tenant_channel_unmapped` /
   `slack_channel_not_in_tenant_run`) and audited via `delivery.recipient_refused`.
 - **Webhook:** HMAC-SHA256 signed, refuses to send with no signing
-  secret configured. Signing is a transport-integrity property, not a
-  recipient-tenant verification; the webhook URL's tenant binding was
-  not isolated (§8).
+  secret configured. Signing stays a transport-integrity property only;
+  recipient authorization (#4611 / G21) binds the outbound webhook URL to
+  `tenant + schedule + run` at send time via `TenantChannelStore.getTenantWebhookUrl` /
+  `setTenantWebhookUrl`, `GET|PUT|PATCH /platform-channels/:id/webhook-url`,
+  `TENANT_WEBHOOK_URLS_JSON`, and `resolveAndVerifyWebhookRecipientAtDelivery`
+  across every webhook layer (including `dispatchOutboundWebhook` in `src/services/tradingWebhooks.ts`),
+  refusing + auditing (`delivery.recipient_refused`) any unmapped or mismatched URL.
 - **Delivery claims:** a dedupe/claim store exists; claim scoping
   (per tenant+run?) was not isolated (§8).
 
@@ -546,8 +550,10 @@ capability, not an absence.
     (`reports/<reportId>.json`).
 15. **Channel recipient verification shipped:** email delivery-time
     recipient verification (`recipient ∈ tenant + owner`) shipped in
-    #4609 (G14), and per-tenant Slack channel mapping (`resolveAndVerifySlackRecipientAtDelivery`,
-    refusing + auditing unmapped tenants) shipped in #4610 (G15).
+    #4609 (G14), per-tenant Slack channel mapping (`resolveAndVerifySlackRecipientAtDelivery`,
+    refusing + auditing unmapped tenants) shipped in #4610 (G15), and
+    per-tenant / per-schedule webhook recipient URL binding + run check
+    (`resolveAndVerifyWebhookRecipientAtDelivery`) shipped in #4611 (G21).
 16. **Flag selection is by binding presence, not environment** (FLAGS
     bound → Flagship, else Env adapter). The Env adapter is therefore
     reachable in any runtime without the binding — not code-enforced
@@ -566,8 +572,9 @@ capability, not an absence.
    credential store found; env-global vs per-login vs per-tenant
    unverified beyond E*TRADE's per-login cache.
 5. Broker surfaces G2/G3 gating (#2856's term) — no gate code isolated.
-6. Webhook recipient URL binding — signing + no-secret refusal
-   verified; per-tenant/per-schedule URL and run check not isolated.
+6. Webhook recipient URL binding (#4611 / G21) — shipped: outbound webhook
+   URLs are bound to `tenant + schedule + run` at send time (`resolveAndVerifyWebhookRecipientAtDelivery`);
+   HMAC signing stays transport-integrity only.
 7. Delivery-claim scoping (`deliveryClaimsStore.ts`) — existence
    noted, tenant+run scoping not isolated.
 8. `agent_data_captures` (D1) vs `mas_data_captures` (DO) — both

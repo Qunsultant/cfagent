@@ -27,6 +27,12 @@ import { ETradeService } from "./etrade";
 import { verifyHmacSha256Signature, assertSafeOutboundWebhookUrl } from "../security/webhookSecurity";
 import { checkSlackWebhookRateLimit, isSlackWebhookUrl } from "./slackWebhookRateLimit";
 import {
+  resolveAndVerifyWebhookRecipientAtDelivery,
+  type ChannelRecipientAuditFn,
+  type ChannelRecipientBinding,
+  type ChannelVerificationLayer,
+} from "./channelRecipientVerification";
+import {
   deriveTradingViewNonce,
   deriveETradeNonce,
   OrmReplayStore,
@@ -307,15 +313,100 @@ export class ETradeWebhookService {
   }
 
   /**
-   * Outbound Webhook: Dispatch HMAC-SHA256 signed event to subscriber URLs
+   * Outbound Webhook: Dispatch HMAC-SHA256 signed event to subscriber URLs.
+   *
+   * Issue #4611 (G21): HMAC-SHA256 signing is transport-integrity only;
+   * recipient authorization is enforced at send time by binding the outbound
+   * webhook URL to `tenant + schedule + run` via `resolveAndVerifyWebhookRecipientAtDelivery`
+   * before signing or transmitting any payload.
    */
   async dispatchOutboundWebhook(
     eventType: string,
     data: Record<string, any>,
     targetUrl?: string,
-    secret?: string
+    secret?: string,
+    scope?: {
+      tenantId?: string | null;
+      userLogin?: string | null;
+      scheduleId?: string | null;
+      runId?: string | null;
+      channelGate?: {
+        tenantId: string;
+        webhookUrl?: string | null;
+        scheduleWebhookUrls?: Readonly<Record<string, string>>;
+      } | null;
+      tenantChannelStore?: {
+        getTenantWebhookUrl?: (tenantId: string, scheduleId?: string | null) => Promise<string | null>;
+        getTenantScheduleWebhookUrls?: (tenantId: string) => Promise<Readonly<Record<string, string>>>;
+      } | null;
+      recipientBinding?: ChannelRecipientBinding | null;
+      layer?: ChannelVerificationLayer;
+      audit?: ChannelRecipientAuditFn;
+    }
   ): Promise<{ success: boolean; url: string; status?: number; error?: string }> {
-    const url = targetUrl || this.env?.OUTBOUND_WEBHOOK_URL;
+    const envRecord = (this.env ?? {}) as unknown as Record<string, unknown>;
+    const hasEnvWebhookBinding =
+      (typeof envRecord["TENANT_WEBHOOK_URLS_JSON"] === "string" &&
+        envRecord["TENANT_WEBHOOK_URLS_JSON"].trim().length > 0) ||
+      (typeof envRecord["CHANNEL_RECIPIENT_BINDINGS_JSON"] === "string" &&
+        envRecord["CHANNEL_RECIPIENT_BINDINGS_JSON"].trim().length > 0);
+
+    let url = targetUrl || this.env?.OUTBOUND_WEBHOOK_URL;
+
+    if (scope || hasEnvWebhookBinding) {
+      const check = await resolveAndVerifyWebhookRecipientAtDelivery({
+        requestedUrl: targetUrl,
+        envFallbackUrl: this.env?.OUTBOUND_WEBHOOK_URL,
+        env: this.env,
+        run: {
+          tenantId: scope?.tenantId ?? (typeof data?.tenantId === "string" ? data.tenantId : null),
+          userLogin:
+            scope?.userLogin ??
+            (typeof data?.userLogin === "string" ? data.userLogin : this.sessionId),
+          scheduleId:
+            scope?.scheduleId ?? (typeof data?.scheduleId === "string" ? data.scheduleId : null),
+          runId:
+            scope?.runId ??
+            (typeof data?.deliveryId === "string"
+              ? data.deliveryId
+              : typeof data?.runId === "string"
+                ? data.runId
+                : null),
+        },
+        channelGate: scope?.channelGate,
+        tenantChannelStore: scope?.tenantChannelStore,
+        binding: scope?.recipientBinding,
+        layer: scope?.layer ?? "webhook_service",
+        audit: (type, payload) => {
+          scope?.audit?.(type, payload);
+          if (!scope?.audit && this.orm?.events) {
+            try {
+              this.orm.events.create({
+                id: `evt_wh_ref_${Date.now()}_${crypto.randomUUID().slice(0, 6)}`,
+                sessionId: this.sessionId,
+                type,
+                agent: "webhook",
+                payload: { ...payload },
+                createdAt: new Date().toISOString(),
+              });
+            } catch {
+              // Best-effort audit persistence.
+            }
+          }
+        },
+      });
+      if (!check.allowed) {
+        return {
+          success: false,
+          url: "",
+          error: check.error,
+        };
+      }
+      if (typeof check.url === "string" && check.url) {
+        url = check.url;
+      }
+    }
+
     if (!url) {
       return { success: false, url: "", error: "No outbound webhook URL configured." };
     }

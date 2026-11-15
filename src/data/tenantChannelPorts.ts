@@ -16,6 +16,8 @@
  * operator disable is an explicit act, and configuring nothing
  * changes nothing (existing dispatch behavior is preserved).
  */
+import { assertSafeOutboundWebhookUrl } from "../security/webhookSecurity";
+
 export type TenantChannelId = "email" | "slack" | "webhook" | "copilot" | "docs";
 
 /** The five delivery channels, in panel order. */
@@ -86,6 +88,44 @@ export function normalizeTenantSlackChannel(
   return { ok: true, slackChannel: trimmed };
 }
 
+const MAX_WEBHOOK_URL_LENGTH = 2048;
+
+/**
+ * Issue #4611 (G21): validate and normalize a per-tenant / per-schedule
+ * outbound webhook URL (or null to clear a tenant/schedule binding).
+ * Rejects empty strings, non-HTTP(S) schemes, and SSRF targets (localhost,
+ * loopback, private/link-local IPs).
+ */
+export function normalizeTenantWebhookUrl(
+  value: unknown,
+): { ok: true; webhookUrl: string | null } | { ok: false; error: string } {
+  if (value === null) {
+    return { ok: true, webhookUrl: null };
+  }
+  if (typeof value !== "string") {
+    return { ok: false, error: "webhookUrl must be a non-empty HTTPS/HTTP URL string or null." };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { ok: false, error: "webhookUrl must not be empty." };
+  }
+  if (trimmed.length > MAX_WEBHOOK_URL_LENGTH) {
+    return {
+      ok: false,
+      error: `webhookUrl must be ${MAX_WEBHOOK_URL_LENGTH} characters or fewer.`,
+    };
+  }
+  try {
+    assertSafeOutboundWebhookUrl(trimmed);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "webhookUrl is not an allowed outbound URL.",
+    };
+  }
+  return { ok: true, webhookUrl: trimmed };
+}
+
 export interface TenantChannelStore {
   /** Current config for a tenant; defaults when no row exists (no row is created). */
   getTenantChannels(tenantId: string): Promise<TenantChannelConfig>;
@@ -100,4 +140,23 @@ export interface TenantChannelStore {
    * Issue #4610 (G15): set or clear (null) the per-tenant Slack channel mapping.
    */
   setTenantSlackChannel?(tenantId: string, slackChannel: string | null): Promise<string | null>;
+  /**
+   * Issue #4611 (G21): per-tenant / per-schedule outbound webhook URL binding.
+   * When `scheduleId` is provided and a per-schedule URL is bound for `(tenantId, scheduleId)`,
+   * returns that URL; otherwise returns the tenant's bound default webhook URL, or null when unbound.
+   */
+  getTenantWebhookUrl?(tenantId: string, scheduleId?: string | null): Promise<string | null>;
+  /**
+   * Issue #4611 (G21): set or clear (null) the bound outbound webhook URL for a tenant
+   * (or for a specific `scheduleId` within the tenant when `scheduleId` is provided).
+   */
+  setTenantWebhookUrl?(
+    tenantId: string,
+    webhookUrl: string | null,
+    scheduleId?: string | null,
+  ): Promise<string | null>;
+  /**
+   * Issue #4611 (G21): return all schedule-specific webhook URL bindings for `tenantId`.
+   */
+  getTenantScheduleWebhookUrls?(tenantId: string): Promise<Readonly<Record<string, string>>>;
 }

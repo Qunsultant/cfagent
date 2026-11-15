@@ -55,6 +55,7 @@ import {
 import {
   inferTenantFromDeliveryId,
   resolveAndVerifySlackRecipientAtDelivery,
+  resolveAndVerifyWebhookRecipientAtDelivery,
   resolveEnvChannelRecipientBinding,
   verifyChannelRecipient,
   verifyEmailRecipientAtDelivery,
@@ -154,6 +155,47 @@ async function resolveAndVerifyPublisherSlackChannel(
   return {
     slackChannel: check.allowed ? check.channel : undefined,
     allowed: check.allowed,
+  };
+}
+
+async function resolveAndVerifyPublisherWebhookUrl(
+  deps: ScreenerPublisherDeps,
+  event: {
+    webhookUrl?: string;
+    deliveryId?: string;
+    scheduleId?: string;
+    tenantId?: string | null;
+    recipientBinding?: ChannelRecipientBinding | null;
+  },
+): Promise<{ webhookUrl?: string; allowed: boolean; attempted: boolean }> {
+  const envFallback = (deps.env as any).OUTBOUND_WEBHOOK_URL;
+  const hasTenantWebhookJson =
+    typeof (deps.env as any)?.TENANT_WEBHOOK_URLS_JSON === "string" &&
+    (deps.env as any).TENANT_WEBHOOK_URLS_JSON.trim().length > 0;
+  if (!event.webhookUrl && !envFallback && !hasTenantWebhookJson) {
+    return { webhookUrl: undefined, allowed: false, attempted: false };
+  }
+  const runScope: ChannelRecipientRunScope = {
+    tenantId: event.tenantId ?? inferTenantFromDeliveryId(event.deliveryId),
+    runId: event.deliveryId ?? null,
+    scheduleId: event.scheduleId ?? null,
+    userLogin: deps.userLogin,
+  };
+  const explicitBinding =
+    event.recipientBinding ?? deps.getRecipientBinding?.(runScope) ?? null;
+  const check = await resolveAndVerifyWebhookRecipientAtDelivery({
+    requestedUrl: event.webhookUrl,
+    envFallbackUrl: envFallback,
+    env: deps.env,
+    run: runScope,
+    binding: explicitBinding,
+    layer: "publisher",
+    audit: (type, payload) => recordPublisherRecipientRefusal(deps, type, payload),
+  });
+  return {
+    webhookUrl: check.allowed ? check.url : undefined,
+    allowed: check.allowed,
+    attempted: true,
   };
 }
 
@@ -593,8 +635,8 @@ async function publishCompleted(
   }
 
   // 3. Webhook
-  const webhookUrl = event.webhookUrl || (deps.env as any).OUTBOUND_WEBHOOK_URL;
-  if (webhookUrl && checkPublisherChannelRecipient(deps, "webhook", webhookUrl, event)) {
+  const { webhookUrl, allowed: webhookAllowed } = await resolveAndVerifyPublisherWebhookUrl(deps, event);
+  if (webhookAllowed && webhookUrl) {
     try {
       const webhook = new ETradeWebhookService(deps.orm, deps.env, deps.userLogin);
       await webhook.dispatchOutboundWebhook(
@@ -683,10 +725,14 @@ async function publishFailed(
     }
   }
 
-  const webhookUrl = event.webhookUrl || (deps.env as any).OUTBOUND_WEBHOOK_URL;
-  if (webhookUrl) {
+  const {
+    webhookUrl,
+    allowed: webhookAllowed,
+    attempted: webhookAttempted,
+  } = await resolveAndVerifyPublisherWebhookUrl(deps, event);
+  if (webhookAttempted) {
     attempted = true;
-    if (checkPublisherChannelRecipient(deps, "webhook", webhookUrl, event)) {
+    if (webhookAllowed && webhookUrl) {
       try {
         const webhook = new ETradeWebhookService(deps.orm, deps.env, deps.userLogin);
         await webhook.dispatchOutboundWebhook(
