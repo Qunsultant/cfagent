@@ -14,12 +14,12 @@
  * handleAuthLoginRoutes with their branches.
  */
 
-import { sessionStore, listSessionFamilyEntries, wiredMembershipStore, deleteSession, wiredAccessRequestStore } from "../../security/session";
+import { sessionStore, SESSION_TTL, listSessionFamilyEntries, wiredMembershipStore, deleteSession, wiredAccessRequestStore } from "../../security/session";
 import { createWiredAuditStore } from "../../security/iaaaAuditStore";
 import { createKvMembershipStore, listMembershipsFromEntries, grantMembership, readMembershipById } from "../../security/iaaaMembershipStore";
 import { createKvPermissionDenialStore } from "../../security/iaaaPermissionDenialStore";
-import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
-import { evaluateRoutePep } from "../../security/pepGateway";
+import { resolveIaaaTenant, isLegacyPdpGraceExpired, isPdpEnabled, shouldEnforcePdp } from "../../security/iaaaGithubEndToEnd";
+import { evaluateRoutePep, PEP_GATE_INVENTORY } from "../../security/pepGateway";
 import { handleLogout, renderLoginPage } from "../../oauth";
 import { AUTH_OUTCOME_PARAM, parseAuthOutcome } from "../../security/authOutcome";
 import { validateReturnTarget } from "../../security/returnTarget";
@@ -982,7 +982,8 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
       path === "/api/iaaa/memberships" ||
       path === "/api/iaaa/deactivate" ||
       path === "/api/iaaa/offboard" ||
-      path === "/api/security/pdp"
+      path === "/api/security/pdp" ||
+      path === "/api/security/pep"
     ) {
       const session = await requireAuth(request, env);
       if (!session) {
@@ -2380,6 +2381,75 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                 enforcementPoints: [] as string[],
               }),
             })),
+          });
+        }
+        // #4653 — SecHub PEP tab: read-only PEP state for the
+        // SecurityHub PEP view. Platform-admin ONLY (tenant admins
+        // never reach policy state): a non-platform caller is
+        // refused with 403, audited, before anything is read — the
+        // same deny audit as the PDP endpoint above.
+        // Enforcement is evaluated for the CALLER's session with the
+        // live helpers (shouldEnforcePdp / isLegacyPdpGraceExpired),
+        // so the values match the server's evaluation inputs exactly:
+        // flag IAAA_PDP_ENABLED + the session (wired vs legacy).
+        // Wired sessions are never grace-expired; a legacy caller
+        // cannot reach this handler at all (the lifecycle block
+        // above refuses unwired sessions with 403), so graceExpired
+        // is false for every caller that reads it — the grace window
+        // (SESSION_TTL, 7 days) is reported as the rule for legacy
+        // sessions. The gate inventory is PEP_GATE_INVENTORY, the
+        // cited list next to evaluateRoutePep — no second copy.
+        // Recent decisions: NO queryable PEP decision record exists
+        // (the four integration:connect denials and the
+        // action:approve denial write no audit row; only the
+        // schedule-webhook denial is audited, in the DO audit, not
+        // in a store this endpoint can read). The endpoint reports
+        // decisionsAvailable: false and decisions: null instead of
+        // inventing rows; the gap is follow-up #4683 (sub-issue under
+        // #4653), not built here.
+        if (path === "/api/security/pep") {
+          const pepDenyAudit = async (): Promise<void> => {
+            try {
+              await recordAuditEvent(createWiredAuditStore(env), {
+                type: "iaaa.policy",
+                actorPrincipalId: session.internalUserId as string,
+                actorType: "human",
+                initiatingPrincipalId: session.internalUserId as string,
+                tenantId: "platform",
+                correlationId: crypto.randomUUID(),
+                action: "policy.access_denied",
+                timestamp: nowMs,
+                decision: "deny",
+                policyVersion: IAAA_AUDIT_POLICY_VERSION,
+                outcome: "failed",
+                errorCode: "PEP_FORBIDDEN",
+              });
+            } catch {
+              /* denial attribution is best-effort; the deny stands */
+            }
+          };
+          if (!callerIsPlatformAdmin) {
+            await pepDenyAudit();
+            return Response.json(
+              { error: "Forbidden: policy state requires platform-admin." },
+              { status: 403 },
+            );
+          }
+          if (request.method !== "GET") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          return Response.json({
+            ok: true,
+            enforcement: {
+              pdpEnabled: isPdpEnabled(env),
+              enforced: shouldEnforcePdp(env, session, nowMs),
+              graceExpired: isLegacyPdpGraceExpired(env, session, nowMs),
+              sessionKind: session.internalUserId ? "wired" : "legacy",
+              legacyGraceWindowSeconds: SESSION_TTL,
+            },
+            gates: PEP_GATE_INVENTORY.map((gate) => ({ ...gate })),
+            decisions: null,
+            decisionsAvailable: false,
           });
         }
         // #3077 (#945 Q3) — reviewed bootstrap changes: approval-gated
