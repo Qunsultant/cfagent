@@ -14,12 +14,14 @@
  *
  * These tests prove the composition, the per-invocation rebuild, the
  * durable storage, the named refusals (goal without a stamped goal
- * run id / comparison / manual shapeReport+deliver / missing
- * request), the start seam, and a run surviving a pause + resume
- * from the journal. (#4290 made the goal shape rebuildable through
- * the host; the goal refusal pinned here is the rebuild's refusal
- * of an unstamped goal request, not the guard's — the guard's goal
- * refusal is gone, and chat control's stands on #4274.)
+ * run id / comparison / missing request), the start seam, and a run
+ * surviving a pause + resume from the journal. (#4290 made the goal
+ * shape rebuildable through the host; the goal refusal pinned here is
+ * the rebuild's refusal of an unstamped goal request, not the
+ * guard's — the guard's goal refusal is gone, and chat control's
+ * stands on #4274. #4450 made the manual shape's shapeReport/deliver
+ * rebuildable through the host the same way, so a manual-shape run
+ * completes all eight stages here.)
  */
 import { describe, expect, it } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
@@ -297,7 +299,7 @@ describe("options workflow host (#4289)", () => {
     }
   });
 
-  it("refuses unrebuildable shapes and manual delivery stages by name, before any execution", () => {
+  it("refuses unrebuildable shapes by name, before any execution (manual delivery stages rebuild since #4450)", () => {
     for (const stage of OPTIONS_PIPELINE_STAGES) {
       // #4290: the goal shape rebuilds through the host — the guard
       // passes it, and the rebuild refuses a goal request with no
@@ -307,14 +309,11 @@ describe("options workflow host (#4289)", () => {
       expect(() => assertOptionsStageRebuildable("comparison", stage, "r1")).toThrowError(
         expect.objectContaining({ code: "stage_port_unavailable" }),
       );
+      // #4450: the manual shape's delivery builders rebuild in the
+      // residency from env + the stored request + the artifact-store
+      // adapter — the guard passes every manual stage.
+      expect(() => assertOptionsStageRebuildable("manual", stage, "r1")).not.toThrow();
     }
-    expect(() => assertOptionsStageRebuildable("manual", "shapeReport", "r1")).toThrowError(
-      expect.objectContaining({ code: "stage_port_unavailable" }),
-    );
-    expect(() => assertOptionsStageRebuildable("manual", "deliver", "r1")).toThrowError(
-      expect.objectContaining({ code: "stage_port_unavailable" }),
-    );
-    expect(() => assertOptionsStageRebuildable("manual", "plan", "r1")).not.toThrow();
     expect(() => assertOptionsStageRebuildable("panel", "deliver", "r1")).not.toThrow();
     expect(() => assertOptionsStageRebuildable("scan", "shapeReport", "r1")).not.toThrow();
   });
@@ -513,11 +512,17 @@ describe("options workflow host (#4289)", () => {
     expect(errors.some((error) => error.includes("single engine step"))).toBe(true);
   });
 
-  it("refuses a manual-shape run at shapeReport by name (the other six stages run)", async () => {
+  it("runs a manual-shape run through the host: all eight stages complete, the report artifact is readable (#4450)", async () => {
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: makeChain("AAPL") });
     try {
       const stores = createInMemoryJobPipelineStores();
-      const deps = hostFlowDeps(stores, hostStepDeps(stores, {}));
+      // The residency delivery builders need the environment (the
+      // blob store, the report pipeline); an empty env proves the
+      // honest degradation — formats fail by name, the run completes.
+      const deps = hostFlowDeps(
+        stores,
+        hostStepDeps(stores, { env: {} as unknown as Env }),
+      );
       const runId = "options-host:manual:1";
       const jobId = optionsScreenJobId(runId);
       const control = new JobPipelineControl(deps);
@@ -528,23 +533,25 @@ describe("options workflow host (#4289)", () => {
         jobId,
         trigger: "manual",
       });
-      expect(outcome.state).toBe("failed");
+      expect(outcome.state).toBe("completed");
       const view = await control.getJob(jobId);
-      const shapeReport = view.stages.find((stage) => stage.kind === "shapeReport");
-      expect(shapeReport?.units.map((unit) => unit.status)).toEqual(["failed"]);
-      expect(shapeReport?.units[0]?.error).toContain("delivery builders");
-      // The six rebuildable stages completed before the refusal.
-      for (const stageId of [
-        "plan",
-        "chainFetch",
-        "enrich",
-        "screen",
-        "risk",
-        "persistCanonicalResults",
-      ]) {
+      for (const stageId of OPTIONS_PIPELINE_STAGES) {
         const stage = view.stages.find((s) => s.kind === stageId);
         expect(stage?.units.map((unit) => unit.status)).toEqual(["completed"]);
       }
+      // The report artifact is readable from the durable store, with
+      // the formats' honest statuses: no blob store is bound in this
+      // env, so XLSX/CSV fail by name and the terminal is partial.
+      const storage = optionsStageStorageFromArtifacts(
+        stores.artifacts,
+        view.instance?.currentRunId ?? "",
+      );
+      const shaped = await storage.get<{ terminal?: string; report?: { xlsxStatus?: string; xlsxError?: string } }>(
+        `options:${runId}:shapeReport`,
+      );
+      expect(shaped?.terminal).toBe("partial");
+      expect(shaped?.report?.xlsxStatus).toBe("failed");
+      expect(shaped?.report?.xlsxError).toMatch(/REPORTS_BUCKET/);
     } finally {
       DynamicOptionsScreener.clearTestChainsFixture();
     }

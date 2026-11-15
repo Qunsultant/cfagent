@@ -153,7 +153,7 @@ export interface OptionsScreenPortDeps {
 /** The run's persisted input: a PlannerInput whose classInput carries the options request. */
 export interface OptionsPipelineRequest extends PlannerInput {
   classInput: {
-    request?: { filter?: unknown; pushToSlack?: boolean; slackChannel?: string; universe?: string; emailTo?: string };
+    request?: { filter?: unknown; pushToSlack?: boolean; slackChannel?: string; universe?: string; emailTo?: string; deferDelivery?: boolean };
     goalPlan?: { optionsFilter?: unknown; structures?: string[]; goalId?: string; goalRunId?: string };
     tradeIntent?: SagaTradeIntent;
     riskLimits?: SagaRiskLimits;

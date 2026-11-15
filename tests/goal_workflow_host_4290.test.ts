@@ -415,19 +415,16 @@ describe("goal workflow host (#4290)", () => {
     ).rejects.toThrow(/job_pipeline_workflow_not_configured/);
   });
 
-  it("the guard no longer refuses the goal shape; the comparison and manual delivery refusals stand", () => {
+  it("the guard no longer refuses the goal shape; the comparison refusal stands, and manual delivery rebuilds since #4450", () => {
     for (const stage of OPTIONS_PIPELINE_STAGES) {
       expect(() => assertOptionsStageRebuildable("goal", stage, "r1")).not.toThrow();
       expect(() => assertOptionsStageRebuildable("comparison", stage, "r1")).toThrowError(
         expect.objectContaining({ code: "stage_port_unavailable" }),
       );
+      // #4450: the manual shape's delivery builders rebuild in the
+      // residency — the guard passes every manual stage.
+      expect(() => assertOptionsStageRebuildable("manual", stage, "r1")).not.toThrow();
     }
-    expect(() => assertOptionsStageRebuildable("manual", "shapeReport", "r1")).toThrowError(
-      expect.objectContaining({ code: "stage_port_unavailable" }),
-    );
-    expect(() => assertOptionsStageRebuildable("manual", "deliver", "r1")).toThrowError(
-      expect.objectContaining({ code: "stage_port_unavailable" }),
-    );
     expect(() => assertOptionsStageRebuildable("panel", "deliver", "r1")).not.toThrow();
     expect(() => assertOptionsStageRebuildable("scan", "shapeReport", "r1")).not.toThrow();
   });

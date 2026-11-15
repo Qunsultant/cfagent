@@ -31,7 +31,7 @@
  * non-strategy shape is refused synchronously by name, with no job
  * defined), and awaitOptionsWorkflowRun polls the read-back until
  * the run settles (the vehicle a future sync-leg cutover awaits on).
- * No production leg dispatches through the host yet — every strategy
+ * No production strategy leg dispatches through the host yet — every strategy
  * leg is blocked by a named gap (#3960 broker selection, #4453
  * scan-run store + stage queue in the residency, universe deps that
  * do not travel); the legs stay on the sync dispatch until those
@@ -54,10 +54,18 @@
  * sync dispatch defines today. The resolving `comparison.run` step
  * rebuilds the whole comparison per invocation (optionsPipelineJobs.ts).
  * The read-back is comparison-aware: a comparison run has one
- * stage, not eight, and writes no shapeReport. No production leg
- * dispatches through the host yet — the comparison leg's cutover
- * is not filed separately (see the #4451 report), and the legs
- * stay blocked by the named gaps (#3960, #4473).
+ * stage, not eight, and writes no shapeReport. No production
+ * comparison leg dispatches through the host yet — the comparison
+ * leg's cutover is not filed separately (see the #4451 report), and
+ * the legs stay blocked by the named gaps (#3960, #4473).
+ *
+ * Issue #4450 — the first production leg dispatches through the
+ * host: the manual route sends gated symbol-scoped screens through
+ * startOptionsScreenWorkflow and awaits settlement with
+ * awaitOptionsWorkflowRun, reading the screen + report artifacts
+ * back through the artifact-store adapter. The gate (the route's
+ * manualScreenDispatchRoute) keeps every other manual screen on
+ * the unchanged sync dispatch until #3960 / #4473 land.
  */
 import {
   createJobPipelineStoresFromD1,
@@ -121,6 +129,43 @@ function workflowNotConfigured(reason: string): Error {
   return new Error(`job_pipeline_workflow_not_configured: ${reason}`);
 }
 
+/** The D1-backed run recorder for the workflow residency — the same adapter the start seam builds. */
+function jobRunRecorderFromD1(db: D1Database): JobRunRecorder {
+  const runs = new D1JobRunRecordStore(createD1JobRunRecordDb(db));
+  return {
+    recordRun: (record: Parameters<JobRunRecorder["recordRun"]>[0]) =>
+      runs.record(record),
+    listRuns: (jobIdArg: string, limit?: number) =>
+      runs.listByJob(jobIdArg, limit),
+    latestRun: (jobIdArg: string) => runs.latestByJob(jobIdArg),
+  };
+}
+
+/**
+ * Issue #4450 — the workflow residency's stores + run recorder from
+ * env, for a caller awaiting or reading back a run it dispatched
+ * through the start seam (the manual route, after
+ * startOptionsScreenWorkflow). Refuses by name when the AGENT_DB
+ * binding the residency reads is not configured — the same refusal
+ * the start seam throws, so a caller that gated on the bindings
+ * never reaches it. Construction performs no I/O; the stores read
+ * the durable state on use.
+ */
+export function optionsWorkflowRunDepsFromEnv(env: Env): {
+  stores: JobPipelineStores;
+  runRecorder: JobRunRecorder;
+} {
+  if (!env.AGENT_DB) {
+    throw workflowNotConfigured(
+      "the AGENT_DB binding the workflow residency reads is not configured in this deployment; the run cannot be read back.",
+    );
+  }
+  return {
+    stores: createJobPipelineStoresFromD1(env.AGENT_DB),
+    runRecorder: jobRunRecorderFromD1(env.AGENT_DB),
+  };
+}
+
 /**
  * Define the per-run job in the workflow residency and create the
  * workflow instance that executes it. Refuses by name when the
@@ -154,18 +199,7 @@ export async function startOptionsScreenWorkflow(
   }
   const runRecorder =
     opts.runRecorder ??
-    (env.AGENT_DB
-      ? (() => {
-          const runs = new D1JobRunRecordStore(createD1JobRunRecordDb(env.AGENT_DB));
-          return {
-            recordRun: (record: Parameters<JobRunRecorder["recordRun"]>[0]) =>
-              runs.record(record),
-            listRuns: (jobIdArg: string, limit?: number) =>
-              runs.listByJob(jobIdArg, limit),
-            latestRun: (jobIdArg: string) => runs.latestByJob(jobIdArg),
-          };
-        })()
-      : null);
+    (env.AGENT_DB ? jobRunRecorderFromD1(env.AGENT_DB) : null);
   if (!runRecorder) {
     throw workflowNotConfigured(
       "the AGENT_DB binding the workflow residency reads is not configured in this deployment; the run was not dispatched.",
@@ -505,9 +539,10 @@ export interface AwaitOptionsWorkflowRunOpts {
  * decides how a failure surfaces. A run that never settles throws
  * a named timeout carrying the job id and the last observed state;
  * the run may still be in flight, and the message says how to read
- * it back. This is the vehicle a future sync-leg cutover awaits on:
- * no production caller uses it yet (every strategy leg is blocked
- * by #3960 / #4453 — see the #4291 report).
+ * it back. The manual route is its first production caller (#4450):
+ * a gated manual screen awaits settlement here, then reads the
+ * screen + report artifacts back through the artifact-store
+ * adapter.
  */
 export async function awaitOptionsWorkflowRun(
   deps: { stores: JobPipelineStores; runRecorder: JobRunRecorder },

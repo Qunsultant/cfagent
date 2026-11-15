@@ -565,6 +565,18 @@ function measure(): Map<string, number> {
  * neutralized (no brand in the comments), and the count falls
  * back when provider selection (#3960) replaces the direct
  * binding. Totals move 1188/9345 -> 1188/9347.
+ * Baseline update (#4450, 2026-11-15): the manual route's gated
+ * cutover dispatches symbol-scoped screens through the workflow
+ * host. 1 new row + 1 raise, both dispositioned INTEGRATION: the
+ * new manualOptionsResidency.ts etrade row (2 — the outbound
+ * email service's import + construction, the residency delivery
+ * builders' own email leg, mirroring the route's) and the
+ * etradeOptionsScreen.ts etrade row 19 -> 20 (the dispatch gate's
+ * broker comparison — naming the residency's bound broker is the
+ * gate's job). The prose around both is neutralized (no brand in
+ * the comments or the gate reasons), and the gate's comparison
+ * falls away when provider selection (#3960) replaces the direct
+ * binding. Totals move 1188/9347 -> 1189/9350.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -923,7 +935,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/etradeOptionsProfiles.ts", "etrade", 7],
   ["src/agents/routes/etradeOptionsRuns.ts", "alpaca", 2],
   ["src/agents/routes/etradeOptionsRuns.ts", "etrade", 14],
-  ["src/agents/routes/etradeOptionsScreen.ts", "etrade", 19],
+  ["src/agents/routes/etradeOptionsScreen.ts", "etrade", 20],
   ["src/agents/routes/kvWipe.ts", "etrade", 11],
   ["src/agents/routes/marketDataResearch.ts", "alpaca", 8],
   ["src/agents/routes/marketDataResearch.ts", "etrade", 7],
@@ -1461,6 +1473,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/workflows/legalApplicability.ts", "alpaca", 1],
   ["src/workflows/legalApplicability.ts", "etrade", 1],
   ["src/workflows/manualOptionsRecordBuilder.ts", "etrade", 1],
+  ["src/workflows/manualOptionsResidency.ts", "etrade", 2],
   ["src/workflows/manualOptionsScreen.ts", "etrade", 4],
   ["src/workflows/manualPanelScreen.ts", "etrade", 2],
   ["src/workflows/optionsScreenPorts.ts", "etrade", 3],

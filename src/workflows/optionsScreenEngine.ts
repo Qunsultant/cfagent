@@ -1077,11 +1077,23 @@ async function dispatchScreenViaEngine(
  * workflow host (startOptionsScreenWorkflow in optionsWorkflowHost.ts,
  * executed by JobPipelineWorkflow with the workflow step as the
  * engine's journal). This sync/in-process dispatch is KEPT, not
- * retired, for the legs that cannot move yet: the manual route (its
- * shapeReport/deliver builders need the route's getScreenerAgent) and
- * the goal leg (its host is #4290). New callers must dispatch
- * through the host; a leg moves here only when its ports are
- * rebuildable per invocation (see optionsStepPorts.ts).
+ * retired, for the legs that cannot move yet — the remaining
+ * consumers, recorded here (#4450):
+ * - the manual route's gated remainder: screens the dispatch gate
+ *   keeps on sync — a resolved broker other than the residency's
+ *   bound broker (#3960), a discovery-mode filter with no explicit
+ *   symbols (#4473), or an unconfigured residency. Gated
+ *   symbol-scoped screens dispatch through the host since #4450.
+ * - the unified opportunities action
+ *   (runUnifiedOpportunitiesViaPipeline): the scan shape, whose
+ *   persist stage writes the scan-run row the residency cannot
+ *   hold (#4453 decided-not-to) — its cutover belongs to the
+ *   scan-leg family (#4469).
+ * - the goal leg (goalDrivenScreen.ts): its host is #4290, and
+ *   its cutover is #4504.
+ * New callers must dispatch through the host; a leg moves here
+ * only when its ports are rebuildable per invocation (see
+ * optionsStepPorts.ts).
  */
 export async function runOptionsScreenViaEngine(
   params: {
