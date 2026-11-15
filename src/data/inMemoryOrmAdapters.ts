@@ -29,6 +29,7 @@ import type { MessagePort } from "./messagePorts";
 import type {
   RepositoryPort,
   RepositoryQueryOptions,
+  RepositoryWhere,
 } from "./repositoryPorts";
 import type {
   SettingsPort,
@@ -63,13 +64,52 @@ export class InMemoryRepository<T extends Record<string, any>>
     return undefined;
   }
 
+  /**
+   * #4385: one comparison for the operator where — numbers
+   * numerically, everything else as strings (mirrors the mock
+   * storage's comparator and SQLite TEXT ordering for ISO
+   * timestamps). Shared by findMany/count/updateWhere/
+   * deleteWhere so both legs agree on the same predicate.
+   */
+  private static compareForOperator(a: unknown, b: unknown): number {
+    if (typeof a === "number" && typeof b === "number") return a < b ? -1 : a > b ? 1 : 0;
+    const as = String(a ?? "");
+    const bs = String(b ?? "");
+    return as < bs ? -1 : as > bs ? 1 : 0;
+  }
+
+  /** #4385: does one row satisfy one where value (equality or operator object)? */
+  private matchesValue(fieldVal: unknown, val: unknown): boolean {
+    if (val === null || typeof val !== "object" || Array.isArray(val)) {
+      return fieldVal === val;
+    }
+    const ops = val as Record<string, unknown>;
+    const hasOp = ["$lt", "$lte", "$gt", "$gte"].some((k) => k in ops);
+    if (!hasOp) return fieldVal === val;
+    for (const [op, bound] of Object.entries(ops)) {
+      if (bound === undefined || bound === null) continue;
+      const cmp = InMemoryRepository.compareForOperator(fieldVal, bound);
+      if (op === "$lt" && !(cmp < 0)) return false;
+      if (op === "$lte" && !(cmp <= 0)) return false;
+      if (op === "$gt" && !(cmp > 0)) return false;
+      if (op === "$gte" && !(cmp >= 0)) return false;
+    }
+    return true;
+  }
+
+  /** #4385: the shared where predicate — a conjunction of per-column values. */
+  protected matchesWhere(row: T, where: RepositoryWhere): boolean {
+    for (const [key, val] of Object.entries(where)) {
+      if (val === undefined || val === null) continue;
+      if (!this.matchesValue(this.fieldOf(row, key), val)) return false;
+    }
+    return true;
+  }
+
   findMany(options: RepositoryQueryOptions = {}): T[] {
     let out = Array.from(this.rows.values());
     if (options.where) {
-      for (const [key, val] of Object.entries(options.where)) {
-        if (val === undefined || val === null) continue;
-        out = out.filter((r) => this.fieldOf(r, key) === val);
-      }
+      out = out.filter((r) => this.matchesWhere(r, options.where!));
     }
     if (options.orderBy) {
       const parts = options.orderBy.split(",").map((p) => p.trim());
@@ -95,7 +135,7 @@ export class InMemoryRepository<T extends Record<string, any>>
     return row ? { ...row } : null;
   }
 
-  findOne(where: Record<string, unknown>): T | null {
+  findOne(where: RepositoryWhere): T | null {
     const results = this.findMany({ where, limit: 1 });
     return results.length > 0 ? results[0] : null;
   }
@@ -107,6 +147,20 @@ export class InMemoryRepository<T extends Record<string, any>>
     }
     this.rows.set(id, { ...record });
     return record;
+  }
+
+  /**
+   * #4385: INSERT OR IGNORE — first-write-wins on the idField.
+   * The twin keys rows by idField only, so the conflict it can
+   * see is the idField's; the DO leg's OR IGNORE covers every
+   * unique constraint (including composite keys) — the two agree
+   * on the idField-keyed shape the conformance suite pins.
+   */
+  createOrIgnore(record: T): boolean {
+    const id = String(record[this.idField]);
+    if (this.rows.has(id)) return false;
+    this.rows.set(id, { ...record });
+    return true;
   }
 
   update(id: string, updates: Partial<T>): T | null {
@@ -140,7 +194,79 @@ export class InMemoryRepository<T extends Record<string, any>>
     return this.rows.delete(id);
   }
 
-  count(where?: Record<string, unknown>): number {
+  /**
+   * #4385: does this where carry an effective predicate — a plain
+   * non-null value, or an operator object with at least one non-null
+   * operator? Mirrors the DO leg's clause builder: a where whose
+   * values all skip produces no clause, and an empty clause set is
+   * refused by updateWhere/deleteWhere on both legs.
+   */
+  private static hasEffectivePredicate(where: RepositoryWhere): boolean {
+    for (const val of Object.values(where)) {
+      if (val === undefined || val === null) continue;
+      if (typeof val === "object" && !Array.isArray(val)) {
+        const ops = val as Record<string, unknown>;
+        const hasOp = ["$lt", "$lte", "$gt", "$gte"].some(
+          (k) => k in ops && ops[k] !== undefined && ops[k] !== null,
+        );
+        if (hasOp) return true;
+        // A plain object with no operator key binds as equality.
+        if (!["$lt", "$lte", "$gt", "$gte"].some((k) => k in ops)) return true;
+        continue;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** #4385: UPDATE … WHERE <predicate>; returns the rows written. */
+  updateWhere(where: RepositoryWhere, set: Partial<T>): number {
+    // An empty predicate would update every row — refuse, exactly
+    // like the DO leg.
+    if (!InMemoryRepository.hasEffectivePredicate(where)) {
+      throw new Error(
+        `InMemoryRepository.updateWhere refused on ${this.tableName}: an empty predicate would update every row`,
+      );
+    }
+    const matched = Array.from(this.rows.values()).filter((r) => this.matchesWhere(r, where));
+    if (matched.length === 0) return 0;
+    const hasSet = Object.entries(set).some(
+      ([prop, val]) => prop !== this.idField && val !== undefined,
+    );
+    if (!hasSet) return 0;
+    for (const row of matched) {
+      const id = String(row[this.idField]);
+      const next = { ...row };
+      for (const [prop, val] of Object.entries(set)) {
+        if (prop !== this.idField && val !== undefined) {
+          (next as Record<string, unknown>)[prop] = val;
+        }
+      }
+      this.rows.set(id, next);
+    }
+    return matched.length;
+  }
+
+  /** #4385: DELETE … WHERE <predicate>; returns the rows written. */
+  deleteWhere(where: RepositoryWhere): number {
+    // An empty predicate would delete every row — refuse, exactly
+    // like the DO leg.
+    if (!InMemoryRepository.hasEffectivePredicate(where)) {
+      throw new Error(
+        `InMemoryRepository.deleteWhere refused on ${this.tableName}: an empty predicate would delete every row`,
+      );
+    }
+    let removed = 0;
+    for (const [id, row] of Array.from(this.rows.entries())) {
+      if (this.matchesWhere(row, where)) {
+        this.rows.delete(id);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  count(where?: RepositoryWhere): number {
     return this.findMany({ where }).length;
   }
 }
