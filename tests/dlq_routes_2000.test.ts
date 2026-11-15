@@ -104,3 +104,42 @@ describe("DLQ operator routes (#2000 slice 1)", () => {
     expect(await call("/api/ops/dlq/records", req("/api/ops/dlq/records", { method: "DELETE", login: "op1" }), ctx())).toBeNull();
   });
 });
+
+/**
+ * Issue #4588 — the Worker strips the /api prefix before forwarding
+ * to the DO (core.ts), so the thin router sees /ops/dlq/records,
+ * never /api/ops/dlq/records. The handler must match the stripped
+ * tail (which also matches the unstripped form). These pins call the
+ * handler with the path the DO actually receives.
+ */
+describe("DLQ routes accept the Worker-stripped path (#4588)", () => {
+  it("GET records matches the stripped path for an operator", async () => {
+    const store = new InMemoryDeadLetterStoreAdapter();
+    await store.insert({ queue: "screener-events", reason: "no_handler", messageId: "a", createdAtMs: 1000 });
+    const res = await call("/ops/dlq/records", req("/ops/dlq/records", { login: "op1" }), ctx({ store }));
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as { records: Array<{ messageId: string }> };
+    expect(body.records.map((r) => r.messageId)).toEqual(["a"]);
+  });
+
+  it("anonymous callers still get 403 on the stripped path", async () => {
+    const res = await call("/ops/dlq/records", req("/ops/dlq/records"), ctx());
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(403);
+  });
+
+  it("POST replay matches the stripped path", async () => {
+    const store = new InMemoryDeadLetterStoreAdapter();
+    const row = await store.insert({ queue: "screener-events", reason: "no_handler", messageId: "env-1", envelope: ENVELOPE, createdAtMs: 1000 });
+    const sent: unknown[] = [];
+    const res = await call(
+      "/ops/dlq/replay",
+      req("/ops/dlq/replay", { method: "POST", login: "op1", body: { recordId: row.id } }),
+      ctx({ store, senders: { "screener-events": { send: async (b: unknown) => { sent.push(b); } } } }),
+    );
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(200);
+    expect(sent).toEqual([ENVELOPE]);
+  });
+});
