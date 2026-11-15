@@ -130,6 +130,9 @@ describe("BizCopilot tenant intent parsing (#4515)", () => {
     expect(parseBizCopilotTenantIntent("List tenants")).toEqual({ action: "list" });
     expect(parseBizCopilotTenantIntent("show all tenants")).toEqual({ action: "list" });
     expect(parseBizCopilotTenantIntent("Show me the tenants?")).toEqual({ action: "list" });
+    // The singular lists too — "Show tenant" is a complete
+    // command, not a needs-identifier shape (#4701 audit).
+    expect(parseBizCopilotTenantIntent("Show tenant")).toEqual({ action: "list" });
   });
 
   it("parses create with the tenant id preserved", () => {
@@ -143,10 +146,96 @@ describe("BizCopilot tenant intent parsing (#4515)", () => {
     });
   });
 
-  it("refuses to guess a create without an id, or with a malformed id", () => {
-    expect(parseBizCopilotTenantIntent("Create a tenant")).toBeNull();
+  it("refuses to guess a create with a malformed id", () => {
     expect(parseBizCopilotTenantIntent("Create tenant a b")).toBeNull();
-    expect(parseBizCopilotTenantIntent("Create tenant ")).toBeNull();
+  });
+
+  it("asks for the tenant id on a recognizable-but-incomplete command (#4701)", () => {
+    expect(parseBizCopilotTenantIntent("Create a tenant")).toEqual({
+      action: "needs-identifier",
+      command: "create",
+      tenantId: null,
+    });
+    expect(parseBizCopilotTenantIntent("Create tenant ")).toEqual({
+      action: "needs-identifier",
+      command: "create",
+      tenantId: null,
+    });
+    expect(parseBizCopilotTenantIntent("Add a tenant")).toEqual({
+      action: "needs-identifier",
+      command: "create",
+      tenantId: null,
+    });
+    expect(parseBizCopilotTenantIntent("Get tenant")).toEqual({
+      action: "needs-identifier",
+      command: "detail",
+      tenantId: null,
+    });
+    expect(parseBizCopilotTenantIntent("Get the tenant")).toEqual({
+      action: "needs-identifier",
+      command: "detail",
+      tenantId: null,
+    });
+    expect(parseBizCopilotTenantIntent("Show members")).toEqual({
+      action: "needs-identifier",
+      command: "members",
+      tenantId: null,
+    });
+    expect(parseBizCopilotTenantIntent("Show settings")).toEqual({
+      action: "needs-identifier",
+      command: "settings-read",
+      tenantId: null,
+    });
+    expect(parseBizCopilotTenantIntent("What are the settings?")).toEqual({
+      action: "needs-identifier",
+      command: "settings-read",
+      tenantId: null,
+    });
+    expect(parseBizCopilotTenantIntent("Turn ads off")).toEqual({
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { adsEnabled: false },
+    });
+    expect(parseBizCopilotTenantIntent("Enable ads")).toEqual({
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { adsEnabled: true },
+    });
+    expect(parseBizCopilotTenantIntent("Disable auto-refresh")).toEqual({
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { autoRefreshEnabled: false },
+    });
+    expect(parseBizCopilotTenantIntent("Set auto-refresh interval to 30")).toEqual({
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { autoRefreshIntervalS: 30 },
+    });
+    expect(parseBizCopilotTenantIntent("Set auto-refresh interval to 0")).toBeNull();
+    expect(parseBizCopilotTenantIntent("Set data provider to alpaca")).toEqual({
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { dataProviderId: "alpaca" },
+    });
+    expect(parseBizCopilotTenantIntent("Set broker to etrade")).toEqual({
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { brokerId: "etrade" },
+    });
+    expect(
+      parseBizCopilotTenantIntent("Set data provider to alpaca and broker to etrade"),
+    ).toEqual({
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { dataProviderId: "alpaca", brokerId: "etrade" },
+    });
   });
 
   it("parses detail and member reads", () => {
@@ -237,6 +326,11 @@ describe("BizCopilot tenant intent parsing (#4515)", () => {
       "Show tenant acme settings",
       "Create a tenant for the new team",
       "Tell me about tenants",
+      // Incomplete membership writes stay null (#4701 audit): the
+      // complete shape is already a deterministic refusal, so
+      // there is no capability-denial fall-through hole — asking
+      // for an id only to refuse adds a round trip with no value.
+      "Add member alice",
     ]) {
       expect(parseBizCopilotTenantIntent(text), text).toBeNull();
     }
@@ -376,6 +470,39 @@ describe("BizCopilot tenant execution through the page's routes (#4515)", () => 
     expect(parsed["pageUrl"]).toBe(BIZCOPILOT_TENANTS_PAGE_URL);
     expect(world.settings.size).toBe(0);
   });
+
+  it("answers a needs-identifier intent with the question and the page link, calling no route (#4701)", async () => {
+    const world = makeWorld();
+    const context = await executeBizCopilotTenantIntent(
+      { action: "needs-identifier", command: "create", tenantId: null },
+      world.deps(OPERATOR),
+    );
+    expect(context.startsWith("BIZCOPILOT_TENANT_RESULT: ")).toBe(true);
+    const parsed = parseResult(context);
+    expect(parsed["action"]).toBe("needs-identifier");
+    expect(parsed["command"]).toBe("create");
+    expect(parsed["tenantId"]).toBeNull();
+    expect(parsed["needsIdentifier"]).toBe(true);
+    expect(parsed["ask"]).toContain("Create tenant acme");
+    expect(parsed["pageUrl"]).toBe(BIZCOPILOT_TENANTS_PAGE_URL);
+    expect(world.settings.size).toBe(0);
+  });
+
+  it("names the exact settings change in a settings-update ask (#4701)", async () => {
+    const world = makeWorld();
+    const context = await executeBizCopilotTenantIntent(
+      {
+        action: "needs-identifier",
+        command: "settings-update",
+        tenantId: null,
+        patch: { adsEnabled: false },
+      },
+      world.deps(OPERATOR),
+    );
+    const parsed = parseResult(context);
+    expect(parsed["ask"]).toContain("Turn ads off for tenant acme");
+    expect(world.settings.size).toBe(0);
+  });
 });
 
 describe("BizCopilot tenant turn branch (#4515)", () => {
@@ -427,5 +554,33 @@ describe("BizCopilot tenant turn branch (#4515)", () => {
       payload: { sourceTab: "BizCopilot", action: "create", tenantId: "acme" },
     });
     expect(world.settings.has("acme")).toBe(true);
+  });
+
+  it("answers the bare quick-chip command with the ask outcome instead of falling through (#4701)", async () => {
+    const world = makeWorld();
+    const audits: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const context = await runBizCopilotTenantBranch({
+      sourceTab: "BizCopilot",
+      userText: "Create a tenant",
+      env: {},
+      userLogin: OPERATOR,
+      audit: (type, payload) => audits.push({ type, payload }),
+      commercial: world.deps(OPERATOR).commercial,
+      directory: world.deps(OPERATOR).directory,
+      operators: world.deps(OPERATOR).operators,
+    });
+    expect(context.startsWith("BIZCOPILOT_TENANT_RESULT: ")).toBe(true);
+    expect(parseResult(context)["needsIdentifier"]).toBe(true);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      type: "bizcopilot.tenant_action_executed",
+      payload: {
+        sourceTab: "BizCopilot",
+        action: "needs-identifier",
+        command: "create",
+        tenantId: null,
+      },
+    });
+    expect(world.settings.size).toBe(0);
   });
 });

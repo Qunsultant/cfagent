@@ -24,14 +24,22 @@
  * The page path's own 30s fetch bound (#4528) stays the page's
  * bound; this path needs none because it never leaves the process.
  *
- * CONSERVATIVE PARSING: only explicit commands parse. Anything
- * ambiguous, partial, or unrecognized returns null and the turn
- * proceeds as a normal LLM turn — the model may ask for
- * clarification, but no mutation is ever guessed. Membership
- * WRITES parse to an explicit refusal (the membership view is
- * read-only here, exactly as on the page; IAAA writes are
- * CISO-lane) — the refusal is deterministic context, never a
- * route call.
+ * CONSERVATIVE PARSING: only explicit commands parse. A
+ * recognizable-but-incomplete command — the command shape with
+ * its tenant id missing (#4701) — parses to a deterministic
+ * needs-identifier outcome: the turn answers asking for the
+ * missing id, with the Tenants page link. No route call is made
+ * and no mutation is ever guessed. Anything ambiguous or
+ * unrecognized returns null and the turn proceeds as a normal
+ * LLM turn. Membership WRITES parse to an explicit refusal (the
+ * membership view is read-only here, exactly as on the page; IAAA
+ * writes are CISO-lane) — the refusal is deterministic context,
+ * never a route call. Incomplete membership-write shapes stay
+ * null: the complete shape is already a deterministic refusal,
+ * so there is no capability-denial fall-through hole for them —
+ * the capability genuinely does not exist in BizCopilot, and
+ * asking for an id only to refuse adds a round trip with no
+ * value.
  *
  * RSI posture (slice 1): BizCopilot turns already flow through the
  * generic evaluation path (judge.evaluate + VectorMemory in
@@ -64,13 +72,28 @@ export interface BizCopilotTenantSettingsPatch {
   brokerId?: string;
 }
 
+/** The command shape a needs-identifier outcome recognized: the action the user asked for, minus its tenant id. */
+export type BizCopilotTenantAskCommand =
+  | "create"
+  | "detail"
+  | "members"
+  | "settings-read"
+  | "settings-update";
+
 export type BizCopilotTenantIntent =
   | { action: "list" }
   | { action: "create"; tenantId: string }
   | { action: "detail"; tenantId: string }
   | { action: "settings-read"; tenantId: string }
   | { action: "settings-update"; tenantId: string; patch: BizCopilotTenantSettingsPatch }
-  | { action: "membership-write-refused"; tenantId: string; userId: string };
+  | { action: "membership-write-refused"; tenantId: string; userId: string }
+  | {
+      action: "needs-identifier";
+      command: BizCopilotTenantAskCommand;
+      tenantId: null;
+      /** For settings-update asks: the patch the user named, so the ask names the exact change. */
+      patch?: BizCopilotTenantSettingsPatch;
+    };
 
 function normalize(text: string): string {
   return text.trim().replace(/\s+/g, " ").replace(/[?.!]+$/, "").trim();
@@ -84,6 +107,10 @@ function isInterval(value: string): number | null {
 /**
  * Parse one tenant command. Returns null for anything that is not
  * an explicit tenant command — the turn then proceeds normally.
+ * A recognizable command shape with its tenant id missing
+ * returns a needs-identifier intent instead of null (#4701): the
+ * turn then answers asking for the id, never falling through to
+ * a model that denies the capability exists.
  */
 export function parseBizCopilotTenantIntent(text: string): BizCopilotTenantIntent | null {
   const raw = normalize(text);
@@ -186,6 +213,95 @@ export function parseBizCopilotTenantIntent(text: string): BizCopilotTenantInten
     return null;
   }
 
+  // Needs-identifier asks (#4701): the command shapes above with
+  // the tenant id missing. These run AFTER the complete shapes so
+  // a complete command always wins; each returns the deterministic
+  // ask outcome, never a route call. The trailing "for" / "for
+  // tenant" / "of tenant" tails are accepted — the id is still
+  // missing, so the ask is the same.
+  if (/^(?:create|add)(?: a)? tenant$/i.test(raw)) {
+    return { action: "needs-identifier", command: "create", tenantId: null };
+  }
+
+  if (/^(?:show|display|get)(?: me)? (?:the )?tenant(?: (?:details|members|info))?$/i.test(raw)) {
+    return { action: "needs-identifier", command: "detail", tenantId: null };
+  }
+
+  if (/^(?:show|display|list)(?: me)? (?:the )?members(?: (?:for|of))?(?: tenant)?$/i.test(raw)) {
+    return { action: "needs-identifier", command: "members", tenantId: null };
+  }
+
+  if (
+    /^(?:(?:show|display|get)(?: me)? (?:the )?settings|what are (?:the )?settings)(?: (?:for|of))?(?: tenant)?$/i.test(
+      raw,
+    )
+  ) {
+    return { action: "needs-identifier", command: "settings-read", tenantId: null };
+  }
+
+  const adsAsk = /^(?:(?:turn|switch|set) ads (on|off)|(?:enable|disable) ads)(?: for(?: tenant)?)?$/.exec(lower);
+  if (adsAsk) {
+    return {
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { adsEnabled: adsAsk[1] === "on" || lower.startsWith("enable") },
+    };
+  }
+
+  const refreshAsk =
+    /^(?:(?:turn|switch|set) auto-?refresh (on|off)|(?:enable|disable) auto-?refresh)(?: for(?: tenant)?)?$/.exec(lower);
+  if (refreshAsk) {
+    return {
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { autoRefreshEnabled: refreshAsk[1] === "on" || lower.startsWith("enable") },
+    };
+  }
+
+  const intervalAsk = /^set auto-?refresh interval (?:to )?(\d+) ?(?:seconds?|s)?(?: for(?: tenant)?)?$/.exec(lower);
+  if (intervalAsk) {
+    const intervalS = isInterval(intervalAsk[1]);
+    if (intervalS === null) return null;
+    return {
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { autoRefreshIntervalS: intervalS },
+    };
+  }
+
+  const providersBothAsk = /^set data provider to (\S+) and broker to (\S+)(?: for(?: tenant)?)?$/i.exec(raw);
+  if (providersBothAsk) {
+    return {
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { dataProviderId: providersBothAsk[1], brokerId: providersBothAsk[2] },
+    };
+  }
+
+  const providerAsk = /^set (?:data )?provider to (\S+)(?: for(?: tenant)?)?$/i.exec(raw);
+  if (providerAsk) {
+    return {
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { dataProviderId: providerAsk[1] },
+    };
+  }
+
+  const brokerAsk = /^set broker to (\S+)(?: for(?: tenant)?)?$/i.exec(raw);
+  if (brokerAsk) {
+    return {
+      action: "needs-identifier",
+      command: "settings-update",
+      tenantId: null,
+      patch: { brokerId: brokerAsk[1] },
+    };
+  }
+
   return null;
 }
 
@@ -243,6 +359,56 @@ function resultContext(intent: BizCopilotTenantIntent, result: TenantRouteResult
 }
 
 /**
+ * The ask message for a needs-identifier intent: the question the
+ * turn answers with, naming the recognized command and showing a
+ * complete example the parser accepts. No route call is made.
+ */
+function tenantAskMessage(
+  intent: Extract<BizCopilotTenantIntent, { action: "needs-identifier" }>,
+): string {
+  switch (intent.command) {
+    case "create":
+      return "Create a tenant with which id? Name the tenant id — for example: Create tenant acme.";
+    case "detail":
+      return "Show which tenant? Name the tenant id — for example: Show tenant acme.";
+    case "members":
+      return "Show the members of which tenant? Name the tenant id — for example: Show members of tenant acme.";
+    case "settings-read":
+      return "Show the settings for which tenant? Name the tenant id — for example: Show settings for tenant acme.";
+    case "settings-update":
+      return settingsUpdateAskMessage(intent.patch ?? {});
+  }
+}
+
+/**
+ * The settings-update ask: the change the user named, in words,
+ * plus a complete example command in the imperative shape the
+ * parser accepts. The patch is the parsed patch — nothing is
+ * invented, and the example always parses.
+ */
+function settingsUpdateAskMessage(patch: BizCopilotTenantSettingsPatch): string {
+  if (patch.dataProviderId !== undefined && patch.brokerId !== undefined) {
+    return `Set the data provider to ${patch.dataProviderId} and the broker to ${patch.brokerId} for which tenant? Name the tenant id — for example: Set data provider to ${patch.dataProviderId} and broker to ${patch.brokerId} for tenant acme.`;
+  }
+  if (patch.adsEnabled !== undefined) {
+    return `Turn ads ${patch.adsEnabled ? "on" : "off"} for which tenant? Name the tenant id — for example: Turn ads ${patch.adsEnabled ? "on" : "off"} for tenant acme.`;
+  }
+  if (patch.autoRefreshEnabled !== undefined) {
+    return `Turn auto-refresh ${patch.autoRefreshEnabled ? "on" : "off"} for which tenant? Name the tenant id — for example: Turn auto-refresh ${patch.autoRefreshEnabled ? "on" : "off"} for tenant acme.`;
+  }
+  if (patch.autoRefreshIntervalS !== undefined) {
+    return `Set the auto-refresh interval to ${patch.autoRefreshIntervalS} seconds for which tenant? Name the tenant id — for example: Set auto-refresh interval to ${patch.autoRefreshIntervalS} seconds for tenant acme.`;
+  }
+  if (patch.dataProviderId !== undefined) {
+    return `Set the data provider to ${patch.dataProviderId} for which tenant? Name the tenant id — for example: Set data provider to ${patch.dataProviderId} for tenant acme.`;
+  }
+  if (patch.brokerId !== undefined) {
+    return `Set the broker to ${patch.brokerId} for which tenant? Name the tenant id — for example: Set broker to ${patch.brokerId} for tenant acme.`;
+  }
+  return "Which tenant should this settings change apply to? Name the tenant id — for example: Turn ads off for tenant acme.";
+}
+
+/**
  * The BizCopilot turn branch (called from
  * OrchestratorAgent.portBeforeTurn): on a BizCopilot turn whose
  * text parses as an explicit tenant command, execute it
@@ -280,6 +446,7 @@ export async function runBizCopilotTenantBranch(deps: {
       sourceTab: deps.sourceTab,
       action: intent.action,
       tenantId: "tenantId" in intent ? intent.tenantId : null,
+      ...("command" in intent ? { command: intent.command } : {}),
     });
     return context;
   } catch (error) {
@@ -287,6 +454,7 @@ export async function runBizCopilotTenantBranch(deps: {
       sourceTab: deps.sourceTab,
       action: intent.action,
       tenantId: "tenantId" in intent ? intent.tenantId : null,
+      ...("command" in intent ? { command: intent.command } : {}),
       error: error instanceof Error ? error.message : String(error),
     });
     return [
@@ -327,6 +495,17 @@ export async function executeBizCopilotTenantIntent(
       refused: true,
       reason:
         "Membership changes are read-only in BizCopilot, exactly as on the Tenants page: IAAA writes belong to the CISO lane. The membership view itself is available — ask to show the tenant to see its members.",
+    })}`;
+  }
+
+  if (intent.action === "needs-identifier") {
+    return `BIZCOPILOT_TENANT_RESULT: ${JSON.stringify({
+      action: intent.action,
+      command: intent.command,
+      tenantId: null,
+      needsIdentifier: true,
+      ask: tenantAskMessage(intent),
+      pageUrl: BIZCOPILOT_TENANTS_PAGE_URL,
     })}`;
   }
 

@@ -151,14 +151,71 @@ describe("BizCopilot channel intent parsing (#4517)", () => {
     });
   });
 
-  it("refuses to guess an unknown channel, a missing tenant, or a malformed id", () => {
+  it("refuses to guess an unknown channel or a malformed id", () => {
     expect(parseBizCopilotChannelIntent("Enable pigeon for tenant acme")).toBeNull();
-    expect(parseBizCopilotChannelIntent("Enable email")).toBeNull();
     expect(parseBizCopilotChannelIntent("Enable email for tenant a b")).toBeNull();
-    expect(parseBizCopilotChannelIntent("Show channels")).toBeNull();
-    expect(parseBizCopilotChannelIntent("Show enforcement")).toBeNull();
     expect(channelFromName("pigeon")).toBeNull();
     expect(channelFromName("sms")).toBeNull();
+  });
+
+  it("asks for the tenant id on a recognizable-but-incomplete command (#4701)", () => {
+    expect(parseBizCopilotChannelIntent("Show channels")).toEqual({
+      action: "needs-identifier",
+      command: "show",
+      tenantId: null,
+    });
+    expect(parseBizCopilotChannelIntent("What channels are enabled?")).toEqual({
+      action: "needs-identifier",
+      command: "show",
+      tenantId: null,
+    });
+    expect(parseBizCopilotChannelIntent("Show enforcement")).toEqual({
+      action: "needs-identifier",
+      command: "enforcement",
+      tenantId: null,
+    });
+    expect(parseBizCopilotChannelIntent("Is email enabled?")).toEqual({
+      action: "needs-identifier",
+      command: "enforcement",
+      tenantId: null,
+      channel: "email",
+    });
+    expect(parseBizCopilotChannelIntent("Is slack off")).toEqual({
+      action: "needs-identifier",
+      command: "enforcement",
+      tenantId: null,
+      channel: "slack",
+    });
+    expect(parseBizCopilotChannelIntent("Enable email")).toEqual({
+      action: "needs-identifier",
+      command: "enable",
+      tenantId: null,
+      channel: "email",
+    });
+    expect(parseBizCopilotChannelIntent("Disable slack")).toEqual({
+      action: "needs-identifier",
+      command: "disable",
+      tenantId: null,
+      channel: "slack",
+    });
+    expect(parseBizCopilotChannelIntent("Turn off webhook")).toEqual({
+      action: "needs-identifier",
+      command: "disable",
+      tenantId: null,
+      channel: "webhook",
+    });
+    expect(parseBizCopilotChannelIntent("Set copilot card off")).toEqual({
+      action: "needs-identifier",
+      command: "disable",
+      tenantId: null,
+      channel: "copilot",
+    });
+    expect(parseBizCopilotChannelIntent("Set docs on")).toEqual({
+      action: "needs-identifier",
+      command: "enable",
+      tenantId: null,
+      channel: "docs",
+    });
   });
 
   it("returns null for anything that is not an explicit channel command", () => {
@@ -384,6 +441,24 @@ describe("BizCopilot channel execution through the page's routes (#4517)", () =>
     expect(context.startsWith("BIZCOPILOT_CHANNEL_ERROR: ")).toBe(true);
     expect(parseResult(context)["status"]).toBe(401);
   });
+
+  it("answers a needs-identifier intent with the question and the page link, calling no route (#4701)", async () => {
+    const world = makeWorld();
+    const context = await executeBizCopilotChannelIntent(
+      { action: "needs-identifier", command: "disable", tenantId: null, channel: "slack" },
+      world.deps(OPERATOR),
+    );
+    expect(context.startsWith("BIZCOPILOT_CHANNEL_RESULT: ")).toBe(true);
+    const parsed = parseResult(context);
+    expect(parsed["action"]).toBe("needs-identifier");
+    expect(parsed["command"]).toBe("disable");
+    expect(parsed["channel"]).toBe("slack");
+    expect(parsed["tenantId"]).toBeNull();
+    expect(parsed["needsIdentifier"]).toBe(true);
+    expect(parsed["ask"]).toContain("Disable slack for tenant acme");
+    expect(parsed["pageUrl"]).toBe(BIZCOPILOT_CHANNELS_PAGE_URL);
+    expect(await world.channels.getTenantChannels("acme")).toEqual(DEFAULT_TENANT_CHANNELS);
+  });
 });
 
 describe("BizCopilot channel turn branch (#4517)", () => {
@@ -443,5 +518,33 @@ describe("BizCopilot channel turn branch (#4517)", () => {
       ...DEFAULT_TENANT_CHANNELS,
       slack: false,
     });
+  });
+
+  it("answers a bare channel command with the ask outcome instead of falling through (#4701)", async () => {
+    const world = makeWorld();
+    const audits: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const context = await runBizCopilotChannelBranch({
+      sourceTab: "BizCopilot",
+      userText: "Show channels",
+      env: {},
+      userLogin: OPERATOR,
+      audit: (type, payload) => audits.push({ type, payload }),
+      channels: world.channels,
+      directory: world.directory,
+      operators: world.deps(OPERATOR).operators,
+    });
+    expect(context.startsWith("BIZCOPILOT_CHANNEL_RESULT: ")).toBe(true);
+    expect(parseResult(context)["needsIdentifier"]).toBe(true);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      type: "bizcopilot.channel_action_executed",
+      payload: {
+        sourceTab: "BizCopilot",
+        action: "needs-identifier",
+        command: "show",
+        tenantId: null,
+      },
+    });
+    expect(await world.channels.getTenantChannels("acme")).toEqual(DEFAULT_TENANT_CHANNELS);
   });
 });

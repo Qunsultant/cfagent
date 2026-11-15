@@ -293,6 +293,95 @@ describe("parseBizCopilotAccountIntent (#4516)", () => {
     });
   });
 
+  it("asks for the login on a recognizable-but-incomplete command (#4701)", () => {
+    expect(parseBizCopilotAccountIntent("Show account")).toEqual({
+      action: "needs-identifier",
+      command: "lookup",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Look up account")).toEqual({
+      action: "needs-identifier",
+      command: "lookup",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Show subscriptions")).toEqual({
+      action: "needs-identifier",
+      command: "lookup",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Show grants")).toEqual({
+      action: "needs-identifier",
+      command: "grant-history",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Show grant history for")).toEqual({
+      action: "needs-identifier",
+      command: "grant-history",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Grant unlimited free")).toEqual({
+      action: "needs-identifier",
+      command: "grant-unlimited-free",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Grant unlimited-free to")).toEqual({
+      action: "needs-identifier",
+      command: "grant-unlimited-free",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Revoke unlimited free")).toEqual({
+      action: "needs-identifier",
+      command: "revoke-unlimited-free",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Grant free access")).toEqual({
+      action: "needs-identifier",
+      command: "grant-free-access",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Grant free access lifetime")).toEqual({
+      action: "needs-identifier",
+      command: "grant-free-access",
+      userId: null,
+      kind: "lifetime",
+    });
+    expect(parseBizCopilotAccountIntent("Grant free access limited to")).toEqual({
+      action: "needs-identifier",
+      command: "grant-free-access",
+      userId: null,
+      kind: "limited",
+    });
+    expect(parseBizCopilotAccountIntent("Revoke free access")).toEqual({
+      action: "needs-identifier",
+      command: "revoke-free-access",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Grant Basic subscription")).toEqual({
+      action: "needs-identifier",
+      command: "grant-subscription",
+      userId: null,
+      planRef: "Basic",
+    });
+    expect(
+      parseBizCopilotAccountIntent("Grant subscription Premium to"),
+    ).toEqual({
+      action: "needs-identifier",
+      command: "grant-subscription",
+      userId: null,
+      planRef: "Premium",
+    });
+    expect(parseBizCopilotAccountIntent("Grant subscription")).toEqual({
+      action: "needs-identifier",
+      command: "grant-subscription",
+      userId: null,
+    });
+    expect(parseBizCopilotAccountIntent("Move to current pricing")).toEqual({
+      action: "needs-identifier",
+      command: "move-current-pricing",
+      userId: null,
+    });
+  });
+
   it("returns null for anything that is not an explicit account command", () => {
     expect(parseBizCopilotAccountIntent("")).toBeNull();
     expect(parseBizCopilotAccountIntent("Hello")).toBeNull();
@@ -301,8 +390,6 @@ describe("parseBizCopilotAccountIntent (#4516)", () => {
     expect(
       parseBizCopilotAccountIntent(`Add 10 credits to ${ALICE}`),
     ).toBeNull();
-    // A bare grant without a target is partial, never guessed.
-    expect(parseBizCopilotAccountIntent("Grant Basic subscription")).toBeNull();
     // The tenant-admin grant path is out of scope — no parse.
     expect(
       parseBizCopilotAccountIntent(
@@ -632,6 +719,71 @@ describe("executeBizCopilotAccountIntent (#4516)", () => {
     expect(context.startsWith("BIZCOPILOT_ACCOUNT_ERROR: ")).toBe(true);
     expect(parseContext(context).error.error).toContain("No commercial account");
   });
+
+  it("answers a needs-identifier intent with the question and the page link, calling no route (#4701)", async () => {
+    // No store, no ORM: any route call would throw. The ask
+    // outcome touches neither — the question is the whole result.
+    const audit = vi.fn();
+    const context = await executeBizCopilotAccountIntent(
+      { action: "needs-identifier", command: "lookup", userId: null },
+      {
+        env: {} as Env,
+        userLogin: OPERATOR,
+        getOrm: () => {
+          throw new Error("no ORM call expected");
+        },
+        audit,
+      },
+    );
+    expect(context.startsWith("BIZCOPILOT_ACCOUNT_RESULT: ")).toBe(true);
+    const payload = parseContext(context);
+    expect(payload.action).toBe("needs-identifier");
+    expect(payload.command).toBe("lookup");
+    expect(payload.userId).toBeNull();
+    expect(payload.needsIdentifier).toBe(true);
+    expect(payload.ask).toContain("Show account alice@example.com");
+    expect(payload.pageUrl).toBe(BIZCOPILOT_ACCOUNTS_PAGE_URL);
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("names the plan and the kind a grant ask recognized (#4701)", async () => {
+    const audit = vi.fn();
+    const deps = {
+      env: {} as Env,
+      userLogin: OPERATOR,
+      getOrm: () => {
+        throw new Error("no ORM call expected");
+      },
+      audit,
+    };
+    const grant = await executeBizCopilotAccountIntent(
+      {
+        action: "needs-identifier",
+        command: "grant-subscription",
+        userId: null,
+        planRef: "Basic",
+      },
+      deps,
+    );
+    expect(parseContext(grant).ask).toContain("Grant Basic subscription to alice@example.com");
+    const freeAccess = await executeBizCopilotAccountIntent(
+      {
+        action: "needs-identifier",
+        command: "grant-free-access",
+        userId: null,
+        kind: "limited",
+      },
+      deps,
+    );
+    expect(parseContext(freeAccess).ask).toContain(
+      "Grant free access limited to alice@example.com",
+    );
+    const unkinded = await executeBizCopilotAccountIntent(
+      { action: "needs-identifier", command: "grant-free-access", userId: null },
+      deps,
+    );
+    expect(parseContext(unkinded).ask).toContain("lifetime or limited");
+  });
 });
 
 describe("runBizCopilotAccountBranch (#4516)", () => {
@@ -670,5 +822,23 @@ describe("runBizCopilotAccountBranch (#4516)", () => {
       await runBizCopilotAccountBranch(branchDeps("BizCopilot", "Hello")),
     ).toBe("");
     expect(auditTypes(audit)).not.toContain("bizcopilot.account_action_executed");
+  });
+
+  it("answers a bare account command with the ask outcome instead of falling through (#4701)", async () => {
+    const { deps, audit } = await setup();
+    const context = await runBizCopilotAccountBranch({
+      sourceTab: "BizCopilot",
+      userText: "Show account",
+      env: deps(OPERATOR).env,
+      userLogin: OPERATOR,
+      getOrm: () => ({}) as DatabaseORM,
+      audit,
+    });
+    expect(context.startsWith("BIZCOPILOT_ACCOUNT_RESULT: ")).toBe(true);
+    const payload = parseContext(context);
+    expect(payload.needsIdentifier).toBe(true);
+    expect(payload.command).toBe("lookup");
+    expect(payload.pageUrl).toBe(BIZCOPILOT_ACCOUNTS_PAGE_URL);
+    expect(auditTypes(audit)).toContain("bizcopilot.account_action_executed");
   });
 });

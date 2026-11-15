@@ -1,0 +1,3 @@
+### Fixed
+
+- BizCopilot no longer falls through on a recognizable-but-incomplete command (#4701): a bare "Create a tenant" (the quick chip's own prompt) previously returned null from the tenant parser, so the turn fell through to the LLM, which falsely reported no tenant capability exists. All three BizCopilot parsers (tenants, accounts, channels) now return a deterministic needs-identifier outcome for command shapes missing their identifier — the turn answers asking for the missing id or login, with the page link. No route call is made and no mutation is ever guessed. Quick-chip prompts are pinned against parser acceptance in `tests/bizcopilot_chips_4701.test.ts`.
