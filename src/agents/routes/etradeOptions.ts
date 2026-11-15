@@ -877,7 +877,7 @@ export async function handleEtradeOptionsRoutes(
         const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, ctx.requestedEnv);
         const universeDeps = await etrade.getUniverseDeps?.(ctx.agentCtx?.storage);
         const screener = new DynamicOptionsScreener(chainSource ?? etrade.client, undefined, universeDeps);
-        return await executeOptionsScreen({ ctx, userLogin, screener, screenFilter, screenPushToSlack, screenSlackChannel, screenUniverseLabel, screenEmailTo, deferDelivery: Boolean(ctx.asyncJobId) });
+        return await executeOptionsScreen({ ctx, userLogin, screener, screenFilter, screenPushToSlack, screenSlackChannel, screenUniverseLabel, screenEmailTo, deferDelivery: Boolean(ctx.asyncJobId), broker });
       } catch (err) {
         const error = err instanceof Error ? err.message : "Options screening failed";
         if (!ctx.asyncJobId && (filter.pushToSlack === true || filter.pushToSlack === "true" || filter.pushToSlack === "1")) {

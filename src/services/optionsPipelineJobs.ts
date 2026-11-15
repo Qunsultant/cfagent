@@ -42,8 +42,9 @@
  * message): job_not_found
  * (no stored definition in this host), stage_request_missing (a
  * definition from before #4066 persisted requests),
- * stage_request_unrecognized, stage_port_unavailable (goal /
- * comparison shapes, manual shapeReport/deliver).
+ * stage_request_unrecognized, stage_port_unavailable (comparison
+ * shapes; a goal request with no stamped goal run id; a manual
+ * rebuild with no bound environment).
  */
 import type { JobArtifactStore, JobDefinitionStore } from "../data/jobPipelinePorts";
 import type { ScanRunStore } from "../data/scanRunPorts";
@@ -77,6 +78,7 @@ import {
   rebuildOptionsStepDeps,
   OptionsStepPortsError,
 } from "../workflows/optionsStepPorts";
+import { createManualOptionsResidencyDelivery } from "../workflows/manualOptionsResidency";
 import type { OptionsScreenWorkflowDeps } from "../workflows/optionsScreenWorkflow";
 import type { JobStepRegistry } from "./jobPipelineSteps";
 
@@ -266,6 +268,12 @@ export function registerOptionsWorkflowSteps(
         : {}),
       ...(deps.scanRunStore ? { scanRunStore: deps.scanRunStore } : {}),
       ...(deps.queue !== undefined ? { queue: deps.queue } : {}),
+      // #4450: the manual delivery factory — the resolving steps
+      // are server-only, so they can import the residency module
+      // the shared rebuild must not reach (#4066). The factory
+      // builds the manual shape's shapeReport/deliver per
+      // invocation from the same env + storage + request.
+      manualDeliveryFactory: createManualOptionsResidencyDelivery,
     });
     return runOptionsScreenStep(ctx, stepDeps);
   });

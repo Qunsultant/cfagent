@@ -37,7 +37,8 @@ import { isDemoCalibratedChainsEnabled } from "../../config/demoMode";
 import { buildDataProviderPorts } from "../../data/buildDataProviderPorts";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { recordOptionsRunOutcome, storeOptionsCanonicalReport } from "../../services/optionsServeRecord";
-import { resolveTenantProviders } from "../../services/tenantProviders";
+import { resolveTenantProviders, type BrokerId } from "../../services/tenantProviders";
+import type { Env } from "../../types";
 import { resolveTenantProviderContext, withProviderProvenance } from "../../services/optionsProviderContext";
 import { getEventCalendarCoverage, toEventCalendarInfo } from "../../services/eventCalendar";
 import type { EtradeOptionsRouteContext } from "./etradeOptions";
@@ -46,8 +47,14 @@ import { createManualOptionsCanonicalLeg } from "../../workflows/optionsCanonica
 import {
   optionsEngineStoresFromSql,
   optionsEngineStoresInMemory,
+  optionsStageStorageFromArtifacts,
   runOptionsScreenViaEngine,
 } from "../../workflows/optionsScreenEngine";
+import {
+  awaitOptionsWorkflowRun,
+  optionsWorkflowRunDepsFromEnv,
+  startOptionsScreenWorkflow,
+} from "../../workflows/optionsWorkflowHost";
 import {
   createManualOptionsRecordBuilder,
   createManualOptionsScreenDelivery,
@@ -67,7 +74,85 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 
 type OptionsScreenValue = Extract<ReturnType<typeof parseOptionsScreenRequest>, { ok: true }>["value"];
 
-export async function executeOptionsScreen(args: {
+/**
+ * Issue #4450 — the manual route's dispatch decision: the host path
+ * only when all three gates hold, else the unchanged sync dispatch.
+ * A gate that fails is not an error — the sync path is the same
+ * pipeline, and the run's behaviour is unchanged. No gate decision
+ * is logged: the serving residency is observable from the run's job
+ * record (a host run's job is defined in the D1 residency).
+ */
+export interface ManualScreenDispatchDecision {
+  route: "host" | "sync";
+  reason: string;
+}
+
+export function manualScreenDispatchRoute(input: {
+  broker: BrokerId;
+  filter: { underlyingSymbols?: unknown };
+  env: Env;
+}): ManualScreenDispatchDecision {
+  // Gate 1 — the residency binds one broker directly, so a screen
+  // for any other resolved broker would fetch the wrong broker's
+  // chains (#3960 owns carrying broker+mode as a stage input).
+  if (input.broker !== "etrade") {
+    return {
+      route: "sync",
+      reason: "the resolved broker is not the residency's bound broker; broker+mode as a stage input is #3960's to carry",
+    };
+  }
+  // Gate 2 — universe deps do not travel as a stage input (#4473),
+  // so a discovery-mode screen (no explicit symbols) would fail at
+  // the screen stage in the residency. The same check shape as the
+  // goal seam's dispatch-time validation.
+  const symbols = input.filter.underlyingSymbols;
+  const symbolScoped =
+    Array.isArray(symbols) &&
+    symbols.some((symbol) => typeof symbol === "string" && symbol.trim().length > 0);
+  if (!symbolScoped) {
+    return {
+      route: "sync",
+      reason: "the filter carries no explicit underlyingSymbols; universe deps as a stage input is #4473's to carry",
+    };
+  }
+  // Gate 3 — the residency bindings. The start seam re-checks
+  // anyway (defense in depth); the gate keeps an unconfigured
+  // deployment on the sync path instead of failing the request.
+  const workflow = input.env.JOB_PIPELINE_WORKFLOW;
+  if (!input.env.AGENT_DB || !workflow || typeof workflow.create !== "function") {
+    return {
+      route: "sync",
+      reason: "the workflow residency bindings are not configured in this deployment",
+    };
+  }
+  return {
+    route: "host",
+    reason: "symbol-scoped, residency-bound broker, bindings configured",
+  };
+}
+
+/**
+ * Issue #4450 — the manual screen's response body, shared by the
+ * sync and host paths: the screen result plus the report keys. One
+ * builder, so the two dispatches can never drift in what the caller
+ * receives.
+ */
+export function manualScreenResponseBody(
+  result: Record<string, unknown>,
+  report: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...result,
+    pdfKey: report["pdfKey"],
+    reportUrl: report["reportUrl"],
+    xlsxKey: report["xlsxKey"],
+    xlsxUrl: report["xlsxUrl"],
+    csvKey: report["csvKey"],
+    csvUrl: report["csvUrl"],
+  };
+}
+
+export interface ExecuteOptionsScreenArgs {
   ctx: EtradeOptionsRouteContext;
   userLogin: string;
   screener: DynamicOptionsScreener;
@@ -79,18 +164,40 @@ export async function executeOptionsScreen(args: {
   /** Issue #1123: when the screen runs as a tracked job, the follow-up
    *  pipeline owns delivery — skip the inline Slack delivery. */
   deferDelivery?: boolean;
-}): Promise<Response> {
+  /** Issue #4450: the resolved broker for this tenant — the dispatch
+   *  gate's first input (the caller already resolves it). */
+  broker: BrokerId;
+}
+
+export async function executeOptionsScreen(args: ExecuteOptionsScreenArgs): Promise<Response> {
+  // Issue #3186 (step 3d): the run id IS the route's generation id
+  // (options_scanner:manual:<iso>), so the pipeline's canonical row
+  // is the route's row - no duplicate. Both dispatches use it.
+  const generationId = `options_scanner:manual:${new Date().toISOString()}`;
+  // Issue #4450: the gated cutover — a symbol-scoped screen for the
+  // residency's bound broker, on a configured deployment, dispatches
+  // through the workflow host; everything else keeps the unchanged
+  // sync dispatch below.
+  const decision = manualScreenDispatchRoute({
+    broker: args.broker,
+    filter: args.screenFilter,
+    env: args.ctx.env,
+  });
+  if (decision.route === "host") {
+    return executeOptionsScreenViaHost(args, generationId);
+  }
+  return executeOptionsScreenViaSync(args, generationId);
+}
+
+async function executeOptionsScreenViaSync(args: ExecuteOptionsScreenArgs, generationId: string): Promise<Response> {
   const { ctx, userLogin, screener, screenFilter, screenPushToSlack, screenSlackChannel, screenUniverseLabel, screenEmailTo, deferDelivery } = args;
   // Issue #3186 (step 3d): the manual screen runs the one options
-  // pipeline instead of the registry provider. The run id IS the
-  // route's generation id (options_scanner:manual:<iso>), so the
-  // pipeline's canonical row is the route's row - no duplicate.
+  // pipeline instead of the registry provider.
   // The report + delivery blocks live in the manual delivery module
   // (workflows/manualOptionsScreen.ts) as the pipeline's shapeReport
   // / deliver stages; the #3072 end-of-run emitter retires for this
   // entry (the pipeline publishes per-stage messages instead - and
   // this was its only caller, so the legacy phases retire with it).
-  const generationId = `options_scanner:manual:${new Date().toISOString()}`;
   const claims = createSqlStageClaimStore(() => ctx.agentCtx.storage.sql);
   // Issue #4060: the manual entry's canonical write rides the
   // engine's tenant-aware leg (the orchestrator door) — the route no
@@ -170,15 +277,74 @@ export async function executeOptionsScreen(args: {
   }
   const result = screened.result;
   const report = shaped.report;
-  return Response.json({
-    ...result,
-    pdfKey: report["pdfKey"],
-    reportUrl: report["reportUrl"],
-    xlsxKey: report["xlsxKey"],
-    xlsxUrl: report["xlsxUrl"],
-    csvKey: report["csvKey"],
-    csvUrl: report["csvUrl"],
+  return Response.json(manualScreenResponseBody(result, report));
+}
+
+/**
+ * Issue #4450 — the manual screen through the workflow host: define
+ * the per-run job in the D1 residency, create the workflow
+ * instance, await settlement, and read the screen + report
+ * artifacts back through the artifact-store adapter. The stored
+ * request carries the same envelope the sync dispatch builds
+ * (filter + delivery prefs), plus deferDelivery — the residency
+ * delivery builders read it from the stored request. The await is
+ * bounded at five minutes (sync parity for a chain-fetching
+ * screen); the timeout error names the job id and the read-back
+ * path, and the run may still be in flight. A failed run throws
+ * the same shape the sync path throws (`options screen failed at
+ * <stage>: <reason>`), so the caller's failure handling is
+ * unchanged.
+ */
+async function executeOptionsScreenViaHost(args: ExecuteOptionsScreenArgs, generationId: string): Promise<Response> {
+  const { ctx, userLogin, screenFilter, screenPushToSlack, screenSlackChannel, screenUniverseLabel, screenEmailTo, deferDelivery } = args;
+  const request = {
+    assetClass: "options",
+    runIdentity: { runId: generationId },
+    trigger: "manual",
+    classInput: {
+      request: {
+        filter: screenFilter,
+        pushToSlack: screenPushToSlack,
+        slackChannel: screenSlackChannel,
+        universe: screenUniverseLabel,
+        emailTo: screenEmailTo,
+        deferDelivery,
+      },
+    },
+  };
+  const { jobId } = await startOptionsScreenWorkflow(ctx.env, {
+    runId: generationId,
+    request,
+    userLogin,
+    trigger: "manual",
   });
+  const deps = optionsWorkflowRunDepsFromEnv(ctx.env);
+  const view = await awaitOptionsWorkflowRun(deps, jobId, { timeoutMs: 300_000 });
+  if (view.state === "failed") {
+    const failed = view.stages.find((stage) => stage.status === "failed");
+    throw new Error(
+      `options screen failed at ${failed?.stageId ?? "unknown"}: ${failed?.error ?? "unknown reason"}`,
+    );
+  }
+  if (view.state !== "completed") {
+    throw new Error(
+      `options screen run ${jobId} ended ${view.state}; the run record carries the stages`,
+    );
+  }
+  if (!view.engineRunId) {
+    throw new Error(`options screen completed but its engine run id is missing for run ${generationId}`);
+  }
+  const stageStorage = optionsStageStorageFromArtifacts(deps.stores.artifacts, view.engineRunId);
+  const screened = await stageStorage.get<{ result: Record<string, unknown> }>(
+    optionsArtifactKey(generationId, "screen"),
+  );
+  const shaped = await stageStorage.get<{ report: Record<string, unknown> }>(
+    optionsArtifactKey(generationId, "shapeReport"),
+  );
+  if (!screened || screened.result === undefined || !shaped || shaped.report === undefined) {
+    throw new Error(`options screen completed but its artifacts are missing for run ${generationId}`);
+  }
+  return Response.json(manualScreenResponseBody(screened.result, shaped.report));
 }
 
 

@@ -16,9 +16,19 @@
  * Shapes (the classInput key decides, exactly as #4066 decoded it):
  * - strategyRequest → panel (strategy ports, all eight stages)
  * - scan → scanner ports, all eight stages
- * - request → manual (manual ports; shapeReport/deliver refuse —
- *   the delivery builders need getScreenerAgent, which neither a
- *   chat/MCP turn nor a workflow residency binds)
+ * - request → manual (manual ports; shapeReport/deliver rebuild
+ *   in the residency from env + the stored request + the stage
+ *   storage — createManualOptionsResidencyDelivery, #4450, supplied
+ *   to the rebuild as an injected factory by the resolving steps,
+ *   because the residency module's graph reaches the report
+ *   pipeline and this module is reachable from the client bundle.
+ *   The delivery builders need no agent handle in the residency:
+ *   the report pipeline is env-only, XLSX/CSV generate through the
+ *   pure generators and write through the blob store, and delivery
+ *   rides the A2A path. Chat control supplies no factory and still
+ *   refuses manual shapeReport/deliver through its own inline
+ *   guard: a turn binds neither the residency env nor the artifact
+ *   store.)
  * - goalPlan → goal: the goal leg's ports are rebuildable through
  *   the workflow host (#4290) — the leg's shapeReport/deliver are
  *   pure functions of their inputs (createGoalOptionsLegDelivery),
@@ -59,6 +69,8 @@ import { DynamicOptionsScreener } from "../trading";
 import type { OptionsScreenStepDeps } from "./optionsScreenEngine";
 import {
   createOptionsScreenPorts,
+  type OptionsDeliverFn,
+  type OptionsShapeReportFn,
   type OptionsStageStorage,
 } from "./optionsScreenPorts";
 import {
@@ -72,6 +84,13 @@ import {
 } from "./strategyScreenPorts";
 import { createManualOptionsCanonicalLeg } from "./optionsCanonicalLeg";
 import { createGoalOptionsLegDelivery } from "./goalOptionsLeg";
+// Type-only: the residency delivery factory's input shape. The
+// shared rebuild must NOT import the residency module's values —
+// its graph reaches the report pipeline (workerd-only modules),
+// which breaks the client bundle this module is reachable from
+// (#4066). The factory crosses the seam as an injected value from
+// the server-only caller (the resolving steps, #4450).
+import type { ManualOptionsResidencyInput } from "./manualOptionsResidency";
 import {
   createManualOptionsRecordBuilder,
   type ManualOptionsScreenCtx,
@@ -143,21 +162,21 @@ export function decodeOptionsRequestShape(
 
 /**
  * Refuse, by name, a stage that cannot be rebuilt for this shape —
- * before any execution. The comparison shape refuses for every
- * stage; the manual shape refuses shapeReport/deliver only (the
- * delivery builders need getScreenerAgent, which neither a
- * chat/MCP turn nor a workflow residency binds — re-dispatch from
- * the manual route instead). The goal shape passes: its ports
- * rebuild through the host (#4290), and the rebuild itself refuses
- * a goal request that carries no stamped goal run id. The plain
- * defaults stand in during the rebuild so the other six stages'
- * ports can still be built; they are never invoked for the
- * refused stages because this guard runs first.
+ * before any execution. Only the comparison shape refuses (for
+ * every stage: a comparison run is a single engine step, not an
+ * eight-stage pipeline). The manual shape passes every stage: its
+ * delivery builders rebuild in the residency (#4450), refusing at
+ * invocation with the same code when no environment is bound. The
+ * goal shape passes: its ports rebuild through the host (#4290),
+ * and the rebuild itself refuses a goal request that carries no
+ * stamped goal run id.
  *
  * This guard serves the host path only. Chat control refuses the
- * goal shape through its own inline guard (decided-not-to, #4274)
- * before ever reaching the shared rebuild — this guard passing a
- * goal shape does not weaken that refusal.
+ * goal shape and manual shapeReport/deliver through its own inline
+ * guards (decided-not-to, #4274; the turn binds neither the
+ * residency env nor the artifact store) before ever reaching the
+ * shared rebuild — this guard passing those shapes does not weaken
+ * those refusals.
  */
 export function assertOptionsStageRebuildable(
   shape: OptionsDecodedRequestShape,
@@ -168,12 +187,6 @@ export function assertOptionsStageRebuildable(
     throw new OptionsStepPortsError(
       "stage_port_unavailable",
       `options run ${runId}: a comparison run is a single engine step, not an eight-stage pipeline — stage ${stageId} has no ports to rebuild, so it cannot run; re-dispatch the comparison`,
-    );
-  }
-  if (shape === "manual" && (stageId === "shapeReport" || stageId === "deliver")) {
-    throw new OptionsStepPortsError(
-      "stage_port_unavailable",
-      `options run ${runId}: stage ${stageId} of a manual-shape run needs the manual route's delivery builders (PDF/XLSX/CSV via getScreenerAgent), which this host cannot bind — re-dispatch the screen from the manual route`,
     );
   }
 }
@@ -194,6 +207,21 @@ export interface RebuildOptionsStepDepsInput {
   scanRunStore?: ScanRunStore;
   /** The stage-message queue. Absent, null: a rebuild publishes nothing. */
   queue?: OptionsScreenWorkflowDeps["queue"];
+  /**
+   * The manual delivery factory (#4450): builds the manual shape's
+   * shapeReport/deliver for one invocation from env + the stored
+   * request + the stage storage. Supplied by the host path (the
+   * resolving steps); the control path supplies none, and the
+   * manual stages then refuse at invocation (its inline guard
+   * refuses them first, so the refusal never fires there). The
+   * factory is injected rather than imported because the residency
+   * module's graph reaches the report pipeline, which the client
+   * bundle this module is reachable from cannot hold (#4066).
+   */
+  manualDeliveryFactory?: (input: ManualOptionsResidencyInput) => {
+    shapeReport: OptionsShapeReportFn;
+    deliver: OptionsDeliverFn;
+  };
 }
 
 /**
@@ -227,6 +255,14 @@ export function rebuildOptionsStepDeps(
   input: RebuildOptionsStepDepsInput,
 ): OptionsScreenStepDeps {
   const { shape, storage } = input;
+  // The manual leg's canonical leg, built once and shared by the
+  // persist stage and the shapeReport re-record (one transport for
+  // the row, #4060) — only for the manual shape, only when an env
+  // is bound. A pure closure over env; building it performs no I/O.
+  const manualCanonicalLeg =
+    shape === "manual" && input.env
+      ? createManualOptionsCanonicalLeg(input.env)
+      : undefined;
   const stages =
     shape === "panel"
       ? createStrategyScreenPorts({
@@ -262,7 +298,7 @@ export function rebuildOptionsStepDeps(
             storage,
             ...(input.env
               ? {
-                  canonicalLeg: createManualOptionsCanonicalLeg(input.env),
+                  canonicalLeg: manualCanonicalLeg,
                   // The record builder reads only ctx.env (the tenant
                   // provider context); the rest of the ctx (getOrm /
                   // getScreenerAgent) is never touched by the builder.
@@ -271,17 +307,37 @@ export function rebuildOptionsStepDeps(
                   } as ManualOptionsScreenCtx),
                 }
               : {}),
-            // Plain defaults: the manual route's shapeReport/deliver
-            // are not rebuildable here (see
-            // assertOptionsStageRebuildable), and those two stages
-            // refuse before execution. The defaults exist so the
-            // other six stages' ports can still be built — they are
-            // never invoked for them.
-            shapeReport: async ({ screen }) => screen,
-            deliver: async () => ({
-              terminal: "completed",
-              deliveryState: "deferred-to-caller",
-            }),
+            // #4450: the manual route's shapeReport/deliver rebuild
+            // in the residency from env + the stored request
+            // envelope + the stage storage, through the factory the
+            // caller injected — the guard no longer refuses them.
+            // No factory ⇒ the stages refuse at invocation with
+            // stage_port_unavailable (the control path, whose inline
+            // guard refuses them first), so the other six stages'
+            // ports still build.
+            ...(input.manualDeliveryFactory
+              ? input.manualDeliveryFactory({
+                  ...(input.env ? { env: input.env } : {}),
+                  storage,
+                  request: (
+                    input.request as { classInput?: { request?: unknown } } | null
+                  )?.classInput?.request,
+                  ...(manualCanonicalLeg ? { canonicalLeg: manualCanonicalLeg } : {}),
+                })
+              : {
+                  shapeReport: async () => {
+                    throw new OptionsStepPortsError(
+                      "stage_port_unavailable",
+                      `options run ${input.runId}: stage shapeReport of a manual-shape run needs the residency delivery builders, and this rebuild carries no delivery factory — dispatch through the manual route, or rebuild through the workflow host`,
+                    );
+                  },
+                  deliver: async () => {
+                    throw new OptionsStepPortsError(
+                      "stage_port_unavailable",
+                      `options run ${input.runId}: stage deliver of a manual-shape run needs the residency delivery builders, and this rebuild carries no delivery factory — dispatch through the manual route, or rebuild through the workflow host`,
+                    );
+                  },
+                }),
           });
   return {
     runId: input.runId,
