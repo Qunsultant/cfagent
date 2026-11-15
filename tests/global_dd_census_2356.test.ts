@@ -574,16 +574,28 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   },
   mas_enrichment_runs: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_messages: {
-    layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/schemaComponent/ormCatalogue.ts"],
+    // #4386 (P6c): the DML moved from the adapters into the DO
+    // DML catalogue as repository entries — the writer set is
+    // unchanged in kind (DML home + schema authority), only the
+    // file moved.
+    layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/ormCatalogue.ts"],
   },
   mas_events: {
-    layer: ["src/data/schemaComponent/ormCatalogue.ts"],
+    // #4386 (P6c): the two events entries (ids_created_before,
+    // tail_hash) are reads, but the catalogue carve-out counts
+    // the registration as writing — uniform with the other
+    // catalogue tables. The bypass is unchanged.
+    layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/ormCatalogue.ts"],
     bypass: { "src/agents/routes/maintenance.ts": "#2489 auditConfirm-gated selective wipe" },
   },
-  mas_memory: { layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/schemaComponent/ormCatalogue.ts"] },
+  mas_memory: {
+    // #4386 (P6c): same move as mas_messages (see above).
+    layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/ormCatalogue.ts"],
+  },
   mas_watchlists: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
   mas_transactions: {
-    layer: ["src/data/doSqliteOrmAdapters.ts", "src/data/schemaComponent/ormCatalogue.ts"],
+    // #4386 (P6c): same move as mas_messages (see above).
+    layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/ormCatalogue.ts"],
   },
   mas_trades: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
   mas_categories: { layer: ["src/data/schemaComponent/ormCatalogue.ts"] },
@@ -734,10 +746,22 @@ describe("global D-D census: writer sets by table for ported tables", () => {
 
 describe("global D-D census: G-7 — mas_settings (port-owned since #2390)", () => {
   it("the only value writer is the settings port's adapter", () => {
+    // #4386 (P6c): the settings writes are repository entries in
+    // the DO DML catalogue — there is no mas_settings write
+    // STATEMENT anywhere in src/ (the old detector finds []),
+    // and the mas_settings codes are referenced (as executor
+    // calls) only from the settings adapter, registered only in
+    // the catalogue. The adapter remains the only writer; only
+    // the mechanism moved.
     const re = /(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+mas_settings(?![\w])/gi;
-    const actual = SRC_FILES.filter((f) => re.test(STRIPPED.get(f)!)).sort();
-    expect(actual).toEqual([
+    const statementWriters = SRC_FILES.filter((f) => re.test(STRIPPED.get(f)!)).sort();
+    expect(statementWriters).toEqual([]);
+    const codeRefs = SRC_FILES.filter((f) =>
+      STRIPPED.get(f)!.includes("dml.do.mas_settings."),
+    ).sort();
+    expect(codeRefs).toEqual([
       "src/data/doSqliteOrmAdapters.ts",
+      "src/data/schemaComponent/doDmlEntries.ts",
     ]);
   });
 
