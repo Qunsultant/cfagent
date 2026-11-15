@@ -98,6 +98,11 @@ const KNOWN_ORPHANS = [
   // removed in #4110 as unreachable; the component is kept for a future
   // re-mount, so it is listed here rather than left silently dead.
   "src/client/JobsPanel.tsx",
+  // Deprecated in place in #4574 (superseded by the Schedules home
+  // dead-letter-queue view); the Queues page's last mount (Chat.tsx
+  // TAB_CONTENT) was removed with the page. Preserved under the
+  // zero-deletions policy gate (§22).
+  "src/client/QueuesPage.tsx",
 ];
 
 describe("tab content wiring gates (#2083)", () => {

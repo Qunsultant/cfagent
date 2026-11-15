@@ -1,15 +1,14 @@
 /**
- * Issue 2973 (nav re-org slice 5): the Platform Queues page.
+ * Issue 2973 (nav re-org slice 5): the Platform Queues page — RETIRED.
  *
- * Composes the existing queue surfaces, reusing their behavior:
- * async jobs (AsyncJobsPanel, embedded) and the dead-letter queue
- * (DlqPanel). Each queue keeps its own loading, decision, and refresh
- * behavior — this page only composes them. Trade approvals live on
- * the Approvals page (?tab=approvals), linked from the Trade
- * approvals section below (#4538 moved the queue there — the
- * Approvals page is its one canonical home). Pending review is
- * deliberately NOT composed here: it stays on the Review page.
- * Built only from src/client/components/ui/ primitives.
+ * @deprecated superseded by the Schedules home dead-letter-queue view
+ * (`?tab=schedules&view=dead-letter-queue`, src/client/SchedulesHome.tsx,
+ * issue #4574). The Queues page's async-jobs copy is covered by the
+ * Schedules background-tasks view (same component, same props, same
+ * endpoint); its trade-approvals link goes away with the page — the
+ * Approvals page is the one home per #4538. This file is kept,
+ * unmounted, per the no-deletion rule (Policy Gate check (i)); do not
+ * re-mount it. Built only from src/client/components/ui/ primitives.
  */
 import { PageShell, PageSection } from "./components/ui";
 import { AsyncJobsPanel } from "./AsyncJobsPanel";

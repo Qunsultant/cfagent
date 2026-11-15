@@ -265,8 +265,8 @@ describe("Surface-tab catalog (issue #2776, expanded scope)", () => {
       ["revenue", "src/client/chat/tabs/RevenueTab.tsx", ["ads", "categories", "metrics", "placements", "schemas"]],
       ["iaaa-admin", "src/client/IaaaAdminPanel.tsx", ["overview", "members", "api", "mcp", "iaaa", "correlations"]],
       ["risk-analysis", "src/client/options/RiskAnalysisModal.tsx", ["anatomy", "playbook", "scenarios", "ai"]],
-      // Issue #4561: the schedules surface lists the home's five views.
-      ["schedules", "src/client/SchedulesHome.tsx", ["list", "runs", "goals", "queue", "background-tasks"]],
+      // Issue #4561: the schedules surface lists the home's five views; #4574 adds the sixth.
+      ["schedules", "src/client/SchedulesHome.tsx", ["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue"]],
     ];
     for (const [surface, file, values] of checks) {
       const source = readFileSync(join(ROOT, file), "utf8");

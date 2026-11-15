@@ -1,7 +1,7 @@
 /**
  * Route table contract (#1804 S1, issue #1808): the table is the single
- * source of truth for navigation, so its shape is pinned — 38 entries
- * (31 nav entries + 6 alias ids; the agents tab was added by #2469,
+ * source of truth for navigation, so its shape is pinned — 43 entries
+ * (30 nav entries + 6 alias ids + 7 non-nav pages; the agents tab was added by #2469,
  * Agent Mesh S20/G9, appended at navOrder 25 so no existing item
  * moves; the options-screener tab was added by #2596, appended at
  * navOrder 26 so no existing item moves; the platform-admin tab was added at navOrder 27 so no existing item moves; the products tab was added by #2695, appended at navOrder 28 so no existing item moves; the billing tab was added by #2740, appended at navOrder 29 so no existing item moves), sorted ids, complete metadata, alias
@@ -10,6 +10,9 @@
  * existing item moves.)
  * (#2973: the queues tab was added, appended at navOrder 31 so no
  * existing item moves.)
+ * (#4574: the queues tab retired into the Schedules home
+ * (dead-letter-queue view); navOrders 12..30 shift down one so the
+ * order stays 0..29 across 30 nav entries.)
  * (#2970: goal-screen, review, and track-record routes added — own
  * pages with no nav entries, so the nav-entry count stays 31.)
  * (#2137 rebuild: checkout added at navOrder 24; search restored at
@@ -53,7 +56,6 @@ const EXPECTED_IDS = [
   "platform-admin",
   "portfolio",
   "product-hub",
-  "queues",
   "referrals",
   "reports",
   "research",
@@ -111,11 +113,11 @@ describe("route table", () => {
     }
   });
 
-  it("has exactly 31 nav entries with unique 0..30 display order", () => {
+  it("has exactly 30 nav entries with unique 0..29 display order", () => {
     const nav = ROUTES.filter(hasNavEntry);
-    expect(nav).toHaveLength(31);
+    expect(nav).toHaveLength(30);
     const orders = nav.map((r) => r.navEntry.navOrder).sort((a, b) => a - b);
-    expect(orders).toEqual(Array.from({ length: 31 }, (_, i) => i));
+    expect(orders).toEqual(Array.from({ length: 30 }, (_, i) => i));
     for (const r of nav) {
       expect(r.navEntry.label.length).toBeGreaterThan(0);
       expect(r.navEntry.shortLabel.length).toBeGreaterThan(0);

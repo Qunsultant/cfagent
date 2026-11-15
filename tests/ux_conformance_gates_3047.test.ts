@@ -330,7 +330,6 @@ const CONFORMING_SUB_TABS: Record<string, string> = {
 const EXPECTED_TAB_CONTENT_KEYS = [
   "agents",
   "approvals",
-  "queues",
   "audit",
   "chat",
   "docs",

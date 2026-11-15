@@ -5,7 +5,7 @@
  * Home: `?tab=schedules` (owner-decided, inventory §8.3). Sub-route
  * scheme, following the app's existing `?tab=` + `?view=` deep-link
  * pattern (`src/client/router.ts` `parseViewFromSearch`):
- * `?tab=schedules&view=list|runs|ledger|goals|queue|background-tasks&schedule=<id>&run=<id>`.
+ * `?tab=schedules&view=list|runs|ledger|goals|queue|background-tasks|dead-letter-queue&schedule=<id>&run=<id>`.
  *
  * - `view=list` (default): the schedule list (today's `SchedulesPanel`
  *   capabilities, incl. the embedded `ScheduledOptionsManager`).
@@ -28,9 +28,16 @@
  *   (`AsyncJobsPanel`) — moved here from Platform Admin, which no longer
  *   mounts it. The queue view and Background Tasks stay separate tabs:
  *   admin-queue table ops vs the async execution queue list.
+ * - `view=dead-letter-queue` (issue #4574): the dead-letter queue
+ *   (`DlqPanel`) — moved here from the retired Queues page, whose
+ *   async-jobs copy is removed as covered by Background Tasks (same
+ *   component, same props, same endpoint). The Queues page's
+ *   trade-approvals link goes away with the page — the Approvals page
+ *   is the one home per #4538.
  *
  * Retired addresses (each maps to the home, or to null with the reason
  * recorded here — never silently kept):
+ * - `?tab=queues` (U-07, issue #4574) → `?tab=schedules&view=dead-letter-queue`.
  * - `?tab=screeners&view=schedules` (U-02) → `?tab=schedules`.
  * - `?tab=platform-admin&view=scheduled-goals` (U-04) →
  *   `?tab=schedules&view=goals`.
@@ -70,8 +77,14 @@ import {
 /** The one schedules home tab id. */
 export const SCHEDULES_HOME_TAB = "schedules";
 
-/** The consolidated home's views; `ledger` is an alias of `runs`, not a sixth view. */
-export type SchedulesHomeView = "list" | "runs" | "goals" | "queue" | "background-tasks";
+/** The consolidated home's views; `ledger` is an alias of `runs`, not a seventh view. */
+export type SchedulesHomeView =
+  | "list"
+  | "runs"
+  | "goals"
+  | "queue"
+  | "background-tasks"
+  | "dead-letter-queue";
 
 export const SCHEDULES_HOME_VIEWS: readonly SchedulesHomeView[] = [
   "list",
@@ -79,6 +92,7 @@ export const SCHEDULES_HOME_VIEWS: readonly SchedulesHomeView[] = [
   "goals",
   "queue",
   "background-tasks",
+  "dead-letter-queue",
 ];
 
 export const SCHEDULES_HOME_VIEW_LABELS: Record<SchedulesHomeView, string> = {
@@ -87,6 +101,7 @@ export const SCHEDULES_HOME_VIEW_LABELS: Record<SchedulesHomeView, string> = {
   goals: "Goal schedules",
   queue: "Queue",
   "background-tasks": "Background Tasks",
+  "dead-letter-queue": "Dead-letter queue",
 };
 
 /** `ledger` is accepted as an alias of `runs` (inventory §8.3 (ii)). */
@@ -191,6 +206,13 @@ export function legacySchedulesRedirect(search: string): LegacySchedulesRedirect
   // working, the issue's change-management rule).
   if (tab === "docs") {
     return { tab: SCHEDULES_HOME_TAB, view: "runs", params: { kind: "reports" } };
+  }
+  // Issue #4574 (U-07): the Queues page is retired into the home — its
+  // dead-letter queue is the home's sixth view. The address redirects
+  // (replace, so back/forward never re-lands on it); the page's
+  // async-jobs copy is removed as covered by Background Tasks.
+  if (tab === "queues") {
+    return { tab: SCHEDULES_HOME_TAB, view: "dead-letter-queue" };
   }
   if (
     tab === "platform-admin" &&
