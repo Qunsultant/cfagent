@@ -245,7 +245,12 @@ describe("governedHalt dual-write protocol (as found)", () => {
       state: "halted",
     });
     expect(log[0]).toBe("mirror:recordHalt");
-    expect(log.slice(1)).toEqual(["do:DELETE", "do:INSERT"]);
+    // #4386 (P6c): the DO DELETE now dispatches the Repository
+    // delete method through the catalogue, which verifies the
+    // removal first (D-E.2) — one SELECT precedes the DELETE.
+    // The order the protocol pins (mirror first, then the DO
+    // DELETE+INSERT) is unchanged.
+    expect(log.slice(1)).toEqual(["do:SELECT", "do:DELETE", "do:INSERT"]);
     expect(doSql.readValue()).toBe("on");
     expect(await mirror.isHalted("primary")).toBe(true);
     // The incumbent tick-facing DO read path sees the halt too.
@@ -271,8 +276,18 @@ describe("governedHalt dual-write protocol (as found)", () => {
       state: "clear",
       nowMs: 6000,
     });
-    expect(log.slice(0, 2)).toEqual(["do:DELETE", "do:INSERT"]);
-    expect(log[2]).toBe("mirror:recordHalt");
+    // #4386 (P6c): the DO DELETE's D-E.2 verification SELECT
+    // precedes it, and — because this recording fake reports no
+    // rowsWritten — the delete verifies the removal with a second
+    // SELECT after the DELETE (see the SET test above); the DO leg
+    // still runs first, then the mirror.
+    expect(log.slice(0, 4)).toEqual([
+      "do:SELECT",
+      "do:DELETE",
+      "do:SELECT",
+      "do:INSERT",
+    ]);
+    expect(log[4]).toBe("mirror:recordHalt");
     expect(doSql2.readValue()).toBe("off");
     expect(await mirror.isHalted("primary")).toBe(false);
     expect(isAdaptationHalted(storage as never)).toBe(false);
