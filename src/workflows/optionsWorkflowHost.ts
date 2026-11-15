@@ -32,11 +32,11 @@
  * defined), and awaitOptionsWorkflowRun polls the read-back until
  * the run settles (the vehicle a future sync-leg cutover awaits on).
  * No production strategy leg dispatches through the host yet — every strategy
- * leg is blocked by a named gap (#3960 broker selection, #4453
- * scan-run store + stage queue in the residency; universe deps
- * travel as a stage input since #4473); the legs stay on the sync
- * dispatch until those land, and this surface is what they cut
- * over onto.
+ * leg is blocked by a named gap (#4453 scan-run store + stage queue
+ * in the residency; universe deps travel as a stage input since
+ * #4473, broker selection since #3960); the legs stay on the sync
+ * dispatch until the cutover slices land, and this surface is what
+ * they cut over onto.
  *
  * Issue #4290 — the goal leg's dispatch surface over this host:
  * startGoalOptionsLegWorkflow validates the goal shape, the goal
@@ -46,8 +46,9 @@
  * rebuild the leg's delivery builders from it), and dispatches
  * under the options job identity — the same identity the leg's sync
  * dispatch defines today. The goal leg itself stays on the sync
- * dispatch until its cutover gaps land (#3960, binding
- * reachability); this surface is what it cuts over onto.
+ * dispatch until its cutover gaps land (binding reachability;
+ * broker selection travels as a stage input since #3960); this
+ * surface is what it cuts over onto.
  *
  * Issue #4451 — the comparison leg's dispatch surface over this
  * host: startComparisonWorkflow validates the comparison shape
@@ -58,8 +59,9 @@
  * The read-back is comparison-aware: a comparison run has one
  * stage, not eight, and writes no shapeReport. No production
  * comparison leg dispatches through the host yet — the comparison
- * leg's cutover is not filed separately (see the #4451 report), and
- * the legs stay blocked by the named gap (#3960).
+ * leg's cutover is not filed separately (see the #4451 report),
+ * and the legs stay on the sync dispatch until the cutover slice
+ * lands (broker selection travels as a stage input since #3960).
  *
  * Issue #4450 — the first production leg dispatches through the
  * host: the manual route sends gated symbol-scoped screens through
@@ -69,7 +71,7 @@
  * manualScreenDispatchRoute) keeps every other manual screen on
  * the unchanged sync dispatch until the cutover slices lift it
  * (#4473 landed: universe deps travel as a stage input; #3960
- * still gates broker selection).
+ * landed: broker selection travels as a stage input).
  */
 import {
   createJobPipelineStoresFromD1,
@@ -100,8 +102,11 @@ import { optionsArtifactKey } from "./optionsScreenPorts";
 import {
   decodeOptionsRequestShape,
   OptionsStepPortsError,
+  stampBrokerStageInput,
   stampUniverseDepsStageInput,
+  validateBrokerStageInput,
   validateUniverseDepsStageInput,
+  type BrokerStageInput,
   type UniverseDepsStageInput,
 } from "./optionsStepPorts";
 import { OPTIONS_PIPELINE_STAGES } from "./stageRuntimeIds";
@@ -125,6 +130,16 @@ export interface StartOptionsScreenWorkflowInput {
    * before anything is defined.
    */
   universe?: UniverseDepsStageInput;
+  /**
+   * The broker stage input (#3960): a serializable (broker, mode)
+   * descriptor stamped on the stored request's classInput, from
+   * which the residency factory resolves the chain source per
+   * invocation — so a run fetches through the broker and mode it
+   * names, per-stage/per-run. Absent, no key is stamped and the
+   * run dispatches exactly as before. A malformed descriptor
+   * refuses by name before anything is defined.
+   */
+  broker?: BrokerStageInput;
   /**
    * The job identity: the options job (default), the strategy job
    * (#4271), or the comparison job (#4276, #4451).
@@ -195,18 +210,25 @@ export async function startOptionsScreenWorkflow(
   opts: StartOptionsScreenWorkflowOpts = {},
 ): Promise<{ instanceId: string; jobId: string }> {
   const trigger = input.trigger ?? "manual";
-  // #4473: validate + stamp the universe stage input BEFORE
+  // #4473 + #3960: validate + stamp the stage inputs BEFORE
   // defining anything — a malformed descriptor refuses by name
   // with no job defined, like the shape validations in the named
   // seams. The stored request carries the stamped copy; the
-  // caller's request is never mutated.
-  const request =
-    input.universe !== undefined
-      ? stampUniverseDepsStageInput(
-          input.request,
-          validateUniverseDepsStageInput(input.universe, input.runId),
-        )
-      : input.request;
+  // caller's request is never mutated. The two descriptors are
+  // independent keys and compose on one run.
+  let request = input.request;
+  if (input.universe !== undefined) {
+    request = stampUniverseDepsStageInput(
+      request,
+      validateUniverseDepsStageInput(input.universe, input.runId),
+    );
+  }
+  if (input.broker !== undefined) {
+    request = stampBrokerStageInput(
+      request,
+      validateBrokerStageInput(input.broker, input.runId),
+    );
+  }
   const jobId =
     input.jobKind === "strategy-screen"
       ? strategyScreenJobId(input.runId)
@@ -365,6 +387,12 @@ export interface StartGoalOptionsLegWorkflowInput {
    * host. Without it, a discovery-mode leg is refused by name.
    */
   universe?: UniverseDepsStageInput;
+  /**
+   * The broker stage input (#3960): stamped on the stored
+   * request's classInput beside the goal run id, so the leg
+   * fetches through the broker and mode the dispatch names.
+   */
+  broker?: BrokerStageInput;
 }
 
 /**
@@ -448,6 +476,7 @@ export async function startGoalOptionsLegWorkflow(
       ...(input.userLogin ? { userLogin: input.userLogin } : {}),
       ...(input.trigger ? { trigger: input.trigger } : {}),
       ...(input.universe ? { universe: input.universe } : {}),
+      ...(input.broker ? { broker: input.broker } : {}),
     },
     opts,
   );

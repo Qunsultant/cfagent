@@ -65,8 +65,22 @@
  * them to the rebuild, which constructs every screener with them.
  * The control path hands none: a control re-run of a discovery-mode
  * stage keeps the #1378 refusal, as it has no residency to resolve
- * over. #3960 mirrors this contract for broker selection with a
- * sibling classInput key.
+ * over.
+ *
+ * Issue #3960 — the broker stage input: a run may carry a
+ * serializable (broker, mode) descriptor on classInput.broker
+ * (BrokerStageInput, decoded by decodeBrokerStageInput, stamped
+ * by the start seams). The live chain source is a constructed
+ * client and can never be stored, so the resolving steps decode
+ * the descriptor per invocation and the residency factory
+ * (brokerChainSourceResidency.ts, bound as chainSourceFor)
+ * resolves the chain source from the pair through the trading
+ * platform registry — per-stage/per-run, never a global or
+ * per-tenant singleton, so two runs may carry different brokers
+ * at the same time. Runs carrying no input keep the legacy
+ * direct client construction, byte-identically. The sibling of
+ * the #4473 universe input: the two descriptors are independent
+ * keys and compose on one run.
  *
  * Refusals throw OptionsStepPortsError, a JobPipelineError — the
  * engine rethrows a JobPipelineError from a step handler with its
@@ -78,7 +92,13 @@
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import type { Env } from "../types";
-import { DynamicOptionsScreener, type NasdaqUniverseDeps } from "../trading";
+import {
+  BROKER_CATALOG,
+  DynamicOptionsScreener,
+  type BrokerId,
+  type NasdaqUniverseDeps,
+  type TradingType,
+} from "../trading";
 import type { OptionsScreenStepDeps } from "./optionsScreenEngine";
 import {
   createOptionsScreenPorts,
@@ -228,9 +248,9 @@ export const UNIVERSE_DEPS_STAGE_INPUT_KEY = "universeDeps";
  *
  * This is the seam #3960 mirrors for provider/broker selection: a
  * sibling classInput key carrying a (broker, mode) descriptor, a
- * sibling decoder, and a sibling factory on the resolving steps.
- * That slice is distinct and owns its own key; nothing here reads
- * or writes it.
+ * sibling decoder, and a sibling factory on the resolving steps
+ * (BrokerStageInput, below). That slice owns its own key; nothing
+ * here reads or writes it.
  */
 export interface UniverseDepsStageInput {
   provider: "nasdaq";
@@ -308,6 +328,115 @@ export function stampUniverseDepsStageInput(
   return {
     ...req,
     classInput: { ...classInput, [UNIVERSE_DEPS_STAGE_INPUT_KEY]: universe },
+  };
+}
+
+/**
+ * The classInput key carrying the broker descriptor. One constant
+ * for every writer (the start seams) and the readers (decode, and
+ * the residency factory), so the key cannot drift between them.
+ */
+export const BROKER_STAGE_INPUT_KEY = "broker";
+
+/**
+ * The (broker, mode) descriptor a run carries as a stage input
+ * (#3960). It is serializable dispatch data, not the chain source
+ * itself: the live source is a constructed client and can never
+ * be stored, so the run carries this descriptor and the residency
+ * factory resolves the source from it per invocation (the factory
+ * in `./brokerChainSourceResidency`, bound as `chainSourceFor`).
+ *
+ * The broker is a catalog broker id — the same vocabulary the
+ * tenant's broker selection carries, and the registry's own key.
+ * The mode is the first-class trading mode (#3451: paper | live),
+ * carried as a run/stage input instead of a global setting, so
+ * two runs (or two legs of one run) may carry different brokers
+ * at the same time. The environment tokens (TEST/PROD) are NOT
+ * the mode: each broker maps its environment to the mode through
+ * the catalog, and the factory maps the mode back to the token
+ * the platform constructors accept.
+ *
+ * The sibling of the #4473 universe input: the two descriptors
+ * are independent keys and compose on one run. Nothing here
+ * reads or writes the universe key.
+ */
+export interface BrokerStageInput {
+  broker: BrokerId;
+  mode: TradingType;
+}
+
+/**
+ * Validate a caller-supplied broker descriptor. A malformed
+ * descriptor refuses by name at the seam that received it — the
+ * decoder never guesses a broker or a mode. Matching is exact:
+ * dispatch data names its broker and mode verbatim, so a
+ * case-folded broker, the legacy `sandbox` alias, and an
+ * environment token in the mode's place all refuse rather than
+ * resolve to something the caller did not name.
+ */
+export function validateBrokerStageInput(
+  value: unknown,
+  runId: string,
+): BrokerStageInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new OptionsStepPortsError(
+      "stage_request_unrecognized",
+      `options run ${runId}: the broker stage input is not an object — refusing to guess the broker`,
+    );
+  }
+  const candidate = value as { broker?: unknown; mode?: unknown };
+  if (
+    typeof candidate.broker !== "string" ||
+    !Object.prototype.hasOwnProperty.call(BROKER_CATALOG, candidate.broker)
+  ) {
+    throw new OptionsStepPortsError(
+      "stage_request_unrecognized",
+      `options run ${runId}: the broker stage input names an unrecognized broker ${JSON.stringify(candidate.broker)} — only a catalog broker id names a chain source; refusing to guess the broker`,
+    );
+  }
+  if (candidate.mode !== "paper" && candidate.mode !== "live") {
+    throw new OptionsStepPortsError(
+      "stage_request_unrecognized",
+      `options run ${runId}: the broker stage input names an unrecognized mode ${JSON.stringify(candidate.mode)} — only "paper" or "live" is a trading mode; refusing to guess the mode`,
+    );
+  }
+  return { broker: candidate.broker as BrokerId, mode: candidate.mode };
+}
+
+/**
+ * Decode the broker descriptor from a stored dispatch request.
+ * Absent (no classInput, or no key) decodes to `undefined`: runs
+ * dispatched before #3960, and runs that carry no broker input,
+ * are untouched. Present-but-malformed refuses by name.
+ */
+export function decodeBrokerStageInput(
+  request: unknown,
+  runId: string,
+): BrokerStageInput | undefined {
+  const classInput = (
+    request as { classInput?: Record<string, unknown> } | null | undefined
+  )?.classInput;
+  const value = classInput?.[BROKER_STAGE_INPUT_KEY];
+  if (value === undefined) return undefined;
+  return validateBrokerStageInput(value, runId);
+}
+
+/**
+ * Stamp a validated broker descriptor onto a copy of a dispatch
+ * request. The caller's request is never mutated (the goal seam's
+ * goalRunId stamp has the same copy semantics).
+ */
+export function stampBrokerStageInput(
+  request: unknown,
+  broker: BrokerStageInput,
+): unknown {
+  const req = (
+    request && typeof request === "object" && !Array.isArray(request) ? request : {}
+  ) as Record<string, unknown>;
+  const classInput = (req.classInput as Record<string, unknown> | undefined) ?? {};
+  return {
+    ...req,
+    classInput: { ...classInput, [BROKER_STAGE_INPUT_KEY]: broker },
   };
 }
 

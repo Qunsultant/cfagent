@@ -577,6 +577,19 @@ function measure(): Map<string, number> {
  * the comments or the gate reasons), and the gate's comparison
  * falls away when provider selection (#3960) replaces the direct
  * binding. Totals move 1188/9347 -> 1189/9350.
+ * Baseline update (#3960, 2026-11-15): provider/broker selection
+ * travels as a stage input, so the direct chain-source bindings
+ * fall back as the #4289/#4452 entries recorded: the
+ * jobPipelineWorkflow.ts etrade row retires outright (2 -> 0, row
+ * removed) and the scheduledTasksPipeline.ts etrade row falls back
+ * 3 -> 1 (only the pre-existing header line remains). 1 new row,
+ * dispositioned INTEGRATION: the residency factory's legacy
+ * direct-client import + construction
+ * (brokerChainSourceResidency.ts etrade 2 — the pair path resolves
+ * through the registry and names no provider; the module's prose
+ * names none). (The header's last recorded totals were stale:
+ * counted 1191 rows / 9358 lines before this change.) Totals move
+ * 1191/9358 -> 1191/9356.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -786,7 +799,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (681 rows / 6530 lines) ----
+  // ---- INTEGRATION (681 rows / 6528 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -960,10 +973,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/sandbox-agent.ts", "etrade", 7],
   ["src/agents/sandboxA2aDispatch.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "alpaca", 1],
-  // #4452 INTEGRATION: the host-side options-step wiring binds the
-  // chain source to the provider's client (the import + construction,
-  // beside the pre-existing header line) — the #4289 precedent.
-  ["src/agents/scheduledTasksPipeline.ts", "etrade", 3],
+  // #4452 INTEGRATION, fallen back in #3960: the host-side
+  // options-step wiring no longer binds the chain source to the
+  // provider's client directly (the shared residency factory
+  // does) — only the pre-existing header line remains.
+  ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "yahoo", 1],
   ["src/agents/screener-agent.ts", "alpaca", 24],
   ["src/agents/screener-agent.ts", "etrade", 95],
@@ -1462,14 +1476,14 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/types.ts", "alpaca", 15],
   ["src/types.ts", "etrade", 82],
   ["src/types.ts", "yahoo", 3],
+  // #3960 INTEGRATION: the broker stage input's residency factory
+  // resolves the chain source per invocation — the legacy direct
+  // client's import + construction for runs carrying no input
+  // (the pair path resolves through the registry and names no
+  // provider). Naming the provider is the legacy binding's job;
+  // the module's prose names none.
+  ["src/workflows/brokerChainSourceResidency.ts", "etrade", 2],
   ["src/workflows/goalStockScreenSpec.ts", "etrade", 1],
-  // #4289 INTEGRATION: the workflow residency binds the options
-  // steps' chain source — the import + construction of the
-  // provider's client in optionsStepDepsForWorkflow. Naming the
-  // provider is the binding's job (the #4192/#4279 precedent);
-  // the prose around it is neutralized, and the count falls back
-  // when provider selection (#3960) replaces the direct binding.
-  ["src/workflows/jobPipelineWorkflow.ts", "etrade", 2],
   ["src/workflows/legalApplicability.ts", "alpaca", 1],
   ["src/workflows/legalApplicability.ts", "etrade", 1],
   ["src/workflows/manualOptionsRecordBuilder.ts", "etrade", 1],

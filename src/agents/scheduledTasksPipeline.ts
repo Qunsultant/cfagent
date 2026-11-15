@@ -63,6 +63,7 @@ import { createEnrichedDatasetAdapter } from "../data/createEnrichedDatasetPorts
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts";
 import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";
+import { resolveChainSourceForRequest } from "../workflows/brokerChainSourceResidency";
 import { stageQueueSendFromEnv } from "../workflows/stageQueueTransport";
 import { createSqlDeliverySuppressionStore } from "../data/deliveryClaimsStore";
 import { createD1IndexListDb, D1IndexListStore } from "../data/d1IndexListAdapter";
@@ -135,7 +136,6 @@ import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import {
   createIndexMembershipService,
   createWikipediaIndexMembershipAdapter,
-  ETradeRestClient,
 } from "../trading";
 import type { JobInstanceRecord } from "../data/jobPipelinePorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -398,11 +398,10 @@ export function deliverStepDepsForScheduledAgent(
  * storage. The definition + artifact stores are the DO-SQLite
  * adapters the host control plane itself reads, so the resolving
  * steps read the dispatch request back from the definition the
- * host defined; the chain source is the tenant's broker client,
- * constructible from env + login exactly as in the workflow
- * residency (provider selection is #3960's gap — until it lands,
- * the host fetches the tenant's broker chains, as every options
- * leg does today); the stage-message queue is built from env.
+ * host defined; the chain source resolves per invocation from
+ * the run's broker stage input (#3960, the shared residency
+ * factory — the same binding as the workflow residency, over
+ * this host's env); the stage-message queue is built from env.
  * No scan-run store is bound, by the #4453 decided-not-to: the
  * scan-run family's home is the per-login store every reader
  * reads, not this host's own SQLite — the persist stage's named
@@ -417,8 +416,8 @@ export function optionsStepDepsForScheduledAgent(
     definitions: stores.definitions,
     artifacts: stores.artifacts,
     env: ctx.env,
-    chainSourceFor: (userLogin) =>
-      userLogin ? new ETradeRestClient(ctx.env, userLogin) : undefined,
+    chainSourceFor: (userLogin, request, runId) =>
+      resolveChainSourceForRequest(ctx.env, { userLogin, request, runId }),
     queue: stageQueueSendFromEnv(ctx.env),
   };
 }
