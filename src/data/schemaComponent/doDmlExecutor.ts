@@ -9,6 +9,17 @@
  * is no function to hand it to. The P6b pin test exercises this
  * (unknown code, duplicate registration, tampered entry).
  *
+ * #4386 (P6c): a parameterized-table entry resolves the runtime
+ * table from the caller's code and params at execution — the
+ * execution-time check is code table == runtime table, enforced
+ * in dispatchRepository before any SQL is built, and the runtime
+ * table must be a lowercase word (it is interpolated into the
+ * Repository's statements). The placeholder code itself
+ * (dml.do.__table__.<action>) is never callable: its table
+ * segment "__table__" is never a runtime table, so the check
+ * refuses it. The AOP operationName is the full resolved code
+ * the caller passed.
+ *
  * SYNC, by design: the DO adapters and their ports are synchronous
  * (SqlStorage.exec is sync; the discovery/run ports are sync
  * methods). Making this executor async would ripple async through
@@ -41,7 +52,8 @@ import type {
   DoDmlCatalogue,
   DoDmlParams,
 } from "./doDmlCatalogue";
-import { validateDoDmlEntry } from "./doDmlCatalogue";
+import { PARAMETERIZED_TABLE, validateDoDmlEntry } from "./doDmlCatalogue";
+import { statementCodeTable } from "./statementCodes";
 import {
   createSchemaError,
   SchemaComponentError,
@@ -93,12 +105,42 @@ function dispatchRepository(
   code: string,
   params: DoDmlParams,
 ): unknown {
+  // #4386: a parameterized-table entry is registered once per
+  // operation with the placeholder table — the runtime table
+  // comes from the caller's code and params, and the
+  // execution-time check is code table == runtime table. The
+  // table is interpolated into the Repository's statements, so
+  // it must be a lowercase word; the placeholder itself is
+  // never a runtime table, so it is never callable.
+  let table = entry.table;
+  if (entry.parameterizedTable === true) {
+    const runtimeTable = params.table;
+    if (typeof runtimeTable !== "string" || !/^[a-z0-9_]+$/.test(runtimeTable)) {
+      throw createSchemaError(
+        SchemaErrorCode.INVALID_ENTRY,
+        `code ${code}: param "table" must be a lowercase word for a parameterized-table entry`,
+      );
+    }
+    if (runtimeTable === PARAMETERIZED_TABLE) {
+      throw createSchemaError(
+        SchemaErrorCode.INVALID_ENTRY,
+        `code ${code}: param "table" must be a runtime table, not the "${PARAMETERIZED_TABLE}" placeholder`,
+      );
+    }
+    if (statementCodeTable(code) !== runtimeTable) {
+      throw createSchemaError(
+        SchemaErrorCode.INVALID_ENTRY,
+        `code ${code}: code table "${statementCodeTable(code)}" does not match runtime table "${runtimeTable}"`,
+      );
+    }
+    table = runtimeTable;
+  }
   // The Repository is a thin dispatcher over the passed storage;
   // construction is cheap and stateless, so one is built per call
   // rather than cached (a cached Repository would pin one storage).
   const repository = new Repository<Record<string, any>>(
     sql,
-    entry.table,
+    table,
     entry.idField ?? "id",
     entry.columnMap ?? {},
   );
@@ -107,6 +149,8 @@ function dispatchRepository(
       return repository.create(requireObject(params, "record", code));
     case "createOrIgnore":
       return repository.createOrIgnore(requireObject(params, "record", code));
+    case "createOrReplace":
+      return repository.createOrReplace(requireObject(params, "record", code));
     case "upsert":
       return repository.upsert(requireObject(params, "record", code));
     case "update":
