@@ -67,6 +67,7 @@ import { createTenantDirectoryAdapter } from "../../data/createTenantDirectoryPo
 import type { TenantDirectory } from "../../data/tenantDirectoryPorts";
 import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
 import type { StoreOperators } from "../../data/storeOperatorsPorts";
+import { isLoginTenantId } from "../../services/platformIdentity";
 
 export interface PlatformTenantRouteContext {
   /** Worker env (carries the AGENT_DB + COMMERCIAL_STORE_OPERATORS bindings). */
@@ -258,6 +259,9 @@ export async function handlePlatformTenantRoutes(
       const newTenantId = body["tenantId"];
       if (!isTenantIdShaped(newTenantId)) {
         return jsonError("tenantId is required and must be a non-empty id without whitespace.", 400);
+      }
+      if (isLoginTenantId(newTenantId.trim())) {
+        return jsonError("tenantId cannot use the reserved 'login:' personal-scope prefix.", 400);
       }
       const existing = await directory.listTenantIds();
       if (existing.includes(newTenantId.trim())) {

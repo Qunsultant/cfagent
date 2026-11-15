@@ -262,6 +262,7 @@ import type { D1SubscriptionAdapter } from "../../data/d1SubscriptionAdapter";
 import { isPlanPriceApproved, resolveEffectiveTier, resolveTierTransition, type SubscriptionPlanRecord } from "../../data/subscriptionPorts";
 import {
   NO_ACCOUNT_PAID_MESSAGE,
+  resolveEffectiveTenantId,
   resolvePlatformIdentity,
   toPlatformIdentityView,
 } from "../../services/platformIdentity";
@@ -1756,10 +1757,10 @@ export async function handleAgenticPaymentsRoutes(
         return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: NO_ACCOUNT_PAID_MESSAGE }, { status: 403 });
       } else {
         // Free path (flag OFF), session scoped always: the scope
-        // label is the verified session login. A client-supplied
-        // tenantId is never read here, in any path — no anonymous
-        // tenant is invented, and no account row is created.
-        tenantId = login;
+        // label is the namespaced personal login-as-tenant id (#4602).
+        // A client-supplied tenantId is never read here, in any path —
+        // no anonymous tenant is invented, and no account row is created.
+        tenantId = resolveEffectiveTenantId(null, login);
       }
       const account = { ...toCommercialAccount(login, identity.stored, email, tenantId), tier: identity.tier };
       // #2219 fix (session scoped always): the screener command's
@@ -2569,7 +2570,7 @@ export async function handleAgenticPaymentsRoutes(
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
-      const tenantId = identity.tenantId ?? login;
+      const tenantId = resolveEffectiveTenantId(identity.tenantId, login);
       const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
       if (!ports) {
         return Response.json({ error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
@@ -2677,7 +2678,7 @@ export async function handleAgenticPaymentsRoutes(
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
-      const tenantId = identity.tenantId ?? login;
+      const tenantId = resolveEffectiveTenantId(identity.tenantId, login);
       const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
       if (!ports) {
         return Response.json({ error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
@@ -2899,7 +2900,7 @@ export async function handleAgenticPaymentsRoutes(
       // #2219 (rebased onto #2198's native card checkout): the tenant
       // comes from the resolved identity, never the request body; the
       // mint itself stays the native Stripe checkout.
-      const tenantId = identity.tenantId ?? login;
+      const tenantId = resolveEffectiveTenantId(identity.tenantId, login);
       // Issue #3289: the buyer buys the effective, approved version
       // for THEIR segment — never a superseded, future, expired, or
       // unapproved version. Fail-closed before any provider call.
@@ -3038,7 +3039,7 @@ export async function handleAgenticPaymentsRoutes(
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
-      const tenantId = identity.tenantId ?? login;
+      const tenantId = resolveEffectiveTenantId(identity.tenantId, login);
       const ports = createCheckoutPorts(ctx.env as unknown as {
         STRIPE_SECRET_KEY?: string;
         STRIPE_TEST_SECRET_KEY?: string;
@@ -3321,7 +3322,7 @@ export async function handleAgenticPaymentsRoutes(
         return topUpCodedResponse("FAILURE_TOP_UP_STORE_UNAVAILABLE", "top_up.checkout", { userLogin: login, rail });
       }
       // #2219: the tenant comes from the resolved identity, never the request body.
-      const tenantId = identity.tenantId ?? login;
+      const tenantId = resolveEffectiveTenantId(identity.tenantId, login);
       const drafts = requireTopUpDrafts();
       if (drafts instanceof Response) return drafts;
       try {
@@ -3755,7 +3756,7 @@ export async function handleAgenticPaymentsRoutes(
         return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       // #2219: the tenant comes from the resolved identity, never the request body.
-      const tenantId = identity.tenantId ?? login;
+      const tenantId = resolveEffectiveTenantId(identity.tenantId, login);
       const ports = createCheckoutPorts(ctx.env as unknown as CheckoutEnv);
       const port = ports?.[rail] ?? null;
       if (!port) {
@@ -4423,7 +4424,7 @@ export async function handleAgenticPaymentsRoutes(
         { commercial: store, subscriptions: subs },
         { userId: login, nowMs: Date.now() },
       );
-      const redeemerTenantId = identity.tenantId ?? login;
+      const redeemerTenantId = resolveEffectiveTenantId(identity.tenantId, login);
       const codes = await requireReferralCodes();
       if (codes instanceof Response) return codes;
       // Attribution is best-effort: an unbound lifecycle port (or
@@ -4721,7 +4722,7 @@ export async function handleAgenticPaymentsRoutes(
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
-      const tenantId = identity.tenantId ?? login;
+      const tenantId = resolveEffectiveTenantId(identity.tenantId, login);
       const previousSubscriptions = await subs.listSubscriptions(login);
       const { subscription, account, trialEndsAtMs } = await activateTrialSubscription({
         subs,
@@ -4829,7 +4830,7 @@ export async function handleAgenticPaymentsRoutes(
         // Issue #4692: an identity failure is its own coded outcome.
         return codedOutcomeResponse("FAILURE_BILLING_IDENTITY_UNAVAILABLE");
       }
-      const tenantId = identity.tenantId ?? login;
+      const tenantId = resolveEffectiveTenantId(identity.tenantId, login);
       // Issue #3289: same effective+approved-for-segment check as
       // the one-time checkout mint — the buyer buys the effective
       // version for THEIR segment. Fail-closed before any provider
@@ -4959,7 +4960,7 @@ export async function handleAgenticPaymentsRoutes(
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
-      const tenantId = identity.tenantId ?? login;
+      const tenantId = resolveEffectiveTenantId(identity.tenantId, login);
       const ports = createBillingCheckoutPorts(ctx.env as unknown as BillingCheckoutEnv);
       if (!ports) {
         return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing checkout is not configured (Stripe)." }, { status: 503 });
@@ -5397,7 +5398,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         },
         {
           userLogin: login,
-          tenantId: identity.tenantId ?? login,
+          tenantId: resolveEffectiveTenantId(identity.tenantId, login),
           email: body?.email,
           family: body?.family,
         },
@@ -5445,14 +5446,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       // A first-time buyer has no commercial account yet: create it
       // (Free tier). Tenant falls back to the login, the same
       // fallback the billing-purchase route uses
-      // (identity.tenantId ?? login).
+      // (resolveEffectiveTenantId(identity.tenantId, login)).
       const identity = await resolvePlatformIdentity(
         { commercial: store, subscriptions: subs },
         { userId: login, nowMs: Date.now() },
       );
       const existing = await store.getAccount(login);
       if (!existing) {
-        await store.upsertAccount({ userId: login, tenantId: identity.tenantId ?? login, tier: "Free" });
+        await store.upsertAccount({ userId: login, tenantId: resolveEffectiveTenantId(identity.tenantId, login), tier: "Free" });
       }
       const result = await confirmChannelPurchase(
         {

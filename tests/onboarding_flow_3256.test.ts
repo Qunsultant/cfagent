@@ -184,7 +184,7 @@ describe("onboarding state routes (#3256)", () => {
       req("POST", "/platform/onboarding/state", "onb-route-c", { currentStep: 2 }),
     );
     const state = saved?.body.state as Record<string, unknown>;
-    expect(state.tenantId).toBe("onb-route-c");
+    expect(state.tenantId).toBe("login:onb-route-c");
   });
 
   it("completion stamps completedAtMs server-side and audits once on the transition", async () => {

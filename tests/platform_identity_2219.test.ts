@@ -300,7 +300,7 @@ describe("submit route tenant derivation (#2219)", () => {
     const { ctx, captured } = await setup();
     const res = await call(ctx, "POST", "/payments/agentic/commercial/submit", "u1", submitBody);
     expect(res?.status).toBe(200);
-    expect((captured() as any).tenantId).toBe("u1");
+    expect((captured() as any).tenantId).toBe("login:u1");
   });
 
   it("free path (flag OFF) ignores a mismatched client tenantId AND a client tenantId inside screenerCommand", async () => {
@@ -311,9 +311,9 @@ describe("submit route tenant derivation (#2219)", () => {
       screenerCommand: { ...screenerCommand, tenantId: "attacker-tenant" },
     });
     expect(res?.status).toBe(200);
-    expect((captured() as any).tenantId).toBe("u1");
-    expect((captured() as any).account.tenantId).toBe("u1");
-    expect((captured() as any).screenerCommand.tenantId).toBe("u1");
+    expect((captured() as any).tenantId).toBe("login:u1");
+    expect((captured() as any).account.tenantId).toBe("login:u1");
+    expect((captured() as any).screenerCommand.tenantId).toBe("login:u1");
     expect((captured() as any).screenerCommand.userLogin).toBe("u1");
   });
 });
@@ -375,7 +375,7 @@ describe("subscription tenant derivation (#2219, native card checkout)", () => {
     expect(((await bodyOf(checkout)) as { checkoutRequestId: string }).checkoutRequestId).toMatch(/^sub-/);
     const auditCalls = (ctx.audit as unknown as { mock: { calls: Array<[string, string, Record<string, unknown>]> } }).mock.calls;
     const created = auditCalls.find(([t]) => t === "commercial.subscription.checkout_created");
-    expect(created?.[2].tenantId).toBe("u1");
+    expect(created?.[2].tenantId).toBe("login:u1");
     // No row was created by checkout: identity still reports no account.
     const identity = await bodyOf(await call(ctx, "GET", "/payments/agentic/commercial/identity", "u1"));
     expect(identity.hasAccount).toBe(false);
@@ -413,12 +413,12 @@ describe("subscription tenant derivation (#2219, native card checkout)", () => {
     });
     expect(purchase?.status).toBe(200);
     const purchased = await bodyOf(purchase);
-    expect(purchased.account.tenantId).toBe("u1");
-    expect(purchased.subscription.tenantId).toBe("u1");
+    expect(purchased.account.tenantId).toBe("login:u1");
+    expect(purchased.subscription.tenantId).toBe("login:u1");
     expect(purchased.effectiveTier).toBe("Subscribed");
     const identity = await bodyOf(await call(ctx, "GET", "/payments/agentic/commercial/identity", "u1"));
     expect(identity.hasAccount).toBe(true);
-    expect(identity.tenantId).toBe("u1");
+    expect(identity.tenantId).toBe("login:u1");
     expect(identity.tier).toBe("Subscribed");
     expect(identity.includedRunsRemaining).toBe(3);
   });
