@@ -240,7 +240,22 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
       expect(itemIds).not.toContain(id);
     }
     expect(SUB_MENU_CONFIGS.orders.map((s) => s.id)).toEqual(["checkout", "ledger"]);
-    expect(SUB_MENU_CONFIGS.billing.map((s) => s.id)).toEqual(["billing", "revenue"]);
+    // Issue #4638: the billing sub-menu is one entry per Billing
+    // section tab (Overview first — the billing page itself, by
+    // default) plus the Revenue Analytics sibling route.
+    expect(SUB_MENU_CONFIGS.billing.map((s) => s.id)).toEqual([
+      "overview",
+      "refund-policy",
+      "refund-flow",
+      "usage-billing",
+      "referral-codes",
+      "approved-free-quota",
+      "top-up-limits",
+      "offer-rules",
+      "plan-stripe-price",
+      "support-snapshot",
+      "revenue",
+    ]);
     expect(SUB_MENU_CONFIGS.payments.map((s) => s.id)).toEqual(["payments", "payment-assurance"]);
     // Submenu links land on the same ?tab=X destinations the
     // top-level items used (default route resolution, no overrides).

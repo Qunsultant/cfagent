@@ -283,12 +283,15 @@ export function isNavItemOrSubItemActive(
         // Issue #4530: the Product Hub's sub-menu items are views of
         // the hub tab, like the stock-hub precedent above. Issue #4575
         // adds the Audit & Vault host: its two entries are the audit
-        // and nlq views of `?tab=audit-vault`.
+        // and nlq views of `?tab=audit-vault`. Issue #4638 adds the
+        // Billing page the same way: its sub-menu items are the
+        // section tabs of `?tab=billing&view=<id>`.
         if (
           (currentTab === "screeners" ||
             currentTab === "stock-hub" ||
             currentTab === "product-hub" ||
-            currentTab === "audit-vault") &&
+            currentTab === "audit-vault" ||
+            currentTab === "billing") &&
           view === sub.id
         )
           return true;

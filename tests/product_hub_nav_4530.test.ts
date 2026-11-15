@@ -105,7 +105,21 @@ describe("Product Hub nav (#4530)", () => {
       expect(navItem(id)).toBeDefined();
     }
     expect((navItem("orders")!.subItems ?? []).map((s) => s.id)).toContain("checkout");
-    expect(subMenus["billing"].map((i) => i.id)).toEqual(["billing", "revenue"]);
+    // Issue #4638: the billing sub-menu is one entry per Billing
+    // section tab plus the Revenue Analytics sibling route.
+    expect(subMenus["billing"].map((i) => i.id)).toEqual([
+      "overview",
+      "refund-policy",
+      "refund-flow",
+      "usage-billing",
+      "referral-codes",
+      "approved-free-quota",
+      "top-up-limits",
+      "offer-rules",
+      "plan-stripe-price",
+      "support-snapshot",
+      "revenue",
+    ]);
     expect(subMenus["orders"].map((i) => i.id)).toEqual(["checkout", "ledger"]);
     expect(subMenus["payments"].map((i) => i.id)).toEqual(["payments", "payment-assurance"]);
     expect(deepLinkHref(deepLinkForNavNode("billing", "billing"))).toBe("?tab=billing");

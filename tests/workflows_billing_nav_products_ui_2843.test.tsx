@@ -72,7 +72,21 @@ describe("Workflows, Billings/Payments Nav & Products UI (issue #2843)", () => {
 
     expect(billingSec!.items.map((i) => i.id)).toEqual(["orders", "billing", "payments"]);
     expect(SUB_MENU_CONFIGS.orders.map((s) => s.id)).toEqual(["checkout", "ledger"]);
-    expect(SUB_MENU_CONFIGS.billing.map((s) => s.id)).toEqual(["billing", "revenue"]);
+    // Issue #4638: the billing sub-menu is one entry per Billing
+    // section tab plus the Revenue Analytics sibling route.
+    expect(SUB_MENU_CONFIGS.billing.map((s) => s.id)).toEqual([
+      "overview",
+      "refund-policy",
+      "refund-flow",
+      "usage-billing",
+      "referral-codes",
+      "approved-free-quota",
+      "top-up-limits",
+      "offer-rules",
+      "plan-stripe-price",
+      "support-snapshot",
+      "revenue",
+    ]);
     expect(SUB_MENU_CONFIGS.payments.map((s) => s.id)).toEqual(["payments", "payment-assurance"]);
 
     const assuranceRoute = getRoute("payment-assurance");
