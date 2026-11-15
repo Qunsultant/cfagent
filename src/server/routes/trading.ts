@@ -35,7 +35,8 @@ import { createKvPermissionDenialStore } from "../../security/iaaaPermissionDeni
 import { sessionStore } from "../../security/session";
 import { confirmSlackLink, INBOUND_EMAIL_ORCHESTRATOR_INSTANCE, verifyApprovalLinkForPrincipal, DEFAULT_SAVED_PRESETS, getDynamicLiveFlowItems, getDynamicFlowSummary, summarizeFlowProvenance, fetchRealMarketNews, fetchRealSecInsiderFilings, fetchRealCongressDisclosures, MarketCapCategory, AssetClassCategory } from "../../trading";
 import { handleMarketQuotesHttp } from "../../services/marketStream";
-import { getQuoteSource, setQuoteSource, normalizeQuoteSource, type QuoteSourceStore } from "../../services/quoteSourceSetting";
+import { getQuoteSource, setQuoteSource, normalizeQuoteSource } from "../../services/quoteSourceSetting";
+import { createD1QuoteSourceDb } from "../../data/d1QuoteSourceAdapter";
 import { levelsForQuoteSwitch, resolveQuoteExpiryMode, resolveQuoteHttpProviderMode } from "../../config/quoteModes";
 
 /**
@@ -519,7 +520,8 @@ export async function handleTradingQuotesRoutes(request: Request, env: Env, url:
     if (path === "/api/market/quotes/source" && (request.method === "GET" || request.method === "POST")) {
       const session = await requireAuth(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
-      const db = (env as any).AGENT_DB as QuoteSourceStore | undefined;
+      const rawDb = (env as any).AGENT_DB as D1Database | undefined;
+      const db = rawDb ? createD1QuoteSourceDb(rawDb) : undefined;
       if (!db) return new Response("Quote source store unavailable", { status: 503 });
       if (request.method === "GET") {
         return Response.json({ source: await getQuoteSource(db) });
