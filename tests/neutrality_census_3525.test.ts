@@ -1936,6 +1936,26 @@ const BASELINE: Array<[string, string, number]> = [
   // adapter; neutralizing it would falsify the schema.
   ["src/data/schemaComponent/remainderCatalogue.ts", "etrade", 1],
   ["src/client/ledgerTable.ts", "etrade", 1],
+  // #4634 INTEGRATION: the brokerage & data matrix names the brokers and
+  // data providers it compares by definition; the table is the artefact,
+  // not platform framing (same disposition as the broker-parity-matrix
+  // rows, #4038/#4039). Measured 2026-11-15 on the placed file.
+  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 80],
+  ["docs/architecture/business/brokerage-data-matrix.md", "public.com", 14],
+  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 59],
+  ["docs/architecture/business/brokerage-data-matrix.md", "schwab", 3],
+  ["docs/architecture/business/brokerage-data-matrix.md", "fidelity", 2],
+  ["docs/architecture/business/brokerage-data-matrix.md", "robinhood", 1],
+  ["docs/architecture/business/brokerage-data-matrix.md", "webull", 1],
+  ["docs/architecture/business/brokerage-data-matrix.md", "thinkorswim", 1],
+  ["docs/architecture/business/brokerage-data-matrix.md", "interactive brokers / ibkr", 15],
+  ["docs/architecture/business/brokerage-data-matrix.md", "tradier", 2],
+  ["docs/architecture/business/brokerage-data-matrix.md", "tastytrade", 12],
+  ["docs/architecture/business/brokerage-data-matrix.md", "yahoo", 9],
+  ["docs/architecture/business/brokerage-data-matrix.md", "nasdaq", 7],
+  ["docs/architecture/business/brokerage-data-matrix.md", "polygon", 2],
+  ["docs/architecture/business/brokerage-data-matrix.md", "finnhub", 6],
+  ["docs/architecture/business/brokerage-data-matrix.md", "twelvedata", 2],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
