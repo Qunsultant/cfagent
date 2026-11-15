@@ -12,8 +12,12 @@ Screener executions run synchronously inside request handlers:
 routes await the full scan and hold the request open, coupling
 user-facing latency to scan duration and losing the run if the
 request dies mid-scan. The ABoK Target State Blueprint (§19,
-Top-10 item 1; §12 ADR-0003 "Adoption of Cloudflare Workflows
-for Long-Running Screener Pipelines", Status Approved) directs
+Top-10 item 1; `docs/architecture/blueprint/abok-target-blueprint.md`
+§12 "Adoption of Cloudflare Workflows for Long-Running Screener
+Pipelines", Status Approved — note: this is the blueprint's own
+numbering, NOT `docs/architecture/adr/0003-messaging-port.md`
+(ADR-0003 in the registry is the queue-backed messaging port;
+cite ADRs by full filename, never by number alone) directs
 migrating multi-step screening runs to Cloudflare Workflows with
 explicit step retries and checkpoints, with the §13 NFRs "Screener
 Pipeline Execution 100% Retriable, Max 3 retries per step" and
