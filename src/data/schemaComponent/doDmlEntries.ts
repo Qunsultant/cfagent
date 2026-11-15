@@ -17,8 +17,25 @@
  * Codes: dml.do.<table>.<action>. Actions follow the old constant
  * names (HAS → has, COUNT_DAY → count_day, …) so the migration is
  * a move, not a rename.
+ *
+ * #4386 (P6c): the ORM-core tables join this same catalogue
+ * (REUSE — no sibling catalogue). The adapter entries carry the
+ * tables' column maps from ../ormColumnMaps (the maps moved
+ * there from doSqliteOrmAdapters.ts so these entries can import
+ * them without a load-order cycle — see that module's header).
+ * The settings entries carry no map (their record keys ARE the
+ * column names) and idField "key". The parameterized operation
+ * entries (table "__table__") are the 9 generator templates'
+ * and the facade's browse/count reads' form: one entry per
+ * Repository operation, the runtime table as a parameter.
  */
 import type { DoDmlCatalogueEntry } from "./doDmlCatalogue";
+import {
+  EVENT_COLUMN_MAP,
+  MEMORY_COLUMN_MAP,
+  MESSAGE_COLUMN_MAP,
+  TRANSACTION_COLUMN_MAP,
+} from "../ormColumnMaps";
 
 export const DO_DML_CATALOGUE_ENTRIES: DoDmlCatalogueEntry[] = [
   // --- mas_discovery_alerts (SqlDiscoveryAlertStore) — 4 repository ---
@@ -184,4 +201,100 @@ export const DO_DML_CATALOGUE_ENTRIES: DoDmlCatalogueEntry[] = [
   { code: "dml.do.mas_strategy_profiles.select_by_id", table: "mas_strategy_profiles", operation: "read", form: "repository", method: "findOne" },
   { code: "dml.do.mas_strategy_profiles.update", table: "mas_strategy_profiles", operation: "update", form: "repository", method: "updateWhere" },
   { code: "dml.do.mas_strategy_profiles.delete", table: "mas_strategy_profiles", operation: "delete", form: "repository", method: "deleteWhere" },
+
+  // --- P6c (#4386): the ORM-core tables (DoSqlite* adapters) — 12 repository + 3 template ---
+  // --- mas_messages (DoSqliteMessageAdapter) — 2 repository ---
+  { code: "dml.do.mas_messages.ids_created_before", table: "mas_messages", operation: "read", form: "repository", method: "findMany", columnMap: MESSAGE_COLUMN_MAP },
+  { code: "dml.do.mas_messages.delete_by_session", table: "mas_messages", operation: "delete", form: "repository", method: "deleteWhere", columnMap: MESSAGE_COLUMN_MAP },
+
+  // --- mas_events (DoSqliteEventLogAdapter) — 1 repository + 1 template ---
+  { code: "dml.do.mas_events.ids_created_before", table: "mas_events", operation: "read", form: "repository", method: "findMany", columnMap: EVENT_COLUMN_MAP },
+  // The chained tail read (ormRepositoryCore.ts ChainedAuditRepository.create):
+  // the latest event_hash by insertion order — a fixed table, so a
+  // fixed template, not a parameterized entry. The create() method
+  // itself keeps its direct read (the frozen audit chain, gate G-5);
+  // this entry is the canonical record the pin executes.
+  {
+    code: "dml.do.mas_events.tail_hash",
+    table: "mas_events",
+    operation: "read",
+    form: "template",
+    statement: "SELECT event_hash FROM mas_events ORDER BY rowid DESC LIMIT 1",
+    params: [],
+    mode: "all",
+  },
+
+  // --- mas_memory (DoSqliteMemoryAdapter) — 2 repository + 2 template ---
+  // clear is an unpredicated DELETE — deleteWhere refuses an empty
+  // predicate by design, so it stays a template.
+  {
+    code: "dml.do.mas_memory.clear",
+    table: "mas_memory",
+    operation: "delete",
+    form: "template",
+    statement: "DELETE FROM mas_memory",
+    params: [],
+    mode: "run",
+  },
+  { code: "dml.do.mas_memory.keys_updated_before", table: "mas_memory", operation: "read", form: "repository", method: "findMany", columnMap: MEMORY_COLUMN_MAP },
+  // search is a LIKE + OR disjunction across two columns — not a
+  // Repository shape, hence a template (byte-identical to the
+  // adapter's statement, params in binding order).
+  {
+    code: "dml.do.mas_memory.search",
+    table: "mas_memory",
+    operation: "read",
+    form: "template",
+    statement: "SELECT key, value, updated_at FROM mas_memory WHERE lower(key) LIKE ? OR lower(value) LIKE ? ORDER BY updated_at DESC LIMIT ?",
+    params: ["like", "like", "limit"],
+    mode: "all",
+  },
+  { code: "dml.do.mas_memory.list_recent", table: "mas_memory", operation: "read", form: "repository", method: "findMany", columnMap: MEMORY_COLUMN_MAP },
+
+  // --- mas_transactions (DoSqliteTransactionLedgerAdapter) — 4 repository + 1 template ---
+  { code: "dml.do.mas_transactions.replace", table: "mas_transactions", operation: "insert", form: "repository", method: "createOrReplace", columnMap: TRANSACTION_COLUMN_MAP },
+  { code: "dml.do.mas_transactions.complete_with_gateway", table: "mas_transactions", operation: "update", form: "repository", method: "updateWhere", columnMap: TRANSACTION_COLUMN_MAP },
+  { code: "dml.do.mas_transactions.reject_with_note", table: "mas_transactions", operation: "update", form: "repository", method: "updateWhere", columnMap: TRANSACTION_COLUMN_MAP },
+  // The OR disjunction (id OR gateway_ref, the reference bound
+  // twice) is not a Repository shape — a template, byte-identical
+  // to the adapter's statement. The adapter keeps the
+  // rowsWritten-or-0 return (the template dispatch's "run" shape).
+  {
+    code: "dml.do.mas_transactions.complete_by_gateway_ref",
+    table: "mas_transactions",
+    operation: "update",
+    form: "template",
+    statement: "UPDATE mas_transactions SET status = 'completed', updated_at = ? WHERE id = ? OR gateway_ref = ?",
+    params: ["updatedAt", "ref", "ref"],
+    mode: "run",
+  },
+  { code: "dml.do.mas_transactions.complete_by_id", table: "mas_transactions", operation: "update", form: "repository", method: "updateWhere", columnMap: TRANSACTION_COLUMN_MAP },
+
+  // --- mas_settings (DoSqliteSettingsAdapter / DoSqliteSettingsReadAdapter) — 3 repository ---
+  // No column map: the record keys (key, value, updated_at) ARE
+  // the column names. set() is DELETE+INSERT (not INSERT OR
+  // REPLACE) so MockSqlStorage-shaped stores stay compatible —
+  // the incumbent idiom, preserved as two entries.
+  { code: "dml.do.mas_settings.get", table: "mas_settings", operation: "read", form: "repository", method: "findById", idField: "key" },
+  { code: "dml.do.mas_settings.insert", table: "mas_settings", operation: "insert", form: "repository", method: "create", idField: "key" },
+  { code: "dml.do.mas_settings.delete", table: "mas_settings", operation: "delete", form: "repository", method: "delete", idField: "key" },
+
+  // --- P6c (#4386): parameterized operation entries — 10 repository ---
+  // One entry per Repository operation, registered once with the
+  // placeholder table "__table__" — the 9 generator templates
+  // (ormRepositoryCore.ts) and the facade's browse/count reads
+  // dispatch through these with the runtime table as a parameter
+  // (code table == runtime table, enforced by the executor).
+  // No column map, no idField: both are table-specific, so the
+  // executor uses the defaults (identity columns, id "id").
+  { code: "dml.do.__table__.find_many", table: "__table__", operation: "read", form: "repository", method: "findMany", parameterizedTable: true },
+  { code: "dml.do.__table__.find_by_id", table: "__table__", operation: "read", form: "repository", method: "findById", parameterizedTable: true },
+  { code: "dml.do.__table__.insert", table: "__table__", operation: "insert", form: "repository", method: "create", parameterizedTable: true },
+  { code: "dml.do.__table__.insert_or_ignore", table: "__table__", operation: "insert", form: "repository", method: "createOrIgnore", parameterizedTable: true },
+  { code: "dml.do.__table__.insert_or_replace", table: "__table__", operation: "insert", form: "repository", method: "createOrReplace", parameterizedTable: true },
+  { code: "dml.do.__table__.update", table: "__table__", operation: "update", form: "repository", method: "update", parameterizedTable: true },
+  { code: "dml.do.__table__.update_where", table: "__table__", operation: "update", form: "repository", method: "updateWhere", parameterizedTable: true },
+  { code: "dml.do.__table__.delete", table: "__table__", operation: "delete", form: "repository", method: "delete", parameterizedTable: true },
+  { code: "dml.do.__table__.delete_where", table: "__table__", operation: "delete", form: "repository", method: "deleteWhere", parameterizedTable: true },
+  { code: "dml.do.__table__.count", table: "__table__", operation: "read", form: "repository", method: "count", parameterizedTable: true },
 ];
