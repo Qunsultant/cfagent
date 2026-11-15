@@ -37,6 +37,7 @@ import { ReferralCodesSection } from "./ReferralCodesSection";
 import { OfferRulesSection } from "./OfferRulesSection";
 import { PlanStripePriceSection } from "./PlanStripePriceSection";
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
+import type { SubscriptionView } from "./commercialApi";
 import {
   buildBillingView,
   type BillingBundleEntitlementInput,
@@ -60,8 +61,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Issue #4643 — narrow the already-fetched GET /subscription rows
+ * (unknown[]) to SubscriptionView[] for the refund picker. A row that
+ * does not match the shape is dropped, never invented; the picker
+ * simply lists fewer rows.
+ */
+function toSubscriptionViews(rows: unknown[]): SubscriptionView[] {
+  return rows.filter((row): row is SubscriptionView => {
+    if (!isRecord(row)) return false;
+    return (
+      typeof row.id === "string" &&
+      typeof row.planId === "string" &&
+      typeof row.status === "string" &&
+      typeof row.periodStartMs === "number" &&
+      typeof row.periodEndMs === "number" &&
+      (row.providerSubscriptionId === undefined ||
+        row.providerSubscriptionId === null ||
+        typeof row.providerSubscriptionId === "string") &&
+      (row.canceledAtMs === undefined ||
+        row.canceledAtMs === null ||
+        typeof row.canceledAtMs === "number")
+    );
+  });
+}
+
 export function BillingServicingPanel() {
   const [view, setView] = useState<BillingView | null>(null);
+  const [subscriptionRows, setSubscriptionRows] = useState<SubscriptionView[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [receiptsError, setReceiptsError] = useState<string | null>(null);
@@ -117,7 +144,9 @@ export function BillingServicingPanel() {
           nowMs: Date.now(),
         }),
       );
+      setSubscriptionRows(toSubscriptionViews(subscription.subscriptions));
     } catch {
+      setSubscriptionRows([]);
       setLoadError("The billing view could not be loaded. Try again later.");
     } finally {
       setLoading(false);
@@ -210,7 +239,7 @@ export function BillingServicingPanel() {
             <p>{view.referral.rulesNote}</p>
           </Card>
           <RefundPolicySection />
-          <RefundFlowSection />
+          <RefundFlowSection subscriptions={subscriptionRows} plans={view.plans} />
           <UsageBillingSection />
           <ReferralCodesSection />
           <ApprovedFreeQuotaSection />
