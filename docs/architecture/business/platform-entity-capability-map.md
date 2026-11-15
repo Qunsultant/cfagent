@@ -544,8 +544,13 @@ capability, not an absence.
    D1 table has neither (has `executedAtMs`, `entitlementConsequence`).
 6. **`usage_events` "tenant-scoped" = login-scoped**, split across two
    DO databases, no production reader.
-7. **Receipts are login-scoped, not tenant-scoped** — a user with
-   memberships in two tenants sees one login's receipts, not a tenant's.
+7. **Receipts are login-scoped by decided boundary (#4601 — resolved):**
+   `GET /payments/receipts` (`src/services/receiptSurface.ts`) is
+   intentionally login-scoped (`RECEIPTS_SCOPE_BOUNDARY = "login"`,
+   returned as `scope: "login"` on `ReceiptsResult`) and ignores any
+   client `tenantId` parameter, because `mas_transactions` (§7.4) and
+   `usage_events` (§7.6, `#3185` out of scope) have no `tenantId` column
+   and each login owns at most one commercial account (`#4600`).
 8. **Scheduled ticks resolve tenant from env, paid coverage from the
    account.** If they differ, the paid seam throws tenant-mismatch on
    the tick — a scheduled run can fail closed purely because the
