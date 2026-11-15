@@ -32,6 +32,8 @@ import {
   type ProposalTransitionRow,
   type ProposeInput,
 } from "./proposalLedgerPorts";
+import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
+import { executeDml } from "./schemaComponent/dmlExecutor";
 
 /** Drizzle D1 database object carrying the ledger schema. */
 export type ProposalLedgerDb = DrizzleD1Database<{
@@ -80,38 +82,23 @@ function toTransition(
   };
 }
 
-/** Proposal ledger over D1 via Drizzle (+ raw batch for transitions). */
+/** Proposal ledger over D1 via Drizzle (proposal + transition rows land in ONE catalogue batch entry). */
 export class D1ProposalLedgerAdapter implements ProposalLedgerStore {
-  constructor(
-    readonly db: ProposalLedgerDb,
-    private readonly d1: D1Database,
-  ) {}
+  constructor(readonly db: ProposalLedgerDb) {}
 
   async propose(input: ProposeInput): Promise<ProposalRow> {
     const existing = await this.getProposal(input.id);
     if (existing) return existing;
     const atMs = input.createdAtMs ?? Date.now();
     // Proposal row + creation transition land in ONE batch.
-    await this.d1.batch([
-      this.d1
-        .prepare(
-          `INSERT INTO agent_proposals (id, title, summary, proposer_agent, principal, state, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, 'proposed', ?, ?)`,
-        )
-        .bind(
-          input.id,
-          input.title,
-          input.summary,
-          input.proposerAgent,
-          input.principal,
-          atMs,
-          atMs,
-        ),
-      this.d1
-        .prepare(
-          `INSERT INTO agent_proposal_transitions (id, proposal_id, from_state, to_state, actor, gate_ref, created_at_ms) VALUES (?, ?, NULL, 'proposed', ?, NULL, ?)`,
-        )
-        .bind(`${input.id}:created`, input.id, input.proposerAgent, atMs),
-    ]);
+    await executeDml(DML_CATALOGUE, this.db, "dml.d1.agent_proposals.propose", {
+      id: input.id,
+      title: input.title,
+      summary: input.summary,
+      proposerAgent: input.proposerAgent,
+      principal: input.principal,
+      atMs,
+    });
     const created = await this.getProposal(input.id);
     if (!created) throw new Error(`Proposal ${input.id} was not recorded.`);
     return created;
@@ -134,26 +121,15 @@ export class D1ProposalLedgerAdapter implements ProposalLedgerStore {
     );
     const atMs = input.atMs ?? Date.now();
     const transitionId = `${input.proposalId}:${current.state}->${input.toState}:${atMs}`;
-    await this.d1.batch([
-      this.d1
-        .prepare(
-          `UPDATE agent_proposals SET state = ?, updated_at_ms = ? WHERE id = ?`,
-        )
-        .bind(input.toState, atMs, input.proposalId),
-      this.d1
-        .prepare(
-          `INSERT INTO agent_proposal_transitions (id, proposal_id, from_state, to_state, actor, gate_ref, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          transitionId,
-          input.proposalId,
-          current.state,
-          input.toState,
-          input.actor,
-          input.gateRef ?? null,
-          atMs,
-        ),
-    ]);
+    await executeDml(DML_CATALOGUE, this.db, "dml.d1.agent_proposals.transition", {
+      proposalId: input.proposalId,
+      fromState: current.state,
+      toState: input.toState,
+      actor: input.actor,
+      gateRef: input.gateRef ?? null,
+      atMs,
+      transitionId,
+    });
     const rows = await this.db
       .select()
       .from(agentProposalTransitions)
