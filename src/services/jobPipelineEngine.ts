@@ -3110,20 +3110,37 @@ export class JobPipelineControl {
           // retry: dead-letter it immediately, per the stage
           // contract's failure handling. A step's processing
           // failure (job_step_failed, or an uncoded throw)
-          // retries within the stage's budget.
+          // retries within the stage's budget. Uncoded stays
+          // retryable deliberately (#4544 survey): a transient
+          // failure such as the gateway's "temporarily
+          // unavailable" names retry as its own remedy, and the
+          // second attempt after backoff is the retry budget
+          // working as designed — not a defect to poison.
           const retryable =
             error instanceof JobPipelineError ? error.code === "job_step_failed" : true;
           if (retryable && tries < budget.maxAttempts) {
             await this.sleep(computeBackoffDelayMs(budget, tries));
-            resume = await this.deriveResumePosition(
-              ctx,
-              node,
-              path,
-              shardKey,
-              eff.mode,
-              eff.inMemory,
-              eff.items,
-            );
+            // Issue #4544 — a forced re-run restarts at step 0
+            // on retry, exactly as it starts: deriving here
+            // would find the dispatch's recorded step artifacts
+            // (a re-run reuses the dispatch's run id, the claim
+            // scope) and resume past the steps the re-run is
+            // ordered to re-run, returning recorded output
+            // without re-executing. Every other retry keeps
+            // deriving — a fresh run resumes from what its own
+            // first try persisted, a resumed run from the
+            // persisted hand-offs.
+            resume = force
+              ? { stepIndex: 0, itemIndex: 0 }
+              : await this.deriveResumePosition(
+                  ctx,
+                  node,
+                  path,
+                  shardKey,
+                  eff.mode,
+                  eff.inMemory,
+                  eff.items,
+                );
             continue;
           }
           const failed = this.entryFor(ctx.ledger, stageId, unit.unitId);
