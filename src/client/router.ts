@@ -119,8 +119,8 @@ export function buildSearchWithView(currentSearch: string, view: string): string
 export interface LegacyProductRedirect {
   tab: string;
   view?: string;
-  /** Extra query params the target address carries (e.g. the hub's nested
-   *  panel tab), so a retired deep link keeps its sub-tab. */
+  /** Extra query params the target address carries, so a retired deep
+   *  link keeps its destination's state. */
   params?: Record<string, string>;
 }
 
@@ -137,17 +137,26 @@ export function legacyProductRedirect(search: string): LegacyProductRedirect | n
   const tab = params.get("tab") ?? "";
   const view = params.get("view") ?? "";
   if (tab === "products") {
-    // The catalog's Marketing draft preview sub-tab is NESTED inside the hub's
-    // Products tab, not a hub tab of its own: the retired address keeps its
-    // sub-tab through the hub's `productTab` param (#4530 — `view` belongs to
-    // the hub, so a sub-tab must never claim it).
+    // Issue #4582 — Marketing draft preview is a hub tab of its own now,
+    // so the retired address maps straight to it (no nested param).
     if (view === "selling-options") return { tab: "product-hub", view: "selling-options" };
     if (view === "marketing-draft-preview") {
-      return {
-        tab: "product-hub",
-        view: "products",
-        params: { productTab: "marketing-draft-preview" },
-      };
+      return { tab: "product-hub", view: "marketing-draft-preview" };
+    }
+    return { tab: "product-hub", view: "products" };
+  }
+  if (tab === "product-hub" && view === "products") {
+    // Issue #4582 — the nested `productTab` mechanism is gone. A
+    // bookmarked nested address routes to the hub tab its sub-tab
+    // became; any other stale value falls back to the Products tab
+    // (the param is stripped either way).
+    const productTab = params.get("productTab") ?? "";
+    if (!productTab) return null;
+    if (productTab === "marketing-draft-preview") {
+      return { tab: "product-hub", view: "marketing-draft-preview" };
+    }
+    if (productTab === "selling-options") {
+      return { tab: "product-hub", view: "selling-options" };
     }
     return { tab: "product-hub", view: "products" };
   }

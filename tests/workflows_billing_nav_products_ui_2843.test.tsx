@@ -122,7 +122,7 @@ describe("Workflows, Billings/Payments Nav & Products UI (issue #2843)", () => {
     root = createRoot(container);
 
     await act(async () => {
-      root!.render(<ProductCatalogPanel />);
+      root!.render(<ProductCatalogPanel onSubscribe={vi.fn()} onPreviewDraft={vi.fn()} />);
     });
 
     // Flush macro-tasks
@@ -135,8 +135,8 @@ describe("Workflows, Billings/Payments Nav & Products UI (issue #2843)", () => {
     expect(text).toContain("Options Screener");
     expect(text).toContain("$0.05 per call");
     expect(text).toContain("Teaser rules");
-    expect(text).toContain("Marketing draft preview");
-    expect(text).toContain("Selling");
+    // Issue #4582 — the Marketing draft preview and the Selling section
+    // no longer live in this panel; they are hub tabs of their own.
 
     // Table renders
     const tables = container.querySelectorAll("table");

@@ -30,21 +30,19 @@ describe("Product Hub nav (#4530)", () => {
     const ids = routes.map((r) => r.id);
     expect(ids).toContain("product-hub");
     expect(ids).not.toContain("products");
-    expect(ids.length).toBe(43);
+    expect(ids.length).toBe(44);
     const hub = routes.find((r) => r.id === "product-hub")!;
     expect(hub.navGroup).toBe("product-hub");
-    // #4574 retires the queues route, shifting navOrders 12..30 down one:
-    // the hub keeps the products route's slot, now 27 in a 0..29 run.
-    expect(hub.navEntry?.navOrder).toBe(27);
-    // Nav entries are 30 with orders exactly 0..29.
+    expect(hub.navEntry?.navOrder).toBe(28);
+    // Nav entries stay 31 with orders exactly 0..30.
     const orders = routes
       .filter((r) => r.navEntry !== undefined)
       .map((r) => r.navEntry!.navOrder)
       .sort((a, b) => a - b);
-    expect(orders).toEqual(Array.from({ length: 30 }, (_, i) => i));
+    expect(orders).toEqual(Array.from({ length: 31 }, (_, i) => i));
   });
 
-  it("nav-config carries a product-hub sub-menu with the four hub tabs plus the marketing preview", () => {
+  it("nav-config carries a product-hub sub-menu with the five hub tabs", () => {
     const group = subMenus["product-hub"];
     expect(group).toBeDefined();
     expect(group.map((item) => item.id)).toEqual([
@@ -81,12 +79,10 @@ describe("Product Hub nav (#4530)", () => {
     expect(deepLinkHref(deepLinkForNavNode("product-hub", "selling-options"))).toBe(
       "?tab=product-hub&view=selling-options",
     );
-    // #4530: the marketing preview is a NESTED sub-tab of the hub's
-    // Products tab, so the deep link names that tab and carries the
-    // sub-tab on the hub's own `productTab` param — never on `view`,
-    // which belongs to the hub.
+    // #4582: Marketing draft preview is a hub tab of its own now, so
+    // the deep link names that tab directly — no nested `productTab`.
     expect(deepLinkHref(deepLinkForNavNode("product-hub", "marketing-draft-preview"))).toBe(
-      "?tab=product-hub&view=products&productTab=marketing-draft-preview",
+      "?tab=product-hub&view=marketing-draft-preview",
     );
     expect(deepLinkHref(deepLinkForNavNode("product-hub", "admin-products"))).toBe(
       "?tab=product-hub&view=admin-products",

@@ -1,17 +1,15 @@
 /** @vitest-environment jsdom */
 /**
- * Issue #4511 — "Selling options" as a sub-tab of the Products page.
+ * Issue #4582 — the Products panel is catalog-only (no sub-tabs).
  *
- * TDD RED first: ProductCatalogPanel gains URL-synced sub-tabs
- * (param "view": "catalog" | "selling-options" | "marketing-draft-preview",
- * default "catalog") via the shared useUrlSyncedTabs hook + the
- * Tabs/TabPanel primitives. The Catalog tab holds the catalog table +
- * Teaser rules; the Marketing draft preview is its own sub-tab (#4530);
- * the Selling options tab holds the SellingSection.
- * The catalog table's Subscribe button switches to the selling-options
- * sub-tab as well as opening the selling flow. The on-demand selling
- * load contract is unchanged: no selling read happens until the user
- * asks (tab switch to selling-options, or Subscribe).
+ * The catalog sub-tabs are gone: "Catalog" duplicated the Products hub
+ * tab (the Products tab IS the catalog) and "Selling options" duplicated
+ * the Selling options hub tab, and Marketing draft preview moved up to
+ * a hub tab. ProductCatalogPanel renders the catalog table + Teaser
+ * rules directly, with no sub-tab row. Subscribe and Preview draft are
+ * callbacks the hub owns: Subscribe switches the hub to its Selling
+ * options tab, Preview draft composes the draft and switches the hub
+ * to its Marketing draft preview tab.
  */
 import { describe, expect, it, afterEach, vi } from "vitest";
 import React, { act } from "react";
@@ -41,11 +39,6 @@ const CATALOG_FIXTURE = [
   },
 ];
 
-const PRO_PLAN = {
-  id: "pro", name: "Pro", priceUSD: 10, periodDays: 30,
-  includedRuns: 0, trialDays: null, active: true,
-};
-
 let container: HTMLDivElement;
 let root: Root | null = null;
 
@@ -63,25 +56,13 @@ afterEach(async () => {
   window.history.pushState(null, "", "/");
 });
 
-function sellingFetch() {
+function catalogFetch() {
   const seen: Array<{ url: string; method: string }> = [];
   const impl = async (url: string, init?: RequestInit) => {
     seen.push({ url, method: init?.method ?? "GET" });
     const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
     const err = (status: number) => ({ ok: false, status, json: async () => ({ error: "typed" }) });
     if (url === "/api/products/catalog") return ok({ products: CATALOG_FIXTURE });
-    if (url === "/api/payments/agentic/commercial/identity") {
-      return ok({ userLogin: "owner", tenantId: null, hasAccount: true, tier: "Free", creditsUSD: 0, includedRunsRemaining: 0 });
-    }
-    if (url.startsWith("/api/payments/agentic/commercial/subscription?")) {
-      return ok({ userId: "owner", effectiveTier: "Free", current: null, subscriptions: [] });
-    }
-    if (url === "/api/payments/agentic/commercial/plans") {
-      return ok({ plans: [PRO_PLAN] });
-    }
-    if (url === "/api/payments/agentic/commercial/bundles") {
-      return ok({ bundles: [] });
-    }
     return err(404);
   };
   return { impl, seen };
@@ -92,18 +73,13 @@ async function renderPanel(fetchImpl: (url: string, init?: RequestInit) => Promi
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
+  const onSubscribe = vi.fn();
+  const onPreviewDraft = vi.fn();
   await act(async () => {
-    root!.render(<ProductCatalogPanel />);
+    root!.render(<ProductCatalogPanel onSubscribe={onSubscribe} onPreviewDraft={onPreviewDraft} />);
   });
   await flush();
-}
-
-function tabButton(label: string): HTMLButtonElement {
-  const found = Array.from(container.querySelectorAll('button[role="tab"]')).find((b) =>
-    (b.textContent ?? "").includes(label),
-  );
-  if (!found) throw new Error(`tab not found: ${label}`);
-  return found as HTMLButtonElement;
+  return { onSubscribe, onPreviewDraft };
 }
 
 function buttonByText(text: string): HTMLButtonElement {
@@ -118,90 +94,48 @@ function text(): string {
   return container.textContent ?? "";
 }
 
-describe("Products sub-tabs (#4511)", () => {
-  it("defaults to the Catalog tab; selling reads happen only on demand", async () => {
-    const { impl, seen } = sellingFetch();
+describe("Products panel (#4582) — catalog only, no sub-tabs", () => {
+  it("renders the catalog directly with no sub-tab row; catalog fetches only", async () => {
+    const { impl, seen } = catalogFetch();
     await renderPanel(impl);
-    expect(tabButton("Catalog").getAttribute("aria-selected")).toBe("true");
-    expect(tabButton("Selling options").getAttribute("aria-selected")).toBe("false");
+    expect(container.querySelectorAll('button[role="tab"]')).toHaveLength(0);
     expect(text()).toContain("Options Screener");
     expect(text()).toContain("Stock Screener");
-    // The SellingSection is not mounted on the Catalog tab.
+    expect(text()).toContain("Teaser Rule B1");
+    // The Subscribed row's purchase path is the "View plans" dead end —
+    // the panel never renders it; it offers a Subscribe button instead
+    // (moved from tests/product_selling_2717.test.tsx, #4582).
+    expect(text()).not.toContain("View plans");
+    // No selling section and no preview panel live in the catalog panel.
     expect(text()).not.toContain("Show selling options");
+    expect(container.querySelector('select[aria-label="Marketing channel"]')).toBeNull();
     expect(seen.map((s) => s.url)).toEqual(["/api/products/catalog"]);
   });
 
-  it("switching to Selling options shows the selling section; switching back restores the catalog", async () => {
-    const { impl, seen } = sellingFetch();
-    await renderPanel(impl);
-    await act(async () => {
-      tabButton("Selling options").click();
-    });
-    await flush();
-    expect(tabButton("Selling options").getAttribute("aria-selected")).toBe("true");
-    expect(text()).toContain("Show selling options");
-    // Still no selling read: the section loads on demand.
-    expect(seen.map((s) => s.url)).toEqual(["/api/products/catalog"]);
-    await act(async () => {
-      buttonByText("Show selling options").click();
-    });
-    await flush();
-    expect(text()).toContain("Pro");
-    expect(seen.map((s) => s.url)).toContain("/api/payments/agentic/commercial/identity");
-    await act(async () => {
-      tabButton("Catalog").click();
-    });
-    await flush();
-    expect(tabButton("Catalog").getAttribute("aria-selected")).toBe("true");
-    expect(text()).toContain("Options Screener");
-  });
-
-  it("Subscribe in the catalog switches to the selling-options sub-tab and opens the selling flow", async () => {
-    const { impl, seen } = sellingFetch();
-    await renderPanel(impl);
+  it("Subscribe calls onSubscribe and mounts no selling section here", async () => {
+    const { impl } = catalogFetch();
+    const { onSubscribe } = await renderPanel(impl);
     await act(async () => {
       buttonByText("Subscribe").click();
     });
     await flush();
-    expect(tabButton("Selling options").getAttribute("aria-selected")).toBe("true");
-    expect(text()).toContain("Pro");
-    expect(seen.map((s) => s.url)).toContain("/api/payments/agentic/commercial/identity");
+    expect(onSubscribe).toHaveBeenCalledTimes(1);
+    expect(text()).not.toContain("Show selling options");
+    expect(container.querySelector("#selling-plan")).toBeNull();
   });
 
-  it("a ?view=selling-options URL opens the selling-options tab on mount", async () => {
-    window.history.pushState(null, "", "/?tab=products&view=selling-options");
-    const { impl } = sellingFetch();
-    await renderPanel(impl);
-    expect(tabButton("Selling options").getAttribute("aria-selected")).toBe("true");
-    expect(text()).toContain("Show selling options");
-  });
-
-  it("the Catalog tab still holds the Teaser rules; the marketing preview is not on it", async () => {
-    const { impl } = sellingFetch();
-    await renderPanel(impl);
-    expect(tabButton("Marketing draft preview").getAttribute("aria-selected")).toBe("false");
-    expect(text()).toContain("Teaser Rule B1");
-    expect(container.querySelector('select[aria-label="Marketing channel"]')).toBeNull();
-  });
-
-  it("Preview draft composes the draft and switches to the marketing-draft-preview sub-tab", async () => {
-    const { impl } = sellingFetch();
-    await renderPanel(impl);
+  it("Preview draft calls onPreviewDraft with the row and renders no preview panel here", async () => {
+    const { impl } = catalogFetch();
+    const { onPreviewDraft } = await renderPanel(impl);
     await act(async () => {
       buttonByText("Preview draft").click();
     });
     await flush();
-    expect(tabButton("Marketing draft preview").getAttribute("aria-selected")).toBe("true");
-    expect(container.querySelector('select[aria-label="Marketing channel"]')).not.toBeNull();
-    expect(text()).toContain("Draft Preview");
-  });
-
-  it("a ?view=marketing-draft-preview URL opens the marketing tab on mount", async () => {
-    window.history.pushState(null, "", "/?tab=products&view=marketing-draft-preview");
-    const { impl } = sellingFetch();
-    await renderPanel(impl);
-    expect(tabButton("Marketing draft preview").getAttribute("aria-selected")).toBe("true");
-    expect(container.querySelector('select[aria-label="Marketing channel"]')).not.toBeNull();
-    expect(text()).not.toContain("Show selling options");
+    expect(onPreviewDraft).toHaveBeenCalledTimes(1);
+    expect(onPreviewDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "options:PayPerUse" }),
+    );
+    expect(container.querySelector('select[aria-label="Marketing channel"]')).toBeNull();
+    expect(text()).not.toContain("Draft Preview");
   });
 });
