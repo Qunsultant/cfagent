@@ -1,4 +1,5 @@
 import React from "react";
+import { Stack } from "../components/ui";
 import { ConfirmModal } from "../scheduledOptionsManager/ConfirmModal";
 import { liveModeConfirmCopy } from "./liveMode";
 
@@ -40,9 +41,11 @@ export function LiveModeSwitchDialog({
       onConfirm={onConfirm}
       onClose={onClose}
     >
-      {copy.body.map((paragraph) => (
-        <p key={paragraph}>{paragraph}</p>
-      ))}
+      <Stack gap="2">
+        {copy.body.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+      </Stack>
     </ConfirmModal>
   );
 }
