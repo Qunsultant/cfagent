@@ -22,13 +22,17 @@ import {
 const CONFIG_PATH = "config/order-capabilities.json";
 
 describe("order capability matrix (#4573)", () => {
-  it("is externalized data, not a code constant", () => {
+  it("is externalized data, not a code constant", async () => {
     const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as {
       note?: string;
       brokers?: Record<string, Record<string, Record<string, unknown>>>;
     };
     expect(raw.note).toContain("#4573");
-    expect(Object.keys(raw.brokers ?? {})).toEqual(["etrade", "alpaca"]);
+// Derive the expected broker list from the catalog instead of hardcoding it:
+    // Public gained a live-only entry in #4958, and a hardcoded list made that a
+    // pin failure rather than a data change.
+    const { BROKER_CATALOG } = await import("../src/trading/brokerCatalog");
+    expect(Object.keys(raw.brokers ?? {}).sort()).toEqual(Object.keys(BROKER_CATALOG).sort());
   });
 
   it("uses only the ticket's own vocabulary, with no duplicates", () => {
