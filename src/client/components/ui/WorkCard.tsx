@@ -20,10 +20,11 @@ export interface WorkCardProps extends CardHeaderProps {
  * this slice builds the organism only.
  *
  * @deprecated #4913 (sub of #3695): the single use (OrderTicketPanel)
- * is folded into the inline Card + Stack gap 5 + CardHeader composition
- * WorkCard itself renders — the component is only that composition, so
- * a second use would be a duplicate, not a reuse. New cards use
- * `<Card><Stack gap="5"><CardHeader … />…</Stack></Card>` directly.
+ * is folded into the inline Card + Stack gap 5 + CardHeader composition.
+ * Superseded by the inline `<Card><Stack gap="5"><CardHeader … />…</Stack></Card>`
+ * composition (see the OrderTicketPanel fold in the same slice) — WorkCard
+ * itself renders only that composition, so a second use would be a
+ * duplicate, not a reuse. New cards use that composition directly.
  * The component stays exported (no file deletion, gitops §22) and
  * exercised in tests/composable_ui_primitives.test.ts; the census test
  * (tests/template_rule_of_three_4913.test.ts) pins zero prod uses.
