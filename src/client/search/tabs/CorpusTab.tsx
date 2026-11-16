@@ -193,7 +193,6 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
 
   useEffect(() => {
     void loadReport();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function runSync() {
