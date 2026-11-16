@@ -193,10 +193,13 @@ export class PublicTradingPlatform implements ITradingPlatform {
    * but the broker default is refused by name — never silently placed as a day
    * order, which is what the pre-#4656 seam did by sending nothing at all.
    */
+  // Issue #4958 (matrix gap 17, Public): an auction term (opg/cls) has nothing to ride
+  // either — the same missing field, so the same named refusal. The live schema check
+  // that could lift it is gap 14 (#4668); until then the decision is unsupported.
   private refuseUnverifiedTimeInForce(timeInForce: string | undefined): void {
     if (timeInForce === undefined || timeInForce === "day") return;
     throw new Error(
-      `PUBLIC_TIME_IN_FORCE_UNVERIFIED: Public.com's hosted MCP schema has no verified time-in-force field, so a ${String(timeInForce).toUpperCase()} order cannot be placed truthfully. Choose the day default; nothing was sent.`
+      `PUBLIC_TIME_IN_FORCE_UNVERIFIED: Public.com's hosted order schema exposes no time-in-force field that can be verified (auction terms included), so a ${String(timeInForce).toUpperCase()} order cannot be placed truthfully. Choose the day default; nothing was sent.`
     );
   }
 
