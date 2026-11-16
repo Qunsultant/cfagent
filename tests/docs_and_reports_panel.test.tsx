@@ -202,7 +202,7 @@ describe("DocsAndReportsPanel", () => {
     };
     await renderPanel();
 
-    const headers = [...container.querySelectorAll("th .docs-sort-label")].map((el) => el.textContent);
+    const headers = [...container.querySelectorAll("th button > span:first-child")].map((el) => el.textContent);
     expect(headers).toEqual(["Date-Time", "Run Type", "Run Source", "PDF", "XLSX", "CSV", "Run ID"]);
 
     const rows = container.querySelectorAll("tbody tr");
@@ -250,7 +250,7 @@ describe("DocsAndReportsPanel", () => {
     const row = rows[0];
     // XLSX failed: a failure badge, not a link and not a bare dash.
     expect(row.textContent).toContain("failed");
-    const failed = row.querySelector(".docs-artifact-failed");
+    const failed = row.querySelector('span[title="blob store unavailable"]');
     expect(failed).not.toBeNull();
     expect(failed!.getAttribute("title")).toBe("blob store unavailable");
     // CSV simply unrecorded: still an honest dash, and only the PDF links.

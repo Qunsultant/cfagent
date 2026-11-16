@@ -713,6 +713,28 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   min-height: 0;
 }
 
+/* Issue #4927 (S-U5): the scroll-owning page frame for long tab pages —
+ * the flex item of .tab-viewport (which clips). Unifies the two retired
+ * page frames — the agents page (flex 1 0 auto, overflow auto) and the
+ * docs page (flex 1 1 auto, overflow-y auto, overflow-x hidden): both
+ * fill the viewport via grow 1 and scroll internally; the docs value
+ * wins on shrink (the #2078 long-ledger pattern) and overflow is auto
+ * on both axes — the docs table scrolls inside its own .ui-scroll-frame,
+ * so page-level horizontal scroll risk is low. The agents page also
+ * gains the reserved scrollbar gutter the docs page already had. */
+.ui-page-frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  width: 100%;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
 .ui-page-shell-header {
   display: flex;
   flex-direction: column;

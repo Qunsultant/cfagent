@@ -6,6 +6,15 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-16 — S-U5 retires agentsPanel.css + docsAndReports.css in place (#4927)
+
+- Files: `src/client/agentsPanel.css`, `src/client/docsAndReports.css` → retired in place (no rules remain)
+- Date: 2026-11-16
+- Reason: Issue #4927 (sub of #3695, S-U5) migrates `src/client/AgentsPanel.tsx` and `src/client/DocsAndReportsPanel.tsx` to primitives and tokens; each sheet's sole importer no longer imports it and no other consumer exists. The sheets stay on disk (no file deletion, gitops §22) with a deprecation header naming their successor.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities, incl. the new `ui-page-frame`, plus `ui-link`, `ui-mono`, `ui-meta-sm`, `ui-meta`, `ui-cell-nowrap`, `ui-scroll-frame`) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: none — each sole importer was migrated in the same slice.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-16 — #4913 retires WorkCard in place (rule-of-three rationalization)
 
 - Component: `WorkCard` (`src/client/components/ui/WorkCard.tsx`) → deprecated in place

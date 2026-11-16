@@ -74,9 +74,9 @@ describe("Chat docs tab (#2078)", () => {
     const text = container.textContent ?? "";
     expect(text).toContain("Docs & Reports");
     expect(text).toContain("Every document set produced by a screener-workflow run");
-    expect(container.querySelector(".docs-report-page")).not.toBeNull();
+    expect(container.querySelector(".ui-page-frame")).not.toBeNull();
     expect(
-      [...container.querySelectorAll("th .docs-sort-label")].map((el) => el.textContent),
+      [...container.querySelectorAll("th button > span:first-child")].map((el) => el.textContent),
     ).toEqual(["Date-Time", "Run Type", "Run Source", "PDF", "XLSX", "CSV", "Run ID"]);
     expect(text).toContain("screener:2026-10-27T13:05:00.000Z");
     expect(text).toContain("Scheduled");

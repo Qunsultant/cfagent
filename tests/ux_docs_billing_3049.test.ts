@@ -4,9 +4,9 @@
  * Pins the chrome mapping (not just PageShell presence, which the #3047
  * gate already asserts): the panels' old headings become the shell
  * title, their scope/description text survives verbatim, and the Docs
- * page keeps its scroll-owning outer div — .docs-report-page must stay
+ * page keeps its scroll-owning outer div — .ui-page-frame must stay
  * the panel root because it is the flex item of .tab-viewport (see the
- * contract comment in docsAndReports.css); a shell-outer wrap would
+ * contract comment in primitives.css); a shell-outer wrap would
  * size to content and let .tab-viewport clip the tail with no
  * scrollbar. Source-scan pin, same scanner discipline as #3047.
  */
@@ -29,8 +29,8 @@ describe("Docs + Billing shell migration (#3049)", () => {
   });
 
   it("Docs keeps its scroll-owning outer div and its toolbar, drops its own header", () => {
-    expect(DOCS).toContain('<div className="docs-report-page">');
-    expect(DOCS).toContain("docs-toolbar");
+    expect(DOCS).toContain('<div className="ui-page-frame">');
+    expect(DOCS).toContain('<Flex gap="3" align="center">');
     expect(DOCS).toContain("Refresh");
     expect(DOCS).not.toContain("docs-header");
     expect(DOCS).not.toContain('<h2 className="docs-title">');

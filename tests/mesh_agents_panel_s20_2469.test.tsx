@@ -106,7 +106,11 @@ describe("AgentsPanel", () => {
       row!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flush();
-    const detail = container.querySelector(".agents-panel-detail");
+    // The detail card is the Stack holding the selected class's
+    // "Recorded status:" line — the fleet table never renders that text.
+    const detail = [...container.querySelectorAll(".ui-stack")].find((el) =>
+      el.textContent?.includes("Recorded status:"),
+    );
     expect(detail, "detail card").not.toBeNull();
     expect(detail!.textContent).toContain("SandboxAgent");
     // Its identity record's per-surface credential env name (S16).

@@ -192,34 +192,6 @@
     "file": "src/client/styles.css",
     "wave": "S-U7"
   },
-  "agents-panel-cards": {
-    "file": "src/client/agentsPanel.css",
-    "wave": "S-U5"
-  },
-  "agents-panel-detail": {
-    "file": "src/client/agentsPanel.css",
-    "wave": "S-U5"
-  },
-  "agents-panel-label": {
-    "file": "src/client/agentsPanel.css",
-    "wave": "S-U5"
-  },
-  "agents-panel-mono": {
-    "file": "src/client/agentsPanel.css",
-    "wave": "S-U5"
-  },
-  "agents-panel-page": {
-    "file": "src/client/agentsPanel.css",
-    "wave": "S-U5"
-  },
-  "agents-panel-stack": {
-    "file": "src/client/agentsPanel.css",
-    "wave": "S-U5"
-  },
-  "agents-panel-sub": {
-    "file": "src/client/agentsPanel.css",
-    "wave": "S-U5"
-  },
   "akp-confirm-text": {
     "file": "src/client/apiKeysPanel.css",
     "wave": "S-U5"
@@ -2133,66 +2105,6 @@
   "dispatch-status-pills": {
     "file": "src/client/scheduledOptions.css",
     "wave": "S-U8"
-  },
-  "docs-artifact-link": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-artifact-missing": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-count": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-header": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-loaded-at": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-loading": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-report-page": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-run-id": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-run-type": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-scope": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-source": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-table-container": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-time": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-title": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
-  },
-  "docs-toolbar": {
-    "file": "src/client/docsAndReports.css",
-    "wave": "S-U5"
   },
   "dot": {
     "file": "src/client/options/strategyDiscovery.css",
@@ -10492,7 +10404,6 @@
   "unknown": {
     "file": "src/client/options/optionsResearch.css",
     "files": [
-      "src/client/docsAndReports.css",
       "src/client/options/optionsResearch.css",
       "src/client/optionsResearch.css"
     ],
