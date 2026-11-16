@@ -707,7 +707,8 @@ function measure(): Map<string, number> {
  * E*TRADE command module, the factory registration, the permission map, the
  * tool-family record, the catalog's copilot block, and the two docs that
  * enumerate tools by provider — all dispositioned INTEGRATION (naming the
- * provider is their job): 8 raises (mcp-server-inventory.md/etrade 5->6,
+ * provider is their job): 8 raises (mcp-server-inventory.md/etrade 5->7 — the
+ * tool table and the async split's new synchronous arm,
  * tool-attribution-audit-1763.md/etrade 8->10, chatPrompt.ts/etrade 7->8 — the
  * steering now names the E*TRADE order tools instead of leaving an E*TRADE
  * session pointed at another broker's, registry.ts/etrade 27->30,
@@ -715,7 +716,7 @@ function measure(): Map<string, number> {
  * mcpPermissionPorts.ts/etrade 9->11, brokerCatalog.ts/etrade 26->29). The
  * prose that named the sibling brokers inside the E*TRADE module was
  * neutralized instead of baselined, so no alpaca or public.com row appears.
- * Measured totals move 1283/10073 -> 1283/10114 (re-based onto 043afa900).
+ * Measured totals move 1283/10073 -> 1283/10115 (re-based onto 043afa900).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -936,7 +937,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/agentic/job-system.md", "nasdaq", 2],
   ["docs/architecture/agentic/job-system.md", "yahoo", 2],
   ["docs/architecture/agentic/mcp-server-inventory.md", "alpaca", 4],
-  ["docs/architecture/agentic/mcp-server-inventory.md", "etrade", 6],
+  ["docs/architecture/agentic/mcp-server-inventory.md", "etrade", 7],
   ["docs/architecture/agentic/mcp-server-inventory.md", "yahoo", 2],
   ["docs/architecture/code/10-mcp-standards.md", "etrade", 1],
   ["docs/architecture/code/13-structure-and-file-organization.md", "etrade", 6],
