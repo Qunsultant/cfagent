@@ -2,6 +2,11 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "ai-search-agent",
   "main": "src/server.ts",
+  // Issue #4968 — minify the Worker bundle (deploy error 10021: startup exceeded the 1s CPU limit).
+  // Measured: bundle 24,942,845 → 13,228,323 bytes; parse 456ms → 369ms median; check-startup
+  // active-time minimum 703ms → 576ms. Parse is ~45% of the startup budget. limits.cpu_ms
+  // is untouched — it is the per-request guard, not the startup limit.
+  "minify": true,
   "compatibility_date": "2026-10-31",
   "compatibility_flags": ["nodejs_compat"],
   // Issue #4708: preserve CI/CD-synced Worker secrets/vars across `wrangler deploy`
