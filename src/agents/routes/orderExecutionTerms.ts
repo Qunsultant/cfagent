@@ -2,7 +2,7 @@
  * Issue #4656 (matrix gap 5) — the execution terms every order route derives from
  * the STORED DRAFT, in one place.
  *
- * Both the neutral `/broker/order/execute` route and the legacy E*TRADE route
+ * Both the neutral `/broker/order/execute` route and the legacy broker route
  * must agree on what the approved draft means:
  *  - `limitPrice` for LIMIT **and STOP_LIMIT** (issue #4654 stopped dropping it
  *    for the latter),
