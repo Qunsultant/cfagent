@@ -1,0 +1,706 @@
+name: "Task form (gitops §5)"
+description: "One unit of work — issue first, per docs/agents/gitops.md"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Task (gitops §5)
+
+        One unit of work — issue first, per docs/agents/gitops.md. Fields marked required must be answered before Submit enables. The Full-stack coverage section is architecture-first and REQUIRED: an unanswered row makes the issue incomplete.
+
+  - type: input
+    id: agent
+    attributes:
+      label: Agent
+      description: "Agent hashtag for the owning lane."
+      placeholder: "#<agent-hashtag>"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      description: "Title convention + label (title prefix and label must match)."
+      options:
+        - "[Enterprise Architecture] - <title> + ent-arch (+ architecture): cross-cutting architecture decision, standard, pattern, or governance item (usually epic or ADR-linked)"
+        - "[Bug] - <title> + bug: defect in shipped behavior"
+        - "[Enhancement] - <title> + enhancement: new or improved capability"
+        - "[Fix] - <title> + fix: planned correction (non-urgent)"
+        - "[Hotfix] - <title> + hotfix: urgent production fix (emergency rules, gitops §18.2, still apply)"
+        - "Task (no type prefix; lane:<lane> label still required)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      description: "Estimate the work, not the importance. Pick one."
+      options:
+        - "Small — one focused change, one PR, no migration, no cross-surface coordination"
+        - "Medium — several files or one migration, one PR, coordination with one other surface or lane"
+        - "Large — multi-slice work, migrations, or cross-lane coordination; split into smaller issues (each one-PR-sized) — a sub-issue's work never spans multiple PRs (gitops §5, issue #4072)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: "How urgent this is, not how big it is. Pick one."
+      options:
+        - "Low — nice to have; no deadline, deferrable without user impact"
+        - "Medium — needed for a planned milestone; short deferral acceptable"
+        - "High — blocks users, a release, or another lane's work; needs prompt attention"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: "What is wrong or missing?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: "What observable result is required?"
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## User journey
+
+  - type: input
+    id: journey
+    attributes:
+      label: Journey
+      description: "Which user journey this change serves."
+    validations:
+      required: true
+
+  - type: input
+    id: journey_user
+    attributes:
+      label: User
+      description: "Who the user is."
+    validations:
+      required: true
+
+  - type: textarea
+    id: journey_ux
+    attributes:
+      label: How value surfaces in UX
+      description: "What the user sees/does differently."
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        Journey impact — REQUIRED before/after statement (an issue without it is incomplete):
+
+  - type: textarea
+    id: journey_today
+    attributes:
+      label: Journey today
+      description: "How it works now, before this change."
+    validations:
+      required: true
+
+  - type: textarea
+    id: journey_after
+    attributes:
+      label: Journey after this change
+      description: "How it works once this lands."
+    validations:
+      required: true
+
+  - type: textarea
+    id: journey_diff
+    attributes:
+      label: What the user sees/does differently
+      description: "Be specific; where the change touches navigation, name the nav/preset states — which items appear/disappear, which preset is active, what an empty selection shows."
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Existing / similar issues (required — search BEFORE creating)
+
+  - type: checkboxes
+    id: prior_search
+    attributes:
+      label: Prior search
+      description: "Search BEFORE creating."
+      options:
+        - label: "I searched existing issues (open and closed) for the same or similar work before creating this issue."
+          required: true
+
+  - type: textarea
+    id: similar_issues
+    attributes:
+      label: Same or similar issues found
+      description: "Reference each by number; state whether it already covers this work, only overlaps it, or is distinct. If none found, write \"None found\" and give the search terms used below."
+      placeholder: "#NNNN — <title> — <covers / overlaps / distinct because …>"
+    validations:
+      required: true
+
+  - type: input
+    id: search_terms
+    attributes:
+      label: Search terms used
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        - If an existing issue already covers this work, do NOT create a duplicate — comment on that issue instead. A new issue is justified only when no existing issue covers it, or when the difference is stated above. (Record confirmed relationships under Related issues below.)
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Related issues
+
+  - type: input
+    id: parent_epic
+    attributes:
+      label: Parent epic
+      placeholder: "Issue number, or none"
+
+  - type: input
+    id: blocks
+    attributes:
+      label: Blocks / Blocked by
+      placeholder: "Issue numbers, or none"
+
+  - type: input
+    id: related
+    attributes:
+      label: Related
+      placeholder: "Issue numbers, or none"
+
+  - type: input
+    id: supersedes
+    attributes:
+      label: Supersedes
+      placeholder: "Issue numbers, or none"
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Scope
+
+  - type: textarea
+    id: scope_included
+    attributes:
+      label: Included
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope_excluded
+    attributes:
+      label: Excluded
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        Scope discipline: every item excluded from this issue gets its own sub-issue under this issue, created at the time it is identified and linked under Related issues — never left as a follow-up note, TODO, or 'future work' line. An excluded item with no sub-issue is a review finding. Title it `[Out-of-Scope] <thing>` (issue #4099): anything this work identifies as out of scope, or as not considered, gets its own sub-issue under the relevant parent with that title, a one-line reason it is out of scope, and a link to the work that surfaced it.
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Full-stack coverage (architecture-first — REQUIRED)
+
+        Architecture first: one row per architecture layer, then the 15-factors mapped to that layer, then the full-stack areas mapped to that layer, then the platforms that layer enables. Layer rows, factor mappings, and full-stack mappings are fixed — do not edit them. Fill the Platforms column from the Domain table below, starting from the owning platform shown, and fill Status per row. A trailing `+` means: add the domain platform(s) this change affects. An unanswered row makes the issue incomplete. Factor numbers follow `docs/agentic-org/architecture.md` §6 (IBM 15-factor formulation): 1 One codebase, 2 API first, 3 Dependency management, 4 Design/build/release/run, 5 Configuration/credentials/code, 6 Logs, 7 Disposability, 8 Backing services, 9 Environment parity, 10 Administrative processes, 11 Port binding, 12 Stateless processes, 13 Concurrency, 14 Telemetry, 15 Authentication/authorization.
+
+        | Row | Architecture layer | 15-factor(s) | Full-stack area(s) | Platform(s) enabled (fill from the Domain table; owning platform shown) | Status / evidence (Done + evidence, or N/A + reason) |
+        |---|---|---|---|---|---|
+        | L-1 | UX | 2, 9 | FS-1 | D-6 CPO Product and experience (owning) + | |
+        | L-2 | Product architecture | 1, 2, 3, 7, 9, 12, 13 | FS-1, FS-3 | D-6 CPO Product and experience; D-8 + | |
+        | L-3 | Application | 1, 2, 3, 5, 6, 7, 10, 11, 12, 13, 14, 15 | FS-2, FS-3, FS-4, FS-7 | D-8 CTO Technology and engineering (owning); D-10, D-16, D-18 + | |
+        | L-4 | Data/storage | 5, 8, 12 | FS-6 | D-9 CDO Data and knowledge (owning) + | |
+        | L-5 | Infrastructure | 4, 5, 8, 9, 12, 14 | FS-6, FS-8 | D-9 CDO Data and knowledge; D-7, D-8 + | |
+        | L-6 | Network | 2, 11, 15 | FS-4 | D-8 CTO Technology and engineering (owning) + | |
+        | L-7 | Integration | 2, 7, 8, 10, 11, 13, 14, 15 | FS-4, FS-5, FS-7 | D-8 CTO Technology and engineering; D-10 + | |
+        | L-8 | Security | 5, 6, 14, 15 | FS-2 | D-16 CISO Security and trust; D-18, D-8 | |
+        | L-9 | Observability | 4, 5, 6, 9, 14, 15 | FS-2, FS-8 | D-16 CISO Security and trust; D-18, D-8, D-7 | |
+        | L-10 | Error-reporting | 5, 6, 14, 15 | FS-2 | D-16 CISO Security and trust; D-18, D-8 | |
+        | L-11 | Agentic | 2, 7, 8, 10, 13, 14, 15 | FS-5, FS-7 | D-10 CAIO AI, agent, and improvement (owning); D-8 + | |
+
+  - type: textarea
+    id: l1
+    attributes:
+      label: "L-1 UX — Platforms + Status"
+      description: "15-factor(s): 2, 9. Full-stack area(s): FS-1. Owning platform shown: D-6 CPO Product and experience +."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l2
+    attributes:
+      label: "L-2 Product architecture — Platforms + Status"
+      description: "15-factor(s): 1, 2, 3, 7, 9, 12, 13. Full-stack area(s): FS-1, FS-3. Platforms shown: D-6 CPO Product and experience; D-8 +."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l3
+    attributes:
+      label: "L-3 Application — Platforms + Status"
+      description: "15-factor(s): 1, 2, 3, 5, 6, 7, 10, 11, 12, 13, 14, 15. Full-stack area(s): FS-2, FS-3, FS-4, FS-7. Platforms shown: D-8 CTO Technology and engineering (owning); D-10, D-16, D-18 +."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l4
+    attributes:
+      label: "L-4 Data/storage — Platforms + Status"
+      description: "15-factor(s): 5, 8, 12. Full-stack area(s): FS-6. Owning platform shown: D-9 CDO Data and knowledge +."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l5
+    attributes:
+      label: "L-5 Infrastructure — Platforms + Status"
+      description: "15-factor(s): 4, 5, 8, 9, 12, 14. Full-stack area(s): FS-6, FS-8. Platforms shown: D-9 CDO Data and knowledge; D-7, D-8 +."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l6
+    attributes:
+      label: "L-6 Network — Platforms + Status"
+      description: "15-factor(s): 2, 11, 15. Full-stack area(s): FS-4. Owning platform shown: D-8 CTO Technology and engineering +."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l7
+    attributes:
+      label: "L-7 Integration — Platforms + Status"
+      description: "15-factor(s): 2, 7, 8, 10, 11, 13, 14, 15. Full-stack area(s): FS-4, FS-5, FS-7. Platforms shown: D-8 CTO Technology and engineering; D-10 +."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l8
+    attributes:
+      label: "L-8 Security — Platforms + Status"
+      description: "15-factor(s): 5, 6, 14, 15. Full-stack area(s): FS-2. Platforms shown: D-16 CISO Security and trust; D-18, D-8."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l9
+    attributes:
+      label: "L-9 Observability — Platforms + Status"
+      description: "15-factor(s): 4, 5, 6, 9, 14, 15. Full-stack area(s): FS-2, FS-8. Platforms shown: D-16 CISO Security and trust; D-18, D-8, D-7."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l10
+    attributes:
+      label: "L-10 Error-reporting — Platforms + Status"
+      description: "15-factor(s): 5, 6, 14, 15. Full-stack area(s): FS-2. Platforms shown: D-16 CISO Security and trust; D-18, D-8."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: textarea
+    id: l11
+    attributes:
+      label: "L-11 Agentic — Platforms + Status"
+      description: "15-factor(s): 2, 7, 8, 10, 13, 14, 15. Full-stack area(s): FS-5, FS-7. Platforms shown: D-10 CAIO AI, agent, and improvement (owning); D-8 +."
+      placeholder: "Platforms: <from the Domain table> / Status: Done + evidence, or N/A + reason"
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Full-stack area sub-issues (one per area — REQUIRED)
+
+        Title each sub-issue `[Full-stack] <area>`. The parent closes only when every area sub-issue is closed. FS-2's scope is the ADD.md AOP definition (Exception Handling, Coded Messages, Logging, Externalized Configuration, Security, Transaction Management).
+
+        | Area | Sub-issue | Status | Evidence |
+        |---|---|---|---|
+        | FS-1 UX-URL (deployed page/route, UX-architecture conformance) | | | |
+        | FS-2 AOP compliance (transactions, security, exceptions, coded messages, logging, error reporting, externalized config) | | | |
+        | FS-3 Services (reused/created) | | | |
+        | FS-4 API endpoints | | | |
+        | FS-5 MCP endpoints | | | |
+        | FS-6 Data layer (D1/DO, Vectorize, R2, AI search) | | | |
+        | FS-7 Agentic capabilities (channels, tools, schedules, workflows, copilots/autopilot) | | | |
+        | FS-8 Release & operations (build/release/run, rollout/rollback) | | | |
+
+  - type: checkboxes
+    id: fs_ack
+    attributes:
+      label: Full-stack sub-issues (R-2)
+      description: "One sub-issue per full-stack area, created when the parent is filed."
+      options:
+        - label: "One [Full-stack] sub-issue per area will be created when this issue is filed (R-2); an N/A area's sub-issue closes with the N/A reason recorded."
+          required: true
+
+  - type: textarea
+    id: fs_ledger
+    attributes:
+      label: Full-stack area sub-issues ledger
+      description: "One row per area: sub-issue link, status, evidence. Title each sub-issue [Full-stack] <area>. The parent closes only when every area sub-issue is closed."
+      placeholder: |
+        FS-1: <sub-issue link> / <status> / <evidence>
+        FS-2: <sub-issue link> / <status> / <evidence>
+        FS-3: <sub-issue link> / <status> / <evidence>
+        FS-4: <sub-issue link> / <status> / <evidence>
+        FS-5: <sub-issue link> / <status> / <evidence>
+        FS-6: <sub-issue link> / <status> / <evidence>
+        FS-7: <sub-issue link> / <status> / <evidence>
+        FS-8: <sub-issue link> / <status> / <evidence>
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Domain declaration (REQUIRED — name every domain the change touches; platform names verbatim from `docs/agentic-org/platforms.md` §1–§2)
+
+        | ID | Domain / platform | Applies to this change? (yes + note / no) |
+        |---|---|---|
+        | D-1 | Research | |
+        | D-2 | Trading | |
+        | D-3 | Payment | |
+        | D-4 | CEO — Organization and strategy platform | |
+        | D-5 | CBO — Business architecture and commercial platform | |
+        | D-6 | CPO — Product and experience platform | |
+        | D-7 | COO — Operations and service-delivery platform | |
+        | D-8 | CTO — Technology and engineering platform | |
+        | D-9 | CDO — Data and knowledge platform | |
+        | D-10 | CAIO — AI, agent, and improvement platform | |
+        | D-11 | CFO — Finance and capital platform | |
+        | D-12 | CLO — Legal and obligation platform | |
+        | D-13 | CIO — Investment and portfolio platform | |
+        | D-14 | Chief Research Officer — Research platform | |
+        | D-15 | CRO — Enterprise, investment, and model-risk platform | |
+        | D-16 | CISO — Security and trust platform | |
+        | D-17 | CCO — Compliance and market-integrity platform | |
+        | D-18 | CQO — Independent assurance platform | |
+        | D-19 | Workforce — Human–agent workforce platform | |
+        | D-20 | Channels (name the channel) | |
+        | D-21 | Other platform capability (name it) | |
+
+  - type: textarea
+    id: domain_declaration
+    attributes:
+      label: Domain declaration
+      description: "Name every domain the change touches; platform names verbatim from docs/agentic-org/platforms.md §1–§2. Answer every row: yes + note, or no."
+      placeholder: |
+        D-1 Research: <yes + note / no>
+        D-2 Trading: <yes + note / no>
+        D-3 Payment: <yes + note / no>
+        D-4 CEO: <yes + note / no>
+        D-5 CBO: <yes + note / no>
+        D-6 CPO: <yes + note / no>
+        D-7 COO: <yes + note / no>
+        D-8 CTO: <yes + note / no>
+        D-9 CDO: <yes + note / no>
+        D-10 CAIO: <yes + note / no>
+        D-11 CFO: <yes + note / no>
+        D-12 CLO: <yes + note / no>
+        D-13 CIO: <yes + note / no>
+        D-14 Chief Research Officer: <yes + note / no>
+        D-15 CRO: <yes + note / no>
+        D-16 CISO: <yes + note / no>
+        D-17 CCO: <yes + note / no>
+        D-18 CQO: <yes + note / no>
+        D-19 Workforce: <yes + note / no>
+        D-20 Channels: <yes + note / no>
+        D-21 Other: <yes + note / no>
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Multi-dimensional enablement (REQUIRED — answer every line)
+
+        For each dimension state Enabled (this change adds it), Preserved (the change keeps it working, with evidence), or N/A (reason). A change must not silently narrow the platform to one provider, one broker, one user, one tenant, or one transaction at a time — any narrowing is a stated, reviewed decision recorded on the dimension's line, never an accident of implementation.
+
+        | ID | Dimension | Answer |
+        |---|---|---|
+        | M-1 | Multi-data-provider | |
+        | M-2 | Multi-broker | |
+        | M-3 | Multi-user | |
+        | M-4 | Multi-tenant | |
+        | M-5 | Multi-transaction | |
+        | M-6 | Concurrency | |
+        | M-7 | Parallelism | |
+        | M-8 | Multi-asset-class | |
+        | M-9 | Multi-channel | |
+        | M-10 | Multi-environment (paper/live) | |
+
+  - type: textarea
+    id: dimensions
+    attributes:
+      label: Multi-dimensional enablement
+      description: "For each dimension state Enabled (this change adds it), Preserved (the change keeps it working, with evidence), or N/A (reason)."
+      placeholder: |
+        M-1 Multi-data-provider: <Enabled / Preserved + evidence / N/A + reason>
+        M-2 Multi-broker: <Enabled / Preserved + evidence / N/A + reason>
+        M-3 Multi-user: <Enabled / Preserved + evidence / N/A + reason>
+        M-4 Multi-tenant: <Enabled / Preserved + evidence / N/A + reason>
+        M-5 Multi-transaction: <Enabled / Preserved + evidence / N/A + reason>
+        M-6 Concurrency: <Enabled / Preserved + evidence / N/A + reason>
+        M-7 Parallelism: <Enabled / Preserved + evidence / N/A + reason>
+        M-8 Multi-asset-class: <Enabled / Preserved + evidence / N/A + reason>
+        M-9 Multi-channel: <Enabled / Preserved + evidence / N/A + reason>
+        M-10 Multi-environment (paper/live): <Enabled / Preserved + evidence / N/A + reason>
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Coverage rules (fixed — do not edit)
+
+        | ID | Rule |
+        |---|---|
+        | R-1 | Full coverage is the default: every layer row is implemented, evidenced through its full-stack areas' sub-issues, or recorded N/A with a reason; every full-stack area is Done with evidence or N/A with a reason. Unanswered = incomplete. |
+        | R-2 | One sub-issue per full-stack area (see the ledger above). An N/A area's sub-issue closes with the N/A reason recorded. |
+        | R-3 | Platforms column: fill per layer row from the Domain table. Implemented rows name at least one platform; an empty cell on an implemented row is incomplete. |
+        | R-4 | Consistency: every platform named in the Domain declaration appears in at least one Platforms cell, and every platform in a Platforms cell is named in the Domain declaration or justified on the row. |
+        | R-5 | No forced mappings: a layer row maps only to factors, areas, and platforms that genuinely apply. |
+        | R-6 | Scope discipline (#4099): every excluded item gets its own sub-issue, created when identified — never a follow-up note, TODO, or 'future work' line. |
+        | R-7 | Scoped issues: an issue may be scoped to specific layer(s)/area(s) — state the scope in the Domain declaration and the table — but every out-of-scope full-stack area then gets its own `[Full-stack] <area>` sub-issue. N/A is reserved for areas that genuinely do not apply at all; scoped-out is not N/A. |
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Acceptance criteria
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: "Observable, testable criterion; failure/recovery criterion; relevant regression criterion."
+      placeholder: |
+        - [ ] Observable, testable criterion
+        - [ ] Failure/recovery criterion
+        - [ ] Relevant regression criterion
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Test plan
+
+  - type: textarea
+    id: test_plan
+    attributes:
+      label: Test plan
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Dependencies
+
+        Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: "Link a separately created and assigned issue for any cross-lane need — do not fold that lane's work into this issue."
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Parallelism (gitops §5, issue #4070)
+
+  - type: input
+    id: parallelism
+    attributes:
+      label: Parallel or Serial
+
+  - type: input
+    id: depends_on
+    attributes:
+      label: Depends on
+      description: "Issue numbers, or none."
+
+  - type: input
+    id: conflicts_with
+    attributes:
+      label: Conflicts with
+      description: "Shared files/surfaces, or none."
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Change management (expected)
+
+  - type: textarea
+    id: change_management
+    attributes:
+      label: Change management (expected)
+      placeholder: |
+        Expected impact:
+        Migration and data impact:
+        Rollout plan:
+        Rollback plan:
+        Communication:
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Conformance (no drift — docs/compliance)
+
+        No UX drift, no architecture drift, no rework, no regression — reuse is mandatory.
+
+  - type: textarea
+    id: conformance
+    attributes:
+      label: Conformance surfaces
+      description: "UX surfaces touched + primitives/tokens used; architecture surfaces touched + patterns/boundaries/ADRs followed; reused surfaces; rework justification; regression risk + pins."
+      placeholder: |
+        UX surfaces touched + primitives/tokens used (or none):
+        Architecture surfaces touched + patterns/boundaries/ADRs followed (or none):
+        Reused surfaces (existing implementations reused):
+        Rework justification (if rebuilding an existing capability, why — otherwise none):
+        Regression risk + pins preserving existing behavior:
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Per-doc conformance checklist (REQUIRED — answer every line; an unanswered line makes the issue incomplete)
+
+        For each doc, write `applies (evidence: …)` or `N/A (reason: …)`:
+
+  - type: checkboxes
+    id: per_doc_checklist
+    attributes:
+      label: Per-doc conformance checklist
+      description: "Check each doc after writing its applies (evidence) or N/A (reason) answer in the textarea below."
+      options:
+        - label: "`docs/agentic-org/platforms.md` — answered below"
+          required: true
+        - label: "`docs/architecture/ADD.md` — answered below"
+          required: true
+        - label: "`docs/architecture/standards/standards.md` — answered below"
+          required: true
+        - label: "`docs/agents/gitops.md` — answered below"
+          required: true
+        - label: "`docs/agents/tech-standards.md` — answered below"
+          required: true
+        - label: "`docs/compliance/anti-drift.md` — answered below"
+          required: true
+        - label: "`docs/architecture/UX/ux-architecture.md` — answered below"
+          required: true
+
+  - type: textarea
+    id: per_doc_answers
+    attributes:
+      label: Per-doc conformance answers
+      description: "For each doc, write applies (evidence: …) or N/A (reason: …)."
+      placeholder: |
+        docs/agentic-org/platforms.md — applies (evidence: ) / N/A (reason: )
+        docs/architecture/ADD.md — applies (evidence: ) / N/A (reason: )
+        docs/architecture/standards/standards.md — applies (evidence: ) / N/A (reason: )
+        docs/agents/gitops.md — applies (evidence: ) / N/A (reason: )
+        docs/agents/tech-standards.md — applies (evidence: ) / N/A (reason: )
+        docs/compliance/anti-drift.md — applies (evidence: ) / N/A (reason: )
+        docs/architecture/UX/ux-architecture.md — applies (evidence: ) / N/A (reason: )
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Agentic design (docs/agents)
+
+        Allocation is a decision, not a default — do NOT turn every service into an agent.
+
+  - type: textarea
+    id: agentic_design
+    attributes:
+      label: Agentic design
+      placeholder: |
+        Capability allocation (agent judgment vs deterministic service/tool, and why the agent earns its cost):
+        Coordinator / delegation path + evaluator (independent criteria):
+        Task state + records (durable task ledger, execution path recorded):
+        Adaptive policies + budgets (explicit, recorded; never-list compliance):
+        Deterministic rules kept in code (calculations, risk limits, authorization, accounting, schema validation — never in a model loop):
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Engineering standards
+        All development on this issue must follow:
+        - SOLID principles
+        - GoF design patterns
+        - GRASP patterns
+        - 15-factor app methodology
+        - Design thinking — start from the user journey and UX: name the journey this change serves and how its value surfaces in UX
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Standing guardrails
+        - TDD (gitops §7): every behavior change updates its pin tests in the same PR
+        - No silent nulls, no lazy fallbacks — fix root causes
+        - User-facing messages carry business errors, not technical errors; technical detail stays in logs
+        - Everything user-scoped, session-scoped, run-scoped — no shared mutable client state
+        - Incremental changes only — never silently remove a capability
+        - Verify against live production before calling it done — merged is not working
+        - Pre-merge: rebase onto fresh main, run scripts/verify-before-merge.sh, green gate expires when main advances; post-merge CI is mandatory
+        - Branch-as-lock when collaborating: check live fix/<issue>-* branches and open PRs before claiming
+        - Never place or cancel a trade/order without explicit confirmation
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Completion report (gitops §15 — fill on close; the single document for this issue)
+
+  - type: textarea
+    id: completion_report
+    attributes:
+      label: Completion report
+      description: "Fill on close per gitops §15; the single document for this issue."
+      placeholder: |
+        Issue / Pull request / Integration (merged, target, resulting commit):
+        Implementation (key decisions, alternatives, scope exclusions):
+        Test evidence (red, green, regression, integration/evaluation; CI runs; post-merge checks):
+        Change management (actual: change type, impacted surfaces, migration and data impact, rollout plan, rollback plan, communication, changelog entry):
+        Conformance (actual: UX primitives/tokens used, architecture boundaries followed, reused surfaces, rework justification, regression pins):
+        Agentic design (actual: allocation as built, delegation path, evaluator, task records, policies/budgets, never-list compliance):
+        Full-stack coverage (actual, keyed by L/FS/D/M IDs):
+        Value and impact (value created, capabilities enhanced, competencies improved, value proposition, delivery channels, user journey):
+        Risk and limitations (security, tenant isolation, compatibility, performance/cost; known test-coverage gaps stated explicitly):
+        Delivery and release (migration, feature flag, deployment impact, rollback; release state, version, environment):
+        Workflows operationalized:
+        How to harness this value from UX:
+        Process docs updated (file + commit, or none with reason):
+        Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
+        Remaining work (gitops §15 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
+        Next-step gate (PASS / BLOCKED + reason):
