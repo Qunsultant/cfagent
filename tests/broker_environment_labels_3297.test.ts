@@ -60,7 +60,10 @@ describe("the switch speaks trading type (#3297)", () => {
   });
 
   it("keeps sending TEST/PROD on the wire (#3719 single toggle)", () => {
-    expect(menu).toContain('onSwitchEnv(isLive ? "TEST" : "PROD")');
+    // Issue #4652: the toggle routes through requestEnvSwitch, which asks before
+    // the TEST→PROD direction and otherwise calls onSwitchEnv — the wire values
+    // are unchanged.
+    expect(menu).toContain('requestEnvSwitch(isLive ? "TEST" : "PROD")');
     expect(menu).toContain('const target = mode === "live" ? "PROD" : "TEST"');
   });
 });

@@ -177,9 +177,21 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
     const buttons = singleLine?.querySelectorAll(".btn-env-mini");
     expect(buttons).toHaveLength(1);
 
-    // Click Paper / Live toggle button
+    // Click Paper / Live toggle button. Issue #4652: arming live asks first,
+    // so the click opens the confirmation and switches nothing yet.
     await act(async () => {
       (buttons![0] as HTMLButtonElement).click();
+    });
+    expect(handleSwitchEnvironment).not.toHaveBeenCalled();
+    expect(handleStartOAuth).not.toHaveBeenCalled();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog, "the live-switch confirmation").not.toBeNull();
+    const confirm = [...dialog!.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Switch to live trading"),
+    ) as HTMLButtonElement | undefined;
+    expect(confirm).toBeTruthy();
+    await act(async () => {
+      confirm!.click();
     });
     expect(handleSwitchEnvironment).toHaveBeenCalledWith("PROD");
     expect(handleStartOAuth).not.toHaveBeenCalled();

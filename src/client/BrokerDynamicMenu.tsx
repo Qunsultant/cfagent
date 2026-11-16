@@ -28,7 +28,7 @@ import {
 } from "./brokerEnvironment";
 // Issue #4649 (matrix gap 1): the one live-mode rule set — which brokers can
 // simulate, when a switch needs a confirmation, and what the dialog/Notice say.
-import { needsLiveModeForBroker, liveOnlyNoticeCopy } from "./trading/liveMode";
+import { needsLiveModeForBroker, liveOnlyNoticeCopy, requiresLiveModeConfirm } from "./trading/liveMode";
 import { LiveModeSwitchDialog } from "./trading/LiveModeSwitchDialog";
 import {
   AdBannerConfig,
@@ -183,6 +183,10 @@ export function BrokerDynamicMenu({
   // confirmation. Non-null === the dialog is open. The selection is NOT saved
   // until the dialog is confirmed, so Public can never be stored in paper mode.
   const [pendingLiveBroker, setPendingLiveBroker] = useState<string | null>(null);
+  // Issue #4652 (matrix gap 3): the environment a TEST→PROD switch is waiting on
+  // the same confirmation for. The mode toggle and the Policy Mode pills both
+  // route through `requestEnvSwitch`, so arming live trading is never one click.
+  const [pendingLiveSwitch, setPendingLiveSwitch] = useState<BrokerEnvironment | null>(null);
   // Issue #3990: the personal-token card toggle, mirroring the
   // key-pair toggle above — one open card per credential kind.
   const [showTokenCard, setShowTokenCard] = useState(false);
@@ -611,6 +615,27 @@ export function BrokerDynamicMenu({
     onSwitchEnv("PROD");
   };
 
+  /**
+   * Issue #4652 (matrix gap 3): every environment switch a user can trigger here
+   * goes through this gate. Flipping TEST→PROD arms real-money placement, and the
+   * mode is global (it applies to every broker), so it asks first, naming the
+   * selected broker. Switching back to paper de-arms nothing and posts straight
+   * away.
+   */
+  const requestEnvSwitch = (target: BrokerEnvironment) => {
+    if (requiresLiveModeConfirm(target, effectiveEnv)) {
+      setPendingLiveSwitch(target);
+      return;
+    }
+    onSwitchEnv(target);
+  };
+
+  const confirmLiveSwitch = () => {
+    const target = pendingLiveSwitch;
+    setPendingLiveSwitch(null);
+    if (target) onSwitchEnv(target);
+  };
+
   const onRunDiagnostics = () => {
     setIsPinned(false);
     setIsHovered(false);
@@ -862,7 +887,7 @@ export function BrokerDynamicMenu({
                 type="button"
                 size="sm"
                 className={`btn-env-mini active ${isLive ? "prod" : ""}`}
-                onClick={() => onSwitchEnv(isLive ? "TEST" : "PROD")}
+                onClick={() => requestEnvSwitch(isLive ? "TEST" : "PROD")}
                 title={`Current mode: ${brokerPresentation(selectedBrokerId).modeWord[isLive ? "live" : "paper"]}. Click to toggle to ${brokerPresentation(selectedBrokerId).modeWord[isLive ? "paper" : "live"]}.`}
               >
                 {isLive ? "🔴 Live" : `🧪 ${brokerPresentation(selectedBrokerId).modeShort[isLive ? "live" : "paper"]}`}
@@ -1056,7 +1081,8 @@ export function BrokerDynamicMenu({
                       // call here posted a second switch (Chat's
                       // toggle POSTs directly), and onSwitchEnv's
                       // direct leg made it three.
-                      onSwitchEnv(target);
+                      // Issue #4652: the TEST→PROD direction asks first.
+                      requestEnvSwitch(target);
                     }}
                   />
                 </div>
@@ -1371,14 +1397,19 @@ export function BrokerDynamicMenu({
         </div>
       )}
 
-      {/* Issue #4649: one dialog for arming live trading, on the ConfirmModal
-          primitive — never a native confirm(). */}
+      {/* Issue #4649/#4652: one dialog for arming live trading, on the
+          ConfirmModal primitive — never a native confirm(). It serves both
+          entry points: selecting a live-only broker (#4649) and flipping the
+          mode TEST→PROD from either control (#4652). */}
       <LiveModeSwitchDialog
-        open={pendingLiveBroker !== null}
+        open={pendingLiveBroker !== null || pendingLiveSwitch !== null}
         brokerLabel={brokerPresentation(pendingLiveBroker ?? selectedBrokerId).label}
         broker={pendingLiveBroker ?? selectedBrokerId}
-        onConfirm={confirmLiveModeSelection}
-        onClose={() => setPendingLiveBroker(null)}
+        onConfirm={pendingLiveBroker !== null ? confirmLiveModeSelection : confirmLiveSwitch}
+        onClose={() => {
+          setPendingLiveBroker(null);
+          setPendingLiveSwitch(null);
+        }}
       />
     </div>
   );
