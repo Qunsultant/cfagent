@@ -114,9 +114,9 @@ function canonParams(params: Record<string, string>): string {
 }
 
 describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
-  it("resolves 417 executable steps and skips the seed-form entry with its reason", () => {
+  it("resolves 418 executable steps and skips the seed-form entry with its reason", () => {
     const p = plan();
-    expect(p.steps).toHaveLength(417);
+    expect(p.steps).toHaveLength(418);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -127,7 +127,7 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     const harness = resolveCombinedSteps().filter(
       (s) => s.code !== SEED_FORM_CODE,
     );
-    expect(harness).toHaveLength(417);
+    expect(harness).toHaveLength(418);
     // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
@@ -256,7 +256,7 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // tables' creations are selected.
     expect(selected.schema).toHaveLength(235);
     expect(selected.seeds).toHaveLength(11);
-    expect(selected.skipped).toHaveLength(7);
+    expect(selected.skipped).toHaveLength(8);
     expect(
       codesOf(selected.skipped),
     ).toContain("schema.orm.mas_transactions.alter_table_add_column_tenant_id");

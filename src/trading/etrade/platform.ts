@@ -591,7 +591,7 @@ export class ETradeTradingPlatform implements ITradingPlatform {
           orderType,
           limitPrice: params.limitPrice,
           stopPrice: params.stopPrice,
-          // Issue #4656 (matrix gap 5): E*TRADE's own term for the approved
+          // Issue #4656 (matrix gap 5): this broker's own term for the approved
           // time-in-force (FOK never reaches here — no verified value).
           orderTerm: etradeOrderTerm(params.timeInForce),
           optionLegs,
@@ -863,7 +863,7 @@ export class ETradeTradingPlatform implements ITradingPlatform {
   }
 
   async placeOrderRemote(params: any): Promise<ETradeOrderExecutionResult> {
-    // Issue #4656 (matrix gap 5): map the approved time-in-force onto E*TRADE's
+    // Issue #4656 (matrix gap 5): map the approved time-in-force onto the broker's
     // own orderTerm. The route has already refused a value this broker cannot
     // carry, so this is the last, cheapest place to keep the wire honest.
     return this.client.placeOrder({ ...params, orderTerm: etradeOrderTerm(params.timeInForce) });
@@ -871,7 +871,7 @@ export class ETradeTradingPlatform implements ITradingPlatform {
 }
 
 /**
- * Issue #4656 (matrix gap 5): the canonical time-in-force → E*TRADE orderTerm.
+ * Issue #4656 (matrix gap 5): the canonical time-in-force → this broker's orderTerm.
  * The client's type has three values; `fok` has none, so it maps to undefined
  * and the caller's pre-#4656 default (GOOD_FOR_DAY) is never reached for it
  * because the route refuses FOK against the capability matrix first.

@@ -375,7 +375,7 @@ describe("recreate, tenant scope (#4383)", () => {
     // D1 leg: the fresh selection (235 schema + 11 seeds). Issue #4654 adds one
     // more ORM-plane entry to the catalogue, so the D1 leg skips one more.
     expect(body.d1.selected).toHaveLength(246);
-    expect(body.d1.skipped).toHaveLength(7);
+    expect(body.d1.skipped).toHaveLength(8);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

@@ -648,6 +648,11 @@
           "pk": 0
         },
         {
+          "name": "time_in_force",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
           "name": "created_at",
           "type": "TEXT",
           "pk": 0

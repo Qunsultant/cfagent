@@ -4,10 +4,9 @@
  *
  * The ticket's vocabulary (`config/orderCapabilities.ts`: DAY/GTC/IOC/FOK) is the
  * user-facing one; the wire wants a lowercase token on `PlaceOrderParams` /
- * `OrderPreviewParams`, and each broker maps it onto its own term (E*TRADE
- * `orderTerm`, Alpaca `time_in_force`). What must never happen is a surface
- * inventing its own token or a route forwarding an unvalidated string to a
- * broker that then substitutes a default.
+ * `OrderPreviewParams`, and each platform maps it onto its own term at its own
+ * seam. What must never happen is a surface inventing its own token, or a route
+ * forwarding an unvalidated string to a broker that then substitutes a default.
  *
  * Fail closed: an absent value stays absent (the broker default applies, which
  * is what every pre-#4656 caller gets), and an unrecognised value is rejected —

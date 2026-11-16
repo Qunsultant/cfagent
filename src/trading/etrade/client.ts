@@ -1010,7 +1010,7 @@ export class ETradeRestClient {
     optionLegs?: TradingOrderLeg[];
     strategyNetDebit?: number;
     /**
-     * Issue #4656 (matrix gap 5): the E*TRADE orderTerm the approved
+     * Issue #4656 (matrix gap 5): the broker orderTerm the approved
      * time-in-force maps to. Absent → GOOD_FOR_DAY (the pre-#4656 default).
      * FILL_OR_KILL has no verified value in this client, so it never appears
      * here; the route refuses FOK before this seam is reached.
