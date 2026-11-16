@@ -6,7 +6,7 @@
       "paper": {
         "equity": {
           "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
-          "timeInForce": ["DAY", "GTC", "IOC"]
+          "timeInForce": ["DAY", "GTC", "IOC", "OPG", "CLS"]
         },
         "options": {
           "orderTypes": ["MARKET", "LIMIT"],
@@ -16,7 +16,7 @@
       "live": {
         "equity": {
           "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
-          "timeInForce": ["DAY", "GTC", "IOC"]
+          "timeInForce": ["DAY", "GTC", "IOC", "OPG", "CLS"]
         },
         "options": {
           "orderTypes": ["MARKET", "LIMIT"],
