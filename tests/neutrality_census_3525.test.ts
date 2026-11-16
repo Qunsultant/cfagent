@@ -620,6 +620,13 @@ function measure(): Map<string, number> {
  * the three route literals plus the two mentions in the inventory
  * comment naming the shared start branch). Totals move 1192/9350
  * -> 1192/9354.
+ * Baseline update (#4469, 2026-11-15): the NLQ scan leg's
+ * (broker, mode) derivation defaults to the pre-provenance broker
+ * id when the caller stamps none — naming the default is the
+ * derivation input's job, dispositioned INTEGRATION. 1 raise
+ * (nlqOptionsStrategy.ts etrade 19 -> 20: the default line). The
+ * cutover's comments name no provider. Totals move 1192/9354 ->
+ * 1192/9355.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (189 rows / 1050 lines) ----
@@ -893,7 +900,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/nlq/schema.ts", "etrade", 10],
   ["src/agents/nlq/types.ts", "etrade", 1],
   ["src/agents/nlqOptionsStrategy.ts", "alpaca", 1],
-  ["src/agents/nlqOptionsStrategy.ts", "etrade", 19],
+  ["src/agents/nlqOptionsStrategy.ts", "etrade", 20],
   ["src/agents/orchestrator.ts", "etrade", 20],
   ["src/agents/orchestrator/asyncJobs.ts", "etrade", 12],
   ["src/agents/orchestrator/autopilot.ts", "etrade", 4],
