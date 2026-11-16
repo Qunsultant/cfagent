@@ -102,10 +102,14 @@ export function RiskAnalysisModal({
           <div className="risk-modal-title-group">
             <span className="risk-modal-icon-shield">🛡️</span>
             <div className="risk-modal-titles">
-              <h2 className="risk-modal-h2">
-                <span className="risk-symbol-badge">{subject.underlyingSymbol}</span>
-                {subject.title || subject.strategyType || "Risk Management & Analysis"}
-              </h2>
+              <CardHeader
+                title={
+                  <>
+                    <span className="risk-symbol-badge">{subject.underlyingSymbol}</span>
+                    {subject.title || subject.strategyType || "Risk Management & Analysis"}
+                  </>
+                }
+              />
               <span className="risk-modal-subtitle">
                 Spot: ${spot.toFixed(2)} • {subject.dte ? `${subject.dte.toFixed(0)} DTE` : "Active Trade"} • {subject.sentiment ? subject.sentiment.toUpperCase() : "Directional"}
               </span>
@@ -195,9 +199,7 @@ export function RiskAnalysisModal({
               {/* Greeks Sensitivity Matrix */}
               <div className="risk-section-box">
                 <div className="risk-section-header">
-                  <h3 className="risk-section-title">
-                    <span>⚡ Institutional Greeks Sensitivity Matrix</span>
-                  </h3>
+                  <CardHeader title="⚡ Institutional Greeks Sensitivity Matrix" />
                   <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-dim)" }}>
                     Values per 1 unit contract lot
                   </span>
@@ -257,9 +259,7 @@ export function RiskAnalysisModal({
               {/* Breakeven Safety Boundaries */}
               <div className="risk-section-box">
                 <div className="risk-section-header">
-                  <h3 className="risk-section-title">
-                    <span>🎯 Breakeven Safety Cushions</span>
-                  </h3>
+                  <CardHeader title="🎯 Breakeven Safety Cushions" />
                   <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
                     Spot: ${spot.toFixed(2)}
                   </span>
@@ -385,9 +385,7 @@ export function RiskAnalysisModal({
               {/* Tactical Adjustments & Rolling Playbook */}
               <div className="risk-section-box">
                 <div className="risk-section-header">
-                  <h3 className="risk-section-title">
-                    <span>🔄 Tactical Defense &amp; Rolling Playbook</span>
-                  </h3>
+                  <CardHeader title="🔄 Tactical Defense &amp; Rolling Playbook" />
                   <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-accent)" }}>
                     How to defend the trade when challenged
                   </span>
@@ -422,9 +420,7 @@ export function RiskAnalysisModal({
           <TabPanel idBase="risk-analysis" tabId="scenarios" active={activeTab === "scenarios"}>
             <div className="risk-section-box">
               <div className="risk-section-header">
-                <h3 className="risk-section-title">
-                  <span>📉 Multi-Point Spot &amp; Tail Shock Stress Test</span>
-                </h3>
+                <CardHeader title="📉 Multi-Point Spot &amp; Tail Shock Stress Test" />
                 <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
                   Estimated P&L under sudden market moves
                 </span>
@@ -464,9 +460,7 @@ export function RiskAnalysisModal({
           <TabPanel idBase="risk-analysis" tabId="ai" active={activeTab === "ai"}>
             <div className="risk-ai-card">
               <div className="risk-ai-header">
-                <h3 className="risk-ai-title">
-                  <span>🤖 Ask AI Assistant to Manage This Trade</span>
-                </h3>
+                <CardHeader title="🤖 Ask AI Assistant to Manage This Trade" />
                 <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
                   Autonomous Agent Risk Orchestration
                 </span>

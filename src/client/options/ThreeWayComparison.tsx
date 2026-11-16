@@ -92,7 +92,7 @@ export function ThreeWayComparison({ data, activeEnv, userLogin }: {
 
   return (
     <section className="options-three-way-comparison" aria-label="Generator comparison">
-      <h2>Generator comparison (LLM / Quant / Hybrid)</h2>
+      <CardHeader title="Generator comparison (LLM / Quant / Hybrid)" />
       <p className="options-comparison-note">
         Run {data.artifact.runId} for {data.symbol ?? "the requested symbol"}. No winner is declared — arms
         accumulate ledger track records over time. The hybrid arm&apos;s LLM ordering lives only on this

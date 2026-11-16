@@ -45,7 +45,7 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
     >
       <header className="sched-dialog-header">
         <div>
-          <h2 className="sched-dialog-title">Edit cadence</h2>
+          <CardHeader title="Edit cadence" />
           <p className="sched-dialog-subtitle">
             {scheduleTitle(item)} · <code>{item.id}</code>
           </p>

@@ -2286,7 +2286,7 @@ export function StrategyDiscoveryPanel({
           <div className="strat-builder-header-bar">
             <div className="strat-builder-title-group">
               <div className="strat-strategy-name-badge-wrap">
-                <h2>{currentStrategyName}</h2>
+                <CardHeader title={currentStrategyName} />
                 <Button
                   type="button"
                   className="strat-change-strat-btn"

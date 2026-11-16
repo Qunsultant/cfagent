@@ -389,7 +389,7 @@ export function ProductsSection({ isActive = true }: { isActive?: boolean } = {}
     <div data-testid="products-panel">
       <Stack gap="2">
         <div>
-          <h2>Products</h2>
+          <CardHeader title="Products" />
           <p>
             Products are identity; versions are immutable terms snapshots. A price change is a new version with an
             effective date — never an edit. A new version moves no one by itself: existing customers stay on the

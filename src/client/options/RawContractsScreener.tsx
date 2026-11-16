@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Flex, Grid, Notice, PageSection, Select, Table, TextInput, type TableColumn } from "../components/ui";
+import { Button, CardHeader, Flex, Grid, Notice, PageSection, Select, Table, TextInput, type TableColumn } from "../components/ui";
 import { apiFetch as fetch } from "../apiFetch";
 import type { ScreenedOptionContractItem } from "../../types";
 import { buildPaymentSignature, describeChallenge, sendUsdcPayment, type PaidTransfer, type X402Challenge } from "../x402Pay";
@@ -453,12 +453,16 @@ export function RawContractsScreener({
         }}
       >
         <div>
-          <h3 style={{ margin: "0 0 0.25rem", fontSize: "var(--font-size-title-sm)", color: "var(--color-accent)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-            <span>📋 Raw Option Contracts Screener</span>
-            <span style={{ fontSize: "var(--font-size-caption)", background: "var(--color-accent-subtle)", border: "1px solid var(--color-border-focus)", borderRadius: "var(--radius-xs, 4px)", padding: "var(--space-0-5) var(--space-2)", color: "var(--color-accent)" }}>
-              Live E*TRADE Chains
-            </span>
-          </h3>
+          <CardHeader
+            title={
+              <>
+                <span>📋 Raw Option Contracts Screener</span>
+                <span style={{ fontSize: "var(--font-size-caption)", background: "var(--color-accent-subtle)", border: "1px solid var(--color-border-focus)", borderRadius: "var(--radius-xs, 4px)", padding: "var(--space-0-5) var(--space-2)", color: "var(--color-accent)" }}>
+                  Live E*TRADE Chains
+                </span>
+              </>
+            }
+          />
           <p style={{ margin: 0, fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
             Query live individual option contracts with implied volatility, bid/ask spreads, Greeks, and liquidity bounds.
           </p>

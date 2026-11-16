@@ -125,6 +125,13 @@ describe("CardHeader (#3133 — distributed header, OrderTicketPanel.tsx:371 + R
     expect(document.querySelector(".ui-card-header")).toBeNull();
     expect(document.body.textContent).toBe("");
   });
+
+  it("carries an id on the h4 so a section can be labelled by its heading (issue 4913)", () => {
+    render(<CardHeader id="sched-audit-heading" title="Execution History & Audit Trail" />);
+    expect(document.querySelector(".ui-card-header h4")?.getAttribute("id")).toBe(
+      "sched-audit-heading",
+    );
+  });
 });
 
 describe("WorkCard (#3133 — order form card, OrderTicketPanel.tsx:370)", () => {

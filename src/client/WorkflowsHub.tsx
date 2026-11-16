@@ -1152,10 +1152,14 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                     <Flex gap="2" align="center">
                       <Badge tone="neutral">Q0{faq.number}</Badge>
                       <Stack gap="0">
-                        <h3>
-                          &ldquo;{faq.question}&rdquo;
-                          <Badge tone="info">{faq.categoryLabel}</Badge>
-                        </h3>
+                        <CardHeader
+                          title={
+                            <>
+                              &ldquo;{faq.question}&rdquo;
+                              <Badge tone="info">{faq.categoryLabel}</Badge>
+                            </>
+                          }
+                        />
                         <p className="ui-meta">{faq.summary}</p>
                       </Stack>
                     </Flex>
@@ -1393,11 +1397,15 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                     <Flex gap="2" align="center">
                       <Badge tone={wf.track === "analysis" ? "info" : "accent"}>{wf.codeId}</Badge>
                       <Stack gap="0">
-                        <h3>
-                          {wf.title}
-                          <Badge tone={wf.track === "analysis" ? "info" : "accent"}>{wf.trackLabel}</Badge>
-                          <Badge tone={badgeToneFor(wf.badgeColor)}>{wf.badge}</Badge>
-                        </h3>
+                        <CardHeader
+                          title={
+                            <>
+                              {wf.title}
+                              <Badge tone={wf.track === "analysis" ? "info" : "accent"}>{wf.trackLabel}</Badge>
+                              <Badge tone={badgeToneFor(wf.badgeColor)}>{wf.badge}</Badge>
+                            </>
+                          }
+                        />
                         <p className="ui-meta">{wf.subtitle}</p>
                       </Stack>
                     </Flex>
@@ -1586,15 +1594,19 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                     <Flex gap="2" align="center">
                       <Badge tone="neutral">0{sec.number}</Badge>
                       <Stack gap="0">
-                        <h3>
-                          {sec.title}
-                          <Badge tone={badgeToneFor(sec.badgeColor)}>{sec.badge}</Badge>
-                          {sec.governedWorkflows && (
-                            <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-accent)", background: "var(--color-accent-subtle)", padding: "var(--space-0-5) var(--space-2)", borderRadius: "4px" }}>
-                              Governs: {sec.governedWorkflows.join(", ")}
-                            </span>
-                          )}
-                        </h3>
+                        <CardHeader
+                          title={
+                            <>
+                              {sec.title}
+                              <Badge tone={badgeToneFor(sec.badgeColor)}>{sec.badge}</Badge>
+                              {sec.governedWorkflows && (
+                                <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-accent)", background: "var(--color-accent-subtle)", padding: "var(--space-0-5) var(--space-2)", borderRadius: "4px" }}>
+                                  Governs: {sec.governedWorkflows.join(", ")}
+                                </span>
+                              )}
+                            </>
+                          }
+                        />
                         <p className="ui-meta">{sec.subtitle}</p>
                       </Stack>
                     </Flex>

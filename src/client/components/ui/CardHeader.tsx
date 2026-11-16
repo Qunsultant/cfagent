@@ -11,6 +11,11 @@ export interface CardHeaderProps {
   /** Content under the subtitle on the left (the order form card's broker/mode badges). */
   belowSubtitle?: React.ReactNode;
   /**
+   * Issue #4913: the h4's id — a section's aria-labelledby target (the
+   * audit-trail section is labelled by its heading). Omitted when unset.
+   */
+  id?: string;
+  /**
    * Issue #4573: put title, subtitle, belowSubtitle and meta on ONE row
    * instead of stacking the left block. Long text ellipsizes (the
    * #4409 `.ui-single-line` rule) and meta stays pinned right. Pass the
@@ -32,7 +37,7 @@ export interface CardHeaderProps {
  * title, subtitle, meta, or belowSubtitle (§1.6b). Pages migrate onto
  * it in Wave 1 (#3138–#3140); this slice builds the organism only.
  */
-export function CardHeader({ title, subtitle, meta, belowSubtitle, singleLine = false }: CardHeaderProps) {
+export function CardHeader({ title, subtitle, meta, belowSubtitle, singleLine = false, id }: CardHeaderProps) {
   if (!title && !subtitle && !meta && !belowSubtitle) return null;
   return (
     <Flex
@@ -44,7 +49,7 @@ export function CardHeader({ title, subtitle, meta, belowSubtitle, singleLine = 
     >
       {(title || subtitle || belowSubtitle) && (
         <div className="ui-card-header-main">
-          {title && <h4>{title}</h4>}
+          {title && <h4 id={id}>{title}</h4>}
           {subtitle && <span className="ui-card-header-subtitle">{subtitle}</span>}
           {belowSubtitle}
         </div>

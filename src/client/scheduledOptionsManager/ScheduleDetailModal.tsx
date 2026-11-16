@@ -53,7 +53,7 @@ export function ScheduleDetailModal({
     >
       <header className="sched-dialog-header">
         <div className="sched-dialog-heading">
-          <h2 className="sched-dialog-title">{model.title}</h2>
+          <CardHeader title={model.title} />
           <div className="schedule-row-badges">
             <Badge
               tone={
