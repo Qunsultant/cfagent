@@ -51,9 +51,9 @@ import { createPublicDataProviderFromEnv } from "../dataProviders/adapters";
 import { PublicTradingMcpClient } from "../../mcps/public/publicTradingMcp";
 import {
   parsePublicAccounts,
-  parsePublicOrderId,
   parsePublicOrders,
   parsePublicPositions,
+  publicCancelReceipt,
   publicDraftFromPreflight,
   publicMultilegArgs,
   publicNoPaperModeOutcomeExists,
@@ -141,6 +141,22 @@ export class PublicTradingPlatform implements ITradingPlatform {
     }
   }
 
+  /**
+   * The TEST-mode refusal for a mutating call, or null in PROD. One check for
+   * every mutating entry point (issue #4650): placement AND cancellation read
+   * the same catalogued outcome, so a cancel can never reach the live MCP tool
+   * while the stored mode says paper.
+   */
+  private noPaperModeRefusalCode(): { code: string; message: string } | null {
+    if (this.environment() !== "TEST") return null;
+    if (!publicNoPaperModeOutcomeExists()) {
+      throw new Error(
+        "FAILURE_PUBLIC_NO_PAPER_MODE is missing from the outcome catalog; refusing to proceed rather than silently calling the broker."
+      );
+    }
+    return publicNoPaperModeRefusal();
+  }
+
   /** Refuse a TEST-mode placement with the named outcome, before any MCP call. Returns the refusal or null. */
   private noPaperModeRefusal(params: {
     orderId: string;
@@ -149,14 +165,26 @@ export class PublicTradingPlatform implements ITradingPlatform {
     quantity: number;
     authorizerDid: string;
   }): BrokerOrderExecutionResult | null {
-    if (this.environment() !== "TEST") return null;
-    if (!publicNoPaperModeOutcomeExists()) {
-      throw new Error(
-        "FAILURE_PUBLIC_NO_PAPER_MODE is missing from the outcome catalog; refusing to place rather than silently proceeding."
-      );
-    }
-    const refusal = publicNoPaperModeRefusal();
+    const refusal = this.noPaperModeRefusalCode();
+    if (!refusal) return null;
     return publicRefusedExecution({ ...params, code: refusal.code, message: refusal.message });
+  }
+
+  /**
+   * Issue #4650 (matrix gap 2): the cancel counterpart of the placement
+   * refusal. A TEST-mode cancel never reaches Public's live `cancel_order`
+   * tool — it would cancel a real PROD-placed order — and the receipt says so
+   * instead of reporting a cancellation.
+   */
+  private cancelNoPaperModeRefusal(orderId: string): BrokerCancelOrderResult | null {
+    const refusal = this.noPaperModeRefusalCode();
+    if (!refusal) return null;
+    return {
+      success: false,
+      orderId,
+      message: `${refusal.code}: ${refusal.message}`,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   async getStatus(): Promise<BrokerStatus> {
@@ -578,17 +606,32 @@ export class PublicTradingPlatform implements ITradingPlatform {
 
   async cancelOrderRemote(orderId: string | number): Promise<BrokerCancelOrderResult> {
     await this.refuseDeploymentCredential();
-    const text = await this.trading.callTradingTool("cancel_order", {
-      order_id: { names: ["order_id", "orderId", "id"], value: String(orderId) },
-    });
-    const payload = this.trading.parseResult(text);
-    const brokerOrderRef = parsePublicOrderId(payload) ?? String(orderId);
-    return {
-      success: true,
-      orderId: brokerOrderRef,
-      message: `Public.com order ${brokerOrderRef} cancelled.`,
-      timestamp: new Date().toISOString(),
-    };
+    const requestedOrderId = String(orderId);
+    // Issue #4650 (matrix gap 2): the paper gate placement already had. A
+    // TEST-mode cancel would reach Public's one live endpoint and cancel a
+    // real order, so it is refused here, before any MCP call.
+    const refusal = this.cancelNoPaperModeRefusal(requestedOrderId);
+    if (refusal) return refusal;
+    try {
+      const text = await this.trading.callTradingTool("cancel_order", {
+        order_id: { names: ["order_id", "orderId", "id"], value: requestedOrderId },
+      });
+      // Issue #4650: the broker's own answer decides the receipt — a refused
+      // or unconfirmed cancel is reported as such, never as cancelled.
+      return publicCancelReceipt({
+        requestedOrderId,
+        payload: this.trading.parseResult(text),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.lastError = message;
+      return {
+        success: false,
+        orderId: requestedOrderId,
+        message: `Public.com cancellation failed: ${message}`,
+        timestamp: new Date().toISOString(),
+      };
+    }
   }
 
   async getOrderHistory(status: "open" | "closed" | "all"): Promise<BrokerRemoteOrder[]> {

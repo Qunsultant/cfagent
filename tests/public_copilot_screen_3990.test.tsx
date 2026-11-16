@@ -335,12 +335,29 @@ describe("public_orders + public_cancel_order (#3990 Slice D)", () => {
     expect(calls.some((c) => c.tool === "get_orders")).toBe(true);
   });
 
-  it("public_cancel_order cancels one order by id", async () => {
+  // Issue #4650 (matrix gap 2): a TEST-mode cancel is refused before any MCP
+  // call — the previous expectation pinned the hole (it called the live tool
+  // and reported success). The PROD case below is the one that cancels.
+  it("public_cancel_order in TEST refuses with FAILURE_PUBLIC_NO_PAPER_MODE and calls nothing", async () => {
     const calls: RpcCall[] = [];
     installFakeMcp(calls);
     const orm = makeOrm();
     const result = await McpToolFactory.getTool("public_cancel_order")!.execute({ order_id: "ord-1" }, ctx(orm));
+    expect(result.success).toBe(false);
+    expect(String(result.message ?? "")).toContain("FAILURE_PUBLIC_NO_PAPER_MODE");
+    expect(calls.some((c) => c.tool === "cancel_order")).toBe(false);
+  });
+
+  it("public_cancel_order in PROD cancels one order by id", async () => {
+    const calls: RpcCall[] = [];
+    installFakeMcp(calls);
+    const orm = makeOrm();
+    const result = await McpToolFactory.getTool("public_cancel_order")!.execute(
+      { order_id: "ord-1" },
+      ctx(orm, (key) => (key === "etrade:environment" ? "PROD" : null)),
+    );
     expect(result.success).toBe(true);
+    expect(String(result.message ?? "")).toMatch(/cancelled/i);
     expect(calls.some((c) => c.tool === "cancel_order")).toBe(true);
   });
 });
