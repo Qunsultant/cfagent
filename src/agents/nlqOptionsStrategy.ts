@@ -21,6 +21,7 @@ import type { RiskProfile } from "../trading";
 import { buildTypeRollup, type StrategyTypeRollup } from "../trading";
 import { getEventCalendarCoverage, getSymbolEventCalendar } from "../services/eventCalendar";
 import {
+  discoveryBrokerStageInput,
   formatDiscoveryRunSummary,
   type DiscoveryRunOutcome,
   type DiscoveryRunRequest,
@@ -49,10 +50,21 @@ import {
   runStrategyScreenViaEngine,
 } from "../workflows/optionsScreenEngine";
 import type { SqlStorage } from "../orm";
+import type { Env } from "../types";
+import type { JobPipelineStores } from "../data/jobPipelinePorts";
+import type { JobRunRecorder } from "../services/jobPipelineEngine";
 import {
   optionsArtifactKey,
   type OptionsStageStorage,
 } from "../workflows/optionsScreenPorts";
+import type { BrokerStageInput } from "../workflows/optionsStepPorts";
+import {
+  awaitOptionsWorkflowRun,
+  optionsWorkflowRunDepsFromEnv,
+  startStrategyScreenWorkflow,
+  type AwaitOptionsWorkflowRunOpts,
+  type StartOptionsScreenWorkflowOpts,
+} from "../workflows/optionsWorkflowHost";
 import type { StageQueueSend } from "../workflows/stageQueueTransport";
 import type { PanelDiscoveryResult } from "../services/recommendationKernel";
 
@@ -677,6 +689,15 @@ export interface OptionsStrategyDeps {
    * (the only broker wired before provenance existed), never a guess.
    */
   broker?: "etrade" | "alpaca" | "public"; // Issue #3990
+  /**
+   * Issue #4469: the worker env, for the scan leg's workflow-residency
+   * gate. When present with the residency bindings configured, the
+   * scan dispatches through the strategy workflow host; absent, the
+   * leg stays on the unchanged sync dispatch (the gate cannot
+   * evaluate bindings it cannot see). Both production hosts thread
+   * it; test/context callers omit it and keep sync behavior.
+   */
+  env?: Env;
   /** Issue #14: the Phase 1 discovery runner (createDiscoveryService's
    *  return shape). When absent, the unified options_fit_discovery
    *  action's scope leg fails with an availability error — the same
@@ -1226,6 +1247,158 @@ async function resolveScopeSymbols(
   };
 }
 
+/** The scan leg's dispatch decision: the host, or the unchanged sync dispatch. */
+export interface NlqScanDispatchDecision {
+  route: "host" | "sync";
+  reason: string;
+}
+
+/**
+ * Issue #4469 — the scan leg's dispatch gate (the #4450 manual-route
+ * gate's shape, as the #4468 panel gate mirrors it). The host only
+ * when the leg's (broker, mode) pair derived from its broker stamp
+ * and the residency bindings are configured; anything else stays on
+ * the unchanged sync dispatch. No symbol gate: every scan request
+ * carries explicit symbols. No universe gate: the scan shape builds
+ * its filter from the request itself, and the stored request carries
+ * no universe stage input. No gate decision is logged; the run's job
+ * record shows which dispatch served it.
+ */
+export function nlqScanDispatchRoute(input: {
+  broker: BrokerStageInput | null;
+  env?: Env;
+}): NlqScanDispatchDecision {
+  if (!input.env) {
+    return {
+      route: "sync",
+      reason: "no env threaded, so the residency bindings cannot be evaluated",
+    };
+  }
+  if (!input.broker) {
+    return {
+      route: "sync",
+      reason:
+        "no broker stage input derives from the run's broker stamp, so the residency could not resolve the run's own chain source",
+    };
+  }
+  const workflow = input.env.JOB_PIPELINE_WORKFLOW;
+  if (!input.env.AGENT_DB || !workflow || typeof workflow.create !== "function") {
+    return {
+      route: "sync",
+      reason: "the workflow residency bindings are not configured in this deployment",
+    };
+  }
+  return {
+    route: "host",
+    reason: "broker pair derived, residency bindings configured",
+  };
+}
+
+/**
+ * Issue #4469 — the host dispatch's injectable seams (the
+ * #4291/#4450/#4468 idiom): the workflow create call, the residency
+ * stores, and the await options. Tests inject fakes; production
+ * passes nothing and the dispatch derives from env.
+ */
+export interface NlqScanHostSeams {
+  startWorkflow?: StartOptionsScreenWorkflowOpts["startWorkflow"];
+  stores?: JobPipelineStores;
+  runRecorder?: JobRunRecorder;
+  awaitOptions?: AwaitOptionsWorkflowRunOpts;
+}
+
+/**
+ * Issue #4469 — one opportunity scan through the strategy workflow
+ * host: define the strategy job with the leg's broker pair stamped on
+ * the stored request (the seam stamps the descriptor over the
+ * envelope's provenance stamp, so the resolving step decodes a pair,
+ * never a bare broker id), create the workflow instance, await
+ * settlement, and return the shapeReport result. The envelope is the
+ * sync dispatch's envelope verbatim; the await bound is the manual
+ * route's (300s, #4450): a scan over live chains is the same shape of
+ * work. A failed run throws the sync path's failure shape; a run
+ * that completes without a report refuses to answer from nothing,
+ * as the sync path does.
+ *
+ * Persistence after settlement: the residency binds no scan-run
+ * store (#4453 decided-not-to — the family lives in the caller's
+ * store, and the persist stage degrades by name), so the settled
+ * result saves here, through the caller's own store, with the pair's
+ * broker — the broker whose chains the run actually read. The save
+ * receipt rides the returned result exactly as the sync persist
+ * stage's does (scanRunId + persisted on success, persisted:false
+ * with the result intact on a store error, no receipt fields at all
+ * when no store is bound).
+ *
+ * The caller's engine stores do not thread here: the host run
+ * records over the residency's durable stores, not the caller's
+ * stores, so a host-path scan is not addressable by per-stage
+ * control from the copilot turn until control moves to the durable
+ * stores (#4505). The sync fallback keeps the #4066 threading for
+ * gated-out runs.
+ */
+export async function runNlqScanViaHost(args: {
+  env: Env;
+  request: unknown;
+  runId: string;
+  userLogin?: string;
+  broker: BrokerStageInput;
+  scanRunStore?: ScanRunStore;
+  seams?: NlqScanHostSeams;
+}): Promise<OpportunityScanResult & { scanRunId?: string; persisted?: boolean }> {
+  const deps =
+    args.seams?.stores && args.seams?.runRecorder
+      ? { stores: args.seams.stores, runRecorder: args.seams.runRecorder }
+      : optionsWorkflowRunDepsFromEnv(args.env);
+  const started = await startStrategyScreenWorkflow(
+    args.env,
+    {
+      runId: args.runId,
+      request: args.request,
+      ...(args.userLogin ? { userLogin: args.userLogin } : {}),
+      broker: args.broker,
+    },
+    {
+      ...deps,
+      ...(args.seams?.startWorkflow ? { startWorkflow: args.seams.startWorkflow } : {}),
+    },
+  );
+  const view = await awaitOptionsWorkflowRun(deps, started.jobId, {
+    timeoutMs: 300_000,
+    ...(args.seams?.awaitOptions ?? {}),
+  });
+  if (view.state === "failed") {
+    const failed = view.stages.find((stage) => stage.status === "failed");
+    throw new Error(
+      `Options opportunity scan failed at ${failed?.stageId ?? "unknown"}: ${failed?.error ?? "unknown reason"}`,
+    );
+  }
+  if (view.state !== "completed") {
+    throw new Error(`Options opportunity scan run ${args.runId} ended ${view.state} without a result`);
+  }
+  const report = view.shapeReport as
+    | (OpportunityScanResult & { scanRunId?: string; persisted?: boolean })
+    | undefined;
+  if (!report) {
+    throw new Error(
+      "Options opportunity scan completed without a report artifact; refusing to answer from nothing.",
+    );
+  }
+  if (!args.scanRunStore) {
+    return report;
+  }
+  try {
+    const saved = await args.scanRunStore.save(report, {
+      ...(args.userLogin ? { userLogin: args.userLogin } : {}),
+      broker: args.broker.broker,
+    });
+    return { ...report, scanRunId: saved.id, persisted: true };
+  } catch (err) {
+    console.error("Failed to persist opportunity scan run (host-side save after settlement)", err);
+    return { ...report, persisted: false };
+  }
+}
+
 async function runOpportunityScan(
   etrade: Parameters<typeof runOptionsStrategyAction>[0],
   filters: OptionsStrategyIntent["filters"] | undefined,
@@ -1318,80 +1491,114 @@ async function runOpportunityScan(
   const scanStorage = deps?.pipelineStorage ?? memoryStageStorage();
   // Issue #4271: the scan is a strategy screen — it defines the
   // strategy job (strategy-screen:<runId>), not the options job.
-  const scanOutcome = await runStrategyScreenViaEngine(
-    {
-      runId: scanPipelineRunId,
-      userLogin: scanUserLogin,
-      trigger: "manual",
-      request: {
-        assetClass: "options",
-        runIdentity: { runId: scanPipelineRunId },
-        trigger: "manual",
-        classInput: {
-          scan: {
-            symbols,
-            template: template as ScanRequestTemplate,
-            options: {
-              riskProfile: filters.riskProfile,
-              strategyFilter: filters.strategyFilter,
-              mode: filters.mode,
-              eventCalendarBySymbol: Object.fromEntries(calendarCoverage.bySymbol),
-              // Issue #28: the profile layers under the question's own
-              // inputs. The question's thesis is explicit when the user
-              // stated it (not inferred from strategy names /
-              // defaults); the mode is ALWAYS explicit — NLQ derives it
-              // from the question's fit phrasing (issue #23), so a
-              // profile never flips which question is being answered.
-              // The parser's riskProfile is NOT declared: its default
-              // yields to the profile's posture. (statedTarget /
-              // perSymbol are not profile fields and survive by
-              // construction.)
-              ...(strategyProfile
-                ? {
-                    profile: strategyProfile,
-                    explicitFields: [...(filters.thesisInferred ? [] : ["thesis"]), "mode"],
-                  }
-                : {}),
-            },
-          },
-          requestRecord,
-          // Issue #3327 (carried from main's runOpportunityScan persist
-          // block by the #3186 splice): the broker whose chains this run
-          // reads, stamped on the saved run by the pipeline's persist
-          // stage. Absent, the run records E*TRADE (the pre-provenance
-          // default) — never a guess.
-          broker: deps?.broker,
+  // The envelope is built once: the sync dispatch and the host
+  // dispatch (#4469) send the same request — the host seam stamps
+  // the broker pair over the provenance stamp below.
+  const scanRequest = {
+    assetClass: "options",
+    runIdentity: { runId: scanPipelineRunId },
+    trigger: "manual",
+    classInput: {
+      scan: {
+        symbols,
+        template: template as ScanRequestTemplate,
+        options: {
+          riskProfile: filters.riskProfile,
+          strategyFilter: filters.strategyFilter,
+          mode: filters.mode,
+          eventCalendarBySymbol: Object.fromEntries(calendarCoverage.bySymbol),
+          // Issue #28: the profile layers under the question's own
+          // inputs. The question's thesis is explicit when the user
+          // stated it (not inferred from strategy names /
+          // defaults); the mode is ALWAYS explicit — NLQ derives it
+          // from the question's fit phrasing (issue #23), so a
+          // profile never flips which question is being answered.
+          // The parser's riskProfile is NOT declared: its default
+          // yields to the profile's posture. (statedTarget /
+          // perSymbol are not profile fields and survive by
+          // construction.)
+          ...(strategyProfile
+            ? {
+                profile: strategyProfile,
+                explicitFields: [...(filters.thesisInferred ? [] : ["thesis"]), "mode"],
+              }
+            : {}),
         },
       },
+      requestRecord,
+      // Issue #3327 (carried from main's runOpportunityScan persist
+      // block by the #3186 splice): the broker whose chains this run
+      // reads, stamped on the saved run by the pipeline's persist
+      // stage. Absent, the run records E*TRADE (the pre-provenance
+      // default) — never a guess.
+      broker: deps?.broker,
     },
-    {
-      stages: createScannerScreenPorts({
-        agents: createStrategyScreenAgents(etrade.client),
-        storage: scanStorage,
-        scanRunStore,
-      }),
-      claims: memoryStageClaims(),
-      queue: deps?.pipelineQueue ?? null,
-      // Issue #4066: as the panel leg — a SQL handle records the
-      // engine run durably in the host DO for later per-stage
-      // control; absent, in-memory stores.
-      ...(deps?.engineSql
-        ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
-        : {}),
-    },
-  );
-  if (scanOutcome.outcome !== "completed") {
-    return fail(`Options opportunity scan failed at ${scanOutcome.failedStage}: ${scanOutcome.reason}`);
-  }
-  const result = await scanStorage.get<OpportunityScanResult & { scanRunId?: string; persisted?: boolean }>(
-    optionsArtifactKey(scanPipelineRunId, "shapeReport"),
-  );
-  if (!result) {
-    return fail("Options opportunity scan completed without a report artifact; refusing to answer from nothing.");
+  };
+  // Issue #4469: the leg's (broker, mode) pair, derived from the
+  // run's broker stamp through the shared derivation (#4468) — the
+  // stamp names the broker whose chains the run reads, and the
+  // default is the pre-provenance broker when the caller stamps
+  // none. The mode mirrors the platform's own environment
+  // resolution with the same env the chain source was constructed
+  // with (both production hosts construct it with no override).
+  const scanBroker = deps?.env
+    ? discoveryBrokerStageInput(deps?.broker ?? "etrade", deps.env)
+    : null;
+  const scanDecision = nlqScanDispatchRoute({ broker: scanBroker, env: deps?.env });
+  let result: OpportunityScanResult & { scanRunId?: string; persisted?: boolean };
+  if (scanDecision.route === "host" && scanBroker && deps?.env) {
+    try {
+      result = await runNlqScanViaHost({
+        env: deps.env,
+        request: scanRequest,
+        runId: scanPipelineRunId,
+        userLogin: scanUserLogin,
+        broker: scanBroker,
+        ...(scanRunStore ? { scanRunStore } : {}),
+      });
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : "Options opportunity scan failed");
+    }
+  } else {
+    const scanOutcome = await runStrategyScreenViaEngine(
+      {
+        runId: scanPipelineRunId,
+        userLogin: scanUserLogin,
+        trigger: "manual",
+        request: scanRequest,
+      },
+      {
+        stages: createScannerScreenPorts({
+          agents: createStrategyScreenAgents(etrade.client),
+          storage: scanStorage,
+          scanRunStore,
+        }),
+        claims: memoryStageClaims(),
+        queue: deps?.pipelineQueue ?? null,
+        // Issue #4066: as the panel leg — a SQL handle records the
+        // engine run durably in the host DO for later per-stage
+        // control; absent, in-memory stores.
+        ...(deps?.engineSql
+          ? { engineStores: optionsEngineStoresFromSql(deps.engineSql) }
+          : {}),
+      },
+    );
+    if (scanOutcome.outcome !== "completed") {
+      return fail(`Options opportunity scan failed at ${scanOutcome.failedStage}: ${scanOutcome.reason}`);
+    }
+    const stored = await scanStorage.get<
+      OpportunityScanResult & { scanRunId?: string; persisted?: boolean }
+    >(optionsArtifactKey(scanPipelineRunId, "shapeReport"));
+    if (!stored) {
+      return fail("Options opportunity scan completed without a report artifact; refusing to answer from nothing.");
+    }
+    result = stored;
   }
   // Issue #27: the shaped result already carries its save receipt
-  // (scanRunId / persisted) from the persist stage; a store error
-  // leaves the result intact, flagged persisted: false.
+  // (scanRunId / persisted) from the persist stage on the sync
+  // dispatch, or the host-side save after settlement on the host
+  // dispatch (#4469); a store error leaves the result intact,
+  // flagged persisted: false.
   const scanRunId = result.scanRunId;
   const persisted = result.persisted ?? false;
 

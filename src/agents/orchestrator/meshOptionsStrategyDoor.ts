@@ -344,6 +344,9 @@ export async function runOptionsStrategyScreenViaDoor(
     // Absent, the leg runs fully in-memory and control refuses by name.
     pipelineStorage: ctx.storage as unknown as OptionsStageStorage | undefined,
     engineSql: (ctx.storage as unknown as { sql?: SqlStorage } | undefined)?.sql,
+    // Issue #4469: thread the worker env so the scan leg can gate
+    // onto the strategy workflow host, as the NLQ host does.
+    env: ctx.env,
   });
 
   const constraints: MeshOptionsStrategyConstraints = {
