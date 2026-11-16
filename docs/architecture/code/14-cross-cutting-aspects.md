@@ -97,6 +97,15 @@ rule is `02` B3.)
 and the per-port conformance suites exercise the wrapped semantics (the
 suite registers the runner explicitly to pin them).
 **Conformance at `9925ead8`.** Pins and suites green at base.
+**Pin (#4937).** `db.transaction()` on D1 is forbidden by conformance pin
+`tests/d1_transaction_pin_4937.test.ts` (in the `test:pins` suite, run by
+CI): drizzle-orm/d1 implements it as sequential BEGIN/COMMIT, not atomic
+(ADR 0022 D-C; `migrationRunner.ts` header). The correct primitive is this
+aspect (`withTransaction`, `src/aspects/transactionAspect.ts`) or the
+store's atomic primitive — D1 `batch()`, DO `storage.transaction()`. The
+pin scans `src/`, excludes comment mentions and the DO
+`storage.transaction` API, and fails CI with a message naming the correct
+primitive.
 
 ## Q4 — Aspect composition is a registered runner, resolved at call time
 
