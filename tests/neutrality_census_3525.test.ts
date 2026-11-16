@@ -1932,7 +1932,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/publicCommands.ts", "alpaca", 4],
   ["src/mcps/public/publicTradingMcp.ts", "public.com", 1],
   ["src/outcomes/outcomeCatalog.json", "public.com", 1],
-  ["src/services/publicTrading.ts", "public.com", 4],
+  // #4650 (INTEGRATION growth, the provider's own mapping module): the cancel
+  // receipt mapper adds the broker's own name to its cancel messages
+  // (`publicCancelReceipt`: cancelled / did-not-cancel / unconfirmed), and the
+  // widened no-paper-mode catalog copy is measured in the outcome row above.
+  // Raised from 4 by #4650 (PR #4765) — the same provider-subject surface the
+  // row already accounted for, not a new PLATFORM framing.
+  ["src/services/publicTrading.ts", "public.com", 9],
   ["src/trading/brokerCatalog.ts", "public.com", 4],
   ["src/trading/brokerPresentation.ts", "public.com", 4],
   ["src/trading/public/platform.ts", "public.com", 11],
