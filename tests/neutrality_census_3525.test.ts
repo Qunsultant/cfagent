@@ -750,7 +750,9 @@ function measure(): Map<string, number> {
  * verbatim (etradeBrokerPublish.ts); rewording the file name would falsify
  * the inventory, so the one row is dispositioned INTEGRATION (naming the
  * provider is the inventory's job — the #4792 survey precedent). The
- * INTEGRATION marker is restated 681/6528 -> 682/6529.
+ * INTEGRATION marker is restated 681/6528 -> 698/7061 (direct recount;
+ * the 682/6529 stated by #4966's merge incremented the stale marker
+ * instead of recounting).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -958,7 +960,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (682 rows / 6529 lines) ----
+  // ---- INTEGRATION (698 rows / 7061 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
