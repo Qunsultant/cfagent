@@ -173,6 +173,12 @@ export type {
 // port, and PortThink itself neither overrides nor blocks the
 // hook.)
 export type { SkillSource } from "@cloudflare/think";
+// Issue #4924: the Think base-class type, re-exported here so the
+// workflow-side port (src/workflows/portThinkWorkflow.ts) can carry
+// ThinkWorkflow's agent-type constraint through the foundation
+// adapter only — the agent-conformance pin forbids direct
+// "@cloudflare/think" imports outside the adapter files.
+export type { Think } from "@cloudflare/think";
 import type { ToolSet, UIMessage } from "ai";
 import type { RetryOptions, Schedule, ScheduleOptions } from "agents";
 import { z } from "zod";

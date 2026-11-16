@@ -194,11 +194,14 @@ describe("registry vs class declarations in source (#2322)", () => {
     }
   });
 
-  it("every ThinkWorkflow class in src/ is a registered workflow, with its wrangler binding", () => {
+  it("every PortThinkWorkflow class in src/ is a registered workflow, with its wrangler binding", () => {
+    // Issue #4924: the workflow classes extend the PortThinkWorkflow
+    // port base, which extends ThinkWorkflow — the scan finds the
+    // five registered classes via the port, not the port itself.
     const declared = new Set<string>();
     for (const file of walkTs(resolve(root, "src"))) {
       const src = readFileSync(file, "utf8");
-      for (const m of src.matchAll(/export\s+class\s+(\w+)\s+extends\s+ThinkWorkflow\b/g)) {
+      for (const m of src.matchAll(/export\s+class\s+(\w+)\s+extends\s+PortThinkWorkflow\b/g)) {
         declared.add(m[1]);
       }
     }

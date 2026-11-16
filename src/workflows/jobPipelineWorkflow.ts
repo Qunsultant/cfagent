@@ -20,7 +20,7 @@
  * type is intentionally `any`: no single Think agent owns
  * pipeline jobs — the control plane is host-agnostic.
  */
-import { ThinkWorkflow } from "@cloudflare/think/workflows";
+import { PortThinkWorkflow } from "./portThinkWorkflow";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { DefaultProgress } from "agents/workflows";
 import type { Env } from "../types";
@@ -354,7 +354,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   };
 }
 
-export class JobPipelineWorkflow extends ThinkWorkflow<
+export class JobPipelineWorkflow extends PortThinkWorkflow<
   any,
   JobPipelineWorkflowPayload,
   DefaultProgress,

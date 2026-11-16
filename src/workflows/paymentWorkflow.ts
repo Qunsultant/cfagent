@@ -97,7 +97,7 @@
  *     logged.
  */
 
-import { ThinkWorkflow } from "@cloudflare/think/workflows";
+import { PortThinkWorkflow } from "./portThinkWorkflow";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { DefaultProgress } from "agents/workflows";
 import type { Env } from "../types";
@@ -247,7 +247,7 @@ export function paymentTraceHop(
   };
 }
 
-export class PaymentWorkflow extends ThinkWorkflow<
+export class PaymentWorkflow extends PortThinkWorkflow<
   any,
   PaymentWorkflowEventParams,
   DefaultProgress,

@@ -1,0 +1,3 @@
+### Added
+
+- Workflow-side port (#4924): the five workflow classes now extend the `PortThinkWorkflow` port base (`src/workflows/portThinkWorkflow.ts`) instead of the SDK's `ThinkWorkflow` directly — the workflow-side mirror of the `PortThink` discipline on the agent side. The port module is the sole `@cloudflare/think/workflows` import site in `src/`; generic type arguments are preserved per class, `instanceof` chains are preserved, and there is no behavior or binding change. ADR 0004 W13's per-class "foundation adapter" shape is superseded by the single seam (supersession note on W13). #CAIO-quns
