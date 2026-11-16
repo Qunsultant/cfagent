@@ -23,7 +23,18 @@
  * stays on the legacy E*TRADE route); remote orders and cancel stay
  * E*TRADE-only. The legacy /api/etrade/* routes are untouched.
  */
-import { TradingPlatformRegistry, ROUTED_BROKER_IDS, brokerSupports, BROKER_CATALOG, BROKER_UNAVAILABLE_CODE, type BrokerId } from "../../trading";
+import { orderCapabilitiesFor } from "../../config/orderCapabilities";
+import {
+  TradingPlatformRegistry,
+  ROUTED_BROKER_IDS,
+  brokerSupports,
+  BROKER_CATALOG,
+  BROKER_UNAVAILABLE_CODE,
+  normalizeTimeInForce,
+  hasTimeInForce,
+  TIME_IN_FORCE_VALUES,
+  type BrokerId,
+} from "../../trading";
 import { handleBrokerLimitRoutes } from "./brokerLimits";
 import {
   cancelAllOrders,
@@ -124,6 +135,10 @@ function isRoutedBroker(value: unknown): value is RoutedBroker {
   return typeof value === "string" && (ROUTED_BROKERS as readonly string[]).includes(value.toLowerCase());
 }
 
+/** Issue #4656: the canonical time-in-force vocabulary lives in the trading
+ * surface (`src/trading/timeInForce.ts`), so this route, the legacy route and
+ * every platform map one token. Nothing is redefined here. */
+
 /**
  * Persist the previewed draft with its broker stamp. Platforms that
  * persist internally (E*TRADE) leave a row without a broker — stamp
@@ -144,6 +159,7 @@ function ensureDraftStored(
   preview: any,
   broker: RoutedBroker,
   mode: "live" | "paper",
+  timeInForce?: "day" | "gtc" | "ioc" | "fok",
 ): void {
   const orm = ctx.getOrm();
   if (!orm?.trades) return;
@@ -159,6 +175,8 @@ function ensureDraftStored(
       broker,
       mode,
       ...(stopPrice !== undefined ? { stopPrice } : {}),
+      // Issue #4656: the approved time-in-force rides the same row.
+      ...(timeInForce !== undefined ? { timeInForce } : {}),
       updatedAt: new Date().toISOString(),
     });
     return;
@@ -184,6 +202,7 @@ function ensureDraftStored(
       typeof (preview as { stopPrice?: unknown }).stopPrice === "number"
         ? (preview as { stopPrice: number }).stopPrice
         : undefined,
+    timeInForce,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -232,6 +251,16 @@ export async function handleBrokerOrderRoutes(
       const orderType = body.orderType || "MARKET";
       const limitPrice = body.limitPrice !== undefined ? Number(body.limitPrice) : undefined;
       const stopPrice = body.stopPrice !== undefined ? Number(body.stopPrice) : undefined;
+      // Issue #4656 (matrix gap 5): the ticket's time-in-force used to die here.
+      const timeInForce = normalizeTimeInForce(body.timeInForce);
+      if (hasTimeInForce(body.timeInForce) && !timeInForce) {
+        return Response.json(
+          {
+            error: `Unsupported timeInForce: ${String(body.timeInForce)}. Supported values: ${TIME_IN_FORCE_VALUES.map((v) => v.toUpperCase()).join(", ")}.`,
+          },
+          { status: 400 },
+        );
+      }
       const optionLegs = Array.isArray(body.optionLegs) ? body.optionLegs : undefined;
       const inferredAssetClass = optionLegs?.some((leg: any) => leg.securityType === "OPTN") ? "options" : "equity";
       const rawAssetClass = body.assetClass === undefined ? inferredAssetClass : String(body.assetClass).toLowerCase();
@@ -239,6 +268,26 @@ export async function handleBrokerOrderRoutes(
         return Response.json({ error: `Unsupported order asset class: ${rawAssetClass}.` }, { status: 400 });
       }
       const assetClass = rawAssetClass as "equity" | "options";
+      // Issue #4656 (matrix gap 5): refuse a time-in-force this broker's own
+      // capability matrix does not list, before the platform sees it — the same
+      // table the ticket renders from, so the UI and the route cannot disagree
+      // about what a broker accepts. A broker with NO matrix entry (Public) is
+      // left to its own named refusal instead of being refused everything here.
+      if (timeInForce) {
+        const caps = orderCapabilitiesFor({
+          brokerId: broker,
+          mode: modeFromEnvironment(requestedEnv),
+          assetClass,
+        });
+        if (caps.supported && !caps.timeInForce.includes(timeInForce.toUpperCase() as never)) {
+          return Response.json(
+            {
+              error: `${BROKER_CATALOG[broker].label} does not accept ${timeInForce.toUpperCase()} for a ${assetClass} order; choose ${caps.timeInForce.join(", ")}. Nothing was sent.`,
+            },
+            { status: 400 },
+          );
+        }
+      }
       if (assetClass === "options" && !optionLegs?.some((leg: any) => leg.securityType === "OPTN")) {
         return Response.json({ error: "Options orders require at least one complete option contract leg." }, { status: 400 });
       }
@@ -262,10 +311,11 @@ export async function handleBrokerOrderRoutes(
         orderType,
         limitPrice,
         stopPrice,
+        timeInForce,
         optionLegs,
         strategyNetDebit: body.strategyNetDebit !== undefined ? Number(body.strategyNetDebit) : undefined,
       });
-      ensureDraftStored(ctx, sessionId, preview, broker, modeFromEnvironment(requestedEnv));
+      ensureDraftStored(ctx, sessionId, preview, broker, modeFromEnvironment(requestedEnv), timeInForce);
       return await completeEtradeOrderPreview({
         ctx,
         sessionId,
@@ -363,6 +413,9 @@ export async function handleBrokerOrderRoutes(
             ? existingRecord.stopPrice
             : existingRecord.price
           : undefined;
+      // Issue #4656 (matrix gap 5): the time-in-force the user approved, read
+      // from the draft (undefined on legacy rows → the broker default).
+      const timeInForce = normalizeTimeInForce(existingRecord.timeInForce);
       const parsedStrategy = parseStrategyOrder(existingRecord.previewNotes);
       const strategyOrder = parsedStrategy.optionLegs.length > 0 ? parsedStrategy : undefined;
 
@@ -431,6 +484,7 @@ export async function handleBrokerOrderRoutes(
         orderType,
         limitPrice,
         stopPrice,
+        timeInForce,
         strategyOrder,
         executionVerdict,
         executor: platform,

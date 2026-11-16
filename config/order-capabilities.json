@@ -1,26 +1,26 @@
 {
   "version": 1,
-  "note": "Order-entry capabilities per broker, mode and asset class. The ticket offers exactly what this table lists and disables the rest, and the preview body carries only a supported combination. This is the single home for the matrix (issue #4573) — no component hardcodes a broker rule. Values mirror each broker's documented order-entry fields; tighten them here when a broker changes its contract.",
+  "note": "Order-entry capabilities per broker, mode and asset class. Issue #4656: E*TRADE lists DAY/GTC/IOC only — its client has no verified FOK orderTerm, so the ticket must not offer it. The ticket offers exactly what this table lists and disables the rest, and the preview body carries only a supported combination. This is the single home for the matrix (issue #4573) — no component hardcodes a broker rule. Values mirror each broker's documented order-entry fields; tighten them here when a broker changes its contract.",
   "brokers": {
     "etrade": {
       "paper": {
         "equity": {
           "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
-          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+          "timeInForce": ["DAY", "GTC", "IOC"]
         },
         "options": {
           "orderTypes": ["MARKET", "LIMIT"],
-          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+          "timeInForce": ["DAY", "GTC", "IOC"]
         }
       },
       "live": {
         "equity": {
           "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
-          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+          "timeInForce": ["DAY", "GTC", "IOC"]
         },
         "options": {
           "orderTypes": ["MARKET", "LIMIT"],
-          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+          "timeInForce": ["DAY", "GTC", "IOC"]
         }
       }
     },

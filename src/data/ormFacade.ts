@@ -346,6 +346,16 @@ export class DatabaseORM {
       }
     }
 
+    // Issue #4656 (matrix gap 5): the time-in-force the ticket selected, so
+    // execute sends the approved value instead of the broker default. Same
+    // guarded-ALTER precedent; legacy rows keep NULL.
+    {
+      const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
+      if (!cols.some((c) => c.name === "time_in_force")) {
+        this.sql.exec(remainderAlterSql("mas_trades", "time_in_force"));
+      }
+    }
+
     // 10. Watchlists Table (E*TRADE & Local Agent Watchlists)
     ensureSharedTable(this.sql, "mas_watchlists");
 

@@ -521,6 +521,17 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #4656 (matrix gap 5): the ticket's time-in-force. The execute path
+    // must send the value the user approved, not the broker's hardcoded
+    // default, so the draft carries it (legacy rows keep NULL → default).
+    code: "schema.orm.mas_trades.alter_table_add_column_time_in_force",
+    plane: "orm",
+    table: "mas_trades",
+    statement: `ALTER TABLE mas_trades ADD COLUMN time_in_force TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.stock_copilot_activity.alter_table_add_column_critic_verdict_json",
     plane: "do",
     table: "stock_copilot_activity",

@@ -1009,6 +1009,13 @@ export class ETradeRestClient {
     userLogin: string;
     optionLegs?: TradingOrderLeg[];
     strategyNetDebit?: number;
+    /**
+     * Issue #4656 (matrix gap 5): the E*TRADE orderTerm the approved
+     * time-in-force maps to. Absent → GOOD_FOR_DAY (the pre-#4656 default).
+     * FILL_OR_KILL has no verified value in this client, so it never appears
+     * here; the route refuses FOK before this seam is reached.
+     */
+    orderTerm?: "GOOD_FOR_DAY" | "GOOD_UNTIL_CANCEL" | "IMMEDIATE_OR_CANCEL";
   }): Promise<ETradeOrderExecutionResult> {
     const userDid = params.userLogin.startsWith("did:") ? params.userLogin : getUserDid(params.userLogin);
     const now = new Date().toISOString();
@@ -1179,7 +1186,7 @@ export class ETradeRestClient {
                 allOrNone: false,
                 priceType: isStrategy ? etradePriceType(legs, priceType, params.strategyNetDebit || 0) : priceType,
                 ...(limitPrice ? { limitPrice } : {}),
-                orderTerm: "GOOD_FOR_DAY",
+                orderTerm: params.orderTerm || "GOOD_FOR_DAY",
                 marketSession: "REGULAR",
                 Instrument: isStrategy ? toETradeInstruments(legs) : [
                   {

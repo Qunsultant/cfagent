@@ -53,6 +53,14 @@ export interface OrderPreviewParams {
   orderType?: "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
   limitPrice?: number;
   stopPrice?: number;
+  /**
+   * Issue #4656 (matrix gap 5): the time-in-force the user selected on the
+   * ticket, in the canonical lowercase vocabulary of
+   * `config/orderCapabilities.ts`. The route normalizes it once; each platform
+   * maps it onto its own wire term (E*TRADE `orderTerm`, Alpaca `time_in_force`)
+   * or refuses it by name where it cannot honour it.
+   */
+  timeInForce?: "day" | "gtc" | "ioc" | "fok";
   sessionId?: string;
   notes?: string;
   /** Optional bracket order parameters. */

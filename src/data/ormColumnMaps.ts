@@ -171,6 +171,7 @@ export const TRADE_COLUMN_MAP = {
   priceSourceJson: "price_source",
   mode: "mode",
   stopPrice: "stop_price",
+  timeInForce: "time_in_force",
   createdAt: "created_at",
   updatedAt: "updated_at",
 } as const;

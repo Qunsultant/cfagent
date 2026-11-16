@@ -324,6 +324,7 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
         price_source TEXT,
         mode TEXT,
         stop_price REAL,
+        time_in_force TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )
