@@ -1556,6 +1556,65 @@ export class ETradeRestClient {
   }
 
   /**
+   * Issue #4667 (matrix gap 13): E*TRADE has no native bracket/conditional
+   * placement in this client, so bracket exits are placed as separate exit
+   * orders (take-profit LIMIT + stop-loss STOP) after the entry order succeeds.
+   */
+  async placeBracketExits(params: {
+    orderId: string;
+    symbol: string;
+    entryAction: "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT";
+    quantity: number;
+    takeProfitLimitPrice?: number;
+    stopLossStopPrice?: number;
+    userLogin: string;
+    orderTerm?: "GOOD_FOR_DAY" | "GOOD_UNTIL_CANCEL" | "IMMEDIATE_OR_CANCEL";
+  }): Promise<{
+    takeProfitResult?: ETradeOrderExecutionResult;
+    stopLossResult?: ETradeOrderExecutionResult;
+  }> {
+    const exitAction: "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT" =
+      params.entryAction === "BUY"
+        ? "SELL"
+        : params.entryAction === "SELL_SHORT"
+          ? "BUY_TO_COVER"
+          : params.entryAction === "BUY_TO_COVER"
+            ? "SELL_SHORT"
+            : "BUY";
+
+    let takeProfitResult: ETradeOrderExecutionResult | undefined;
+    let stopLossResult: ETradeOrderExecutionResult | undefined;
+
+    if (Number.isFinite(params.takeProfitLimitPrice) && Number(params.takeProfitLimitPrice) > 0) {
+      takeProfitResult = await this.placeOrder({
+        orderId: `${params.orderId}-tp`,
+        symbol: params.symbol,
+        action: exitAction,
+        quantity: params.quantity,
+        orderType: "LIMIT",
+        limitPrice: params.takeProfitLimitPrice,
+        userLogin: params.userLogin,
+        orderTerm: params.orderTerm,
+      });
+    }
+
+    if (Number.isFinite(params.stopLossStopPrice) && Number(params.stopLossStopPrice) > 0) {
+      stopLossResult = await this.placeOrder({
+        orderId: `${params.orderId}-sl`,
+        symbol: params.symbol,
+        action: exitAction,
+        quantity: params.quantity,
+        orderType: "STOP",
+        stopPrice: params.stopLossStopPrice,
+        userLogin: params.userLogin,
+        orderTerm: params.orderTerm,
+      });
+    }
+
+    return { takeProfitResult, stopLossResult };
+  }
+
+  /**
    * Fetches authentic accounts list
    */
   async fetchAccounts(): Promise<ETradeAccount[]> {

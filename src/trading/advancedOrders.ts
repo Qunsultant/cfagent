@@ -108,12 +108,13 @@ const COMPOUND: AdvancedOrderType[] = [
   {
     id: "bracket",
     label: "Bracket (entry + take-profit + stop-loss)",
-    broker: { alpaca: "native", etrade: "native" },
+    broker: { alpaca: "native", etrade: "emulated" },
     requires: ["take_profit", "stop_loss"],
     excludes: [["qty", "notional"]],
     // Issue #3839: a bracket is day-only on both brokers.
     tif: ["day"],
     refusalCode: "order_type_unsupported",
+    notes: "E*TRADE emulates brackets by placing the entry order and submitting separate take-profit and stop-loss exit orders (placeBracketExits).",
   },
   {
     id: "oco",
@@ -127,10 +128,11 @@ const COMPOUND: AdvancedOrderType[] = [
   {
     id: "oto",
     label: "OTO (one triggers the other)",
-    broker: { alpaca: "native", etrade: "native" },
+    broker: { alpaca: "native", etrade: "none" },
     requires: ["take_profit"],
     excludes: [],
     refusalCode: "order_type_unsupported",
+    notes: "E*TRADE OTO conditional placement is not implemented in this client.",
   },
 ];
 

@@ -185,7 +185,7 @@ describe("E*TRADE percent bracket preview (#3839)", () => {
     expect(draft.previewMessage).toContain("E*TRADE preview only");
   });
 
-  it("refuses to place a bracket draft rather than leaving the parent unprotected", async () => {
+  it("places the entry order and separate bracket exits on approval (#3839 / #4667)", async () => {
     const orm = makeOrm();
     const platform = new ETradeTradingPlatform(
       { ETRADE_ENVIRONMENT: "sandbox" } as unknown as Env,
@@ -201,10 +201,72 @@ describe("E*TRADE percent bracket preview (#3839)", () => {
       takeProfitPercent: 4,
       stopLossPercent: 2,
     });
-    await expect(
-      platform.executeOrder(draft.orderId, "did:user:github:trader_3839", "approved"),
-    ).rejects.toThrow(/E\*TRADE bracket preview/);
-    expect(orm.trades.findById(draft.orderId)?.status).toBe("previewed");
+    const client = (platform as any).client;
+    const placeOrderSpy = vi.spyOn(client, "placeOrder").mockResolvedValue({
+      success: true,
+      orderId: draft.orderId,
+      executionId: "et_entry_1",
+      brokerOrderRef: "et_entry_1",
+      authorizerDid: "did:user:github:trader_3839",
+      status: "executed",
+      symbol: "AAPL",
+      action: "BUY",
+      quantity: 10,
+      executionPrice: 100,
+      totalSettled: 1000,
+      didAttestation: { proposerDid: "did:agent:trading", authorizerDid: "did:user:github:trader_3839", signature: "sig" },
+      message: "Entry filled",
+      timestamp: new Date().toISOString(),
+    });
+    const placeExitsSpy = vi.spyOn(client, "placeBracketExits").mockResolvedValue({
+      takeProfitResult: {
+        success: true,
+        orderId: `${draft.orderId}-tp`,
+        executionId: "et_tp_1",
+        brokerOrderRef: "et_tp_1",
+        authorizerDid: "did:user:github:trader_3839",
+        status: "executed",
+        symbol: "AAPL",
+        action: "SELL",
+        quantity: 10,
+        executionPrice: 104,
+        totalSettled: 1040,
+        didAttestation: { proposerDid: "did:agent:trading", authorizerDid: "did:user:github:trader_3839", signature: "sig" },
+        message: "TP placed",
+        timestamp: new Date().toISOString(),
+      },
+      stopLossResult: {
+        success: true,
+        orderId: `${draft.orderId}-sl`,
+        executionId: "et_sl_1",
+        brokerOrderRef: "et_sl_1",
+        authorizerDid: "did:user:github:trader_3839",
+        status: "executed",
+        symbol: "AAPL",
+        action: "SELL",
+        quantity: 10,
+        executionPrice: 98,
+        totalSettled: 980,
+        didAttestation: { proposerDid: "did:agent:trading", authorizerDid: "did:user:github:trader_3839", signature: "sig" },
+        message: "SL placed",
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    const res = await platform.executeOrder(draft.orderId, "did:user:github:trader_3839", "approved");
+    expect(res.success).toBe(true);
+    expect(placeOrderSpy).toHaveBeenCalledTimes(1);
+    expect(placeExitsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderId: draft.orderId,
+        symbol: "AAPL",
+        entryAction: "BUY",
+        quantity: 10,
+        takeProfitLimitPrice: 104,
+        stopLossStopPrice: 98,
+      }),
+    );
+    expect(orm.trades.findById(draft.orderId)?.status).toBe("executed");
   });
 });
 
