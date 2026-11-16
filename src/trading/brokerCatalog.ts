@@ -266,8 +266,11 @@ export const BROKER_CATALOG = {
         quote: "etrade_get_quote",
         preview: "etrade_preview_order",
         place: "etrade_execute_order",
-        orders: null,
-        cancel: null,
+        // Issue #4660 (matrix gap 8): E*TRADE now has the order read and the
+        // one-order cancel the other two brokers already had, so the copilot
+        // can list and cancel on it too.
+        orders: "etrade_orders",
+        cancel: "etrade_cancel_order",
       },
     },
   },

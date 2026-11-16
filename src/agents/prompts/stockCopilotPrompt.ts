@@ -69,7 +69,7 @@ function renderCapabilitiesFromBrokerTools(brokerTools: ResolvedPromptBrokerTool
 - '${brokerTools.previewTool}': Draft a ${brokerTools.brokerLabel} order proposal (market, limit, bracket) with Agent DID attestation ('did:agent:openaimp:trading'). Safety guarantee: NO SHARES ARE BOUGHT OR SOLD. Awaiting human confirmation.
 - '${brokerTools.executeTool}': ${brokerTools.executionPolicy === "autonomous" ? `Execute or place a ${brokerTools.brokerLabel} order immediately in autonomous execution mode (${brokerTools.modeLabel}) within risk policy guardrails. Direct synchronous execution.` : `Execute or place a confirmed ${brokerTools.brokerLabel} order draft ONLY after explicit human authorization. Direct synchronous execution.`}
 - '${brokerTools.ordersTool}': View open, filled, or historical orders.
-- '${brokerTools.cancelBracketTool}': Cancel open bracket orders or legs.
+- '${brokerTools.cancelBracketTool}': Cancel one open order — a bracket's held legs go with it where the broker models them.
 - 'tool_openaimp_get_async_job' / 'tool_openaimp_list_async_jobs': Background job state and results for asynchronous pipeline workflows; rule 8 governs when to use them.`;
 }
 

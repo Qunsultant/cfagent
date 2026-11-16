@@ -184,8 +184,13 @@ export function resolvePromptBrokerTools(
     : isPublic
       ? ["public", "Public", "tool_openaimp_public_get_quote", "tool_openaimp_public_preview_order", "tool_openaimp_public_place_order"]
       : ["alpaca", "Alpaca", "tool_openaimp_alpaca_get_quote", "tool_openaimp_alpaca_preview_order", "tool_openaimp_alpaca_place_order"];
-  const [ordersTool, cancelBracketTool] = isPublic
-    ? ["tool_openaimp_public_orders", "tool_openaimp_public_cancel_order"]
+  // Issue #4660 (matrix gap 8): the order list and the single-order cancel are
+  // per-broker tools, not one shared pair. A session on the broker that owns
+  // these tools must be steered at them, never at another broker's tools.
+  const [ordersTool, cancelBracketTool] = isEtrade
+    ? ["tool_openaimp_etrade_orders", "tool_openaimp_etrade_cancel_order"]
+    : isPublic
+      ? ["tool_openaimp_public_orders", "tool_openaimp_public_cancel_order"]
     : ["tool_openaimp_alpaca_orders", "tool_openaimp_alpaca_cancel_bracket_ladder"];
   return {
     brokerId,
