@@ -323,6 +323,7 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
         broker TEXT,
         price_source TEXT,
         mode TEXT,
+        stop_price REAL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )

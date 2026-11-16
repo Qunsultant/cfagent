@@ -506,6 +506,9 @@ export class PublicTradingPlatform implements ITradingPlatform {
       limitPrice: record.price,
       priceSource,
       userLogin: this.userLogin,
+      // Issue #4654: the trigger price the draft carried, so a STOP /
+      // STOP_LIMIT approval settles the price the user saw, not the quote.
+      stopPrice: (record as { stopPrice?: number }).stopPrice,
       orderClass: (notes.orderClass as PlaceOrderParams["orderClass"]) ?? undefined,
       takeProfit: notes.takeProfit as PlaceOrderParams["takeProfit"],
       stopLoss: notes.stopLoss as PlaceOrderParams["stopLoss"],
@@ -575,6 +578,9 @@ export class PublicTradingPlatform implements ITradingPlatform {
           quantity: params.quantity,
           orderType: params.orderType,
           limitPrice: params.limitPrice,
+          // Issue #4654 (matrix gap 4): the stop price travels to the wire for
+          // a stop type; it was accepted by the arg builder but never passed.
+          stopPrice: params.stopPrice,
           orderClass: params.orderClass,
           takeProfit: params.takeProfit,
           stopLoss: params.stopLoss,

@@ -1671,8 +1671,16 @@ export function ETradeTradingHub({
     }
 
     const price = parseFloat(orderLimitPrice);
-    if (orderType === "LIMIT" && (isNaN(price) || price <= 0)) {
-      setOrderError("Please specify a valid limit price");
+    // Issue #4654 (matrix gap 4): every type except MARKET is priced from the
+    // ticket's field — LIMIT as the limit, STOP/STOP_LIMIT as the trigger. A
+    // missing price used to pass validation for stop types and reached the
+    // broker as NaN, which is why a STOP ticket could not be placed.
+    if (orderType !== "MARKET" && (isNaN(price) || price <= 0)) {
+      setOrderError(
+        orderType === "LIMIT"
+          ? "Please specify a valid limit price"
+          : "Please specify a valid stop price",
+      );
       setPreviewLoading(false);
       return;
     }
@@ -1694,6 +1702,9 @@ export function ETradeTradingHub({
         orderType,
         timeInForce: orderTif,
         limitPrice: orderType === "LIMIT" ? String(price) : undefined,
+        // Issue #4654: the stop price the ticket typed, for a stop type only.
+        stopPrice:
+          orderType === "STOP" || orderType === "STOP_LIMIT" ? String(price) : undefined,
         optionLegs: orderContext?.optionLegs,
         strategyNetDebit: orderContext?.strategyNetDebit,
       });
@@ -1788,6 +1799,11 @@ export function ETradeTradingHub({
           orderType: activeDraft.orderType,
           timeInForce: (activeDraft as { timeInForce?: OrderTimeInForce }).timeInForce ?? orderTif,
           limitPrice: activeDraft.limitPrice,
+          // Issue #4654: a refreshed stop draft keeps its trigger price.
+          stopPrice:
+            (activeDraft as { stopPrice?: number }).stopPrice !== undefined
+              ? String((activeDraft as { stopPrice?: number }).stopPrice)
+              : undefined,
           optionLegs: activeDraft.optionLegs,
           strategyNetDebit: activeDraft.strategyNetDebit,
         }),

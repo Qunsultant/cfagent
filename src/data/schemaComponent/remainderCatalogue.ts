@@ -508,6 +508,19 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #4654 (matrix gap 4): the ticket typed a stop price and the hub
+    // never sent it, so STOP/STOP_LIMIT could not be placed from the UI on any
+    // broker. The draft row has to carry it from preview to execute — `price`
+    // is the quote (or the limit), never the stop. Same guarded-ALTER
+    // precedent as broker/price_source/mode; legacy rows keep NULL.
+    code: "schema.orm.mas_trades.alter_table_add_column_stop_price",
+    plane: "orm",
+    table: "mas_trades",
+    statement: `ALTER TABLE mas_trades ADD COLUMN stop_price REAL`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.stock_copilot_activity.alter_table_add_column_critic_verdict_json",
     plane: "do",
     table: "stock_copilot_activity",

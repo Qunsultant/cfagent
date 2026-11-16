@@ -90,6 +90,12 @@ export interface PlaceOrderParams {
   quantity: number;
   orderType?: string;
   limitPrice?: number;
+  /**
+   * Issue #4654 (matrix gap 4): the STOP/STOP_LIMIT trigger price, carried
+   * from the stored draft. Per-broker acceptance is each broker's own concern:
+   * a platform that cannot place a stop refuses by name (matrix gaps 6/7).
+   */
+  stopPrice?: number;
   previewId?: string;
   /**
    * Issue #3782: where the limit price came from. The trade workflow

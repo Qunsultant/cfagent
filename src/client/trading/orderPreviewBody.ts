@@ -27,6 +27,12 @@ export interface OrderPreviewInput {
   orderType: OrderType;
   timeInForce: OrderTimeInForce;
   limitPrice?: string;
+  /**
+   * Issue #4654 (matrix gap 4): the STOP/STOP_LIMIT trigger price. The ticket
+   * types it and the hub used to drop it, so a stop order could not be placed
+   * from the UI on any broker. Only a stop type carries it; ignored otherwise.
+   */
+  stopPrice?: string;
   optionLegs?: unknown[];
   strategyNetDebit?: number;
 }
@@ -61,6 +67,13 @@ export function buildOrderPreviewBody(input: OrderPreviewInput): OrderPreviewBod
       orderType: input.orderType,
       timeInForce: input.timeInForce,
       limitPrice: input.orderType === "LIMIT" ? input.limitPrice : undefined,
+      // Issue #4654: the stop price the ticket typed now leaves the client for
+      // a stop type; the route already forwards it to the platform preview, and
+      // the draft row carries it to execute.
+      stopPrice:
+        input.orderType === "STOP" || input.orderType === "STOP_LIMIT"
+          ? input.stopPrice
+          : undefined,
       optionLegs: input.optionLegs?.map((leg) => ({
         ...(leg as Record<string, unknown>),
         underlyingSymbol: input.symbol.toUpperCase(),

@@ -1208,6 +1208,12 @@ export interface TradeRecord {
    * from the resolved trading environment (TEST resolves to paper,
    * PROD to live). Absent on legacy rows — those carry no mode. */
   mode?: "live" | "paper";
+  /** Issue #4654 (matrix gap 4): the STOP/STOP_LIMIT trigger price the
+   * ticket sent, carried from preview to execute. `price` is the quote
+   * (or the limit) for those types, never the stop, so a stop order
+   * without this column could not be placed truthfully. Absent on
+   * legacy rows and on non-stop orders. */
+  stopPrice?: number;
   createdAt: string;
   updatedAt: string;
 }
