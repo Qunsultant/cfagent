@@ -145,7 +145,7 @@ function SortHeader({
   const direction = sort.dir === "asc" ? "ascending" : "descending";
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       size="sm"
       className={`ui-table-sort${active ? " active" : ""}`}
       onClick={() => onSort(sortKey)}
@@ -356,7 +356,7 @@ export function DocsAndReportsPanel() {
         {error && (
         <Notice tone="danger" title="Documents unavailable">
           {error}{" "}
-          <Button variant="ghost" size="sm" onClick={() => void load()}>
+          <Button variant="secondary" size="sm" onClick={() => void load()}>
             Retry
           </Button>
         </Notice>

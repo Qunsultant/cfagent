@@ -180,7 +180,7 @@ export function SearchHub() {
           {recent.slice(0, 10).map((r, i) => (
             <Button
               key={i}
-              variant="ghost"
+              variant="secondary"
               onClick={() => {
                 handleTabChange(r.tab);
                 setPendingQuery({ query: r.query, nonce: Date.now() });

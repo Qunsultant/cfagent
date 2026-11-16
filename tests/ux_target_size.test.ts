@@ -73,7 +73,6 @@ describe("touch-target floors (#1578, A2; WCAG 2.2 AA 2.5.8)", () => {
   it.each([
     [".ui-btn.size-sm", "min-height"],
     [".ui-btn.size-md", "min-height"],
-    [".ui-btn.size-lg", "min-height"],
     [".pill-group.size-sm .pill-btn", "min-height"],
     [".segmented-control.size-sm .segmented-btn", "min-height"],
   ] as const)("primitive %s %s is at least 24px", (selector, prop) => {

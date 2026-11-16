@@ -341,7 +341,7 @@ export function PlatformAdminPanel({
           </div>
           <Button
             type="button"
-            variant="ghost"
+            variant="secondary"
             className="platform-admin-close"
             onClick={onClose}
             aria-label="Close Platform Admin"
@@ -359,7 +359,7 @@ export function PlatformAdminPanel({
                 <Button
                   key={section.id}
                   type="button"
-                  variant="ghost"
+                  variant="secondary"
                   className={`platform-admin-menu-item ${active === section.id ? "active" : ""}`}
                   aria-current={active === section.id ? "page" : undefined}
                   onClick={() => setActive(section.id)}

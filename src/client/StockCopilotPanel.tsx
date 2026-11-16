@@ -265,7 +265,7 @@ export function StockCopilotPanel() {
         <div className="scp-actions">
           <Button
             type="button"
-            variant="ghost"
+            variant="secondary"
             size="sm"
             onClick={() => void load()}
             title="Refresh copilot status"

@@ -585,7 +585,7 @@ export function MatrixBoard({
                 return (<><div>{cell.passedCount}/{cell.evaluatedCount} passed · {cell.rejectedCount} rejected</div>{top && (<div className="ui-meta-sm" title={top.reason}>top rejection: {top.reason} ×{top.count}</div>)}</>);
               }
               const content = (<><strong>{cell.best.compositeScore.toFixed(1)}</strong><span className="ui-meta-sm">composite</span><div>{cell.passedCount}/{cell.evaluatedCount} passed</div><div>{cell.best.label}</div></>);
-              return onPreviewTrade ? (<Button variant="ghost" title={`Preview ${cell.best.label} for ${row.symbol}`} onClick={() => onPreviewTrade(matrixCellTradeContext(row, cell, thesis))}>{content}</Button>) : content;
+              return onPreviewTrade ? (<Button variant="secondary" title={`Preview ${cell.best.label} for ${row.symbol}`} onClick={() => onPreviewTrade(matrixCellTradeContext(row, cell, thesis))}>{content}</Button>) : content;
             },
           })),
         ]}
@@ -621,7 +621,7 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
       <Flex gap="2" align="center" wrap>
         <strong>Mode: {MODE_LABELS[mode]}</strong>
         <Button
-        variant="accent"
+        variant="secondary"
         tone="subtle"
         size="sm"
           onClick={() => downloadScanExport(exportRun, "results-csv")}
@@ -630,7 +630,7 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
           ⬇ CSV results
         </Button>
         <Button
-        variant="accent"
+        variant="secondary"
         tone="subtle"
         size="sm"
           onClick={() => downloadScanExport(exportRun, "run-json")}
@@ -648,7 +648,7 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
           <Button
             href={result.reportUrl}
             download
-            variant="accent"
+            variant="secondary"
             tone="subtle"
             size="sm"
           >
@@ -946,7 +946,7 @@ function StrategyCatalogBrowser() {
   return (
     <Card padding="sm">
       <Button
-      variant="ghost"
+      variant="secondary"
         onClick={() => setOpen(!open)}
       >
         {open ? "▼" : "▶"} Strategy catalog ({strategies.length || "…" } strategies)

@@ -195,13 +195,13 @@ describe("Badge Component (#492)", () => {
 
 describe("Button Component (#492)", () => {
   it("supports every variant and size", () => {
-    const variants = ["primary", "secondary", "ghost", "danger", "trade"] as const;
+    const variants = ["primary", "secondary", "danger"] as const;
     for (const variant of variants) {
       const element = React.createElement(Button, { variant }, "Go");
       expect(element.props.variant).toBe(variant);
     }
-    const sized = React.createElement(Button, { size: "lg" }, "Go");
-    expect(sized.props.size).toBe("lg");
+    const sized = React.createElement(Button, { size: "sm" }, "Go");
+    expect(sized.props.size).toBe("sm");
   });
 
   it("defaults to type button and honors the loading contract", () => {
@@ -354,24 +354,17 @@ describe("TextInput multiline (#594)", () => {
   });
 });
 
-describe("Button accent variant (#594)", () => {
-  it("carries the accent variant", () => {
-    const element = React.createElement(Button, { variant: "accent" }, "Copy config");
-    expect(element.props.variant).toBe("accent");
-  });
-});
-
-describe("Button subtle tone + warning variant (#628)", () => {
+// The accent variant (#594) and the warning variant (#628) are folded away
+// by #4913 (accent -> primary for apply/create, secondary for quiet actions;
+// warning -> secondary for risk-analysis navigation). Their pins live in
+// tests/template_rule_of_three_4913.test.ts, which fails on any re-added
+// folded variant; this file keeps only the surviving tone contract.
+describe("Button subtle tone (#628, #4913)", () => {
   it("defaults to the solid tone and carries the subtle tone", () => {
-    const solid = React.createElement(Button, { variant: "accent" }, "Report");
+    const solid = React.createElement(Button, { variant: "primary" }, "Report");
     expect(solid.props.tone).toBeUndefined();
-    const subtle = React.createElement(Button, { variant: "accent", tone: "subtle" }, "Report");
+    const subtle = React.createElement(Button, { variant: "primary", tone: "subtle" }, "Report");
     expect(subtle.props.tone).toBe("subtle");
-  });
-
-  it("carries the warning variant", () => {
-    const element = React.createElement(Button, { variant: "warning", tone: "subtle" }, "Risk Analysis");
-    expect(element.props.variant).toBe("warning");
   });
 });
 

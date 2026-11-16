@@ -865,7 +865,7 @@ export function ScheduledOptionsManager({
           </Button>
           <Button
             type="button"
-            variant="accent"
+            variant="primary"
             onClick={openCreateModal}
             title="Register a new durable schedule"
           >

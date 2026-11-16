@@ -642,7 +642,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                     {!brokerConnected && brokerId === "etrade" && (
                       <Notice tone="info">
                         <span>🔒 Connect your E*TRADE account to fetch authenticated live market quotes.</span>{" "}
-                        <Button type="button" variant="ghost" size="sm" onClick={onConnectBroker}>
+                        <Button type="button" variant="secondary" size="sm" onClick={onConnectBroker}>
                           Connect E*TRADE →
                         </Button>
                       </Notice>
@@ -928,8 +928,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                       )}
                     </Button>
                     <Button variant="primary"
-                      type="button"
-                      size="lg"
+                      type="button"
                       disabled={!orderSymbol.trim()}
                       onClick={() => {
                         const estPrice = orderType === "LIMIT" ? parseFloat(orderLimitPrice || "0") : (orderQuote?.lastPrice || 100);
@@ -1051,21 +1050,21 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                   <p>You can also place trades effortlessly through conversational natural language:</p>
                   <Stack gap="1">
                     <Button
-                      variant="ghost"
+                      variant="secondary"
                       size="sm"
                       onClick={() => sendNlqToChat("Preview buy 10 shares of NVDA limit 125.50")}
                     >
                       👉 "Preview buy 10 shares of NVDA limit 125.50"
                     </Button>
                     <Button
-                      variant="ghost"
+                      variant="secondary"
                       size="sm"
                       onClick={() => sendNlqToChat("Screen oversold tech stocks")}
                     >
                       👉 "Screen oversold tech stocks"
                     </Button>
                     <Button
-                      variant="ghost"
+                      variant="secondary"
                       size="sm"
                       onClick={() => sendNlqToChat("Show my portfolio positions")}
                     >

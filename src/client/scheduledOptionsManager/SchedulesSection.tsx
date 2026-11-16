@@ -70,7 +70,7 @@ export function SchedulesSection({
               title="No active schedules"
               description="Create a stock screen, options analysis, or saved-view discovery schedule to see it here; legacy app-created jobs are not recreated automatically."
               action={
-                <Button type="button" variant="accent" onClick={openCreateModal}>
+                <Button type="button" variant="primary" onClick={openCreateModal}>
                   + Create First Schedule
                 </Button>
               }

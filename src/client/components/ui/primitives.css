@@ -171,24 +171,14 @@
 
 .ui-btn.size-sm { font-size: var(--font-size-caption); padding: var(--space-1-5) var(--space-2-5); min-height: 30px; }
 .ui-btn.size-md { font-size: var(--font-size-body); padding: var(--space-2) var(--space-4); min-height: 38px; }
-.ui-btn.size-lg { font-size: var(--font-size-body); padding: var(--space-2-5) var(--space-5); min-height: 44px; }
 
 .ui-btn.variant-primary { background: var(--color-primary); color: var(--color-primary-foreground); }
 .ui-btn.variant-primary:hover:not(:disabled) { background: var(--color-primary-hover); }
 
-.ui-btn.variant-accent { background: var(--color-accent); color: var(--color-accent-contrast); border-color: var(--color-accent); }
-.ui-btn.variant-accent:hover:not(:disabled) { filter: brightness(1.1); }
-
-.ui-btn.variant-warning { background: var(--color-warning); color: var(--color-warning-foreground); border-color: var(--color-warning); }
-.ui-btn.variant-warning:hover:not(:disabled) { filter: brightness(1.05); }
-
 /* Subtle tone (#628): tinted background + tone text/border, for dense
    table actions and toolbar chips (the old .btn-table-action family). */
 .ui-btn.tone-subtle.variant-primary { background: var(--color-primary-alpha); color: var(--color-primary); border-color: var(--color-primary-border); }
-.ui-btn.tone-subtle.variant-accent { background: var(--color-accent-subtle); color: var(--color-accent); border-color: var(--color-border-focus); }
-.ui-btn.tone-subtle.variant-trade { background: var(--color-trade-subtle); color: var(--color-trade); border-color: var(--color-trade); }
 .ui-btn.tone-subtle.variant-danger { background: var(--color-danger-subtle); color: var(--color-danger); border-color: var(--color-danger); }
-.ui-btn.tone-subtle.variant-warning { background: var(--color-warning-subtle); color: var(--color-warning); border-color: var(--color-warning); }
 .ui-btn.tone-subtle.variant-secondary { background: var(--color-surface); color: var(--color-text-secondary); border-color: var(--color-border-subtle); }
 .ui-btn.tone-subtle:hover:not(:disabled) { filter: brightness(1.05); }
 
@@ -199,14 +189,8 @@
 }
 .ui-btn.variant-secondary:hover:not(:disabled) { background: var(--color-surface-hover); border-color: var(--color-border-strong); }
 
-.ui-btn.variant-ghost { background: transparent; color: var(--color-text-secondary); }
-.ui-btn.variant-ghost:hover:not(:disabled) { background: var(--color-muted); color: var(--color-text-primary); }
-
 .ui-btn.variant-danger { background: var(--color-danger); color: var(--color-danger-foreground); }
 .ui-btn.variant-danger:hover:not(:disabled) { background: var(--color-danger-text); }
-
-.ui-btn.variant-trade { background: var(--color-trade); color: var(--color-primary-foreground); }
-.ui-btn.variant-trade:hover:not(:disabled) { background: var(--color-trade-deep); }
 
 .ui-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -1321,7 +1305,7 @@ div.ui-drawer-title {
  * second block's background-only rules never overrode. The --brand-bg /
  * --brand-border / --brand-color properties let the mini hover reuse the
  * network background without one rule per network. */
-.ui-btn.variant-ghost.ui-brand-x-twitter {
+.ui-btn.ui-brand-x-twitter {
   --brand-bg: var(--brand-x);
   --brand-border: var(--color-border-strong);
   --brand-color: var(--color-text-primary);
@@ -1332,7 +1316,7 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-linkedin {
+.ui-btn.ui-brand-linkedin {
   --brand-bg: var(--brand-linkedin);
   --brand-border: var(--brand-linkedin);
   --brand-color: var(--color-accent);
@@ -1343,7 +1327,7 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-reddit {
+.ui-btn.ui-brand-reddit {
   --brand-bg: var(--brand-reddit);
   --brand-border: var(--brand-reddit-bright);
   --brand-color: var(--color-text-primary);
@@ -1354,7 +1338,7 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-facebook {
+.ui-btn.ui-brand-facebook {
   --brand-bg: var(--brand-facebook);
   --brand-border: var(--brand-facebook-border);
   --brand-color: var(--color-text-primary);
@@ -1365,7 +1349,7 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-whatsapp {
+.ui-btn.ui-brand-whatsapp {
   --brand-bg: var(--brand-whatsapp);
   --brand-border: var(--brand-whatsapp-bright);
   --brand-color: var(--color-text-primary);
@@ -1376,7 +1360,7 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-telegram {
+.ui-btn.ui-brand-telegram {
   --brand-bg: var(--brand-telegram);
   --brand-border: var(--color-accent);
   --brand-color: var(--color-info-text);
@@ -1387,7 +1371,7 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-threads {
+.ui-btn.ui-brand-threads {
   --brand-bg: var(--brand-threads);
   --brand-border: var(--color-border-strong);
   --brand-color: var(--color-text-primary);
@@ -1398,7 +1382,7 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-bluesky {
+.ui-btn.ui-brand-bluesky {
   --brand-bg: var(--brand-bluesky);
   --brand-border: var(--color-accent);
   --brand-color: var(--color-text-primary);
@@ -1409,7 +1393,7 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-hackernews {
+.ui-btn.ui-brand-hackernews {
   --brand-bg: var(--brand-hackernews);
   --brand-border: var(--brand-hackernews);
   --brand-color: var(--color-text-primary);
@@ -1420,7 +1404,7 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-pinterest {
+.ui-btn.ui-brand-pinterest {
   --brand-bg: var(--brand-pinterest);
   --brand-border: var(--brand-pinterest);
   --brand-color: var(--color-text-primary);
@@ -1431,70 +1415,70 @@ div.ui-drawer-title {
   box-shadow: var(--shadow-sm);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ui-btn.variant-ghost.ui-brand-x-twitter:hover:not(:disabled) {
+.ui-btn.ui-brand-x-twitter:hover:not(:disabled) {
   background: var(--color-surface-hover);
   color: var(--brand-color);
   transform: translateY(-1px);
   filter: brightness(1.2);
   box-shadow: var(--shadow-md);
 }
-.ui-btn.variant-ghost.ui-brand-linkedin:hover:not(:disabled) {
+.ui-btn.ui-brand-linkedin:hover:not(:disabled) {
   background: var(--brand-linkedin-strong);
   color: var(--brand-color);
   transform: translateY(-1px);
   filter: brightness(1.2);
   box-shadow: var(--shadow-md);
 }
-.ui-btn.variant-ghost.ui-brand-reddit:hover:not(:disabled) {
+.ui-btn.ui-brand-reddit:hover:not(:disabled) {
   background: var(--brand-bg);
   color: var(--brand-color);
   transform: translateY(-1px);
   filter: brightness(1.2);
   box-shadow: var(--shadow-md);
 }
-.ui-btn.variant-ghost.ui-brand-facebook:hover:not(:disabled) {
+.ui-btn.ui-brand-facebook:hover:not(:disabled) {
   background: var(--brand-bg);
   color: var(--brand-color);
   transform: translateY(-1px);
   filter: brightness(1.2);
   box-shadow: var(--shadow-md);
 }
-.ui-btn.variant-ghost.ui-brand-whatsapp:hover:not(:disabled) {
+.ui-btn.ui-brand-whatsapp:hover:not(:disabled) {
   background: var(--brand-bg);
   color: var(--brand-color);
   transform: translateY(-1px);
   filter: brightness(1.2);
   box-shadow: var(--shadow-md);
 }
-.ui-btn.variant-ghost.ui-brand-telegram:hover:not(:disabled) {
+.ui-btn.ui-brand-telegram:hover:not(:disabled) {
   background: var(--brand-telegram-strong);
   color: var(--brand-color);
   transform: translateY(-1px);
   filter: brightness(1.2);
   box-shadow: var(--shadow-md);
 }
-.ui-btn.variant-ghost.ui-brand-threads:hover:not(:disabled) {
+.ui-btn.ui-brand-threads:hover:not(:disabled) {
   background: var(--brand-bg);
   color: var(--brand-color);
   transform: translateY(-1px);
   filter: brightness(1.2);
   box-shadow: var(--shadow-md);
 }
-.ui-btn.variant-ghost.ui-brand-bluesky:hover:not(:disabled) {
+.ui-btn.ui-brand-bluesky:hover:not(:disabled) {
   background: var(--brand-bg);
   color: var(--brand-color);
   transform: translateY(-1px);
   filter: brightness(1.2);
   box-shadow: var(--shadow-md);
 }
-.ui-btn.variant-ghost.ui-brand-hackernews:hover:not(:disabled) {
+.ui-btn.ui-brand-hackernews:hover:not(:disabled) {
   background: var(--brand-bg);
   color: var(--brand-color);
   transform: translateY(-1px);
   filter: brightness(1.2);
   box-shadow: var(--shadow-md);
 }
-.ui-btn.variant-ghost.ui-brand-pinterest:hover:not(:disabled) {
+.ui-btn.ui-brand-pinterest:hover:not(:disabled) {
   background: var(--brand-bg);
   color: var(--brand-color);
   transform: translateY(-1px);
@@ -1509,7 +1493,7 @@ div.ui-drawer-title {
  * the mini network rules set background only; the hover keeps the brand
  * background (minis never changed it) and grows 1.1x, as before. Placed
  * after the brand hovers so it wins the equal-specificity ties. */
-.ui-btn.variant-ghost.ui-brand-mini {
+.ui-btn.ui-brand-mini {
   width: var(--space-8);
   height: var(--space-8);
   min-height: 0;
@@ -1521,7 +1505,7 @@ div.ui-drawer-title {
   box-shadow: none;
   transition: all 0.15s ease;
 }
-.ui-btn.variant-ghost.ui-brand-mini:hover:not(:disabled) {
+.ui-btn.ui-brand-mini:hover:not(:disabled) {
   background: var(--brand-bg);
   transform: translateY(-1px) scale(1.1);
   filter: brightness(1.2);

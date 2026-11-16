@@ -447,7 +447,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
                     )}
                     <span className="ui-push">
                       <Button
-                        variant="ghost"
+                        variant="secondary"
                         size="sm"
                         onClick={() => setSelectedProofTx(tx)}
                         title="Inspect Cryptographic DID Proof"

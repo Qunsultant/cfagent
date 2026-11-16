@@ -212,7 +212,7 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
                           <Flex justify="between" align="center" gap="2">
                             <span className="ui-mono">🔑 {m.key}</span>
                             <Button
-                              variant="ghost"
+                              variant="secondary"
                               size="sm"
                               onClick={() => setMemoryToDelete(m.key)}
                               title="Delete memory"
@@ -345,7 +345,7 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
                 meta={
                   <Flex gap="2" align="center">
                     <Badge size="xs" tone="neutral">{browsedData.total} Total Records</Badge>
-                    <Button variant="ghost" size="sm" onClick={() => setBrowsedData(null)} title="Close browsed table">
+                    <Button variant="secondary" size="sm" onClick={() => setBrowsedData(null)} title="Close browsed table">
                       ✕ Close
                     </Button>
                   </Flex>

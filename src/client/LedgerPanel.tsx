@@ -75,7 +75,7 @@ function SortHeader({
   const direction = sort.dir === "asc" ? "ascending" : "descending";
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       size="sm"
       className="ui-table-sort"
       onClick={() => onSort(sortKey)}
@@ -123,7 +123,7 @@ export function LedgerPanel({ orders, ordersLoading, fetchOrders, setRiskSubject
       { key: "ref", header: header("Broker Ref", "orderRef"), ariaSort: ariaSort("orderRef"), render: (ord) => <code>{ord.orderRef || "—"}</code> },
       { key: "did", header: header("Proposer DID", "proposerDid"), ariaSort: ariaSort("proposerDid"), render: (ord) => <code title={ord.proposerDid}>{ord.proposerDid.replace("did:agent:openaimp:", "")}</code> },
       { key: "date", header: header("Date & Time", "createdAt"), ariaSort: ariaSort("createdAt"), render: (ord) => <span>{new Date(ord.createdAt).toLocaleString()}</span> },
-      { key: "actions", header: "Action", render: (ord) => <Button variant="warning" tone="subtle" size="sm" type="button" onClick={() => { setRiskSubject({ title: `${ord.action} ${ord.quantity}x ${ord.symbol}`, underlyingSymbol: ord.symbol, underlyingPrice: ord.price, strategyType: `${ord.action} Trade`, sentiment: ord.action.toLowerCase().includes("buy") ? "bullish" : "bearish", quantity: ord.quantity, positionType: "EQUITY", maxLoss: ord.totalValue, breakevens: [ord.price], breakevenText: `Price: ${safePriceFormat(ord.price)}` }); }} title="Analyze risk profile for this ledger trade">🛡️ Risk</Button> },
+      { key: "actions", header: "Action", render: (ord) => <Button variant="secondary" tone="subtle" size="sm" type="button" onClick={() => { setRiskSubject({ title: `${ord.action} ${ord.quantity}x ${ord.symbol}`, underlyingSymbol: ord.symbol, underlyingPrice: ord.price, strategyType: `${ord.action} Trade`, sentiment: ord.action.toLowerCase().includes("buy") ? "bullish" : "bearish", quantity: ord.quantity, positionType: "EQUITY", maxLoss: ord.totalValue, breakevens: [ord.price], breakevenText: `Price: ${safePriceFormat(ord.price)}` }); }} title="Analyze risk profile for this ledger trade">🛡️ Risk</Button> },
     ];
   }, [handleSort, setRiskSubject, sort]);
 

@@ -204,7 +204,7 @@ export function RunDetailsModal({
 
           <RunDetailSections detail={detail} levelFilter={filter} />
           <p>
-            <Button variant="ghost" size="sm" onClick={onClose}>
+            <Button variant="secondary" size="sm" onClick={onClose}>
               Close
             </Button>
           </p>

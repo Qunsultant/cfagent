@@ -83,7 +83,7 @@ export function ScheduleDetailModal({
           </div>
           <code className="sched-dialog-id">{item.id}</code>
         </div>
-        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+        <Button type="button" variant="secondary" size="sm" onClick={onClose}>
           Close
         </Button>
       </header>

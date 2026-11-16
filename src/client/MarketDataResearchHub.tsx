@@ -669,7 +669,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               <Flex gap="2" align="center">
                 <Badge tone={yfinanceQuote?.provenance === "live" ? "success" : "warning"} dot>{yfinanceQuote?.provenance === "live" ? "Yahoo Finance Live" : "Yahoo Finance — non-live market data"}</Badge>
                 <Badge tone="warning" dot>Alpaca Market Data v2 (On-Page)</Badge>
-                <Button variant="accent" tone="subtle" size="sm"
+                <Button variant="secondary" tone="subtle" size="sm"
                   type="button"
                   onClick={() => loadAllSymbolData(activeSymbol)}
                   disabled={quoteLoading || snapshotLoading}
@@ -787,13 +787,13 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             {/* Quick Action Navigation & Drawer Toggle */}
             <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center", paddingTop: "var(--space-1)" }}>
               <span style={{ fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)", fontWeight: 600 }}>Deep-Dive Analysis:</span>
-              <Button variant="accent" tone="subtle" size="sm"
+              <Button variant="secondary" tone="subtle" size="sm"
                 type="button"
                 onClick={() => handleTabChange("report")}
               >
                 🔬 In-Depth AI Research Report →
               </Button>
-              <Button variant="warning" size="sm" tone={showAlpacaDrawerOnScreener ? "solid" : "subtle"} aria-pressed={showAlpacaDrawerOnScreener}
+              <Button variant="secondary" size="sm" tone={showAlpacaDrawerOnScreener ? "solid" : "subtle"} aria-pressed={showAlpacaDrawerOnScreener}
                 type="button"
                 onClick={() => setShowAlpacaDrawerOnScreener(!showAlpacaDrawerOnScreener)}
               >
@@ -805,14 +805,14 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               >
                 ⚖️ Fundamentals &amp; Multiples →
               </Button>
-              <Button variant="trade" tone="subtle" size="sm"
+              <Button variant="secondary" tone="subtle" size="sm"
                 type="button"
                 onClick={() => handleTabChange("bars")}
               >
                 📈 Candlestick Bars →
               </Button>
               {onTradeSymbol && (
-                <Button variant="trade"
+                <Button variant="primary"
                   type="button"
                   onClick={() => onTradeSymbol(activeSymbol)}
                   style={{ marginLeft: "auto" }}
@@ -1071,7 +1071,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                     header: "Alpaca Feed",
                     align: "center",
                     render: (stock) => (
-                      <Button variant="warning" size="sm" tone={activeSymbol === stock.symbol ? "solid" : "subtle"} aria-pressed={activeSymbol === stock.symbol}
+                      <Button variant="secondary" size="sm" tone={activeSymbol === stock.symbol ? "solid" : "subtle"} aria-pressed={activeSymbol === stock.symbol}
                         type="button"
                         title={`Inspect live Alpaca quote & snapshot for ${stock.symbol}`}
                         onClick={() => {
@@ -1091,7 +1091,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                     align: "center",
                     render: (stock) => (
                       <Flex gap="1-5" justify="center">
-                        <Button variant="accent" tone="subtle" size="sm"
+                        <Button variant="secondary" tone="subtle" size="sm"
                           type="button"
                           title="Generate AI Research Report with Yahoo Finance & Alpaca"
                           onClick={() => {
@@ -1114,7 +1114,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                           ⚖️ Ratios
                         </Button>
                         {onTradeSymbol && (
-                          <Button variant="trade" tone="subtle" size="sm"
+                          <Button variant="primary" tone="subtle" size="sm"
                             type="button"
                             title="Send to E*TRADE Order Ticket for Execution"
                             onClick={() => onTradeSymbol(stock.symbol)}
@@ -1810,7 +1810,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 <span style={{ fontSize: "var(--font-size-body)", fontWeight: 700, color: "var(--color-text-primary)" }}>
                   ⚡ Antigravity &amp; Agent MCP Server Config (Alpaca)
                 </span>
-                <Button variant="accent"
+                <Button variant="primary"
                   type="button"
                   onClick={() => {
                     const cfg = JSON.stringify({

@@ -77,7 +77,7 @@ export function LiveResultPreview({ liveResult, thesis = "bullish", onPreviewTra
                 {candidate && onPreviewTrade && (
                   <Button
                     type="button"
-                    variant="accent"
+                    variant="secondary"
                     tone="subtle"
                     size="sm"
                     className="live-preview-action"

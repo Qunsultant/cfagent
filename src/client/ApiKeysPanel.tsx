@@ -118,7 +118,7 @@ export function ApiKeysPanel() {
             <Button size="sm" variant="primary" onClick={handleCopy}>
               {copied ? "Copied ✓" : "Copy key"}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setFreshSecret(null)}>
+            <Button size="sm" variant="secondary" onClick={() => setFreshSecret(null)}>
               Dismiss
             </Button>
           </div>
@@ -175,7 +175,7 @@ export function ApiKeysPanel() {
                   >
                     Confirm revoke
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setConfirmingRevokeId(null)}>
+                  <Button size="sm" variant="secondary" onClick={() => setConfirmingRevokeId(null)}>
                     Cancel
                   </Button>
                 </div>

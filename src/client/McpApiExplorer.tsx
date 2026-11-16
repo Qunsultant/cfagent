@@ -439,7 +439,7 @@ export function McpApiExplorer() {
                 <div className="result-header">
                   <span className="result-tag success">JSON-RPC 2.0 Response</span>
                   <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                     className="copy-btn"
                     onClick={() => copyToClipboard(JSON.stringify(mcpResult, null, 2), "mcp-res")}
@@ -502,7 +502,7 @@ export function McpApiExplorer() {
                 <div className="result-header">
                   <span className="result-tag success">Live Resource Content</span>
                   <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                     className="copy-btn"
                     onClick={() => copyToClipboard(JSON.stringify(resourceResult, null, 2), "res-res")}
@@ -681,7 +681,7 @@ export function McpApiExplorer() {
               <div className="curl-header">
                 <h5>Sample cURL Command:</h5>
                 <Button
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                   className="copy-btn"
                   onClick={() => copyToClipboard(activeRest.sampleCurl, `curl-${activeRest.id}`)}
@@ -714,7 +714,7 @@ export function McpApiExplorer() {
                     {restLatencyMs !== null && <span className="latency-tag">⚡ {restLatencyMs}ms</span>}
                   </div>
                   <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                     className="copy-btn"
                     onClick={() => copyToClipboard(JSON.stringify(restResponse, null, 2), "rest-res")}
@@ -745,7 +745,7 @@ export function McpApiExplorer() {
               <div className="code-box-header">
                 <span><code>claude_desktop_config.json</code></span>
                 <Button
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                   className="copy-btn"
                   onClick={() => copyToClipboard(claudeConfigSnippet, "claude-cfg")}
@@ -768,7 +768,7 @@ export function McpApiExplorer() {
               <div className="code-box-header">
                 <span>Cursor MCP Settings</span>
                 <Button
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                   className="copy-btn"
                   onClick={() => copyToClipboard(cursorConfigSnippet, "cursor-cfg")}

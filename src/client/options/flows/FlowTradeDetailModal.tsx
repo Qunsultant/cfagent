@@ -83,7 +83,7 @@ export function FlowTradeDetailModal({
           <div className="flow-modal-header-right">
             <span className="flow-modal-time">{timeFormatted}</span>
             <Button
-              variant="ghost"
+              variant="secondary"
               type="button"
               className="flow-modal-close-btn"
               onClick={onClose}
@@ -214,7 +214,7 @@ export function FlowTradeDetailModal({
             Open in Builder
           </Button>
           {onRiskAnalysis && (
-            <Button variant="warning" tone="subtle" size="sm"
+            <Button variant="secondary" tone="subtle" size="sm"
               type="button"
               onClick={() => onRiskAnalysis(trade)}
             >

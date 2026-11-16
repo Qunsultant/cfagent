@@ -200,7 +200,7 @@ describe("ActionBar (#3134 — per-page button rows)", () => {
         secondary={
           <>
             <Button variant="secondary">Save draft</Button>
-            <Button variant="ghost">Cancel</Button>
+            <Button variant="secondary">Cancel</Button>
           </>
         }
       />,

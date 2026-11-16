@@ -276,7 +276,7 @@ function SortLabel({
 }) {
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       size="sm"
       onClick={() => toggle(k)}
       title={title ?? `Sort by ${label}`}
@@ -430,7 +430,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
         {result.success && (
           <>
             <Button
-            variant="accent"
+            variant="secondary"
             tone="subtle"
             size="sm"
               onClick={() => downloadScreenExport(result, "standouts")}
@@ -440,7 +440,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
             </Button>
             {(result.allStocks?.length ?? 0) > 0 && (
               <Button
-              variant="accent"
+              variant="secondary"
               tone="subtle"
               size="sm"
                 onClick={() => downloadScreenExport(result, "all-stocks")}
@@ -450,7 +450,7 @@ export function ScreenerResultsView({ result }: { result: ScreenerResultData }) 
               </Button>
             )}
             <Button
-            variant="accent"
+            variant="secondary"
             tone="subtle"
             size="sm"
               onClick={() => downloadScreenExport(result, "run-json")}

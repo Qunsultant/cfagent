@@ -121,7 +121,7 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
               </div>
               <Button
                 type="button"
-                variant="ghost"
+                variant="secondary"
                 className="btn-modal-close"
                 onClick={() => setModalOpen(false)}
               >

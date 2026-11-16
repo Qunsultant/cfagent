@@ -119,7 +119,7 @@ export function StrategyLibraryModal({
                 : "Choose a pre-made strategy to evaluate profit/loss characteristics"}
             </span>
           </div>
-          <Button variant="ghost" type="button" className="strat-modal-close-btn" onClick={onClose}>
+          <Button variant="secondary" type="button" className="strat-modal-close-btn" onClick={onClose}>
             ✕
           </Button>
         </div>
@@ -224,7 +224,7 @@ export function StrategyLibraryModal({
                   )}
                   <div style={{ display: "flex", gap: "var(--space-1-5)" }}>
                     {onAnalyzeRisk && (
-                      <Button variant="warning" tone="subtle" size="sm"
+                      <Button variant="secondary" tone="subtle" size="sm"
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();

@@ -257,7 +257,7 @@ function BestTradeCard({
             </Button>
           )}
           {pick.best && onRiskAnalysis && (
-            <Button variant="warning" tone="subtle" size="sm"
+            <Button variant="secondary" tone="subtle" size="sm"
               type="button"
               onClick={() => onRiskAnalysis(candidateToRiskSubject(pick.best!.candidate))}
               title="Analyze Risk and Defense Playbook for Top Trade"
@@ -323,7 +323,7 @@ function BestTradeCard({
                                             </Button>
                                           )}
                                           {onRiskAnalysis && (
-                                            <Button variant="warning" tone="subtle" size="sm"
+                                            <Button variant="secondary" tone="subtle" size="sm"
                                               type="button"
                                               onClick={(e) => {
                                                 e.stopPropagation();
@@ -657,7 +657,7 @@ function StrategyCard({
             </Button>
           )}
           {onRiskAnalysis && (
-            <Button variant="warning" tone="subtle" size="sm"
+            <Button variant="secondary" tone="subtle" size="sm"
               type="button"
               onClick={() => onRiskAnalysis(candidateToRiskSubject(candidate))}
               title="Institutional Risk Management & Defense Playbook"
@@ -1656,7 +1656,7 @@ function StrategyLedgerTable({ rows }: { rows: Array<Record<string, any>> }) {
             columns={ledgerColumns.map((column) => ({
               key: column.key,
               header: (
-                <Button type="button" variant="ghost" size="sm" onClick={() => sortBy(column.key)}>
+                <Button type="button" variant="secondary" size="sm" onClick={() => sortBy(column.key)}>
                   {column.label}{sortKey === column.key ? (direction === "asc" ? " ▲" : " ▼") : ""}
                 </Button>
               ),

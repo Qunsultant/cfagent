@@ -163,7 +163,7 @@ function ledgerColumns(
     typeof r.jobId === "string" && r.jobId.trim() && !isMissingIdLiteral(r.jobId) ? (
       <Button
         type="button"
-        variant="ghost"
+        variant="secondary"
         size="sm"
         onClick={() => onJobClick(r.jobId)}
         title={`Show run history for ${r.jobId}`}
@@ -214,7 +214,7 @@ function ledgerColumns(
       typeof r.asyncJobId === "string" && r.asyncJobId ? (
         <Button
           type="button"
-          variant="ghost"
+          variant="secondary"
           size="sm"
           onClick={() => onAsyncJobClick(r.asyncJobId as string)}
           title={`Open job detail for ${r.asyncJobId}`}
@@ -493,7 +493,7 @@ export function ScheduleRunLedgerPanel({
             </span>
             <Button
               type="button"
-              variant="ghost"
+              variant="secondary"
               size="sm"
               onClick={() => navigateToTab("schedules", "runs")}
               title="Show every run in the ledger"

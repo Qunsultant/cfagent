@@ -1362,7 +1362,7 @@ export function Chat({ user }: { user: User }) {
 
               {/* Universal Top Bar Refresh Button */}
               <Button
-                variant="ghost"
+                variant="secondary"
                 className="nav-refresh-btn top-nav-control"
                 onClick={handleGlobalRefresh}
                 disabled={isRefreshing}
@@ -1376,7 +1376,7 @@ export function Chat({ user }: { user: User }) {
 
               {/* Trade Button (Orange/Amber pill matching reference) */}
               <Button
-                variant="ghost"
+                variant="secondary"
                 className="nav-trade-btn top-nav-control"
                 onClick={() => {
                   handleSelectTab("order");

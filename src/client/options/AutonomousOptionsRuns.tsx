@@ -54,7 +54,7 @@ export function AutonomousOptionsRuns() {
     <section className="autonomous-runs" aria-label="Autonomous options runs">
       <div className="autonomous-runs-head">
         <h3>🤖 Autonomous Options Runs</h3>
-        <Button variant="ghost" tone="subtle" onClick={() => refreshOptionsLatest()}>
+        <Button variant="secondary" tone="subtle" onClick={() => refreshOptionsLatest()}>
           ↻ Refresh
         </Button>
       </div>

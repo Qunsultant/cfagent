@@ -124,7 +124,7 @@ export function RiskAnalysisModal({
               Risk Score: {anatomy.riskScore}/100 • {anatomy.riskLevel}
             </span>
             <Button
-              variant="ghost"
+              variant="secondary"
               type="button"
               className="risk-modal-close-btn"
               onClick={onClose}

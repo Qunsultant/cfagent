@@ -122,7 +122,7 @@ export function Drawer({
             <span />
           )}
           {actions && <span className="ui-drawer-actions">{actions}</span>}
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
+          <Button variant="secondary" size="sm" onClick={onClose} aria-label="Close">
             ✕
           </Button>
         </div>

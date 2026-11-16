@@ -53,7 +53,7 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
             Current: <Badge tone="accent" size="xs">{cadenceText(item)}</Badge>
           </p>
         </div>
-        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+        <Button type="button" variant="secondary" size="sm" onClick={onClose}>
           Close
         </Button>
       </header>

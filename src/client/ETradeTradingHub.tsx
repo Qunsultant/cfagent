@@ -2245,7 +2245,7 @@ export function ETradeTradingHub({
             </div>
             {(!lastExecutionResult.success && (lastExecutionResult.message?.includes("timed out") || lastExecutionResult.message?.includes("resubmit"))) && activeDraft && (
               <div>
-                <Button variant="trade"
+                <Button variant="secondary"
                   type="button"
                   disabled={executingDraft}
                   onClick={handleRefreshPreview}
@@ -2528,7 +2528,7 @@ export function ETradeTradingHub({
 
                 <Flex gap="2" align="center">
                   <Button
-                    variant="trade"
+                    variant="primary"
                     onClick={() => {
                       handleQuickTrade(inspectQuote, "BUY");
                       setInspectSymbol(null);

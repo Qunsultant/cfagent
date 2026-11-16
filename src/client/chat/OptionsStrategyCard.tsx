@@ -470,7 +470,7 @@ export function OptionsStrategyCard({
         </Button>
 
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
           disabled={isBusy}
           onClick={handleCopyJson}
