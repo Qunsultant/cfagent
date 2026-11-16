@@ -28,6 +28,18 @@
  * entries (table "__table__") are the 9 generator templates'
  * and the facade's browse/count reads' form: one entry per
  * Repository operation, the runtime table as a parameter.
+ *
+ * #4387 (P6d): the route-held DELETEs join this same catalogue
+ * (REUSE — no sibling catalogue). The maintenance route's two
+ * unpredicated DELETEs (mas_job_outcomes_meta, mas_events) are
+ * template entries — an unpredicated DELETE is not a Repository
+ * shape — executed through the DO DML executor. The
+ * orchestratorMigration INSERT OR REPLACE does NOT join this
+ * catalogue: it is the P3 parameterized seed entry
+ * (seed.route.orchestrator_migration.insert_or_replace, the
+ * remainder catalogue), resolved by the route through
+ * remainderStatementSql; its table parameter is validated
+ * against the combined catalogue there.
  */
 import type { DoDmlCatalogueEntry } from "./doDmlCatalogue";
 import {
@@ -278,6 +290,35 @@ export const DO_DML_CATALOGUE_ENTRIES: DoDmlCatalogueEntry[] = [
   { code: "dml.do.mas_settings.get", table: "mas_settings", operation: "read", form: "repository", method: "findById", idField: "key" },
   { code: "dml.do.mas_settings.insert", table: "mas_settings", operation: "insert", form: "repository", method: "create", idField: "key" },
   { code: "dml.do.mas_settings.delete", table: "mas_settings", operation: "delete", form: "repository", method: "delete", idField: "key" },
+
+  // --- P6d (#4387): the route-held DELETEs (maintenance.ts clear-table) — 2 template ---
+  // The Data Lifecycle delete path: the maintenance route clears
+  // whole tables (the prune watermark, the audit history). An
+  // unpredicated DELETE is not a Repository shape — deleteWhere
+  // refuses an empty predicate by design — so both stay templates,
+  // exactly like dml.do.mas_memory.clear above. The route calls
+  // these entries through the DO DML executor; the inline strings
+  // are gone. The clear contract is unchanged: mas_job_outcomes_meta
+  // is its own clearable row (the watermark survives an outcomes
+  // clear), mas_events stays auditConfirm-gated (#2489).
+  {
+    code: "dml.do.mas_job_outcomes_meta.clear",
+    table: "mas_job_outcomes_meta",
+    operation: "delete",
+    form: "template",
+    statement: "DELETE FROM mas_job_outcomes_meta",
+    params: [],
+    mode: "run",
+  },
+  {
+    code: "dml.do.mas_events.clear",
+    table: "mas_events",
+    operation: "delete",
+    form: "template",
+    statement: "DELETE FROM mas_events",
+    params: [],
+    mode: "run",
+  },
 
   // --- P6c (#4386): parameterized operation entries — 10 repository ---
   // One entry per Repository operation, registered once with the

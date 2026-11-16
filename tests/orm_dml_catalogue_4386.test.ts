@@ -26,6 +26,11 @@
  *    byte-identical to the statement it replaced, and every
  *    entry executes against real SQLite.
  *
+ * #4387 (P6d): the catalogue grows 79 → 81 with the two
+ * route-held DELETEs (both template) — the counts below move
+ * with the change (gitops §7). The route-held entries are
+ * pinned by tests/dml_route_catalogue_4387.test.ts.
+ *
  * Baseline on 7d81cd93 (evidence-p6c/scan-orm-core-7d81cd93.txt):
  * the 16 doSqliteOrmAdapters.ts statements (10 write / 6 read),
  * the 9 ormRepositoryCore.ts generator templates (the 10th
@@ -220,19 +225,20 @@ describe("ORM-core DML catalogue coverage (#4386)", () => {
     const built = buildDoDmlCatalogue();
     expect(built.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
     expect(DO_DML_CATALOGUE.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
-    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(79);
+    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(81);
     expect(new Set(DO_DML_CATALOGUE_ENTRIES.map((e) => e.code)).size).toBe(
       DO_DML_CATALOGUE_ENTRIES.length,
     );
   });
 
-  it("per-table entry counts match the migration (22 repository + 4 template new)", () => {
+  it("per-table entry counts match the migration (22 repository + 4 template new in P6c, +2 template in P6d)", () => {
     const counts: Record<string, number> = {
       mas_messages: 2,
-      mas_events: 2,
+      mas_events: 3,
       mas_memory: 4,
       mas_transactions: 5,
       mas_settings: 3,
+      mas_job_outcomes_meta: 1,
       __table__: 10,
     };
     for (const [table, expected] of Object.entries(counts)) {
@@ -243,7 +249,7 @@ describe("ORM-core DML catalogue coverage (#4386)", () => {
       {} as Record<string, number>,
     );
     expect(forms.repository).toBe(64);
-    expect(forms.template).toBe(15);
+    expect(forms.template).toBe(17);
   });
 
   it("every template statement is byte-identical to the statement it replaced", () => {
