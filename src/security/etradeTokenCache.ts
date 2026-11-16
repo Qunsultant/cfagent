@@ -37,9 +37,14 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-/** Tokens are namespaced per environment: TEST and PROD never share an entry. */
-export function tokenCacheKey(envName: string, userLogin: string): string {
-  return `${envName.toUpperCase()}:${userLogin.toLowerCase()}`;
+/** Tokens are namespaced per tenant + environment (#4618): tenants and TEST/PROD never share an entry. */
+export function tokenCacheKey(
+  envName: string,
+  userLogin: string,
+  tenantId: string = "default",
+): string {
+  const normalizedTenant = tenantId.trim() || "default";
+  return `${normalizedTenant}:${envName.toUpperCase()}:${userLogin.toLowerCase()}`;
 }
 
 /** `undefined` means "not cached"; `null` means "cached: no tokens". */
@@ -64,13 +69,21 @@ export function readTokenCache(key: string): CachedTokenSet | null | undefined {
  */
 const loginEpochs = new Map<string, number>();
 
-function loginOfKey(key: string): string {
+function epochScopeOfKey(key: string): string {
+  const parts = key.split(":");
+  if (parts.length >= 3) {
+    const tenant = parts[0] || "default";
+    const login = parts.slice(2).join(":").toLowerCase();
+    return `${tenant}:${login}`;
+  }
   const i = key.indexOf(":");
-  return (i >= 0 ? key.slice(i + 1) : key).toLowerCase();
+  return `default:${(i >= 0 ? key.slice(i + 1) : key).toLowerCase()}`;
 }
 
 export function tokenCacheEpoch(key: string): number {
-  return loginEpochs.get(loginOfKey(key)) ?? 0;
+  const scoped = epochScopeOfKey(key);
+  const loginOnly = scoped.slice(scoped.indexOf(":") + 1);
+  return (loginEpochs.get(scoped) ?? 0) + (loginEpochs.get(`*:${loginOnly}`) ?? 0);
 }
 
 export function writeTokenCache(key: string, tokens: CachedTokenSet | null, epoch?: number): void {
@@ -91,12 +104,22 @@ export function writeTokenCache(key: string, tokens: CachedTokenSet | null, epoc
  * PROD, TEST and unscoped keys, so a single-variant invalidation would leave
  * the other two serving a revoked token.
  */
-export function invalidateTokenCacheFor(userLogin: string): void {
+export function invalidateTokenCacheFor(userLogin: string, tenantId?: string): void {
   // Bump the epoch even when nothing is cached: an in-flight reader
   // holds no entry yet, and its landing write must still be dropped.
   const login = userLogin.toLowerCase();
-  loginEpochs.set(login, (loginEpochs.get(login) ?? 0) + 1);
   const suffix = `:${login}`;
+  if (tenantId && tenantId.trim().length > 0) {
+    const scoped = `${tenantId.trim()}:${login}`;
+    loginEpochs.set(scoped, (loginEpochs.get(scoped) ?? 0) + 1);
+    const prefix = `${tenantId.trim()}:`;
+    for (const key of [...cache.keys()]) {
+      if (key.startsWith(prefix) && key.endsWith(suffix)) cache.delete(key);
+    }
+    return;
+  }
+  const wildcardScope = `*:${login}`;
+  loginEpochs.set(wildcardScope, (loginEpochs.get(wildcardScope) ?? 0) + 1);
   for (const key of [...cache.keys()]) {
     if (key.endsWith(suffix)) cache.delete(key);
   }

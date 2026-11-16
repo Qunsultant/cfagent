@@ -183,7 +183,8 @@ export function createKvBackedTokenFamily(
       const envName = host.envName(opts?.overrideEnv);
       // Identity-aware reads bypass the cache (see tokenPorts.ts).
       const useCache = !opts?.identity?.internalUserId;
-      const cacheKey = tokenCacheKey(envName, userLogin);
+      const tenantId = (opts as { tenantId?: string } | undefined)?.tenantId ?? "default";
+      const cacheKey = tokenCacheKey(envName, userLogin, tenantId);
       if (useCache) {
         const cached = readTokenCache(cacheKey);
         if (cached !== undefined) return cached;
