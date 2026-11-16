@@ -38,11 +38,22 @@
  * - Brokerage: untouched. This route reads no token, writes no
  *   token, and grants no brokerage credential; brokerage-attached
  *   work runs as the schedule owner only (#2331 decision).
+ *   EXCEPTION, issue #4988 (#945 Q10): the E*TRADE authorization
+ *   routes below (etrade/start, etrade/verifier, etrade/revoke)
+ *   are the ONE way the service login gains its own broker token
+ *   — the owner authorizes svc-background through the 3-legged
+ *   flow, and the token is stored under the service login's keys
+ *   only, never the owner's. The user's Connect flow is untouched,
+ *   and schedule-owner brokerage work (#2331) is not rewired.
  * - Audit: every actual grant and every actual revoke emits one
  *   event through the orchestrator audit funnel (ctx.audit).
  *   Idempotent no-ops (already provisioned, nothing to revoke)
  *   change nothing and emit nothing, the same rule as the
- *   maintenance preview. Reads (status) emit nothing.
+ *   maintenance preview. Reads (status) emit nothing. The #4988
+ *   E*TRADE routes audit the same way: a started authorization,
+ *   a completed exchange, and an actual token revocation each emit
+ *   one event with the acting admin as actor and the service
+ *   identity as target; a refused start/exchange emits nothing.
  * - Provision is idempotent: re-provisioning an already active
  *   matching binding returns it instead of minting a duplicate.
  *   Revoke removes every active binding in the selected scope;
@@ -52,8 +63,17 @@
 
 import { createKvMembershipStore, grantMembership } from "../../security/iaaaMembershipStore";
 import { resolveGrantDefaultExpiryDays } from "../../security/grantRules";
-import { getStoredTokens } from "../../security/etradeOAuth";
+import {
+  exchangeETradeVerifier,
+  getETradeRequestToken,
+  getStoredTokens,
+  revokeRemoteAccessToken,
+} from "../../security/etradeOAuth";
 import { isPlatformAdmin } from "../../security/iaaaAdminOverview";
+import { createKvPermissionDenialStore } from "../../security/iaaaPermissionDenialStore";
+import { requiresStepUpForAction } from "../../security/iaaaGates";
+import { evaluateRoutePep } from "../../security/pepGateway";
+import { isWiringEnabled } from "../../security/providers";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import {
   getServiceUserLogin,
@@ -61,7 +81,7 @@ import {
   serviceUserInternalUserId,
 } from "../../security/serviceIdentity";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
-import { sessionStore } from "../../security/session";
+import { getSession, getSessionId, sessionStore } from "../../security/session";
 import {
   listServiceTokens,
   mintServiceToken,
@@ -70,9 +90,9 @@ import {
   serviceTokenStore,
   type ServiceTokenTier,
 } from "../../security/serviceTokens";
-import type { MembershipStore } from "../../security/authorization";
+import type { MembershipStore, PermissionDenialReader } from "../../security/authorization";
 import type { KvLike } from "../../security/kvResilience";
-import type { Env } from "../../types";
+import type { Env, SessionData } from "../../types";
 
 export interface ServiceUserRouteContext {
   /** Worker env (carries the SESSION_STORE binding). */
@@ -101,6 +121,21 @@ export interface ServiceUserRouteContext {
   brokerageTokenPresent?: (serviceLogin: string) => Promise<boolean | null>;
   /** Issue #2681 — test seam: use this store instead of the SessionStore service_tokens bucket. */
   tokenStore?: KvLike;
+  /**
+   * Issue #4988 — test seam: the acting session for the step-up +
+   * PEP gates on the E*TRADE authorization routes. When the property
+   * is absent, the route loads the session from the request's session
+   * cookie (fail-closed when unresolvable). A present null is a
+   * missing session, never a fallback to the header identity.
+   */
+  session?: SessionData | null;
+  /**
+   * Issue #4988 — test seam: per-user permission-denial store for the
+   * PEP check. When absent, the route builds the KV denial store over
+   * the SessionStore; a build failure falls back to a denial-unaware
+   * decision, exactly as evaluateRoutePep documents.
+   */
+  permissionDenialStore?: PermissionDenialReader;
 }
 
 type Tier = "platform" | "tenant";
@@ -399,7 +434,7 @@ async function buildProvisioningChecklist(
   }
   if (tokenPresent === false) {
     ownerActions.push(
-      `Authorize ${serviceLogin} once via the Connect E*TRADE flow so a stored token exists under its login.`,
+      `Authorize ${serviceLogin} once via the "Authorize service login with E*TRADE" action in the Service User section, so a stored token exists under its login.`,
     );
   }
   if (tokenPresent === null) {
@@ -573,6 +608,261 @@ async function revokeTokenRoute(
   return Response.json({ ok: true, revoked: true, tokenId });
 }
 
+/**
+ * Issue #4988 (#945 Q10) — service-login E*TRADE authorization
+ * (option 1, owner decision 2026-11-16): the service identity
+ * (`svc-background`) holds its own broker login and its own stored
+ * token; it never uses the owner's token.
+ *
+ * The three routes below are the ONE way the service login gains
+ * its token. Every E*TRADE OAuth route in src/server/routes/auth.ts
+ * binds to the signed-in session's login, and this slice does not
+ * touch that flow. The rules, in order, on every route:
+ * - Gate: the same resolveCaller platform-admin gate as the
+ *   provision/revoke/status routes (wired session, never a
+ *   service-token caller).
+ * - Session: the acting session is loaded from the request's
+ *   session cookie (the Worker forwards /api/* to this DO with the
+ *   cookie intact, via stub.fetch). A missing session is refused
+ *   with 401 — the header login is never substituted for it.
+ * - Start only: Q4 step-up for integration-credential management
+ *   (5-minute window), checked BEFORE the authorization decision,
+ *   the same order as the role:assign route.
+ * - Start + exchange: PEP integration:connect via evaluateRoutePep,
+ *   the same helper and the same two 403 responses as the user
+ *   linking routes (#1755). Revoke is platform-admin + audit only,
+ *   per the slice (the api-keys pilot likewise does not step-up-
+ *   gate revocation).
+ * - Identity: the service login is resolved server-side from
+ *   getServiceUserLogin() — NEVER from the request. The exchange
+ *   binds to the request-token record stored under the service
+ *   login's key, so a tampered or client-supplied login cannot
+ *   redirect the token into another login's slot; the token lands
+ *   under the service login's keys only (login + internal-id,
+ *   via the identity dual-write in storeAccessTokens).
+ * - Completion is a verifier PIN, not a browser callback: the
+ *   start passes "oob", E*TRADE shows the PIN, the owner pastes
+ *   it into the Service User section. No callback URL is
+ *   registered — this DO-side route has no trusted public origin
+ *   (the forwarded request URL is agent.internal), so a
+ *   client-supplied callback would be an open redirect.
+ * - Audit: a started authorization, a completed exchange, and an
+ *   actual token revocation each emit one event with the acting
+ *   admin as actor and the service identity as target. Refusals
+ *   and no-op revokes emit nothing.
+ */
+
+/** The E*TRADE environment override, same carriers as the user linking routes. */
+function etradeReqEnv(request: Request, url: URL): string | undefined {
+  return (
+    (request.headers.get("x-environment") || url.searchParams.get("env") || "").toUpperCase() ||
+    undefined
+  );
+}
+
+/**
+ * The acting session for the step-up + PEP gates. The session seam
+ * overrides the load in tests; in production the id comes from the
+ * request's session cookie. Any failure loads as null — fail-closed,
+ * never a fallback to the header login.
+ */
+async function resolveActingSession(
+  request: Request,
+  ctx: ServiceUserRouteContext,
+): Promise<SessionData | null> {
+  if ("session" in ctx) return ctx.session ?? null;
+  try {
+    const sessionId = getSessionId(request);
+    if (!sessionId) return null;
+    return await getSession(ctx.env, sessionId);
+  } catch {
+    return null;
+  }
+}
+
+function resolveServiceLoginForEtrade(
+  ctx: ServiceUserRouteContext,
+): string | Response {
+  const serviceLogin =
+    ctx.serviceLogin === undefined ? getServiceUserLogin(ctx.env) : ctx.serviceLogin;
+  if (serviceLogin === null) {
+    return jsonError("Service user login is not configured (SERVICE_USER_LOGIN).", 500);
+  }
+  return serviceLogin;
+}
+
+/**
+ * The integration:connect PEP gate for the service-login E*TRADE
+ * start + exchange routes — the same helper (evaluateRoutePep) and
+ * the same two 403 responses as the user linking routes (#1755).
+ * Returns null when the call may proceed, else the denial response.
+ */
+async function requireServiceEtradePep(
+  caller: Caller,
+  ctx: ServiceUserRouteContext,
+  session: SessionData,
+): Promise<Response | null> {
+  let denialStore = ctx.permissionDenialStore;
+  if (!denialStore) {
+    try {
+      denialStore = createKvPermissionDenialStore(sessionStore(ctx.env));
+    } catch {
+      denialStore = undefined;
+    }
+  }
+  const pep = await evaluateRoutePep({
+    env: ctx.env,
+    session,
+    tenantId: ctx.defaultTenantId ?? resolveIaaaTenant(ctx.env),
+    permission: "integration:connect",
+    membershipStore: caller.store,
+    permissionDenialStore: denialStore,
+    nowMs: Date.now(),
+  });
+  if (pep.enforced && !pep.allowed) {
+    if (pep.graceExpired) {
+      return Response.json({ error: "Legacy session PDP grace expired: re-login through wiring to restore gated actions.", code: "legacy_pdp_grace_expired" }, { status: 403 });
+    }
+    return Response.json({ error: "Authorization denied: integration:connect permission required." }, { status: 403 });
+  }
+  return null;
+}
+
+async function startServiceEtradeAuth(
+  caller: Caller,
+  ctx: ServiceUserRouteContext,
+  request: Request,
+  url: URL,
+): Promise<Response> {
+  const serviceLoginOrError = resolveServiceLoginForEtrade(ctx);
+  if (serviceLoginOrError instanceof Response) return serviceLoginOrError;
+  const serviceLogin = serviceLoginOrError;
+  const serviceInternalUserId = serviceUserInternalUserId(serviceLogin);
+  const session = await resolveActingSession(request, ctx);
+  if (!session) {
+    return jsonError("Unauthorized: a signed-in session is required.", 401);
+  }
+  // #3102 (#945 Q4): starting a service credential requires fresh
+  // authentication inside the 5-minute integration-credential-
+  // management window, before the authorization decision below.
+  if (
+    requiresStepUpForAction(
+      session,
+      "integration-credential-management",
+      isWiringEnabled(ctx.env),
+      Date.now(),
+    )
+  ) {
+    return jsonError("Step-up authentication required: please sign in again and retry.", 403);
+  }
+  const denied = await requireServiceEtradePep(caller, ctx, session);
+  if (denied) return denied;
+  try {
+    const result = await getETradeRequestToken(
+      ctx.env,
+      serviceLogin,
+      "oob",
+      etradeReqEnv(request, url),
+    );
+    ctx.audit("service_user.etrade_auth_started", "orchestrator", {
+      actor: caller.internalUserId,
+      serviceUser: serviceLogin,
+      serviceInternalUserId,
+    });
+    // The request-token secret stays server-side: the exchange reads
+    // it from the service login's record, so it is never returned.
+    return Response.json({
+      ok: true,
+      authorizeUrl: result.authorizeUrl,
+      serviceUser: serviceLogin,
+      serviceInternalUserId,
+    });
+  } catch (err: any) {
+    return Response.json({ error: err.message || "Failed to initiate E*TRADE OAuth", code: err.code }, { status: 500 });
+  }
+}
+
+async function completeServiceEtradeAuth(
+  caller: Caller,
+  ctx: ServiceUserRouteContext,
+  request: Request,
+  url: URL,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const serviceLoginOrError = resolveServiceLoginForEtrade(ctx);
+  if (serviceLoginOrError instanceof Response) return serviceLoginOrError;
+  const serviceLogin = serviceLoginOrError;
+  const serviceInternalUserId = serviceUserInternalUserId(serviceLogin);
+  const session = await resolveActingSession(request, ctx);
+  if (!session) {
+    return jsonError("Unauthorized: a signed-in session is required.", 401);
+  }
+  const denied = await requireServiceEtradePep(caller, ctx, session);
+  if (denied) return denied;
+  const verifier = typeof body.verifier === "string" ? body.verifier.trim() : "";
+  if (!verifier) return jsonError("Verifier PIN is required", 400);
+  try {
+    const tokens = await exchangeETradeVerifier(
+      ctx.env,
+      serviceLogin,
+      verifier,
+      undefined,
+      undefined,
+      etradeReqEnv(request, url),
+      { internalUserId: serviceInternalUserId },
+    );
+    ctx.audit("service_user.etrade_auth_completed", "orchestrator", {
+      actor: caller.internalUserId,
+      serviceUser: serviceLogin,
+      serviceInternalUserId,
+    });
+    return Response.json({
+      ok: true,
+      serviceUser: serviceLogin,
+      serviceInternalUserId,
+      environment: tokens.environment,
+      storedAt: tokens.storedAt,
+    });
+  } catch (err: any) {
+    return Response.json({ error: err.message || "Failed to exchange verifier", code: err.code }, { status: 400 });
+  }
+}
+
+async function revokeServiceEtradeToken(
+  caller: Caller,
+  ctx: ServiceUserRouteContext,
+  request: Request,
+  url: URL,
+): Promise<Response> {
+  const serviceLoginOrError = resolveServiceLoginForEtrade(ctx);
+  if (serviceLoginOrError instanceof Response) return serviceLoginOrError;
+  const serviceLogin = serviceLoginOrError;
+  const serviceInternalUserId = serviceUserInternalUserId(serviceLogin);
+  // The identity deletes the service login's full resolved key set
+  // — login + internal-id + alias — and nothing else; the owner's
+  // token is never in that set.
+  const result = await revokeRemoteAccessToken(
+    ctx.env,
+    serviceLogin,
+    etradeReqEnv(request, url),
+    { internalUserId: serviceInternalUserId },
+  );
+  if (result.deleted) {
+    ctx.audit("service_user.etrade_revoked", "orchestrator", {
+      actor: caller.internalUserId,
+      serviceUser: serviceLogin,
+      serviceInternalUserId,
+    });
+  }
+  return Response.json({
+    ok: true,
+    deleted: result.deleted,
+    serviceUser: serviceLogin,
+    serviceInternalUserId,
+    message: result.message,
+  });
+}
+
 export async function handleServiceUserRoutes(
   request: Request,
   url: URL,
@@ -580,7 +870,6 @@ export async function handleServiceUserRoutes(
   sessionId: string,
   ctx: ServiceUserRouteContext,
 ): Promise<Response | null> {
-  void url;
   void sessionId;
   // Issue #2681 token routes. Checked before the provision/revoke/
   // status dispatch; an unknown tokens sub-path returns null so the
@@ -617,6 +906,33 @@ export async function handleServiceUserRoutes(
       return revokeTokenRoute(caller, ctx, body);
     } catch {
       return jsonError("Service-token administration unavailable.", 500);
+    }
+  }
+  // Issue #4988 (#945 Q10) — service-login E*TRADE authorization
+  // routes. Checked before the provision/revoke/status dispatch;
+  // an unknown etrade sub-path returns null so the DO chain keeps
+  // routing (no route hijack).
+  if (
+    path.endsWith("/admin/service-user/etrade/start") ||
+    path.endsWith("/admin/service-user/etrade/verifier") ||
+    path.endsWith("/admin/service-user/etrade/revoke")
+  ) {
+    if (request.method !== "POST") {
+      return jsonError("Method not allowed", 405);
+    }
+    try {
+      const caller = await resolveCaller(request, ctx);
+      if (caller instanceof Response) return caller;
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      if (path.endsWith("/admin/service-user/etrade/start")) {
+        return startServiceEtradeAuth(caller, ctx, request, url);
+      }
+      if (path.endsWith("/admin/service-user/etrade/verifier")) {
+        return completeServiceEtradeAuth(caller, ctx, request, url, body);
+      }
+      return revokeServiceEtradeToken(caller, ctx, request, url);
+    } catch {
+      return jsonError("Service-user E*TRADE authorization unavailable.", 500);
     }
   }
   let action: "provision" | "revoke" | "status" | null = null;

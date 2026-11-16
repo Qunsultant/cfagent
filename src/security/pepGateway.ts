@@ -23,6 +23,10 @@
  * from the membership store adapted to the PIP port. It performs
  * no enforcement itself and changes no decision — it only removes
  * the duplication between the four call sites.
+ * Issue #4988 (#945 Q10): the service-login E*TRADE start +
+ * verifier routes in src/agents/routes/serviceUser.ts are two
+ * further integration:connect call sites of this same helper,
+ * listed in PEP_GATE_INVENTORY below like the original four.
  */
 
 import {
@@ -218,5 +222,21 @@ export const PEP_GATE_INVENTORY: readonly PepGateInfo[] = [
     gateway: "evaluateAgentSchedulePdp",
     source: "src/agents/routes/schedules.ts",
     denied: "403 — approval denied by policy",
+  },
+  {
+    route: "/api/admin/service-user/etrade/start",
+    method: "POST",
+    permission: "integration:connect",
+    gateway: "evaluateRoutePep",
+    source: "src/agents/routes/serviceUser.ts",
+    denied: PEP_DENIED_ROUTE,
+  },
+  {
+    route: "/api/admin/service-user/etrade/verifier",
+    method: "POST",
+    permission: "integration:connect",
+    gateway: "evaluateRoutePep",
+    source: "src/agents/routes/serviceUser.ts",
+    denied: PEP_DENIED_ROUTE,
   },
 ];

@@ -487,6 +487,15 @@
  * in source order) — bringing the pinned inventory to 479 entries
  * (477 measured on the slice base); the delegation sequence is
  * unchanged (same handlers, same positions).
+ *
+ * Issue #4988 added five — POST /admin/service-user/etrade/start,
+ * /verifier and /revoke (in handleServiceUserRoutes, after the
+ * service-tokens routes and before provision, in source order).
+ * The guard matches all three paths and the dispatch matches start
+ * and verifier individually, so the three routes contribute five
+ * inventory entries — bringing the pinned inventory to 485 entries
+ * (480 measured on the slice base); the delegation sequence is
+ * unchanged (same handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -1068,6 +1077,11 @@ const EXPECTED_INVENTORY = [
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/tokens\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/tokens/rotate\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/tokens/revoke\")",
+  "handleServiceUserRoutes :: endsWith(\"/admin/service-user/etrade/start\")",
+  "handleServiceUserRoutes :: endsWith(\"/admin/service-user/etrade/verifier\")",
+  "handleServiceUserRoutes :: endsWith(\"/admin/service-user/etrade/revoke\")",
+  "handleServiceUserRoutes :: endsWith(\"/admin/service-user/etrade/start\")",
+  "handleServiceUserRoutes :: endsWith(\"/admin/service-user/etrade/verifier\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/provision\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/revoke\")",
   "handleServiceUserRoutes :: endsWith(\"/admin/service-user/status\")",

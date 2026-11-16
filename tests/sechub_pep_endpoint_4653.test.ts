@@ -115,6 +115,8 @@ const EXPECTED_GATES = [
   { route: "/api/schedule/goals/approvals/:id/(approve|reject)", method: "POST", permission: "action:approve", gateway: "evaluateRoutePep" },
   { route: "/api/schedules/webhook/followup", method: "POST", permission: "task:create", gateway: "evaluateAgentSchedulePdp" },
   { route: "/api/schedules/approvals/:id/(approve|reject)", method: "POST", permission: "action:approve", gateway: "evaluateAgentSchedulePdp" },
+  { route: "/api/admin/service-user/etrade/start", method: "POST", permission: "integration:connect", gateway: "evaluateRoutePep" },
+  { route: "/api/admin/service-user/etrade/verifier", method: "POST", permission: "integration:connect", gateway: "evaluateRoutePep" },
 ];
 
 describe("GET /api/security/pep (#4653)", () => {
