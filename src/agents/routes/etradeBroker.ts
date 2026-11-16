@@ -22,6 +22,7 @@ import { ETradeThinkHarness } from "../../services/thinkHarness";
 import { TradingPlatformRegistry, fetchQuoteLiveStrict } from "../../trading";
 // #4654/#4656: draft→placement terms, shared with the neutral route.
 import { deriveOrderExecutionTerms } from "./orderExecutionTerms";
+import { markDraftCancelledIfPresent } from "./brokerOrders";
 import { resolveEnvironmentConfig } from "../../config/environment";
 import { generateHedgeProposals } from "../../services/hedgeProposals";
 import { normalizeBundleCandidates } from "../../services/recommendationBundle";
@@ -790,6 +791,7 @@ export async function handleEtradeBrokerRoutes(
       if (!userLogin) return unauthenticatedResponse();
       const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
       const result = await etrade.cancelOrderRemote(orderId);
+      if (result.success) markDraftCancelledIfPresent(ctx, orderId);
       ctx.audit("etrade.order_cancelled", "trading", { orderId, success: result.success });
       return Response.json(result, { status: result.success ? 200 : 400 });
     } catch (err) {
