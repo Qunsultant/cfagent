@@ -14,7 +14,7 @@
  */
 
 import { useState } from "react";
-import { Badge, Button, Card, CardHeader, Notice, PageSection } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Grid, Notice, PageSection } from "./components/ui";
 import {
   ScreenerPresetManager,
   createPreset,
@@ -115,7 +115,7 @@ export function PresetsPanel({
       {copyError && (
         <Notice tone="danger" density="compact">{copyError}</Notice>
       )}
-      <div className="ui-stack-lg">
+      <Grid columns={1} gap="2-5">
         {starters.map((starter) => (
           <Card key={starter.id}>
             <div className="ui-row">
@@ -148,7 +148,7 @@ export function PresetsPanel({
             )}
           </Card>
         ))}
-      </div>
+      </Grid>
       </PageSection>
     </div>
   );

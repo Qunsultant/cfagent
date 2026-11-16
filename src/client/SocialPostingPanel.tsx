@@ -13,7 +13,7 @@
  * All reads/writes go through the existing session-gated routes.
  */
 import React, { useCallback, useEffect, useState } from "react";
-import { Badge, Button, Card, Notice, PageSection, PageShell, Tabs, TabPanel, TextInput } from "./components/ui";
+import { Badge, Button, Card, Flex, Grid, Notice, PageSection, PageShell, Stack, Tabs, TabPanel, TextInput } from "./components/ui";
 import type { TabOption } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import {
@@ -201,19 +201,19 @@ export function SocialPostingPanel({
                   }}
                 />
                 <div className="ui-meta">
-                  {briefText.length} / {SOCIAL_BRIEF_MAX_CHARS} characters
+                  {briefText.length} / {SOCIAL_BRIEF_MAX_CHARS} characters{" "}
                   {overCap && (
-                    <span className="ui-danger ui-ml-3">
+                    <span className="ui-danger">
                       Over the {SOCIAL_BRIEF_MAX_CHARS}-character cap — shorten the text to save.
                     </span>
                   )}
                 </div>
-                <div>
+                <Flex gap="3" align="center">
                   <Button variant="primary" disabled={!canSave} onClick={() => void handleSave()} loading={busy === "save"}>
                     {"Save brief"}
                   </Button>
-                  {savedNote && <span className="ui-meta ui-success ui-ml-3">{savedNote}</span>}
-                </div>
+                  {savedNote && <span className="ui-meta ui-success">{savedNote}</span>}
+                </Flex>
               </div>
               </PageSection>
             </TabPanel>
@@ -229,38 +229,40 @@ export function SocialPostingPanel({
               {goal && (
                 <div className="ui-narrow">
                   <Card>
-                    <div className="ui-row">
-                      <strong>{goal.name}</strong>
-                      <code className="ui-meta-sm">{goal.id}</code>
-                      <span className="ui-meta-sm">{goal.cron}</span>
-                      <span className="ui-push">
-                        <Badge tone={goal.enabled ? "success" : "neutral"} size="sm">
-                          {goal.enabled ? "ENABLED" : "DISABLED"}
-                        </Badge>
-                      </span>
-                    </div>
-                    <div className="ui-meta ui-mt-1">
-                      operation <code>{goal.operation}</code> · budget ${(goal.budgetCents / 100).toFixed(2)} · last
-                      run {goal.lastRun ? new Date(goal.lastRun).toLocaleString() : "never"}
-                    </div>
-                    <div className="ui-row ui-mt-2">
-                      <Button variant="primary" disabled={!!busy} onClick={() => void handleTrigger()}>
-                        Run now
-                      </Button>
-                    </div>
-                    {lastTick && (
-                      <div className="ui-meta ui-mt-2">
-                        Last manual run: {new Date(lastTick.timestamp).toLocaleString()} — evaluated{" "}
-                        {lastTick.goalsEvaluated}, created {lastTick.jobsCreated}, skipped {lastTick.jobsSkipped}
-                        {lastTick.errors.length > 0 && (
-                          <div className="ui-danger ui-mt-1">
-                            {lastTick.errors.map((e, i) => (
-                              <div key={i}>{e}</div>
-                            ))}
-                          </div>
-                        )}
+                    <Stack gap="2">
+                      <div className="ui-row">
+                        <strong>{goal.name}</strong>
+                        <code className="ui-meta-sm">{goal.id}</code>
+                        <span className="ui-meta-sm">{goal.cron}</span>
+                        <span className="ui-push">
+                          <Badge tone={goal.enabled ? "success" : "neutral"} size="sm">
+                            {goal.enabled ? "ENABLED" : "DISABLED"}
+                          </Badge>
+                        </span>
                       </div>
-                    )}
+                      <div className="ui-meta">
+                        operation <code>{goal.operation}</code> · budget ${(goal.budgetCents / 100).toFixed(2)} · last
+                        run {goal.lastRun ? new Date(goal.lastRun).toLocaleString() : "never"}
+                      </div>
+                      <div className="ui-row">
+                        <Button variant="primary" disabled={!!busy} onClick={() => void handleTrigger()}>
+                          Run now
+                        </Button>
+                      </div>
+                      {lastTick && (
+                        <div className="ui-meta">
+                          Last manual run: {new Date(lastTick.timestamp).toLocaleString()} — evaluated{" "}
+                          {lastTick.goalsEvaluated}, created {lastTick.jobsCreated}, skipped {lastTick.jobsSkipped}
+                          {lastTick.errors.length > 0 && (
+                            <div className="ui-danger ui-mt-1">
+                              {lastTick.errors.map((e, i) => (
+                                <div key={i}>{e}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </Stack>
                   </Card>
                 </div>
               )}
@@ -273,7 +275,7 @@ export function SocialPostingPanel({
               {approvals.length === 0 && (
                 <div className="ui-meta">No pending approvals for {date}.</div>
               )}
-              <div className="ui-stack-lg ui-narrow">
+              <Grid columns={1} gap="2-5" className="ui-narrow">
                 {approvals.map((a) => (
                   <Card key={a.draftId}>
                     <div className="ui-row">
@@ -286,7 +288,7 @@ export function SocialPostingPanel({
                     <div className="ui-meta ui-mt-1">{a.text}</div>
                   </Card>
                 ))}
-              </div>
+              </Grid>
               </PageSection>
             </TabPanel>
           )}
@@ -296,71 +298,75 @@ export function SocialPostingPanel({
               {posts.length === 0 && (
                 <div className="ui-meta">No submitted posts or drafts for {date}.</div>
               )}
-              <div className="ui-stack-lg ui-narrow">
+              <Grid columns={1} gap="2-5" className="ui-narrow">
                 {posts.map((p) => {
                   const label = CHANNEL_LABELS[p.channel] ?? p.channel;
                   const isPosted = p.status === "posted";
                   const isDryRun = p.status === "dry-run-posted";
                   return (
                     <Card key={p.draftId}>
-                      <div className="ui-row ui-mb-1-5">
-                        <strong>{label}</strong>
-                        <Badge tone={isPosted ? "success" : isDryRun ? "accent" : "neutral"} size="sm">
-                          {p.status.toUpperCase()}
-                        </Badge>
-                        {p.platformPostId && (
-                          <code className="ui-meta-sm">ID: {p.platformPostId}</code>
-                        )}
-                        <span className="ui-meta-sm ui-push">
-                          {new Date(p.createdAtMs).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="ui-meta ui-mb-1">
-                        <span>Submission endpoint: </span>
-                        <code>{p.submissionEndpoint || "—"}</code>
-                      </div>
-                      <div className="ui-meta ui-mb-1-5">
-                        <span>Submitted post URL: </span>
-                        {p.postUrl ? (
-                          <a
-                            href={p.postUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ui-link"
-                          >
-                            {p.postUrl}
-                          </a>
-                        ) : (
-                          <span className="ui-meta-sm">
-                            {isDryRun ? "Dry run (simulated — not submitted to live platform)" : "Pending submission"}
+                      <Stack gap="1-5">
+                        <div className="ui-row">
+                          <strong>{label}</strong>
+                          <Badge tone={isPosted ? "success" : isDryRun ? "accent" : "neutral"} size="sm">
+                            {p.status.toUpperCase()}
+                          </Badge>
+                          {p.platformPostId && (
+                            <code className="ui-meta-sm">ID: {p.platformPostId}</code>
+                          )}
+                          <span className="ui-meta-sm ui-push">
+                            {new Date(p.createdAtMs).toLocaleString()}
                           </span>
-                        )}
-                      </div>
-                      <div className="ui-meta ui-mt-1">{p.text}</div>
+                        </div>
+                        <div className="ui-meta">
+                          <span>Submission endpoint: </span>
+                          <code>{p.submissionEndpoint || "—"}</code>
+                        </div>
+                        <div className="ui-meta">
+                          <span>Submitted post URL: </span>
+                          {p.postUrl ? (
+                            <a
+                              href={p.postUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ui-link"
+                            >
+                              {p.postUrl}
+                            </a>
+                          ) : (
+                            <span className="ui-meta-sm">
+                              {isDryRun ? "Dry run (simulated — not submitted to live platform)" : "Pending submission"}
+                            </span>
+                          )}
+                        </div>
+                        <div className="ui-meta">{p.text}</div>
+                      </Stack>
                     </Card>
                   );
                 })}
-              </div>
+              </Grid>
               </PageSection>
             </TabPanel>
           )}
           {visitedTabs.has("tokens") && (
             <TabPanel idBase="social" tabId="tokens" active={activeTab === "tokens"} retain>
               <PageSection title="Token health">
-              {SOCIAL_CHANNEL_ORDER.filter((id) => tokenChannels[id]).map((id) => {
-                const channel = tokenChannels[id];
-                return (
-                  <div key={id} className="ui-meta ui-mb-1-5">
-                    <strong>{CHANNEL_LABELS[id] ?? id}</strong> —{" "}
-                    {channel.presence === "configured" ? "Configured" : "Not configured"} · validity{" "}
-                    {channel.validity === "valid"
-                      ? "Valid"
-                      : channel.validity === "invalid"
-                        ? "Invalid"
-                        : "Unknown"}
-                  </div>
-                );
-              })}
+              <Stack gap="1-5">
+                {SOCIAL_CHANNEL_ORDER.filter((id) => tokenChannels[id]).map((id) => {
+                  const channel = tokenChannels[id];
+                  return (
+                    <div key={id} className="ui-meta">
+                      <strong>{CHANNEL_LABELS[id] ?? id}</strong> —{" "}
+                      {channel.presence === "configured" ? "Configured" : "Not configured"} · validity{" "}
+                      {channel.validity === "valid"
+                        ? "Valid"
+                        : channel.validity === "invalid"
+                          ? "Invalid"
+                          : "Unknown"}
+                    </div>
+                  );
+                })}
+              </Stack>
               <div className="ui-meta-sm ui-mt-1">
                 Validity reads Unknown in production by design: no live probe is wired, so validity is
                 never assumed — only a real post proves a token works.

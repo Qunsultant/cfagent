@@ -97,6 +97,13 @@ describe("Layout primitives (#3048)", () => {
       expect(el.props.className).toContain("autofit-lg");
       expect(el.props.className).toContain("gap-5");
     });
+
+    it("renders a dl when as='dl' so a definition list keeps its semantics (issue 4913)", () => {
+      const el = Grid({ as: "dl", autoFit: true, minColumnWidth: "sm", gap: "2", children: [] });
+      expect(el.type).toBe("dl");
+      expect(el.props.className).toContain("ui-grid");
+      expect(el.props.className).toContain("autofit-sm");
+    });
   });
 
   describe("primitives.css carries every mapped class", () => {

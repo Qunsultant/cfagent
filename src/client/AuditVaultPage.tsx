@@ -353,7 +353,7 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
               />
 
               {browsedData.rows && browsedData.rows.length > 0 ? (
-                <div className="ui-scroll-x">
+                <div className="ui-scroll-frame">
                   <Table
                     columns={Object.keys(browsedData.rows[0]).map((col) => ({
                       key: col,

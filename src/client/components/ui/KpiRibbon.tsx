@@ -1,6 +1,7 @@
 import React from "react";
 import { Card } from "./Card";
 import { Stack } from "./Stack";
+import { Grid } from ".";
 
 export type KpiSubTone = "success" | "warning" | "danger";
 
@@ -19,8 +20,8 @@ export interface KpiRibbonProps {
  * KpiRibbon (#3132, Part of #2150)
  * The KPI-ribbon slot (design-system §1.6b slot 3): the autopilot
  * executive ribbon (AutopilotControlCenter.tsx:775) rebuilt as a
- * primitive. One Card per item — label, value, sub-trend — on the
- * shared .ui-stat-grid, which wraps 4 → 2 → 1 the same way the
+ * primitive. One Card per item — label, value, sub-trend — on a
+ * shared auto-fit Grid, which wraps 4 → 2 → 1 the same way the
  * ribbon's fixed grid did. Renders nothing with no items (§1.6b).
  * Pages migrate onto it in Wave 1 (#3138–#3140); this slice builds
  * the organism only.
@@ -28,7 +29,7 @@ export interface KpiRibbonProps {
 export function KpiRibbon({ items }: KpiRibbonProps) {
   if (items.length === 0) return null;
   return (
-    <div className="ui-stat-grid">
+    <Grid autoFit minColumnWidth="sm" gap="2">
       {items.map((item, index) => (
         <Card key={index}>
           <Stack gap="1">
@@ -48,6 +49,6 @@ export function KpiRibbon({ items }: KpiRibbonProps) {
           </Stack>
         </Card>
       ))}
-    </div>
+    </Grid>
   );
 }
