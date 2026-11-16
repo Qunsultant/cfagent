@@ -1556,7 +1556,7 @@ export class ETradeRestClient {
   }
 
   /**
-   * Issue #4667 (matrix gap 13): E*TRADE has no native bracket/conditional
+   * Issue #4667 (matrix gap 13): this broker has no native bracket/conditional
    * placement in this client, so bracket exits are placed as separate exit
    * orders (take-profit LIMIT + stop-loss STOP) after the entry order succeeds.
    */
@@ -1570,8 +1570,8 @@ export class ETradeRestClient {
     userLogin: string;
     orderTerm?: "GOOD_FOR_DAY" | "GOOD_UNTIL_CANCEL" | "IMMEDIATE_OR_CANCEL";
   }): Promise<{
-    takeProfitResult?: ETradeOrderExecutionResult;
-    stopLossResult?: ETradeOrderExecutionResult;
+    takeProfitResult?: import("../../types").BrokerOrderExecutionResult;
+    stopLossResult?: import("../../types").BrokerOrderExecutionResult;
   }> {
     const exitAction: "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT" =
       params.entryAction === "BUY"
@@ -1582,8 +1582,8 @@ export class ETradeRestClient {
             ? "SELL_SHORT"
             : "BUY";
 
-    let takeProfitResult: ETradeOrderExecutionResult | undefined;
-    let stopLossResult: ETradeOrderExecutionResult | undefined;
+    let takeProfitResult: import("../../types").BrokerOrderExecutionResult | undefined;
+    let stopLossResult: import("../../types").BrokerOrderExecutionResult | undefined;
 
     if (Number.isFinite(params.takeProfitLimitPrice) && Number(params.takeProfitLimitPrice) > 0) {
       takeProfitResult = await this.placeOrder({

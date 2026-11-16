@@ -84,16 +84,16 @@ export function nonLivePricingNotice(quoteStatus?: string): string {
   return `⚠ PRICED FROM A NON-LIVE QUOTE (${quoteStatus}): live E*TRADE quote unavailable — the estimated price uses static fallback data, not live market data. Verify the price before authorizing.`;
 }
 
-interface ETradeBracketDraftNotes {
+interface BracketDraftNotes {
   kind: "bracket-draft-v1";
   takeProfit?: { limitPrice?: number };
   stopLoss?: { stopPrice?: number };
 }
 
-function parseBracketDraft(rawNotes: unknown): ETradeBracketDraftNotes | null {
+function parseBracketDraft(rawNotes: unknown): BracketDraftNotes | null {
   if (typeof rawNotes !== "string" || !rawNotes.includes("bracket-draft-v1")) return null;
   try {
-    const parsed = JSON.parse(rawNotes) as Partial<ETradeBracketDraftNotes> | null;
+    const parsed = JSON.parse(rawNotes) as Partial<BracketDraftNotes> | null;
     if (!parsed || parsed.kind !== "bracket-draft-v1") return null;
     return {
       kind: "bracket-draft-v1",
@@ -797,7 +797,7 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     const proposerDid = record.proposerDid;
     const proofSignature = record.proofSignature;
 
-    // Issue #4667 (matrix gap 13): an E*TRADE bracket preview carries computed
+    // Issue #4667 (matrix gap 13): a bracket preview carries computed
     // exit legs (`bracket-draft-v1`); placement submits the entry order first
     // and then places separate take-profit / stop-loss exit orders via
     // `placeBracketExits` (the catalog's stated model).

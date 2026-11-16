@@ -114,7 +114,7 @@ const COMPOUND: AdvancedOrderType[] = [
     // Issue #3839: a bracket is day-only on both brokers.
     tif: ["day"],
     refusalCode: "order_type_unsupported",
-    notes: "E*TRADE emulates brackets by placing the entry order and submitting separate take-profit and stop-loss exit orders (placeBracketExits).",
+    notes: "Emulates brackets by placing the entry order and submitting separate take-profit and stop-loss exit orders (placeBracketExits).",
   },
   {
     id: "oco",
@@ -132,7 +132,7 @@ const COMPOUND: AdvancedOrderType[] = [
     requires: ["take_profit"],
     excludes: [],
     refusalCode: "order_type_unsupported",
-    notes: "E*TRADE OTO conditional placement is not implemented in this client.",
+    notes: "OTO conditional placement is not implemented in this client.",
   },
 ];
 
