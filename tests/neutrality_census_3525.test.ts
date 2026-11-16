@@ -1502,7 +1502,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/email/agent.ts", "etrade", 42],
   ["src/trading/etrade/client.ts", "etrade", 328],
   ["src/trading/etrade/optionOrders.ts", "etrade", 9],
-  ["src/trading/etrade/platform.ts", "etrade", 66],
+  // Issue #4656: the adapter names its own time-in-force mapper (etradeOrderTerm)
+  // — a code identifier in the broker's own adapter, the disposition this section
+  // already records for per-broker execution entries.
+  ["src/trading/etrade/platform.ts", "etrade", 69],
   ["src/trading/etrade/quoteConfig.ts", "etrade", 2],
   ["src/trading/etrade/quoteTrace.ts", "etrade", 1],
   ["src/trading/factorGrades.ts", "etrade", 5],
@@ -1958,7 +1961,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/publicTrading.ts", "public.com", 9],
   ["src/trading/brokerCatalog.ts", "public.com", 4],
   ["src/trading/brokerPresentation.ts", "public.com", 4],
-  ["src/trading/public/platform.ts", "public.com", 11],
+  // Issue #4656: the TIF refusal names the broker in its user-facing message
+  // (PUBLIC_TIME_IN_FORCE_UNVERIFIED), the same INTEGRATION growth the #3990
+  // rows above already account for.
+  ["src/trading/public/platform.ts", "public.com", 12],
   ["src/trading/public/platform.ts", "alpaca", 2],
   ["src/trading/screenerPipeline.ts", "public.com", 3],
   ["docs/architecture/agentic/mcp-server-inventory.md", "public.com", 2],
