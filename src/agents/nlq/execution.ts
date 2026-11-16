@@ -4,7 +4,10 @@ import {
   parseOptionScreenerFilter,
   parseStockScreenerFilter,
   SCREENING_SCHEDULE_CALLBACKS,
+  TradingPlatformRegistry,
+  brokerPresentation,
 } from "../../trading";
+import { resolveTenantBrokerSelection } from "../../services/tenantProviders";
 import { ETradeAgenticPaymentService, TRADING_PAID_SERVICES } from "../../services/agenticPayments";
 import { describeX402PaymentPath } from "../../services/x402PaymentPath";
 import { ETradeBrowserService } from "../../services/browserAgent";
@@ -1906,6 +1909,12 @@ async function executeNLQQueryAsyncCore(
     }
 
     if (action === "preview_order") {
+      const brokerId = (await resolveTenantBrokerSelection(env).catch(() => null)) ?? ("etrade" as const);
+      const brokerLabel = brokerPresentation(brokerId).label;
+      const platform =
+        brokerId === "etrade"
+          ? etrade
+          : TradingPlatformRegistry.getPlatform(brokerId, env ?? ({} as Env), orm, login, undefined, deps?.storage);
       const sym = (plan.tradingData?.symbol || "").trim().toUpperCase();
       if (!sym) {
         return {
@@ -1913,19 +1922,22 @@ async function executeNLQQueryAsyncCore(
           domain: "trading",
           targetTable: "mas_trades",
           count: 0,
-          summary: "E*TRADE order preview requires a valid stock symbol (e.g. 'buy 10 shares of NVDA').",
+          summary: `${brokerLabel} order preview requires a valid stock symbol (e.g. 'buy 10 shares of NVDA').`,
           rows: [],
           executedAt,
         };
       }
       const qty = plan.tradingData?.quantity || 1;
       const orderAction = plan.tradingData?.orderAction || "BUY";
-      const quote = await etrade.fetchQuoteRemote(sym);
+      const quote =
+        "fetchQuoteRemote" in platform && typeof platform.fetchQuoteRemote === "function"
+          ? await platform.fetchQuoteRemote(sym)
+          : await platform.getQuote(sym);
       const relativeOffset = plan.tradingData?.relativePriceOffsetPercent;
       const relativeDesc = plan.tradingData?.relativePriceDescription;
 
       // #913/#920: a relative-priced order ("x% below market") may only be
-      // priced off a LIVE E*TRADE quote. A static/simulated fallback quote
+      // priced off a LIVE quote. A static/simulated fallback quote
       // or a missing price refuses the order — no draft is created and no
       // static-derived price is ever substituted.
       if (relativeOffset !== undefined && (!(quote.lastPrice > 0) || isNonLivePricingQuoteStatus(quote.quoteStatus))) {
@@ -1934,7 +1946,7 @@ async function executeNLQQueryAsyncCore(
           domain: "trading",
           targetTable: "mas_trades",
           count: 0,
-          summary: `Cannot price this relative order for ${sym}: no live E*TRADE quote is available (quote status: ${quote.quoteStatus || "UNAVAILABLE"}). Relative orders are priced only from a live E*TRADE quote — no order draft was created.`,
+          summary: `Cannot price this relative order for ${sym}: no live ${brokerLabel} quote is available (quote status: ${quote.quoteStatus || "UNAVAILABLE"}). Relative orders are priced only from a live ${brokerLabel} quote — no order draft was created.`,
           rows: [],
           executedAt,
         };
@@ -1950,14 +1962,24 @@ async function executeNLQQueryAsyncCore(
         orderType = "LIMIT";
       }
 
-      const draft = await etrade.previewOrderRemote({
-        sessionId,
-        symbol: sym,
-        orderAction,
-        quantity: qty,
-        orderType,
-        limitPrice,
-      });
+      const draft =
+        "previewOrderRemote" in platform && typeof platform.previewOrderRemote === "function"
+          ? await platform.previewOrderRemote({
+              sessionId,
+              symbol: sym,
+              orderAction,
+              quantity: qty,
+              orderType,
+              limitPrice,
+            })
+          : await platform.previewOrder({
+              sessionId,
+              symbol: sym,
+              orderAction,
+              quantity: qty,
+              orderType,
+              limitPrice,
+            });
 
       const shareWord = draft.quantity === 1 ? "share" : "shares";
       const marketPriceStr = quote.lastPrice > 0 ? `$${quote.lastPrice.toFixed(2)}` : "Market";
@@ -1977,7 +1999,7 @@ async function executeNLQQueryAsyncCore(
         ? ` ${nonLivePricingNotice(pricingQuoteStatus)}`
         : "";
 
-      const summary = `E*TRADE order preview drafted for ${draft.orderAction} ${draft.quantity} ${shareWord} of ${draft.symbol} ${pricingSummary}. Total: $${draft.estimatedTotal.toFixed(2)}. Attested by ${draft.proposerDid}. Awaiting Human Authorization.${nonLivePricingNote}`;
+      const summary = `${brokerLabel} order preview drafted for ${draft.orderAction} ${draft.quantity} ${shareWord} of ${draft.symbol} ${pricingSummary}. Total: $${draft.estimatedTotal.toFixed(2)}. Attested by ${draft.proposerDid}. Awaiting Human Authorization.${nonLivePricingNote}`;
 
       return {
         plan,

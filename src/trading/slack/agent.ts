@@ -34,7 +34,10 @@ import {
 import {
   approvePreviewedOrder,
   cancelPreviewedOrder,
+  type ApprovalExecutor,
 } from "../channels/approval";
+import { TradingPlatformRegistry } from "../registry";
+import { resolveTenantBrokerSelection } from "../../services/tenantProviders";
 import {
   deliverJourneyDecision,
   findDecidedJourneyGate,
@@ -262,7 +265,15 @@ export class ETradeSlackTradingService {
         // keeps only the Block Kit rendering. The engine's tier gate
         // refuses before any ledger read, so a below-tier principal
         // cannot even probe draft existence (Phase 1 behaviour).
-        const tradingService = new ETradeService(orm, this.env, this.identityLogin());
+        const brokerId = await resolveTenantBrokerSelection(this.env).catch(() => null);
+        const tradingService: ApprovalExecutor = brokerId
+          ? (TradingPlatformRegistry.getPlatform(
+              brokerId,
+              this.env,
+              orm,
+              this.identityLogin(),
+            ) as unknown as ApprovalExecutor)
+          : new ETradeService(orm, this.env, this.identityLogin());
         const outcome = await approvePreviewedOrder({
           trades: orm.trades ?? null,
           executor: tradingService,
@@ -978,7 +989,15 @@ export class ETradeSlackTradingService {
       }
     }
 
-    const tradingService = new ETradeService(this.orm, this.env, this.identityLogin());
+    const brokerId = await resolveTenantBrokerSelection(this.env).catch(() => null);
+    const tradingService: ApprovalExecutor = brokerId
+      ? (TradingPlatformRegistry.getPlatform(
+          brokerId,
+          this.env,
+          this.orm,
+          this.identityLogin(),
+        ) as unknown as ApprovalExecutor)
+      : new ETradeService(this.orm, this.env, this.identityLogin());
 
     // Issue #2041 S2: saga journey-gate buttons. The button value
     // carries the saga id (not an order id); the decider is the
