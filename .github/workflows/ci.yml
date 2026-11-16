@@ -151,12 +151,12 @@ jobs:
           echo "verified_by_run_id=$MATCH_RUN" >> "$GITHUB_OUTPUT"
           echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
 
-  # ── Job 2: fast deterministic gates — typecheck + build ──
+  # ── Job 2: fast deterministic gates — typecheck + build + pins ──
   fast-gates:
     name: Fast gates (typecheck + build)
     runs-on: ubuntu-24.04
     needs: load-environment
-    if: needs.load-environment.outputs.tree_already_verified != 'true'
+    if: needs.load-environment.outputs.tree_already_verified != 'true' || needs.load-environment.outputs.docs_only == 'true'
     permissions:
       contents: read
     steps:
@@ -319,7 +319,15 @@ jobs:
             echo "::error::load-environment did not succeed; the required check stays red."
             exit 1
           fi
+          if [ "${{ needs.load-environment.outputs.docs_only }}" = "true" ] && \
+             [ "${{ needs.fast-gates.result }}" = "success" ] && \
+             [ "${{ needs.test-shard-pr.result }}" = "skipped" ] && \
+             [ "${{ needs.test-shard-mq.result }}" = "skipped" ]; then
+            echo "Docs-only fast path verified (Fast gates including pin suites passed). All gates passed."
+            exit 0
+          fi
           if [ "${{ needs.load-environment.outputs.tree_already_verified }}" = "true" ] && \
+             [ "${{ needs.load-environment.outputs.docs_only }}" != "true" ] && \
              [ "${{ needs.fast-gates.result }}" = "skipped" ] && \
              [ "${{ needs.test-shard-pr.result }}" = "skipped" ] && \
              [ "${{ needs.test-shard-mq.result }}" = "skipped" ]; then
