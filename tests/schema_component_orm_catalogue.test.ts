@@ -110,7 +110,7 @@ const ORM_STATEMENT_SHA256: Record<string, string> = {
   "schema.orm.webhook_replay_nonces.create_table":
     "6c097641c5a146633087861629801f82c6dea5e8f2bb80eb6f8db5988f14663a",
   "schema.orm.mas_trades.create_table":
-    "815001c97cc3220831489978c6c28e604645427f4dd36cd6602dc9e73155f497",
+    "6ff2cf5a44966467eb65d26a1dc1f473983ec75eba343d272abed7f961a2b00a",
   "schema.orm.mas_options_chain_cache.create_table":
     "564070bddebdf12b90ef3a0401524f3ec234f83177e17e1cdafbc15a1d32e359",
   "schema.index.cf_agents_jobs.create_index_idx_cf_agents_jobs_time":
@@ -298,6 +298,7 @@ describe("ORM + index-schema catalogue — helpers delegate (#4282 P2a)", () => 
       "ALTER TABLE mas_trades ADD COLUMN broker TEXT",
       "ALTER TABLE mas_trades ADD COLUMN price_source TEXT",
       "ALTER TABLE mas_trades ADD COLUMN mode TEXT",
+      "ALTER TABLE mas_trades ADD COLUMN stop_price REAL",
     ]);
     expect(masReportsInline).toHaveLength(11);
     expect(inlineAlters).toHaveLength(11);
