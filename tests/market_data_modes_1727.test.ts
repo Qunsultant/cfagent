@@ -155,10 +155,19 @@ vi.mock("../src/trading", async () => {
   // must expose it or the file fails collection. Real values, via the
   // defining leaf module — never a hardcoded copy of the list.
   const membership = await vi.importActual<any>("../src/trading/indexMembership");
+  // Issue #4431: the market-data research route now validates run-body
+  // provider claims via services/tenantProviders, which reads
+  // DATA_PROVIDER_IDS + isStockScreenProvider from the barrel — the stub
+  // must expose the real values too (same leaf-module pattern, never a
+  // hardcoded copy of the list).
+  const contract = await vi.importActual<any>("../src/trading/dataProviders/contract");
+  const pipeline = await vi.importActual<any>("../src/trading/screenerPipeline");
   return {
     parseStockScreenRequest: schemas.parseStockScreenRequest,
     ADVANCED_ORDER_TYPES: advanced.ADVANCED_ORDER_TYPES,
     SECTOR_IDS: membership.SECTOR_IDS,
+    DATA_PROVIDER_IDS: contract.DATA_PROVIDER_IDS,
+    isStockScreenProvider: pipeline.isStockScreenProvider,
   };
 });
 

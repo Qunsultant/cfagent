@@ -33,6 +33,7 @@ import {
 } from "./chatAwaitBudget";
 import type { ShardJobRow } from "../../data/shardJobPorts";
 import { meshTraceStoreForEnv } from "../../data/createMeshTracePorts";
+import { resolveScreenProviderForRun } from "../../services/tenantProviders";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
 import {
   listScheduledReports,
@@ -334,10 +335,10 @@ interface ChatScreenCommandParts {
  * through the PaymentWorkflow — the payment run starts the
  * screener under this command's job id once covered/paid.
  */
-function buildChatScreenCommand(
+async function buildChatScreenCommand(
   ctx: NlqPortsContext,
   req: { filters: StockScreenerFilter; userLogin: string; universe?: string },
-): ChatScreenCommandParts {
+): Promise<ChatScreenCommandParts> {
   const universeId = req.universe ?? "TECH";
   // Issue #2867: shard derivation is the broker's one policy.
   const shards: WorkflowJobCommand["shards"] = shardsForUniverse(universeId);
@@ -360,6 +361,15 @@ function buildChatScreenCommand(
   // one builder — the literal lived here before, now shared.
   // Issue #2908 (G1): the NLQ trigger rides the command
   // instead of collapsing to "manual" in provenance.
+  // Issue #4431 (S5/N3): the command carries the tenant's
+  // effective data-provider selection (resolveScreenProviderForRun)
+  // so the planner's required provider is met — the chat screen
+  // is a provider-carrying run, never a silent default. A
+  // selection that is not a stock-screen provider leaves the
+  // command without one, and the planner refuses the run loud
+  // and coded. The full door carry (schema, preset, steering)
+  // is N5 (#4434); this is only the command's provider fill.
+  const provider = await resolveScreenProviderForRun(ctx.env);
   const command: WorkflowJobCommand = buildParentScreenCommand({
     jobId,
     source: "nlq-chat",
@@ -371,6 +381,7 @@ function buildChatScreenCommand(
     filters: req.filters as unknown as Record<string, unknown>,
     maxItems: 10,
     pollIntervalMs: CHAT_SCREEN_PARENT_POLL_INTERVAL_MS,
+    ...(provider !== null ? { provider } : {}),
     ...(traceparent ? { traceparent } : {}),
   });
   return { command, jobId, tenantId, shards, startedAtIso };
@@ -438,7 +449,7 @@ async function runChatScreenViaWorkflow(
     );
   }
 
-  const { command, jobId, tenantId, shards, startedAtIso } = buildChatScreenCommand(ctx, req);
+  const { command, jobId, tenantId, shards, startedAtIso } = await buildChatScreenCommand(ctx, req);
   const nowMs = ctx.nowMs ?? (() => Date.now());
 
   let handle;
@@ -623,7 +634,7 @@ async function runChatPaidScreen(
   ctx: NlqPortsContext,
   req: { filters: StockScreenerFilter; userLogin: string; universe?: string },
 ): Promise<NLQStockScreenRunResult> {
-  const { command, jobId, tenantId, shards, startedAtIso } = buildChatScreenCommand(ctx, req);
+  const { command, jobId, tenantId, shards, startedAtIso } = await buildChatScreenCommand(ctx, req);
 
   // 1. Price from the operator catalogue — fail closed
   // before the budget check when no valid stored price

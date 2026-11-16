@@ -602,16 +602,27 @@ export async function handlePremiumRoutes(
 
         // Issue #2373 (S1b, F9) — the fulfilment provider is the
         // tenant's stored data-provider selection, never a
-        // hardcoded "yahoo". "yahoo" stays yahoo; the engine-default
-        // provider or no selection stored omits the provider (the
-        // engine then resolves its own default — a disclosed
-        // behaviour change: an unconfigured tenant's premium
-        // signals move from Yahoo to the engine default); any other
-        // stored provider does not serve premium stock signals and
-        // the fulfilment is refused with a plain error — no fallback
-        // provider, no fabricated signals.
+        // hardcoded "yahoo". "yahoo" stays yahoo; "etrade" is
+        // omitted and the engine seam fills it from the same
+        // stored selection (issue #4431, S5/N3). Issue #4431:
+        // no selection stored refuses outright — the engine
+        // default this used to fall back to is removed, and the
+        // platform default (alpaca) does not serve premium stock
+        // signals, so there is no provider to fall back to. Any
+        // other stored provider does not serve premium stock
+        // signals either and the fulfilment is refused with a
+        // plain error — no fallback provider, no fabricated signals.
         const storedProvider = await resolveTenantDataProviderSelection(ctx.env);
-        if (storedProvider !== null && storedProvider !== "yahoo" && storedProvider !== "etrade") {
+        if (storedProvider === null) {
+          return {
+            success: false,
+            service: tier.name,
+            receipt,
+            error:
+              "No data provider is configured for this tenant. Choose a data provider in Settings to run premium stock signals.",
+          };
+        }
+        if (storedProvider !== "yahoo" && storedProvider !== "etrade") {
           return {
             success: false,
             service: tier.name,

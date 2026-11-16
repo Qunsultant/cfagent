@@ -620,10 +620,48 @@ function measure(): Map<string, number> {
  * the three route literals plus the two mentions in the inventory
  * comment naming the shared start branch). Totals move 1192/9350
  * -> 1192/9354.
+ * Baseline update (#4431 S5/N3, 2026-11-15): the manual stock-screen
+ * path stops guessing providers — the planner requires one, the spec
+ * carries the tenant-resolved one, the gate refuses unconfigured
+ * tenants, and provenance is `?? "unknown"`. The new provider-carry
+ * code names the providers it matches/refuses, so its comments and
+ * identifiers add brand lines — all dispositioned INTEGRATION (the
+ * tenant-provider / screen-path modules naming the provider is their
+ * job): 4 new rows (premium.ts/alpaca 1 — the unconfigured-refusal
+ * comment names the platform default the premium path no longer
+ * leans on; drizzleSchema.ts/alpaca 2 — the corrected "Absent row =
+ * alpaca" comments name the code default DEFAULT_TENANT_PROVIDERS;
+ * paidStockScreenSeam.ts/alpaca 1 / yahoo 2 — the explicit
+ * routeProvider comments name the route's provider and the effective
+ * default the command carries for an unconfigured tenant)
+ * and 10 raises (screeningAdapters.ts etrade 1->4 / yahoo 4->7 — the
+ * variant→registry id map, data-bearing identifiers;
+ * commercialPorts.ts alpaca 8->10 — the corrected default comments;
+ * tenantProviders.ts alpaca 11->13 / nasdaq 2->4 — the new
+ * claim-validation helpers name the providers they match and the
+ * non-screen provider they refuse; screenerPipeline.ts alpaca 26->27
+ * / yahoo 79->80 / nasdaq 32->33 — the screen-provider guard and the
+ * provenance comment; premium.ts etrade 8->9 — the refusal comment;
+ * paidStockScreenSeam.ts etrade 8->10 — the routeProvider arg and
+ * its comments).
+ * The same diff retires 3 rows outright (the "E*TRADE live"
+ * provenance guess and the stale etrade-default comments are gone:
+ * StockHub.tsx/etrade 1, reports.ts/etrade 1,
+ * goalStockScreenSpec.ts/etrade 1), so the PLATFORM slice shrinks
+ * 189 -> 188 rows (its header and slice bound are restated; the
+ * derived platform total was 990 before this change and is 989
+ * after it — the header's 1050 had drifted since #3050). Shrinks
+ * needing no baseline change: marketDataResearch.ts yahoo 14->5,
+ * stockScreenCapability.ts etrade 9->4 / yahoo 4->2,
+ * stockScreenRunSpec.ts yahoo 4->1, stockScreenPlanner.ts etrade
+ * 4->2, commercialPorts.ts etrade 4->2, drizzleSchema.ts etrade
+ * 5->3, brokerGate.ts etrade 11->10, etradeBroker.ts etrade
+ * 166->165. Measured totals move 1191/9359 -> 1192/9355 (re-based onto
+ * 155f5121; the totals on 2ac3e995 were 1191/9355 -> 1192/9351, on 7d81cd93
+ * 1190/9351 -> 1191/9347, and on cc33837c 1174/9135 -> 1175/9131).
  */
 const BASELINE: Array<[string, string, number]> = [
-  // ---- PLATFORM (189 rows / 1050 lines) ----
-  // ---- PLATFORM (189 rows / 1050 lines) ----
+  // ---- PLATFORM (188 rows / 989 lines) ----
   ["README.md", "etrade", 3],
   ["README.md", "yahoo", 1],
   // #4038/#4039 INTEGRATION: the broker parity matrix names the brokers it
@@ -784,7 +822,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/SettingsMenu.tsx", "etrade", 1],
   ["src/client/StockCopilotPanel.tsx", "alpaca", 3],
   ["src/client/StockCriteriaPanel.tsx", "etrade", 1],
-  ["src/client/StockHub.tsx", "etrade", 1],
   // #4430 PLATFORM (S2 client copy): the switch-action button label names
   // the provider it switches to — the user must know the target.
   ["src/client/StockHub.tsx", "yahoo", 1],
@@ -987,12 +1024,18 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/optionsProviderGate.ts", "etrade", 11],
   ["src/agents/routes/optionsProviderGate.ts", "yahoo", 2],
   ["src/agents/routes/optionsRegenerate.ts", "etrade", 5],
-  ["src/agents/routes/paidStockScreenSeam.ts", "etrade", 8],
+  ["src/agents/routes/paidStockScreenSeam.ts", "etrade", 10],
+  // #4431 INTEGRATION: the explicit routeProvider arg and its
+  // comments name the route's provider and the effective default.
+  ["src/agents/routes/paidStockScreenSeam.ts", "alpaca", 1],
+  ["src/agents/routes/paidStockScreenSeam.ts", "yahoo", 2],
   ["src/agents/routes/platformTenants.ts", "etrade", 1],
-  ["src/agents/routes/premium.ts", "etrade", 8],
+  ["src/agents/routes/premium.ts", "etrade", 9],
+  // #4431 INTEGRATION: the unconfigured-refusal comment names the
+  // platform default the premium path no longer leans on.
+  ["src/agents/routes/premium.ts", "alpaca", 1],
   ["src/agents/routes/premium.ts", "yahoo", 7],
   ["src/agents/routes/reports.ts", "alpaca", 1],
-  ["src/agents/routes/reports.ts", "etrade", 1],
   ["src/agents/routes/routeIdentity.ts", "etrade", 1],
   ["src/agents/routes/schedules.ts", "etrade", 21],
   ["src/agents/routes/screenerResearch.ts", "yahoo", 1],
@@ -1075,11 +1118,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/runExport.ts", "etrade", 9],
   ["src/client/scannerApi.ts", "etrade", 7],
   ["src/client/screeningAdapters.ts", "alpaca", 1],
-  ["src/client/screeningAdapters.ts", "etrade", 1],
+  ["src/client/screeningAdapters.ts", "etrade", 4],
   ["src/client/screeningAdapters.ts", "nasdaq", 1],
   // #4430 INTEGRATION: the workflow-backed variant's registry id
   // ("yahoo-finance") named verbatim — a data-bearing identifier.
-  ["src/client/screeningAdapters.ts", "yahoo", 4],
+  ["src/client/screeningAdapters.ts", "yahoo", 7],
   ["src/client/stockCopilotApi.ts", "alpaca", 1],
   ["src/client/styles.css", "alpaca", 8],
   ["src/client/styles.css", "etrade", 79],
@@ -1115,7 +1158,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/config/tradingAgentConfig.ts", "alpaca", 5],
   ["src/config/tradingAgentConfig.ts", "etrade", 4],
   ["src/data/bucketPorts.ts", "etrade", 4],
-  ["src/data/commercialPorts.ts", "alpaca", 8],
+  ["src/data/commercialPorts.ts", "alpaca", 10],
   ["src/data/commercialPorts.ts", "etrade", 7],
   ["src/data/createBucketPorts.ts", "etrade", 1],
   ["src/data/createTokenPorts.ts", "etrade", 6],
@@ -1136,6 +1179,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/data/doSqliteProviderConfigAdapter.ts", "etrade", 9],
   ["src/data/doTokenFamilyAdapter.ts", "etrade", 5],
   ["src/data/drizzleSchema.ts", "etrade", 5],
+  // #4431 INTEGRATION: the corrected "Absent row = alpaca" comments
+  // name the code default DEFAULT_TENANT_PROVIDERS.
+  ["src/data/drizzleSchema.ts", "alpaca", 2],
   ["src/data/durableKv.ts", "etrade", 1],
   // #3932 INTEGRATION: the persisted sentiment dataset definition
   // names its feed ("yahoo-news") — provenance data, not framing.
@@ -1387,9 +1433,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/stockCopilotIntrospection.ts", "nasdaq", 1],
   ["src/services/stockCopilotIntrospection.ts", "yahoo", 1],
   ["src/services/stockCopilotSessions.ts", "alpaca", 1],
-  ["src/services/tenantProviders.ts", "alpaca", 11],
+  ["src/services/tenantProviders.ts", "alpaca", 13],
   ["src/services/tenantProviders.ts", "etrade", 12],
-  ["src/services/tenantProviders.ts", "nasdaq", 2],
+  ["src/services/tenantProviders.ts", "nasdaq", 4],
   ["src/services/tenantProviders.ts", "public.com", 2],
   ["src/services/tenantProviders.ts", "yahoo", 2],
   ["src/services/thinkHarness.ts", "etrade", 12],
@@ -1481,7 +1527,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/screenerConfig.ts", "etrade", 4],
   ["src/trading/screenerConfig.ts", "yahoo", 4],
   ["src/trading/screenerPipeline.ts", "etrade", 110],
-  ["src/trading/screenerPipeline.ts", "yahoo", 79],
+  ["src/trading/screenerPipeline.ts", "yahoo", 80],
   ["src/trading/screenerReportCsv.ts", "etrade", 1],
   ["src/trading/screenerReportPdf.ts", "alpaca", 3],
   ["src/trading/screenerReportPdf.ts", "etrade", 10],
@@ -1514,7 +1560,6 @@ const BASELINE: Array<[string, string, number]> = [
   // provider). Naming the provider is the legacy binding's job;
   // the module's prose names none.
   ["src/workflows/brokerChainSourceResidency.ts", "etrade", 2],
-  ["src/workflows/goalStockScreenSpec.ts", "etrade", 1],
   ["src/workflows/legalApplicability.ts", "alpaca", 1],
   ["src/workflows/legalApplicability.ts", "etrade", 1],
   ["src/workflows/manualOptionsRecordBuilder.ts", "etrade", 1],
@@ -1581,7 +1626,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/scheduledEffectiveMode.ts", "alpaca", 7],
   ["src/services/scheduledTasks.ts", "alpaca", 7],
   ["src/services/shardExecutors.ts", "alpaca", 3],
-  ["src/trading/screenerPipeline.ts", "alpaca", 26],
+  ["src/trading/screenerPipeline.ts", "alpaca", 27],
   ["src/trading/screeningSchemas.ts", "alpaca", 4],
   ["docs/agents/rca-aapl-bracket-order-3812.md", "alpaca", 20],
   ["docs/agents/rca-aapl-bracket-order-3812.md", "etrade", 11],
@@ -1809,7 +1854,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/liveScreener.ts", "nasdaq", 1],
   ["src/trading/options/flows/flowService.ts", "nasdaq", 2],
   ["src/trading/platformHistory.ts", "nasdaq", 1],
-  ["src/trading/screenerPipeline.ts", "nasdaq", 32],
+  ["src/trading/screenerPipeline.ts", "nasdaq", 33],
   ["src/trading/screenerReportXlsx.ts", "nasdaq", 3],
   ["src/trading/screeningProvider.ts", "nasdaq", 1],
   ["src/trading/screeningSchemas.ts", "nasdaq", 2],
@@ -1979,11 +2024,11 @@ const BASELINE: Array<[string, string, number]> = [
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
 const PLATFORM_KEYS = new Set(
-  BASELINE.slice(0, 189).map(([f, t]) => `${f}\t${t}`),
+  BASELINE.slice(0, 188).map(([f, t]) => `${f}\t${t}`),
 );
 // #3917: derived, not a hand-maintained literal — the platform slice is the
-// first 189 rows, so its total follows from them.
-const PLATFORM_BASELINE_TOTAL = BASELINE.slice(0, 189).reduce((sum, [, , count]) => sum + count, 0);
+// first 188 rows, so its total follows from them.
+const PLATFORM_BASELINE_TOTAL = BASELINE.slice(0, 188).reduce((sum, [, , count]) => sum + count, 0);
 
 describe("#3525 S6 shrink-only provider-brand census pin", () => {
   const measured = measure();

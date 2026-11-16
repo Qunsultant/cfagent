@@ -1,0 +1,3 @@
+### Changed
+
+- Manual stock screens are now structurally provider-neutral: the hub run body carries the tenant-resolved `providerId` (+ `brokerId`) and the server refuses a mismatch with a coded 409; the stock-screen planner requires a provider (`FAILURE_NO_SCREENING_PROVIDER` on missing, no E*TRADE default); the run spec carries the tenant-resolved provider instead of a per-route hardcode; the broker gate refuses unconfigured tenants with 409 `NO_BROKER_CONFIGURED` instead of passing them through; result rows show `unknown` provenance when absent instead of guessing "E*TRADE live"; and a run whose provider or broker fell back to the platform default is surfaced with a warning on the hub instead of running silently.

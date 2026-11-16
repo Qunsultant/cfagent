@@ -697,7 +697,10 @@ describe("site: market-data research screen (#4278)", () => {
     const res = await handleMarketDataCompareScreenRoutes(req, url, "/market-data/screen", "s1", ctx);
     expect(res?.status).toBe(200);
     const body = (await res!.json()) as Record<string, unknown>;
-    expect(body.provider).toBe("yahoo");
+    // Issue #4431 (S5/N3): the route stamps the tenant-resolved
+    // provider — the unbound test env resolves the effective default
+    // (alpaca), never the old hardcoded "yahoo".
+    expect(body.provider).toBe("alpaca");
     expect(body.totalScanned).toBe(10);
     expect(body.stocks).toEqual(result.allStocks);
     expect(audits).toContain("market_data.screener.executed");

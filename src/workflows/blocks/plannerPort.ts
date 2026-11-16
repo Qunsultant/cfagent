@@ -20,6 +20,7 @@
  */
 
 import { parseOptionScreenerFilter } from "../../trading";
+import type { StockScreenProvider } from "../../trading";
 import { planGoalStockLeg } from "../goalStockScreenSpec";
 import { planFromSpec } from "../stockScreenPlanner";
 import type { StockScreenRunSpec } from "../stockScreenRunSpec";
@@ -90,7 +91,12 @@ export function stockPlanBlock(): PlanBlock {
       const timestamp = input.timestamp ?? new Date().toISOString();
       const stockPlan =
         spec.source === "goal"
-          ? planGoalStockLeg(spec, input.trigger, timestamp)
+          ? planGoalStockLeg(
+              spec,
+              input.trigger,
+              timestamp,
+              input.provider as StockScreenProvider | undefined,
+            )
           : planFromSpec(spec, input.trigger, timestamp);
       return {
         assetClass: "stock",

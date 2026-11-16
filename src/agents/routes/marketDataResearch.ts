@@ -78,7 +78,7 @@ export interface MarketDataResearchRouteContext {
    * this route too. Absent → env-only admission, as before.
    */
   readSettingRaw?: ((key: string) => string | null) | undefined;
-  /** Screener agent (owner: OrchestratorAgent.getScreenerAgent) — issue #1007: the market-data screen runs through the one pipeline via this agent, with the Yahoo data-source adapter as its provider. */
+  /** Screener agent (owner: OrchestratorAgent.getScreenerAgent) — issue #1007: the market-data screen runs through the one pipeline via this agent, with the tenant-resolved provider (issue #4431). */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
   /**
    * Issue #4278: the one engine seam (runStockScreenViaEngine)
@@ -299,14 +299,17 @@ export async function handleMarketDataCompareScreenRoutes(
   // Dedicated Yahoo Finance Market Screener
   // Issue #1007 (consolidation S3): this route no longer runs a second
   // screening engine. It executes through the ONE stock pipeline via
-  // ScreenerAgent with provider "yahoo" (the Yahoo data-source adapter
-  // inside screenerPipeline.acquireUniverse), so scoring, result shape
-  // and persistence are the pipeline's — identical to the E*TRADE
-  // screen — and the run stores a canonical mas_reports report in the
-  // REST idiom (persistScreenerReportCanonical, the seam the
-  // /etrade/screen route uses), with provider provenance in the body.
-  // Yahoo unavailable → the run fails visibly (502, the REST screen
-  // idiom); no fallback to E*TRADE data, no fabricated rows.
+  // ScreenerAgent with the tenant-resolved provider (issue #4431,
+  // S5/N3 — the route no longer hardcodes "yahoo"; the hub reaches
+  // this route only for yahoo tenants, and any other tenant-resolved
+  // provider screens through its own adapter), so scoring, result
+  // shape and persistence are the pipeline's — identical to the
+  // E*TRADE screen — and the run stores a canonical mas_reports
+  // report in the REST idiom (persistScreenerReportCanonical, the
+  // seam the /etrade/screen route uses), with provider provenance
+  // in the body. Provider unavailable → the run fails visibly
+  // (502, the REST screen idiom); no fallback to another
+  // provider's data, no fabricated rows.
   if ((path.endsWith("/market-data/screen") || path.endsWith("/foss/screen") || path.endsWith("/yfinance/screen")) && (request.method === "POST" || request.method === "GET")) {
     try {
       const filters = request.method === "POST" ? ((await request.json().catch(() => ({}))) as any) : {};
@@ -332,6 +335,23 @@ export async function handleMarketDataCompareScreenRoutes(
       // strips it like `async` so the strict schema never sees
       // it). Required when monetization is ON; ignored OFF.
       const checkoutEmail = extractCheckoutEmail(request.method, filters, url.searchParams);
+      // Issue #4431 (S5/N3): the run body's providerId/brokerId
+      // claims are validated against the tenant-resolved values,
+      // and the tenant-resolved provider rides the spec — never a
+      // per-route hardcode. A mismatch, or a tenant data provider
+      // that is not a stock-screen provider, refuses here with
+      // nothing started.
+      const { resolveManualScreenProviders, dataProviderIdentity } = await import(
+        "../../services/tenantProviders"
+      );
+      const screenProviders = await resolveManualScreenProviders(ctx.env, {
+        providerId: (filters as { providerId?: unknown }).providerId,
+        brokerId: (filters as { brokerId?: unknown }).brokerId,
+      });
+      if (!screenProviders.ok) return screenProviders.response;
+      const tenantProvider = screenProviders.provider;
+      const tenantProviderLabel =
+        dataProviderIdentity(tenantProvider)?.displayName ?? tenantProvider;
       // Issue #2809: dual-mode admission (#2530) and the ONE shared
       // stock-screen schema (#959) are built once here by the
       // single spec builder — ND refuses 400 before any execution
@@ -345,6 +365,7 @@ export async function handleMarketDataCompareScreenRoutes(
         query: url.searchParams,
         asyncRequested,
         source: "market-data",
+        provider: tenantProvider,
         readSettingRaw: ctx.readSettingRaw,
       });
       if (!specResult.ok) {
@@ -365,6 +386,9 @@ export async function handleMarketDataCompareScreenRoutes(
         userLogin,
         checkoutEmail,
         spec,
+        // Issue #4431 (S5/N3): the route's implied provider for the
+        // paid seam's F9 route-vs-selection check.
+        routeProvider: "yahoo",
         auditType: "market_data.screener.payment_started",
         auditAgent: "research",
         audit: ctx.audit,
@@ -389,7 +413,7 @@ export async function handleMarketDataCompareScreenRoutes(
             jobId: started.jobId,
             workflowId: started.handle.workflowId,
             universe,
-            provider: "yahoo",
+            provider: tenantProvider,
           });
           return workflowAcceptedResponse(started.handle);
         }
@@ -416,15 +440,15 @@ export async function handleMarketDataCompareScreenRoutes(
         ctx.audit("market_data.screener.executed", "research", {
           filterSummary: `ALL (sharded: ${shards.length} universes)`,
           count: shards.reduce((n, r) => n + r.allStocks.length, 0),
-          provider: "yahoo",
+          provider: tenantProvider,
           success: failedShards.length < shards.length,
         });
         if (failedShards.length === shards.length) {
-          return Response.json({ error: failedShards[0]?.error || "Yahoo Finance unavailable" }, { status: 502 });
+          return Response.json({ error: failedShards[0]?.error || `${tenantProviderLabel} unavailable` }, { status: 502 });
         }
         return Response.json({
           sharded: true,
-          provider: "yahoo",
+          provider: tenantProvider,
           universes: shards.map((r) => ({
             universe: r.universe,
             provider: r.provider,
@@ -500,15 +524,15 @@ export async function handleMarketDataCompareScreenRoutes(
       ctx.audit("market_data.screener.executed", "research", {
         filterSummary: result.filterSummary,
         count: result.allStocks.length,
-        provider: "yahoo",
+        provider: tenantProvider,
         success: result.success,
       });
       if (!result.success) {
-        return Response.json({ error: result.error || "Yahoo Finance unavailable" }, { status: 502 });
+        return Response.json({ error: result.error || `${tenantProviderLabel} unavailable` }, { status: 502 });
       }
       return Response.json({
         universe: result.universe,
-        provider: "yahoo",
+        provider: tenantProvider,
         totalScanned: result.totalScanned,
         matchedCount: result.matchedCount,
         opportunities: result.opportunities,
@@ -527,7 +551,9 @@ export async function handleMarketDataCompareScreenRoutes(
         xlsxUrl: result.xlsxKey ? `/api/screener/report.xlsx?key=${encodeURIComponent(result.xlsxKey)}` : undefined,
       });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to run Yahoo Finance screener" }, { status: 500 });
+      // Issue #4431 (S5/N3): the catch cannot see the resolved provider (resolution itself may
+      // have thrown), so the message stays provider-neutral instead of naming a guessed provider.
+      return Response.json({ error: err instanceof Error ? err.message : "Failed to run market-data screener" }, { status: 500 });
     }
   }
 

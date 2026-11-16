@@ -245,7 +245,7 @@ function marketDataResult(overrides: Record<string, unknown> = {}) {
 }
 
 describe("S3 (b) — market-data route persists a canonical report with provider provenance", () => {
-  it("POST /api/market-data/screen runs the pipeline (provider yahoo) and stores the canonical copy", async () => {
+  it("POST /api/market-data/screen runs the pipeline (provider tenant-resolved: alpaca default) and stores the canonical copy", async () => {
     const runScreen = vi.fn(async () => marketDataResult());
     const persist = vi.fn();
     const audit = vi.fn();
@@ -265,15 +265,17 @@ describe("S3 (b) — market-data route persists a canonical report with provider
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
     const body = (await res!.json()) as any;
-    expect(body.provider).toBe("yahoo");
+    // Issue #4431 (S5/N3): the route no longer hardcodes yahoo — the
+    // unbound test env resolves the effective default (alpaca).
+    expect(body.provider).toBe("alpaca");
     expect(body.stocks).toHaveLength(1);
     expect(body.stocks[0].source).toBe("Yahoo Finance");
     expect(body.results).toEqual(body.stocks);
 
-    // The pipeline run was requested with the Yahoo provider.
+    // The pipeline run was requested with the tenant-resolved provider.
     expect(runScreen).toHaveBeenCalledWith(expect.objectContaining({
       trigger: "manual",
-      provider: "yahoo",
+      provider: "alpaca",
       filters: expect.objectContaining({ sector: "Technology", maxRsi: 65 }),
       userLogin: "octocat-s3",
     }));
@@ -287,7 +289,7 @@ describe("S3 (b) — market-data route persists a canonical report with provider
     expect(audit).toHaveBeenCalledWith(
       "market_data.screener.executed",
       "research",
-      expect.objectContaining({ provider: "yahoo", count: 1 })
+      expect.objectContaining({ provider: "alpaca", count: 1 })
     );
   });
 

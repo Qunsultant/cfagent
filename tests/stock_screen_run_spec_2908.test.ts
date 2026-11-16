@@ -187,9 +187,11 @@ describe("broker reads the spec, never re-derives (G1)", () => {
 
 describe("planner + goal spec (G1)", () => {
   it("planFromSpec derives a scheduled plan from a scheduled spec", () => {
-    const plan = planFromSpec(baseSpec({ trigger: "scheduled", universe: "TECH" }));
+    // Issue #4431 (S5/N3): the planner requires a provider — a
+    // scheduled spec carries the resolved one (F6 #3655).
+    const plan = planFromSpec(baseSpec({ trigger: "scheduled", universe: "TECH", provider: "etrade" }));
     expect(plan.idempotencyKey.startsWith("screener:scheduled:TECH:")).toBe(true);
-    const manual = planFromSpec(baseSpec({ trigger: "manual", universe: "TECH" }));
+    const manual = planFromSpec(baseSpec({ trigger: "manual", universe: "TECH", provider: "etrade" }));
     expect(manual.idempotencyKey.startsWith("screener:manual:TECH:")).toBe(true);
   });
 

@@ -256,8 +256,9 @@ export async function handleEtradeBrokerRoutes(
   }
 
   // Market Screener & Scanning — delegated to ScreenerAgent (#261).
-  // One agent, E*TRADE-only market data, honest failure when unavailable.
-  // (The Nasdaq-listings screenLive path is kept in the repo, unwired.)
+  // One agent; the screened path runs the tenant-resolved provider
+  // (issue #4431, S5/N3), honest failure when unavailable. (The
+  // Nasdaq-listings screenLive path is kept in the repo, unwired.)
   if (path.endsWith("/etrade/screen") && (request.method === "POST" || request.method === "GET")) {
     try {
       const userLogin = request.headers.get("x-user-login");
@@ -287,6 +288,21 @@ export async function handleEtradeBrokerRoutes(
       // strips it like `async` so the strict schema never sees
       // it). Required when monetization is ON; ignored OFF.
       const checkoutEmail = extractCheckoutEmail(request.method, filters, url.searchParams);
+      // Issue #4431 (S5/N3): the run body's providerId/brokerId
+      // claims are validated against the tenant-resolved values,
+      // and the tenant-resolved provider rides the spec — never a
+      // per-route hardcode and never the removed planner default.
+      // A mismatch, or a tenant data provider that is not a
+      // stock-screen provider, refuses here with nothing started.
+      // Runs before the listings branch: the claims bind the whole
+      // route, not just the screened path.
+      const { resolveManualScreenProviders } = await import("../../services/tenantProviders");
+      const screenProviders = await resolveManualScreenProviders(ctx.env, {
+        providerId: (filters as { providerId?: unknown }).providerId,
+        brokerId: (filters as { brokerId?: unknown }).brokerId,
+      });
+      if (!screenProviders.ok) return screenProviders.response;
+      const tenantProvider = screenProviders.provider;
       // Issue #2530: dual-mode fields (distinct from the E01
       // `mode` switch below): ND refuses 400 before any path.
       const modeSelection = admitScreenModeSelection(ctx.env, request.method, filters, url.searchParams, { asyncRequested, readSettingRaw: ctx.readSettingRaw });
@@ -318,6 +334,7 @@ export async function handleEtradeBrokerRoutes(
         query: url.searchParams,
         asyncRequested,
         source: "etrade",
+        provider: tenantProvider,
         modeSelection,
         userLogin,
       });
@@ -334,6 +351,9 @@ export async function handleEtradeBrokerRoutes(
         userLogin,
         checkoutEmail,
         spec: specResult.spec,
+        // Issue #4431 (S5/N3): the route's implied provider for the
+        // paid seam's F9 route-vs-selection check.
+        routeProvider: "etrade",
         ...(requestedEnv !== undefined ? { environment: requestedEnv } : {}),
         readSettingRaw: ctx.readSettingRaw,
         auditType: "etrade.screen_payment_started",

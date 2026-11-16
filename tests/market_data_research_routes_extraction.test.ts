@@ -80,9 +80,17 @@ vi.mock("../src/trading", async () => {
   // Issue #1007: the route no longer imports any engine class from
   // the barrel — the pipeline seam is the ScreenerAgent, mocked via
   // the route context below (__mockScreener).
+  // Issue #4431: the screen route now validates the run-body provider
+  // claims via services/tenantProviders, which reads DATA_PROVIDER_IDS
+  // + isStockScreenProvider from the barrel — the fake must re-export
+  // the real values too (same leaf-module pattern, never a copy).
   const schemas = await vi.importActual<any>("../src/trading/screeningSchemas");
+  const contract = await vi.importActual<any>("../src/trading/dataProviders/contract");
+  const pipeline = await vi.importActual<any>("../src/trading/screenerPipeline");
   return {
     parseStockScreenRequest: schemas.parseStockScreenRequest,
+    DATA_PROVIDER_IDS: contract.DATA_PROVIDER_IDS,
+    isStockScreenProvider: pipeline.isStockScreenProvider,
   };
 });
 
@@ -325,11 +333,13 @@ describe("market-data research handler behavior (extraction #377)", () => {
     expect(body.stocks).toEqual([{ symbol: "NVDA" }]);
     expect(body.results).toEqual([{ symbol: "NVDA" }]);
     // Issue #1007: the run goes through the one pipeline — ScreenerAgent
-    // with provider "yahoo" and the validated filters. Issue #4278: the
+    // with the tenant-resolved provider and the validated filters.
+    // Issue #4431 (S5/N3): the unbound test env resolves the effective
+    // default (alpaca), never the old hardcoded "yahoo". Issue #4278: the
     // canonical copy is stored by the workflow's own store step, not by
     // the route — a SUCCESS run skips the route's persist finalizer.
     expect(screenerMocks.fns.runScreen).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "yahoo", trigger: "manual", filters })
+      expect.objectContaining({ provider: "alpaca", trigger: "manual", filters })
     );
     expect(screenerMocks.persist).not.toHaveBeenCalled();
     expect(ctx.audit).toHaveBeenCalledWith(
@@ -350,7 +360,7 @@ describe("market-data research handler behavior (extraction #377)", () => {
     expect(res).not.toBeNull();
     expect(screenerMocks.fns.runScreen).toHaveBeenCalledWith(
       expect.objectContaining({
-        provider: "yahoo",
+        provider: "alpaca",
         filters: expect.objectContaining({ sector: "Tech", maxRsi: 70, gainersOnly: true }),
       })
     );

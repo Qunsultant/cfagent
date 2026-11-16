@@ -123,6 +123,25 @@ export function noScreeningProviderMessage(tenantDataProviderId: string): string
   );
 }
 
+/**
+ * Issue #4431 (S5/N3): the reverse of TENANT_PROVIDER_TO_VARIANT_ID —
+ * a hub variant id maps back to the tenant data-provider registry id
+ * the run body carries (`providerId`). The variant ids are the hub
+ * selector's ids (`etrade`, `yahoo-finance`); the registry ids are
+ * the tenant selection's ids (`etrade`, `yahoo`). Unknown variants
+ * map to undefined (never a guessed provider): the body then carries
+ * no providerId claim and the server runs the tenant-resolved
+ * provider.
+ */
+const VARIANT_ID_TO_TENANT_PROVIDER_ID: Readonly<Record<string, string>> = {
+  etrade: "etrade",
+  "yahoo-finance": "yahoo",
+};
+
+export function variantIdToTenantProviderId(variantId: string): string | undefined {
+  return VARIANT_ID_TO_TENANT_PROVIDER_ID[variantId];
+}
+
 export function resolveInitialScreeningProviderId(
   tenantDataProviderId: string,
   providers: readonly ScreeningProviderAdapter[],

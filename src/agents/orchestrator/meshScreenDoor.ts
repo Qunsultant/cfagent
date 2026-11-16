@@ -110,6 +110,7 @@ import {
   resolveChatAwaitDeadlineMs,
 } from "./chatAwaitBudget";
 import { CREDITS_TOP_UP_HINT } from "../../services/providerUxLinks";
+import { resolveScreenProviderForRun } from "../../services/tenantProviders";
 import {
   listScheduledReports,
   resolveCanonicalReportBody,
@@ -528,7 +529,7 @@ interface ScreenCommandParts {
  * suffix, so two screens in one millisecond never adopt each
  * other's run.
  */
-function buildScreenCommand(
+async function buildScreenCommand(
   ctx: MeshScreenDoorContext,
   req: {
     filters: StockScreenerFilter;
@@ -540,7 +541,7 @@ function buildScreenCommand(
     /** Issue #4363 — the validated execution mode, when the caller chose one. */
     executionMode?: import("../../data/jobPipelinePorts").JobExecutionMode;
   },
-): ScreenCommandParts {
+): Promise<ScreenCommandParts> {
   // Issue #2867: shard derivation is the broker's one policy.
   const shards: WorkflowJobCommand["shards"] = shardsForUniverse(req.universeId);
   const nowMs = ctx.nowMs ?? (() => Date.now());
@@ -552,6 +553,15 @@ function buildScreenCommand(
   // one builder — the literal lived here before, now shared.
   // Issue #2908 (G1): the mesh trigger rides the command
   // instead of collapsing to "manual" in provenance.
+  // Issue #4431 (S5/N3): the command carries the tenant's
+  // effective data-provider selection (resolveScreenProviderForRun)
+  // so the planner's required provider is met — the door screen
+  // is a provider-carrying run, never a silent default. A
+  // selection that is not a stock-screen provider leaves the
+  // command without one, and the planner refuses the run loud
+  // and coded. The full door carry (schema, preset, steering)
+  // is N5 (#4434); this is only the command's provider fill.
+  const provider = await resolveScreenProviderForRun(ctx.env);
   const command: WorkflowJobCommand = buildParentScreenCommand({
     jobId,
     source: "mesh-door",
@@ -567,6 +577,7 @@ function buildScreenCommand(
       ? { screenMode: req.screenMode, screenIntent: req.screenIntent }
       : {}),
     ...(req.executionMode ? { executionMode: req.executionMode } : {}),
+    ...(provider !== null ? { provider } : {}),
     ...(traceparent ? { traceparent } : {}),
   });
   return { command, jobId, tenantId, shards, startedAtIso };
@@ -727,7 +738,7 @@ async function runFreeScreen(
     );
   }
 
-  const parts = buildScreenCommand(ctx, req);
+  const parts = await buildScreenCommand(ctx, req);
   let handle;
   try {
     handle = await ports.start(assertWorkflowJobCommand(parts.command));
@@ -952,7 +963,7 @@ async function runPaidScreen(
     executionMode?: import("../../data/jobPipelinePorts").JobExecutionMode;
   },
 ): Promise<MeshScreenRunResult> {
-  const parts = buildScreenCommand(ctx, req);
+  const parts = await buildScreenCommand(ctx, req);
   const { jobId, tenantId, shards, startedAtIso } = parts;
 
   // 1. Price from the operator catalogue — fail closed before

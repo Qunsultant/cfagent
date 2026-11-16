@@ -12,7 +12,12 @@
  *   - sector: request sector, else filter sector, else "ALL"
  *     (issue #421: no sector selected means every sector).
  *   - universe: request universe, else "TECH".
- *   - provider: request provider, else "etrade" (issue #1007).
+ *   - provider: REQUIRED (issue #4431, S5/N3) — the caller
+ *     supplies the tenant-resolved provider; a missing provider
+ *     refuses with FAILURE_NO_SCREENING_PROVIDER (the F6 #3655
+ *     contract) instead of screening another provider's data.
+ *     The pre-#4431 `?? "etrade"` default is removed, never
+ *     replaced by another silent default.
  *   - providerFallback: carried through untouched (issue #1527).
  *   - idempotencyKey: the durable-task identity, verbatim from
  *     runScreenInner — scheduled runs key on their minute slot
@@ -27,12 +32,15 @@
  *
  * planFromSpec is the canonical-path entry: a Slice 1
  * StockScreenRunSpec plus a trigger plans exactly as the
- * equivalent ScreenerRunRequest would (spec.provider unset
- * means the E*TRADE default, as in Slice 1; spec filters carry
- * the sector, as the routes' parse step produces them).
+ * equivalent ScreenerRunRequest would (spec.provider is the
+ * tenant-resolved provider the routes stamp per #4431; spec
+ * filters carry the sector, as the routes' parse step produces
+ * them). A spec with no provider refuses here — the planner
+ * never invents one.
  */
 
 import type { StockScreenProvider, UniverseId } from "../trading";
+import { BusinessError } from "../outcomes/outcomeAspects";
 import type { StockScreenRunSpec } from "./stockScreenRunSpec";
 
 /** The resolved execution plan for one stock-screen run. */
@@ -62,7 +70,19 @@ export interface StockScreenPlanInput {
 function buildPlan(input: StockScreenPlanInput, timestamp: string): StockScreenPlan {
   const sector = input.sector || input.filters?.sector || "ALL";
   const universe: UniverseId = input.universe ?? "TECH";
-  const provider: StockScreenProvider = input.provider ?? "etrade";
+  // Issue #4431 (S5/N3): the provider is required — a missing
+  // provider refuses with the F6 (#3655) coded outcome instead of
+  // screening another provider's data. The issue text names this
+  // refusal NO_SCREEN_PROVIDER; it is implemented as the existing
+  // catalog outcome FAILURE_NO_SCREENING_PROVIDER (409) so the
+  // manual path and the scheduled path refuse with one code.
+  if (input.provider === undefined) {
+    throw new BusinessError("FAILURE_NO_SCREENING_PROVIDER", {
+      trigger: input.trigger,
+      universe,
+    });
+  }
+  const provider: StockScreenProvider = input.provider;
   return {
     sector,
     universe,
@@ -90,9 +110,12 @@ export function planStockScreenRun(
  * The effective provider rule is copied verbatim from
  * ScheduledTasksService.autonomousMarketScreen: a fallback run
  * (E*TRADE auth dead) runs Yahoo with its marker; otherwise the
- * requested provider, else the planner default. The trigger
- * defaults to "scheduled"; callers that re-run a schedule with
- * trigger "manual" (Trigger-Now) pass it explicitly.
+ * requested provider. Issue #4431 (S5/N3): there is no planner
+ * default anymore — a scheduled run with no resolved provider
+ * refuses with FAILURE_NO_SCREENING_PROVIDER (the scheduled path
+ * resolves first per #3655 F6, so it never reaches this throw).
+ * The trigger defaults to "scheduled"; callers that re-run a
+ * schedule with trigger "manual" (Trigger-Now) pass it explicitly.
  */
 export function planScheduledScreen(
   input: {

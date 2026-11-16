@@ -80,6 +80,7 @@ import {
   type WorkflowShard,
 } from "./workflowPorts";
 import { ScreenAlreadyRunningError } from "../services/screenInFlight";
+import { resolveScreenProviderForRun } from "../services/tenantProviders";
 import { CHAT_AWAIT_POLL_INTERVAL_MS } from "../agents/orchestrator/chatAwaitBudget";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -409,6 +410,23 @@ async function startStockScreenViaEngine(input: RunStockScreenViaEngineInput): P
     if (overrides.mode !== undefined) command.mode = overrides.mode;
     if (overrides.modeSource !== undefined) command.modeSource = overrides.modeSource;
     if (overrides.deliver !== undefined) command.deliver = overrides.deliver;
+  }
+  // Issue #4431 (S5/N3) — the provider the command carries, when
+  // neither the spec nor an override names one: the tenant's
+  // effective data-provider selection (resolveScreenProviderForRun).
+  // This is the seam's fill for entries that predate the required
+  // provider — premium fulfilment, A2A dispatch, goal workflow
+  // legs — so the planner's required provider never meets a
+  // provider-less command from this seam. A selection that is not
+  // a stock-screen provider stays absent: the planner refuses with
+  // FAILURE_NO_SCREENING_PROVIDER instead of screening another
+  // provider's data. Explicit providers always win: a command that
+  // already carries one is never rewritten.
+  if (!command.provider) {
+    const provider = await resolveScreenProviderForRun(env);
+    if (provider !== null) {
+      command.provider = provider;
+    }
   }
   // Gate 1 — ND backstop (#2530), before any side effect.
   assertNdGate(env, command, { readSettingRaw: input.readSettingRaw });

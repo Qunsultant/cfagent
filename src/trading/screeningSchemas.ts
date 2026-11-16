@@ -216,6 +216,17 @@ export interface StockScreenRequest {
    * converted into filter fields.
    */
   patternQualifications?: string[];
+  /**
+   * Issue #4431 (S5/N3): the run body's provider/broker claims,
+   * sent by the Stock Hub for the tenant-resolved selection.
+   * Envelope only, split out here; never forwarded into the
+   * engine filter. The routes validate them against the
+   * tenant-resolved values (resolveManualScreenProviders) and
+   * refuse a mismatch loud and coded — the body never chooses
+   * the run's provider; the tenant selection does.
+   */
+  providerId?: string;
+  brokerId?: string;
 }
 
 const stockScreenRequestSchema = z.strictObject({
@@ -231,12 +242,14 @@ const stockScreenRequestSchema = z.strictObject({
     .strictObject({ patternId: nonEmptyString, version: nonEmptyString })
     .optional(),
   patternQualifications: z.array(nonEmptyString).optional(),
+  providerId: z.string().optional(),
+  brokerId: z.string().optional(),
 });
 
 export function parseStockScreenRequest(input: unknown): ScreeningValidationResult<StockScreenRequest> {
   const parsed = parseWith("stock screen request", stockScreenRequestSchema, input);
   if (!parsed.ok) return parsed;
-  const { universe, minScore, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf, patternRef, patternQualifications, ...filters } = parsed.value as Record<string, unknown>;
+  const { universe, minScore, emailTo, pushToSlack, slackChannel, webhookUrl, generatePdf, patternRef, patternQualifications, providerId, brokerId, ...filters } = parsed.value as Record<string, unknown>;
   return {
     ok: true,
     value: {
@@ -250,6 +263,8 @@ export function parseStockScreenRequest(input: unknown): ScreeningValidationResu
       ...(generatePdf !== undefined ? { generatePdf: generatePdf as boolean } : {}),
       ...(patternRef !== undefined ? { patternRef: patternRef as StockScreenRequest["patternRef"] } : {}),
       ...(patternQualifications !== undefined ? { patternQualifications: patternQualifications as string[] } : {}),
+      ...(providerId !== undefined ? { providerId: providerId as string } : {}),
+      ...(brokerId !== undefined ? { brokerId: brokerId as string } : {}),
     },
   };
 }

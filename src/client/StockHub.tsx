@@ -7,12 +7,13 @@ import { apiFetch as fetch } from "./apiFetch";
 import {
   getScreeningProviders,
   noScreeningProviderMessage,
+  variantIdToTenantProviderId,
   YAHOO_FINANCE_VARIANT_ID,
   providerSupportsFilter,
   resolveInitialScreeningProviderId,
   type ScreeningAssetClass,
 } from "./screeningAdapters";
-import { readTenantProvidersState } from "./tenantProviders";
+import { useTenantProviders, type TenantProvidersState } from "./tenantProviders";
 import {
   buildPaidScreenBody,
   isBrokerUnavailableError,
@@ -80,13 +81,24 @@ export interface StockRunDeliverySelection {
  * engine filter (parseStockScreenRequest) and stamps it onto the
  * run's delivery outcome, so a manual run with delivery options
  * produces the same artifacts as the scheduled run.
+ *
+ * Issue #4431 (S5/N3): the body also carries the tenant-resolved
+ * `providerId` (+ `brokerId`) when the caller knows them — the
+ * server validates them against the tenant-resolved values and
+ * refuses a mismatch loud and coded. The body never chooses the
+ * run's provider; the tenant selection does. Absent claims are
+ * omitted (never sent as empty strings): the server then runs
+ * the tenant-resolved provider.
  */
 export function buildStockRunRequestBody(
   filters: Record<string, unknown>,
   delivery: StockRunDeliverySelection,
+  provider?: { providerId?: string; brokerId?: string },
 ): Record<string, unknown> {
   return {
     ...filters,
+    ...(provider?.providerId ? { providerId: provider.providerId } : {}),
+    ...(provider?.brokerId ? { brokerId: provider.brokerId } : {}),
     pushToSlack: delivery.pushToSlack,
     ...(delivery.pushToSlack && delivery.slackChannel.trim()
       ? { slackChannel: delivery.slackChannel.trim() }
@@ -95,6 +107,30 @@ export function buildStockRunRequestBody(
     ...(delivery.webhookUrl.trim() ? { webhookUrl: delivery.webhookUrl.trim() } : {}),
     generatePdf: delivery.generatePdf,
   };
+}
+
+/**
+ * Issue #4431 (S5/N3): the fell-back notice text for the run form.
+ * Reads the served identity's dataProviderFellBack / brokerFellBack
+ * flags (the settings route's identity block, reports.ts:583-595):
+ * null when nothing fell back (or when the state is still the
+ * mirror, which carries no flags); otherwise a line naming the
+ * defaulted axis and the default it runs on, so a fell-back run
+ * is surfaced, never silent.
+ */
+export function providerFellBackNotice(state: TenantProvidersState): string | null {
+  const fellBack: string[] = [];
+  if (state.dataProviderFellBack) {
+    fellBack.push(`data provider (${state.dataProviderDisplayName ?? state.dataProviderId})`);
+  }
+  if (state.brokerFellBack) {
+    fellBack.push(`broker (${state.brokerDisplayName ?? state.brokerId})`);
+  }
+  if (fellBack.length === 0) return null;
+  return (
+    `Your ${fellBack.join(" and ")} fell back to the platform default — no stored selection. ` +
+    `This run uses the default. Choose a provider in Settings.`
+  );
 }
 
 export type StockHubTab = "stocks" | "new-screen" | "run-screen" | "research" | "patterns" | "presets";
@@ -250,7 +286,12 @@ export function StockHub({
   // the correction effect below must NOT repair that to the first
   // variant — the run stays blocked with the coded
   // NO_SCREENING_PROVIDER_FOR_TENANT message.
-  const tenantProvidersState = readTenantProvidersState();
+  // Issue #4431 (S5/N3): the served tenant-provider state, loaded
+  // from the server (useTenantProviders) so the fell-back flags
+  // ride it — a fell-back run is surfaced on this form, never
+  // silent. Before the server load completes the state is the
+  // last-known mirror, exactly as readTenantProvidersState gave.
+  const [tenantProvidersState] = useTenantProviders();
   const [providerId, setProviderId] = useState(() =>
     resolveInitialScreeningProviderId(tenantProvidersState.dataProviderId, providers),
   );
@@ -467,6 +508,11 @@ export function StockHub({
   // no hub variant — the run is blocked before any fetch, with the
   // coded message, instead of posting to a substituted endpoint.
   const noScreeningProvider = providers.length > 0 && !activeProvider;
+  // Issue #4431 (S5/N3): the fell-back notice for the run form — the
+  // served identity's *FellBack flags (reports.ts:583-595) read on
+  // the screen path. A fell-back run is surfaced, never silent: the
+  // notice names the defaulted axis and the default it runs on.
+  const fellBackNotice = providerFellBackNotice(tenantProvidersState);
   const switchToYahoo = () => {
     setProviderId(YAHOO_FINANCE_VARIANT_ID);
     setOfferSwitchToYahoo(false);
@@ -532,13 +578,24 @@ export function StockHub({
       // Issue #2545: the delivery envelope rides the same request —
       // the server splits it out of the engine filter and delivers
       // through the scheduled run's follow-up path.
-      const requestBody = buildStockRunRequestBody(filters, {
-        pushToSlack: deliveryPushToSlack,
-        slackChannel: deliverySlackChannel,
-        emailTo: deliveryEmailTo,
-        webhookUrl: deliveryWebhookUrl,
-        generatePdf: deliveryGeneratePdf,
-      });
+      // Issue #4431 (S5/N3): the tenant-resolved providerId (+
+      // brokerId) ride the body too — the variant id maps back to
+      // the registry id, and the broker is the tenant's stored
+      // broker. The server refuses a mismatch loud and coded.
+      const requestBody = buildStockRunRequestBody(
+        filters,
+        {
+          pushToSlack: deliveryPushToSlack,
+          slackChannel: deliverySlackChannel,
+          emailTo: deliveryEmailTo,
+          webhookUrl: deliveryWebhookUrl,
+          generatePdf: deliveryGeneratePdf,
+        },
+        {
+          providerId: variantIdToTenantProviderId(providerId),
+          brokerId: tenantProvidersState.brokerId,
+        },
+      );
       // Issue #2909 (G2): a run with intact applied-pattern
       // criteria pins the pattern at run creation — the server
       // stamps patternRef onto the spec and the canonical body,
@@ -654,7 +711,7 @@ export function StockHub({
         lastPrice: s.lastPrice ?? 0,
         changePercent: s.changePercent ?? 0,
         rsi14: s.rsi14 ?? null,
-        source: s.source || "E*TRADE live",
+        source: s.source ?? "unknown",
         indicators: s.indicators,
         factorGrades: s.factorGrades,
         technicals: s.technicals,
@@ -1079,6 +1136,11 @@ export function StockHub({
             {noScreeningProvider && (
               <Notice tone="warning" density="compact">
                 {noScreeningProviderMessage(tenantProvidersState.dataProviderId)}
+              </Notice>
+            )}
+            {fellBackNotice !== null && (
+              <Notice tone="warning" density="compact">
+                {fellBackNotice}
               </Notice>
             )}
             <form onSubmit={(event) => void runScreen(event)}>

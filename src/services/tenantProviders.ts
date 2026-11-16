@@ -23,7 +23,12 @@
  * selected provider/broker does not declare must report the
  * coded unavailable outcome, never substitute E*TRADE.
  */
-import { DATA_PROVIDER_IDS } from "../trading";
+import { DATA_PROVIDER_IDS, isStockScreenProvider, type StockScreenProvider } from "../trading";
+// Issue #4431 (S5/N3): the trading barrel, NOT a definition module —
+// the #290 trading boundary forbids modules outside src/trading from
+// importing a trading-internal path. Route tests that mock the barrel
+// re-export the real guard + ids (see the #4431 notes in the two
+// market-data route test mocks).
 import type { TenantProviders } from "../data/commercialPorts";
 import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 import { codedMessage } from "../outcomes/outcomeAspects";
@@ -245,4 +250,127 @@ export function brokerStoreUnavailableResponse(): Response {
     },
     { status: 503 },
   );
+}
+
+/** Issue #4431 (S5/N3) — coded response for a tenant with no broker
+ * selection stored at all. The gate refuses with 409 instead of
+ * passing the run through to the E*TRADE surface. The code is the
+ * issue-literal `NO_BROKER_CONFIGURED`, deliberately NOT a catalog
+ * code: catalog keys must match `^(SUCCESS|FAILURE)_[A-Z_]+$`, so
+ * this response carries a literal message like
+ * brokerStoreUnavailableResponse does, and no catalog entry is added.
+ * The #3460 S0–S12 slice programme owns the rest of that menu; this
+ * slice only refuses here, it does not duplicate that programme's
+ * planning. */
+export function noBrokerConfiguredResponse(): Response {
+  const message =
+    "No broker is configured for this tenant. Choose a broker in Settings — nothing was served from a default broker.";
+  return Response.json(
+    { code: "NO_BROKER_CONFIGURED", error: message, message, retryable: false },
+    { status: 409 },
+  );
+}
+
+/** Issue #4431 (S5/N3) — coded response for a manual run whose body
+ * brokerId differs from the tenant-resolved broker. Same shape as
+ * providerMismatchResponse (code + `error` carrying the message, so
+ * the client never drops the reason): the run is refused, no
+ * fallback broker is used, and nothing was started. Literal message,
+ * no catalog entry — see noBrokerConfiguredResponse. */
+export function brokerMismatchResponse(requestedBroker: string, selectedBroker: string): Response {
+  const message =
+    "The run broker does not match the tenant's selected broker. Change the broker selection in Settings.";
+  return Response.json(
+    {
+      code: "FAILURE_BROKER_MISMATCH",
+      error: message,
+      message,
+      retryable: false,
+      requestedBroker,
+      selectedBroker,
+    },
+    { status: 409 },
+  );
+}
+
+/** Issue #4431 (S5/N3): the tenant's EFFECTIVE providers read through
+ * the PRESENCE-AWARE seam (resolveTenantDataProviderSelection /
+ * resolveTenantBrokerSelection) with the platform default applied
+ * when nothing is stored — the same seam the paid seam (F9 #2373)
+ * and the broker gate read, so a mocked store and production agree
+ * on the stored row. Unlike resolveTenantProviders (which reads the
+ * row through getTenantProviders), this is the seam the manual
+ * routes' callers mock; the stored values are the same row.
+ * Never throws: a read failure reads as unconfigured (defaults). */
+export async function resolveEffectiveTenantProviders(env: unknown): Promise<TenantProviders> {
+  const [storedDataProvider, storedBroker] = await Promise.all([
+    resolveTenantDataProviderSelection(env),
+    resolveTenantBrokerSelection(env),
+  ]);
+  return {
+    dataProviderId: storedDataProvider ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
+    brokerId: storedBroker ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+  };
+}
+
+/** Issue #4431 (S5/N3): the provider a provider-less engine entry
+ * runs with — the tenant's EFFECTIVE data-provider selection
+ * (stored selection, or the platform default alpaca when no row
+ * is stored), when it names a stock-screen provider. Null when
+ * the selection is not a screen provider (notably `nasdaq`):
+ * the caller leaves the provider absent and the planner refuses
+ * with FAILURE_NO_SCREENING_PROVIDER instead of screening
+ * another provider's data. Never a per-route guess. */
+export async function resolveScreenProviderForRun(env: unknown): Promise<StockScreenProvider | null> {
+  const providers = await resolveEffectiveTenantProviders(env);
+  return isStockScreenProvider(providers.dataProviderId) ? providers.dataProviderId : null;
+}
+
+/** Issue #4431 (S5/N3) — validate a manual run body's providerId /
+ * brokerId claims against the tenant-resolved values, and resolve
+ * the provider the run will screen. The comparison is against the
+ * tenant's EFFECTIVE selection (resolveEffectiveTenantProviders:
+ * the stored selection, or the platform default alpaca/alpaca when
+ * no row is stored) — the same value the spec carries — so a claim
+ * must name the provider the run will actually use. An absent claim is not a
+ * mismatch (older clients and direct callers send none); a present
+ * claim that differs is refused loud and coded. An effective data
+ * provider that is not a stock-screen provider (notably `nasdaq`)
+ * is refused with FAILURE_NO_SCREENING_PROVIDER, mirroring F6
+ * (#3655) for the scheduled path. The effective selection is read
+ * through resolveEffectiveTenantProviders — the presence-aware seam,
+ * so the paid seam's mocks and production agree (see its doc). */
+export async function resolveManualScreenProviders(
+  env: unknown,
+  claimed: { providerId?: unknown; brokerId?: unknown },
+): Promise<
+  | { ok: true; providers: TenantProviders; provider: StockScreenProvider }
+  | { ok: false; response: Response }
+> {
+  const providers = await resolveEffectiveTenantProviders(env);
+  if (
+    typeof claimed.providerId === "string" &&
+    claimed.providerId !== "" &&
+    claimed.providerId !== providers.dataProviderId
+  ) {
+    return { ok: false, response: providerMismatchResponse(claimed.providerId, providers.dataProviderId) };
+  }
+  if (
+    typeof claimed.brokerId === "string" &&
+    claimed.brokerId !== "" &&
+    claimed.brokerId !== providers.brokerId
+  ) {
+    return { ok: false, response: brokerMismatchResponse(claimed.brokerId, providers.brokerId) };
+  }
+  if (!isStockScreenProvider(providers.dataProviderId)) {
+    const message = codedMessage("FAILURE_NO_SCREENING_PROVIDER");
+    return {
+      ok: false,
+      response: Response.json(
+        { code: "FAILURE_NO_SCREENING_PROVIDER", error: message, message, retryable: false },
+        { status: 409 },
+      ),
+    };
+  }
+  return { ok: true, providers, provider: providers.dataProviderId };
 }

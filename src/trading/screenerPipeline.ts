@@ -191,6 +191,20 @@ export type UniverseMode = "all-listings" | "live-quotes" | "etrade-only" | "yah
  */
 export type StockScreenProvider = "etrade" | "yahoo" | "alpaca" | "public"; // Issue #3990: Public screens record their own provider.
 
+/**
+ * Issue #4431 (S5/N3): the stock-screen provider guard — the four
+ * ids a stock-screen run can name. Any other data-provider id
+ * (notably `nasdaq`, a listings feed, not a screen provider) is
+ * not a screen provider: a run that would name it refuses with
+ * FAILURE_NO_SCREENING_PROVIDER instead of screening another
+ * provider's data.
+ */
+export function isStockScreenProvider(value: unknown): value is StockScreenProvider {
+  return (
+    value === "etrade" || value === "yahoo" || value === "alpaca" || value === "public"
+  );
+}
+
 export interface AcquireUniverseOptions {
   mode: UniverseMode;
   /** Tunables (defaults to DEFAULT_SCREENER_CONFIG). */
@@ -1506,6 +1520,9 @@ export async function acquireUniverse(
     // Provenance-preserving accept: the composer already stamps each
     // row's source (E*TRADE live / Yahoo Finance). The leg keeps
     // that stamp and only fills sector/companyName enrichment.
+    // Issue #4431 (S5/N3): a row with no source is "unknown", never
+    // a guessed provider — the old "E*TRADE live" fallback mislabelled
+    // provenance the composer never stamped.
     const acceptQuote = (
       listing: NasdaqStockListing,
       live: ETradeQuote | null
@@ -1517,7 +1534,7 @@ export async function acquireUniverse(
         symbol: listing.symbol,
         companyName: live.companyName || listing.companyName,
         sector: resolveStockSector(listing.symbol, live.companyName || listing.companyName, live.sector || listing.sector),
-        source: live.source || "E*TRADE live",
+        source: live.source ?? "unknown",
         quoteStatus: live.quoteStatus || "LIVE",
       } as ETradeQuote);
       quotedSymbols.add(listing.symbol.toUpperCase());
