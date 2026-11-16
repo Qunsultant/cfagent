@@ -10,10 +10,14 @@
  *     --description "…" --category Execution [--issue 30xx] [--nav ...]
  *
  * What it writes:
- *   1. src/client/<Component>Panel.tsx — PageTemplate + PageSection, primitives
- *      only, zero inline styles, zero hex (token ratchet + inline budgets).
- *      The four template slots are omitted from the stub — they are added
- *      when the page gets real content.
+ *   1. src/client/<Component>Panel.tsx — PageTemplate + PageSection +
+ *      a Card composition (Card + CardHeader), primitives only, zero
+ *      inline styles, zero hex (token ratchet + inline budgets). The
+ *      card composition is what makes the stub pass the #4825 general
+ *      template-conformance rule on day one (a bare section +
+ *      EmptyState has no slot and no composition); the four template
+ *      slots are omitted from the stub — they are added when the page
+ *      gets real content.
  *   2. src/client/nav-config.json — route entry, ids kept sorted ascending
  *      (nav_config_data_2977 pin). Without --nav the route has no navEntry:
  *      it renders via TAB_CONTENT and is reachable by ?tab=<id>, but it
@@ -304,7 +308,7 @@ const nextNavRaw =
     `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
   ) + "\n";
 
-const panel = `import { EmptyState, PageSection, PageTemplate } from "./components/ui";
+const panel = `import { Card, CardHeader, EmptyState, PageSection, PageTemplate } from "./components/ui";
 
 /**
  * ${component} — scaffolded page (scripts/new-page.mjs).
@@ -313,11 +317,17 @@ const panel = `import { EmptyState, PageSection, PageTemplate } from "./componen
 export function ${component}() {
   return (
     <PageTemplate title="${title}" scopeNote="${description}">
-      <PageSection title="Overview">
-        <EmptyState
-          title="Under construction"
-          description="This page was scaffolded; its content is not implemented yet."
-        />
+      <PageSection>
+        <Card>
+          <CardHeader
+            title="Overview"
+            subtitle="Scaffolded page — replace this card with the page's real content."
+          />
+          <EmptyState
+            title="Under construction"
+            description="This page was scaffolded; its content is not implemented yet."
+          />
+        </Card>
       </PageSection>
     </PageTemplate>
   );
@@ -391,6 +401,10 @@ describe("scaffolded page ${id}", () => {
     expect(panel).toContain('<PageTemplate title="${title}"');
     expect(panel).toContain('scopeNote="${description}"');
     expect(panel).not.toContain("<PageShell");
+    // Issue #4825: the stub carries a card composition (Card +
+    // CardHeader), so a scaffolded page passes the general
+    // template-conformance rule on day one.
+    expect(panel).toContain("<CardHeader");
     const register = JSON.parse(src("tests/ux_shell_exceptions_3047.json")) as {
       template: Record<string, { state: string }>;
     };
