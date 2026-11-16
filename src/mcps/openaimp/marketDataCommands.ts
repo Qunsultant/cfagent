@@ -476,7 +476,7 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       // without — the schema never offered it, so the MCP path could only POST
       // type=stop with no price.
       stop_price: { type: "number", description: "Stop trigger price (required if type is stop or stop_limit)" },
-      time_in_force: { type: "string", enum: ["day", "gtc", "ioc", "fok"], description: "Time in force" },
+      time_in_force: { type: "string", enum: ["day", "gtc", "ioc", "fok", "gtd"], description: "Time in force" },
       extended_hours: { type: "boolean", description: "Allow execution in pre-market, after-hours, and overnight EXTO sessions" },
       order_class: { type: "string", enum: ["simple", "bracket", "oco", "oto"], description: "Order class ('bracket' for parent orders with take-profit and stop-loss legs)" },
       take_profit: {
@@ -537,7 +537,7 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     good_till_date: z.string().min(1).optional().describe("Issue #3892: GTD expiry instant"),
     limit_price: z.number().positive().optional().describe("Limit price"),
     stop_price: z.number().positive().optional().describe("Issue #4657: stop trigger price for stop / stop_limit"),
-    time_in_force: z.enum(["day", "gtc", "ioc", "fok"]).default("day").optional(),
+    time_in_force: z.enum(["day", "gtc", "ioc", "fok", "gtd"]).default("day").optional(),
     extended_hours: z.boolean().optional().describe("Allow extended-hours execution"),
     order_class: z.enum(["simple", "bracket", "oco", "oto"]).optional().describe("Order class ('bracket' for parent orders with TP/SL legs)"),
     take_profit: z.object({ limit_price: z.number().positive() }).optional().describe("Take-profit bracket leg"),
