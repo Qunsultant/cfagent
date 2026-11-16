@@ -22,7 +22,7 @@ import { NAV_ICON_MAP } from "./components/NavigationMenu";
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, PillGroup } from "./components/ui";
+import { Button, CardHeader, PillGroup } from "./components/ui";
 import {
   getStoredAdBannerConfig,
   saveStoredAdBannerConfig,
@@ -336,7 +336,7 @@ export function PlatformAdminPanel({
       >
         <header className="platform-admin-header">
           <div className="platform-admin-title-block">
-            <h4 className="platform-admin-title">{platformAdminTitle(config)}</h4>
+            <CardHeader title={platformAdminTitle(config)} />
             <p className="platform-admin-subtitle">Administration surfaces for this workspace</p>
           </div>
           <Button

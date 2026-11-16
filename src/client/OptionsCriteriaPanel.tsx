@@ -43,6 +43,7 @@ import { TextInput } from "./components/ui/TextInput";
 import { Select } from "./components/ui/Select";
 import { Button } from "./components/ui/Button";
 import { EmptyState } from "./components/ui/EmptyState";
+import { CardHeader } from "./components/ui";
 
 export type OptionsContractType = "BOTH" | "CALL" | "PUT";
 export type OptionsMoneyness = "ALL" | "ITM" | "OTM" | "ATM";
@@ -344,7 +345,7 @@ export function OptionsCriteriaPanel({ criteria, onChange, lastSentFilters }: Op
 
   return (
     <Card>
-      <h3>Options criteria</h3>
+      <CardHeader title="Options criteria" />
       <p>
         Thresholds the next run filters on. A criterion left Off is omitted
         from the run request without clearing its value. All rows are
@@ -381,7 +382,7 @@ export function OptionsCriteriaPanel({ criteria, onChange, lastSentFilters }: Op
       {numericRow("maxRho", "Max rho", "Above this rho are rejected.", { step: "0.001" })}
       {numericRow("minIvPct", "Min IV", "Percent; below this implied volatility are rejected.", { min: "0", step: "1" })}
       {numericRow("maxIvPct", "Max IV", "Percent; above this implied volatility are rejected.", { min: "0", step: "1" })}
-      <h4>Last run&apos;s criteria</h4>
+      <CardHeader title="Last run&apos;s criteria" />
       {lastSentFilters === null ? (
         <EmptyState title="No run yet — the criteria above apply to the next run." />
       ) : (

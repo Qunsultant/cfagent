@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { apiFetch } from "../../apiFetch";
-import { Button, TextInput, Select, FileInput } from "../../components/ui";
+import { Button, CardHeader, TextInput, Select, FileInput } from "../../components/ui";
 import { buildJson, downloadTextFile } from "../../runExport";
 import type { SearchTabProps } from "../searchTabTypes";
 
@@ -258,7 +258,7 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
         manifest with per-entry status; it is not a stored-documents catalog (the corpus has no listing API, by design).
       </p>
 
-      <h3>Integrity</h3>
+      <CardHeader title="Integrity" />
       <Button type="button" onClick={() => void loadReport()} disabled={reportLoading} loading={reportLoading}>
         {"Refresh"}
       </Button>{" "}
@@ -280,7 +280,7 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
           <p>Missing ({report.missing.length}): {report.missing.length > 0 ? report.missing.join(", ") : "none"}</p>
           <p>Mismatched ({report.mismatched.length}): {report.mismatched.length > 0 ? report.mismatched.join(", ") : "none"}</p>
           <p>Extra ({report.extra.length}): {report.extra.length > 0 ? report.extra.join(", ") : "none"}</p>
-          <h4>Expected documents</h4>
+          <CardHeader title="Expected documents" />
           {report.entries && report.entries.length > 0 ? (
             report.entries.map((entry, i) => (
               <p key={i}>
@@ -294,7 +294,7 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
         </div>
       )}
 
-      <h3>Sync</h3>
+      <CardHeader title="Sync" />
       <p>The sync also runs weekly on the existing every-30-minutes tick; this button only triggers a run now.</p>
       <Button type="button" onClick={() => void runSync()} disabled={syncLoading} loading={syncLoading}>
         {"Run sync now"}
@@ -335,7 +335,7 @@ export function CorpusTab({ onHealth }: SearchTabProps) {
         </div>
       )}
 
-      <h3>Upload</h3>
+      <CardHeader title="Upload" />
       <form onSubmit={(e) => void runUpload(e)}>
         <TextInput label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Document title (required)" />
         <Select label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>

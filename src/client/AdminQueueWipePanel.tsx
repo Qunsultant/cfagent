@@ -77,6 +77,7 @@ import {
   recreateTrack1,
   track1RecreatePlan,
 } from "./adminQueueApi";
+import { CardHeader } from "./components/ui";
 
 const CLEARABLE_TABLES: ClearableTable[] = ["mas_async_jobs", "mas_job_outcomes", "unified_schedules"];
 
@@ -605,7 +606,7 @@ export function AdminQueueWipePanel() {
       />
 
       <TabPanel idBase="schedules-queue" tabId="queue" active={section === "queue"} retain>
-      <h3>Queue dump</h3>
+      <CardHeader title="Queue dump" />
       <p className="iaaa-admin-note">
         Read before any destructive action. Refresh after a wipe to verify the queue is empty.
       </p>
@@ -635,7 +636,7 @@ export function AdminQueueWipePanel() {
       </TabPanel>
 
       <TabPanel idBase="schedules-queue" tabId="cancel" active={section === "cancel"} retain>
-      <h3>Cancel all schedules (queue wipe)</h3>
+      <CardHeader title="Cancel all schedules (queue wipe)" />
       <p className="iaaa-admin-note">
         Preview first: the preview lists exactly what would be cancelled and how many paused
         records would be preserved, and cancels nothing. Confirm in the dialog to wipe.
@@ -689,7 +690,7 @@ export function AdminQueueWipePanel() {
       </TabPanel>
 
       <TabPanel idBase="schedules-queue" tabId="wipe" active={section === "wipe"} retain>
-      <h3>Clear a table</h3>
+      <CardHeader title="Clear a table" />
       <p className="iaaa-admin-note">
         Only the allowlisted tables are offered. Running jobs are never deleted (counted as
         skipped). Audit history (mas_events) and the outcome watermark are clearable through
@@ -735,7 +736,7 @@ export function AdminQueueWipePanel() {
         )}
       </Modal>
 
-      <h3>Selective wipe (all tables, by default)</h3>
+      <CardHeader title="Selective wipe (all tables, by default)" />
       <p className="iaaa-admin-note">
         Every row is checked by default. Uncheck a row to keep it: unchecked rows are skipped
         entirely — no preview call, no delete, no audit for that row. SQL rows wipe this
@@ -831,7 +832,7 @@ export function AdminQueueWipePanel() {
       </TabPanel>
 
       <TabPanel idBase="schedules-queue" tabId="recreate" active={section === "recreate"} retain>
-      <h3>Recreate Track 1</h3>
+      <CardHeader title="Recreate Track 1" />
       <p className="iaaa-admin-note">
         A separate explicit action, never automatic after a wipe. Review the four schedules
         below; creating them is the recreate half of the wipe decision, and leaving schedules

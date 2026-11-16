@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button, Checkbox, FieldShell, Select, TextInput, Modal } from "../../components/ui";
+import { Button, CardHeader, Checkbox, FieldShell, Select, TextInput, Modal } from "../../components/ui";
 import {
   FlowFilterConfig,
   SavedFilterPreset,
@@ -627,7 +627,7 @@ export function FlowFiltersSidebar({
       {/* Save Filter Modal */}
       {showSaveModal && (
                 <Modal open={showSaveModal} onClose={() => setShowSaveModal(false)} size="none" panelClassName="flow-modal-dialog" ariaLabel="Save flow filter preset">
-            <h3>💾 Save Flow Filter Preset</h3>
+            <CardHeader title="💾 Save Flow Filter Preset" />
             <p>Save current configuration to "Your Filters" for instant recall and alerting.</p>
             <TextInput
               type="text"

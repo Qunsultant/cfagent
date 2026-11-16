@@ -11,7 +11,7 @@ import {
 import type { TradeOrderContext, TradeOrderLeg } from "../trading/tradeOrderContext";
 import "./strategyDiscovery.css";
 
-import { Button, Modal, TextInput, FieldShell } from "../components/ui";
+import { Button, CardHeader, Modal, TextInput, FieldShell } from "../components/ui";
 import { FeatureDisabledNotice, isOptionsProductEnabled } from "../featureFlags";
 export interface StrategyToEvaluate {
   symbol: string;
@@ -213,7 +213,7 @@ export function LlmStrategyEvalModal({
         <div className="llm-eval-modal-header">
           <div className="llm-eval-title-group">
             <span className="llm-eval-badge">🧠 Neural Strategy Evaluation</span>
-            <h3>{strategy.strategyName} on {strategy.symbol}</h3>
+            <CardHeader title={<>{strategy.strategyName} on {strategy.symbol}</>} />
             {strategy.legsText && <span className="llm-eval-legs-subtitle">{strategy.legsText}</span>}
           </div>
           <Button variant="secondary" type="button" className="llm-eval-close-btn" onClick={onClose} title="Close">
@@ -351,7 +351,7 @@ export function LlmStrategyEvalModal({
               {/* Final Synthesis / Cross-group Ranking */}
               {result.finalAnalysis?.status === "complete" ? (
                 <div className="llm-eval-synthesis-card">
-                  <h4>Synthesis & Recommendations</h4>
+                  <CardHeader title="Synthesis & Recommendations" />
                   <p className="llm-eval-answer-text">{result.finalAnalysis.answer}</p>
 
                   {(result.finalAnalysis.rankings || []).length > 0 && (
@@ -374,7 +374,7 @@ export function LlmStrategyEvalModal({
                 </div>
               ) : (
                 <div className="llm-eval-synthesis-card">
-                  <h4>LLM Analysis Response</h4>
+                  <CardHeader title="LLM Analysis Response" />
                   <p className="llm-eval-answer-text">
                     {result.llm.answer || (result.llm.error ? `⚠️ Synthesis note: ${result.llm.error}` : "Analysis completed across cohorts.")}
                   </p>

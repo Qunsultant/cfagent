@@ -9,7 +9,7 @@
  * declares no winner (arms accumulate ledger track records).
  */
 import { useState } from "react";
-import { Button } from "../components/ui";
+import { Button, CardHeader } from "../components/ui";
 
 export interface ThreeWayArmCandidate {
   id: string;
@@ -100,7 +100,7 @@ export function ThreeWayComparison({ data, activeEnv, userLogin }: {
       </p>
       {ARMS.map((arm) => (
         <div key={arm}>
-          <h3>{arm} — {data.artifact.arms[arm].ranked.length} ranked ({attritionLine(data.artifact.arms[arm])})</h3>
+          <CardHeader title={<>{arm} — {data.artifact.arms[arm].ranked.length} ranked ({attritionLine(data.artifact.arms[arm])})</>} />
           {data.artifact.arms[arm].ranked.length === 0 ? (
             <p>No ranked candidates in this arm.</p>
           ) : (

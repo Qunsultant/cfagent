@@ -14,14 +14,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "./apiFetch";
-import {
-  Badge,
-  Card,
-  EmptyState,
-  Notice,
-  Spinner,
-  Table,
-} from "./components/ui";
+import { Badge, Card, CardHeader, EmptyState, Notice, Spinner, Table } from "./components/ui";
 import type { CalibrationDashboard as CalibrationData } from "../services/calibrationReport";
 
 function formatPct(hitRate: number | null): string {
@@ -128,7 +121,7 @@ export function CalibrationDashboard({ userLogin }: { userLogin?: string }) {
 
   return (
     <section aria-label="Calibration dashboard">
-      <h3>Calibration dashboard</h3>
+      <CardHeader title="Calibration dashboard" />
       <p>
         Predicted vs realized direction, measured over the research track
         record. Hit rate is a measurement, not a promise — and a thesis
@@ -150,28 +143,28 @@ export function CalibrationDashboard({ userLogin }: { userLogin?: string }) {
           </p>
         )}
       </Card>
-      <h4>Per thesis</h4>
+      <CardHeader title="Per thesis" />
       <Table
         columns={sliceColumns(calibration.lowSampleThreshold)}
         rows={thesisRows}
         rowKey={(row) => row.key}
         caption="Direction accuracy by thesis"
       />
-      <h4>Per strategy</h4>
+      <CardHeader title="Per strategy" />
       <Table
         columns={sliceColumns(calibration.lowSampleThreshold)}
         rows={calibration.byStrategy}
         rowKey={(row) => row.key}
         caption="Direction accuracy by strategy structure"
       />
-      <h4>Per regime</h4>
+      <CardHeader title="Per regime" />
       <Table
         columns={sliceColumns(calibration.lowSampleThreshold)}
         rows={calibration.byRegime}
         rowKey={(row) => row.key}
         caption="Direction accuracy by recorded market regime"
       />
-      <h4>Hit rate by month</h4>
+      <CardHeader title="Hit rate by month" />
       <Table
         columns={sliceColumns(calibration.lowSampleThreshold)}
         rows={calibration.byMonth}

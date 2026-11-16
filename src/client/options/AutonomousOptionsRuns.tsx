@@ -9,7 +9,7 @@
  * appears without a page reload.
  */
 import { useEffect, useState } from "react";
-import { Badge, Button, EmptyState } from "../components/ui";
+import { Badge, Button, CardHeader, EmptyState } from "../components/ui";
 import { subscribeOptionsLatest, refreshOptionsLatest } from "../optionsLatestShared";
 
 interface OptionsRunOpportunity {
@@ -53,7 +53,7 @@ export function AutonomousOptionsRuns() {
   return (
     <section className="autonomous-runs" aria-label="Autonomous options runs">
       <div className="autonomous-runs-head">
-        <h3>🤖 Autonomous Options Runs</h3>
+        <CardHeader title="🤖 Autonomous Options Runs" />
         <Button variant="secondary" tone="subtle" onClick={() => refreshOptionsLatest()}>
           ↻ Refresh
         </Button>

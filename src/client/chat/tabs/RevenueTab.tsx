@@ -18,6 +18,7 @@ import { TextInput } from "../../components/ui/TextInput";
 import { FieldShell } from "../../components/ui/Field";
 import { Tabs, TabPanel } from "../../components/ui/Tabs";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
+import { CardHeader } from "../../components/ui";
 
 export interface RevenueTabProps {
   adBannerConfig: AdBannerConfig;
@@ -222,7 +223,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
           <Card>
             <div className="ui-stack">
               <div>
-                <h4>📡 External Ad Network Placements ({externalAds.length})</h4>
+                <CardHeader title={<>📡 External Ad Network Placements ({externalAds.length})</>} />
                 <p className="ui-meta">
                   Manage active network units (EthicalAds, Carbon Ads, Google AdSense, Direct) generating revenue per 1,000 views (CPM) and per click (CPC).
                 </p>
@@ -356,7 +357,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
           <Card>
             <div className="ui-stack">
               <div>
-                <h4>🏷️ Referral Categories &amp; Taxonomy Manager</h4>
+                <CardHeader title="🏷️ Referral Categories &amp; Taxonomy Manager" />
                 <p className="ui-meta">
                   Configure and maintain the categorization taxonomy used by partners to list developer tools, affiliate links, and monetization campaigns.
                 </p>
@@ -443,7 +444,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
           <Card>
             <div className="ui-stack">
               <div>
-                <h4>🗄️ Institutional Data Schemas &amp; Record Counts</h4>
+                <CardHeader title="🗄️ Institutional Data Schemas &amp; Record Counts" />
                 <p className="ui-meta">
                   Direct view into institutional records, transaction schemas, and enterprise data repositories.
                 </p>
@@ -495,7 +496,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
           <Card>
             <div className="ui-stack">
               <div>
-                <h4>🌐 Google Ads & Multi-Network Display Engine</h4>
+                <CardHeader title="🌐 Google Ads & Multi-Network Display Engine" />
                 <p className="ui-meta">
                   Configure official Google AdSense and network display banners, test live formats, and track impressions/clicks across the platform.
                 </p>

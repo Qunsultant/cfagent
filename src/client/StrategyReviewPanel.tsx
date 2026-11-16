@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Button } from "./components/ui";
+import { Button, CardHeader } from "./components/ui";
 import { csrfHeaders } from "./apiFetch";
 
 interface StrategyReview {
@@ -50,7 +50,7 @@ export function StrategyReviewPanel() {
 
   return (
     <div className="strategy-review-panel">
-      <h3>Strategy Candidates</h3>
+      <CardHeader title="Strategy Candidates" />
       <div className="review-filters">
         {["pending", "approved", "rejected", "all"].map((f) => (
           <Button

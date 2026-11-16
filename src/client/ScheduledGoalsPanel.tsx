@@ -54,21 +54,7 @@ import {
 // Issue #4333 — the section no longer lists those runs: the ledger is the
 // one run list, and this section hands the reader to it (`kind=goal`).
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
-import {
-  Badge,
-  Button,
-  Checkbox,
-  Flex,
-  Modal,
-  Notice,
-  Select,
-  Stack,
-  Table,
-  Tabs,
-  TabPanel,
-  TextInput,
-  type TableColumn,
-} from "./components/ui";
+import { Badge, Button, CardHeader, Checkbox, Flex, Modal, Notice, Select, Stack, Table, Tabs, TabPanel, TextInput, type TableColumn } from "./components/ui";
 import { DelegationContractPreview } from "./DelegationContractPreview";
 import { buildDelegationContract } from "./delegationContract";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
@@ -548,7 +534,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
       {/* ----------------------------------------------------- Add goal */}
       <TabPanel idBase="schedules-goals" tabId="add" active={section === "add"} retain>
         <Stack gap="3" className="ui-narrow">
-          <h3>Add goal</h3>
+          <CardHeader title="Add goal" />
           {formError && (
             <Notice tone="danger" title="The goal was not added">
               {formError}
@@ -697,7 +683,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
       {/* ---------------------------------------- SessionStore resource goals */}
       <TabPanel idBase="schedules-goals" tabId="resources" active={section === "resources"} retain>
         <Stack gap="3">
-          <h3>SessionStore resource goals</h3>
+          <CardHeader title="SessionStore resource goals" />
           <div className="ui-meta">
             Adds the three SessionStore resource goals (daily rollup, 70% cap alert, dashboard
             comparison) with timeZone UTC. Goals that already exist are skipped, not duplicated.
@@ -734,7 +720,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
       {/* --------------------------------------------------- Seed built-ins */}
       <TabPanel idBase="schedules-goals" tabId="seed" active={section === "seed"} retain>
         <Stack gap="3">
-          <h3>Seed all built-in goals</h3>
+          <CardHeader title="Seed all built-in goals" />
           {/* Issue #3996: seed all built-in goals — adds every missing
               built-in goal in DEFAULT_SCHEDULES order, skipping ones
               that already exist, and reports per-goal results. The
@@ -762,7 +748,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
       {/* ------------------------------------------------------------ Ticks */}
       <TabPanel idBase="schedules-goals" tabId="ticks" active={section === "ticks"} retain>
         <Stack gap="2">
-          <h3>Recent ticks</h3>
+          <CardHeader title="Recent ticks" />
           {ticks.length === 0 && <div className="ui-meta">No ticks recorded yet.</div>}
           {ticks.map((t, i) => (
             <div
@@ -797,7 +783,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
               second run-history path. Issue #4333 — the ledger IS the run
               list: this section reports what is recorded and hands the reader
               to `kind=goal`, instead of repeating the rows here. */}
-          <h3>Recent goal runs</h3>
+          <CardHeader title="Recent goal runs" />
           {runsError ? (
             <Notice tone="danger" title="Goal runs could not be loaded">
               {runsError}

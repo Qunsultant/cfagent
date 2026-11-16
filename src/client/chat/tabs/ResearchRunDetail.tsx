@@ -1,5 +1,5 @@
 import React from "react";
-import { Badge, Button, Card, Notice, Spinner, Table } from "../../components/ui";
+import { Badge, Button, Card, CardHeader, Notice, Spinner, Table } from "../../components/ui";
 import { apiFetch } from "../../apiFetch";
 
 /**
@@ -321,7 +321,7 @@ export function ResearchRunDetailView(props: {
           </a>
         ) : null}
       </div>
-      <h3 className="research-detail-title">{props.title}</h3>
+      <CardHeader title={props.title} />
       {props.createdAt ? (
         <div className="research-detail-meta">{new Date(props.createdAt).toLocaleString()}</div>
       ) : null}
@@ -342,7 +342,7 @@ export function ResearchRunDetailView(props: {
           {model.query ? <p className="research-detail-summary">Query: {model.query}</p> : null}
           {model.sheets.map((sheet) => (
             <div key={sheet.name} className="research-sheet">
-              <h4>{sheet.name}</h4>
+              <CardHeader title={sheet.name} />
               <Table
                 columns={sheet.columns.map((c) => ({
                   key: c,
@@ -369,7 +369,7 @@ export function ResearchRunDetailView(props: {
               </Badge>
             ))}
           </div>
-          <h4>Ranked ideas</h4>
+          <CardHeader title="Ranked ideas" />
           <Table
             columns={[
               { key: "rank", header: "#", render: (i: RunIdeaView) => i.rank, align: "right" },
@@ -387,13 +387,13 @@ export function ResearchRunDetailView(props: {
           ))}
           {model.configEntries.length > 0 && (
             <>
-              <h4>Filter / config snapshot</h4>
+              <CardHeader title="Filter / config snapshot" />
               <DefinitionList entries={model.configEntries} />
             </>
           )}
           {model.watchlist.length > 0 && (
             <>
-              <h4>Watchlist</h4>
+              <CardHeader title="Watchlist" />
               <ul className="research-detail-list">
                 {model.watchlist.map((w, i) => (
                   <li key={i}>
@@ -406,7 +406,7 @@ export function ResearchRunDetailView(props: {
           )}
           {model.rejected.length > 0 && (
             <>
-              <h4>Rejected</h4>
+              <CardHeader title="Rejected" />
               <ul className="research-detail-list">
                 {model.rejected.map((r, i) => (
                   <li key={i}>

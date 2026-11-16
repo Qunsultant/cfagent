@@ -29,7 +29,7 @@
  * rendered text.
  */
 import React, { useEffect, useState } from "react";
-import { Badge, Button, Table } from "./components/ui";
+import { Badge, Button, CardHeader, Table } from "./components/ui";
 import {
   formatPeriodEnd,
   formatUSD,
@@ -290,7 +290,7 @@ export function PlanCompare({ payload, selectedPackVersionId, onChoosePlan, onBu
 
   return (
     <div role="status">
-      <h3>Compare plans</h3>
+      <CardHeader title="Compare plans" />
       <p>
         Credits: {formatUSD(current.creditsUSD)} · Included runs remaining: {current.includedRunsRemaining}
         {current.packRunsRemaining > 0 && <> · Pack runs remaining: {current.packRunsRemaining}</>}
@@ -323,7 +323,7 @@ export function PlanCompare({ payload, selectedPackVersionId, onChoosePlan, onBu
       {held && <p>{STACKING_DISCLOSURE}</p>}
       {showDowngrades && (
         <>
-          <h4>Lower plans</h4>
+          <CardHeader title="Lower plans" />
           <p>{DOWNGRADE_DISCLOSURE}</p>
           {anyBillingManagedDowngrade && <p>{BILLING_MANAGED_COPY}</p>}
           <Table
@@ -337,7 +337,7 @@ export function PlanCompare({ payload, selectedPackVersionId, onChoosePlan, onBu
       )}
       {packRows.length > 0 && (
         <>
-          <h4>Runs packs</h4>
+          <CardHeader title="Runs packs" />
           <p>
             A runs pack adds runs to your pack balance. Pack runs spend after your included runs and before your
             credits, and only while the run&apos;s price is approved. A pack never changes your plan or

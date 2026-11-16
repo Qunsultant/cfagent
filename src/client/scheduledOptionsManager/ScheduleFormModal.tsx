@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Select, TextInput, Modal, Button } from "../components/ui";
+import { CardHeader, Select, TextInput, Modal, Button } from "../components/ui";
 import { useTenantProviders } from "../tenantProviders";
 import { useBrokerEnvironment } from "../brokerEnvironment";
 import { listPresets, type ScreenerPreset } from "../ScreenerPresetManager";
@@ -116,7 +116,7 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
       {/* Parent mounts this modal conditionally; open is always true here. */}
             <header className="sched-modal-header">
               <div>
-        <h3>{editingScheduleId ? "✏ Update Screening Schedule" : "⏰ Configure New Schedule"}</h3>
+        <CardHeader title={editingScheduleId ? "✏ Update Screening Schedule" : "⏰ Configure New Schedule"} />
                 <p>Register an autonomous persistent timer to run in the background.</p>
               </div>
               <Button

@@ -10,7 +10,7 @@
  * so draft content cannot execute as markup.
  */
 import React from "react";
-import { Card } from "./components/ui";
+import { Card, CardHeader } from "./components/ui";
 import {
   buildTradeExecutionPreview,
   type TradeExecutionDraft,
@@ -20,9 +20,7 @@ export function TradeExecutionPreview({ draft }: { draft: TradeExecutionDraft })
   const preview = buildTradeExecutionPreview(draft);
   return (
     <Card padding="sm">
-      <h4>
-        Execution preview — what approving sends
-      </h4>
+      <CardHeader title="Execution preview — what approving sends" />
       <div>
         <strong>
           Exact execution payload (POST /api/broker/order/execute)

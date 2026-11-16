@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { createResearchWorkbook, encodeBase64, type ResearchReportSheet } from "./researchReports";
-import { Button, TextInput } from "./components/ui";
+import { Button, CardHeader, TextInput } from "./components/ui";
 import "./researchReports.css";
 
 interface ResearchReportActionsProps {
@@ -127,7 +127,7 @@ export function ResearchReportActions({ title, query, sheets, userLogin }: Resea
 
   return (
     <section className="research-report-actions" aria-label={`${title} export and delivery`}>
-      <h3>Export and share this research</h3>
+      <CardHeader title="Export and share this research" />
       <div className="research-report-controls">
         <Button type="button" disabled={Boolean(busy) || !rowsAvailable} onClick={() => void download()} loading={busy === "download"}>
           {"Download .xlsx"}

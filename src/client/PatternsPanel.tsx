@@ -10,7 +10,7 @@
  */
 
 import { useState } from "react";
-import { Badge, Button, Card, Notice, PageSection } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Notice, PageSection } from "./components/ui";
 import {
   listStockPatterns,
   type StockPattern,
@@ -55,7 +55,7 @@ export function PatternsPanel({ onApplyPattern }: PatternsPanelProps) {
         {patterns.map((pattern) => (
           <Card key={pattern.id}>
             <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
-              <h3 style={{ margin: 0 }}>{pattern.label}</h3>
+              <CardHeader title={pattern.label} />
               <Badge tone="neutral">stock</Badge>
               <Badge tone="neutral">read-only</Badge>
             </div>

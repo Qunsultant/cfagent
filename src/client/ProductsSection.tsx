@@ -33,7 +33,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
-import { Button, Notice, Select, Stack, TextInput } from "./components/ui";
+import { Button, CardHeader, Notice, Select, Stack, TextInput } from "./components/ui";
 import { Tabs, TabPanel, type TabOption } from "./components/ui/Tabs";
 import { apiFetch } from "./apiFetch";
 import { codedMessage } from "../outcomes/outcomeAspects";
@@ -838,7 +838,7 @@ function ReferralCodeRulesPanel({
 
   return (
     <div>
-      <h3>Referral-code rules</h3>
+      <CardHeader title="Referral-code rules" />
       <p>
         Rules are keyed by this product and survive version changes. Terms are snapshotted onto a code at
         issuance, so a later rule edit never reprices outstanding codes; caps are read live at redemption,
@@ -952,7 +952,7 @@ function ReferralCodeManagementPanel({ productId }: { productId: string }) {
 
   return (
     <div>
-      <h3>Referral codes</h3>
+      <CardHeader title="Referral codes" />
       <p>
         Issue a code under this product&apos;s rule. The code value is shown once, in this session — copy
         it now; it is never stored and never shown again. Revoking a code never claws back runs already
@@ -1112,7 +1112,7 @@ function ProductDetail({
         const effective = resolveEffectiveVersion(chain, segment, Date.now());
         return (
           <div key={segment}>
-            <h3>Segment: {segment}</h3>
+            <CardHeader title={<>Segment: {segment}</>} />
             <Stack gap="1">
               {chain.map((version) => {
                 const isEffective = effective?.id === version.id;
@@ -1370,7 +1370,7 @@ function NewVersionForm({
   }
   return (
     <Stack gap="1">
-      <h3>New version of {product.name}</h3>
+      <CardHeader title={<>New version of {product.name}</>} />
       <p>
         A new version lands proposed and moves no one. Existing holders stay grandfathered; new customers buy the
         current effective version for their segment once this version is approved and effective.
@@ -1523,7 +1523,7 @@ function NewCatalogueVersionForm({
   }
   return (
     <Stack gap="1">
-      <h3>New catalogue version of {product.name}</h3>
+      <CardHeader title={<>New catalogue version of {product.name}</>} />
       <p>
         A new catalogue version lands proposed. Per-run customers always pay their segment&apos;s current approved
         price — there is no move for per-run products. Approval is in{" "}
@@ -1668,7 +1668,7 @@ function BulkMovePanel({
 
   return (
     <Stack gap="1">
-      <h3>Move all customers to current pricing</h3>
+      <CardHeader title="Move all customers to current pricing" />
       <p>
         Every live holder of a non-current version of this product moves to their own segment&apos;s current effective
         version. Holders already on the current version are skipped. Per-run customers are untouched — they always
@@ -1705,7 +1705,7 @@ function BulkMovePanel({
       </div>
       {preview && (
         <Stack gap="1">
-          <h4>Confirmation — no one has moved yet</h4>
+          <CardHeader title="Confirmation — no one has moved yet" />
           {preview.preview.length === 0 && <p>No live holders of this product in scope.</p>}
           {preview.preview.map((segmentPreview) => {
             const target = segmentPreview.targetVersionId
@@ -1765,7 +1765,7 @@ function BulkMovePanel({
           )}
           {result.failures.length > 0 && (
             <div>
-              <h4>Failures (recorded, never fatal)</h4>
+              <CardHeader title="Failures (recorded, never fatal)" />
               <ul>
                 {result.failures.map((failure) => (
                   <li key={failure.subscriptionId}>
@@ -1779,7 +1779,7 @@ function BulkMovePanel({
       )}
       {history.length > 0 && (
         <div>
-          <h4>Bulk-move history</h4>
+          <CardHeader title="Bulk-move history" />
           <Stack gap="1">
             {history.map((summary) => (
               <div key={summary.id}>
@@ -1903,7 +1903,7 @@ function NewRunsPackVersionForm({
   }
   return (
     <Stack gap="1">
-      <h3>New pack version of {product.name}</h3>
+      <CardHeader title={<>New pack version of {product.name}</>} />
       <p>
         A new pack version lands proposed and moves no one. Buying a pack adds its runs to the buyer&apos;s pack
         balance — it never confers a tier and never creates a subscription row. Pack runs never expire.

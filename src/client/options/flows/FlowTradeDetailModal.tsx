@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Modal, Table, type TableColumn } from "../../components/ui";
+import { Button, CardHeader, Modal, Table, type TableColumn } from "../../components/ui";
 import { LiveFlowItem } from "../../../trading";
 
 interface FlowTradeDetailModalProps {
@@ -167,7 +167,7 @@ export function FlowTradeDetailModal({
 
         {/* Performance Box */}
         <div className="flow-modal-section-card">
-          <h4 className="flow-modal-section-title">Performance</h4>
+          <CardHeader title="Performance" />
           <div className="flow-performance-metrics-row">
             <div className="flow-perf-item">
               <span className="flow-perf-label">NOW</span>
@@ -200,7 +200,7 @@ export function FlowTradeDetailModal({
 
         {/* Calculations Box */}
         <div className="flow-modal-section-card">
-          <h4 className="flow-modal-section-title">Calculations</h4>
+          <CardHeader title="Calculations" />
           <p className="flow-modal-calc-text">{calcText}</p>
         </div>
 

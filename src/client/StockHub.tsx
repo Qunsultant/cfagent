@@ -1169,7 +1169,7 @@ export function StockHub({
                     style={{ marginBottom: "0.75rem" }}
                   >
                     <Card>
-                      <h3 style={{ margin: "0 0 0.5rem" }}>Run detail</h3>
+                      <CardHeader title="Run detail" />
                       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
                         <Badge
                           tone={
@@ -1383,7 +1383,7 @@ export function StockHub({
               </Grid>
               <Grid autoFit minColumnWidth="lg" gap="2">
                 <Stack gap="2">
-                  <h3>Delivery &amp; report</h3>
+                  <CardHeader title="Delivery &amp; report" />
                   <p className="ui-footnote">Deliver this run like the scheduled Stock Market Screen does.</p>
                   <FieldShell id="stock-delivery-slack-push" label="Slack push">
                     <Checkbox id="stock-delivery-slack-push" checked={deliveryPushToSlack} onChange={(event) => setDeliveryPushToSlack(event.target.checked)} />
@@ -1596,7 +1596,7 @@ export function StockHub({
             {manualResult && <ScreenerResultsView result={manualResult} />}
             {shardedResults.length > 0 && shardedResults.map((r) => (
               <div key={r.universe} style={{ marginTop: "1.5rem" }}>
-                <h3 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>🌐 {r.universe}</h3>
+                <CardHeader title={<>🌐 {r.universe}</>} />
                 <ScreenerResultsView result={r} />
               </div>
             ))}

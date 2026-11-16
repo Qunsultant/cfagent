@@ -1497,7 +1497,7 @@ export function RunDetail({
         </div>
       </dl>
 
-      <h4>Stages</h4>
+      <CardHeader title="Stages" />
       {run.stages.length === 0 ? (
         <Notice tone="neutral" density="compact">
           {run.source === "report"
@@ -1669,18 +1669,18 @@ export function RunDetail({
 
       <div className="ui-stat-grid">
         <section aria-label="Run inputs">
-          <h4>Inputs</h4>
+          <CardHeader title="Inputs" />
           <pre className="ui-pre">{formatJson(run.inputs)}</pre>
         </section>
         <section aria-label="Run outputs">
-          <h4>Outputs</h4>
+          <CardHeader title="Outputs" />
           <pre className="ui-pre">{formatJson(run.outputs)}</pre>
         </section>
       </div>
 
       {run.documents && (
         <section aria-label="Documents">
-          <h4>Documents</h4>
+          <CardHeader title="Documents" />
           <div className="ui-row">
             <DocumentCell url={run.documents.pdfUrl} status={run.documents.pdfStatus} error={run.documents.pdfError} kind="PDF" />
             <DocumentCell url={run.documents.xlsxUrl} status={run.documents.xlsxStatus} error={run.documents.xlsxError} kind="XLSX" />
@@ -1692,7 +1692,7 @@ export function RunDetail({
 
       {run.documents && (
         <section aria-label="Docs run details">
-          <h4>Docs run details</h4>
+          <CardHeader title="Docs run details" />
           {docsLoading && <p className="ui-meta-sm">Loading docs run details…</p>}
           {stageActionError && (
             <Notice tone="danger" density="compact">
@@ -1711,7 +1711,7 @@ export function RunDetail({
       )}
 
       <section aria-label="Artifacts and delivery">
-        <h4>Artifacts & delivery</h4>
+        <CardHeader title="Artifacts & delivery" />
         {visibleArtifacts.length === 0 && Object.keys(run.deliveryStates).length === 0 ? (
           <p className="ui-meta-sm">No artifacts or delivery states recorded for this run.</p>
         ) : (
@@ -1732,7 +1732,7 @@ export function RunDetail({
 
       {run.stages.some((stage) => stage.input !== null || stage.output !== null) && (
         <section className="ui-stack" aria-label="Per-stage inputs and outputs">
-          <h4>Per-stage inputs & outputs</h4>
+          <CardHeader title="Per-stage inputs & outputs" />
           {run.stages
             .filter((stage) => stage.input !== null || stage.output !== null)
             .map((stage) => (

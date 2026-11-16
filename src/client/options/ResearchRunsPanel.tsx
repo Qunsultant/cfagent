@@ -14,7 +14,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Button, Checkbox, PageSection, Table, TextInput, type TableColumn } from "../components/ui";
+import { Button, CardHeader, Checkbox, PageSection, Table, TextInput, type TableColumn } from "../components/ui";
 import { navigateToTab } from "../router";
 import { csrfHeaders } from "../apiFetch";
 import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
@@ -385,7 +385,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
 
       {showFilters && config && (
         <div style={{ border: "1px solid var(--color-border-medium)", borderRadius: 8, padding: "var(--space-3)", marginBottom: 12 }}>
-          <h4>Filters & thresholds — every run embeds the effective snapshot</h4>
+          <CardHeader title="Filters & thresholds — every run embeds the effective snapshot" />
           {CONFIG_FIELDS.map((f) => (
             <div key={f.key} style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: 6 }}>
               <span id={`rrf-${f.key}`} style={{ width: 260, fontSize: 13 }}>{f.label}</span>
@@ -421,7 +421,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
           </div>
           <p>{report.summary}</p>
 
-          <h4>Qualified ideas ({report.ideas.length})</h4>
+          <CardHeader title={<>Qualified ideas ({report.ideas.length})</>} />
           {report.ideas.length === 0 && (
             <div style={{ color: "var(--color-text-muted)" }}>
               No qualifying opportunities — no candidate passed the evidence and risk gates. This is a valid outcome.
@@ -431,7 +431,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
             <TradeCardDetail key={c.rank} card={c} />
           ))}
 
-          <h4>Watchlist ({report.watchlist.length})</h4>
+          <CardHeader title={<>Watchlist ({report.watchlist.length})</>} />
           {report.watchlist.map((w, i) => (
             <div key={i} style={{ fontSize: 13, borderLeft: "3px solid var(--color-warning)", paddingLeft: "var(--space-2)", marginBottom: 6 }}>
               <b>{w.symbol}</b> ({w.outlook}, {w.structure}) — {w.reason}
@@ -439,7 +439,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
             </div>
           ))}
 
-          <h4>Rejected ({report.rejected.length})</h4>
+          <CardHeader title={<>Rejected ({report.rejected.length})</>} />
           {report.rejected.slice(0, 10).map((r, i) => (
             <div key={i} style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4 }}>
               <b>{r.symbol}</b> [{r.gate}] {r.reason}
@@ -453,7 +453,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
               this panel keeps its settings, controls and latest report, and
               links to the ledger filtered to Options instead of keeping a
               second run list. */}
-          <h4>Run history</h4>
+          <CardHeader title="Run history" />
           <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4, display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
             <span>
               {history.length > 0

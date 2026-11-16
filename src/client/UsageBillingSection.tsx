@@ -30,6 +30,7 @@ import type {
   UsageBillingRefundRow,
   UsageBillingSubscriptionRow,
 } from "../data/usageBilling";
+import { CardHeader } from "./components/ui";
 
 function usd(amountUSD: number): string {
   return `$${amountUSD.toFixed(2)} USD`;
@@ -155,7 +156,7 @@ export function UsageBillingSection() {
       )}
       {view && (
         <>
-          <h4>Usage</h4>
+          <CardHeader title="Usage" />
           <p>Included runs remaining: {view.identity.includedRunsRemaining}</p>
           <p>Credit balance: {usd(view.identity.creditsUSD)}</p>
           {view.usage.receipts.length === 0 && <p>No usage recorded yet.</p>}
@@ -166,7 +167,7 @@ export function UsageBillingSection() {
               {provenanceLabel(entry.provenance)}
             </p>
           ))}
-          <h4>Billing</h4>
+          <CardHeader title="Billing" />
           {subscriptions.length === 0 && <p>No subscriptions on file.</p>}
           {subscriptions.map((row) => (
             <p key={row.id}>
@@ -174,14 +175,14 @@ export function UsageBillingSection() {
               {provenanceLabel(row.provenance)}
             </p>
           ))}
-          <h4>Renewals</h4>
+          <CardHeader title="Renewals" />
           {view.billing.renewals.length === 0 && <p>No renewals scheduled.</p>}
           {view.billing.renewals.map((row) => (
             <p key={row.subscriptionId}>
               {row.planId} — renews {day(row.renewsAtMs)} — {row.status}
             </p>
           ))}
-          <h4>Refunds</h4>
+          <CardHeader title="Refunds" />
           {refunds.length === 0 && <p>No refunds on file.</p>}
           {refunds.map((row) => (
             <p key={row.id}>

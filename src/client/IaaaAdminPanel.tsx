@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, EmptyState, Modal, Notice, Select, Spinner, Table, Tabs, TabPanel, TextInput } from "./components/ui";
+import { Button, CardHeader, EmptyState, Modal, Notice, Select, Spinner, Table, Tabs, TabPanel, TextInput } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import {
   deactivateSelf,
@@ -384,13 +384,13 @@ export function IaaaAdminPanel() {
           </p>
           {roleGrantsAllowed && (
             <>
-              <h4>Role grants</h4>
+              <CardHeader title="Role grants" />
               <RoleGrantsPanel />
             </>
           )}
           {loggedInUsersAllowed && (
             <>
-              <h4>Logged-in users</h4>
+              <CardHeader title="Logged-in users" />
               <LoggedInUsersPanel />
             </>
           )}
@@ -417,7 +417,7 @@ export function IaaaAdminPanel() {
       A Notice (ui primitive), not a new bespoke note paragraph — the
       interior ceiling for this file (ux_shell_exceptions_3047.json)
       forbids new bespoke class tokens. */}
-      <h3>IAAA Admin</h3>
+      <CardHeader title="IAAA Admin" />
       <Notice tone="info">
         Identity and access administration for this platform: memberships, admin roles,
         service identities, and the audit trail. Platform admins see every section;
@@ -476,7 +476,7 @@ export function IaaaAdminPanel() {
 
         <TabPanel idBase="iaaa-admin-overview" tabId="summary" active={section === "summary"}>
         {/* Issue #4839 G2: the Summary section has a heading like every other section. */}
-        <h4>Summary</h4>
+        <CardHeader title="Summary" />
         <div className="iaaa-admin-summary">
           <div>
             <span className="iaaa-admin-label">Tenant</span>
@@ -514,7 +514,7 @@ export function IaaaAdminPanel() {
 
         {overview.adminCounts && (
           <>
-            <h4>Admin counts</h4>
+            <CardHeader title="Admin counts" />
             <div className="iaaa-admin-summary">
               <div>
                 <span className="iaaa-admin-label">Platform admins</span>
@@ -557,7 +557,7 @@ export function IaaaAdminPanel() {
         not a new tab (tab indices unchanged) and not duplicated in
         the Queue tab: like admin counts and genesis, it is platform
         state. */}
-        <h4>Service user</h4>
+        <CardHeader title="Service user" />
         <ServiceUserSection />
         </TabPanel>
 
@@ -566,7 +566,7 @@ export function IaaaAdminPanel() {
         service-user section, not a new tab (tab indices unchanged)
         and not duplicated elsewhere: like the service-user tiers,
         they are platform state. */}
-        <h4>Service tokens</h4>
+        <CardHeader title="Service tokens" />
         <ServiceTokensPanel />
         </TabPanel>
 
@@ -576,7 +576,7 @@ export function IaaaAdminPanel() {
         (tab indices unchanged) and not duplicated elsewhere: like
         them, admin grants are platform state. Tenant-admins reach
         this same section through the limited view above. */}
-        <h4>Role grants</h4>
+        <CardHeader title="Role grants" />
         <RoleGrantsPanel />
         </TabPanel>
 
@@ -586,7 +586,7 @@ export function IaaaAdminPanel() {
         unchanged) and not duplicated elsewhere: like them, bootstrap
         administration is platform state. Tenant-admins never see
         this section (the limited view above returns early). */}
-        <h4>Bootstrap proposals</h4>
+        <CardHeader title="Bootstrap proposals" />
         <BootstrapProposalsPanel />
         </TabPanel>
 
@@ -596,12 +596,12 @@ export function IaaaAdminPanel() {
         unchanged) and not duplicated elsewhere. Unlike policy
         proposals, tenant-admins DO reach this section through
         the limited view above — server-scoped to their tenant. */}
-        <h4>Logged-in users</h4>
+        <CardHeader title="Logged-in users" />
         <LoggedInUsersPanel />
         </TabPanel>
 
         <TabPanel idBase="iaaa-admin-overview" tabId="deactivate" active={section === "deactivate"}>
-        <h4>Deactivate my account</h4>
+        <CardHeader title="Deactivate my account" />
         <p className="iaaa-admin-note">
           Deactivation revokes your sessions, memberships, API keys, and broker tokens,
           suppresses mail, and verifies the result. It cannot be undone from this panel.
@@ -630,7 +630,7 @@ export function IaaaAdminPanel() {
           approves. Membership grant, revoke, and edit live on the Members tab.
         </p>
 
-        <h4>Access requests</h4>
+        <CardHeader title="Access requests" />
         {accessError && <Notice tone="danger">{accessError}</Notice>}
         {accessNotice && <Notice>{accessNotice}</Notice>}
         {accessRequests.length === 0 ? (
@@ -679,7 +679,7 @@ export function IaaaAdminPanel() {
         </TabPanel>
 
         <TabPanel idBase="iaaa-admin-overview" tabId="audit-events" active={section === "audit-events"}>
-        <h4>Recent audit events</h4>
+        <CardHeader title="Recent audit events" />
         {/* Issue #4839 G12: scope, legend, and the taxonomy link. The window is
         the overview cap (IAAA_ADMIN_OVERVIEW_LIMIT = 100, newest first, this
         tenant only) — verified in src/security/iaaaAdminOverview.ts. Decision
@@ -729,7 +729,7 @@ export function IaaaAdminPanel() {
         </p>
         {membersError && <Notice tone="danger">{membersError}</Notice>}
         {grantNotice && <Notice>{grantNotice}</Notice>}
-        <h4>Grant membership</h4>
+        <CardHeader title="Grant membership" />
         {/* Issue #4839 G6: where the id comes from — the Memberships table
         below lists them; a wired sign-in's /api/me shows the caller's own. */}
         <TextInput
@@ -786,7 +786,7 @@ export function IaaaAdminPanel() {
           roles and reads the audit trail, platform scope only. Scopes: tenant — one
           tenant; workspace — one workspace; platform — the whole platform.
         </Notice>
-        <h4>Memberships</h4>
+        <CardHeader title="Memberships" />
         {memberships.length === 0 ? (
           <EmptyState title="No memberships" description="No memberships returned for this tenant yet." />
         ) : (
@@ -875,7 +875,7 @@ export function IaaaAdminPanel() {
           marked as such — it is not an endpoint.
         </p>
         {/* Issue #4839 G13: an endpoint count like the MCP tab's Tools/Resources/Prompts counts. */}
-        <h4>Endpoints ({API_ENDPOINT_CATALOG.length})</h4>
+        <CardHeader title={<>Endpoints ({API_ENDPOINT_CATALOG.length})</>} />
         <Table
           columns={[
             {
@@ -921,7 +921,7 @@ export function IaaaAdminPanel() {
           The MCP tools, resources, and prompts from the existing client catalog — reused,
           not duplicated. Server capabilities the catalog lacks are listed below as gaps.
         </p>
-        <h4>Tools ({MCP_TOOLS_CATALOG.length})</h4>
+        <CardHeader title={<>Tools ({MCP_TOOLS_CATALOG.length})</>} />
         <Table
           columns={[
             { key: "name", header: "Name", render: (tool) => <code>{tool.name}</code> },
@@ -931,7 +931,7 @@ export function IaaaAdminPanel() {
           rows={MCP_TOOLS_CATALOG}
           rowKey={(tool) => tool.name}
         />
-        <h4>Resources ({MCP_RESOURCES_CATALOG.length})</h4>
+        <CardHeader title={<>Resources ({MCP_RESOURCES_CATALOG.length})</>} />
         <Table
           columns={[
             {
@@ -945,7 +945,7 @@ export function IaaaAdminPanel() {
           rows={MCP_RESOURCES_CATALOG}
           rowKey={(resource) => resource.uri}
         />
-        <h4>Prompts ({MCP_PROMPTS_CATALOG.length})</h4>
+        <CardHeader title={<>Prompts ({MCP_PROMPTS_CATALOG.length})</>} />
         <Table
           columns={[
             { key: "name", header: "Name", render: (prompt) => <code>{prompt.name}</code> },
@@ -954,7 +954,7 @@ export function IaaaAdminPanel() {
           rows={MCP_PROMPTS_CATALOG}
           rowKey={(prompt) => prompt.name}
         />
-        <h4>Not in this catalog (server capabilities reported as gaps)</h4>
+        <CardHeader title="Not in this catalog (server capabilities reported as gaps)" />
         <Table
           columns={[
             { key: "capability", header: "Capability", render: (gap) => <code>{gap.item}</code> },
@@ -971,7 +971,7 @@ export function IaaaAdminPanel() {
           live emitting site for each event. Occurrences that emit no audit event are
           listed below as gaps — never fabricated into events.
         </p>
-        <h4>Audit events</h4>
+        <CardHeader title="Audit events" />
         <Table
           columns={[
             { key: "action", header: "Action", render: (event) => <code>{event.action}</code> },
@@ -997,7 +997,7 @@ export function IaaaAdminPanel() {
           rows={IAAA_AUDIT_EVENT_CATALOG}
           rowKey={(event) => `${event.action} ${event.decision} ${event.outcome}`}
         />
-        <h4>Gaps — IAAA occurrences with no audit event</h4>
+        <CardHeader title="Gaps — IAAA occurrences with no audit event" />
         <Table
           columns={[
             { key: "occurrence", header: "Occurrence", render: (gap) => <code>{gap.item}</code> },
@@ -1013,7 +1013,7 @@ export function IaaaAdminPanel() {
           Mapping tables. Rows with no counterpart are shown as UNMAPPED, not forced into
           a match. Every row cites its source in the catalog module.
         </p>
-        <h4>API endpoint ↔ MCP tool</h4>
+        <CardHeader title="API endpoint ↔ MCP tool" />
         <Table
           columns={[
             { key: "endpoint", header: "Endpoint", render: (row) => <code>{row.left}</code> },
@@ -1032,7 +1032,7 @@ export function IaaaAdminPanel() {
           rows={IAAA_CORRELATION_ROWS.filter((row) => row.kind === "endpoint-mcp")}
           rowKey={(_row, index) => `endpoint-mcp-${index}`}
         />
-        <h4>IAAA event ↔ endpoint</h4>
+        <CardHeader title="IAAA event ↔ endpoint" />
         <Table
           columns={[
             {

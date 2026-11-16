@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Button, Checkbox, Modal, TextInput } from "../components/ui";
+import { Button, CardHeader, Checkbox, Modal, TextInput } from "../components/ui";
 import {
   DIRECTION_TAGS,
   DIRECTION_TAG_LABELS,
@@ -112,7 +112,7 @@ export function StrategyLibraryModal({
         <Modal open={isOpen} onClose={onClose} size="none" panelClassName="strat-strategy-picker-modal" ariaLabel="Options strategy library">
         <div className="strat-modal-header">
           <div className="strat-modal-header-titles">
-            <h3>Options Strategy Library ({strategies.length} Strategies)</h3>
+            <CardHeader title={<>Options Strategy Library ({strategies.length} Strategies)</>} />
             <span>
               {multiSelect
                 ? `Select strategies for the scan (${localSelected.length} selected)`

@@ -6,7 +6,7 @@ import {
   type ComprehensiveRiskProfile,
 } from "./riskManagementEngine";
 import "./riskAnalysis.css";
-import { Button, Modal, Table, Tabs, TabPanel, TextInput, type TableColumn } from "../components/ui";
+import { Button, CardHeader, Modal, Table, Tabs, TabPanel, TextInput, type TableColumn } from "../components/ui";
 
 export interface RiskAnalysisModalProps {
   isOpen: boolean;
@@ -309,9 +309,7 @@ export function RiskAnalysisModal({
               <div className="risk-sizing-calculator">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <h4 style={{ margin: 0, fontSize: "var(--font-size-body)", fontWeight: 700, color: "var(--color-text-primary)" }}>
-                      📐 Risk-Budgeted Position Sizing Calculator
-                    </h4>
+                    <CardHeader title="📐 Risk-Budgeted Position Sizing Calculator" />
                     <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
                       {playbook.sizingRationale}
                     </span>

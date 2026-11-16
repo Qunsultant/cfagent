@@ -31,7 +31,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch as fetch } from "./apiFetch";
-import { Badge, Button, Card, EmptyState, Notice, PageSection, Spinner } from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, Notice, PageSection, Spinner } from "./components/ui";
 import { formatCountdown } from "./PendingReviewQueue";
 
 /** Overnight window: 18:00 previous day → 09:00 today, viewer-local. */
@@ -243,7 +243,7 @@ export function MorningDigest({
         </div>
       )}
 
-      <h4 style={{ margin: "1.25rem 0 0.5rem" }}>Held for review</h4>
+      <CardHeader title="Held for review" />
       {heldError && (
         <Notice tone="danger" density="compact" onDismiss={() => setHeldError(null)}>
           {heldError}

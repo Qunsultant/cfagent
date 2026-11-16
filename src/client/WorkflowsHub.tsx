@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import "./workflowsHub.css";
-import { Badge, Button, Card, KpiRibbon, Notice, PageSection, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
+import { Badge, Button, Card, CardHeader, KpiRibbon, Notice, PageSection, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import {
@@ -1185,9 +1185,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
 
                       {/* 3 Distinct Execution Methods */}
                       <div>
-                        <h4>
-                          🚀 Multi-Method Execution Paths (3 Ways to Run)
-                        </h4>
+                        <CardHeader title="🚀 Multi-Method Execution Paths (3 Ways to Run)" />
                         <Grid autoFit minColumnWidth="md" gap="2">
                           {faq.methods.map((method, mIdx) => (
                             <Card key={mIdx}>
@@ -1321,7 +1319,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           {/* Operational process guides (#3464): taxonomy + index. */}
           <Card id="operational-process-guides">
             <Stack gap="3">
-              <h3>Operational process guides</h3>
+              <CardHeader title="Operational process guides" />
               <p className="ui-meta">
                 The taxonomy and index are the single entry point for operational processes — how each
                 process is classified, who owns it, and where its guide lives. Future answers link
@@ -1434,9 +1432,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
 
                       {/* Flowchart Timeline */}
                       <div>
-                        <h4 style={{ fontSize: "var(--font-size-body-sm)", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-accent)", margin: "0 0 0.75rem 0" }}>
-                          ⚡ Step-by-Step Execution Pipeline
-                        </h4>
+                        <CardHeader title="⚡ Step-by-Step Execution Pipeline" />
                         <Grid autoFit minColumnWidth="sm" gap="2">
                           {wf.steps.map((step, idx) => (
                             <Card key={idx}><Stack gap="1">
@@ -1561,9 +1557,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           <Stack gap="5" role="tabpanel" id="workflows-panel-decisioning" aria-labelledby="workflows-tab-decisioning">
           {/* Decisioning Hero Note */}
           <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "10px", padding: "var(--space-5) var(--space-6)" }}>
-            <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
-              📐 Deterministic Decision Logic, Scoring Equations &amp; Selection Gates (6 Engines)
-            </h4>
+            <CardHeader title="📐 Deterministic Decision Logic, Scoring Equations &amp; Selection Gates (6 Engines)" />
             <p style={{ margin: 0, color: "var(--color-text-secondary)", fontSize: "var(--font-size-body)", lineHeight: 1.55 }}>
               Comprehensive documentation of the mathematical formulas, boundary constraints, sorting comparators, and automated safety gates powering the Stock Screener (A1), Options Screener (A3), Strategy Engine (A2), Recommendation Agent (<code>pickBestTrades</code>), and live Brokerage Handshake (E1).
             </p>
@@ -1616,9 +1610,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
 
                       {/* Rules Grid */}
                       <div>
-                        <h4 style={{ fontSize: "var(--font-size-body-sm)", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-accent)", margin: "0 0 0.75rem 0" }}>
-                          ⚙️ Mathematical Rules, Constraints &amp; Algorithmic Gates
-                        </h4>
+                        <CardHeader title="⚙️ Mathematical Rules, Constraints &amp; Algorithmic Gates" />
                         <Grid autoFit minColumnWidth="md" gap="2">
                           {sec.rules.map((rule, rIdx) => (
                             <Card key={rIdx}>
@@ -1651,9 +1643,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                       {/* Matrix / Weights Table (if present) */}
                       {sec.matrixOrWeights && sec.matrixOrWeights.length > 0 && (
                         <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "8px", padding: "var(--space-4)" }}>
-                          <h4 style={{ margin: "0 0 0.6rem", color: "var(--color-accent)", fontSize: "var(--font-size-body-sm)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                            📊 Dimension Weightings &amp; Profile Matrix
-                          </h4>
+                          <CardHeader title="📊 Dimension Weightings &amp; Profile Matrix" />
                           <div style={{ overflowX: "auto" }}>
                                                         <Table
                               columns={[
@@ -1725,9 +1715,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           <Stack gap="5" role="tabpanel" id="workflows-panel-matrix" aria-labelledby="workflows-tab-matrix">
           {/* Matrix Header Callout */}
           <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "10px", padding: "var(--space-5) var(--space-6)" }}>
-            <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
-              📊 Interactive Capability &amp; Lookup Matrix
-            </h4>
+            <CardHeader title="📊 Interactive Capability &amp; Lookup Matrix" />
             <p style={{ margin: 0, color: "var(--color-text-secondary)", fontSize: "var(--font-size-body)", lineHeight: 1.55 }}>
               Quick architectural reference showing which platform workflow is best suited to answer each question, key input parameters, and ideal visual output structures. Click &quot;Try Now&quot; to jump directly into the target platform tab.
             </p>
@@ -1773,9 +1761,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
           <Stack gap="5" role="tabpanel" id="workflows-panel-improvements" aria-labelledby="workflows-tab-improvements">
           {/* Architectural Analysis Hero Note */}
           <div style={{ background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "10px", padding: "var(--space-5) var(--space-6)" }}>
-            <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
-              🏗️ Architectural Optimization Roadmap (Pure Analysis &amp; Design)
-            </h4>
+            <CardHeader title="🏗️ Architectural Optimization Roadmap (Pure Analysis &amp; Design)" />
             <p style={{ margin: 0, color: "var(--color-text-secondary)", fontSize: "var(--font-size-body)", lineHeight: 1.55 }}>
               To elevate the platform from a single-symbol screener to an institutional-grade algorithmic execution system that answers complex multi-constraint questions optimally, the following 6 architectural enhancements have been formulated. These recommendations analyze cross-sectional batching, Pareto multi-objective optimization, declarative constraint solvers, and volatility surface modeling.
             </p>

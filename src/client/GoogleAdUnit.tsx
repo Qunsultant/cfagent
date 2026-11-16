@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { apiFetch as fetch } from "./apiFetch";
-import { Button } from "./components/ui";
+import { Button, CardHeader } from "./components/ui";
 import { isAdBeaconsPaused } from "./adBeacons";
 
 export interface GoogleAdUnitProps {
@@ -130,7 +130,7 @@ export function GoogleAdUnit({
             <span className="google-ad-display-url">https://{displayUrl}</span>
             <span className="google-ad-verified-badge" title="Verified Google Advertiser">✓ Verified</span>
           </div>
-          <h4 className="google-ad-title">{campaign.title}</h4>
+          <CardHeader title={campaign.title} />
           <p className="google-ad-description">{campaign.tagline}</p>
         </div>
 

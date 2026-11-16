@@ -6,7 +6,7 @@
  * with token-only styling (repo AGENTS.md §20).
  */
 import { useState } from "react";
-import { Badge, Button, Modal, SegmentedControl, Table } from "../components/ui";
+import { Badge, Button, CardHeader, Modal, SegmentedControl, Table } from "../components/ui";
 import { formatRunDetailTimestamp, runDetailVisibleSections, type RunDetail, type RunDetailLevelFilter } from "../runDetails";
 
 function Unknown({ store }: { store: string }) {
@@ -43,7 +43,7 @@ export function RunDetailSections({
     <>
           {show("request") && (
             <section aria-label="Request">
-              <h3>Request</h3>
+              <CardHeader title="Request" />
               <Table
                 caption="Exact input as submitted, where recorded"
                 columns={[
@@ -54,7 +54,7 @@ export function RunDetailSections({
                 rows={detail.request}
                 rowKey={(r) => r.field}
               />
-              <h4>Defaults applied</h4>
+              <CardHeader title="Defaults applied" />
               {detail.defaultsApplied.length === 0 ? (
                 <p>No defaults recorded for this run — defaults are unknown, not guessed.</p>
               ) : (
@@ -73,7 +73,7 @@ export function RunDetailSections({
 
           {show("provenance") && (
             <section aria-label="Provenance">
-              <h3>Provenance</h3>
+              <CardHeader title="Provenance" />
               <Table
                 caption="Provenance tuple for this run"
                 columns={[
@@ -91,7 +91,7 @@ export function RunDetailSections({
 
           {show("lineage") && (
             <section aria-label="Lineage">
-              <h3>Lineage</h3>
+              <CardHeader title="Lineage" />
               <p>
                 Input hash: <FieldValue value={detail.lineage.inputHash} store={detail.store} /> · Engine:{" "}
                 <FieldValue value={detail.lineage.engineVersion} store={detail.store} /> · Captures:{" "}
@@ -111,7 +111,7 @@ export function RunDetailSections({
 
           {show("stages") && (
             <section aria-label="Stage trace">
-              <h3>Stage trace</h3>
+              <CardHeader title="Stage trace" />
               <Table
                 caption="Stage-by-stage trace for this run"
                 columns={[
@@ -128,7 +128,7 @@ export function RunDetailSections({
 
           {show("reasons") && (
             <section aria-label="Why this report has no data">
-              <h3>Why this report has no data</h3>
+              <CardHeader title="Why this report has no data" />
               {detail.reasons.length === 0 ? (
                 <p>No missing-data reason recorded for this run — its formats are present or were never attempted by construction (see the stage trace).</p>
               ) : (
@@ -142,7 +142,7 @@ export function RunDetailSections({
                   ))}
                 </ul>
               )}
-              <h4>Formats</h4>
+              <CardHeader title="Formats" />
               <Table
                 caption="Per-format status for this run"
                 columns={[

@@ -1,4 +1,4 @@
-import { Badge, Button, Card, EmptyState, Flex, KpiRibbon, Notice, PageSection, PageShell, Spinner, Stack, Table } from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, Flex, KpiRibbon, Notice, PageSection, PageShell, Spinner, Stack, Table } from "./components/ui";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { AccountPanels } from "./AccountPanels";
 import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
@@ -81,7 +81,7 @@ export function PortfolioPanel({
                   </Badge>
                   <Badge tone="success" size="sm">HITL ATTESTED</Badge>
                 </Flex>
-                <h3>{brokerLabel} Portfolio Holdings &amp; Open Positions</h3>
+                <CardHeader title={<>{brokerLabel} Portfolio Holdings &amp; Open Positions</>} />
                 <p className="ui-meta">
                   Inspect real-time equity &amp; options holdings, cost basis, unrealized gain/loss, asset allocations, and portfolio Greeks across your connected {brokerLabel} brokerage desk.
                 </p>

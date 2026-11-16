@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { TabHoverItem } from "./TabHoverItem";
-import { Button, TextInput, Select } from "./components/ui";
+import { Button, CardHeader, TextInput, Select } from "./components/ui";
 import {
   MCP_TOOLS_CATALOG,
   MCP_RESOURCES_CATALOG,
@@ -232,7 +232,7 @@ export function McpApiExplorer() {
           <span className="live-status-pill">● Server Active: JSON-RPC 2.0</span>
           <span className="transport-badge">HTTP POST & SSE Ready</span>
         </div>
-        <h3>Model Context Protocol & REST API Developer Gateway</h3>
+        <CardHeader title="Model Context Protocol & REST API Developer Gateway" />
         <p>
           Seamlessly connect autonomous agents, Claude Desktop, Cursor, and enterprise workflows to Multi-Agent Studio.
           Expose, test, and introspect all 14 tools, 6 resources, 3 prompts, and 16 REST APIs with live execution.
@@ -337,7 +337,7 @@ export function McpApiExplorer() {
           {/* Left: Tools List */}
           <div className="endpoints-list-pane">
             <div className="pane-header">
-              <h4>Available MCP Tools ({filteredTools.length})</h4>
+              <CardHeader title={<>Available MCP Tools ({filteredTools.length})</>} />
               <TextInput
                 type="text"
                 placeholder="Filter tools by name or description..."
@@ -459,7 +459,7 @@ export function McpApiExplorer() {
         <div className="endpoints-split-view">
           <div className="endpoints-list-pane">
             <div className="pane-header">
-              <h4>Exposed MCP Resources ({MCP_RESOURCES_CATALOG.length})</h4>
+              <CardHeader title={<>Exposed MCP Resources ({MCP_RESOURCES_CATALOG.length})</>} />
               <p className="pane-sub">Direct access to stateful data records, revenue metrics, and memory vaults.</p>
             </div>
             <div className="tools-cards-scroll">
@@ -522,7 +522,7 @@ export function McpApiExplorer() {
         <div className="endpoints-split-view">
           <div className="endpoints-list-pane">
             <div className="pane-header">
-              <h4>Pre-Engineered Agent Prompts ({MCP_PROMPTS_CATALOG.length})</h4>
+              <CardHeader title={<>Pre-Engineered Agent Prompts ({MCP_PROMPTS_CATALOG.length})</>} />
               <p className="pane-sub">Structured reasoning prompts for security audits and revenue analysis.</p>
             </div>
             <div className="tools-cards-scroll">
@@ -588,7 +588,7 @@ export function McpApiExplorer() {
         <div className="endpoints-split-view">
           <div className="endpoints-list-pane">
             <div className="pane-header">
-              <h4>Platform REST Endpoints ({filteredRest.length})</h4>
+              <CardHeader title={<>Platform REST Endpoints ({filteredRest.length})</>} />
               <Select
                 className="category-filter-select"
                 value={restCategoryFilter}
@@ -738,7 +738,7 @@ export function McpApiExplorer() {
               <div className="config-header">
                 <span className="config-icon">🤖</span>
                 <div>
-                  <h4>Claude Desktop Configuration</h4>
+                  <CardHeader title="Claude Desktop Configuration" />
                   <p>Add Multi-Agent Studio to Claude Desktop by editing <code>claude_desktop_config.json</code>.</p>
                 </div>
               </div>
@@ -761,7 +761,7 @@ export function McpApiExplorer() {
               <div className="config-header">
                 <span className="config-icon">⚡</span>
                 <div>
-                  <h4>Cursor IDE Integration</h4>
+                  <CardHeader title="Cursor IDE Integration" />
                   <p>Configure Cursor Features → MCP to use this server's real-time tools.</p>
                 </div>
               </div>

@@ -40,6 +40,7 @@ import { Button } from "./components/ui/Button";
 import { Flex } from "./components/ui/Flex";
 import { PageSection } from "./components/ui/PageShell";
 import { EmptyState } from "./components/ui/EmptyState";
+import { CardHeader } from "./components/ui";
 
 export type RsiBand = "any" | "oversold" | "overbought" | "neutral";
 export type MomentumKind =
@@ -330,7 +331,7 @@ export function StockCriteriaPanel({ criteria, onChange, lastSentFilters }: Stoc
           { value: "high_relative_volume", label: "High relative volume" },
         ])}
       </Flex>
-      <h4>Last run&apos;s criteria</h4>
+      <CardHeader title="Last run&apos;s criteria" />
       {lastSentFilters === null ? (
         <EmptyState title="No run yet — the criteria above apply to the next run." />
       ) : (

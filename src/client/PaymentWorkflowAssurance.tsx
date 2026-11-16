@@ -67,21 +67,7 @@ import {
   type PaymentWorkflowOutcome,
   type PaymentWorkflowParams,
 } from "../workflows/paymentWorkflowFlow";
-import {
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  Notice,
-  PageSection,
-  PageShell,
-  Select,
-  Table,
-  Tabs,
-  TabPanel,
-  TextInput,
-  type TabOption,
-} from "./components/ui";
+import { Badge, Button, Card, CardHeader, Checkbox, Notice, PageSection, PageShell, Select, Table, Tabs, TabPanel, TextInput, type TabOption } from "./components/ui";
 import { StoreOperatorsPanel } from "./StoreOperatorsPanel";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { withCsrfInit, csrfHeaders } from "./apiFetch";
@@ -1159,7 +1145,7 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
                   <Badge tone={last.outcome?.status === "started" ? "success" : last.error ? "danger" : "neutral"}>{resultLabel(last)}</Badge>
                   {last.credited && <Badge tone="info">failure credit issued</Badge>}
                 </div>
-                <h3 style={stepTraceHeaderStyle}>Step trace</h3>
+                <CardHeader title="Step trace" />
                 <ol style={resultListStyle}>
                   {last.trace.map((t, i) => (
                     <li key={i}>{t}</li>

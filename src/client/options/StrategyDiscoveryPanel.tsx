@@ -48,7 +48,7 @@ import { OptionsDataDownloadDropdown } from "./OptionsDataDownloadDropdown";
 import type { TradeOrderContext } from "../trading/tradeOrderContext";
 import "./strategyDiscovery.css";
 import { StrategyLibraryModal, type StrategyInfo } from "./StrategyLibraryModal";
-import { Button, FieldShell, PillGroup, SegmentedControl, Select, Table, TextInput, Modal, useToast } from "../components/ui";
+import { Button, CardHeader, FieldShell, PillGroup, SegmentedControl, Select, Table, TextInput, Modal, useToast } from "../components/ui";
 
 const SENTIMENT_ITEMS: Array<{
   id: SentimentType;
@@ -2404,7 +2404,7 @@ export function StrategyDiscoveryPanel({
           <section className="strat-server-candidates" aria-label="Backend-ranked strategies for payoff analysis">
             <div className="strat-server-candidates-header">
               <div>
-                <h3>Backend-ranked strategies</h3>
+                <CardHeader title="Backend-ranked strategies" />
                 <p>Choose a market sentiment to load live server-ranked candidates into the payoff analyzer.</p>
               </div>
               <span className={`strat-server-source ${discoveryDataSource}`}>
@@ -3467,7 +3467,7 @@ export function StrategyDiscoveryPanel({
       {rollingLeg && (
                 <Modal open={Boolean(rollingLeg)} onClose={() => setRollingLeg(null)} size="none" panelClassName="strat-roll-modal" ariaLabel="Roll option leg">
             <div className="strat-modal-header">
-              <h3>Roll Option Leg</h3>
+              <CardHeader title="Roll Option Leg" />
               <Button type="button" className="strat-modal-close-btn" onClick={() => setRollingLeg(null)}>
                 ✕
               </Button>
@@ -3522,7 +3522,7 @@ export function StrategyDiscoveryPanel({
                 <Modal open={showHistoryModal} onClose={() => setShowHistoryModal(false)} size="none" panelClassName="strat-history-modal" ariaLabel="Strategy price history">
             <div className="strat-modal-header">
               <div>
-                <h3>Strategy Price History (Past 30 Days)</h3>
+                <CardHeader title="Strategy Price History (Past 30 Days)" />
                 <span className="strat-modal-sub">
                   Historical contract value of {activeSymbol} {currentStrategyName}
                 </span>
@@ -3580,7 +3580,7 @@ export function StrategyDiscoveryPanel({
       {showSaveModal && (
                 <Modal open={showSaveModal} onClose={() => setShowSaveModal(false)} size="none" panelClassName="strat-save-modal" ariaLabel="Save trade strategy">
             <div className="strat-modal-header">
-              <h3>Save Trade Strategy</h3>
+              <CardHeader title="Save Trade Strategy" />
               <Button type="button" className="strat-modal-close-btn" onClick={() => setShowSaveModal(false)}>
                 ✕
               </Button>
@@ -3629,7 +3629,7 @@ export function StrategyDiscoveryPanel({
                 <Modal open={showSavedTradesModal} onClose={() => setShowSavedTradesModal(false)} size="none" panelClassName="strat-saved-trades-modal" ariaLabel="My saved trades">
             <div className="strat-modal-header">
               <div>
-                <h3>My Saved Trades ({savedTrades.length})</h3>
+                <CardHeader title={<>My Saved Trades ({savedTrades.length})</>} />
                 <span className="strat-modal-sub">Track profit/loss and reopen saved positions</span>
               </div>
               <Button type="button" className="strat-modal-close-btn" onClick={() => setShowSavedTradesModal(false)}>
@@ -3722,7 +3722,7 @@ export function StrategyDiscoveryPanel({
       {showPositionsDrawer && (
         <div className="strat-positions-drawer">
           <div className="strat-drawer-header">
-            <h4>Positions & Leg Status</h4>
+            <CardHeader title="Positions & Leg Status" />
             <Button type="button" className="strat-drawer-close" onClick={() => setShowPositionsDrawer(false)}>
               ✕
             </Button>

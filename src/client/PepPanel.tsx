@@ -19,7 +19,7 @@
  * styles, no CSS imports.
  */
 import { useEffect, useState } from "react";
-import { EmptyState, Notice, Spinner, Stack } from "./components/ui";
+import { CardHeader, EmptyState, Notice, Spinner, Stack } from "./components/ui";
 import { fetchPepState, type PepState } from "./pepApi";
 
 type LoadState =
@@ -79,7 +79,7 @@ export function PepPanel() {
   return (
     <Stack gap="2">
       <div>
-        <h3>Enforcement state</h3>
+        <CardHeader title="Enforcement state" />
         <p>
           Enforcement {enforcement.enforced ? "on" : "off"} for your session
           (PDP flag {enforcement.pdpEnabled ? "on" : "off"}).
@@ -109,7 +109,7 @@ export function PepPanel() {
       </div>
 
       <div>
-        <h3>Gated routes</h3>
+        <CardHeader title="Gated routes" />
         <p>
           Read-only: every route the PEP gates, with the permission it
           checks and the response a denial returns. The inventory is
@@ -134,7 +134,7 @@ export function PepPanel() {
       </div>
 
       <div>
-        <h3>Recent PEP decisions</h3>
+        <CardHeader title="Recent PEP decisions" />
         {/* No decision record exists yet (decisionsAvailable is false):
             the empty state below is the honest rendering. When a
             record lands, this section renders it from pep.decisions. */}

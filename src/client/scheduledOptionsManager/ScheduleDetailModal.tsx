@@ -1,5 +1,5 @@
 import React from "react";
-import { Badge, Button, Modal, Notice, Spinner } from "../components/ui";
+import { Badge, Button, CardHeader, Modal, Notice, Spinner } from "../components/ui";
 import type { StrategyProfile } from "../../trading";
 import type { ScheduledTaskItem } from "./types";
 import { buildScheduleDetail, type PresetRef } from "./scheduleDetail";
@@ -106,7 +106,7 @@ export function ScheduleDetailModal({
 
       {model.sections.map((section) => (
         <section key={section.id} className="sched-detail-section" aria-label={section.title}>
-          <h3 className="sched-detail-section-title">{section.title}</h3>
+          <CardHeader title={section.title} />
           <dl className="sched-detail-list">
             {section.fields.map((field) => (
               <div className="sched-detail-row" key={`${section.id}-${field.label}`}>

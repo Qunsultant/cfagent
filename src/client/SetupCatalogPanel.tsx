@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Button } from "./components/ui";
+import { Button, CardHeader } from "./components/ui";
 
 interface SetupSignature {
   description: string;
@@ -37,7 +37,7 @@ export function SetupCatalogPanel({ onLaunchScreen }: { onLaunchScreen?: (setupI
 
   return (
     <div className="setup-catalog-panel">
-      <h3>Setup Catalog</h3>
+      <CardHeader title="Setup Catalog" />
       <div className="review-filters">
         {["all", "stock", "options"].map((f) => (
           <Button

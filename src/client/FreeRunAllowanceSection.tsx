@@ -25,7 +25,7 @@
  * All calls go through src/client/apiFetch.ts (the #71 rule).
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Notice, Stack, TextInput } from "./components/ui";
+import { Button, CardHeader, Notice, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { FREE_RUN_FAMILIES } from "../data/freeRunCounterPorts";
 
@@ -149,7 +149,7 @@ export function FreeRunAllowanceSection() {
 
   return (
     <Stack gap="1" data-testid="free-runs-panel">
-      <h4>Free-run allowance (operator)</h4>
+      <CardHeader title="Free-run allowance (operator)" />
       <p>
         How many free runs each product gets per calendar month, platform-wide. A Free-tier account may
         run up to the allowance without payment; at the cap the gate falls through to the paid path.

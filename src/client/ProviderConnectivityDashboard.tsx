@@ -31,7 +31,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePolling } from "./usePolling";
 import { apiFetch as fetch } from "./apiFetch";
-import { Badge, Card, EmptyState, Notice, Spinner } from "./components/ui";
+import { Badge, Card, CardHeader, EmptyState, Notice, Spinner } from "./components/ui";
 import {
   fetchDataProviders,
   fmtCaptureBytes,
@@ -122,7 +122,7 @@ export function ProviderConnectivityDashboard() {
 
   return (
     <Card>
-      <h3 style={{ margin: "0 0 0.25rem" }}>Provider connectivity</h3>
+      <CardHeader title="Provider connectivity" />
       <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 1rem" }}>
         Health from stored state only — capture records and credential presence, never a live probe.
         Nothing on this surface runs, verifies, or tests a provider.

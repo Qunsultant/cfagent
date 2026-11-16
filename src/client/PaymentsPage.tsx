@@ -14,21 +14,7 @@
  * strings here are functional agent DIDs, which are not brand surface.
  */
 import React, { useEffect, useRef, useState } from "react";
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  FieldShell,
-  Modal,
-  Notice,
-  PageSection,
-  PageShell,
-  Select,
-  Tabs,
-  TabPanel,
-  TextInput,
-} from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, FieldShell, Modal, Notice, PageSection, PageShell, Select, Tabs, TabPanel, TextInput } from "./components/ui";
 import type { TabOption } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -309,7 +295,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
           <PageSection>
           <form onSubmit={handleCreatePayment}>
             <div className="ui-stack">
-              <h4>➕ Initialize Payment / Checkout Link</h4>
+              <CardHeader title="➕ Initialize Payment / Checkout Link" />
               <p className="ui-meta">Issue a new payment intent across Stripe, PayPal, or Lemon Squeezy with cryptographic Agent DID attestation.</p>
               {paySuccessMsg && <Notice tone="success">{paySuccessMsg}</Notice>}
               {payErrorMsg && <Notice tone="danger">{payErrorMsg}</Notice>}
@@ -382,7 +368,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
       {visitedTabs.has("ledger") && (
         <TabPanel idBase="payments" tabId="ledger" active={activeTab === "ledger"} retain>
           <PageSection>
-          <h4>📋 Transaction Ledger & DID Provenance ({transactions.length})</h4>
+          <CardHeader title={<>📋 Transaction Ledger & DID Provenance ({transactions.length})</>} />
           <p className="ui-meta">Stateful record of all payment operations, drafts, and cryptographic audit proofs.</p>
           {transactions.length === 0 ? (
             <EmptyState

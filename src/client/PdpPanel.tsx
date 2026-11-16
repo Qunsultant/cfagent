@@ -21,7 +21,7 @@
  * styles, no CSS imports.
  */
 import { useEffect, useState } from "react";
-import { EmptyState, Notice, Spinner, Stack } from "./components/ui";
+import { CardHeader, EmptyState, Notice, Spinner, Stack } from "./components/ui";
 import { fetchActivePolicy, type PolicySnapshotInfo } from "./policyProposalsApi";
 import { fetchPdpState, type PdpState } from "./pdpApi";
 
@@ -94,7 +94,7 @@ export function PdpPanel() {
   return (
     <Stack gap="2">
       <div>
-        <h3>Active policy</h3>
+        <CardHeader title="Active policy" />
         <p>Version: {active.version}</p>
         <p>Source: {activeSource}</p>
         {roles.length === 0 ? (
@@ -114,7 +114,7 @@ export function PdpPanel() {
       </div>
 
       <div>
-        <h3>Policy source</h3>
+        <CardHeader title="Policy source" />
         <p>Resolved source: {pdp.policySource.source}</p>
         {pdp.policySource.invalid ? (
           <Notice tone="warning">
@@ -131,7 +131,7 @@ export function PdpPanel() {
       </div>
 
       <div>
-        <h3>Obligations</h3>
+        <CardHeader title="Obligations" />
         <p>
           Read-only: obligations attach to permissions in the frozen obligation
           policy and cannot be edited on this tab.

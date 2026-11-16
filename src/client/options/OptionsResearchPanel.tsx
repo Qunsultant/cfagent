@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useState, createContext, useRef } from "react";
-import { Badge, Button, Card, Checkbox, DetailCard, FieldShell, Flex, Grid, Notice, PageSection, Select, Stack, Table, TextInput } from "../components/ui";
+import { Badge, Button, Card, CardHeader, Checkbox, DetailCard, FieldShell, Flex, Grid, Notice, PageSection, Select, Stack, Table, TextInput } from "../components/ui";
 import { subscribeToRouteChanges } from "../router";
 import { researchSurfaceForParam, researchParamForMode } from "./researchSurface";
 import { apiFetch as fetch } from "../apiFetch";
@@ -283,7 +283,7 @@ function BestTradeCard({
       )}
       {pick.tradePlan && pick.tradePlan.length > 0 && (
         <Stack gap="1">
-          <h4>Trade plan (preview only, requires your approval)</h4>
+          <CardHeader title="Trade plan (preview only, requires your approval)" />
           <Table
             columns={[
               { key: "action", header: "Action", render: (leg) => leg.action },
@@ -721,7 +721,7 @@ function StrategyCard({
           </Grid>
           {targetScenarios.length > 0 && (
             <Stack gap="1">
-              <h4>Modeled P/L near target date · IV unchanged</h4>
+              <CardHeader title="Modeled P/L near target date · IV unchanged" />
               <Table
                 columns={[
                   { key: "underlying", header: "Underlying", render: (scenario) => `$${scenario.underlyingPrice.toFixed(2)}` },
