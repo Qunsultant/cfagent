@@ -659,6 +659,19 @@ function measure(): Map<string, number> {
  * 166->165. Measured totals move 1191/9359 -> 1192/9355 (re-based onto
  * 155f5121; the totals on 2ac3e995 were 1191/9355 -> 1192/9351, on 7d81cd93
  * 1190/9351 -> 1191/9347, and on cc33837c 1174/9135 -> 1175/9131).
+ * Baseline update (#4792, 2026-11-16): four CPO-dhmp surveys are filed
+ * into docs/architecture/survey/ as dated records of what was measured
+ * on their stated bases. Their provider-brand mentions are route
+ * paths, query-param names, and file names that cannot be reworded
+ * without falsifying the survey — all dispositioned S5 live docs
+ * (dated records / identifier inventories): 4 new rows
+ * (2380-survey-draft.md/etrade 6 — the /api/etrade/... route paths
+ * in the surface inventory; 2380-survey-draft.md/alpaca 1 — the
+ * alpaca.ts route reference; 3238-param-survey.md/etrade 1 — the
+ * etrade_auth / etrade_connect_error param names;
+ * slice4-label-survey.md/etrade 4 — the ETradeTradingHub.tsx file
+ * name). ux-framework-survey.md carries no rows. Measured totals move
+ * 1192/9360 -> 1196/9372 (re-based onto c334d9ae).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1691,9 +1704,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/1976-data-foundation-survey.md", "etrade", 1],
   ["docs/architecture/survey/1976-step5-sessionstore-audit.md", "etrade", 30],
   ["docs/architecture/survey/1976-step5-sessionstore-audit.md", "public.com", 1],
+  ["docs/architecture/survey/2380-survey-draft.md", "alpaca", 1],
+  ["docs/architecture/survey/2380-survey-draft.md", "etrade", 6],
+  ["docs/architecture/survey/3238-param-survey.md", "etrade", 1],
   ["docs/architecture/survey/ai-search-activation-survey.md", "etrade", 11],
   ["docs/architecture/survey/native-payments-survey-design.md", "etrade", 1],
   ["docs/architecture/survey/search-hub-survey-design.md", "etrade", 8],
+  ["docs/architecture/survey/slice4-label-survey.md", "etrade", 4],
   ["docs/compliance/facts-n-findings-01.md", "alpaca", 2],
   ["docs/compliance/facts-n-findings-01.md", "etrade", 5],
   ["docs/compliance/facts-n-findings-01.md", "public.com", 1],
