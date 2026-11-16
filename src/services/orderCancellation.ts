@@ -946,3 +946,37 @@ export function recordScopedCancelOutcome(
     matched: receipt.cancelled.length,
   });
 }
+
+export type TradesCancelPort = {
+  trades?: { update?: (id: string, patch: { status: "cancelled" }) => unknown };
+};
+
+/**
+ * Best-effort sync of the `mas_trades` draft row when a broker confirms
+ * cancellation. Orders placed outside `mas_trades` may have no local row.
+ */
+export function markDraftRowCancelledIfPresent(
+  orm: TradesCancelPort | null | undefined,
+  orderId: string | null | undefined,
+): void {
+  if (!orderId) return;
+  try {
+    orm?.trades?.update?.(orderId, { status: "cancelled" });
+  } catch {
+    // Best-effort: orders placed outside mas_trades may have no local draft row.
+  }
+}
+
+/**
+ * Sync every cancelled order in a scoped cancel receipt (`cancel_ticker` /
+ * `cancel_all`) to `mas_trades` when present.
+ */
+export function markScopedDraftsCancelledIfPresent(
+  orm: TradesCancelPort | null | undefined,
+  receipt: Pick<ScopedCancelReceipt, "cancelled" | "dryRun">,
+): void {
+  if (receipt.dryRun) return;
+  for (const entry of receipt.cancelled) {
+    markDraftRowCancelledIfPresent(orm, entry.orderId);
+  }
+}
