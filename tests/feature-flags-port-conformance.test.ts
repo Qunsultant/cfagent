@@ -176,11 +176,9 @@ describe("FeatureFlagPort Conformance Suite (Issue #1815)", () => {
       expect(await enabled.isEnabled("goal_workflow")).toBe(true);
     });
 
-    it("keeps monetization strictly closed in a bare env, Flagship ON/OFF controls it (issue #2043)", async () => {
-      // Same rule as goal_workflow, for charging: a bare env must
-      // never silently enable payment. Explicit enablement only:
-      // FEATURE_FLAGS bulk JSON, FEATURE_MONETIZATION, or the
-      // legacy MONETIZATION_ENABLED var (env adapter only).
+    it("uses the single monetization default (OFF) in a bare env while explicit Flagship/env ON/OFF controls it (#2043, #4613)", async () => {
+      // #4613: monetization has a single shared default across Flagship and Env
+      // (DEFAULT_MONETIZATION_FLAG_VALUE = false, fail-closed). Explicit overrides still win.
       const bare = new EnvFeatureFlagAdapter({});
       expect(await bare.isEnabled("monetization")).toBe(false);
       const bulk = new EnvFeatureFlagAdapter({
@@ -264,13 +262,13 @@ describe("FeatureFlagPort Conformance Suite (Issue #1815)", () => {
       expect(getBooleanValue).toHaveBeenCalledWith("goal_workflow", true, undefined);
     });
 
-    it("passes monetization default true to Flagship, other flags false (#2742, owner direction)", async () => {
+    it("passes the single monetization default (false) to Flagship, other flags false (#4613)", async () => {
       const getBooleanValue = vi.fn().mockImplementation((flag: string, defaultVal: boolean) => Promise.resolve(defaultVal));
       const binding: FlagshipBindingLike = { getBooleanValue };
       const port: FeatureFlagPort = new CfFlagshipAdapter(binding);
-      expect(await port.isEnabled("monetization")).toBe(true);
+      expect(await port.isEnabled("monetization")).toBe(false);
       expect(await port.isEnabled("screener")).toBe(false);
-      expect(getBooleanValue).toHaveBeenCalledWith("monetization", true, undefined);
+      expect(getBooleanValue).toHaveBeenCalledWith("monetization", false, undefined);
     });
 
     it("fails closed when Flagship throws an error", async () => {

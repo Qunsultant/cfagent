@@ -10,6 +10,7 @@
 
 import {
   ALL_FEATURE_FLAGS,
+  DEFAULT_MONETIZATION_FLAG_VALUE,
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
@@ -49,11 +50,11 @@ export class CfFlagshipAdapter implements FeatureFlagPort {
       // the missing-flag case (the dashboard flag is still the
       // authoritative control; an explicit Flagship value wins, and
       // an evaluation failure still fails closed below).
-    // Issue #2742: monetization defaults ON (owner direction).
+    // Issue #2742 / #4613: single monetization default shared via DEFAULT_MONETIZATION_FLAG_VALUE.
     const defaultValue =
       flag === "payment_assurance" ||
       flag === "goal_workflow" ||
-      flag === "monetization";
+      (flag === "monetization" && DEFAULT_MONETIZATION_FLAG_VALUE);
     try {
       // Issue #2596: Flagship cannot distinguish an absent dashboard
       // flag from an explicit one, so parent inheritance is expressed

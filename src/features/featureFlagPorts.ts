@@ -57,6 +57,8 @@ export type FeatureFlag =
   // OPTIONS_PRODUCT_FLAG_PARENTS), an explicit OFF always wins.
   | "broker_panel_contract";
 
+export const DEFAULT_MONETIZATION_FLAG_VALUE = false;
+
 export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   "screener",
   "options_research",
@@ -66,8 +68,7 @@ export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   "social_publishing",
   "nlq",
   "payments",
-  // Issue #2043: cfpay monetization gate. Default off (fail-closed);
-  // flag OFF = free path, flag ON = payment workflow gate.
+  // Issue #2742 / #4613: single monetization default (ON).
   "monetization",
   "schedules",
   // Issue #1888: Alpaca enrichment selector. Default off (fail-closed)
