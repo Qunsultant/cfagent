@@ -72,6 +72,7 @@ const SCOPE_FILES: string[] = [];
 function walk(dir: string): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name).replace(/\\/g, "/");
+    if (path === "docs/architecture/survey") continue; // historical workspace/ surveys (#4793)
     if (entry.isDirectory()) walk(path); // entry: the directory entry being classified
     else SCOPE_FILES.push(path);
   }
