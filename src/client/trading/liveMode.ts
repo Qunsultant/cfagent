@@ -2,13 +2,13 @@
  * Issue #4649 (matrix gap 1) — the one rule set for "this broker cannot
  * simulate, so the paper mode is not a real mode for it".
  *
- * Public.com has a single live MCP endpoint: there is no paper host, no
- * sandbox account and no simulation anywhere. Placement in TEST is refused at
- * the platform seam (`FAILURE_PUBLIC_NO_PAPER_MODE`), so a surface that shows
- * "Public.com / Paper" states a mode that cannot exist. The decided behaviour
- * (Ceos, 2026-11-15) is not display-only: selecting Public while the stored
- * mode is TEST auto-switches the stored mode to PROD, with a confirmation
- * dialog as the disclosure.
+ * The live-only broker has a single live MCP endpoint: there is no paper
+ * host, no sandbox account and no simulation anywhere. Placement in TEST is
+ * refused at the platform seam (`FAILURE_PUBLIC_NO_PAPER_MODE`), so a surface
+ * that shows "<broker> / Paper" states a mode that cannot exist. The decided
+ * behaviour (Ceos, 2026-11-15) is not display-only: selecting that broker while
+ * the stored mode is TEST auto-switches the stored mode to PROD, with a
+ * confirmation dialog as the disclosure.
  *
  * This module holds the decisions (does this broker need live? does this
  * switch need a confirmation? what does the dialog say?), so the settings

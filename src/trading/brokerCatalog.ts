@@ -132,11 +132,12 @@ export interface BrokerDefinition {
   readonly assetClasses: readonly BrokerAssetClass[];
   /**
    * Issue #4649 (matrix gap 1): does this broker have a SIMULATED (paper)
-   * account the platform can route TEST orders to? E*TRADE has a sandbox
-   * host, Alpaca has a paper host, Public has neither — its TEST mode is
-   * preview/read only. Declared per broker, total by type, because a surface
-   * must never infer the answer from a comment: the crumb wording, the
-   * mode-switch confirmation and the ticket warning all read this flag.
+   * account the platform can route TEST orders to? Two of the three
+   * brokers switch hosts per environment and place simulated orders in
+   * TEST; one has a single live endpoint, so its TEST mode is preview/read
+   * only. Declared per broker, total by type, because a surface must never
+   * infer the answer from a comment: the crumb wording, the mode-switch
+   * confirmation and the ticket warning all read this flag.
    */
   readonly paperMode: boolean;
   /** Which operations this broker supports. Total by type: every op is stated. */
@@ -219,8 +220,8 @@ export const BROKER_CATALOG = {
     label: "E*TRADE",
     credentialKind: "oauth1_per_login",
     assetClasses: ["equity", "options"],
-    // E*TRADE really does switch hosts: live api.etrade.com, otherwise the
-    // apisb.etrade.com sandbox. TEST places simulated orders.
+    // This broker really does switch hosts per environment: live against the
+    // production host, otherwise the sandbox. TEST places simulated orders.
     paperMode: true,
     tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
     supports: {
@@ -275,8 +276,8 @@ export const BROKER_CATALOG = {
     label: "Alpaca",
     credentialKind: "api_key_pair",
     assetClasses: ["equity", "options"],
-    // Alpaca really does switch hosts: ALPACA_PAPER_HOST vs
-    // ALPACA_LIVE_HOST. TEST places against the paper account.
+    // This broker's paper account is real: TEST places against the paper host,
+    // not against a simulation.
     paperMode: true,
     tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
     supports: {
@@ -347,10 +348,10 @@ export const BROKER_CATALOG = {
     label: "Public.com",
     credentialKind: "personal_token",
     assetClasses: ["equity", "options"],
-    // Issue #4649: NO paper mode. Public has one live MCP endpoint; TEST is
+    // Issue #4649: NO paper mode. This broker has one live endpoint; TEST is
     // preview/read only and placement is refused at the seam. This flag is
-    // what the crumb, the mode-switch dialog and the ticket warning read, so
-    // "Public + Paper" can no longer be rendered by any surface.
+    // what the crumb, the mode-switch dialog and the ticket warning read, so a
+    // "<broker> + Paper" rendering is impossible for a live-only broker.
     paperMode: false,
     // Public has NO paper trading mode. TEST resolves to the paper
     // bucket for the platform's mode machinery (the type stays

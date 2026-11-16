@@ -42,11 +42,11 @@ export function isBrokerEnvironment(value: unknown): value is BrokerEnvironment 
  * word stays "Live Execution", the wording the crumb already used.
  *
  * Issue #4649 (matrix gap 1): the mode word is the broker's capability,
- * not the stored environment's name. A broker with no paper account
- * (Public.com) never renders "Paper": in TEST it reads "Live Execution",
- * because live is the only mode in which an order could ever place, and
- * the dialog + Notice disclose that. Display-only was rejected — the
- * selection auto-switches the stored mode to PROD, so the crumb and the
+ * not the stored environment's name. A broker with no paper account (a
+ * live-only broker) never renders "Paper": in TEST it reads "Live
+ * Execution", because live is the only mode in which an order could ever
+ * place, and the dialog + Notice disclose that. Display-only was rejected —
+ * the selection auto-switches the stored mode to PROD, so the crumb and the
  * stored mode agree.
  */
 export function brokerModeLabel(params: {
