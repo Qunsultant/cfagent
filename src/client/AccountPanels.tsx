@@ -266,7 +266,7 @@ export function AccountPanels({ activeEnv, onUnreadAlertsChange }: AccountPanels
               <div className="ap-row" key={String(order.orderId)}>
                 <div className="ap-row-main static">
                   <strong>{order.symbol ?? "—"} {order.orderAction ?? ""} {order.quantity ?? ""}</strong>
-                  <span>{order.status} · {order.orderType}{order.limitPrice !== undefined ? ` @ ${fmtUsd(order.limitPrice, 2)}` : ""} · {fmtTime(order.placedTime)} · #{String(order.orderId)}</span>
+                  <span>{order.status} · {order.orderType}{order.limitPrice !== undefined ? ` @ ${fmtUsd(order.limitPrice, 2)}` : ""}{order.filledQty !== undefined ? ` · filled ${order.filledQty}${order.avgFillPrice !== undefined ? ` @ ${fmtUsd(order.avgFillPrice, 2)}` : ""}` : ""} · {fmtTime(order.placedTime)} · #{String(order.orderId)}</span>
                 </div>
                 {order.status === "OPEN" && destructive(`order:${order.orderId}`, "Cancel", () => void cancelRemoteOrder(activeEnv, order.orderId).then((res) => { setOrdersMsg(res.message); void loadOrders(); }).catch((err: any) => setOrdersError(err?.message || "Cancel failed")))}
               </div>

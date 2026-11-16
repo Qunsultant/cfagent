@@ -73,6 +73,8 @@ interface OrderHistoryPayload {
     rawStatus?: string;
     placedTime?: number;
     quantity?: number;
+    filledQty?: number;
+    avgFillPrice?: number;
     limitPrice?: number;
     symbol?: string;
     orderAction?: string;
@@ -139,6 +141,18 @@ const ORDER_HISTORY_COLUMNS = [
     header: "Qty",
     align: "right" as const,
     render: (row: OrderHistoryPayload["orders"][number]) => fmtNum(row.quantity),
+  },
+  {
+    key: "filled",
+    header: "Filled",
+    align: "right" as const,
+    render: (row: OrderHistoryPayload["orders"][number]) => fmtNum(row.filledQty),
+  },
+  {
+    key: "avgPrice",
+    header: "Avg Price",
+    align: "right" as const,
+    render: (row: OrderHistoryPayload["orders"][number]) => fmtMoney(row.avgFillPrice),
   },
   { key: "type", header: "Type", render: (row: OrderHistoryPayload["orders"][number]) => row.orderType },
   {
