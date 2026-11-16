@@ -99,6 +99,15 @@ export interface PlaceOrderParams {
   orderType?: string;
   limitPrice?: number;
   /**
+   * Issue #4657 (matrix gap 6): the trailing-stop distance, in dollars. A broker
+   * accepts exactly one of `trailPrice` / `trailPercent` for a trailing order;
+   * the registry (`advancedOrders`) states at-most-one and the platform seam
+   * refuses both or neither. Ignored by a non-trailing type.
+   */
+  trailPrice?: number;
+  /** Issue #4657: the trailing-stop distance, in percent (one of the pair). */
+  trailPercent?: number;
+  /**
    * Issue #4654 (matrix gap 4): the STOP/STOP_LIMIT trigger price, carried
    * from the stored draft. Per-broker acceptance is each broker's own concern:
    * a platform that cannot place a stop refuses by name (matrix gaps 6/7).

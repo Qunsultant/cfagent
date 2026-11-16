@@ -25,6 +25,9 @@ import {
   type AlpacaOptionsConfig,
 } from "./optionsData";
 import { AlpacaMarketDataProvider } from "../../services/marketDataResearch";
+// Issue #4657: the registry's validator is the single statement of which order
+// types exist per broker and what each one requires.
+import { validateAdvancedOrder } from "../advancedOrders";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 
 // Issue #3990: the paper/live resolver lives in optionsData.ts now
@@ -1086,18 +1089,50 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       );
     }
 
-    let type: "market" | "limit";
+    let type: "market" | "limit" | "stop" | "stop_limit" | "trailing_stop" | "trailing_stop_limit";
     let limitPrice: number | undefined;
-    if (orderType === "MARKET") {
-      type = "market";
-    } else if (orderType === "LIMIT") {
+    // Issue #4657 (matrix gap 6): the seam used to accept MARKET/LIMIT only and
+    // refuse the rest with a hand-written sentence, while the provider below it
+    // has supported stop / stop-limit / trailing all along. The registry (#3892)
+    // already declares which types exist per broker and what each one requires,
+    // so the gate VALIDATES through it instead of keeping a second list. Its
+    // first production caller is here.
+    const advanced = validateAdvancedOrder({
+      type: orderType.toLowerCase(),
+      broker: "alpaca",
+      params: {
+        stop_price: params.stopPrice,
+        limit_price: params.limitPrice,
+        trail_price: params.trailPrice,
+        trail_percent: params.trailPercent,
+        qty: params.quantity,
+      },
+    });
+    if (!advanced.ok) {
+      return failed(`${advanced.message} The order was not placed.`);
+    }
+    type = orderType.toLowerCase() as typeof type;
+    // Every limit-bearing type carries the limit price: LIMIT, STOP_LIMIT and
+    // TRAILING_STOP_LIMIT (the registry requires `limit_price` for all three).
+    if (orderType === "LIMIT" || orderType === "STOP_LIMIT" || orderType === "TRAILING_STOP_LIMIT") {
       if (!Number.isFinite(params.limitPrice)) {
         return failed("Alpaca limit order rejected: a limit price is required. The order was not placed.");
       }
-      type = "limit";
       limitPrice = params.limitPrice;
-    } else {
-      return failed(`Alpaca supports market and limit equity orders in this client; order type ${orderType} was not placed.`);
+    }
+    // Alpaca requires EXACTLY one trailing distance for a trailing order; the
+    // registry states at-most-one (its `excludes` pair), so the at-least-one
+    // half is stated here, before the POST.
+    const isTrailing = type === "trailing_stop" || type === "trailing_stop_limit";
+    if (isTrailing && params.trailPrice === undefined && params.trailPercent === undefined) {
+      return failed(
+        `Alpaca ${type} needs one of trail_price / trail_percent, and the request carried neither. The order was not placed.`,
+      );
+    }
+    if (!isTrailing && (params.trailPrice !== undefined || params.trailPercent !== undefined)) {
+      return failed(
+        `Alpaca ${orderType} does not take a trailing distance; trail_price / trail_percent apply only to a trailing order. The order was not placed.`,
+      );
     }
     if (!this.alpacaData.isConfigured()) {
       return failed("Alpaca credentials are not configured, so the order was not placed. No funds were moved.");
@@ -1116,6 +1151,11 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       side,
       type,
       ...(limitPrice !== undefined ? { limit_price: limitPrice } : {}),
+      // Issue #4657: the trigger and trailing distances the mapping above
+      // accepted now actually travel to the broker.
+      ...(params.stopPrice !== undefined ? { stop_price: params.stopPrice } : {}),
+      ...(params.trailPrice !== undefined ? { trail_price: params.trailPrice } : {}),
+      ...(params.trailPercent !== undefined ? { trail_percent: params.trailPercent } : {}),
       ...(priceSource !== undefined ? { priceSource } : {}),
       time_in_force: (params.timeInForce as any) || "day",
       ...(isExtendedSession ? { extended_hours: true } : {}),
@@ -1263,6 +1303,13 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       quantity: record.quantity,
       orderType: record.orderType,
       limitPrice: record.price,
+      // Issue #4657: the HITL path settles the trigger and time-in-force the
+      // draft carries (#4654/#4656), not an empty set — a stop draft approved
+      // here used to reach the seam with no stop price at all.
+      stopPrice: (record as { stopPrice?: number }).stopPrice,
+      ...((record as { timeInForce?: "day" | "gtc" | "ioc" | "fok" }).timeInForce
+        ? { timeInForce: (record as { timeInForce?: "day" | "gtc" | "ioc" | "fok" }).timeInForce }
+        : {}),
       priceSource,
       userLogin: this.userLogin,
       ...(notes.orderClass === "bracket"

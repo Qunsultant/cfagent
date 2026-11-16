@@ -2619,6 +2619,8 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     /** Issue #3892: the advanced types the registry declares (trailing stops). */
     type?: "market" | "limit" | "stop" | "stop_limit" | "trailing_stop" | "trailing_stop_limit";
     limit_price?: number;
+    /** Issue #4657: the STOP / STOP_LIMIT trigger price (matrix gap 6). */
+    stop_price?: number;
     /** Issue #3892: trailing-stop parameters, exactly one of the two. */
     trail_price?: number;
     trail_percent?: number;
@@ -2675,6 +2677,10 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
         type: params.type || "market",
         time_in_force: params.time_in_force || "day",
         ...(params.limit_price ? { limit_price: params.limit_price } : {}),
+        // Issue #4657: the trigger price a stop / stop_limit order cannot be
+        // placed without. Sent only when present, so a basic order's wire body
+        // is byte-identical to before.
+        ...(params.stop_price !== undefined ? { stop_price: params.stop_price } : {}),
         // Issue #3892: the fields the advanced registry declares. Sent only
         // when present, so a basic order's wire body is byte-identical.
         ...(params.trail_price !== undefined ? { trail_price: params.trail_price } : {}),
@@ -3518,6 +3524,8 @@ export class MarketDataResearchService {
     /** Issue #3892: the advanced types the registry declares. */
     type?: "market" | "limit" | "stop" | "stop_limit" | "trailing_stop" | "trailing_stop_limit";
     limit_price?: number;
+    /** Issue #4657: the STOP / STOP_LIMIT trigger (forwarded to placeOrder). */
+    stop_price?: number;
     trail_price?: number;
     trail_percent?: number;
     notional?: number;

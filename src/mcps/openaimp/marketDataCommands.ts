@@ -472,6 +472,10 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       notional: { type: "number", description: "Issue #3892: notional sizing instead of qty (fractional trading)" },
       good_till_date: { type: "string", description: "Issue #3892: GTD expiry instant (RFC 3339) with time_in_force 'gtd'" },
       limit_price: { type: "number", description: "Limit price (required if type is limit)" },
+      // Issue #4657: the trigger a stop / stop_limit order cannot be placed
+      // without — the schema never offered it, so the MCP path could only POST
+      // type=stop with no price.
+      stop_price: { type: "number", description: "Stop trigger price (required if type is stop or stop_limit)" },
       time_in_force: { type: "string", enum: ["day", "gtc", "ioc", "fok"], description: "Time in force" },
       extended_hours: { type: "boolean", description: "Allow execution in pre-market, after-hours, and overnight EXTO sessions" },
       order_class: { type: "string", enum: ["simple", "bracket", "oco", "oto"], description: "Order class ('bracket' for parent orders with take-profit and stop-loss legs)" },
@@ -532,6 +536,7 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     notional: z.number().positive().optional().describe("Issue #3892: notional sizing instead of qty"),
     good_till_date: z.string().min(1).optional().describe("Issue #3892: GTD expiry instant"),
     limit_price: z.number().positive().optional().describe("Limit price"),
+    stop_price: z.number().positive().optional().describe("Issue #4657: stop trigger price for stop / stop_limit"),
     time_in_force: z.enum(["day", "gtc", "ioc", "fok"]).default("day").optional(),
     extended_hours: z.boolean().optional().describe("Allow extended-hours execution"),
     order_class: z.enum(["simple", "bracket", "oco", "oto"]).optional().describe("Order class ('bracket' for parent orders with TP/SL legs)"),
@@ -558,6 +563,8 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       side: "buy" | "sell";
       type?: "market" | "limit" | "stop" | "stop_limit" | "trailing_stop" | "trailing_stop_limit";
       limit_price?: number;
+      /* Issue #4657: the stop trigger for a stop / stop_limit order. */
+      stop_price?: number;
       /* Issue #3892: the advanced parameters the registry declares. */
       trail_price?: number;
       trail_percent?: number;
@@ -766,6 +773,8 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
     const advanced: Record<string, unknown> = {};
     if (input.trail_price !== undefined) advanced.trail_price = Number(input.trail_price);
     if (input.trail_percent !== undefined) advanced.trail_percent = Number(input.trail_percent);
+    // Issue #4657: the stop trigger travels with the order (stop / stop_limit).
+    if (input.stop_price !== undefined) advanced.stop_price = Number(input.stop_price);
     if (input.notional !== undefined) advanced.notional = Number(input.notional);
     if (input.good_till_date !== undefined) advanced.good_till_date = String(input.good_till_date);
     const result = await service.placeAlpacaOrder({ ...normalized, ...advanced, priceSource: { kind: "user" } });
