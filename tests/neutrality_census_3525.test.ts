@@ -743,6 +743,21 @@ function measure(): Map<string, number> {
  * refusal and their doc comments; etrade/client.ts etrade 329->330 — the
  * predicate that keeps a LIMIT_ON_* order priced). Measured totals move
  * 1283/10127 -> 1283/10138 (re-based onto 5dbede526).
+
+ * Baseline update (#4935, 2026-11-16; re-based onto f24e9dfd):
+ * ADR 0033 (cross-store consistency contract) files under
+ * docs/architecture/adr/ with its audit ledger. The ledger
+ * inventories the existing dual-write/projection paths by module
+ * file name, so it names the broker screener-run publication module
+ * verbatim (etradeBrokerPublish.ts); rewording the file name would
+ * falsify the inventory, so the one row is dispositioned INTEGRATION
+ * (naming the provider is the inventory's job — the #4792 survey
+ * precedent). This rebase also resolves the merge conflict with the
+ * #4671/#4469 paragraphs and the #4957 paragraph, which landed on main
+ * after this branch's base. The INTEGRATION marker is restated to the true value
+ * 698/7061: the pre-change marker (681/6528) had drifted — the true
+ * span on current main is 697/7060 (the #4791 precedent; main's #4957
+ * raises added 12 lines) — plus this row (1 line).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -950,7 +965,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (681 rows / 6528 lines) ----
+  // ---- INTEGRATION (698 rows / 7061 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -958,6 +973,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "yahoo", 5],
   ["docs/architecture/adr/0019-enrichment-yahoo-alpaca.md", "alpaca", 17],
   ["docs/architecture/adr/0019-enrichment-yahoo-alpaca.md", "yahoo", 18],
+  // #4935: ADR 0033's audit ledger names the broker publication module
+  // it inventories (INTEGRATION — naming the provider is the
+  // inventory's job).
+  ["docs/architecture/adr/0033-cross-store-consistency-contract.md", "etrade", 1],
   ["docs/architecture/agentic/agent-capabilities.md", "alpaca", 1],
   ["docs/architecture/agentic/job-system.md", "alpaca", 6],
   ["docs/architecture/agentic/job-system.md", "nasdaq", 2],
