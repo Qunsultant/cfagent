@@ -716,14 +716,14 @@ function measure(): Map<string, number> {
  * mcpPermissionPorts.ts/etrade 9->11, brokerCatalog.ts/etrade 26->29). The
  * prose that named the sibling brokers inside the E*TRADE module was
  * neutralized instead of baselined, so no alpaca or public.com row appears.
- * Measured totals move 1283/10115 -> 1283/10124 (re-based onto 043afa900).
+ * Measured totals move 1283/10115 -> 1283/10126 (re-based onto 043afa900).
  * Baseline update (#4671, 2026-11-16): gap 17 gives the auction terms a broker.
  * An auction order is market/limit + opg/cls, so the change lands in the two
  * capability records (the order-type registry and the matrix doc), in the
  * E*TRADE seam that now refuses the term by name, and nowhere else. Every row
  * is a provider's own file or the document that inventories it — all
  * dispositioned INTEGRATION (naming the provider is their job): 5 raises
- * (brokerage-data-matrix.md etrade 80->82 / alpaca 60->62, advancedOrders.ts
+ * (brokerage-data-matrix.md etrade 80->83 / alpaca 60->63, advancedOrders.ts
  * etrade 27->28 / alpaca 28->29, etrade/platform.ts etrade 69->72). The prose
  * that named the sibling broker inside `timeInForce.ts` and the E*TRADE seam
  * was neutralized instead of baselined, so no new row appears.
@@ -2107,9 +2107,9 @@ const BASELINE: Array<[string, string, number]> = [
   // data providers it compares by definition; the table is the artefact,
   // not platform framing (same disposition as the broker-parity-matrix
   // rows, #4038/#4039). Measured 2026-11-15 on the placed file.
-  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 82],
+  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 83],
   ["docs/architecture/business/brokerage-data-matrix.md", "public.com", 14],
-  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 62],
+  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 63],
   ["docs/architecture/business/brokerage-data-matrix.md", "schwab", 3],
   ["docs/architecture/business/brokerage-data-matrix.md", "fidelity", 2],
   ["docs/architecture/business/brokerage-data-matrix.md", "robinhood", 1],
