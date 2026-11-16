@@ -18,7 +18,7 @@ import { TextInput } from "../../components/ui/TextInput";
 import { FieldShell } from "../../components/ui/Field";
 import { Tabs, TabPanel } from "../../components/ui/Tabs";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
-import { CardHeader } from "../../components/ui";
+import { CardHeader, Grid } from "../../components/ui";
 
 export interface RevenueTabProps {
   adBannerConfig: AdBannerConfig;
@@ -133,7 +133,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
         />
         <TabPanel idBase="revenue" tabId="metrics" active={activeTab === "metrics"} retain={visitedTabs.has("metrics")}>
           <PageSection title="Metrics">
-          <div className="ui-stat-grid">
+          <Grid autoFit minColumnWidth="sm" gap="2">
             <Card padding="none" emphasized>
               <div className="ui-row">
                 <span>💵</span>
@@ -215,7 +215,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                 </div>
               </div>
             </Card>
-          </div>
+          </Grid>
           </PageSection>
         </TabPanel>
         <TabPanel idBase="revenue" tabId="placements" active={activeTab === "placements"} retain={visitedTabs.has("placements")}>
@@ -255,7 +255,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                   {extAdErrorMsg && <Notice tone="danger">{extAdErrorMsg}</Notice>}
 
                   <form onSubmit={handleCreateExternalAd} className="ui-stack">
-                    <div className="ui-form-row-3">
+                    <Grid columns={3} gap="2">
                       <FieldShell id="ext-title" label="Ad Campaign Title *">
                         <TextInput
                           type="text"
@@ -287,7 +287,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                           <option value="sidebar">Sidebar Rail</option>
                         </Select>
                       </FieldShell>
-                    </div>
+                    </Grid>
 
                     <FieldShell id="ext-tagline" label="Tagline / Promo Copy">
                       <TextInput
@@ -298,7 +298,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                       />
                     </FieldShell>
 
-                    <div className="ui-form-row-4">
+                    <Grid columns={4} gap="2">
                       <FieldShell id="ext-url" label="Target URL *">
                         <TextInput
                           type="url"
@@ -334,7 +334,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                           onChange={(e) => setNewExtCpc(e.target.value)}
                         />
                       </FieldShell>
-                    </div>
+                    </Grid>
 
                     <div>
                       <Button
@@ -386,7 +386,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                   {catErrorMsg && <Notice tone="danger">{catErrorMsg}</Notice>}
 
                   <form onSubmit={handleCreateCategory} className="ui-stack">
-                    <div className="ui-form-row-3">
+                    <Grid columns={3} gap="2">
                       <FieldShell id="cat-name" label="Category Name *">
                         <TextInput
                           type="text"
@@ -412,7 +412,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                           onChange={(e) => setNewCatOrder(e.target.value)}
                         />
                       </FieldShell>
-                    </div>
+                    </Grid>
 
                     <FieldShell id="cat-desc" label="Description">
                       <TextInput
@@ -450,7 +450,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                 </p>
               </div>
 
-              <div className="ui-stat-grid">
+              <Grid autoFit minColumnWidth="sm" gap="2">
                 {tables.map((tbl) => (
                   <Card padding="none" key={tbl.name}>
                     <div className="ui-stack">
@@ -486,7 +486,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                     </div>
                   </Card>
                 ))}
-              </div>
+              </Grid>
             </div>
           </Card>
           </PageSection>
@@ -502,7 +502,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                 </p>
               </div>
 
-              <div className="ui-form-row">
+              <Grid columns={2} gap="2">
                 <Card padding="none">
                   <div className="ui-stack">
                     <h5>⚙️ Google Ads Configuration</h5>
@@ -525,7 +525,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                       />
                     </FieldShell>
 
-                    <div className="ui-form-row">
+                    <Grid columns={2} gap="2">
                       <FieldShell id="google-slot" label="Default Ad Slot ID">
                         <TextInput
                           type="text"
@@ -544,7 +544,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                           <option value="rectangle">300x250 Medium Rectangle</option>
                         </Select>
                       </FieldShell>
-                    </div>
+                    </Grid>
                   </div>
                 </Card>
 
@@ -562,7 +562,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                     </div>
                   </Card>
                 )}
-              </div>
+              </Grid>
             </div>
           </Card>
           </PageSection>

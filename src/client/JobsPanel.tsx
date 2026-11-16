@@ -11,7 +11,7 @@
  * styles), and no issue-number patterns in rendered text.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Badge, Button, CardHeader, EmptyState, Modal, Notice, Select, Table, TextInput } from "./components/ui";
+import { Badge, Button, CardHeader, EmptyState, Grid, Modal, Notice, Select, Stack, Table, TextInput } from "./components/ui";
 import {
   addGoal,
   createSchedule,
@@ -214,8 +214,8 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
   ];
 
   return (
-    <div className={embedded ? "" : "jobs-panel"}>
-      <div className="ui-mb-1">
+    <Stack gap="2" className={embedded ? "" : "jobs-panel"}>
+      <div>
         <Button size="sm" variant="secondary" disabled={loading} onClick={() => void refresh()}>
           Refresh
         </Button>
@@ -274,7 +274,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
         empty={<EmptyState title="No goals" />}
       />
       {selectedGoalId && (
-        <div className="ui-mt-2">
+        <div>
           <CardHeader title={<>Run history: {selectedGoalId}</>} />
           <Table
             columns={runColumns}
@@ -287,11 +287,11 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
 
       <CardHeader title="Add a goal" />
       {goalFormError && <Notice tone="danger">{goalFormError}</Notice>}
-      <div className="ui-form-row">
+      <Grid columns={2} gap="2">
         <TextInput label="Id" value={goalForm.id} onChange={(e) => setGoalForm({ ...goalForm, id: e.target.value })} />
         <TextInput label="Name" value={goalForm.name} onChange={(e) => setGoalForm({ ...goalForm, name: e.target.value })} />
-      </div>
-      <div className="ui-form-row">
+      </Grid>
+      <Grid columns={2} gap="2">
         <TextInput label="Cron" value={goalForm.cron} onChange={(e) => setGoalForm({ ...goalForm, cron: e.target.value })} />
         <Select label="Operation" aria-label="operation" value={goalForm.operation} disabled={operations.length === 0} onChange={(e) => setGoalForm({ ...goalForm, operation: e.target.value })}>
           <option value="">{operations.length === 0 ? "Could not load operations" : "Select an operation…"}</option>
@@ -301,12 +301,12 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
             </option>
           ))}
         </Select>
-      </div>
-      <div className="ui-form-row">
+      </Grid>
+      <Grid columns={2} gap="2">
         <TextInput label="Budget (cents)" value={goalForm.budgetCents} onChange={(e) => setGoalForm({ ...goalForm, budgetCents: e.target.value })} />
         <TextInput label="Time zone (optional)" value={goalForm.timeZone} onChange={(e) => setGoalForm({ ...goalForm, timeZone: e.target.value })} />
-      </div>
-      <div className="ui-mt-2">
+      </Grid>
+      <div>
         <Button variant="primary" disabled={!!busy} onClick={() => void submitGoalForm()}>
           Add goal
         </Button>
@@ -363,7 +363,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
         empty={<EmptyState title="No schedules" />}
       />
       {selectedScheduleId && (
-        <div className="ui-mt-2">
+        <div>
           <CardHeader title={<>Run history: {selectedScheduleId}</>} />
           <Table
             columns={runColumns}
@@ -377,7 +377,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
       <CardHeader title="Create a schedule" />
       <p className="ui-meta">Only the gated callbacks can be armed from here. Screening schedules need a connected account; the server reports that plainly.</p>
       {scheduleFormError && <Notice tone="danger">{scheduleFormError}</Notice>}
-      <div className="ui-form-row">
+      <Grid columns={2} gap="2">
         <Select label="Callback" aria-label="callback" value={scheduleForm.callback} disabled={callbacks.length === 0} onChange={(e) => setScheduleForm({ ...scheduleForm, callback: e.target.value })}>
           <option value="">{callbacks.length === 0 ? "Could not load callbacks" : "Select a callback…"}</option>
           {callbacks.map((c) => (
@@ -390,16 +390,16 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
           <option value="cron">Cron</option>
           <option value="interval">Interval</option>
         </Select>
-      </div>
-      <div className="ui-form-row">
+      </Grid>
+      <Grid columns={2} gap="2">
         {scheduleForm.scheduleType === "cron" ? (
           <TextInput label="Cron" value={scheduleForm.cron} onChange={(e) => setScheduleForm({ ...scheduleForm, cron: e.target.value })} />
         ) : (
           <TextInput label="Interval seconds" value={scheduleForm.intervalSeconds} onChange={(e) => setScheduleForm({ ...scheduleForm, intervalSeconds: e.target.value })} />
         )}
         <TextInput label="Payload (JSON object)" multiline rows={3} value={scheduleForm.payloadJson} onChange={(e) => setScheduleForm({ ...scheduleForm, payloadJson: e.target.value })} />
-      </div>
-      <div className="ui-mt-2">
+      </Grid>
+      <div>
         <Button variant="primary" disabled={!!busy} onClick={() => void submitScheduleForm()}>
           Create schedule
         </Button>
@@ -417,34 +417,38 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
         empty={<EmptyState title="No cron triggers" />}
       />
 
-      <div className="ui-mt-2">
+      <div>
         <Notice tone="info" title="Coverage note">
           Platform firings of internal-only callbacks (async-job plumbing, draft expiry, IV collection, token renewal) have no per-run record in this slice; their outcomes stay visible through their own feeds. Manual triggers of those callbacks from this panel are recorded. Paused schedules refuse Run now until resumed.
         </Notice>
       </div>
 
       <Modal open={goalDeleteTarget !== null} onClose={() => setGoalDeleteTarget(null)} title="Remove goal?">
-        <p>Removing {goalDeleteTarget?.id} deletes the goal. Past run records stay readable.</p>
-        <div className="ui-mt-2">
-          <Button variant="danger" disabled={!!busy} onClick={() => { const t = goalDeleteTarget; setGoalDeleteTarget(null); if (t) void withBusy(`remove-${t.id}`, () => removeGoal(t.id).then(() => {})); }}>
-            Remove
-          </Button>{" "}
-          <Button variant="secondary" onClick={() => setGoalDeleteTarget(null)}>
-            Keep
-          </Button>
-        </div>
+        <Stack gap="2">
+          <p>Removing {goalDeleteTarget?.id} deletes the goal. Past run records stay readable.</p>
+          <div>
+            <Button variant="danger" disabled={!!busy} onClick={() => { const t = goalDeleteTarget; setGoalDeleteTarget(null); if (t) void withBusy(`remove-${t.id}`, () => removeGoal(t.id).then(() => {})); }}>
+              Remove
+            </Button>{" "}
+            <Button variant="secondary" onClick={() => setGoalDeleteTarget(null)}>
+              Keep
+            </Button>
+          </div>
+        </Stack>
       </Modal>
       <Modal open={scheduleDeleteTarget !== null} onClose={() => setScheduleDeleteTarget(null)} title="Delete schedule?">
-        <p>Deleting {scheduleDeleteTarget?.id} cancels the schedule. Past run records stay readable.</p>
-        <div className="ui-mt-2">
-          <Button variant="danger" disabled={!!busy} onClick={() => { const t = scheduleDeleteTarget; setScheduleDeleteTarget(null); if (t) void withBusy(`delete-${t.id}`, () => deleteSchedule(t.id)); }}>
-            Delete
-          </Button>{" "}
-          <Button variant="secondary" onClick={() => setScheduleDeleteTarget(null)}>
-            Keep
-          </Button>
-        </div>
+        <Stack gap="2">
+          <p>Deleting {scheduleDeleteTarget?.id} cancels the schedule. Past run records stay readable.</p>
+          <div>
+            <Button variant="danger" disabled={!!busy} onClick={() => { const t = scheduleDeleteTarget; setScheduleDeleteTarget(null); if (t) void withBusy(`delete-${t.id}`, () => deleteSchedule(t.id)); }}>
+              Delete
+            </Button>{" "}
+            <Button variant="secondary" onClick={() => setScheduleDeleteTarget(null)}>
+              Keep
+            </Button>
+          </div>
+        </Stack>
       </Modal>
-    </div>
+    </Stack>
   );
 }

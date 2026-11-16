@@ -32,21 +32,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { controlJobStage } from "./jobsApi";
-import {
-  Badge,
-  Button,
-  Card,
-  CardHeader,
-  EmptyState,
-  Modal,
-  Notice,
-  PageSection,
-  PageShell,
-  PillGroup,
-  Table,
-  type TableColumn,
-  TextInput,
-} from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, Grid, Modal, Notice, PageSection, PageShell, PillGroup, Stack, Table, type TableColumn, TextInput } from "./components/ui";
 import type {
   ShardStrategyEvidence,
   WorkflowRun,
@@ -840,7 +826,7 @@ export function WorkflowRunsPanel() {
     <div>
       <PageShell
       title="Workflow Runs"
-      scopeNote="Every run the workflow engine recorded — job chains (feed → generate → serve → deliver) and standalone screener, goal, and discovery outcomes. Each run shows its stages, inputs, outputs, failures, artifacts, and how it was triggered. Trade approvals and payments stay in their own ledgers (Approvals, Billing)."
+      scopeNote="Every run the workflow engine recorded — job chains (feed → generate → serve → deliver) and standalone screener, goal, and discovery outcomes. Each run shows its stages, inputs, outputs, failures, artifacts, and how it was triggered. Trade approvals and payments stay in their own ledgers (Approvals, Billing))."
       loading={loading && runs.length === 0}
       loadingLabel="Loading workflow runs"
     >
@@ -947,7 +933,7 @@ export function WorkflowRunsPanel() {
         </Card>
 
         {summary && (
-          <div className="ui-stat-grid" aria-label="Run summary">
+          <Grid autoFit minColumnWidth="sm" gap="2">
             {[
               { label: "Runs loaded", value: summary.total },
               { label: "Completed", value: summary.completed },
@@ -966,7 +952,7 @@ export function WorkflowRunsPanel() {
                 <span className="ui-meta-sm">{stat.label}</span>
               </Card>
             ))}
-          </div>
+          </Grid>
         )}
 
         {failedSources.length > 0 && (
@@ -982,7 +968,7 @@ export function WorkflowRunsPanel() {
             rows={displayed}
             rowKey={(run) => run.id}
             caption="Workflow runs"
-            containerClassName="ui-scroll-x"
+            containerClassName="ui-scroll-frame"
             empty={
               <EmptyState
                 framed
@@ -1454,7 +1440,7 @@ export function RunDetail({
         </Notice>
       )}
 
-      <dl className="ui-stat-grid">
+      <Grid as="dl" autoFit minColumnWidth="sm" gap="2">
         <div className="ui-stack">
           <dt className="ui-label">Trigger</dt>
           <dd className="ui-m-0">{run.triggerDetail}</dd>
@@ -1495,7 +1481,7 @@ export function RunDetail({
             {run.failedStages > 0 ? ` · ${run.failedStages} failed` : ""}
           </dd>
         </div>
-      </dl>
+      </Grid>
 
       <CardHeader title="Stages" />
       {run.stages.length === 0 ? (
@@ -1505,7 +1491,7 @@ export function RunDetail({
             : "No stage records exist for this run — the producing store recorded only the run outcome. Stages are never inferred."}
         </Notice>
       ) : (
-        <div className="ui-scroll-x">
+        <div className="ui-scroll-frame">
           <Table
             columns={stageColumns(true)}
             rows={run.stages}
@@ -1667,7 +1653,7 @@ export function RunDetail({
         </PageSection>
       )}
 
-      <div className="ui-stat-grid">
+      <Grid autoFit minColumnWidth="sm" gap="2">
         <section aria-label="Run inputs">
           <CardHeader title="Inputs" />
           <pre className="ui-pre">{formatJson(run.inputs)}</pre>
@@ -1676,7 +1662,7 @@ export function RunDetail({
           <CardHeader title="Outputs" />
           <pre className="ui-pre">{formatJson(run.outputs)}</pre>
         </section>
-      </div>
+      </Grid>
 
       {run.documents && (
         <section aria-label="Documents">
@@ -1743,16 +1729,20 @@ export function RunDetail({
                       {stage.order}. {stage.label} — {stageStatus(stage)}
                     </strong>
                   </summary>
-                  <div className="ui-stat-grid ui-mt-2">
+                  <Grid autoFit minColumnWidth="sm" gap="2">
                     <section aria-label={`${stage.label} inputs`}>
-                      <h5 className="ui-label ui-mt-0 ui-mb-1">Inputs</h5>
-                      <pre className="ui-pre">{formatJson(stage.input)}</pre>
+                      <Stack gap="1">
+                        <h5 className="ui-label ui-mt-0">Inputs</h5>
+                        <pre className="ui-pre">{formatJson(stage.input)}</pre>
+                      </Stack>
                     </section>
                     <section aria-label={`${stage.label} outputs`}>
-                      <h5 className="ui-label ui-mt-0 ui-mb-1">Outputs</h5>
-                      <pre className="ui-pre">{formatJson(stage.output)}</pre>
+                      <Stack gap="1">
+                        <h5 className="ui-label ui-mt-0">Outputs</h5>
+                        <pre className="ui-pre">{formatJson(stage.output)}</pre>
+                      </Stack>
                     </section>
-                  </div>
+                  </Grid>
                 </details>
               </Card>
             ))}

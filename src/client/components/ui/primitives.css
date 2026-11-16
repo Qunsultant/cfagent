@@ -260,7 +260,7 @@
   line-height: 1.5;
 }
 
-.ui-empty .ui-btn, .ui-empty .ui-empty-action { margin-top: var(--space-4); }
+.ui-empty .ui-btn { margin-top: var(--space-4); }
 
 
 /* ---------- Card ---------- */
@@ -780,11 +780,6 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   gap: var(--space-2);
 }
 
-.ui-stack-lg {
-  display: grid;
-  gap: var(--space-2-5);
-}
-
 .ui-push {
   margin-left: auto;
 }
@@ -825,31 +820,12 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   padding-top: var(--space-3);
 }
 
-.ui-stack > .ui-footer-bar,
-.ui-stack-lg > .ui-footer-bar {
+.ui-stack > .ui-footer-bar {
   margin-top: 0;
 }
 
 .ui-narrow {
   max-width: 40rem;
-}
-
-.ui-form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-2);
-}
-
-.ui-form-row-3 {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: var(--space-2);
-}
-
-.ui-form-row-4 {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  gap: var(--space-2);
 }
 
 .ui-icon-lg {
@@ -858,22 +834,6 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
 
 .ui-mt-1 {
   margin-top: var(--space-1);
-}
-
-.ui-mt-2 {
-  margin-top: var(--space-2);
-}
-
-.ui-mb-1 {
-  margin-bottom: var(--space-1);
-}
-
-.ui-mb-1-5 {
-  margin-bottom: var(--space-1-5);
-}
-
-.ui-ml-3 {
-  margin-left: var(--space-3);
 }
 
 .ui-danger {
@@ -896,12 +856,6 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
 .ui-plain-link {
   text-decoration: none;
   color: inherit;
-}
-
-.ui-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-  gap: var(--space-2);
 }
 
 /* ---------- Template organisms I (#3132) ---------- */
@@ -1546,13 +1500,6 @@ div.ui-drawer-title {
   overflow-wrap: anywhere;
 }
 
-/* Horizontal-only scroll frame (the retired
- * .workflow-runs-table-container / .workflow-runs-stage-list): a wide
- * table scrolls on its own axis instead of pushing the page. */
-.ui-scroll-x {
-  overflow-x: auto;
-}
-
 /* Clip children to the rounded card (the retired
  * .workflow-runs-table-card): without it the table header's muted
  * background paints square over the card's rounded corners. */
@@ -1560,8 +1507,7 @@ div.ui-drawer-title {
   overflow: hidden;
 }
 
-/* Zero-margin utilities, completing the margin family (ui-mt-1, ui-mb-1,
- * ui-ml-3): the facts <dd> needs its browser 40px start margin removed,
+/* Zero-margin utilities: the facts <dd> needs its browser 40px start margin removed,
  * and the label <h5> needs its top margin removed without losing the
  * bottom one. Bare 0 is unitless, never a length token. */
 .ui-m-0 {

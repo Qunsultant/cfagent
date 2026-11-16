@@ -1,6 +1,6 @@
 import React from "react";
 import { adAccentPalette } from "../../designTokens";
-import { Badge, Card, CardHeader, Select, Button, TextInput, PageSection, PageShell, FieldShell, Tabs, TabPanel, Notice } from "../../components/ui";
+import { Badge, Card, CardHeader, Grid, Select, Button, TextInput, PageSection, PageShell, FieldShell, Tabs, TabPanel, Notice } from "../../components/ui";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
 import type { AdItem } from "../types";
 
@@ -75,7 +75,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
         />
         <TabPanel idBase="ads" tabId="offers" active={activeTab === "offers"} retain={visitedTabs.has("offers")}>
           <PageSection title="Offers">
-          <div className="ui-stat-grid">
+          <Grid autoFit minColumnWidth="sm" gap="2">
             {ads.map((ad) => (
               <Card key={ad.id}>
                 <div className="ui-stack">
@@ -106,7 +106,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
                 </div>
               </Card>
             ))}
-          </div>
+          </Grid>
           </PageSection>
         </TabPanel>
         <TabPanel idBase="ads" tabId="submit" active={activeTab === "submit"} retain={visitedTabs.has("submit")}>
@@ -122,7 +122,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
                 {adFormSuccess && <Notice tone="success">{adFormSuccess}</Notice>}
                 {adFormError && <Notice tone="danger">{adFormError}</Notice>}
 
-                <div className="ui-form-row">
+                <Grid columns={2} gap="2">
                   <FieldShell id="ad-title" label="Campaign / Product Title *">
                     <TextInput
                       type="text"
@@ -141,7 +141,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
                       onChange={(e) => setNewAdSponsor(e.target.value)}
                     />
                   </FieldShell>
-                </div>
+                </Grid>
 
                 <FieldShell id="ad-tagline" label="Tagline / Offer Description *">
                   <TextInput
@@ -153,7 +153,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
                   />
                 </FieldShell>
 
-                <div className="ui-form-row-3">
+                <Grid columns={3} gap="2">
                   <FieldShell id="ad-url" label="Destination Landing URL *">
                     <TextInput
                       type="url"
@@ -183,7 +183,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
                       ))}
                     </Select>
                   </FieldShell>
-                </div>
+                </Grid>
 
                 <div>
                   <Button

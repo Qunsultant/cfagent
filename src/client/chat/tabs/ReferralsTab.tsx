@@ -17,7 +17,7 @@ import { FieldShell } from "../../components/ui/Field";
 import { Tabs, TabPanel } from "../../components/ui/Tabs";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
 import { BRAND } from "../../branding";
-import { CardHeader } from "../../components/ui";
+import { CardHeader, Grid } from "../../components/ui";
 
 export interface ReferralsTabProps {
   activeShareRefId: string | null;
@@ -137,7 +137,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 </Button>
               </div>
               <span className="ui-meta-sm">Share to All Social Media Platforms:</span>
-              <div className="ui-stat-grid">
+              <Grid autoFit minColumnWidth="sm" gap="2">
                 <Button
                   href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
                     `Build autonomous AI trading and intelligence agents on ${BRAND.name}: ${personalReferralUrl}`
@@ -273,14 +273,14 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 >
                   👾 {discordCopied ? "✓ Discord Link Copied!" : "Discord Embed"}
                 </Button>
-              </div>
+              </Grid>
             </div>
           </Card>
           </PageSection>
         </TabPanel>
         <TabPanel idBase="referrals" tabId="activity" active={activeTab === "activity"} retain={visitedTabs.has("activity")}>
           <PageSection title="Activity">
-          <div className="ui-stat-grid">
+          <Grid autoFit minColumnWidth="sm" gap="2">
             <Card padding="none">
               <div className="ui-row">
                 <span>🔗</span>
@@ -317,12 +317,12 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 </div>
               </div>
             </Card>
-          </div>
+          </Grid>
           </PageSection>
         </TabPanel>
         <TabPanel idBase="referrals" tabId="links" active={activeTab === "links"} retain={visitedTabs.has("links")}>
           <PageSection>
-          <div className="ui-form-row">
+          <Grid columns={2} gap="2">
             <Card>
               <div className="ui-stack">
                 <div>
@@ -353,7 +353,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                     />
                   </FieldShell>
 
-                  <div className="ui-form-row">
+                  <Grid columns={2} gap="2">
                     <FieldShell id="ref-category" label="Category">
                       <Select
                         value={newRefCategory}
@@ -385,7 +385,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                         onChange={(e) => setNewRefReward(e.target.value)}
                       />
                     </FieldShell>
-                  </div>
+                  </Grid>
 
                   <div>
                     <Button
@@ -551,7 +551,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 </div>
               </div>
             </Card>
-          </div>
+          </Grid>
           </PageSection>
         </TabPanel>
         <TabPanel idBase="referrals" tabId="community" active={activeTab === "community"} retain={visitedTabs.has("community")}>
@@ -565,7 +565,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 </p>
               </div>
 
-              <div className="ui-stat-grid">
+              <Grid autoFit minColumnWidth="sm" gap="2">
                 <a href="https://github.com/OpenAIMP/cfagent" target="_blank" rel="noopener noreferrer" className="ui-plain-link">
                   <Card padding="none">
                     <div className="ui-row">
@@ -710,7 +710,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                     </div>
                   </Card>
                 </a>
-              </div>
+              </Grid>
             </div>
           </Card>
           </PageSection>

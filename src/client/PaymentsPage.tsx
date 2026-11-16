@@ -14,7 +14,7 @@
  * strings here are functional agent DIDs, which are not brand surface.
  */
 import React, { useEffect, useRef, useState } from "react";
-import { Badge, Button, Card, CardHeader, EmptyState, FieldShell, Modal, Notice, PageSection, PageShell, Select, Tabs, TabPanel, TextInput } from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, FieldShell, Grid, Modal, Notice, PageSection, PageShell, Select, Tabs, TabPanel, TextInput } from "./components/ui";
 import type { TabOption } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -238,7 +238,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
       {visitedTabs.has("stats") && (
         <TabPanel idBase="payments" tabId="stats" active={activeTab === "stats"} retain>
           <PageSection title="Stats">
-          <div className="ui-stat-grid">
+          <Grid autoFit minColumnWidth="sm" gap="2">
             <Card padding="none" emphasized>
               <div className="ui-row">
                 <span>💰</span>
@@ -275,7 +275,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
                 </div>
               </div>
             </Card>
-          </div>
+          </Grid>
           </PageSection>
         </TabPanel>
       )}
@@ -309,7 +309,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
                   <option value="lemonsqueezy">Lemon Squeezy (Merchant of Record)</option>
                 </Select>
               </FieldShell>
-              <div className="ui-form-row">
+              <Grid columns={2} gap="2">
                 <FieldShell id="pay-amount" label="Amount *">
                   <TextInput
                     type="number"
@@ -332,7 +332,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
                     <option value="CAD">CAD ($)</option>
                   </Select>
                 </FieldShell>
-              </div>
+              </Grid>
               <FieldShell id="pay-customer" label="Customer Name or Account ID *">
                 <TextInput
                   type="text"
