@@ -500,9 +500,11 @@ capability, not an absence.
   (login only, split across two DOs, no production reader), R2 keys
   (report-id only).
 - **Observability.** Per-run: `mas_events` by session; per-login:
-  `usage_events` by `userLogin`; per-tenant: only where the caller
-  stamps tenant into payloads or uses the Q7 chain / tenant-scoped
-  reads. No single per-tenant observability view exists.
+  `usage_events` by `userLogin`; per-tenant: `buildTenantObservabilityView()`
+  (`src/observability/tenantObservabilityView.ts`, #4619) unifies a
+  tenant's runs, deliveries, denials, and fallbacks over
+  `AuditReader.listAuditForTenant` and #4615's `ProvenanceTuple`
+  without manual joins.
 - **Roles / permissions.** Roles: `platform-admin`, `tenant-admin`,
   `workspace-admin`, `member`, `approver`, `auditor`. Scopes:
   `"platform"` vs `"tenant"` (vs workspace). Platform-admin is
