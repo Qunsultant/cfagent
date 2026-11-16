@@ -146,6 +146,7 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.orm.mas_trades.alter_table_add_column_broker": "7834d9e5f79d40b95e2ee560baa78516e2408e4661665a95cad45ab0faf6c112",
   "schema.orm.mas_trades.alter_table_add_column_price_source": "29e11de70b4fe0a986f306027d5c806afe1dd7313633500a73890e225ad27bfa",
   "schema.orm.mas_trades.alter_table_add_column_mode": "38442d5e5ceb505bfa7e876ce69f8b2be9cfe1f9b48b84a2528075306109b70b",
+  "schema.orm.mas_trades.alter_table_add_column_stop_price": "cfcb1fec30f6e6e022bcaceb91d92bd79b22d7d966574fc3fafb85089a4ab31d",
   "schema.do.stock_copilot_activity.alter_table_add_column_critic_verdict_json": "64dd279747ad9a77a808e5e63c8baf21307acfbcde00195e6ec01064095f1134",
   "schema.do.stock_copilot_activity.alter_table_add_column_mode": "5eb025894bfc9a3e47c888234122af4170214d0ed31da66e373f3d126a7a670b",
   "schema.do.stock_copilot_activity.alter_table_add_column_session": "a5f1dc8ac6e137f026e2611705c21a32be485279d86c5f774575e319a6aee161",
@@ -443,11 +444,11 @@ const P3_DELEGATED_FILES = [
 ];
 
 describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)", () => {
-  it("catalogues all 54 remainder statements: 8 table + 2 index + 42 alter + 1 drop + 1 seed-form", () => {
+  it("catalogues all 56 remainder statements: 8 table + 2 index + 44 alter + 1 drop + 1 seed-form", () => {
     const catalogue = buildRemainderCatalogue();
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(55);
-    expect(catalogue.size()).toBe(55);
-    expect(catalogue.byKind("schema").length).toBe(54);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(56);
+    expect(catalogue.size()).toBe(56);
+    expect(catalogue.byKind("schema").length).toBe(55);
     expect(catalogue.byKind("seed").length).toBe(1);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -472,20 +473,20 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
     }
     expect(verbs.get("CREATE TABLE")).toBe(8);
     expect(verbs.get("CREATE INDEX")).toBe(2);
-    expect(verbs.get("ALTER TABLE")).toBe(43);
+    expect(verbs.get("ALTER TABLE")).toBe(44);
     expect(verbs.get("DROP INDEX")).toBe(1);
     expect(verbs.get("INSERT OR REPLACE")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(REMAINDER_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(55);
+    expect(codes.size).toBe(56);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
-    // Planes: do 47, d1 1, orm 3, index 3, route 1.
+    // Planes: do 47, d1 1, orm 4, index 3, route 1.
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(47);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "d1").length).toBe(1);
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(3);
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(4);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length).toBe(3);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "route").length).toBe(1);
     // Exactly the four parameterized entries, with their parameters.
@@ -580,7 +581,7 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(55);
+    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(56);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")

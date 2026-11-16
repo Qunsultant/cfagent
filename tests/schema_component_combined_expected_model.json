@@ -8048,6 +8048,11 @@
           "pk": 0
         },
         {
+          "name": "stop_price",
+          "type": "REAL",
+          "pk": 0
+        },
+        {
           "name": "created_at",
           "type": "TEXT",
           "pk": 0
