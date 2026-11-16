@@ -26,6 +26,8 @@ import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { brokerSectionNav } from "./brokerSectionNav";
 import type { RiskBroker } from "./portfolioRiskApi";
 import { brokerSupports, isBrokerId } from "../trading";
+// Issue #4649: the one live-mode rule set shared with the settings menu.
+import { needsLiveModeForBroker, liveOnlyNoticeCopy } from "./trading/liveMode";
 import { submitVoiceTurn } from "./voiceDeskClient";
 import {
   createSurfaceVoiceBackend,
@@ -2131,6 +2133,24 @@ export function ETradeTradingHub({
             <Notice tone="warning">
               🛡️ <strong>Safety Guarantee:</strong> No trade will be executed without your explicit authorization. Funds remain untouched until you approve.
             </Notice>
+
+            {/* Issue #4649 (matrix gap 1): the same standing disclosure as the
+                settings menu, above the Approve button — the combination cannot
+                place (the server refuses in TEST), so saying it here stops the
+                user approving a payload that will be refused. Preview stays
+                fully available; nothing is disabled. */}
+            {needsLiveModeForBroker(selectedBroker, activeEnv) && (
+              <Notice
+                tone="warning"
+                variant="box"
+                density="compact"
+                icon="⚠️"
+                title={liveOnlyNoticeCopy({ brokerLabel: presentation.label }).title}
+                className="broker-live-only-notice"
+              >
+                {liveOnlyNoticeCopy({ brokerLabel: presentation.label }).body}
+              </Notice>
+            )}
 
             {/* Issue #1773 (OWASP ASI-02): the exact execution
                 payload, fees, and slippage limits, shown BEFORE the

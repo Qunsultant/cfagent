@@ -1340,7 +1340,11 @@ export function Chat({ user }: { user: User }) {
                 <span className="crumb-module">{getCrumb(tab)}</span>
                 <span className="crumb-divider">{" / "}</span>
                 <span className="crumb-subtitle top-nav-control">
-                  {brokerModeLabel(selectedBrokerLabel, accountMode)}
+                  {brokerModeLabel({
+                    broker: tenantProviders.brokerId,
+                    brokerLabel: selectedBrokerLabel,
+                    accountMode,
+                  })}
                 </span>
               </div>
               <MarketStatusPill variant="sub-header" />
