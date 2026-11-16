@@ -372,6 +372,131 @@ export function publicDraftFromPreflight(
   };
 }
 
+/* ---------------------------- cancellation --------------------------- */
+
+/**
+ * Issue #4650 (matrix gap 2): the status words a cancel payload may carry
+ * that mean the broker ACCEPTED the cancellation. Public's documented order
+ * statuses include CANCELLED, QUEUED_CANCELLED and PENDING_CANCEL; the
+ * spellings are matched case-insensitively because the hosted schema is
+ * unpublished and a single-letter vendor difference must not turn a real
+ * cancellation into a reported failure.
+ */
+const CANCEL_ACCEPTED_STATUS = new Set([
+  "CANCELLED",
+  "CANCELED",
+  "CANCEL_REQUESTED",
+  "CANCEL_PENDING",
+  "PENDING_CANCEL",
+  "QUEUED_CANCELLED",
+  "QUEUED_CANCELED",
+]);
+
+/**
+ * Every other documented order status means the cancel did NOT take effect:
+ * the order is still working (NEW, PARTIALLY_FILLED), already done (FILLED,
+ * EXPIRED, REJECTED), or replaced (PENDING_REPLACE, REPLACED). Listed rather
+ * than inferred so an unknown word falls through to "unconfirmed" instead of
+ * being silently read as success.
+ */
+const CANCEL_REFUSED_STATUS = new Set([
+  "NEW",
+  "OPEN",
+  "PARTIALLY_FILLED",
+  "FILLED",
+  "EXPIRED",
+  "REJECTED",
+  "FAILED",
+  "REPLACED",
+  "PENDING_REPLACE",
+]);
+
+/** The broker's explicit error signal, if the payload carries one. */
+function cancelErrorSignal(payload: Record<string, unknown>): string | undefined {
+  const error = payload.error;
+  if (typeof error === "string" && error !== "") return error;
+  if (isRecord(error)) {
+    const code = str(pickField(error, ["code", "error_code", "errorCode"]));
+    if (code) return code;
+    const message = str(pickField(error, ["message", "detail"]));
+    if (message) return message;
+    return "error";
+  }
+  const errors = payload.errors;
+  if (Array.isArray(errors) && errors.length > 0) {
+    const first = errors[0];
+    if (isRecord(first)) {
+      return str(pickField(first, ["code", "error_code", "errorCode", "message"])) ?? "error";
+    }
+    return typeof first === "string" && first !== "" ? first : "error";
+  }
+  return undefined;
+}
+
+/**
+ * The cancel receipt for a `cancel_order` payload (issue #4650).
+ *
+ * The old seam returned `success: true` unconditionally, so a refused or
+ * unconfirmed cancel read as cancelled. This maps the broker's own signal and
+ * FAILS CLOSED: success requires an explicit `success: true` or a status word
+ * that means the cancellation was accepted. A refusal, an error, or a payload
+ * with no signal at all is `success: false` — the third case says the broker
+ * returned no confirmation, because "we do not know" must never render as
+ * "cancelled".
+ */
+export function publicCancelReceipt(params: {
+  requestedOrderId: string;
+  payload: unknown;
+  /** Injectable clock for deterministic tests; defaults to now. */
+  now?: string;
+}): BrokerCancelOrderResult {
+  const now = params.now ?? new Date().toISOString();
+  const orderId = (isRecord(params.payload) ? parsePublicOrderId(params.payload) : undefined) ?? params.requestedOrderId;
+  const status = isRecord(params.payload) ? parsePublicOrderStatus(params.payload) : undefined;
+  const statusWord = status ? status.toUpperCase() : undefined;
+  const explicitSuccess = isRecord(params.payload) ? params.payload.success : undefined;
+  const errorSignal = isRecord(params.payload) ? cancelErrorSignal(params.payload) : undefined;
+
+  if (explicitSuccess === false) {
+    return {
+      success: false,
+      orderId,
+      message: `Public.com did not cancel order ${orderId}${errorSignal ? ` (${errorSignal})` : ""}; the order was left as the broker had it.`,
+      timestamp: now,
+    };
+  }
+  if (statusWord && CANCEL_REFUSED_STATUS.has(statusWord)) {
+    return {
+      success: false,
+      orderId,
+      message: `Public.com did not cancel order ${orderId}: the broker reported status ${statusWord}. Check the order list before retrying.`,
+      timestamp: now,
+    };
+  }
+  if (errorSignal && explicitSuccess !== true) {
+    return {
+      success: false,
+      orderId,
+      message: `Public.com did not cancel order ${orderId} (${errorSignal}); nothing is reported as cancelled. Check the order list before retrying.`,
+      timestamp: now,
+    };
+  }
+  if (explicitSuccess === true || (statusWord && CANCEL_ACCEPTED_STATUS.has(statusWord))) {
+    return {
+      success: true,
+      orderId,
+      message: `Public.com cancelled order ${orderId}${statusWord ? ` (status ${statusWord})` : ""}.`,
+      timestamp: now,
+    };
+  }
+  return {
+    success: false,
+    orderId,
+    message: `Public.com returned no cancellation confirmation for order ${orderId}; the order may still be open. Check the order list before retrying.`,
+    timestamp: now,
+  };
+}
+
 /** A failed execution result carrying the named refusal (never a placement). */
 export function publicRefusedExecution(params: {
   orderId: string;
