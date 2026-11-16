@@ -406,9 +406,13 @@ watchlists (owner column `user_login`).
 - **Tenant-admins cannot use user lookup at all** (platform-admin-only
   gate) — the reverse gap: a tenant-scoped admin cannot read their own
   tenant's users through this surface.
-- **Premium x402 calls:** identity falls back to the on-chain payer
-  when no session login exists — a payer wallet can read/act without a
-  login identity, and tier is resolved from whatever login that maps to.
+- **Premium x402 calls (#4621 — decided & enforced):** wallet-as-subject
+  policy in `src/security/payerWalletIdentity.ts` (`resolvePayerWalletIdentity`).
+  When no session login exists, a verified payer wallet acts strictly as
+  `payer:<wallet>` for paid runs and per-payer quota (never able to read
+  user broker tokens or impersonate a login), resolves a tier only when
+  explicitly mapped to a login (else Free), and fails closed when neither
+  a session login nor a verified payer wallet is present.
 - **Check-payment unknown submission (#4606 — resolved):** when no
   paid-submission record exists for `runRequestId`, `POST /submission/check-payment`
   returns `404` (`FAILURE_COMMERCIAL_NOT_FOUND`) before any Stripe/facilitator
