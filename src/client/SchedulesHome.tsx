@@ -36,7 +36,7 @@
  * handler. The home stays broker-neutral and de-hubbed.
  */
 import { useEffect, useState } from "react";
-import { Card, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
+import { Card, CardHeader, PageSection, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
 import { SchedulesPanel } from "./SchedulesPanel";
 import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
 import { ScheduleRunLedgerPanel } from "./ScheduleRunLedgerPanel";
@@ -95,7 +95,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
       title="Schedules"
       scopeNote="The one scheduling surface — schedules, goal schedules, the consolidated run ledger, the admin queue, background tasks, and the dead-letter queue"
     >
-      <div className="schedules-home-tabs-wrapper">
+      <PageSection>
         <Tabs<SchedulesHomeView>
           idBase="schedules-home"
           ariaLabel="Schedules views"
@@ -103,7 +103,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
           value={deepLink.view}
           onChange={handleSelectView}
         />
-      </div>
+      </PageSection>
 
       <TabPanel idBase="schedules-home" tabId="list" active={deepLink.view === "list"}>
         <Card>
@@ -125,10 +125,10 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
         <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
-          <div className="section-label-row">
-            <span>Run ledger</span>
-            <small>Every run with its schedule, async-job, and workflow linkage</small>
-          </div>
+          <CardHeader
+            title="Run ledger"
+            meta={<span className="ui-meta-sm">Every run with its schedule, async-job, and workflow linkage</span>}
+          />
           <ScheduleRunLedgerPanel
             scheduleId={deepLink.scheduleId}
             runId={deepLink.runId}
@@ -142,10 +142,10 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
         <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
-          <div className="section-label-row">
-            <span>Goal schedules</span>
-            <small>ScheduledAgent goals, ticks &amp; add-goal form</small>
-          </div>
+          <CardHeader
+            title="Goal schedules"
+            meta={<span className="ui-meta-sm">ScheduledAgent goals, ticks &amp; add-goal form</span>}
+          />
           <ScheduledGoalsPanel embedded />
         </div>
         </Card>
@@ -155,10 +155,10 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
         <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
-          <div className="section-label-row">
-            <span>Queue</span>
-            <small>Admin queue — dump, cancel-all, wipe, and Track 1 recreate</small>
-          </div>
+          <CardHeader
+            title="Queue"
+            meta={<span className="ui-meta-sm">Admin queue — dump, cancel-all, wipe, and Track 1 recreate</span>}
+          />
           <ScheduleQueueView />
         </div>
         </Card>
@@ -168,10 +168,10 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
         <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
-          <div className="section-label-row">
-            <span>Background Tasks</span>
-            <small>Async jobs &amp; execution queue</small>
-          </div>
+          <CardHeader
+            title="Background Tasks"
+            meta={<span className="ui-meta-sm">Async jobs &amp; execution queue</span>}
+          />
           <AsyncJobsPanel embedded />
         </div>
         </Card>
@@ -181,10 +181,10 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
         <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
-          <div className="section-label-row">
-            <span>Dead-letter queue</span>
-            <small>Unreplayed records — replay to the source queue</small>
-          </div>
+          <CardHeader
+            title="Dead-letter queue"
+            meta={<span className="ui-meta-sm">Unreplayed records — replay to the source queue</span>}
+          />
           <DlqPanel />
         </div>
         </Card>

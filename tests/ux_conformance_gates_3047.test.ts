@@ -484,6 +484,16 @@ const CONFORMING_INTERIORS: string[] = [
   // Issue #4825: the Audit & Vault page — 5 sections, zero bespoke,
   // kpiRibbon slot filled; its register entry is removed in the same PR.
   "src/client/AuditVaultPage.tsx",
+  // Issue #4927 (S-U5): the seven migrated interiors — Agents,
+  // Docs & Reports, Platform Admin, Schedules, Approvals, Queues,
+  // Endpoints; their register entries are removed in the same PR.
+  "src/client/AgentsPanel.tsx",
+  "src/client/DocsAndReportsPanel.tsx",
+  "src/client/PlatformAdminPage.tsx",
+  "src/client/SchedulesHome.tsx",
+  "src/client/ApprovalsPanel.tsx",
+  "src/client/QueuesPage.tsx",
+  "src/client/chat/tabs/EndpointsTab.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):

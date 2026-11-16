@@ -23,7 +23,9 @@ import {
   Badge,
   Button,
   EmptyState,
+  Flex,
   Notice,
+  PageSection,
   PageShell,
   Spinner,
   Table,
@@ -43,7 +45,6 @@ import {
 } from "./docsAndReports";
 import { RunDetailsModal } from "./components/RunDetailsModal";
 import type { RunDetail } from "./runDetails";
-import "./docsAndReports.css";
 
 const RUN_TYPE_LABELS: Record<DocumentRunType, string> = {
   manual: "Manual",
@@ -64,13 +65,13 @@ function RunTypeCell({ row }: { row: DocumentRow }) {
   if (!row.runType) {
     // Honest absence: some stores record no trigger at all (options scans).
     return (
-      <span className="docs-run-type unknown" title="The run's store recorded no trigger">
+      <span className="ui-meta-sm" title="The run's store recorded no trigger">
         —
       </span>
     );
   }
   return (
-    <span className={`docs-run-type ${row.runType}`} title={row.rawTrigger ?? undefined}>
+    <span title={row.rawTrigger ?? undefined}>
       <Badge size="sm" tone={row.runType === "scheduled" ? "info" : "neutral"}>
         {RUN_TYPE_LABELS[row.runType]}
       </Badge>
@@ -100,21 +101,21 @@ export function ArtifactLink({
     // Issue #2088: a recorded leg failure renders as a failure
     // state with its reason, never a bare "—".
     return (
-      <span className="docs-artifact-failed" title={error ?? undefined}>
+      <span title={error ?? undefined}>
         <Badge size="sm" tone="danger">failed</Badge>
       </span>
     );
   }
   if (!url) {
     return (
-      <span className="docs-artifact-missing" title={`This run recorded no ${kind} artifact`}>
+      <span className="ui-meta-sm" title={`This run recorded no ${kind} artifact`}>
         —
       </span>
     );
   }
   return (
     <a
-      className="docs-artifact-link"
+      className="ui-link"
       href={url}
       download
       title={`Download the ${kind} for run ${runId}`}
@@ -152,7 +153,7 @@ function SortHeader({
       title={active ? `Sorted ${direction} — click to reverse` : `Sort by ${label}`}
       aria-label={active ? `${label}, sorted ${direction}. Reverse order` : `Sort by ${label}`}
     >
-      <span className="docs-sort-label">{label}</span>
+      <span>{label}</span>
       <span className="ui-table-sort-indicator" aria-hidden="true">
         {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
       </span>
@@ -232,8 +233,9 @@ export function DocsAndReportsPanel() {
           <SortHeader label={SORT_LABELS.createdAt} sortKey="createdAt" sort={sort} onSort={handleSort} />
         ),
         ariaSort: ariaSort("createdAt"),
+        cellClassName: "ui-cell-nowrap",
         render: (row) => (
-          <time className="docs-time" dateTime={row.createdAt} title={row.createdAt}>
+          <time dateTime={row.createdAt} title={row.createdAt}>
             {formatRunTimestamp(row.createdAt)}
           </time>
         ),
@@ -251,7 +253,7 @@ export function DocsAndReportsPanel() {
         ),
         ariaSort: ariaSort("runSource"),
         render: (row) => (
-          <span className={`docs-source ${row.runSource}`}>
+          <span>
             {DOCUMENT_SOURCE_LABELS[row.runSource]}
           </span>
         ),
@@ -304,7 +306,7 @@ export function DocsAndReportsPanel() {
         ariaSort: ariaSort("runId"),
         render: (row) => (
           <div>
-            <code className="docs-run-id" title={row.runId}>
+            <code className="ui-mono" title={row.runId}>
               {row.runId}
             </code>
             {/* Issue #4423 — a retried chain is ONE Docs row by design (the
@@ -341,17 +343,18 @@ export function DocsAndReportsPanel() {
   const storeErrorNames = Object.keys(storeErrors);
 
   return (
-    <div className="docs-report-page">
+    <div className="ui-page-frame">
       <PageShell
         title="Docs & Reports"
         scopeNote="Every document set produced by a screener-workflow run — stock, options, goal and strategy — with the PDF, XLSX and CSV that run generated. Links are shown only when the run recorded that artifact."
       >
-        <div className="docs-toolbar">
-          {loadedAt && <span className="docs-loaded-at">Updated {loadedAt}</span>}
+        <PageSection>
+        <Flex gap="3" align="center">
+          {loadedAt && <span className="ui-meta-sm">Updated {loadedAt}</span>}
           <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
             Refresh
           </Button>
-        </div>
+        </Flex>
 
         {error && (
         <Notice tone="danger" title="Documents unavailable">
@@ -369,13 +372,13 @@ export function DocsAndReportsPanel() {
       )}
 
       {loading && rows.length === 0 ? (
-        <div className="docs-loading">
+        <Flex gap="3" align="center">
           <Spinner label="Loading documents" />
-          <span>Loading documents…</span>
-        </div>
+          <span className="ui-meta-sm">Loading documents…</span>
+        </Flex>
       ) : (
         <>
-          <div className="docs-count" aria-live="polite">
+          <div className="ui-meta" aria-live="polite">
             {sortedRows.length} {sortedRows.length === 1 ? "run" : "runs"} · sorted by{" "}
             {SORT_LABELS[sort.key]}, {sort.dir === "asc" ? "ascending" : "descending"}
           </div>
@@ -396,7 +399,7 @@ export function DocsAndReportsPanel() {
             columns={columns}
             rows={sortedRows}
             rowKey={(row) => `${row.runSource}:${row.id}`}
-            containerClassName="docs-table-container"
+            containerClassName="ui-scroll-frame"
             stickyHeader
             empty={
               <EmptyState
@@ -413,6 +416,7 @@ export function DocsAndReportsPanel() {
           />
         </>
       )}
+        </PageSection>
       </PageShell>
     </div>
   );

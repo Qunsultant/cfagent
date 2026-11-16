@@ -26,13 +26,14 @@
  */
 
 import React, { useEffect, useState } from "react";
-import "./agentsPanel.css";
 import {
   Badge,
   Card,
   EmptyState,
+  Grid,
   PageSection,
   PageShell,
+  Stack,
   Table,
   type TableColumn,
 } from "./components/ui";
@@ -94,31 +95,31 @@ export function AgentsPanel() {
       key: "class",
       header: "Class",
       render: (agent) => (
-        <div className="agents-panel-stack">
-          <span className="agents-panel-mono">{agent.className}</span>
-          <span className="agents-panel-sub">
+        <Stack gap="1">
+          <span className="ui-mono">{agent.className}</span>
+          <span className="ui-meta-sm">
             {agent.kind} · {agent.base}
           </span>
-        </div>
+        </Stack>
       ),
     },
     {
       key: "bindings",
       header: "Bindings",
       render: (agent) => (
-        <span className="agents-panel-mono">{agent.bindings.join(", ")}</span>
+        <span className="ui-mono">{agent.bindings.join(", ")}</span>
       ),
     },
     {
       key: "status",
       header: "Status (as recorded)",
       render: (agent) => (
-        <div className="agents-panel-stack">
+        <Stack gap="1">
           <Badge tone={statusTone(agent.status)}>{agent.status}</Badge>
           {agent.status === "degraded" ? (
-            <span className="agents-panel-sub">{agent.statusReason}</span>
+            <span className="ui-meta-sm">{agent.statusReason}</span>
           ) : null}
-        </div>
+        </Stack>
       ),
     },
     {
@@ -127,14 +128,14 @@ export function AgentsPanel() {
       render: (agent) => {
         const exposed = agent.doors.filter((d) => d.status === "exposed");
         return (
-          <div className="agents-panel-stack">
+          <Stack gap="1">
             <span>
               {exposed.length} of {agent.doors.length} exposed
             </span>
-            <span className="agents-panel-sub">
+            <span className="ui-meta-sm">
               {exposed.map((d) => doorName(d.door)).join(", ") || "none"}
             </span>
-          </div>
+          </Stack>
         );
       },
     },
@@ -143,11 +144,11 @@ export function AgentsPanel() {
       header: "Mesh credentials (env names)",
       render: (agent) =>
         agent.identity && agent.identity.meshCredentials.length > 0 ? (
-          <span className="agents-panel-mono">
+          <span className="ui-mono">
             {agent.identity.meshCredentials.join(", ")}
           </span>
         ) : (
-          <span className="agents-panel-sub">No A2A credential</span>
+          <span className="ui-meta-sm">No A2A credential</span>
         ),
     },
   ];
@@ -170,9 +171,9 @@ export function AgentsPanel() {
       header: "Operations",
       render: (cell) =>
         cell.operations.length > 0 ? (
-          <span className="agents-panel-mono">{cell.operations.join(", ")}</span>
+          <span className="ui-mono">{cell.operations.join(", ")}</span>
         ) : (
-          <span className="agents-panel-sub">Not enumerable — see gate / reason</span>
+          <span className="ui-meta-sm">Not enumerable — see gate / reason</span>
         ),
     },
     {
@@ -190,9 +191,9 @@ export function AgentsPanel() {
       key: "budget",
       header: "Cost budget (S19)",
       render: (door) => (
-        <div className="agents-panel-stack">
+        <Stack gap="1">
           <span>{door.budget.unit}</span>
-          <span className="agents-panel-sub">
+          <span className="ui-meta-sm">
             {door.budget.caps
               ? `Caps: ${door.budget.caps.perCall ?? "—"} per call · ${door.budget.caps.perDay ?? "—"} per day`
               : "No cap recorded"}
@@ -201,7 +202,7 @@ export function AgentsPanel() {
               {door.budget.enforcement}
             </Badge>
           </span>
-        </div>
+        </Stack>
       ),
     },
   ];
@@ -210,12 +211,12 @@ export function AgentsPanel() {
     {
       key: "class",
       header: "Workflow",
-      render: (w) => <span className="agents-panel-mono">{w.className}</span>,
+      render: (w) => <span className="ui-mono">{w.className}</span>,
     },
     {
       key: "binding",
       header: "Binding",
-      render: (w) => <span className="agents-panel-mono">{w.binding}</span>,
+      render: (w) => <span className="ui-mono">{w.binding}</span>,
     },
     { key: "starters", header: "Started by", render: (w) => w.starters.join("; ") },
     { key: "role", header: "Role", render: (w) => w.role },
@@ -238,10 +239,10 @@ export function AgentsPanel() {
       key: "family",
       header: "Tool family",
       render: (f) => (
-        <div className="agents-panel-stack">
+        <Stack gap="1">
           <span>{f.name}</span>
-          <span className="agents-panel-sub agents-panel-mono">{f.id}</span>
-        </div>
+          <span className="ui-mono">{f.id}</span>
+        </Stack>
       ),
     },
     { key: "source", header: "Source", render: (f) => f.source },
@@ -258,7 +259,7 @@ export function AgentsPanel() {
   ];
 
   return (
-    <div className="agents-panel-page">
+    <div className="ui-page-frame">
       <PageShell
         title="Agents"
         scopeNote="The agent fleet exactly as the G0 registry (src/agents/registry.ts) records it — classes, doors and gates, identity and credential posture, and the honest degraded/absent records. Read-only; the registry is the source of truth."
@@ -285,18 +286,18 @@ export function AgentsPanel() {
                 }
               />
               {selected ? (
-                <div className="agents-panel-detail">
+                <Stack gap="3">
                   <Card>
-                    <div className="agents-panel-stack">
-                      <span className="agents-panel-mono">{selected.className}</span>
+                    <Stack gap="1">
+                      <span className="ui-mono">{selected.className}</span>
                       <span>{selected.role}</span>
-                      <span className="agents-panel-sub">
+                      <span className="ui-meta-sm">
                         Recorded status: {selected.status} — {selected.statusReason}
                       </span>
                       {selected.notes ? (
-                        <span className="agents-panel-sub">{selected.notes}</span>
+                        <span className="ui-meta-sm">{selected.notes}</span>
                       ) : null}
-                    </div>
+                    </Stack>
                   </Card>
                   <Table
                     columns={censusColumns}
@@ -305,17 +306,17 @@ export function AgentsPanel() {
                     caption={`${selected.className} — capability × door census`}
                   />
                   <Card>
-                    <div className="agents-panel-stack">
-                      <span className="agents-panel-label">Identity & credential posture</span>
+                    <Stack gap="1">
+                      <span className="ui-label">Identity & credential posture</span>
                       {selected.identity ? (
                         <>
                           <span>
                             DID:{" "}
-                            <span className="agents-panel-mono">
+                            <span className="ui-mono">
                               {selected.identity.did ?? "none registered"}
                             </span>
                           </span>
-                          <span className="agents-panel-sub">
+                          <span className="ui-meta-sm">
                             {selected.identity.identitySource}
                           </span>
                           <span>
@@ -324,26 +325,26 @@ export function AgentsPanel() {
                           </span>
                           <span>
                             Mesh credentials:{" "}
-                            <span className="agents-panel-mono">
+                            <span className="ui-mono">
                               {selected.identity.meshCredentials.join(", ") ||
                                 "none"}
                             </span>
                           </span>
-                          <span className="agents-panel-sub">
+                          <span className="ui-meta-sm">
                             {selected.identity.credentialPosture}
                           </span>
-                          <span className="agents-panel-sub">
+                          <span className="ui-meta-sm">
                             {selected.identity.attribution}
                           </span>
                         </>
                       ) : (
-                        <span className="agents-panel-sub">
+                        <span className="ui-meta-sm">
                           No identity record is registered for this class.
                         </span>
                       )}
-                    </div>
+                    </Stack>
                   </Card>
-                </div>
+                </Stack>
               ) : null}
             </PageSection>
 
@@ -382,64 +383,64 @@ export function AgentsPanel() {
               title="Programme records"
               description="What the Agent Mesh programme recorded about itself: the G12 proof, the unified trace spine with its recorded breaks, the mesh credential inventory, and the Skills-packaging assessment."
             >
-              <div className="agents-panel-cards">
+              <Grid autoFit minColumnWidth="md" gap="3">
                 <Card>
-                  <div className="agents-panel-stack">
-                    <span className="agents-panel-label">
+                  <Stack gap="1">
+                    <span className="ui-label">
                       G12 — every capability, every door
                     </span>
                     <Badge tone="success">{view.programme.g12Proof.status}</Badge>
-                    <span className="agents-panel-sub">
+                    <span className="ui-meta-sm">
                       {view.programme.g12Proof.scope}
                     </span>
-                    <span className="agents-panel-sub">
+                    <span className="ui-meta-sm">
                       Golden-task catalog: {view.programme.g12Proof.catalog};
                       results store: {view.programme.g12Proof.store}.
                     </span>
-                  </div>
+                  </Stack>
                 </Card>
                 <Card>
-                  <div className="agents-panel-stack">
-                    <span className="agents-panel-label">
+                  <Stack gap="1">
+                    <span className="ui-label">
                       Trace spine — recorded breaks
                     </span>
                     {view.programme.traceBreaks.map((brk) => (
-                      <span key={brk.hop} className="agents-panel-sub">
+                      <span key={brk.hop} className="ui-meta-sm">
                         {brk.hop}: {brk.consequence}
                       </span>
                     ))}
-                  </div>
+                  </Stack>
                 </Card>
                 <Card>
-                  <div className="agents-panel-stack">
-                    <span className="agents-panel-label">
+                  <Stack gap="1">
+                    <span className="ui-label">
                       Mesh credential inventory (env names only)
                     </span>
-                    <span className="agents-panel-mono">
+                    <span className="ui-mono">
                       {view.programme.credentialEnvNames.join(", ")}
                     </span>
-                    <span className="agents-panel-sub">
+                    <span className="ui-meta-sm">
                       Each surface's own credential, verified at the A2A edge;
                       a surface without its own secret set authenticates
                       transitionally on the shared token — the per-class
                       posture is in each class's identity record above.
                     </span>
-                  </div>
+                  </Stack>
                 </Card>
                 <Card>
-                  <div className="agents-panel-stack">
-                    <span className="agents-panel-label">
+                  <Stack gap="1">
+                    <span className="ui-label">
                       Skills packaging (S19 assessment)
                     </span>
                     <Badge tone="neutral">
                       {view.programme.skillsAssessment.recommendation}
                     </Badge>
-                    <span className="agents-panel-sub">
+                    <span className="ui-meta-sm">
                       {view.programme.skillsAssessment.adoptionState}
                     </span>
-                  </div>
+                  </Stack>
                 </Card>
-              </div>
+              </Grid>
             </PageSection>
           </>
         ) : null}

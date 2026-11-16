@@ -1,58 +1,10 @@
 /**
- * Agents page styles — semantic tokens only
- * (docs/architecture/UX/ux-architecture.md §20). Layout lives here; every
- * surface, color, and spacing value comes from tokens.css.
+ * DEPRECATED — S-U5 (#4927): this sheet is retired in place (no rules
+ * remain). Superseded by src/client/components/ui/primitives.css (ui-*
+ * utilities, incl. the new `ui-page-frame`) and src/client/tokens.css
+ * (design tokens). No consumers remain; the sole importer
+ * (src/client/AgentsPanel.tsx) no longer imports it. Deletion needs
+ * zero consumers plus an owner decision plus a gate amendment;
+ * deletion is never part of a program slice (gitops §22). See
+ * docs/architecture/transition/deprecations.md.
  */
-
-.agents-panel-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  width: 100%;
-  box-sizing: border-box;
-  /* The page is a flex item of .tab-viewport: claim the content height
-     (no shrink) and own the scroll, so the fleet table and the detail
-     card scroll inside the page instead of being compressed by the
-     shell (the Workflow Runs page's pattern). */
-  flex: 1 0 auto;
-  min-height: 0;
-  overflow: auto;
-}
-
-.agents-panel-stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.agents-panel-sub {
-  font-size: var(--font-size-caption);
-  color: var(--color-text-muted);
-}
-
-.agents-panel-mono {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-body-sm);
-}
-
-.agents-panel-label {
-  font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-}
-
-.agents-panel-detail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-}
-
-.agents-panel-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: var(--space-3);
-}

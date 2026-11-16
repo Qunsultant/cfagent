@@ -17,21 +17,19 @@ import { DlqPanel } from "./DlqPanel";
 
 export function QueuesPage() {
   return (
-    <div className="queues-page">
-      <PageShell
-        title="Queues"
-        scopeNote="Every queue with work waiting, in one place. Async jobs and the dead-letter queue each keep their own loading, decision, and refresh behavior — this page only composes them. Trade approvals live on the Approvals page. Pending review stays on the Review page."
-      >
-        <PageSection title="Async jobs">
-          <AsyncJobsPanel embedded />
-        </PageSection>
-        <PageSection title="Dead-letter queue">
-          <DlqPanel />
-        </PageSection>
-        <PageSection title="Trade approvals">
-          <a href="?tab=order&orderTab=approvals">Review trade approvals in the approvals tab</a>
-        </PageSection>
-      </PageShell>
-    </div>
+    <PageShell
+      title="Queues"
+      scopeNote="Every queue with work waiting, in one place. Async jobs and the dead-letter queue each keep their own loading, decision, and refresh behavior — this page only composes them. Trade approvals live on the Approvals page. Pending review stays on the Review page."
+    >
+      <PageSection title="Async jobs">
+        <AsyncJobsPanel embedded />
+      </PageSection>
+      <PageSection title="Dead-letter queue">
+        <DlqPanel />
+      </PageSection>
+      <PageSection title="Trade approvals">
+        <a href="?tab=order&orderTab=approvals">Review trade approvals in the approvals tab</a>
+      </PageSection>
+    </PageShell>
   );
 }

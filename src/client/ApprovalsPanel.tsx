@@ -28,18 +28,16 @@ import { PendingReviewQueue } from "./PendingReviewQueue";
 
 export function ApprovalsPanel() {
   return (
-    <div className="approvals-panel">
-      <PageShell
-        title="Approvals"
-        scopeNote="Every consequential action awaiting your decision, in one place. Trade drafts and held deliveries are the two decidable queues with listable pending items today; each queue below keeps its own loading, decision, and refresh behavior — this surface only composes them."
-      >
-        <PageSection title="Trade approvals">
-          <TradingApprovalsQueue />
-        </PageSection>
-        <PageSection title="Held deliveries">
-          <PendingReviewQueue />
-        </PageSection>
-      </PageShell>
-    </div>
+    <PageShell
+      title="Approvals"
+      scopeNote="Every consequential action awaiting your decision, in one place. Trade drafts and held deliveries are the two decidable queues with listable pending items today; each queue below keeps its own loading, decision, and refresh behavior — this surface only composes them."
+    >
+      <PageSection title="Trade approvals">
+        <TradingApprovalsQueue />
+      </PageSection>
+      <PageSection title="Held deliveries">
+        <PendingReviewQueue />
+      </PageSection>
+    </PageShell>
   );
 }

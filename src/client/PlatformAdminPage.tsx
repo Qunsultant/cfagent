@@ -44,6 +44,8 @@ import { NavIcons } from "./components/NavigationMenu";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Card,
+  CardHeader,
+  PageSection,
   PageShell,
   Tabs,
   TabPanel,
@@ -170,7 +172,7 @@ export function PlatformAdminPage({
       title={platformAdminTitle(config)}
       scopeNote="Workspace administration, background jobs, external connectivity, and security governance"
     >
-      <div className="platform-admin-tabs-wrapper">
+      <PageSection>
         <Tabs<PlatformAdminSectionId>
           idBase="platform-admin"
           ariaLabel="Platform Admin Sections"
@@ -178,7 +180,7 @@ export function PlatformAdminPage({
           value={active}
           onChange={handleSelectTab}
         />
-      </div>
+      </PageSection>
 
       <TabPanel idBase="platform-admin" tabId="ads" active={active === "ads"}>
         <Card>
@@ -199,40 +201,40 @@ export function PlatformAdminPage({
 
       <TabPanel idBase="platform-admin" tabId="api-keys" active={active === "api-keys"}>
         <Card>
-          <div className="section-label-row">
-            <span>API Keys</span>
-            <small>MCP transport access for external clients</small>
-          </div>
+          <CardHeader
+            title="API Keys"
+            meta={<span className="ui-meta-sm">MCP transport access for external clients</span>}
+          />
           <ApiKeysPanel />
         </Card>
       </TabPanel>
 
       <TabPanel idBase="platform-admin" tabId="tenants" active={active === "tenants"}>
         <Card>
-          <div className="section-label-row">
-            <span>Tenants</span>
-            <small>Tenant create, list, settings &amp; members</small>
-          </div>
+          <CardHeader
+            title="Tenants"
+            meta={<span className="ui-meta-sm">Tenant create, list, settings &amp; members</span>}
+          />
           <TenantAdminPanel />
         </Card>
       </TabPanel>
 
       <TabPanel idBase="platform-admin" tabId="channels" active={active === "channels"}>
         <Card>
-          <div className="section-label-row">
-            <span>Channels</span>
-            <small>Delivery-channel enablement per tenant</small>
-          </div>
+          <CardHeader
+            title="Channels"
+            meta={<span className="ui-meta-sm">Delivery-channel enablement per tenant</span>}
+          />
           <ChannelsAdminPanel />
         </Card>
       </TabPanel>
 
       <TabPanel idBase="platform-admin" tabId="accounts" active={active === "accounts"}>
         <Card>
-          <div className="section-label-row">
-            <span>Accounts</span>
-            <small>Self-service account setup, tier, credits, subscriptions &amp; catalogue</small>
-          </div>
+          <CardHeader
+            title="Accounts"
+            meta={<span className="ui-meta-sm">Self-service account setup, tier, credits, subscriptions &amp; catalogue</span>}
+          />
           <AccountAdminPanel />
         </Card>
       </TabPanel>

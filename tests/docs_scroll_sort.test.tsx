@@ -222,18 +222,18 @@ describe("DocsAndReportsPanel scroll + sort", () => {
   it("owns the page scroll instead of growing past the shell", async () => {
     payload = { count: 0, runs: [] };
     await renderPanel();
-    expect(container.querySelector(".docs-report-page")).not.toBeNull();
+    expect(container.querySelector(".ui-page-frame")).not.toBeNull();
 
-    const css = readFileSync("src/client/docsAndReports.css", "utf8");
-    const pageRule = css.match(/\.docs-report-page\s*\{([^}]*)\}/)?.[1] ?? "";
+    const css = readFileSync("src/client/components/ui/primitives.css", "utf8");
+    const pageRule = css.match(/\.ui-page-frame\s*\{([^}]*)\}/)?.[1] ?? "";
     // Constrained flex item (shrinkable, zero min-height) + its own scroll.
     expect(pageRule).toContain("flex: 1 1 auto");
     expect(pageRule).toContain("min-height: 0");
-    expect(pageRule).toMatch(/overflow-y:\s*auto/);
+    expect(pageRule).toMatch(/overflow:\s*auto/);
 
-    const tableRule = css.match(/\.docs-table-container\s*\{([^}]*)\}/)?.[1] ?? "";
-    expect(tableRule).toMatch(/overflow:\s*auto|overflow-x:\s*auto/);
-    expect(tableRule).toMatch(/max-height:/);
+    const frameRule = css.match(/\.ui-scroll-frame\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(frameRule).toMatch(/overflow:\s*auto/);
+    expect(frameRule).toMatch(/max-height:/);
   });
 
   it("renders every header as a sort button and marks the default sort", async () => {
@@ -283,16 +283,16 @@ describe("DocsAndReportsPanel scroll + sort", () => {
     };
     await renderPanel();
     // Default: newest first (stock > goal > options by date).
-    expect(columnTexts(".docs-source")).toEqual(["Stock", "Goal", "Options"]);
+    expect(columnTexts("td:nth-child(3)")).toEqual(["Stock", "Goal", "Options"]);
 
     const header = headerByText("Run Source");
     await click(header.querySelector("button")!);
     expect(header.getAttribute("aria-sort")).toBe("ascending");
-    expect(columnTexts(".docs-source")).toEqual(["Goal", "Options", "Stock"]);
+    expect(columnTexts("td:nth-child(3)")).toEqual(["Goal", "Options", "Stock"]);
 
     await click(header.querySelector("button")!);
     expect(header.getAttribute("aria-sort")).toBe("descending");
-    expect(columnTexts(".docs-source")).toEqual(["Stock", "Options", "Goal"]);
+    expect(columnTexts("td:nth-child(3)")).toEqual(["Stock", "Options", "Goal"]);
     // Only one column is marked as sorted.
     expect(headerByText("Date-Time").hasAttribute("aria-sort")).toBe(false);
   });
@@ -318,16 +318,16 @@ describe("DocsAndReportsPanel scroll + sort", () => {
     const header = headerByText("PDF");
     await click(header.querySelector("button")!);
     expect(header.getAttribute("aria-sort")).toBe("descending");
-    expect(columnTexts(".docs-run-id")[0]).toBe("run-pdf");
+    expect(columnTexts("td:nth-child(7) code")[0]).toBe("run-pdf");
     // Both unrecorded rows follow; ordering between them stays newest first.
-    expect(columnTexts(".docs-run-id").slice(1)).toEqual(["run-none", "run-failed"]);
+    expect(columnTexts("td:nth-child(7) code").slice(1)).toEqual(["run-none", "run-failed"]);
   });
 
   it("announces the active sort in the count line", async () => {
     payload = { count: 1, runs: [run()] };
     await renderPanel();
-    expect(container.querySelector(".docs-count")!.textContent).toContain("sorted by Date-Time");
+    expect(container.querySelector(".ui-meta")!.textContent).toContain("sorted by Date-Time");
     await click(headerByText("Run Type").querySelector("button")!);
-    expect(container.querySelector(".docs-count")!.textContent).toContain("sorted by Run Type");
+    expect(container.querySelector(".ui-meta")!.textContent).toContain("sorted by Run Type");
   });
 });
