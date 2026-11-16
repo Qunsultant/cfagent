@@ -228,7 +228,7 @@ export function RoleGrantsPanel() {
                     >
                       Confirm revoke
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirmingRevokeId(null)}>
+                    <Button size="sm" variant="secondary" onClick={() => setConfirmingRevokeId(null)}>
                       Cancel
                     </Button>
                   </div>

@@ -461,7 +461,7 @@ function SortHeader({
   const direction = sort?.direction === "asc" ? "ascending" : "descending";
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       size="sm"
       className={`ui-table-sort${active ? " active" : ""}`}
       onClick={() => onSort(sortKey)}
@@ -1373,7 +1373,7 @@ export function AutopilotControlCenter({
               cellClassName: "attestation-cell ui-cell-nowrap",
               render: (action) => (
               <><Button
-              variant="ghost"
+              variant="secondary"
               size="sm"
                           onClick={() =>
                             handleCopyDid(

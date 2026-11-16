@@ -928,7 +928,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
                   <Button loading={checking} onClick={handleCheckPayment}>
                     I have paid — verify
                   </Button>{" "}
-                  <Button variant="ghost" onClick={() => setPolling(false)}>
+                  <Button variant="secondary" onClick={() => setPolling(false)}>
                     Stop status polling
                   </Button>
                   {checkResult && <Notice tone="info">{checkResult}</Notice>}

@@ -1221,7 +1221,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                                 )}
                                 {onSendPrompt && (
                                   <Button
-                                  variant="accent"
+                                  variant="secondary"
                                   tone="subtle"
                                   size="sm"
                                     onClick={() => onSendPrompt(method.samplePayloadOrCommand || faq.samplePrompt, faq.question)}
@@ -1247,7 +1247,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                         </div>
                         {faq.relatedDecisionRuleId && (
                           <Button
-                          variant="ghost"
+                          variant="secondary"
                             onClick={() => jumpToDecisionRule(faq.relatedDecisionRuleId!)}
                           >
                             <span>⚖️</span> View Governing Decision Rule →
@@ -1292,7 +1292,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
 
                           {onSendPrompt && (
                             <Button
-                            variant="accent"
+                            variant="secondary"
                             tone="subtle"
                               onClick={() => {
                                 onSendPrompt(faq.samplePrompt, faq.question);
@@ -1423,7 +1423,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                           </span>
                           {wf.governingDecisionRuleId && (
                             <Button
-                            variant="ghost"
+                            variant="secondary"
                               onClick={() => jumpToDecisionRule(wf.governingDecisionRuleId!)}
                             >
                               <span>⚖️</span> Governing Decision Rule →
@@ -1526,7 +1526,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
 
                           {onSendPrompt && (
                             <Button
-                            variant="accent"
+                            variant="secondary"
                             tone="subtle"
                               onClick={() => {
                                 onSendPrompt(wf.sampleQueryOrAction, wf.title);
@@ -1698,7 +1698,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                         <Flex gap="2">
                           {onSendPrompt && (
                             <Button
-                            variant="accent"
+                            variant="secondary"
                             tone="subtle"
                               onClick={() => {
                                 onSendPrompt(`Explain the decision logic and scoring for ${sec.title}`, sec.title);

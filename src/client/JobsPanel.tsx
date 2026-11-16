@@ -259,7 +259,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
                 <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => void withBusy(`trigger-${g.id}`, () => triggerGoal(g.id).then(() => {}))}>
                   Run now
                 </Button>{" "}
-                <Button size="sm" variant="ghost" onClick={() => setSelectedGoalId(selectedGoalId === g.id ? null : g.id)}>
+                <Button size="sm" variant="secondary" onClick={() => setSelectedGoalId(selectedGoalId === g.id ? null : g.id)}>
                   History
                 </Button>{" "}
                 <Button size="sm" variant="danger" tone="subtle" onClick={() => setGoalDeleteTarget(g)}>
@@ -348,7 +348,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
                 <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => void withBusy(`pause-${s.id}`, () => (s.paused ? resumeSchedule(s.id) : pauseSchedule(s.id)))}>
                   {s.paused ? "Resume" : "Pause"}
                 </Button>{" "}
-                <Button size="sm" variant="ghost" onClick={() => setSelectedScheduleId(selectedScheduleId === s.id ? null : s.id)}>
+                <Button size="sm" variant="secondary" onClick={() => setSelectedScheduleId(selectedScheduleId === s.id ? null : s.id)}>
                   History
                 </Button>{" "}
                 <Button size="sm" variant="danger" tone="subtle" onClick={() => setScheduleDeleteTarget(s)}>

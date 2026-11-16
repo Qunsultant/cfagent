@@ -257,7 +257,7 @@ export function PortfolioRiskPanel({ activeEnv, onPreviewHedge, broker = "etrade
   return (
     <section className="prp-panel" id="section-portfolio-risk" style={{ scrollMarginTop: 80 }}>
       <div className="prp-header">
-        <Button className="prp-collapse" onClick={() => setPanelOpen((o) => !o)} aria-expanded={panelOpen} variant="ghost">
+        <Button className="prp-collapse" onClick={() => setPanelOpen((o) => !o)} aria-expanded={panelOpen} variant="secondary">
           {panelOpen ? "▾" : "▸"} Portfolio Risk
         </Button>
         {report && <span className="prp-asof">as of {new Date(report.asOf).toLocaleString()}</span>}

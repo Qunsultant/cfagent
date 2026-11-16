@@ -786,7 +786,7 @@ export function NavigationMenu({
           {/* Universal Top Bar Refresh Button */}
           {onRefresh && (
             <Button
-              variant="ghost"
+              variant="secondary"
               className={`nav-refresh-btn top-nav-control ${isRefreshing ? "refreshing" : ""}`}
               onClick={onRefresh}
               disabled={isRefreshing}
@@ -802,7 +802,7 @@ export function NavigationMenu({
           {/* Quick Font Size Controls */}
           <div className="nav-font-size-ctrl top-nav-control" title="Adjust application font size throughout the app">
             <Button
-              variant="ghost"
+              variant="secondary"
               className="nav-font-btn"
               onClick={() => {
                 const next = adjustFontScale(-0.05);
@@ -818,7 +818,7 @@ export function NavigationMenu({
               {Math.round(navFontScale * 100)}%
             </span>
             <Button
-              variant="ghost"
+              variant="secondary"
               className="nav-font-btn"
               onClick={() => {
                 const next = adjustFontScale(0.05);
@@ -834,7 +834,7 @@ export function NavigationMenu({
 
           {/* Quick Trade Button */}
           <Button
-            variant="ghost"
+            variant="secondary"
             className="nav-trade-btn top-nav-control"
             onClick={() => onSelectTab("autopilot")}
             title="Open Autopilot & Trading execution center"
@@ -898,7 +898,7 @@ export function NavigationMenu({
                   hoverOpen
                   trigger={
                     <Button
-                      variant="ghost"
+                      variant="secondary"
                       className={`top-menu-item-btn ${menuActive ? "active" : ""}`}
                       title={item.description}
                     >
@@ -918,7 +918,7 @@ export function NavigationMenu({
             }
             return (
               <Button
-                variant="ghost"
+                variant="secondary"
                 key={item.id}
                 className={`top-menu-item-btn ${active ? "active" : ""}`}
                 href={deepLinkHref(itemLink)}
@@ -964,7 +964,7 @@ export function NavigationMenu({
                   hoverOpen
                   trigger={
                     <Button
-                      variant="ghost"
+                      variant="secondary"
                       className={`top-menu-item-btn ${menuActive ? "active" : ""}`}
                       title={parent.description}
                     >

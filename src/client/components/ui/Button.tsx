@@ -1,12 +1,12 @@
 import React from "react";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "trade" | "accent" | "warning";
+export type ButtonVariant = "primary" | "secondary" | "danger";
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   /** solid = filled; subtle = tinted background + tone text/border (dense chips, table actions). */
   tone?: "solid" | "subtle";
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md";
   /** Shows a spinner and sets aria-busy; the button is disabled while loading. */
   loading?: boolean;
   /**

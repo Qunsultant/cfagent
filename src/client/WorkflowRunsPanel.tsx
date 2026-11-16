@@ -322,7 +322,7 @@ function SortHeader({
   const direction = sort.dir === "asc" ? "ascending" : "descending";
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       size="sm"
       className={`ui-table-sort${active ? " active" : ""}`}
       onClick={() => onSort(sortKey)}
@@ -642,7 +642,7 @@ export function WorkflowRunsPanel() {
           <span className="ui-meta-sm">
             {run.workflow} ·{" "}
             <Button
-              variant="ghost"
+              variant="secondary"
               size="sm"
               className="ui-mono"
               onClick={() => setSelectedId(run.id)}

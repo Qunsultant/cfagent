@@ -45,7 +45,7 @@ function OptionsBlockView({
       <OptionsStrategyCard data={optionsData} onAction={onAction} />
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "var(--space-1)" }}>
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
           onClick={() => setShowRaw(!showRaw)}
           title="Toggle underlying raw JSON code block"

@@ -143,7 +143,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-x-twitter"
                   title="Share on X (Twitter)"
@@ -156,7 +156,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-linkedin"
                   title="Share on LinkedIn"
@@ -169,7 +169,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   )}&title=${encodeURIComponent(`${BRAND.name}: Autonomous Multi-Agent Trading & Strategy Execution`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-reddit"
                   title="Share on Reddit"
@@ -180,7 +180,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(personalReferralUrl)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-facebook"
                   title="Share on Facebook"
@@ -193,7 +193,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-whatsapp"
                   title="Share on WhatsApp"
@@ -206,7 +206,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   )}&text=${encodeURIComponent("Check out Multi-Agent Studio for edge AI agents")}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-telegram"
                   title="Share on Telegram"
@@ -219,7 +219,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-threads"
                   title="Share on Threads"
@@ -232,7 +232,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-bluesky"
                   title="Share on Bluesky"
@@ -245,7 +245,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   )}&t=${encodeURIComponent(`${BRAND.name}: Institutional Multi-Agent Trading System`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-hackernews"
                   title="Share on Hacker News"
@@ -258,7 +258,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                   )}&description=${encodeURIComponent("Autonomous Multi-Agent Trading & Strategy Execution")}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   className="ui-brand-pinterest"
                   title="Pin on Pinterest"
@@ -445,7 +445,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                               📢 Share Link
                             </Button>
                             <Button
-                              variant="ghost"
+                              variant="secondary"
                               size="sm"
                               onClick={() => handleDeleteReferral(ref.id)}
                               title="Delete this referral"
@@ -460,7 +460,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                                 href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`${ref.title}: ${ref.url}`)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                variant="ghost"
+                                variant="secondary"
                                 size="sm"
                                 className="ui-brand-x-twitter ui-brand-mini"
                                 title="Share on X"
@@ -471,7 +471,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                                 href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(ref.url)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                variant="ghost"
+                                variant="secondary"
                                 size="sm"
                                 className="ui-brand-linkedin ui-brand-mini"
                                 title="Share on LinkedIn"
@@ -482,7 +482,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                                 href={`https://reddit.com/submit?url=${encodeURIComponent(ref.url)}&title=${encodeURIComponent(ref.title)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                variant="ghost"
+                                variant="secondary"
                                 size="sm"
                                 className="ui-brand-reddit ui-brand-mini"
                                 title="Share on Reddit"
@@ -493,7 +493,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                                 href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`${ref.title}: ${ref.url}`)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                variant="ghost"
+                                variant="secondary"
                                 size="sm"
                                 className="ui-brand-whatsapp ui-brand-mini"
                                 title="Share on WhatsApp"
@@ -504,7 +504,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                                 href={`https://t.me/share/url?url=${encodeURIComponent(ref.url)}&text=${encodeURIComponent(ref.title)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                variant="ghost"
+                                variant="secondary"
                                 size="sm"
                                 className="ui-brand-telegram ui-brand-mini"
                                 title="Share on Telegram"
@@ -515,7 +515,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                                 href={`https://threads.net/intent/post?text=${encodeURIComponent(`${ref.title}: ${ref.url}`)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                variant="ghost"
+                                variant="secondary"
                                 size="sm"
                                 className="ui-brand-threads ui-brand-mini"
                                 title="Share on Threads"
@@ -526,7 +526,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                                 href={`https://bsky.app/intent/compose?text=${encodeURIComponent(`${ref.title}: ${ref.url}`)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                variant="ghost"
+                                variant="secondary"
                                 size="sm"
                                 className="ui-brand-bluesky ui-brand-mini"
                                 title="Share on Bluesky"

@@ -147,7 +147,7 @@ export function StockCopilotVoiceControl(props: { sourceTab: string }) {
         </Button>
         <Button
           type="button"
-          variant="ghost"
+          variant="secondary"
           size="sm"
           onClick={() => setMuted((m) => !m)}
           title="Toggle spoken replies"

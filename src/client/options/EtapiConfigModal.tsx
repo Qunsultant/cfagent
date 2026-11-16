@@ -762,7 +762,7 @@ export function EtapiConfigModal({
             <Button variant="secondary" size="sm" onClick={handleResetDefaults} disabled={saving || loading}>
               Reset Defaults
             </Button>
-            <Button variant="accent" size="sm" onClick={handleApplyOverrides} disabled={saving || loading}>
+            <Button variant="primary" size="sm" onClick={handleApplyOverrides} disabled={saving || loading}>
               {saving ? "Applying..." : "Apply Runtime Config"}
             </Button>
           </Flex>
@@ -810,7 +810,7 @@ export function EtapiConfigModal({
             <Button variant="secondary" onClick={onClose}>
               Cancel
             </Button>
-            <Button variant="accent" onClick={handleApplyOverrides} disabled={saving || loading}>
+            <Button variant="primary" onClick={handleApplyOverrides} disabled={saving || loading}>
               {saving ? "Applying..." : "Apply Runtime Config"}
             </Button>
           </div>

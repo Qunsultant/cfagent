@@ -62,7 +62,7 @@ export function DownloadsPanel({ activeEnv, userLogin }: DownloadsPanelProps) {
                 <Button
                   key={sym}
                   size="sm"
-                  variant={symbol === sym ? "accent" : "secondary"}
+                  variant={symbol === sym ? "primary" : "secondary"}
                   onClick={() => setSymbol(sym)}
                 >
                   {sym}

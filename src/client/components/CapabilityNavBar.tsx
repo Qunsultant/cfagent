@@ -91,7 +91,7 @@ export function CapabilityNavBar({
 
           const tabButton = (
             <Button
-              variant="ghost"
+              variant="secondary"
               id={`cap-tab-${tab.id}`}
               role="tab"
               aria-selected={isActive}
@@ -152,7 +152,7 @@ export function CopilotTriggerButton({
 }) {
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       className={`btn-capability-copilot ${className}`}
       onClick={() => {
         window.dispatchEvent(new CustomEvent("open-ask-agent", { detail: { prompt } }));

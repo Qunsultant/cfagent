@@ -413,7 +413,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
           <Flex gap="1" justify="end" wrap>
             <Button
               type="button"
-              variant="accent"
+              variant="secondary"
               tone="subtle"
               size="sm"
               disabled={!!busy || !g.enabled}

@@ -312,7 +312,7 @@ export function ResearchRunDetailView(props: {
   return (
     <div className="research-detail">
       <div className="research-detail-topbar">
-        <Button variant="ghost" size="sm" onClick={props.onBack}>
+        <Button variant="secondary" size="sm" onClick={props.onBack}>
           ← All reports
         </Button>
         {props.reportUrl ? (
@@ -456,7 +456,7 @@ export function ResearchRunDetail(props: { reportId: string; onBack: () => void 
   if (state.phase === "loading") {
     return (
       <div className="research-detail">
-        <Button variant="ghost" size="sm" onClick={props.onBack}>
+        <Button variant="secondary" size="sm" onClick={props.onBack}>
           ← All reports
         </Button>
         <div className="research-detail-loading">
@@ -468,7 +468,7 @@ export function ResearchRunDetail(props: { reportId: string; onBack: () => void 
   if (state.phase === "error") {
     return (
       <div className="research-detail">
-        <Button variant="ghost" size="sm" onClick={props.onBack}>
+        <Button variant="secondary" size="sm" onClick={props.onBack}>
           ← All reports
         </Button>
         <Notice tone="danger" title="Could not load this report">

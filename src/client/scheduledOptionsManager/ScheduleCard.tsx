@@ -189,7 +189,7 @@ export function buildScheduleRowColumns(
             </Button>
             <Button
               type="button"
-              variant="accent"
+              variant="secondary"
               tone="subtle"
               size="sm"
               onClick={() => handlers.onTrigger(item)}

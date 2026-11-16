@@ -175,7 +175,6 @@ const REGISTERED_EXCEPTIONS: Record<string, string> = {
   "min-height:34px": "segmented size-md control height",
   "min-height:38px": "button size-md control height",
   "min-height:40px": "segmented size-lg control height",
-  "min-height:44px": "button size-lg control height",
   // Layout widths and breakpoints — no scale step applies; a
   // layout-token tier does not exist yet.
   "max-width:480px": "empty-state measure",

@@ -160,7 +160,7 @@ export function PendingReviewQueue() {
         <Badge tone="neutral" size="sm">
           {items.length} held
         </Badge>
-        <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading}>
+        <Button variant="secondary" size="sm" onClick={() => void refresh()} disabled={loading}>
           Refresh
         </Button>
       </div>

@@ -216,7 +216,7 @@ export function LlmStrategyEvalModal({
             <h3>{strategy.strategyName} on {strategy.symbol}</h3>
             {strategy.legsText && <span className="llm-eval-legs-subtitle">{strategy.legsText}</span>}
           </div>
-          <Button variant="ghost" type="button" className="llm-eval-close-btn" onClick={onClose} title="Close">
+          <Button variant="secondary" type="button" className="llm-eval-close-btn" onClick={onClose} title="Close">
             ✕
           </Button>
         </div>

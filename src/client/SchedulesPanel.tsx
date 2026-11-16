@@ -460,7 +460,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   const sortableHeader = (key: string, label: string) => (
     <Button
       type="button"
-      variant="ghost"
+      variant="secondary"
       size="sm"
       onClick={() => setSort((current) => nextTableSort(current, key))}
       title={`Sort by ${label}`}
@@ -653,7 +653,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           </Button>
           <Button
             type="button"
-            variant="accent"
+            variant="secondary"
             tone="subtle"
             size="sm"
             disabled={!!s.paused}

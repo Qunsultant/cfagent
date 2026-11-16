@@ -253,7 +253,7 @@ export function LeftNavBar({
 
         {onToggleCollapse && (
           <Button
-            variant="ghost"
+            variant="secondary"
             size="sm"
             className="sidebar-collapse-btn"
             onClick={onToggleCollapse}
@@ -319,7 +319,7 @@ export function LeftNavBar({
                     >
                       <div className={`sidebar-nav-item-row ${active ? "active" : ""}`}>
                         <Button
-                          variant="ghost"
+                          variant="secondary"
             size="sm"
                           className={`sidebar-nav-item ${active ? "active" : ""}`}
                           href={isMenuOnly ? undefined : deepLinkHref(itemLink)}
@@ -357,7 +357,7 @@ export function LeftNavBar({
                         {/* Expandable sub-menu toggle indicator '>' */}
                         {!collapsed && hasSubMenu && (
                           <Button
-                            variant="ghost"
+                            variant="secondary"
             size="sm"
                             className={`submenu-toggle-btn ${isExpanded ? "open" : ""}`}
                             onClick={(e) => toggleSubMenu(item.id, e)}
@@ -379,7 +379,7 @@ export function LeftNavBar({
                             still navigates to the item's own page. */}
                         {collapsed && hasSubMenu && visibleSubItems.length > 0 && (
                           <Button
-                            variant="ghost"
+                            variant="secondary"
             size="sm"
                             className={`submenu-toggle-btn ${flyoutOpen ? "open" : ""}`}
                             onClick={(e) => {
@@ -419,7 +419,7 @@ export function LeftNavBar({
 
                             return (
                               <Button
-                                variant="ghost"
+                                variant="secondary"
             size="sm"
                                 key={sub.id}
                                 className={`sidebar-submenu-item ${subActive ? "active" : ""}`}
@@ -485,7 +485,7 @@ export function LeftNavBar({
                             const subLink = deepLinkForNavNode(item.id, sub.id);
                             return (
                               <Button
-                                variant="ghost"
+                                variant="secondary"
             size="sm"
                                 key={sub.id}
                                 className={`sidebar-submenu-item ${subActive ? "active" : ""}`}

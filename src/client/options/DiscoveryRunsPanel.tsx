@@ -587,7 +587,7 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
               <Button
                 key={run.id}
                 type="button"
-                variant={selected ? "accent" : "secondary"}
+                variant={selected ? "primary" : "secondary"}
                 tone="subtle"
                 aria-pressed={selected}
                 aria-label={`Review discovery run from ${new Date(run.createdAt).toLocaleString()}`}

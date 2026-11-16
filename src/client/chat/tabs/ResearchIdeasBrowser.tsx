@@ -143,7 +143,7 @@ export function ResearchIdeasBrowser(props: {
               header: "Run",
               render: (e: BrowseEntry) => (
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
                   onClick={() => props.onOpenReport(e.reportId)}
                   title={e.reportTitle}

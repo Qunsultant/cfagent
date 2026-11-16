@@ -240,7 +240,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                     { key: "clicks", header: "Clicks", render: (ad) => <>{ad.clicks}</> },
                     { key: "earned", header: "Total Earned", render: (ad) => <strong>${ad.earnings.toFixed(2)}</strong> },
                     { key: "status", header: "Status", render: (ad) => <Badge size="xs" uppercase tone={ad.isActive ? "success" : "neutral"}>{ad.isActive ? "ACTIVE" : "PAUSED"}</Badge> },
-                    { key: "preview", header: "Live Preview", render: (ad) => <Button variant="accent" tone="subtle" size="sm" onClick={() => handleExternalAdClick(ad)}>{ad.ctaText}</Button> },
+                    { key: "preview", header: "Live Preview", render: (ad) => <Button variant="secondary" tone="subtle" size="sm" onClick={() => handleExternalAdClick(ad)}>{ad.ctaText}</Button> },
                   ]}
                   rows={externalAds}
                   rowKey={(ad) => ad.id}

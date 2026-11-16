@@ -164,7 +164,7 @@ function FeedStatusBlock({
       </div>
       {feed.state !== "not-configured" && (
         <div className="dpp-feed-actions">
-          <Button size="sm" variant="ghost" disabled={busy} onClick={onRunNow}>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={onRunNow}>
             Run now
           </Button>
         </div>
@@ -241,7 +241,7 @@ function FeedJobScheduleEditor({
         />
         <Button
           size="sm"
-          variant="ghost"
+          variant="secondary"
           disabled={busy || !canSave}
           onClick={() => onSave(view, job, { enabled: schedule.enabled, intervalMinutes: parsed })}
         >
@@ -250,7 +250,7 @@ function FeedJobScheduleEditor({
         {schedule.enabled ? (
           <Button
             size="sm"
-            variant="ghost"
+            variant="secondary"
             disabled={busy}
             onClick={() => onSave(view, job, { enabled: false })}
           >
@@ -259,7 +259,7 @@ function FeedJobScheduleEditor({
         ) : (
           <Button
             size="sm"
-            variant="ghost"
+            variant="secondary"
             disabled={busy}
             onClick={() => onSave(view, job, { enabled: true })}
           >
@@ -817,7 +817,7 @@ export function DataProvidersPanel() {
                   <div className="dpp-feed-actions">
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       disabled={busy}
                       onClick={() => void runFeedAction(view, job, "run")}
                     >
@@ -826,7 +826,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runFeedAction(view, job, "pause")}
                       >
@@ -836,7 +836,7 @@ export function DataProvidersPanel() {
                     {state === "paused" && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runFeedAction(view, job, "resume")}
                       >
@@ -846,7 +846,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued" || state === "paused") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runFeedAction(view, job, "cancel")}
                       >
@@ -856,7 +856,7 @@ export function DataProvidersPanel() {
                     {(state === "completed" || state === "failed" || state === "cancelled") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runFeedAction(view, job, "retry")}
                       >
@@ -942,7 +942,7 @@ export function DataProvidersPanel() {
                   <div className="dpp-feed-actions">
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       disabled={busy}
                       onClick={() => void runEnrichAction(view, job, "run")}
                     >
@@ -951,7 +951,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runEnrichAction(view, job, "pause")}
                       >
@@ -961,7 +961,7 @@ export function DataProvidersPanel() {
                     {state === "paused" && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runEnrichAction(view, job, "resume")}
                       >
@@ -971,7 +971,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued" || state === "paused") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runEnrichAction(view, job, "cancel")}
                       >
@@ -981,7 +981,7 @@ export function DataProvidersPanel() {
                     {(state === "completed" || state === "failed" || state === "cancelled") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runEnrichAction(view, job, "retry")}
                       >
@@ -1072,7 +1072,7 @@ export function DataProvidersPanel() {
                   <div className="dpp-feed-actions">
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       disabled={busy}
                       onClick={() => void runAnalyzeAction(view, job, "run")}
                     >
@@ -1081,7 +1081,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runAnalyzeAction(view, job, "pause")}
                       >
@@ -1091,7 +1091,7 @@ export function DataProvidersPanel() {
                     {state === "paused" && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runAnalyzeAction(view, job, "resume")}
                       >
@@ -1101,7 +1101,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued" || state === "paused") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runAnalyzeAction(view, job, "cancel")}
                       >
@@ -1111,7 +1111,7 @@ export function DataProvidersPanel() {
                     {(state === "completed" || state === "failed" || state === "cancelled") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runAnalyzeAction(view, job, "retry")}
                       >
@@ -1202,7 +1202,7 @@ export function DataProvidersPanel() {
                   <div className="dpp-feed-actions">
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       disabled={busy}
                       onClick={() => void runGenerateAction(view, job, "run")}
                     >
@@ -1211,7 +1211,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runGenerateAction(view, job, "pause")}
                       >
@@ -1221,7 +1221,7 @@ export function DataProvidersPanel() {
                     {state === "paused" && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runGenerateAction(view, job, "resume")}
                       >
@@ -1231,7 +1231,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued" || state === "paused") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runGenerateAction(view, job, "cancel")}
                       >
@@ -1241,7 +1241,7 @@ export function DataProvidersPanel() {
                     {(state === "completed" || state === "failed" || state === "cancelled") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runGenerateAction(view, job, "retry")}
                       >
@@ -1330,7 +1330,7 @@ export function DataProvidersPanel() {
                   <div className="dpp-feed-actions">
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       disabled={busy}
                       onClick={() => void runDeliverAction(view, job, "run")}
                     >
@@ -1339,7 +1339,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runDeliverAction(view, job, "pause")}
                       >
@@ -1349,7 +1349,7 @@ export function DataProvidersPanel() {
                     {state === "paused" && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runDeliverAction(view, job, "resume")}
                       >
@@ -1359,7 +1359,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued" || state === "paused") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runDeliverAction(view, job, "cancel")}
                       >
@@ -1369,7 +1369,7 @@ export function DataProvidersPanel() {
                     {(state === "completed" || state === "failed" || state === "cancelled") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runDeliverAction(view, job, "retry")}
                       >
@@ -1443,7 +1443,7 @@ export function DataProvidersPanel() {
                   <div className="dpp-feed-actions">
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       disabled={busy}
                       onClick={() => void runChainAction(view, chain, "run")}
                     >
@@ -1452,7 +1452,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runChainAction(view, chain, "pause")}
                       >
@@ -1462,7 +1462,7 @@ export function DataProvidersPanel() {
                     {state === "paused" && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runChainAction(view, chain, "resume")}
                       >
@@ -1472,7 +1472,7 @@ export function DataProvidersPanel() {
                     {(state === "running" || state === "queued" || state === "paused") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runChainAction(view, chain, "cancel")}
                       >
@@ -1482,7 +1482,7 @@ export function DataProvidersPanel() {
                     {(state === "completed" || state === "failed" || state === "cancelled") && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() => void runChainAction(view, chain, "retry")}
                       >
@@ -1492,7 +1492,7 @@ export function DataProvidersPanel() {
                     {frontierStage && frontierStage.status === "running" && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() =>
                           void runChainAction(view, chain, "stage_pause", frontierStage.stage)
@@ -1504,7 +1504,7 @@ export function DataProvidersPanel() {
                     {frontierStage && frontierStage.status === "stopped" && (
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         disabled={busy}
                         onClick={() =>
                           void runChainAction(view, chain, "stage_resume", frontierStage.stage)
@@ -1519,7 +1519,7 @@ export function DataProvidersPanel() {
                       frontierStage.status !== "not-run" && (
                         <Button
                           size="sm"
-                          variant="ghost"
+                          variant="secondary"
                           disabled={busy}
                           onClick={() =>
                             void runChainAction(view, chain, "stage_cancel", frontierStage.stage)
@@ -1638,7 +1638,7 @@ export function DataProvidersPanel() {
                 </Button>
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="secondary"
                   onClick={() => setConfirmingDeprovisionId(null)}
                   disabled={busy}
                 >
@@ -1649,7 +1649,7 @@ export function DataProvidersPanel() {
               <div className="dpp-item-actions">
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="secondary"
                   disabled={busy}
                   onClick={() => openConfigure(view)}
                 >
@@ -1657,7 +1657,7 @@ export function DataProvidersPanel() {
                 </Button>
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="secondary"
                   disabled={busy}
                   onClick={() => void runAction(view, "verify")}
                 >
@@ -1665,7 +1665,7 @@ export function DataProvidersPanel() {
                 </Button>
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="secondary"
                   disabled={busy}
                   onClick={() => void runAction(view, view.enabled ? "disable" : "enable")}
                 >
@@ -1716,7 +1716,7 @@ export function DataProvidersPanel() {
                   </Button>
                   <Button
                     size="sm"
-                    variant="ghost"
+                    variant="secondary"
                     onClick={() => setConfiguringId(null)}
                     disabled={busy}
                   >

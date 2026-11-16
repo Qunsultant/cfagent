@@ -505,7 +505,7 @@ export function ToolResultView({
           </a>
           {onAction && jobId && (
             <Button
-              variant="ghost"
+              variant="secondary"
               size="sm"
               onClick={() => onAction(`Check status of job ${jobId}`)}
               title="Poll the status of this background job"

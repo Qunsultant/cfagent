@@ -129,7 +129,7 @@ export function ChannelsAdminPanel() {
             <div key={tenant.tenantId}>
               <Button
                 size="sm"
-                variant={selectedId === tenant.tenantId ? "primary" : "ghost"}
+                variant={selectedId === tenant.tenantId ? "primary" : "secondary"}
                 onClick={() => void loadChannels(tenant.tenantId)}
               >
                 {tenant.tenantId}
