@@ -50,6 +50,7 @@ import type { StockScreenRunSpec } from "../../workflows/stockScreenRunSpec";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { withProvenanceTuple } from "../../observability/provenanceTuple";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -195,6 +196,28 @@ export async function submitPaidStockScreenOrNull(
     const impliedProvider = args.routeProvider;
     const selectedProvider = await resolveTenantDataProviderSelection(args.env);
     if (selectedProvider !== null && selectedProvider !== impliedProvider) {
+      args.audit(
+        args.auditType,
+        args.auditAgent,
+        withProvenanceTuple(
+          {
+            principalKind: "session",
+            status: 409,
+            reason: "provider_mismatch",
+            impliedProvider,
+            selectedProvider,
+            universe: args.spec.universe,
+          },
+          "denial",
+          {
+            tenantId,
+            userId: args.userLogin,
+            providerId: impliedProvider,
+            brokerId: selectedProvider,
+            channel: "api",
+          },
+        ),
+      );
       return providerMismatchResponse(impliedProvider, selectedProvider);
     }
     const { account } = await resolvePaidScreenAccount(
@@ -213,6 +236,27 @@ export async function submitPaidStockScreenOrNull(
     if (!args.checkoutEmail) {
       const probe = await probePaidScreenCoverage(args.env, account);
       if (probe.refusedAtLimit) {
+        args.audit(
+          args.auditType,
+          args.auditAgent,
+          withProvenanceTuple(
+            {
+              principalKind: "session",
+              status: 402,
+              code: probe.outcomeCode,
+              reason: probe.reason,
+              universe: args.spec.universe,
+            },
+            "denial",
+            {
+              tenantId,
+              userId: args.userLogin,
+              providerId: impliedProvider,
+              brokerId: selectedProvider ?? "none",
+              channel: "api",
+            },
+          ),
+        );
         return Response.json(
           {
             error: probe.reason,
@@ -282,13 +326,27 @@ export async function submitPaidStockScreenOrNull(
         | undefined,
       params,
     );
-    args.audit(args.auditType, args.auditAgent, {
-      principalKind: "session",
-      jobId: paidCommand.jobId,
-      trigger: "manual",
-      workflowId: started.workflowId,
-      universe: args.spec.universe,
-    });
+    args.audit(
+      args.auditType,
+      args.auditAgent,
+      withProvenanceTuple(
+        {
+          principalKind: "session",
+          jobId: paidCommand.jobId,
+          trigger: "manual",
+          workflowId: started.workflowId,
+          universe: args.spec.universe,
+        },
+        "run",
+        {
+          tenantId,
+          userId: args.userLogin,
+          providerId: impliedProvider,
+          brokerId: storedBroker ?? "none",
+          channel: "api",
+        },
+      ),
+    );
     return Response.json(
       { runRequestId: paidCommand.jobId, workflowId: started.workflowId, status: "payment_started" },
       { status: 202 },

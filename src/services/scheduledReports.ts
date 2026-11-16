@@ -108,6 +108,7 @@ import { createBlobStore } from "./blobStoreR2Adapter";
 import { blobText } from "./blobStorePorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { withProvenanceTuple } from "../observability/provenanceTuple";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -1035,11 +1036,24 @@ export async function storeReportAtGenerationWithR2(
       // carries the put error's message on the outcome; the
       // line quotes it exactly as the inline catch did.
       bodyStatus = "inline_fallback";
-      structuredLog.error("storeReportAtGenerationWithR2.r2_body_put_failed", {
-        message: `[scheduledReports] storeReportAtGenerationWithR2: R2 body put failed for report ${rec.id}; storing inline instead: ${bodyOutcome.error ?? "unknown error"}`,
-        reportId: rec.id,
-        error: bodyOutcome.error ?? "unknown error",
-      });
+      structuredLog.error(
+        "storeReportAtGenerationWithR2.r2_body_put_failed",
+        withProvenanceTuple(
+          {
+            message: `[scheduledReports] storeReportAtGenerationWithR2: R2 body put failed for report ${rec.id}; storing inline instead: ${bodyOutcome.error ?? "unknown error"}`,
+            reportId: rec.id,
+            error: bodyOutcome.error ?? "unknown error",
+          },
+          "fallback",
+          {
+            tenantId: owner,
+            userId: owner,
+            providerId: rec.source ?? "scheduled_reports",
+            brokerId: "none",
+            channel: "r2_fallback",
+          },
+        ),
+      );
     }
     const statuses = initialIndexStatuses(env, rec.source);
     const fanout = makeFanoutOutcome(
