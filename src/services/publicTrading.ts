@@ -70,9 +70,33 @@ function orderType(orderType?: string): string {
       return "STOP";
     case "STOP_LIMIT":
       return "STOP_LIMIT";
+    // Issue #4958 (matrix gap 17): Public documents on-close order types; they
+    // must survive this mapper, or a MOC/LOC would silently become a plain MARKET.
+    case "MARKET_ON_CLOSE":
+      return "MARKET_ON_CLOSE";
+    case "LIMIT_ON_CLOSE":
+      return "LIMIT_ON_CLOSE";
     default:
       return "MARKET";
   }
+}
+
+/**
+ * Issue #4958 (matrix gap 17): Public's documented order-type set includes the
+ * ON-CLOSE types (`MARKET_ON_CLOSE`, `LIMIT_ON_CLOSE`) and no on-open type at
+ * all — so the canonical `cls` maps onto the broker's own type while `opg` has
+ * nothing to map onto and is refused by name at the seam. Same derivation shape
+ * as the other two brokers: (order type, time-in-force) -> one broker value.
+ */
+export function publicAuctionOrderType(
+  orderType: string | undefined,
+  timeInForce: string | undefined,
+): "MARKET_ON_CLOSE" | "LIMIT_ON_CLOSE" | null {
+  if (timeInForce !== "cls") return null;
+  const base = String(orderType ?? "MARKET").trim().toUpperCase();
+  if (base === "MARKET") return "MARKET_ON_CLOSE";
+  if (base === "LIMIT") return "LIMIT_ON_CLOSE";
+  return null;
 }
 
 /**

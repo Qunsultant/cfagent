@@ -140,9 +140,15 @@ describe("#4671 — the capability matrix offers auction values only where suppo
     }
   });
 
-  it("Public has no capability entry at all, so it fails closed to its own refusal", () => {
-    const publicCaps = orderCapabilitiesFor({ brokerId: "public", mode: "live", assetClass: "equity" });
-    expect(publicCaps.supported).toBe(false);
+  it("Public lists the on-close value it documents, and fails closed where it has no mode", () => {
+    // Issue #4958: Public's documented order types include MARKET_ON_CLOSE /
+    // LIMIT_ON_CLOSE, so live equity offers CLS (never OPG, which it does not
+    // document). Public has no paper mode, so the TEST matrix stays empty.
+    const live = orderCapabilitiesFor({ brokerId: "public", mode: "live", assetClass: "equity" });
+    expect(live.supported).toBe(true);
+    expect(live.timeInForce).toContain("CLS");
+    expect(live.timeInForce).not.toContain("OPG");
+    expect(orderCapabilitiesFor({ brokerId: "public", mode: "paper", assetClass: "equity" }).supported).toBe(false);
   });
 
   it("the ticket body carries OPG for every broker that documents an auction", () => {

@@ -55,6 +55,7 @@ import {
   parsePublicPositions,
   publicCancelReceipt,
   publicDraftFromPreflight,
+  publicAuctionOrderType,
   publicMultilegArgs,
   publicNoPaperModeOutcomeExists,
   publicNoPaperModeRefusal,
@@ -198,8 +199,19 @@ export class PublicTradingPlatform implements ITradingPlatform {
   // that could lift it is gap 14 (#4668); until then the decision is unsupported.
   private refuseUnverifiedTimeInForce(timeInForce: string | undefined): void {
     if (timeInForce === undefined || timeInForce === "day") return;
+    // Issue #4958 (matrix gap 17): `cls` IS expressible — Public documents the
+    // on-close order types (MARKET_ON_CLOSE / LIMIT_ON_CLOSE) — so it is carried
+    // to the broker's own enum instead of being refused.
+    if (timeInForce === "cls") return;
+    if (timeInForce === "opg") {
+      throw new Error(
+        `PUBLIC_AUCTION_ON_OPEN_UNSUPPORTED: Public.com documents the on-close order types (MARKET_ON_CLOSE, LIMIT_ON_CLOSE) and no on-open type, so an OPG (MOO/LOO) order cannot be placed. Choose "At the close" or a plain day order; nothing was sent.`
+      );
+    }
+    // DAY is the documented default; GTD exists but needs an expiry we do not
+    // carry here, and GTC/IOC/FOK are not in Public's published set.
     throw new Error(
-      `PUBLIC_TIME_IN_FORCE_UNVERIFIED: Public.com's hosted order schema exposes no time-in-force field that can be verified (auction terms included), so a ${String(timeInForce).toUpperCase()} order cannot be placed truthfully. Choose the day default; nothing was sent.`
+      `PUBLIC_TIME_IN_FORCE_UNVERIFIED: Public.com documents DAY (and GTD, which needs an expiry this path does not carry), so a ${String(timeInForce).toUpperCase()} order cannot be placed truthfully. Choose the day default; nothing was sent.`
     );
   }
 
@@ -361,7 +373,8 @@ export class PublicTradingPlatform implements ITradingPlatform {
           assetClass: params.assetClass,
           action,
           quantity: params.quantity,
-          orderType,
+          // Issue #4958: `cls` rides as the broker's own on-close order type.
+          orderType: publicAuctionOrderType(orderType, params.timeInForce) ?? orderType,
           limitPrice: params.limitPrice,
           stopPrice: params.stopPrice,
           orderClass,
@@ -600,6 +613,22 @@ export class PublicTradingPlatform implements ITradingPlatform {
     });
     if (refusal) return refusal;
 
+    const auctionOrderType = publicAuctionOrderType(params.orderType, params.timeInForce);
+    if (auctionOrderType === "LIMIT_ON_CLOSE" && !(Number(params.limitPrice) > 0)) {
+      const message =
+        "PUBLIC_AUCTION_MISSING_LIMIT: a LIMIT_ON_CLOSE order needs a positive limit price, and the request carried none. Nothing was sent.";
+      this.lastError = message;
+      return publicRefusedExecution({
+        orderId: params.orderId,
+        symbol: params.symbol,
+        action: params.action,
+        quantity: params.quantity,
+        authorizerDid: getUserDid(this.userLogin),
+        code: "FAILURE_BROKER_UNAVAILABLE",
+        message,
+      });
+    }
+
     const isMultileg = (params.optionLegs?.length ?? 0) > 1;
     const tool = isMultileg ? "place_multileg_order" : "place_order";
     const args = isMultileg
@@ -613,7 +642,8 @@ export class PublicTradingPlatform implements ITradingPlatform {
           assetClass: params.optionLegs?.[0]?.securityType === "OPTN" ? "options" : "equity",
           action: params.action,
           quantity: params.quantity,
-          orderType: params.orderType,
+          // Issue #4958: same derivation at the placement seam.
+          orderType: publicAuctionOrderType(params.orderType, params.timeInForce) ?? params.orderType,
           limitPrice: params.limitPrice,
           // Issue #4654 (matrix gap 4): the stop price travels to the wire for
           // a stop type; it was accepted by the arg builder but never passed.

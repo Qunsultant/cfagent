@@ -23,7 +23,7 @@ import { TradingPlatformRegistry } from "../src/trading/registry";
 import { normalizeTimeInForce, TIME_IN_FORCE_VALUES } from "../src/trading";
 import { etradeOrderTerm } from "../src/trading/etrade/platform";
 import { PublicTradingPlatform } from "../src/trading/public/platform";
-import { publicSingleLegArgs } from "../src/services/publicTrading";
+import { publicAuctionOrderType, publicSingleLegArgs } from "../src/services/publicTrading";
 import { orderCapabilitiesFor } from "../src/config/orderCapabilities";
 import type { Env } from "../src/types";
 
@@ -272,51 +272,142 @@ describe("#4656 — Public refuses a TIF it cannot honour, by name", () => {
     expect(receipt.message).toMatch(/PUBLIC_TIME_IN_FORCE_UNVERIFIED/);
   });
 
-  // Issue #4671 (matrix gap 17): an auction term is a non-default TIF too, so it
-  // takes the SAME named refusal — Public must not pretend to place a MOO/MOC.
-  it("refuses an auction TIF (opg) the same way, by name", async () => {
-    const receipt = await publicPlatform().placeOrderRemote({
-      orderId: "draft-2",
+  // Issue #4958 (matrix gap 17): Public DOCUMENTS the on-close order types
+  // (MARKET_ON_CLOSE / LIMIT_ON_CLOSE) and no on-open type at all, so 'cls' is
+  // carried and 'opg' is refused by name against the broker's own documented set.
+  it("carries a MOC as Public's documented MARKET_ON_CLOSE type", async () => {
+    const placed = await publicPlatform().placeOrderRemote({
+      orderId: "draft-moc",
       symbol: "AAPL",
-      action: "BUY",
-      quantity: 1,
+      action: "SELL",
+      quantity: 10,
       orderType: "MARKET",
-      timeInForce: "opg",
+      timeInForce: "cls",
       userLogin: "owner@example.com",
     });
-    expect(receipt.success).toBe(false);
-    expect(receipt.message).toMatch(/PUBLIC_TIME_IN_FORCE_UNVERIFIED/);
-  });
-  it("refuses an auction TIF the same way, naming the missing field (issue #4958)", async () => {
-    const receipt = await publicPlatform().placeOrderRemote({
-      orderId: "draft-3",
-      symbol: "AAPL",
-      action: "BUY",
-      quantity: 1,
-      orderType: "MARKET",
-      timeInForce: "opg",
-      userLogin: "owner@example.com",
-    });
-    expect(receipt.success).toBe(false);
-    expect(receipt.message).toMatch(/PUBLIC_TIME_IN_FORCE_UNVERIFIED/);
-    // The reason is the absence of a verifiable field, not "we did not try".
-    expect(receipt.message).toMatch(/exposes no time-in-force field that can be verified/);
+    // Not a time-in-force refusal: the term is expressible on this broker.
+    expect(String(placed.message)).not.toMatch(/PUBLIC_AUCTION_ON_OPEN_UNSUPPORTED|PUBLIC_TIME_IN_FORCE_UNVERIFIED/);
   });
 
-  it("has nothing to send an auction term on: the single-leg spec carries no time-in-force key (#4958)", () => {
-    const spec = publicSingleLegArgs({
+  it("puts the broker's on-close type on the wire, not a silent MARKET", async () => {
+    const bodies: any[] = [];
+    const fetchImpl = vi.fn(async (_url: any, init: any) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      bodies.push(body);
+      // The client lists the tools first and refuses anything it did not see,
+      // so the stub answers tools/list with the placement tool.
+      const result =
+        body?.method === "tools/list"
+          ? {
+              tools: [
+                {
+                  name: "place_order",
+                  inputSchema: {
+                    type: "object",
+                    properties: {
+                      symbol: { type: "string" },
+                      instrument_type: { type: "string" },
+                      order_side: { type: "string" },
+                      order_type: { type: "string" },
+                      quantity: { type: "number" },
+                      limit_price: { type: "number" },
+                    },
+                  },
+                },
+                { name: "preflight_order", inputSchema: { type: "object", properties: {} } },
+              ],
+            }
+          : { content: [{ type: "text", text: JSON.stringify({ orderId: "ord-moc", status: "NEW" }) }] };
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body?.id ?? 1, result }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const platform = new PublicTradingPlatform({} as Env, undefined, "owner@example.com", "PROD", {
+      accessTokenProvider: async () => "pat-token",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleep: async () => undefined,
+    });
+    await platform.placeOrderRemote({
+      orderId: "draft-wire",
       symbol: "AAPL",
-      assetClass: "equity",
+      action: "SELL",
+      quantity: 10,
+      orderType: "MARKET",
+      timeInForce: "cls",
+      userLogin: "owner@example.com",
+    });
+    const call = bodies.find((body) => body?.method === "tools/call");
+    expect(call, "a tools/call reached the Public MCP client").toBeDefined();
+    expect(JSON.stringify(call)).toContain("MARKET_ON_CLOSE");
+  });
+  it("refuses an on-OPEN term by name, citing the broker's documented order types", async () => {
+    const receipt = await publicPlatform().placeOrderRemote({
+      orderId: "draft-moo",
+      symbol: "AAPL",
       action: "BUY",
       quantity: 1,
       orderType: "MARKET",
+      timeInForce: "opg",
+      userLogin: "owner@example.com",
     });
-    expect(Object.keys(spec)).not.toContain("time_in_force");
-    // Every key the spec can emit, so a future field cannot slip in unremarked.
-    expect(Object.keys(spec).sort()).toEqual(
-      ["instrument_type", "limit_price", "order_class", "order_side", "order_type", "quantity", "stop_price", "symbol"].filter(
-        (key) => key in spec,
-      ).sort(),
-    );
+    expect(receipt.success).toBe(false);
+    expect(receipt.message).toMatch(/PUBLIC_AUCTION_ON_OPEN_UNSUPPORTED/);
+    // The reason names what Public DOES document (on-close) and what it does not (on-open).
+    expect(receipt.message).toMatch(/on-close order types \(MARKET_ON_CLOSE, LIMIT_ON_CLOSE\) and no on-open type/);
+  });
+
+  it("still refuses the terms Public does not publish", async () => {
+    const receipt = await publicPlatform().placeOrderRemote({
+      orderId: "draft-gtc",
+      symbol: "AAPL",
+      action: "BUY",
+      quantity: 1,
+      orderType: "LIMIT",
+      limitPrice: 100,
+      timeInForce: "gtc",
+      userLogin: "owner@example.com",
+    });
+    expect(receipt.success).toBe(false);
+    expect(receipt.message).toMatch(/PUBLIC_TIME_IN_FORCE_UNVERIFIED/);
+  });
+
+  it("derives the broker's on-close type from the pair, and nothing for on-open", () => {
+    expect(publicAuctionOrderType("MARKET", "cls")).toBe("MARKET_ON_CLOSE");
+    expect(publicAuctionOrderType("LIMIT", "cls")).toBe("LIMIT_ON_CLOSE");
+    expect(publicAuctionOrderType("MARKET", "opg")).toBeNull();
+    expect(publicAuctionOrderType("STOP", "cls")).toBeNull();
+  });
+
+  it("the single-leg spec carries the on-close type through (no silent MARKET)", () => {
+    const moc = publicSingleLegArgs({
+      symbol: "AAPL",
+      assetClass: "equity",
+      action: "SELL",
+      quantity: 10,
+      orderType: "MARKET_ON_CLOSE",
+    });
+    expect(moc.order_type.value).toBe("MARKET_ON_CLOSE");
+
+    const loc = publicSingleLegArgs({
+      symbol: "AAPL",
+      assetClass: "equity",
+      action: "SELL",
+      quantity: 10,
+      orderType: "LIMIT_ON_CLOSE",
+      limitPrice: 225,
+    });
+    expect(loc.order_type.value).toBe("LIMIT_ON_CLOSE");
+    expect(loc.limit_price?.value).toBe(225);
+  });
+
+  it("the capability matrix lists CLS for Public live equity and never OPG", () => {
+    const live = orderCapabilitiesFor({ brokerId: "public", mode: "live", assetClass: "equity" });
+    expect(live.supported).toBe(true);
+    expect(live.timeInForce).toContain("CLS");
+    expect(live.timeInForce).not.toContain("OPG");
+    // Public has no paper mode, so the TEST matrix stays empty and the ticket
+    // offers nothing there.
+    expect(orderCapabilitiesFor({ brokerId: "public", mode: "paper", assetClass: "equity" }).supported).toBe(false);
   });
 });

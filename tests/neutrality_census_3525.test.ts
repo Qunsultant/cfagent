@@ -751,6 +751,11 @@ function measure(): Map<string, number> {
  * the inventory, so the one row is dispositioned INTEGRATION (naming the
  * provider is the inventory's job — the #4792 survey precedent). The
  * INTEGRATION marker is restated 681/6528 -> 682/6529.
+ * Baseline update (#4958, 2026-11-16; the Public auction slice): Public's own
+ * platform file gains the on-open refusal message, which names the broker — a
+ * user-facing string in that broker's adapter, dispositioned INTEGRATION like
+ * the rest of the row: 1 raise (public/platform.ts public.com 12->13).
+ * Measured totals move 1284/10139 -> 1284/10140 (re-based onto 1930e03e7).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -2066,7 +2071,7 @@ const BASELINE: Array<[string, string, number]> = [
   // Issue #4656: the TIF refusal names the broker in its user-facing message
   // (PUBLIC_TIME_IN_FORCE_UNVERIFIED), the same INTEGRATION growth the #3990
   // rows above already account for.
-  ["src/trading/public/platform.ts", "public.com", 12],
+  ["src/trading/public/platform.ts", "public.com", 13],
   ["src/trading/public/platform.ts", "alpaca", 2],
   ["src/trading/screenerPipeline.ts", "public.com", 3],
   ["docs/architecture/agentic/mcp-server-inventory.md", "public.com", 2],

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Order-entry capabilities per broker, mode and asset class. Issue #4656: E*TRADE lists DAY/GTC/IOC only — its client has no verified FOK orderTerm, so the ticket must not offer it. Issue #4671: OPG/CLS are the auction values (market+opg = MOO, market+cls = MOC, limit+opg = LOO, limit+cls = LOC) and only Alpaca equity lists them — E*TRADE declares no auction term, and Public's hosted schema is unverified. The ticket offers exactly what this table lists and disables the rest, and the preview body carries only a supported combination. This is the single home for the matrix (issue #4573) — no component hardcodes a broker rule. Values mirror each broker's documented order-entry fields; tighten them here when a broker changes its contract.",
+  "note": "Order-entry capabilities per broker, mode and asset class. Issue #4656: E*TRADE lists DAY/GTC/IOC only — its client has no verified FOK orderTerm, so the ticket must not offer it. Issue #4671: OPG/CLS are the auction values (market+opg = MOO, market+cls = MOC, limit+opg = LOO, limit+cls = LOC) and only Alpaca equity lists them — E*TRADE carries them as price types (issue #4957), and Public lists CLS only because its documented order types include MARKET_ON_CLOSE / LIMIT_ON_CLOSE and no on-open type (issue #4958). The ticket offers exactly what this table lists and disables the rest, and the preview body carries only a supported combination. This is the single home for the matrix (issue #4573) — no component hardcodes a broker rule. Values mirror each broker's documented order-entry fields; tighten them here when a broker changes its contract.",
   "brokers": {
     "etrade": {
       "paper": {
@@ -43,6 +43,14 @@
         "options": {
           "orderTypes": ["MARKET", "LIMIT"],
           "timeInForce": ["DAY", "GTC"]
+        }
+      }
+    },
+    "public": {
+      "live": {
+        "equity": {
+          "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+          "timeInForce": ["DAY", "CLS"]
         }
       }
     }
