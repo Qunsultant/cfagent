@@ -2012,9 +2012,6 @@ const BASELINE: Array<[string, string, number]> = [
   // rows, #4038/#4039). Measured 2026-11-15 on the placed file.
   ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 80],
   ["docs/architecture/business/brokerage-data-matrix.md", "public.com", 14],
-  // #4654 (INTEGRATION/provenance in the capability record): the gap-4 FIXED
-  // note names which brokers still own a stop-placement gap (6 / 7), the same
-  // provenance-enumeration disposition this row already carries.
   ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 60],
   ["docs/architecture/business/brokerage-data-matrix.md", "schwab", 3],
   ["docs/architecture/business/brokerage-data-matrix.md", "fidelity", 2],
@@ -2090,12 +2087,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/958-screening-consolidation-survey.md", "yahoo", 3],
   ["docs/architecture/survey/958-screening-consolidation-survey.md", "nasdaq", 1],
   ["docs/architecture/survey/982-screening-s2-verify-first-survey.md", "etrade", 6],
-  // Docs that landed without their census rows while main was already red
-  // (#4770 operations guide, #4800/#4811 CISO survey copies, plus the #4793
-  // survey move): HISTORICAL dated records and INTEGRATION subject docs — the
-  // same disposition the neighbouring docs/** rows carry. Added by the #4654
-  // lane as the §10 / §18.2 stop-the-line fix: main cannot go green without
-  // them, and no PR can merge while main is red.
+  // Stop-the-line CI baseline for consolidated survey + dispatch-modes docs on main
   ["docs/architecture/survey/2012-2405-dedup-audit-survey.md", "etrade", 1],
   ["docs/architecture/survey/2373-single-payment-path-design-note.md", "etrade", 8],
   ["docs/architecture/survey/2373-single-payment-path-design-note.md", "yahoo", 1],
