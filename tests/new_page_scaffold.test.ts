@@ -119,8 +119,12 @@ describe("new-page scaffold (issues #3080, #3137)", () => {
       expect(panel).toContain('scopeNote="Probe page for the scaffold generator"');
       expect(panel).not.toContain("<PageShell");
       expect(panel).toContain(
-        'import { EmptyState, PageSection, PageTemplate } from "./components/ui";',
+        'import { Card, CardHeader, EmptyState, PageSection, PageTemplate } from "./components/ui";',
       );
+      // Issue #4825: the stub carries a card composition (Card +
+      // CardHeader), so a scaffolded page passes the general
+      // template-conformance rule on day one.
+      expect(panel).toContain("<CardHeader");
       // Built, not literal, so this test file itself carries no inline-style text.
       expect(panel).not.toContain("style" + "{{");
       expect(panel).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
