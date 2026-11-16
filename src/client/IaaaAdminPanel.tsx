@@ -413,13 +413,16 @@ export function IaaaAdminPanel() {
 
   return (
     <div className="iaaa-admin-panel">
-      {/* Issue #4839 G1: the page states its purpose before the tab bar. */}
+      {/* Issue #4839 G1: the page states its purpose before the tab bar.
+      A Notice (ui primitive), not a new bespoke note paragraph — the
+      interior ceiling for this file (ux_shell_exceptions_3047.json)
+      forbids new bespoke class tokens. */}
       <h3>IAAA Admin</h3>
-      <p className="iaaa-admin-note">
+      <Notice tone="info">
         Identity and access administration for this platform: memberships, admin roles,
         service identities, and the audit trail. Platform admins see every section;
         tenant admins see only their own tenant&apos;s role grants and logged-in users.
-      </p>
+      </Notice>
       <Modal
         open={revokeTarget !== null}
         onClose={() => setRevokeTarget(null)}
@@ -493,19 +496,20 @@ export function IaaaAdminPanel() {
         {/* Issue #4839 G3: dead ends get a way forward — verified against
         docs/architecture/security/iaaa-admin-bootstrap-genesis.md: genesis is the
         one-shot first platform: grant from the bootstrap list, and a role comes
-        from a platform admin's grant, not from signing in. */}
+        from a platform admin's grant, not from signing in. Notices, not new
+        bespoke note paragraphs (interior ceiling, see G1). */}
         {!overview.genesis.platformGenesisOccurred && (
-          <p className="iaaa-admin-note">
+          <Notice tone="info">
             Platform genesis has not yet occurred — no platform admin exists yet. The first
             platform admin comes from the bootstrap list (IAAA_BOOTSTRAP_ADMINS): the first
             platform: entry wins on that identity&apos;s next fresh sign-in. See Bootstrap
             proposals.
-          </p>
+          </Notice>
         )}
         {roles.length === 0 && (
-          <p className="iaaa-admin-note">
+          <Notice tone="info">
             You hold no roles — ask a platform admin to grant you a role from the Members tab.
-          </p>
+          </Notice>
         )}
 
         {overview.adminCounts && (
@@ -681,12 +685,13 @@ export function IaaaAdminPanel() {
         tenant only) — verified in src/security/iaaaAdminOverview.ts. Decision
         and Outcome values are the catalog's own (allow/deny; succeeded/failed/
         unknown). The "Audit events are read-only" sentence moved here from
-        Access requests (G9). */}
-        <p className="iaaa-admin-note">
+        Access requests (G9). A Notice, not a new bespoke note paragraph
+        (interior ceiling, see G1). */}
+        <Notice tone="info">
           The 100 most recent audit events for this tenant, newest first. Audit events are
           read-only. Decision is allow or deny; Outcome is whether the action succeeded,
           failed, or is unknown.
-        </p>
+        </Notice>
         <Button type="button" variant="secondary" onClick={() => setTab("iaaa")}>
           See the IAAA tab taxonomy
         </Button>
@@ -771,15 +776,16 @@ export function IaaaAdminPanel() {
           </p>
         )}
         {/* Issue #4839 G7: what each role and scope can do — verified against
-        the role catalog in src/security/authorization.ts (ROLE_GRANTS). */}
-        <p className="iaaa-admin-note">
+        the role catalog in src/security/authorization.ts (ROLE_GRANTS).
+        A Notice, not a new bespoke note paragraph (interior ceiling, see G1). */}
+        <Notice tone="info">
           Roles: member — uses the platform (tasks, artifacts, proposals, and their own
           brokerage); approver — approves actions only; auditor — reads tasks, artifacts,
           and the audit trail; workspace-admin — all permissions within one workspace;
           tenant-admin — all permissions within one tenant; platform-admin — assigns admin
           roles and reads the audit trail, platform scope only. Scopes: tenant — one
           tenant; workspace — one workspace; platform — the whole platform.
-        </p>
+        </Notice>
         <h4>Memberships</h4>
         {memberships.length === 0 ? (
           <EmptyState title="No memberships" description="No memberships returned for this tenant yet." />
