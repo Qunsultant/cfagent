@@ -134,7 +134,7 @@ jobs:
           echo "label=$(jq -r '.label' <<<"$config")" >> "$GITHUB_OUTPUT"
           echo "excluded=$(jq -c '.excludedAuthors // []' <<<"$config")" >> "$GITHUB_OUTPUT"
 
-      - name: Label the PR (lane from the body hashtag)
+      - name: Label the PR (lane from the Agent section)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -150,7 +150,12 @@ jobs:
             exit 0
           fi
           LANE_LABEL=""
-          AGENT_TAG=$(echo "$PR_BODY" | grep -i -o -E '#[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9]+' | head -n 1 || true)
+          # Lane comes ONLY from the ## Agent section (to the next ## heading):
+          # a comment URL above it (…#issuecomment-<id>) matches the hashtag
+          # pattern and must never mint a lane label (#4826). No Agent section
+          # means no lane label — never guess from the whole body.
+          AGENT_SECTION=$(echo "$PR_BODY" | awk 'tolower($0) ~ /^## agent[[:space:]]*$/ {flag=1; next} /^## / {flag=0} flag')
+          AGENT_TAG=$(echo "$AGENT_SECTION" | grep -i -o -E '#[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9]+' | head -n 1 || true)
           if [ -n "$AGENT_TAG" ]; then
             AGENT_ID=$(echo "$AGENT_TAG" | sed 's/^#//' | tr '[:upper:]' '[:lower:]')
             LANE_LABEL="lane:$AGENT_ID"
