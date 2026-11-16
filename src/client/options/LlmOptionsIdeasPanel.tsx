@@ -280,7 +280,7 @@ export function LlmOptionsIdeasPanel({ activeEnv, userLogin }: LlmOptionsIdeasPa
             </Notice>
           )}
           {result.finalAnalysis?.status === "complete" ? (
-            <Card padding="md">
+            <Card>
               <Stack gap="2">
                 <CardHeader title="Overall group-winner ranking" />
                 <p>{result.finalAnalysis.answer}</p>
@@ -302,7 +302,7 @@ export function LlmOptionsIdeasPanel({ activeEnv, userLogin }: LlmOptionsIdeasPa
             </Notice>
           )}
           {(result.groups || []).map((group) => (
-            <Card padding="md" key={group.id}>
+            <Card key={group.id}>
               <Stack gap="2">
                 <CardHeader
                   title={group.label}

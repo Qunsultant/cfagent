@@ -114,7 +114,7 @@ export function FeatureDisabledNotice({
       }}
     >
       <div style={{ maxWidth: "560px", width: "100%", textAlign: "center" }}>
-        <Card padding="lg">
+        <Card>
           <div
             style={{
               display: "flex",

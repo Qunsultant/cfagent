@@ -117,7 +117,7 @@ export function PresetsPanel({
       )}
       <div className="ui-stack-lg">
         {starters.map((starter) => (
-          <Card key={starter.id} padding="md">
+          <Card key={starter.id}>
             <div className="ui-row">
               <h4>{starter.name}</h4>
               <Badge tone="neutral">proposed</Badge>

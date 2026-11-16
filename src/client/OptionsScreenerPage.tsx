@@ -176,7 +176,7 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
         title="Provider selection"
         description="The data provider feeding these surfaces and the broker whose surfaces render, from Settings. Changing a selection writes the server row; this page only displays it."
       >
-        <Card padding="md">
+        <Card>
           <p>
             Data provider: {dataProviderLabel} · Broker: {brokerLabel}
           </p>
@@ -196,7 +196,7 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
           const navNodeId = OPTIONS_PRODUCT_NAV_NODE[product.id];
           const link = enabled && navNodeId ? deepLinkForNavNode("options-screener", navNodeId) : null;
           return (
-            <Card key={product.id} padding="md">
+            <Card key={product.id}>
               <div
                 style={{
                   display: "flex",
@@ -261,7 +261,7 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
         title="Related surfaces"
         description="The run record, schedules, and settings that every options run shares."
       >
-        <Card padding="md">
+        <Card>
           <div
             style={{
               display: "flex",
@@ -280,7 +280,7 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
             </div>
           </div>
         </Card>
-        <Card padding="md">
+        <Card>
           <div
             style={{
               display: "flex",
@@ -299,7 +299,7 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
             </div>
           </div>
         </Card>
-        <Card padding="md">
+        <Card>
           <div
             style={{
               display: "flex",
@@ -318,7 +318,7 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
             </div>
           </div>
         </Card>
-        <Card padding="md">
+        <Card>
           <div
             style={{
               display: "flex",

@@ -253,7 +253,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
         <TabPanel idBase="payments" tabId="stats" active={activeTab === "stats"} retain>
           <PageSection title="Stats">
           <div className="ui-stat-grid">
-            <Card padding="none" highlight>
+            <Card padding="none" emphasized>
               <div className="ui-row">
                 <span>💰</span>
                 <div>

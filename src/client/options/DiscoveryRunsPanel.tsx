@@ -265,7 +265,7 @@ function NoViewOutcomeBody({ outcome }: { outcome: DiscoverySymbolOutcome }) {
                 const c = entry.candidate;
                 const isBest = bestCandidateId !== undefined && c.id === bestCandidateId;
                 return (
-                  <Card key={c.id} padding="sm" highlight={isBest}>
+                  <Card key={c.id} padding="sm" emphasized={isBest}>
                     <Stack gap="0-5">
                       <Flex gap="1" align="center" wrap>
                         <Badge tone={isBest ? "accent" : "neutral"} size="xs">#{entry.rank}</Badge>
@@ -317,7 +317,7 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
   const excludedCount = excluded.reduce((sum, e) => sum + e.count, 0);
 
   return (
-    <Card padding="md">
+    <Card>
       <Stack gap="2">
       <Flex gap="2" align="center" wrap>
         <strong>{outcome.symbol}</strong>
@@ -424,7 +424,7 @@ function OutcomeView({ outcome }: { outcome: DiscoverySymbolOutcome }) {
                 const c = entry.candidate;
                 const isBest = bestCandidateId !== undefined && c.id === bestCandidateId;
                 return (
-                  <Card key={c.id} padding="sm" highlight={isBest}>
+                  <Card key={c.id} padding="sm" emphasized={isBest}>
                     <Stack gap="0-5">
                       <Flex gap="1" align="center" wrap>
                         <Badge tone={isBest ? "accent" : "neutral"} size="xs">#{entry.rank}</Badge>
@@ -635,7 +635,7 @@ export function DiscoveryRunsPanel({ activeEnv, userLogin }: DiscoveryRunsPanelP
           )}
           {detail && !detailLoading && (
             <>
-              <Card padding="md">
+              <Card>
                 <CardHeader
                   title={`${new Date(detail.createdAt).toLocaleString()} · ${discoveryTriggerLabel(detail)}`}
                   subtitle={

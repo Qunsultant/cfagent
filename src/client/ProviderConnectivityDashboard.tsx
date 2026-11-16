@@ -121,7 +121,7 @@ export function ProviderConnectivityDashboard() {
   usePolling(load, { fastMs: 60_000, idleMs: 60_000 });
 
   return (
-    <Card padding="md">
+    <Card>
       <h3 style={{ margin: "0 0 0.25rem" }}>Provider connectivity</h3>
       <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 1rem" }}>
         Health from stored state only — capture records and credential presence, never a live probe.

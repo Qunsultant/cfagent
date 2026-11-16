@@ -196,7 +196,7 @@ function WorkflowCard({
   latest: WorkflowRun | undefined;
 }) {
   return (
-    <Card padding="md">
+    <Card>
       <Stack gap="3">
         <CardHeader
           title={workflow.label}

@@ -422,7 +422,7 @@ export function RunDetailView({
 
   if (chrome === "bare") return <PageSection>{body}</PageSection>;
   return (
-    <Card padding="md">
+    <Card>
       <PageSection>{body}</PageSection>
     </Card>
   );

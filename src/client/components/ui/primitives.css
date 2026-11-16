@@ -271,12 +271,11 @@
   box-shadow: var(--shadow-card);
 }
 
-.ui-card.elevated { background: var(--color-card-elevated); box-shadow: var(--shadow-md); }
+.ui-card.emphasized { background: var(--color-primary-alpha); border-color: var(--color-primary-border); box-shadow: var(--shadow-md); }
 
 .ui-card.pad-none { padding: 0; }
 .ui-card.pad-sm { padding: var(--space-3); }
 .ui-card.pad-md { padding: var(--space-5); }
-.ui-card.pad-lg { padding: 1.75rem; }
 
 /* ---------- Notice ---------- */
 .ui-notice {
@@ -897,11 +896,6 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
 .ui-plain-link {
   text-decoration: none;
   color: inherit;
-}
-
-.ui-card.highlight {
-  background: var(--color-primary-alpha);
-  border-color: var(--color-primary-border);
 }
 
 .ui-stat-grid {

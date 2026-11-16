@@ -156,7 +156,7 @@ export function MorningDigest({
 
   return (
     <PageSection title="Morning digest">
-    <Card padding="md">
+    <Card>
       <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 1rem" }}>
         Overnight: {formatTime(window.startMs)} – {formatTime(window.endMs)}
         {window.inProgress ? " (in progress)" : ""} · {overnight.length} ran · {partialCount} partial ·{" "}

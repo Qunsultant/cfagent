@@ -1071,7 +1071,7 @@ export function StockHub({
             />
           </div>
           {/* Issue #212: autonomous screener panel — retained run history. */}
-          <Card padding="md" style={{ marginBottom: "1rem" }}>
+          <Card style={{ marginBottom: "1rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginBottom: "0.5rem", flexWrap: "wrap" }}>
               <span style={{ color: "var(--color-accent)", fontWeight: 700 }}>🤖 Autonomous Screen</span>
               <span style={{ fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
@@ -1168,7 +1168,7 @@ export function StockHub({
                     aria-label="Selected job run data"
                     style={{ marginBottom: "0.75rem" }}
                   >
-                    <Card padding="md">
+                    <Card>
                       <h3 style={{ margin: "0 0 0.5rem" }}>Run detail</h3>
                       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
                         <Badge
@@ -1228,7 +1228,7 @@ export function StockHub({
           </Card>
           {/* Issue #2746: One-shot manual screen moved to its own page / view (?tab=screeners&view=new-screen). */}
           <Stack gap="2">
-            <Card padding="md">
+            <Card>
               <CardHeader
                 title="Run a new screen"
                 subtitle="Execute a manual stock screen with custom filters, presets, and delivery targets."
@@ -1244,7 +1244,7 @@ export function StockHub({
               />
             </Card>
             {/* Issue #2723: Provider connectivity consolidated into Platform Admin -> Data Providers. */}
-            <Card padding="md" id="provider-dashboard">
+            <Card id="provider-dashboard">
               <CardHeader
                 title="Provider connectivity & health"
                 subtitle="Live provisioning lifecycle, capture health, and route metrics are consolidated in Platform Admin."
@@ -1602,7 +1602,7 @@ export function StockHub({
             ))}
             {!manualResult && summary && <Flex gap="2" justify="between" align="center" wrap><span className="ui-meta">{summary}</span><span className="ui-meta">{activeProvider?.label} · {activeEnv}</span></Flex>}
 
-            <Card padding="md" id="provider-dashboard">
+            <Card id="provider-dashboard">
               <CardHeader
                 title="Provider connectivity & health"
                 subtitle="Live provisioning lifecycle, capture health, and route metrics are consolidated in Platform Admin."

@@ -869,7 +869,7 @@ export function WorkflowRunsPanel() {
             : "Workflow runs"
         }
       >
-        <Card padding="md" className="ui-row">
+        <Card className="ui-row">
           <div className="ui-stack">
             <span className="ui-label">Trigger</span>
             <PillGroup options={TRIGGER_OPTIONS} value={triggerFilter} onChange={setTriggerFilter} size="sm" ariaLabel="Filter runs by trigger" />

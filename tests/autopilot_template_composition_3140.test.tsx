@@ -17,8 +17,8 @@
  * The slot assertions are the red drivers for round 2: the ribbon
  * renders as .ui-stat-grid in the template Stack ahead of the
  * workspace sections (no "Executive performance" h2 anymore — the
- * slot carries no title), and the five cards render as elevated
- * DetailCards (.ui-card.elevated) with CardHeaders carrying their
+ * slot carries no title), and the five cards render as emphasized
+ * DetailCards (.ui-card.emphasized) with CardHeaders carrying their
  * source lines. The h1 / scopeNote / section assertions are
  * regression guards: they pass before and after, and fail if the
  * migration doubles the header or drops a section.
@@ -215,10 +215,10 @@ describe("autopilot page template composition (#3140)", () => {
     expect(container.querySelector(".ui-stat-grid")).not.toBeNull();
   });
 
-  it("the chart card renders as a DetailCard (elevated surface, no hand-rolled card)", async () => {
+  it("the chart card renders as a DetailCard (emphasized surface, no hand-rolled card)", async () => {
     await mountHub("autopilot");
     const section = sectionFor("Strategy Equity vs S&P 500 Benchmark");
-    const card = section.querySelector(".ui-card.elevated");
+    const card = section.querySelector(".ui-card.emphasized");
     expect(card).not.toBeNull();
     expect(card!.textContent).toContain("No performance history recorded");
     // The chart card's title lives in the PageSection above it, so its
@@ -234,7 +234,7 @@ describe("autopilot page template composition (#3140)", () => {
     // visible tab panel, not an h2.
     const panel = container.querySelector('[role="tabpanel"]:not([hidden])');
     expect(panel).not.toBeNull();
-    const card = panel!.querySelector(".ui-card.elevated");
+    const card = panel!.querySelector(".ui-card.emphasized");
     expect(card).not.toBeNull();
     const header = card!.querySelector(".ui-card-header");
     expect(header).not.toBeNull();
@@ -269,7 +269,7 @@ describe("autopilot page template composition (#3140)", () => {
       expect(tab!.getAttribute("aria-selected")).toBe("true");
       const panel = container.querySelector('[role="tabpanel"]:not([hidden])');
       expect(panel?.textContent).toContain(title);
-      const card = panel!.querySelector(".ui-card.elevated");
+      const card = panel!.querySelector(".ui-card.emphasized");
       expect(card).not.toBeNull();
       const header = card!.querySelector(".ui-card-header");
       expect(header).not.toBeNull();

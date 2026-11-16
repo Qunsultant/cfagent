@@ -231,10 +231,10 @@ describe("Spinner + EmptyState (#492)", () => {
 });
 
 describe("Card + Notice (#492)", () => {
-  it("Card supports elevation and the padding scale", () => {
-    const element = React.createElement(Card, { elevated: true, padding: "lg" }, "body");
-    expect(element.props.elevated).toBe(true);
-    expect(element.props.padding).toBe("lg");
+  it("Card supports the emphasized treatment and the padding scale", () => {
+    const element = React.createElement(Card, { emphasized: true, padding: "sm" }, "body");
+    expect(element.props.emphasized).toBe(true);
+    expect(element.props.padding).toBe("sm");
   });
 
   it("Notice supports tones, strip variant, and dismissal", () => {

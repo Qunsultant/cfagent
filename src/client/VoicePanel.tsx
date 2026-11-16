@@ -77,7 +77,7 @@ export function VoicePanel({
             </Notice>
           )}
           {/* Header Card */}
-          <Card padding="md">
+          <Card>
             <CardHeader
               title={<><span>🎙️</span> {presentation.deskName}</>}
               subtitle="Real-time conversational voice trading with speech synthesis and recognition. Verbal quote inquiries, technical screening, and strict two-stage verbal Human-in-the-Loop order drafting."
@@ -107,7 +107,7 @@ export function VoicePanel({
 
           <Stack gap="2">
             {/* Visualizer & Mic Control Bar */}
-            <Card padding="md">
+            <Card>
               <Flex gap="2" align="center" justify="center" wrap>
                 <Button
                   type="button"
@@ -242,7 +242,7 @@ export function VoicePanel({
             </Card>
 
             {/* Conversation Feed */}
-            <Card padding="md">
+            <Card>
               <CardHeader title={<><span>💬</span> Live Voice Conversation History</>} />
 
               <Stack gap="2">
@@ -256,7 +256,7 @@ export function VoicePanel({
                       {msg.role === "user" ? "👤 Trader (Voice)" : `🤖 ${presentation.deskAgentName}`} • {msg.timestamp}
                     </span>
 
-                    <Card padding="sm" highlight={msg.role === "user"}>
+                    <Card padding="sm" emphasized={msg.role === "user"}>
                       <div>{msg.text}</div>
 
                       {/* Embedded HITL Order Preview Card in Voice Feed */}

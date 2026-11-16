@@ -307,7 +307,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 </div>
               </div>
             </Card>
-            <Card padding="none" highlight>
+            <Card padding="none" emphasized>
               <div className="ui-row">
                 <span>💎</span>
                 <div className="ui-stack">

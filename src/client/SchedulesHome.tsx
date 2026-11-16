@@ -106,7 +106,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
       </div>
 
       <TabPanel idBase="schedules-home" tabId="list" active={deepLink.view === "list"}>
-        <Card padding="md">
+        <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
           <SchedulesPanel
@@ -122,7 +122,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
       </TabPanel>
 
       <TabPanel idBase="schedules-home" tabId="runs" active={deepLink.view === "runs"}>
-        <Card padding="md">
+        <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
           <div className="section-label-row">
@@ -139,7 +139,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
       </TabPanel>
 
       <TabPanel idBase="schedules-home" tabId="goals" active={deepLink.view === "goals"}>
-        <Card padding="md">
+        <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
           <div className="section-label-row">
@@ -152,7 +152,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
       </TabPanel>
 
       <TabPanel idBase="schedules-home" tabId="queue" active={deepLink.view === "queue"}>
-        <Card padding="md">
+        <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
           <div className="section-label-row">
@@ -165,7 +165,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
       </TabPanel>
 
       <TabPanel idBase="schedules-home" tabId="background-tasks" active={deepLink.view === "background-tasks"}>
-        <Card padding="md">
+        <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
           <div className="section-label-row">
@@ -178,7 +178,7 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
       </TabPanel>
 
       <TabPanel idBase="schedules-home" tabId="dead-letter-queue" active={deepLink.view === "dead-letter-queue"}>
-        <Card padding="md">
+        <Card>
           {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
           <div className="ui-scroll-frame">
           <div className="section-label-row">
