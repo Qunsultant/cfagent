@@ -45,6 +45,7 @@ import {
   cancelTickerOrders,
   createCancelBrokerPort,
   createPlatformCancelPort,
+  markDraftRowCancelledIfPresent,
   recordCancelOutcome,
   recordScopedCancelOutcome,
   type CancelBrokerPort,
@@ -215,11 +216,7 @@ export function markDraftCancelledIfPresent(
   ctx: { getOrm?: () => { trades?: { update?: (id: string, patch: { status: "cancelled" }) => unknown } } },
   orderId: string,
 ): void {
-  try {
-    ctx.getOrm?.()?.trades?.update?.(orderId, { status: "cancelled" });
-  } catch {
-    // Best-effort: orders placed outside mas_trades may have no local draft row.
-  }
+  markDraftRowCancelledIfPresent(ctx.getOrm?.(), orderId);
 }
 
 export async function handleBrokerOrderRoutes(

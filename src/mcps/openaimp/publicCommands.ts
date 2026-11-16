@@ -27,6 +27,7 @@
  *     control to alpaca for the same reason.
  */
 import { z } from "zod";
+import { markDraftRowCancelledIfPresent } from "../../services/orderCancellation";
 import { recordTradingRunOutcome } from "../../services/tradingRunOutcome";
 import { notifyOrderExecution } from "../../services/orderExecutionNotifier";
 import { getUserDid } from "../../agents/did";
@@ -550,6 +551,9 @@ export class PublicCancelOrderCommand implements IMcpToolCommand {
       orderId: receipt.orderId,
       success: receipt.success,
     });
+    if (receipt.success) {
+      markDraftRowCancelledIfPresent(context.orm, orderId);
+    }
     return receipt;
   }
 }

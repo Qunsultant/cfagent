@@ -19,6 +19,8 @@ import {
   cancelSingleOrder,
   cancelTickerOrders,
   createCancelBrokerPort,
+  markDraftRowCancelledIfPresent,
+  markScopedDraftsCancelledIfPresent,
   recordCancelOutcome,
   recordScopedCancelOutcome,
 } from "../../services/orderCancellation";
@@ -105,6 +107,9 @@ export class AlpacaCancelOrderCommand implements IMcpToolCommand {
       message: receipt.message,
     });
     recordCancelOutcome(context.orm?.getSql?.(), receipt, "alpaca_cancel_order", context.env);
+    if (receipt.success) {
+      markDraftRowCancelledIfPresent(context.orm, receipt.target?.orderId ?? input.orderId);
+    }
     return receipt;
   }
 }
@@ -187,6 +192,7 @@ export class AlpacaCancelTickerCommand implements IMcpToolCommand {
     });
     if (!receipt.dryRun) {
       recordScopedCancelOutcome(context.orm?.getSql?.(), receipt, "alpaca_cancel_ticker", context.env);
+      markScopedDraftsCancelledIfPresent(context.orm, receipt);
     }
     return receipt;
   }
@@ -257,6 +263,7 @@ export class AlpacaCancelAllCommand implements IMcpToolCommand {
         context.env,
         `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`,
       );
+      markScopedDraftsCancelledIfPresent(context.orm, receipt);
     }
     return receipt;
   }
