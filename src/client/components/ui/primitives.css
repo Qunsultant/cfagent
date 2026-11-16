@@ -344,6 +344,17 @@
   scrollbar-width: thin;
 }
 
+/* Billing sticky tab strip (#4691 follow-up): the Billing strip is the
+   sole tab chrome on that view and its sections scroll, so it stays
+   pinned to the top of the tab viewport while the section content
+   scrolls. Billing-only — the shared .ui-tabs default is untouched. */
+.ui-tabs.ui-billing-tabs-sticky {
+  position: sticky;
+  top: 0;
+  background: var(--color-surface);
+  z-index: 10;
+}
+
 .ui-tab {
   display: inline-flex;
   align-items: center;
