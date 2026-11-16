@@ -1025,7 +1025,12 @@ export async function getValidTokens(
   // revoke) where a stale cached verdict is exactly the #2386 snap-back,
   // and they are user-triggered, not hot data-plane reads.
   const useCache = !identity?.internalUserId;
-  const cacheKey = tokenCacheKey(envConfig.name, userLogin);
+  const envRec = env as unknown as Record<string, unknown> | undefined;
+  const tenantId =
+    typeof envRec?.TENANT_ID === "string" && envRec.TENANT_ID.trim().length > 0
+      ? envRec.TENANT_ID.trim()
+      : "default";
+  const cacheKey = tokenCacheKey(envConfig.name, userLogin, tenantId);
   if (useCache) {
     const cached = readTokenCache(cacheKey);
     if (cached !== undefined) return cached;
