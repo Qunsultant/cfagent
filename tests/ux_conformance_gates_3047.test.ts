@@ -112,6 +112,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join, dirname, normalize, sep } from "node:path";
+import { routeConformance, templateRoutes } from "./template_route_tree";
 
 const HERE = join(__dirname, "..");
 const CLIENT_DIR = join(HERE, "src", "client");
@@ -422,7 +423,13 @@ function parseTradingSubTabs(hubSrc: string): string[] {
 }
 
 /** S-U1 interior-consistency gate (#3991). A surface conforms when its
- *  file renders ≥1 PageSection and zero bespoke classes. */
+ *  file renders ≥1 PageSection and zero bespoke classes — and, for a
+ *  template-state route file (#4825), when it also meets the general
+ *  template-conformance bar: ≥1 template slot filled or ≥1 card
+ *  composition in its render tree. Non-template surfaces keep the
+ *  old bar: the hub interiors render Tables / Notices / Buttons /
+ *  forms, not cards, and demoting them would be scope creep into
+ *  S-U6 territory. */
 const CONFORMING_INTERIORS: string[] = [
   "src/client/OptionsScreenerPage.tsx",
   "src/client/ProductCatalogPanel.tsx",
@@ -474,6 +481,9 @@ const CONFORMING_INTERIORS: string[] = [
   "src/client/SocialPostingPanel.tsx",
   "src/client/chat/tabs/AdsTab.tsx",
   "src/client/chat/tabs/RevenueTab.tsx",
+  // Issue #4825: the Audit & Vault page — 5 sections, zero bespoke,
+  // kpiRibbon slot filled; its register entry is removed in the same PR.
+  "src/client/AuditVaultPage.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):
@@ -695,7 +705,18 @@ function countInteriorClasses(src: string): { ui: number; bespoke: number } {
   return { ui, bespoke };
 }
 
-function isInteriorConforming(sections: number, bespoke: number): boolean {
+function isInteriorConforming(
+  sections: number,
+  bespoke: number,
+  opts?: { templateRoute?: boolean; slots?: number; compositions?: number },
+): boolean {
+  if (opts?.templateRoute) {
+    return (
+      sections >= 1 &&
+      bespoke === 0 &&
+      ((opts.slots ?? 0) >= 1 || (opts.compositions ?? 0) >= 1)
+    );
+  }
   return sections >= 1 && bespoke === 0;
 }
 
@@ -705,6 +726,15 @@ interface InteriorCheck {
   bespoke: number;
   entry?: InteriorEntry;
   conformingTarget: string;
+  /**
+   * Issue #4825: a template-state route file carries the general
+   * template-conformance bar as well — its slot / composition counts
+   * (from tests/template_route_tree.ts). Absent for non-template
+   * surfaces and for the synthetic checks, which keep the old bar.
+   */
+  templateRoute?: boolean;
+  slots?: number;
+  compositions?: number;
 }
 
 /** Pure checker shared by the real gate and the synthetic test. */
@@ -712,10 +742,19 @@ function interiorViolations(checks: InteriorCheck[]): string[] {
   const violations: string[] = [];
   for (const c of checks) {
     if (!c.entry) {
-      if (!isInteriorConforming(c.sections, c.bespoke)) {
+      if (
+        !isInteriorConforming(c.sections, c.bespoke, {
+          templateRoute: c.templateRoute,
+          slots: c.slots,
+          compositions: c.compositions,
+        })
+      ) {
         violations.push(
-          `${c.id}: no PageSection or primitives-only interior and not registered ` +
-            `(sections=${c.sections}, bespoke=${c.bespoke})`,
+          c.templateRoute
+            ? `${c.id}: no PageSection, slot, or card composition and not registered ` +
+                `(sections=${c.sections}, bespoke=${c.bespoke}, slots=${c.slots ?? 0}, compositions=${c.compositions ?? 0})`
+            : `${c.id}: no PageSection or primitives-only interior and not registered ` +
+                `(sections=${c.sections}, bespoke=${c.bespoke})`,
         );
       }
       continue;
@@ -730,7 +769,13 @@ function interiorViolations(checks: InteriorCheck[]): string[] {
         `${c.id}: PageSections fell ${c.entry.sections} -> ${c.sections}`,
       );
     }
-    if (isInteriorConforming(c.sections, c.bespoke)) {
+    if (
+      isInteriorConforming(c.sections, c.bespoke, {
+        templateRoute: c.templateRoute,
+        slots: c.slots,
+        compositions: c.compositions,
+      })
+    ) {
       violations.push(`${c.id}: fully conforming now; ${c.conformingTarget}`);
     }
   }
@@ -1027,17 +1072,27 @@ describe("interior consistency (#3991, S-U1)", () => {
     const entries = parseTabContentEntries(chatSrc);
     const checks: InteriorCheck[] = [];
     const seen = new Set<string>();
+    // Issue #4825: template-state route files carry the general
+    // template-conformance bar as well (slot or card composition).
+    const templateFiles = new Set(templateRoutes().map((r) => r.file));
     for (const file of INTERIOR_SURFACE_FILES) {
       seen.add(file);
       const src = readFileSync(join(HERE, file), "utf8");
       const sections = countOccurrences(clean(src), "<PageSection");
       const { bespoke } = countInteriorClasses(src);
+      const templateRoute = templateFiles.has(file);
+      const { slots, compositions } = templateRoute
+        ? routeConformance(file)
+        : { slots: 0, compositions: 0 };
       checks.push({
         id: file,
         sections,
         bespoke,
         entry: interiors[file],
         conformingTarget: "flip to CONFORMING_INTERIORS",
+        templateRoute,
+        slots,
+        compositions,
       });
     }
     // Chat.tsx inline entries (audit/nlq): measured as slices, not
@@ -1205,6 +1260,49 @@ describe("interior consistency (#3991, S-U1)", () => {
         },
       ]),
     ).toEqual(["fake: fully conforming now; flip to CONFORMING_INTERIORS"]);
+    // Issue #4825: a template-state route file needs the slot-or-card
+    // bar too — sections + zero bespoke is not enough on its own.
+    expect(
+      interiorViolations([
+        {
+          id: "fake-template",
+          sections: 1,
+          bespoke: 0,
+          templateRoute: true,
+          slots: 0,
+          compositions: 0,
+          conformingTarget: "flip",
+        },
+      ]),
+    ).toEqual([
+      "fake-template: no PageSection, slot, or card composition and not registered (sections=1, bespoke=0, slots=0, compositions=0)",
+    ]);
+    expect(
+      interiorViolations([
+        {
+          id: "fake-template",
+          sections: 1,
+          bespoke: 0,
+          templateRoute: true,
+          slots: 1,
+          compositions: 0,
+          conformingTarget: "flip",
+        },
+      ]),
+    ).toEqual([]);
+    expect(
+      interiorViolations([
+        {
+          id: "fake-template",
+          sections: 1,
+          bespoke: 0,
+          templateRoute: true,
+          slots: 0,
+          compositions: 2,
+          conformingTarget: "flip",
+        },
+      ]),
+    ).toEqual([]);
   });
 });
 
