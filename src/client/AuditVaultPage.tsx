@@ -22,11 +22,16 @@ import {
   Badge,
   Button,
   Card,
+  CardHeader,
   EmptyState,
+  Flex,
+  Grid,
+  KpiRibbon,
   Modal,
   PageSection,
   PageTemplate,
   Select,
+  Stack,
   Table,
   TabPanel,
   Tabs,
@@ -160,6 +165,14 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
     <PageTemplate
       title="Audit & Vault"
       scopeNote="The memory vault, the live event stream, and the natural-language records surface — one menu, two views."
+      kpiRibbon={
+        <KpiRibbon
+          items={[
+            { label: "Persistent facts", value: String(memories.length) },
+            { label: "Audit events", value: String(auditEvents.length) },
+          ]}
+        />
+      }
     >
       <Tabs<AuditVaultView>
         idBase="audit-vault"
@@ -180,55 +193,61 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
             </Button>
           </div>
 
-          <div className="audit-grid">
+          <Grid columns={2} gap="3">
             <PageSection>
-              <Card padding="none" className="audit-panel memory-panel">
-                <div className="panel-title">
-                  <span>🧠 Persistent Memory Vault</span>
-                  <Badge size="xs" tone="info">{memories.length} facts</Badge>
-                </div>
-                <div className="memory-list">
-                  {memories.length === 0 ? (
-                    <EmptyState icon="🧠" title="No memories saved yet" description='Try asking the assistant to "Remember that..."' />
-                  ) : (
-                    memories.map((m) => (
-                      <Card padding="none" key={m.key} className="memory-card-item">
-                        <div className="mem-header">
-                          <span className="mem-key">🔑 {m.key}</span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setMemoryToDelete(m.key)}
-                            title="Delete memory"
-                          >
-                            ×
-                          </Button>
-                        </div>
-                        <div className="mem-value">{m.value}</div>
-                        <div className="mem-date">{new Date(m.updatedAt).toLocaleString()}</div>
+              <Card>
+                <CardHeader
+                  title="🧠 Persistent Memory Vault"
+                  meta={
+                    <Badge size="xs" tone="info">{memories.length} facts</Badge>
+                  }
+                />
+                {memories.length === 0 ? (
+                  <EmptyState icon="🧠" title="No memories saved yet" description='Try asking the assistant to "Remember that..."' />
+                ) : (
+                  <Stack gap="2">
+                    {memories.map((m) => (
+                      <Card padding="sm" key={m.key}>
+                        <Stack gap="1">
+                          <Flex justify="between" align="center" gap="2">
+                            <span className="ui-mono">🔑 {m.key}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setMemoryToDelete(m.key)}
+                              title="Delete memory"
+                            >
+                              ×
+                            </Button>
+                          </Flex>
+                          <div>{m.value}</div>
+                          <span className="ui-meta-sm">{new Date(m.updatedAt).toLocaleString()}</span>
+                        </Stack>
                       </Card>
-                    ))
-                  )}
-                </div>
+                    ))}
+                  </Stack>
+                )}
               </Card>
             </PageSection>
 
             <PageSection>
-              <Card padding="none" className="audit-panel events-panel">
-                <div className="panel-title">
-                  <span>📋 Real-time Event Log</span>
-                  <Badge size="xs" tone="info">{auditEvents.length} events</Badge>
-                </div>
-                <div className="events-stream">
-                  {auditEvents.length === 0 ? (
-                    <EmptyState icon="📋" title="No audit events logged yet" />
-                  ) : (
-                    auditEvents.map((e) => <AuditEventCard key={e.id} event={e} />)
-                  )}
-                </div>
+              <Card>
+                <CardHeader
+                  title="📋 Real-time Event Log"
+                  meta={
+                    <Badge size="xs" tone="info">{auditEvents.length} events</Badge>
+                  }
+                />
+                {auditEvents.length === 0 ? (
+                  <EmptyState icon="📋" title="No audit events logged yet" />
+                ) : (
+                  <Stack gap="2">
+                    {auditEvents.map((e) => <AuditEventCard key={e.id} event={e} />)}
+                  </Stack>
+                )}
               </Card>
             </PageSection>
-          </div>
+          </Grid>
         </PageSection>
       </TabPanel>
 
@@ -237,8 +256,8 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
           title="Natural Language Records & Audit Analytics"
           description="Query business records, inspect enterprise data schemas, retrieve transaction records, and browse commercial records."
         >
-          <div className="nlq-presets">
-            <span className="preset-label">Natural Language Queries:</span>
+          <Flex gap="2" align="center" wrap>
+            <span className="ui-label">Natural Language Queries:</span>
             <Button variant="secondary" tone="subtle" size="sm" onClick={() => setNlqInput("List all database tables and schema")}>
               🗄️ List tables & schema
             </Button>
@@ -257,35 +276,36 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
             <Button variant="secondary" tone="subtle" size="sm" onClick={() => setNlqInput("List all user questions asked")}>
               💬 List user questions
             </Button>
-          </div>
+          </Flex>
 
           <form
-            className="chat-input-bar nlq-bar"
             onSubmit={(event) => {
               event.preventDefault();
               ask(nlqInput);
             }}
           >
-            <TextInput
-              type="text"
-              value={nlqInput}
-              onChange={(e) => setNlqInput(e.target.value)}
-              placeholder="Ask the shared chat about database records or categories…"
-            />
-            <Button type="submit" variant="primary" disabled={!nlqInput.trim() || isBusy}>
-              Ask in Chat
-            </Button>
+            <Flex gap="2" align="center">
+              <TextInput
+                type="text"
+                value={nlqInput}
+                onChange={(e) => setNlqInput(e.target.value)}
+                placeholder="Ask the shared chat about database records or categories…"
+                wrapperClassName="ui-grow"
+              />
+              <Button type="submit" variant="primary" disabled={!nlqInput.trim() || isBusy}>
+                Ask in Chat
+              </Button>
+            </Flex>
           </form>
         </PageSection>
 
         <PageSection>
           {/* Record Explorer toolbar — the same direct ORM browse path. */}
-          <div className="nlq-orm-toolbar">
-            <span className="orm-tag">⚡ RECORD EXPLORER:</span>
+          <Flex gap="2" align="center" wrap>
+            <span className="ui-label">⚡ RECORD EXPLORER:</span>
             <Select
               value={selectedBrowseTable}
               onChange={(e) => setSelectedBrowseTable(e.target.value)}
-              className="orm-table-select"
             >
               <option value="mas_categories">🏷️ mas_categories (Referral Categories)</option>
               <option value="mas_referrals">🔗 mas_referrals (Referral Links)</option>
@@ -302,6 +322,7 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
               onChange={(e) => setBrowseSearch(e.target.value)}
               placeholder="Search table text…"
               aria-label="Search table text"
+              wrapperClassName="ui-grow"
             />
 
             <Button
@@ -311,22 +332,28 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
             >
               {"🔍 Browse Records"}
             </Button>
-          </div>
+          </Flex>
 
           {browsedData && (
-            <Card padding="none" className="nlq-results-card orm-browsed-card">
-              <div className="browsed-card-header">
-                <div className="browsed-title">
-                  <span>🗄️ Table Data: <strong>{browsedData.tableName}</strong></span>
-                  <Badge size="xs" tone="neutral">{browsedData.total} Total Records</Badge>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setBrowsedData(null)} title="Close browsed table">
-                  ✕ Close
-                </Button>
-              </div>
+            <Card>
+              <CardHeader
+                title={
+                  <span>
+                    🗄️ Table Data: <strong>{browsedData.tableName}</strong>
+                  </span>
+                }
+                meta={
+                  <Flex gap="2" align="center">
+                    <Badge size="xs" tone="neutral">{browsedData.total} Total Records</Badge>
+                    <Button variant="ghost" size="sm" onClick={() => setBrowsedData(null)} title="Close browsed table">
+                      ✕ Close
+                    </Button>
+                  </Flex>
+                }
+              />
 
               {browsedData.rows && browsedData.rows.length > 0 ? (
-                <div className="results-table-container">
+                <div className="ui-scroll-x">
                   <Table
                     columns={Object.keys(browsedData.rows[0]).map((col) => ({
                       key: col,
@@ -357,7 +384,7 @@ export function AuditVaultPage({ isBusy = false, onAsk }: AuditVaultPageProps) {
               onClose={() => setBrowsedDetailRow(null)}
               title={`Record detail: ${browsedData?.tableName ?? "row"}`}
             >
-              <pre className="event-payload">
+              <pre className="ui-pre">
                 {(() => {
                   const expanded: Record<string, unknown> = {};
                   for (const [k, v] of Object.entries(browsedDetailRow)) {

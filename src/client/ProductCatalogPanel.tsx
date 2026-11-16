@@ -21,6 +21,8 @@ import { Badge } from "./components/ui/Badge";
 import { FieldShell } from "./components/ui/Field";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import { CardHeader } from "./components/ui/CardHeader";
+import { Flex } from "./components/ui/Flex";
 import { Notice } from "./components/ui/Notice";
 import { PageSection, PageShell } from "./components/ui/PageShell";
 import { Select } from "./components/ui/Select";
@@ -72,35 +74,6 @@ const pageWrapperStyle: React.CSSProperties = {
   gap: "var(--space-4)",
 };
 
-const cardHeaderRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: "var(--space-3)",
-  marginBottom: "var(--space-3)",
-  flexWrap: "wrap",
-};
-
-const cardTitleStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: "var(--font-size-title-sm)",
-  fontWeight: "var(--font-weight-bold)",
-  color: "var(--color-text-primary)",
-};
-
-const cardSubtitleStyle: React.CSSProperties = {
-  margin: "var(--space-1) 0 0",
-  fontSize: "var(--font-size-body-sm)",
-  color: "var(--color-text-muted)",
-};
-
-const badgeRowStyle: React.CSSProperties = {
-  display: "flex",
-  gap: "var(--space-2)",
-  alignItems: "center",
-  flexWrap: "wrap",
-};
-
 const detailTextStyle: React.CSSProperties = {
   margin: "var(--space-2) 0",
   fontSize: "var(--font-size-body)",
@@ -127,10 +100,6 @@ const mintedActionStyle: React.CSSProperties = {
   flexDirection: "column",
   gap: "var(--space-3)",
   marginTop: "var(--space-3)",
-  marginBottom: "var(--space-3)",
-};
-
-const sectionHeaderStyle: React.CSSProperties = {
   marginBottom: "var(--space-3)",
 };
 
@@ -767,18 +736,18 @@ export function SellingSection({
       {opened && !loading && !error && selling && (
         <>
           <Card>
-            <div style={cardHeaderRowStyle}>
-              <div>
-                <h3 style={cardTitleStyle}>Current tier: {selling.subscription.effectiveTier}</h3>
-                <p style={cardSubtitleStyle}>Live entitlement status and active period window</p>
-              </div>
-              <div style={badgeRowStyle}>
-                <Badge tone="accent">{selling.subscription.effectiveTier}</Badge>
-                <Badge tone={selling.subscription.activation !== "none" ? "success" : "neutral"}>
-                  Activation: {selling.subscription.activation}
-                </Badge>
-              </div>
-            </div>
+            <CardHeader
+              title={`Current tier: ${selling.subscription.effectiveTier}`}
+              subtitle="Live entitlement status and active period window"
+              meta={
+                <Flex gap="2" align="center">
+                  <Badge tone="accent">{selling.subscription.effectiveTier}</Badge>
+                  <Badge tone={selling.subscription.activation !== "none" ? "success" : "neutral"}>
+                    Activation: {selling.subscription.activation}
+                  </Badge>
+                </Flex>
+              }
+            />
             {selling.subscription.current && (
               <p style={detailTextStyle}>
                 Current period ends: {new Date(selling.subscription.current.periodEndMs).toISOString()}
@@ -862,14 +831,10 @@ export function SellingSection({
           )}
 
           <Card>
-            <div style={sectionHeaderStyle}>
-              <h3 style={cardTitleStyle}>Product bundles</h3>
-              <p style={cardSubtitleStyle}>
-                Two or more listed pay-per-use products at one operator-set, owner-approved bundle
-                price. One verified payment confers one entitlement per member product — no partial
-                entitlement. Bundles are bought through the same Billing checkout as plans.
-              </p>
-            </div>
+            <CardHeader
+              title="Product bundles"
+              subtitle="Two or more listed pay-per-use products at one operator-set, owner-approved bundle price. One verified payment confers one entitlement per member product — no partial entitlement. Bundles are bought through the same Billing checkout as plans."
+            />
             {selling.bundles.length > 0 && (
               <div style={checkoutRowStyle}>
                 <FieldShell id="selling-bundle" label="Bundle">
@@ -924,15 +889,10 @@ export function SellingSection({
           </Card>
 
           <Card>
-            <div style={sectionHeaderStyle}>
-              <h3 style={cardTitleStyle}>Pay per run via cfpay channel</h3>
-              <p style={cardSubtitleStyle}>
-                One pay-per-use run of a listed product, paid through the cfpay channel. No
-                subscription is created. Credit is added only after the payment is verified —
-                never on checkout creation. The server refuses any product whose approved price
-                does not match the operator-set channel price.
-              </p>
-            </div>
+            <CardHeader
+              title="Pay per run via cfpay channel"
+              subtitle="One pay-per-use run of a listed product, paid through the cfpay channel. No subscription is created. Credit is added only after the payment is verified — never on checkout creation. The server refuses any product whose approved price does not match the operator-set channel price."
+            />
             <div style={checkoutRowStyle}>
               <FieldShell id="channel-product" label="Product">
                 <Select
@@ -989,10 +949,10 @@ export function SellingSection({
           </Card>
 
           <Card>
-            <div style={sectionHeaderStyle}>
-              <h3 style={cardTitleStyle}>Purchase receipts</h3>
-              <p style={cardSubtitleStyle}>Recorded transaction history and billing verification</p>
-            </div>
+            <CardHeader
+              title="Purchase receipts"
+              subtitle="Recorded transaction history and billing verification"
+            />
             {selling.subscription.receipts.length === 0 ? (
               <p style={detailMutedTextStyle}>No purchases yet.</p>
             ) : (
@@ -1032,10 +992,10 @@ export function SellingSection({
           </Card>
 
           <Card>
-            <div style={sectionHeaderStyle}>
-              <h3 style={cardTitleStyle}>How each product is sold</h3>
-              <p style={cardSubtitleStyle}>Entitlement rails and subscription gating breakdown</p>
-            </div>
+            <CardHeader
+              title="How each product is sold"
+              subtitle="Entitlement rails and subscription gating breakdown"
+            />
             <Table<ProductSellingEntry>
               columns={[
                 {
@@ -1093,9 +1053,17 @@ export function ProductCatalogPanel({
    */
   onSubscribe,
   onPreviewDraft,
+  /**
+   * Issue #4825 — the hub's kpiRibbon slot reports the catalog size:
+   * the panel reports its loaded catalog (total + listed) so the hub
+   * can show real counts without a second read. Optional; the panel
+   * renders the same without it.
+   */
+  onCatalogStats,
 }: {
   onSubscribe: () => void;
   onPreviewDraft: (row: CatalogDisplayEntry) => void;
+  onCatalogStats?: (stats: { total: number; listed: number }) => void;
 }) {
   const [products, setProducts] = useState<CatalogDisplayEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1106,7 +1074,13 @@ export function ProductCatalogPanel({
       .then(async (res) => {
         if (!res.ok) throw new Error(`catalog request failed: ${res.status}`);
         const body = (await res.json()) as { products: CatalogDisplayEntry[] };
-        if (!cancelled) setProducts(body.products);
+        if (!cancelled) {
+          setProducts(body.products);
+          onCatalogStats?.({
+            total: body.products.length,
+            listed: body.products.filter((p) => p.listed).length,
+          });
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "catalog request failed");
@@ -1114,7 +1088,7 @@ export function ProductCatalogPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [onCatalogStats]);
 
   const columns: TableColumn<CatalogDisplayEntry>[] = [
     { key: "product", header: "Product", render: (row) => <strong>{row.canonicalName}</strong> },
@@ -1271,10 +1245,10 @@ export function MarketingDraftPreviewSection({
       )}
       {preview && (
         <Card>
-          <div style={cardHeaderRowStyle}>
-            <h4 style={cardTitleStyle}>Draft Preview</h4>
-            <Badge tone="accent">{channel.toUpperCase()}</Badge>
-          </div>
+          <CardHeader
+            title="Draft Preview"
+            meta={<Badge tone="accent">{channel.toUpperCase()}</Badge>}
+          />
           <div style={draftBoxStyle}>
             <pre style={draftTextStyle}>{preview.text}</pre>
           </div>

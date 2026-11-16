@@ -13,7 +13,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Card, Flex, Notice, Stack, Table } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Flex, Notice, Stack, Table } from "./components/ui";
 import {
   listWorkflows,
   type StageDeclaration,
@@ -198,30 +198,32 @@ function WorkflowCard({
   return (
     <Card padding="md">
       <Stack gap="3">
-        <Flex align="center" justify="between" gap="3">
-          <strong>{workflow.label}</strong>
-          <Flex align="center" gap="2">
-            <Badge tone={workflow.runnable ? "success" : "neutral"} size="sm">
-              {workflow.runnable ? "Runnable" : "Read-only"}
-            </Badge>
-            {/* Issue #3074: Run links the family's EXISTING, gated submission
-                surface - the catalog never invents a submission path and never
-                bypasses that surface's flags or payment gates. */}
-            {workflow.runnable && workflow.runPath ? (
-              <Button href={workflow.runPath} variant="secondary" size="sm">
-                Run
+        <CardHeader
+          title={workflow.label}
+          meta={
+            <Flex align="center" gap="2">
+              <Badge tone={workflow.runnable ? "success" : "neutral"} size="sm">
+                {workflow.runnable ? "Runnable" : "Read-only"}
+              </Badge>
+              {/* Issue #3074: Run links the family's EXISTING, gated submission
+                  surface - the catalog never invents a submission path and never
+                  bypasses that surface's flags or payment gates. */}
+              {workflow.runnable && workflow.runPath ? (
+                <Button href={workflow.runPath} variant="secondary" size="sm">
+                  Run
+                </Button>
+              ) : null}
+              {/* Issue #3174: every workflow links to its own runs in the ledger. */}
+              <Button
+                href={`?tab=workflow-runs&q=${encodeURIComponent(workflow.family)}`}
+                variant="secondary"
+                size="sm"
+              >
+                All runs
               </Button>
-            ) : null}
-            {/* Issue #3174: every workflow links to its own runs in the ledger. */}
-            <Button
-              href={`?tab=workflow-runs&q=${encodeURIComponent(workflow.family)}`}
-              variant="secondary"
-              size="sm"
-            >
-              All runs
-            </Button>
-          </Flex>
-        </Flex>
+            </Flex>
+          }
+        />
         <span>
           <code>{workflow.id}</code> | family {workflow.family} | {workflow.stages.length} stages |{" "}
           {workflow.stageSeam ? "stage seam wired" : "stage seam not wired yet"}
