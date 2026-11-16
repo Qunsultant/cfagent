@@ -844,7 +844,6 @@ export function BrokerDynamicMenu({
                 density="compact"
                 icon="⚠️"
                 title={liveOnlyNoticeCopy({ brokerLabel: selectedBrokerLabel }).title}
-                className="broker-live-only-notice"
               >
                 <p>{liveOnlyNoticeCopy({ brokerLabel: selectedBrokerLabel }).body}</p>
                 <Button
