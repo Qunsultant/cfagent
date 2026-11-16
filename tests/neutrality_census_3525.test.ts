@@ -727,6 +727,13 @@ function measure(): Map<string, number> {
  * etrade 27->28 / alpaca 28->29, etrade/platform.ts etrade 69->72). The prose
  * that named the sibling broker inside `timeInForce.ts` and the E*TRADE seam
  * was neutralized instead of baselined, so no new row appears.
+ * Baseline update (#4469, 2026-11-15; re-based onto 38c4115b):
+ * the NLQ scan leg's (broker, mode) derivation defaults to the
+ * pre-provenance broker id when the caller stamps none — naming
+ * the default is the derivation input's job, dispositioned
+ * INTEGRATION. 1 raise (nlqOptionsStrategy.ts etrade 19 -> 20:
+ * the default line). The cutover's comments name no provider.
+ * Totals move 1196/9372 -> 1196/9373.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -998,7 +1005,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/nlq/schema.ts", "etrade", 10],
   ["src/agents/nlq/types.ts", "etrade", 1],
   ["src/agents/nlqOptionsStrategy.ts", "alpaca", 1],
-  ["src/agents/nlqOptionsStrategy.ts", "etrade", 19],
+  ["src/agents/nlqOptionsStrategy.ts", "etrade", 20],
   ["src/agents/orchestrator.ts", "etrade", 20],
   ["src/agents/orchestrator/asyncJobs.ts", "etrade", 12],
   ["src/agents/orchestrator/autopilot.ts", "etrade", 4],
