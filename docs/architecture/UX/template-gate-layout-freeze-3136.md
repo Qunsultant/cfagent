@@ -1,7 +1,7 @@
-# Template gate + bespoke-layout freeze (#3136)
+# Template gate + bespoke-class freeze (#3136)
 
 Part of #2150 (template program), slice #3136 — route→template gate +
-bespoke-layout freeze (Phase 2). Freeze-first: the gate lands green on
+bespoke-class freeze (Phase 2, tightened S-U4 #4820). Freeze-first: the gate lands green on
 day one and ratchets forward; it never ships red.
 
 ## The two halves
@@ -14,40 +14,59 @@ day one and ratchets forward; it never ships red.
    hub's PageShell wrapper), `chat-inline` (inline `TAB_CONTENT` entry
    in `Chat.tsx`, inside Chat's PageShell), `exception` (not a page —
    only `chat` today).
-2. **Bespoke-layout freeze** — no NEW bespoke layout class may appear;
+2. **Bespoke-class freeze** — no NEW bespoke class may appear;
    the grandfathered list in `tests/ux_layout_freeze_3136.json` is the
    complete set at freeze time. Enforced by the `#3136` section of
    `tests/ux_conformance_gates_3047.test.ts`.
 
-## Definition: what counts as a bespoke layout class
+## Definition: what counts as a bespoke class
 
-A non-primitive class rule whose declarations include a **layout
-property** — exactly this set:
-
-- `display: grid | flex | inline-grid | inline-flex`
-- `grid-template`, `grid-template-columns`, `grid-template-rows`,
-  `grid-template-areas`
-- `flex-direction`
-- `grid-column`, `grid-row`
-- `position: absolute | fixed`
+Any class rule outside the primitive library — layout or not. The
+#3136 freeze first covered only classes whose declarations include a
+**layout property** (display grid/flex, grid-template-*, flex-direction,
+grid-column/row, position absolute/fixed); S-U4 (#4820, the first slice
+under the zero-bespoke rule) tightened it to **every** non-`ui-` class
+rule, because a bespoke color, font, or radius is bespoke all the same.
+The layout-property filter is gone from the scanner; the grandfathered
+list now holds every class the sheets define.
 
 Non-primitive means defined outside the primitive library: every
 `.css` file under `src/client/` **except** `tokens.css` (the token
 source) and `src/client/components/ui/primitives.css` (the primitive
-library itself). 25 sheets are scanned.
+library itself). 25 sheets are scanned. Classes starting with `ui-`
+that appear in a scanned sheet (`ui-table`, `ui-btn`, `ui-input`,
+`ui-modal-body`, …) are primitive-library collisions, not bespoke:
+the gate skips them (one, `ui-modal-body`, is grandfathered S-U7
+from the layout-only era — see Borderline calls — the other four
+are not listed).
 
 Target-based: only the **last simple selector** of each comma part is
 the rule's subject. `.a .b { display: flex }` freezes `.b`, not `.a`;
-`.a, .b { display: flex }` freezes both. Rules inside `@media`
-blocks are scanned like any other (the scanner finds the inner rules).
+`.a, .b { display: flex }` freezes both. Rules defined **only** inside
+`@media` blocks are NOT scanned: the regex only matches a rule whose
+selector starts outside a brace block, so a media-only rule never
+reaches the scanner (verified by a minimal repro — this doc used to
+claim the opposite).
 
-## Measurement (base: post-#3135 main `1dc4a859`)
+## Measurement (base: post-#3135 main `1dc4a859`; tightened S-U4 #4820)
 
-- **1,185 grandfathered classes** across the 25 scanned sheets.
-  Largest sheets: `styles.css` 542, `options/strategyDiscovery.css`
-  223, `options/flows/optionsFlows.css` 68, `workflowsHub.css` 58,
-  `optionsResearch.css` 52, `options/optionsResearch.css` 52.
-  51 classes are defined in more than one file.
+- **2,611 grandfathered classes** across the 25 scanned sheets:
+  1,162 layout + 1,449 non-layout. Largest sheets (by entry file):
+  `styles.css` 1,237, `options/strategyDiscovery.css` 459,
+  `options/flows/optionsFlows.css` 173, `workflowsHub.css` 105,
+  `options/optionsResearch.css` 95, `scheduledOptions.css` 72.
+  123 classes are defined in more than one file.
+- **S-U4 shrink.** The migration commit of #4820 deleted 53 classes
+  (23 layout: the 20 `workflowRuns.css` entries + `social-btn`,
+  `mini-social-btn`, `social-buttons`; 30 non-layout: the other 17
+  `workflow-runs-*` classes + `did-modal-card` + `share-toggle-btn` +
+  the 11 network classes `x-twitter`, `linkedin`, `reddit`,
+  `facebook`, `whatsapp`, `telegram`, `threads`, `bluesky`,
+  `hackernews`, `pinterest`, `discord`). The pre-tightening
+  baseline was 1,185 layout classes and 2,668 total classes scanned;
+  the tightened list holds 2,611 (the 4 scanned `ui-*` collisions
+  `ui-btn`, `ui-checkbox-label`, `ui-input`, `ui-table` are not
+  grandfathered — the gate skips `ui-*`).
 - **Correction to the #3136 discussion brief.** The brief said "487"
   for `styles.css`. That number is a **rule** count under a
   single-class-selector regex (`\.name\s*\{`), reproduced exactly on
@@ -58,7 +77,9 @@ blocks are scanned like any other (the scanner finds the inner rules).
   `gap`, `align-*`, `justify-*`, `flex`, `place-*`, `flex-wrap`,
   `grid-area`, `grid-auto-flow`) finds 1,254 classes — 69 more that
   carry only those properties. The freeze deliberately uses the narrow
-  set; extending it is a future slice, not this one.
+  set; extending it is a future slice, not this one. (Moot since the
+  S-U4 tightening: the freeze now covers every class, not a property
+  subset.)
 - **Template states (44 routes):** 1 `template` (risk-analysis), 23
   `shell`, 17 `hub`, 2 `chat-inline` (audit, nlq), 1 `exception`
   (chat). Only `src/client/RiskAnalysisPanel.tsx` renders
@@ -71,15 +92,15 @@ Each grandfathered class carries the slice that burns it down:
 
 | Wave | Rule | Count |
 |---|---|---|
-| wave-1 (#3138–#3140) | `order-*`, `autopilot-*`, `executive-kpi-*` prefixes (any file), or defined in `optionsResearch.css` (either copy, #3139) | 69 |
-| S-U4 | `workflowRuns.css` | 20 |
-| S-U5 | `dataProvidersPanel.css`, `serviceTokensPanel.css`, `apiKeysPanel.css`, `loggedInUsersPanel.css`, `roleGrantsPanel.css`, `agenticWalletPanel.css`, `accountPanels.css`, `agentsPanel.css`, `docsAndReports.css`, `iaaaAdminPanel.css` | 83 |
-| S-U6 | `reports.css`, `scannerPanel.css`, `portfolioRiskPanel.css`, `stockCopilotPanel.css` | 56 |
-| S-U7 | `styles.css` (shared sheet), `options/strategyDiscovery.css`, `workflowsHub.css` | 807 |
-| S-U8 | `options/flows/optionsFlows.css`, `scheduledOptions.css`, `chat/optionsCard.css`, `researchReports.css` | 114 |
-| S-U9 | `options/riskAnalysis.css` | 36 |
+| wave-1 (#3138–#3140) | `order-*`, `autopilot-*`, `executive-kpi-*` prefixes (any file), or defined in `optionsResearch.css` (either copy, #3139) | 126 |
+| S-U4 | `workflowRuns.css` | 0 |
+| S-U5 | `dataProvidersPanel.css`, `serviceTokensPanel.css`, `apiKeysPanel.css`, `loggedInUsersPanel.css`, `roleGrantsPanel.css`, `agenticWalletPanel.css`, `accountPanels.css`, `agentsPanel.css`, `docsAndReports.css`, `iaaaAdminPanel.css` | 205 |
+| S-U6 | `reports.css`, `scannerPanel.css`, `portfolioRiskPanel.css`, `stockCopilotPanel.css` | 158 |
+| S-U7 | `styles.css` (shared sheet), `options/strategyDiscovery.css`, `workflowsHub.css` | 1,777 |
+| S-U8 | `options/flows/optionsFlows.css`, `scheduledOptions.css`, `chat/optionsCard.css`, `researchReports.css` | 277 |
+| S-U9 | `options/riskAnalysis.css` | 68 |
 
-Multi-file classes (51) take the **earliest** wave among their
+Multi-file classes (123) take the **earliest** wave among their
 defining files (wave-1 < S-U4 < … < S-U9). The entry's `file` is the
 defining file with the earliest wave (alphabetical tie-break); `files`
 lists all defining files when there is more than one.
@@ -107,8 +128,8 @@ conforming template routes rather than the S-U4 migration list.
 ## Borderline calls
 
 - **Component-internal flex rows are frozen.** The definition is
-  mechanical (property-based): a button row inside a card
-  (`.card-actions { display: flex }`) is a layout class and is
+  mechanical (any class rule): a button row inside a card
+  (`.card-actions { display: flex }`) is a bespoke class and is
   grandfathered like any other. The page-vs-component distinction
   does not exempt a class; it only affects which slice burns it.
 - **`ui-modal-body` (styles.css) is a namespace collision, not a
@@ -118,15 +139,17 @@ conforming template routes rather than the S-U4 migration list.
   `ui-modal-body` primitive ever lands, this rule must be removed
   first.
 - **`display: block` / `contents`, `position: sticky` / `relative`,
-  and `gap` / `align-*` / `justify-*` alone are NOT freeze triggers.**
-  Only the narrow property set above freezes a class. A rule with
-  only `gap: 8px` is not a layout class under this definition.
-- **Duplicate definitions stay frozen in every file.** 51 classes
+  and `gap` / `align-*` / `justify-*` alone are NOT freeze triggers —
+  under the ORIGINAL layout-only definition only.** Since the S-U4
+  tightening every class rule freezes regardless of its properties,
+  so a rule with only `gap: 8px` is frozen like any other. The
+  property list above is history, not the gate.
+- **Duplicate definitions stay frozen in every file.** 123 classes
   are defined in more than one file (e.g. both `optionsResearch.css`
   copies); all definitions must go before the entry can be removed.
 - **RiskAnalysisPanel's own sheet is frozen but unloaded.** The
   panel imports no CSS and has zero `className` occurrences, yet
-  `options/riskAnalysis.css` still carries 36 layout classes.
+  `options/riskAnalysis.css` still carries 68 classes.
   They are grandfathered S-U9 (the panel's slice) and die when the
   sheet is deleted, not before.
 
@@ -136,7 +159,7 @@ conforming template routes rather than the S-U4 migration list.
   its entry from `tests/ux_layout_freeze_3136.json` in the same PR.
   Removing the entry alone fails (the class is still scanned);
   removing the class alone fails (stale entry).
-- **Add a class:** any layout class outside the list fails CI. Build
+- **Add a class:** any bespoke class outside the list fails CI. Build
   from `src/client/components/ui/` primitives instead; if a new
   bespoke class is genuinely needed, the freeze definition itself
   must change in a dedicated PR — never silently extend the list.
