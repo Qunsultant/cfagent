@@ -1214,6 +1214,10 @@ export interface TradeRecord {
    * without this column could not be placed truthfully. Absent on
    * legacy rows and on non-stop orders. */
   stopPrice?: number;
+  /** Issue #4656 (matrix gap 5): the time-in-force the ticket selected,
+   * in the canonical lowercase vocabulary. Execute sends this value instead
+   * of the broker's hardcoded default. Absent on legacy rows → default. */
+  timeInForce?: "day" | "gtc" | "ioc" | "fok";
   createdAt: string;
   updatedAt: string;
 }

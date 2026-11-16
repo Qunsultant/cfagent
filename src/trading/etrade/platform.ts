@@ -591,6 +591,9 @@ export class ETradeTradingPlatform implements ITradingPlatform {
           orderType,
           limitPrice: params.limitPrice,
           stopPrice: params.stopPrice,
+          // Issue #4656 (matrix gap 5): E*TRADE's own term for the approved
+          // time-in-force (FOK never reaches here — no verified value).
+          orderTerm: etradeOrderTerm(params.timeInForce),
           optionLegs,
           strategyNetDebit: params.strategyNetDebit,
         });
@@ -860,6 +863,30 @@ export class ETradeTradingPlatform implements ITradingPlatform {
   }
 
   async placeOrderRemote(params: any): Promise<ETradeOrderExecutionResult> {
-    return this.client.placeOrder(params);
+    // Issue #4656 (matrix gap 5): map the approved time-in-force onto E*TRADE's
+    // own orderTerm. The route has already refused a value this broker cannot
+    // carry, so this is the last, cheapest place to keep the wire honest.
+    return this.client.placeOrder({ ...params, orderTerm: etradeOrderTerm(params.timeInForce) });
+  }
+}
+
+/**
+ * Issue #4656 (matrix gap 5): the canonical time-in-force → E*TRADE orderTerm.
+ * The client's type has three values; `fok` has none, so it maps to undefined
+ * and the caller's pre-#4656 default (GOOD_FOR_DAY) is never reached for it
+ * because the route refuses FOK against the capability matrix first.
+ */
+export function etradeOrderTerm(
+  timeInForce: "day" | "gtc" | "ioc" | "fok" | undefined,
+): "GOOD_FOR_DAY" | "GOOD_UNTIL_CANCEL" | "IMMEDIATE_OR_CANCEL" | undefined {
+  switch (timeInForce) {
+    case "gtc":
+      return "GOOD_UNTIL_CANCEL";
+    case "ioc":
+      return "IMMEDIATE_OR_CANCEL";
+    case "day":
+      return "GOOD_FOR_DAY";
+    default:
+      return undefined;
   }
 }

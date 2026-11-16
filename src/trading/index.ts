@@ -60,7 +60,9 @@ export * from "./baseBreakout";
 // Issue #3892: the declarative advanced/complex order-type registry, the named
 // option-strategy builders and the collateral/protective-exit validators.
 export * from "./advancedOrders";
-// Issue #3232: the broker catalog is part of the public trading surface.
+// Issue #4656: the canonical time-in-force vocabulary shared by the routes and
+// the platform seams (see src/trading/timeInForce.ts).
+export * from "./timeInForce";
 export * from "./brokerCatalog";
 export * from "./brokerPanels";
 // Issue #3417: what a broker is CALLED, beside what it can do. The worker and

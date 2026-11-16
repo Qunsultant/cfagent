@@ -19,7 +19,7 @@ import {
 } from "./brokerEnvironment";
 export { publishManualScreenerRun } from "./etradeBrokerPublish";
 import { ETradeThinkHarness } from "../../services/thinkHarness";
-import { TradingPlatformRegistry, fetchQuoteLiveStrict } from "../../trading";
+import { TradingPlatformRegistry, fetchQuoteLiveStrict, normalizeTimeInForce } from "../../trading";
 import { resolveEnvironmentConfig } from "../../config/environment";
 import { generateHedgeProposals } from "../../services/hedgeProposals";
 import { normalizeBundleCandidates } from "../../services/recommendationBundle";
@@ -523,6 +523,8 @@ export async function handleEtradeBrokerRoutes(
             ? existingRecord.stopPrice
             : existingRecord.price
           : undefined;
+      // Issue #4656 (matrix gap 5): the approved time-in-force, from the draft.
+      const timeInForce = normalizeTimeInForce(existingRecord.timeInForce);
       // #1726: dedup — the stored strategy-order parse already lives
       // in orderPayloadHash.ts; only optionLegs/strategyNetDebit are
       // consumed downstream, and both match the inline parse.
@@ -553,7 +555,7 @@ export async function handleEtradeBrokerRoutes(
       const executionVerdict = autopilot.verdict;
 
       const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
-      return await completeEtradeOrderExecution({ ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, stopPrice, strategyOrder, executionVerdict, executor: etrade });
+      return await completeEtradeOrderExecution({ ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, stopPrice, timeInForce, strategyOrder, executionVerdict, executor: etrade });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to execute trade order" }, { status: 500 });
     }

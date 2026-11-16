@@ -187,6 +187,19 @@ export class PublicTradingPlatform implements ITradingPlatform {
     };
   }
 
+  /**
+   * Issue #4656 (matrix gap 5): Public's hosted MCP schema has no verified
+   * time-in-force argument (matrix §2.2 marks Public ❓). A request for anything
+   * but the broker default is refused by name — never silently placed as a day
+   * order, which is what the pre-#4656 seam did by sending nothing at all.
+   */
+  private refuseUnverifiedTimeInForce(timeInForce: string | undefined): void {
+    if (timeInForce === undefined || timeInForce === "day") return;
+    throw new Error(
+      `PUBLIC_TIME_IN_FORCE_UNVERIFIED: Public.com's hosted MCP schema has no verified time-in-force field, so a ${String(timeInForce).toUpperCase()} order cannot be placed truthfully. Choose the day default; nothing was sent.`
+    );
+  }
+
   async getStatus(): Promise<BrokerStatus> {
     const token = await this.tokenProvider().catch(() => null);
     const configured = Boolean(token);
@@ -296,6 +309,10 @@ export class PublicTradingPlatform implements ITradingPlatform {
 
   async previewOrder(params: OrderPreviewParams): Promise<BrokerOrderDraft> {
     await this.refuseDeploymentCredential();
+    // Issue #4656 (matrix gap 5): the hosted MCP schema carries no verified
+    // time-in-force field, so a requested TIF other than the broker default is
+    // refused by name instead of previewed as if it would be honoured.
+    this.refuseUnverifiedTimeInForce(params.timeInForce);
     const action = params.action ?? params.orderAction ?? "BUY";
     const userDid = getUserDid(params.sessionId || this.userLogin);
     const orderType = params.orderType ?? "MARKET";
@@ -554,6 +571,23 @@ export class PublicTradingPlatform implements ITradingPlatform {
 
   async placeOrderRemote(params: PlaceOrderParams): Promise<BrokerOrderExecutionResult> {
     await this.refuseDeploymentCredential();
+    // Issue #4656 (matrix gap 5): same refusal at the placement seam — a GTC or
+    // IOC request must not be placed as a silent day order.
+    try {
+      this.refuseUnverifiedTimeInForce(params.timeInForce);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.lastError = message;
+      return publicRefusedExecution({
+        orderId: params.orderId,
+        symbol: params.symbol,
+        action: params.action,
+        quantity: params.quantity,
+        authorizerDid: getUserDid(this.userLogin),
+        code: "FAILURE_BROKER_UNAVAILABLE",
+        message,
+      });
+    }
     const refusal = this.noPaperModeRefusal({
       orderId: params.orderId,
       symbol: params.symbol,
