@@ -156,7 +156,7 @@ describe("autopilot page template composition (#3140)", () => {
     await mountHub("autopilot");
     // PageTemplate wraps slots + children in <Stack gap="4">; the
     // kpiRibbon slot renders ahead of the workspace in the same Stack.
-    const ribbon = container.querySelector(".ui-stat-grid");
+    const ribbon = container.querySelector(".ui-grid");
     expect(ribbon).not.toBeNull();
     const stack = ribbon!.parentElement;
     expect(stack?.className).toContain("ui-stack");
@@ -168,7 +168,7 @@ describe("autopilot page template composition (#3140)", () => {
     // nothing (#4409), so only the default Performance section is
     // in the DOM. The order check walks the Stack's descendants in
     // document order.
-    const ordered = [...stack!.querySelectorAll(".ui-stat-grid, [role='tablist'], section")];
+    const ordered = [...stack!.querySelectorAll(".ui-grid, [role='tablist'], section")];
     const at = (el: Element) => ordered.indexOf(el);
     const chart = sectionFor("Strategy Equity vs S&P 500 Benchmark");
     const tablist = container.querySelector('[role="tablist"]');
@@ -184,7 +184,7 @@ describe("autopilot page template composition (#3140)", () => {
 
   it("the executive ribbon renders in the kpiRibbon slot as a KpiRibbon", async () => {
     await mountHub("autopilot");
-    const ribbon = container.querySelector(".ui-stat-grid");
+    const ribbon = container.querySelector(".ui-grid");
     expect(ribbon).not.toBeNull();
     // The four KPI labels and values (stubbed state: no verdicts).
     expect(ribbon!.textContent).toContain("Portfolio NAV");
@@ -212,7 +212,7 @@ describe("autopilot page template composition (#3140)", () => {
     // selected, so it is absent here. The seventh block is the ribbon
     // slot, not a section.
     expect(container.textContent).not.toContain("Paused");
-    expect(container.querySelector(".ui-stat-grid")).not.toBeNull();
+    expect(container.querySelector(".ui-grid")).not.toBeNull();
   });
 
   it("the chart card renders as a DetailCard (emphasized surface, no hand-rolled card)", async () => {

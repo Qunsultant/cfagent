@@ -148,7 +148,7 @@ describe("WorkflowRunsPanel", () => {
     // S-U4 (#4820): the bespoke .workflow-runs-page scroller is gone —
     // the tab viewport owns vertical scroll and the wide table scrolls
     // on its own axis via .ui-scroll-x.
-    expect(container.querySelector(".ui-scroll-x")).not.toBeNull();
+    expect(container.querySelector(".ui-scroll-frame")).not.toBeNull();
   });
 
   it("opens the selected run in a dialog and closes it", async () => {

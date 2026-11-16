@@ -76,7 +76,7 @@ const CANONICAL_SLOTS = [
 /** Organism root for each slot (the slot's content, when rendered). */
 const SLOT_MARKER: Record<string, string> = {
   "contextStrip=": ".ui-context-strip",
-  "kpiRibbon=": ".ui-stat-grid",
+  "kpiRibbon=": ".ui-grid",
   "actionBar=": ".ui-action-bar",
   "queueRail=": ".ui-queue-feed",
 };
