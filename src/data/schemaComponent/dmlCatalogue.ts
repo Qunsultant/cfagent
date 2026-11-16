@@ -63,6 +63,18 @@ export interface DmlCatalogueEntry {
   table: string;
   operation: DmlOperation;
   form: DmlEntryForm;
+  /**
+   * Retry declaration (ADR 0033 R-1, #4930): true means re-executing
+   * this entry is a no-op under redelivery — an ON CONFLICT guard, a
+   * delete by key, a pure-assignment update, or an atomic batch whose
+   * failure applied nothing. Absent/false means the entry is retried
+   * only for did-not-run errors (the statement never executed), never
+   * for ambiguous ones. Reads and upserts are safe by kind and carry
+   * no flag. The flag is audited, not guessed: the census pin
+   * (`tests/d1_retry_policy_4930.test.ts`) asserts the exact flagged
+   * set, so a future entry must choose deliberately.
+   */
+  idempotent?: boolean;
   /** Builder form: run the operation via Drizzle. */
   run?: (db: DmlDb, params: DmlParams) => Promise<unknown>;
   /** Fragment form: return the SQL fragment. */
@@ -133,6 +145,15 @@ export function validateDmlEntry(
     return {
       valid: false,
       reason: `operation "${String(candidate.operation)}" must be one of insert/upsert/update/delete/read`,
+    };
+  }
+  if (
+    candidate.idempotent !== undefined &&
+    typeof candidate.idempotent !== "boolean"
+  ) {
+    return {
+      valid: false,
+      reason: `idempotent "${String(candidate.idempotent)}" must be a boolean when present`,
     };
   }
   // The form must carry exactly its thunk — a builder entry with a
