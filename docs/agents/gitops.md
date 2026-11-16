@@ -214,6 +214,94 @@ Included:
 Excluded:
 Scope discipline: every item excluded from this issue gets its own sub-issue under this issue, created at the time it is identified and linked under Related issues — never left as a follow-up note, TODO, or 'future work' line. An excluded item with no sub-issue is a review finding. Title it `[Out-of-Scope] <thing>` (issue #4099): anything this work identifies as out of scope, or as not considered, gets its own sub-issue under the relevant parent with that title, a one-line reason it is out of scope, and a link to the work that surfaced it.
 
+## Full-stack coverage (architecture-first — REQUIRED)
+
+Architecture first: one row per architecture layer, then the 15-factors mapped to that layer, then the full-stack areas mapped to that layer, then the platforms that layer enables. Layer rows, factor mappings, and full-stack mappings are fixed — do not edit them. Fill the Platforms column from the Domain table below, starting from the owning platform shown, and fill Status per row. A trailing `+` means: add the domain platform(s) this change affects. An unanswered row makes the issue incomplete. Factor numbers follow `docs/agentic-org/architecture.md` §6 (IBM 15-factor formulation): 1 One codebase, 2 API first, 3 Dependency management, 4 Design/build/release/run, 5 Configuration/credentials/code, 6 Logs, 7 Disposability, 8 Backing services, 9 Environment parity, 10 Administrative processes, 11 Port binding, 12 Stateless processes, 13 Concurrency, 14 Telemetry, 15 Authentication/authorization.
+
+| Row | Architecture layer | 15-factor(s) | Full-stack area(s) | Platform(s) enabled (fill from the Domain table; owning platform shown) | Status / evidence (Done + evidence, or N/A + reason) |
+|---|---|---|---|---|---|
+| L-1 | UX | 2, 9 | FS-1 | D-6 CPO Product and experience (owning) + | |
+| L-2 | Product architecture | 1, 2, 3, 7, 9, 12, 13 | FS-1, FS-3 | D-6 CPO Product and experience; D-8 + | |
+| L-3 | Application | 1, 2, 3, 5, 6, 7, 10, 11, 12, 13, 14, 15 | FS-2, FS-3, FS-4, FS-7 | D-8 CTO Technology and engineering (owning); D-10, D-16, D-18 + | |
+| L-4 | Data/storage | 5, 8, 12 | FS-6 | D-9 CDO Data and knowledge (owning) + | |
+| L-5 | Infrastructure | 4, 5, 8, 9, 12, 14 | FS-6, FS-8 | D-9 CDO Data and knowledge; D-7, D-8 + | |
+| L-6 | Network | 2, 11, 15 | FS-4 | D-8 CTO Technology and engineering (owning) + | |
+| L-7 | Integration | 2, 7, 8, 10, 11, 13, 14, 15 | FS-4, FS-5, FS-7 | D-8 CTO Technology and engineering; D-10 + | |
+| L-8 | Security | 5, 6, 14, 15 | FS-2 | D-16 CISO Security and trust; D-18, D-8 | |
+| L-9 | Observability | 4, 5, 6, 9, 14, 15 | FS-2, FS-8 | D-16 CISO Security and trust; D-18, D-8, D-7 | |
+| L-10 | Error-reporting | 5, 6, 14, 15 | FS-2 | D-16 CISO Security and trust; D-18, D-8 | |
+| L-11 | Agentic | 2, 7, 8, 10, 13, 14, 15 | FS-5, FS-7 | D-10 CAIO AI, agent, and improvement (owning); D-8 + | |
+
+### Full-stack area sub-issues (one per area — REQUIRED)
+
+Title each sub-issue `[Full-stack] <area>`. The parent closes only when every area sub-issue is closed. FS-2's scope is the ADD.md AOP definition (Exception Handling, Coded Messages, Logging, Externalized Configuration, Security, Transaction Management).
+
+| Area | Sub-issue | Status | Evidence |
+|---|---|---|---|
+| FS-1 UX-URL (deployed page/route, UX-architecture conformance) | | | |
+| FS-2 AOP compliance (transactions, security, exceptions, coded messages, logging, error reporting, externalized config) | | | |
+| FS-3 Services (reused/created) | | | |
+| FS-4 API endpoints | | | |
+| FS-5 MCP endpoints | | | |
+| FS-6 Data layer (D1/DO, Vectorize, R2, AI search) | | | |
+| FS-7 Agentic capabilities (channels, tools, schedules, workflows, copilots/autopilot) | | | |
+| FS-8 Release & operations (build/release/run, rollout/rollback) | | | |
+
+### Domain declaration (REQUIRED — name every domain the change touches; platform names verbatim from `docs/agentic-org/platforms.md` §1–§2)
+
+| ID | Domain / platform | Applies to this change? (yes + note / no) |
+|---|---|---|
+| D-1 | Research | |
+| D-2 | Trading | |
+| D-3 | Payment | |
+| D-4 | CEO — Organization and strategy platform | |
+| D-5 | CBO — Business architecture and commercial platform | |
+| D-6 | CPO — Product and experience platform | |
+| D-7 | COO — Operations and service-delivery platform | |
+| D-8 | CTO — Technology and engineering platform | |
+| D-9 | CDO — Data and knowledge platform | |
+| D-10 | CAIO — AI, agent, and improvement platform | |
+| D-11 | CFO — Finance and capital platform | |
+| D-12 | CLO — Legal and obligation platform | |
+| D-13 | CIO — Investment and portfolio platform | |
+| D-14 | Chief Research Officer — Research platform | |
+| D-15 | CRO — Enterprise, investment, and model-risk platform | |
+| D-16 | CISO — Security and trust platform | |
+| D-17 | CCO — Compliance and market-integrity platform | |
+| D-18 | CQO — Independent assurance platform | |
+| D-19 | Workforce — Human–agent workforce platform | |
+| D-20 | Channels (name the channel) | |
+| D-21 | Other platform capability (name it) | |
+
+### Multi-dimensional enablement (REQUIRED — answer every line)
+
+For each dimension state Enabled (this change adds it), Preserved (the change keeps it working, with evidence), or N/A (reason). A change must not silently narrow the platform to one provider, one broker, one user, one tenant, or one transaction at a time — any narrowing is a stated, reviewed decision recorded on the dimension's line, never an accident of implementation.
+
+| ID | Dimension | Answer |
+|---|---|---|
+| M-1 | Multi-data-provider | |
+| M-2 | Multi-broker | |
+| M-3 | Multi-user | |
+| M-4 | Multi-tenant | |
+| M-5 | Multi-transaction | |
+| M-6 | Concurrency | |
+| M-7 | Parallelism | |
+| M-8 | Multi-asset-class | |
+| M-9 | Multi-channel | |
+| M-10 | Multi-environment (paper/live) | |
+
+### Coverage rules (fixed — do not edit)
+
+| ID | Rule |
+|---|---|
+| R-1 | Full coverage is the default: every layer row is implemented, evidenced through its full-stack areas' sub-issues, or recorded N/A with a reason; every full-stack area is Done with evidence or N/A with a reason. Unanswered = incomplete. |
+| R-2 | One sub-issue per full-stack area (see the ledger above). An N/A area's sub-issue closes with the N/A reason recorded. |
+| R-3 | Platforms column: fill per layer row from the Domain table. Implemented rows name at least one platform; an empty cell on an implemented row is incomplete. |
+| R-4 | Consistency: every platform named in the Domain declaration appears in at least one Platforms cell, and every platform in a Platforms cell is named in the Domain declaration or justified on the row. |
+| R-5 | No forced mappings: a layer row maps only to factors, areas, and platforms that genuinely apply. |
+| R-6 | Scope discipline (#4099): every excluded item gets its own sub-issue, created when identified — never a follow-up note, TODO, or 'future work' line. |
+| R-7 | Scoped issues: an issue may be scoped to specific layer(s)/area(s) — state the scope in the Domain declaration and the table — but every out-of-scope full-stack area then gets its own `[Full-stack] <area>` sub-issue. N/A is reserved for areas that genuinely do not apply at all; scoped-out is not N/A. |
+
 ## Acceptance criteria
 - [ ] Observable, testable criterion
 - [ ] Failure/recovery criterion
@@ -288,6 +376,7 @@ All development on this issue must follow:
 - Change management (actual: change type, impacted surfaces, migration and data impact, rollout plan, rollback plan, communication, changelog entry):
 - Conformance (actual: UX primitives/tokens used, architecture boundaries followed, reused surfaces, rework justification, regression pins):
 - Agentic design (actual: allocation as built, delegation path, evaluator, task records, policies/budgets, never-list compliance):
+- Full-stack coverage (actual, keyed by L/FS/D/M IDs):
 - Value and impact (value created, capabilities enhanced, competencies improved, value proposition, delivery channels, user journey):
 - Risk and limitations (security, tenant isolation, compatibility, performance/cost; known test-coverage gaps stated explicitly):
 - Delivery and release (migration, feature flag, deployment impact, rollback; release state, version, environment):
@@ -1294,6 +1383,7 @@ Agents cannot approve their own exceptions.
 - Change management (actual: change type, impacted surfaces, migration and data impact, rollout plan, rollback plan, communication, changelog entry):
 - Conformance (actual: UX primitives/tokens used, architecture boundaries followed, reused surfaces, rework justification, regression pins):
 - Agentic design (actual: allocation as built, delegation path, evaluator, task records, policies/budgets, never-list compliance):
+- Full-stack coverage (actual, keyed by L/FS/D/M IDs):
 - Value and impact (value created, capabilities enhanced, competencies improved, value proposition, delivery channels, user journey):
 - Risk and limitations (security, tenant isolation, compatibility, performance/cost; known test-coverage gaps stated explicitly):
 - Delivery and release (migration, feature flag, deployment impact, rollback; release state, version, environment):
