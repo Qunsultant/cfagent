@@ -1,4 +1,4 @@
-import type { NormalizedTimeInForce } from "./trading/timeInForce";
+import type { NormalizedTimeInForce } from "./trading";
 
 export interface Env {
   ASSETS: Fetcher;
