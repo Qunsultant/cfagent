@@ -257,7 +257,7 @@ auto-creates the account server-side when missing and audits
 | Operator list | Login list (env var UNION store list) | Env var = deployer; store list = whoever holds the operator-write route (§8) |
 | Feature flags (`monetization`, etc.) | Platform-wide; no per-tenant flags found | Flagship dashboard when `FLAGS` bound, else Env adapter. Flagship `monetization` defaults ON (owner direction); Env adapter defaults it OFF unless explicitly enabled (§7.17) |
 | IAAA role grants | Membership (login × tenant × role × scope) | Platform-admin grants platform-admin; tenant-admin grants require `role:assign` in that tenant. CISO lane owns IAAA writes |
-| Q7 audit policy (blocking set, retention, mode) | Global | Operator data; activation gated on CISO+CDO sign-off — mechanism built, enforcement not activated |
+| Q7 audit policy (blocking set, retention, mode) | Global | Activated (#4607, CISO+CDO sign-off) — `AUDIT_POLICY_DEFAULT_MODE = "enforcing"`, blocking set enforces fail-closed on money-moving actions |
 | Delivery channels | Tenant-level enablement flags (operator-gated, no secrets in v1) | Shipped under #3169 (PR #3196, migration 0039). Per-schedule/per-run channel fields and per-user notification preferences remain adjacent config; recipient verification still missing (see §5.1) |
 
 ### 4.4 Activities performed — who acts, who is the subject?

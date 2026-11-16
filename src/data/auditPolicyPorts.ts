@@ -93,8 +93,8 @@ export const AUDIT_POLICY_PROPOSED_RETENTION_DAYS = 365;
 export const AUDIT_POLICY_SETTING_ENFORCEMENT_MODE = "enforcement_mode";
 export const AUDIT_POLICY_SETTING_RETENTION_DAYS = "retention_days";
 
-/** Seeded enforcement mode: audit-only. Never "enforcing". */
-export const AUDIT_POLICY_DEFAULT_MODE: AuditEnforcementMode = "audit-only";
+/** Seeded enforcement mode (#4607 CISO+CDO sign-off): enforcing. */
+export const AUDIT_POLICY_DEFAULT_MODE: AuditEnforcementMode = "enforcing";
 
 /** Rows fetched + deleted per prune batch (mirrors retention purge). */
 export const AUDIT_CHAIN_PRUNE_DEFAULT_BATCH_SIZE = 500;
@@ -249,7 +249,7 @@ export function evaluateAuditGate(
   };
 }
 
-/** Build a resolved policy from operator rows. Unknown mode strings fall back to audit-only. */
+/** Build a resolved policy from operator rows. Unknown mode strings fail closed to AUDIT_POLICY_DEFAULT_MODE ("enforcing"). */
 export async function resolveAuditPolicy(port: AuditPolicyPort): Promise<AuditPolicy> {
   const [actions, modeRow, retentionRow] = await Promise.all([
     port.listActionPolicies(),
@@ -257,7 +257,7 @@ export async function resolveAuditPolicy(port: AuditPolicyPort): Promise<AuditPo
     port.getSetting(AUDIT_POLICY_SETTING_RETENTION_DAYS),
   ]);
   const mode: AuditEnforcementMode =
-    modeRow?.value === "enforcing" ? "enforcing" : "audit-only";
+    modeRow?.value === "audit-only" ? "audit-only" : AUDIT_POLICY_DEFAULT_MODE;
   let retentionDays: number | null = null;
   if (retentionRow) {
     const parsed = Number(retentionRow.value);

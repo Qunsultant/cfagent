@@ -102,7 +102,7 @@ const makers: Array<{
 const DAY_MS = 86_400_000;
 
 describe.each(makers)("audit-policy port conformance (#2183) — $name", ({ make }) => {
-  it("seeds the proposed blocking set, non-blocking reads, audit-only mode, 365d retention", async () => {
+  it("seeds the proposed blocking set, non-blocking reads, enforcing mode (#4607), 365d retention", async () => {
     const { port } = await make();
     const actions = await port.listActionPolicies();
     for (const action of AUDIT_POLICY_BLOCKING_ACTIONS) {
@@ -112,16 +112,17 @@ describe.each(makers)("audit-policy port conformance (#2183) — $name", ({ make
       expect(actions.find((a) => a.action === action)?.blockOnAuditFailure).toBe(false);
     }
     const mode = await port.getSetting(AUDIT_POLICY_SETTING_ENFORCEMENT_MODE);
-    expect(mode?.value).toBe("audit-only");
+    expect(mode?.value).toBe("enforcing");
     const retention = await port.getSetting(AUDIT_POLICY_SETTING_RETENTION_DAYS);
     expect(retention?.value).toBe(String(AUDIT_POLICY_PROPOSED_RETENTION_DAYS));
     const policy = await resolveAuditPolicy(port);
-    expect(policy.mode).toBe("audit-only");
+    expect(policy.mode).toBe("enforcing");
     expect(policy.retentionDays).toBe(365);
   });
 
-  it("gate: audit-only mode never blocks, even for money actions on audit failure", async () => {
+  it("gate: explicit audit-only mode never blocks, even for money actions on audit failure", async () => {
     const { port } = await make();
+    await port.setSetting(AUDIT_POLICY_SETTING_ENFORCEMENT_MODE, "audit-only");
     const policy = await resolveAuditPolicy(port);
     expect(policy.mode).toBe("audit-only");
     for (const action of AUDIT_POLICY_BLOCKING_ACTIONS) {
@@ -168,12 +169,12 @@ describe.each(makers)("audit-policy port conformance (#2183) — $name", ({ make
     expect(evaluateAuditGate(updated, "credit.redeem", false).blocked).toBe(true);
   });
 
-  it("gate: pure evaluator defaults unknown mode strings to audit-only via resolve", async () => {
+  it("gate: pure evaluator defaults unknown mode strings to enforcing via resolve (#4607)", async () => {
     const { port } = await make();
     await port.setSetting(AUDIT_POLICY_SETTING_ENFORCEMENT_MODE, "bogus-mode");
     const policy = await resolveAuditPolicy(port);
-    expect(policy.mode).toBe("audit-only");
-    expect(evaluateAuditGate(policy, "payment.charge", false).blocked).toBe(false);
+    expect(policy.mode).toBe("enforcing");
+    expect(evaluateAuditGate(policy, "payment.charge", false).blocked).toBe(true);
   });
 
   it("chain: append links hashes and verification passes; payload key order does not matter", async () => {
