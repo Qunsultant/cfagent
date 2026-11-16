@@ -1239,8 +1239,8 @@ div.ui-drawer-title {
 /* Brand share buttons (ReferralsTab). Ceos DECIDED 2026-11-16: per-network
  * brand colors are design tokens, not bespoke CSS — the --brand-* constants
  * already live in tokens.css (theme-invariant by definition, #471); these
- * classes bind them to the Button primitive. Call sites use variant="ghost"
- * size="sm"; the compound selector beats the ghost hover (which would
+ * classes bind them to the Button primitive. Call sites use variant="secondary"
+ * size="sm"; the compound selector beats the secondary hover (which would
  * otherwise paint every button muted on hover). Base = the merged cascade
  * of the two retired .social-btn blocks in styles.css: inline-flex,
  * centered, gap-1-5, padding 0.4/0.75rem (Button size-sm: 0.375/0.625rem),
