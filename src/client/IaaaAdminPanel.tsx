@@ -180,6 +180,10 @@ export function IaaaAdminPanel() {
   const [editScope, setEditScope] = useState<Record<string, string>>({});
   const [deactivateArmed, setDeactivateArmed] = useState(false);
   const [deactivateResult, setDeactivateResult] = useState("");
+  // Issue #4839 G10: a verified deactivation is success, not danger —
+  // the result string alone cannot carry the tone, so the verified
+  // flag travels with it.
+  const [deactivateVerified, setDeactivateVerified] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -323,12 +327,14 @@ export function IaaaAdminPanel() {
     setDeactivateArmed(false);
     try {
       const report = await deactivateSelf();
+      setDeactivateVerified(report.verified);
       setDeactivateResult(
         report.verified
           ? "Deactivated: sessions, memberships, keys, and tokens revoked and verified."
           : `Deactivation completed with unverified items: ${report.residuals.join("; ") || "see report"}.`,
       );
     } catch (err: any) {
+      setDeactivateVerified(false);
       setDeactivateResult(err?.message || "Failed to deactivate.");
     }
   }, [deactivateArmed]);
@@ -407,6 +413,13 @@ export function IaaaAdminPanel() {
 
   return (
     <div className="iaaa-admin-panel">
+      {/* Issue #4839 G1: the page states its purpose before the tab bar. */}
+      <h3>IAAA Admin</h3>
+      <p className="iaaa-admin-note">
+        Identity and access administration for this platform: memberships, admin roles,
+        service identities, and the audit trail. Platform admins see every section;
+        tenant admins see only their own tenant&apos;s role grants and logged-in users.
+      </p>
       <Modal
         open={revokeTarget !== null}
         onClose={() => setRevokeTarget(null)}
@@ -459,6 +472,8 @@ export function IaaaAdminPanel() {
         />
 
         <TabPanel idBase="iaaa-admin-overview" tabId="summary" active={section === "summary"}>
+        {/* Issue #4839 G2: the Summary section has a heading like every other section. */}
+        <h4>Summary</h4>
         <div className="iaaa-admin-summary">
           <div>
             <span className="iaaa-admin-label">Tenant</span>
@@ -475,6 +490,23 @@ export function IaaaAdminPanel() {
             </strong>
           </div>
         </div>
+        {/* Issue #4839 G3: dead ends get a way forward — verified against
+        docs/architecture/security/iaaa-admin-bootstrap-genesis.md: genesis is the
+        one-shot first platform: grant from the bootstrap list, and a role comes
+        from a platform admin's grant, not from signing in. */}
+        {!overview.genesis.platformGenesisOccurred && (
+          <p className="iaaa-admin-note">
+            Platform genesis has not yet occurred — no platform admin exists yet. The first
+            platform admin comes from the bootstrap list (IAAA_BOOTSTRAP_ADMINS): the first
+            platform: entry wins on that identity&apos;s next fresh sign-in. See Bootstrap
+            proposals.
+          </p>
+        )}
+        {roles.length === 0 && (
+          <p className="iaaa-admin-note">
+            You hold no roles — ask a platform admin to grant you a role from the Members tab.
+          </p>
+        )}
 
         {overview.adminCounts && (
           <>
@@ -569,19 +601,29 @@ export function IaaaAdminPanel() {
         <p className="iaaa-admin-note">
           Deactivation revokes your sessions, memberships, API keys, and broker tokens,
           suppresses mail, and verifies the result. It cannot be undone from this panel.
-          Click once to arm, again to confirm.
+          Click once to arm, again to confirm. If you deactivate by mistake, sign in
+          again — deactivation does not block sign-in — then ask a platform admin to
+          re-grant your roles from the Members tab. If your identity is still on the
+          bootstrap list, a fresh sign-in restores tenant-admin automatically;
+          platform-admin can only be re-granted by another platform admin.
         </p>
-        {deactivateResult && <Notice tone="danger">{deactivateResult}</Notice>}
+        {deactivateResult && (
+          <Notice tone={deactivateVerified ? "success" : "danger"}>{deactivateResult}</Notice>
+        )}
         <Button type="button" onClick={() => void deactivate()}>
           {deactivateArmed ? "Confirm deactivation" : "Deactivate my account"}
         </Button>
         </TabPanel>
 
         <TabPanel idBase="iaaa-admin-overview" tabId="access-requests" active={section === "access-requests"}>
+        {/* Issue #4839 G9: the intro states the Q9 two-admin rule — a first
+        approval only records; the grant mints after a second, distinct admin
+        approves (the post-approval notice already says this). The "Audit events
+        are read-only" sentence moved to the Audit events sub-tab, where it belongs. */}
         <p className="iaaa-admin-note">
-          Audit events are read-only. Pending access requests below can be
-          approved or denied here; approval grants the requested role, denial grants nothing.
-          Membership grant, revoke, and edit live on the Members tab.
+          Pending access requests below can be approved or denied here. A first approval
+          only records the approval — the grant mints after a second, distinct admin
+          approves. Membership grant, revoke, and edit live on the Members tab.
         </p>
 
         <h4>Access requests</h4>
@@ -592,7 +634,7 @@ export function IaaaAdminPanel() {
         ) : (
           <Table
             columns={[
-              { key: "requested", header: "Requested", render: (r) => formatEventTime(r.createdAtMs) },
+              { key: "requested", header: "Requested at", render: (r) => formatEventTime(r.createdAtMs) },
               {
                 key: "requester",
                 header: "Requester",
@@ -634,6 +676,20 @@ export function IaaaAdminPanel() {
 
         <TabPanel idBase="iaaa-admin-overview" tabId="audit-events" active={section === "audit-events"}>
         <h4>Recent audit events</h4>
+        {/* Issue #4839 G12: scope, legend, and the taxonomy link. The window is
+        the overview cap (IAAA_ADMIN_OVERVIEW_LIMIT = 100, newest first, this
+        tenant only) — verified in src/security/iaaaAdminOverview.ts. Decision
+        and Outcome values are the catalog's own (allow/deny; succeeded/failed/
+        unknown). The "Audit events are read-only" sentence moved here from
+        Access requests (G9). */}
+        <p className="iaaa-admin-note">
+          The 100 most recent audit events for this tenant, newest first. Audit events are
+          read-only. Decision is allow or deny; Outcome is whether the action succeeded,
+          failed, or is unknown.
+        </p>
+        <Button type="button" variant="secondary" onClick={() => setTab("iaaa")}>
+          See the IAAA tab taxonomy
+        </Button>
         {overview.recentAuditEvents.length === 0 ? (
           <EmptyState title="No audit events" description="No events recorded for this tenant yet." />
         ) : (
@@ -661,12 +717,19 @@ export function IaaaAdminPanel() {
           Memberships in this tenant (platform admins see all tenants&apos; memberships).
           Granting yourself a role is refused server-side; a grant requires fresh
           authentication for the step-up obligation, so a stale session must sign in again.
+          {/* Issue #4839 G5: the two grant surfaces explain themselves. */}
+          Grant membership here assigns any role — member, approver, auditor, or an admin
+          role — at tenant, workspace, or platform scope. Role grants on the Overview tab
+          grants admin roles only.
         </p>
         {membersError && <Notice tone="danger">{membersError}</Notice>}
         {grantNotice && <Notice>{grantNotice}</Notice>}
         <h4>Grant membership</h4>
+        {/* Issue #4839 G6: where the id comes from — the Memberships table
+        below lists them; a wired sign-in's /api/me shows the caller's own. */}
         <TextInput
           label="Target internal user id"
+          hint="Find it in the Memberships table below, or from /api/me after a wired sign-in."
           value={grantTarget}
           onChange={(e) => setGrantTarget(e.target.value)}
         />
@@ -707,6 +770,16 @@ export function IaaaAdminPanel() {
               : `Welcome mail not sent${grantWelcome.reason ? ` (${grantWelcome.reason})` : ""}.`}
           </p>
         )}
+        {/* Issue #4839 G7: what each role and scope can do — verified against
+        the role catalog in src/security/authorization.ts (ROLE_GRANTS). */}
+        <p className="iaaa-admin-note">
+          Roles: member — uses the platform (tasks, artifacts, proposals, and their own
+          brokerage); approver — approves actions only; auditor — reads tasks, artifacts,
+          and the audit trail; workspace-admin — all permissions within one workspace;
+          tenant-admin — all permissions within one tenant; platform-admin — assigns admin
+          roles and reads the audit trail, platform scope only. Scopes: tenant — one
+          tenant; workspace — one workspace; platform — the whole platform.
+        </p>
         <h4>Memberships</h4>
         {memberships.length === 0 ? (
           <EmptyState title="No memberships" description="No memberships returned for this tenant yet." />
@@ -795,6 +868,8 @@ export function IaaaAdminPanel() {
           branches. Aliases are one endpoint, not several. The catch-all forwarder is
           marked as such — it is not an endpoint.
         </p>
+        {/* Issue #4839 G13: an endpoint count like the MCP tab's Tools/Resources/Prompts counts. */}
+        <h4>Endpoints ({API_ENDPOINT_CATALOG.length})</h4>
         <Table
           columns={[
             {

@@ -146,15 +146,14 @@ export function LoggedInUsersPanel() {
 
   return (
     <div className="lup-panel">
+      {/* Issue #4839 G11: the two intro paragraphs said the same thing twice —
+      merged into one. */}
       <p className="lup-desc">
-        Active sessions and per-user login history from the durable records. Each row below is
-        one active login session. Login counts cover retained audit events only — see the
-        coverage note below.
-      </p>
-      <p className="lup-desc">
-        Each row is one active login session. Created = when this login happened. Last seen = its
-        last activity. Expires = when it stops counting as active (last activity + 8-hour idle
-        window). Revoke ends only this session.
+        Active sessions and per-user login history from the durable records. Each row is
+        one active login session. Created = when this login happened. Last seen = its
+        last activity. Expires = when it stops counting as active (last activity + 8-hour
+        idle window). Revoke ends only this session. Login counts cover retained audit
+        events only — see the coverage note below.
       </p>
       {notice !== "" && <Notice tone="success">{notice}</Notice>}
       {error !== "" && <Notice tone="danger">{error}</Notice>}
@@ -167,8 +166,9 @@ export function LoggedInUsersPanel() {
             see remaining quota and active overrides, or grant extra runs for the current window.
           </span>
           <span className="lup-item-count">
+            {/* Issue #4839 G8: visible labels, not aria-label only. */}
             <TextInput
-              aria-label="User login for quota lookup"
+              label="User login"
               value={quotaLogin}
               onChange={(e) => setQuotaLogin(e.target.value)}
               placeholder="user login"
@@ -195,8 +195,9 @@ export function LoggedInUsersPanel() {
                 {quotaData.usage.monthly.remaining}, resets {fmtLoggedInTime(quotaData.usage.monthly.resetAtMs)})
               </span>
               <span className="lup-item-count">
+                {/* Issue #4839 G8: visible labels, not aria-label only. */}
                 <Select
-                  aria-label="Override window"
+                  label="Override window"
                   value={grantWindow}
                   onChange={(e) => setGrantWindow(e.target.value as "daily" | "weekly" | "monthly")}
                 >
@@ -205,13 +206,13 @@ export function LoggedInUsersPanel() {
                   <option value="monthly">monthly</option>
                 </Select>{" "}
                 <TextInput
-                  aria-label="Extra runs"
+                  label="Extra runs"
                   value={grantRuns}
                   onChange={(e) => setGrantRuns(e.target.value)}
                   placeholder="extra runs"
                 />{" "}
                 <TextInput
-                  aria-label="Override reason"
+                  label="Override reason"
                   value={grantReason}
                   onChange={(e) => setGrantReason(e.target.value)}
                   placeholder="reason (audited)"

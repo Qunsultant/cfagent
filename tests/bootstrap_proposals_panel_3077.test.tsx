@@ -96,15 +96,20 @@ describe("BootstrapProposalsPanel (#3077)", () => {
 
   it("proposes an add change to the server", async () => {
     await renderPanel();
-    const inputs = [...container.querySelectorAll("input")];
-    const identifierInput = inputs.find(
-      (el) => el.getAttribute("aria-label") === "Bootstrap identifier",
-    ) as HTMLInputElement | undefined;
-    const reasonInput = inputs.find(
-      (el) => el.getAttribute("aria-label") === "Proposal reason",
-    ) as HTMLInputElement | undefined;
-    expect(identifierInput).toBeDefined();
-    expect(reasonInput).toBeDefined();
+    // #4839 G8: the propose fields carry visible labels now, not
+    // aria-label only — find the inputs through their <label> (htmlFor).
+    const inputForLabel = (text: string) => {
+      const label = [...container.querySelectorAll("label")].find(
+        (el) => (el.textContent ?? "") === text,
+      );
+      return label?.htmlFor
+        ? (container.querySelector(`#${label.htmlFor}`) as HTMLInputElement | null)
+        : null;
+    };
+    const identifierInput = inputForLabel("Bootstrap identifier");
+    const reasonInput = inputForLabel("Proposal reason");
+    expect(identifierInput).not.toBeNull();
+    expect(reasonInput).not.toBeNull();
     // React controlled inputs: set through the native setter so the
     // input event registers as a change.
     const setValue = (el: HTMLInputElement, value: string) => {

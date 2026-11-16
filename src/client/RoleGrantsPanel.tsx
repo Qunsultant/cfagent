@@ -123,6 +123,9 @@ export function RoleGrantsPanel() {
         role by itself. A platform admin grants platform-admin; a tenant admin grants
         tenant-admin within their own tenant only. Granting yourself a role is refused by
         the server, and every grant and revoke is audited. Revocation takes effect immediately.
+        {/* Issue #4839 G5: admin roles only here — anything else is Members. */}
+        Use Role grants for admin roles only (platform-admin or tenant-admin). For any
+        other role, use Grant membership on the Members tab.
       </p>
 
       {error && (
@@ -138,9 +141,12 @@ export function RoleGrantsPanel() {
 
       <div className="rgp-grant-form">
         <div className="rgp-grant-row">
+          {/* Issue #4839 G6: where the id comes from — the Memberships table
+          on the Members tab lists them; /api/me shows the caller's own. */}
           <TextInput
             id="rgp-target"
             label="Target internal user id"
+            hint="Find it in the Memberships table on the Members tab, or from /api/me after a wired sign-in."
             placeholder="e.g. v1:…"
             value={target}
             onChange={(event) => setTarget(event.target.value)}
