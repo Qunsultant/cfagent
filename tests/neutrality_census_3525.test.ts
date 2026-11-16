@@ -756,6 +756,17 @@ function measure(): Map<string, number> {
  * user-facing string in that broker's adapter, dispositioned INTEGRATION like
  * the rest of the row: 1 raise (public/platform.ts public.com 12->13).
  * Measured totals move 1284/10139 -> 1284/10140 (re-based onto 1930e03e7).
+ * Baseline update (#4854, 2026-11-16): the scheduled firer's options
+ * screens cut over to the strategy workflow host, gated. 2 raises:
+ * the scheduledTasks.ts etrade row 90 -> 91, dispositioned
+ * INTEGRATION (the dispatch derivation's broker literal — naming
+ * the provider is the derivation's job, the #4853 precedent; the
+ * prose around it names no provider), and the nasdaq row 4 -> 5 in
+ * the NOT-PROVIDER section, where the term's rows live (the
+ * universe descriptor line — naming the provider is the
+ * descriptor's job). Measured totals move 1284/10140 -> 1284/10142
+ * (re-based onto ca881bc4).
+ *
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -963,7 +974,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (682 rows / 6529 lines) ----
+  // ---- INTEGRATION (682 rows / 6531 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -1516,7 +1527,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/riskPolicyEngine.ts", "etrade", 1],
   ["src/services/sandboxAgent.ts", "etrade", 1],
   ["src/services/scheduleSystems.ts", "etrade", 1],
-  ["src/services/scheduledTasks.ts", "etrade", 90],
+  ["src/services/scheduledTasks.ts", "etrade", 91],
   ["src/services/scheduledTasks.ts", "yahoo", 17],
   ["src/services/screenerFollowupDelivery.ts", "etrade", 6],
   ["src/services/screenerFollowups.ts", "etrade", 1],
@@ -1912,7 +1923,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/plans/rsi-tech-plan-2026-10-20.md", "yahoo", 1],
   ["docs/plans/pr_3719_body.md", "alpaca", 3],
   ["docs/plans/pr_3719_body.md", "etrade", 6],
-  // ---- NOT-PROVIDER (74 rows / 290 lines) ----
+  // ---- NOT-PROVIDER (74 rows / 291 lines) ----
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "nasdaq", 4],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "nasdaq", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "nasdaq", 6],
@@ -1972,7 +1983,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "nasdaq", 18],
   ["src/services/quoteCache.ts", "nasdaq", 3],
   ["src/services/researchProviders.ts", "nasdaq", 1],
-  ["src/services/scheduledTasks.ts", "nasdaq", 4],
+  ["src/services/scheduledTasks.ts", "nasdaq", 5],
   ["src/services/shardExecutors.ts", "nasdaq", 15],
   ["src/services/shardJobs.ts", "nasdaq", 10],
   ["src/trading/etrade/platform.ts", "nasdaq", 1],

@@ -1,0 +1,3 @@
+### Added
+
+- **Scheduled firer's options screens dispatch through the strategy workflow host (#4854):** the hourly durable schedules' options screens now run through `startStrategyScreenWorkflow` when the gate holds — the leg's (broker, mode) pair derives from the firer platform (the #4853 derivation, reused) and the residency bindings are configured, with the universe descriptor stamped so the residency rebuilds the run's universe deps per invocation. Gated-out runs (no derived pair, unbound residency, or a stored snapshot input) stay on the unchanged sync dispatch. Stage-boundary messages publish through the residency's queue wiring (#4851); host-path screens record over the residency's durable stores, so per-stage control from the copilot turn awaits #4859.
