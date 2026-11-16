@@ -31,7 +31,7 @@ import { COPILOT_BROKER_ID } from "../../agents/copilotTradingMode";
 import { ADVANCED_ORDER_TYPES, computeBracketExits } from "../../trading";
 import { getUserDid } from "../../agents/did";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
-import type { NormalizedTimeInForce } from "../../trading/timeInForce";
+import type { NormalizedTimeInForce } from "../../trading";
 import { MarketDataResearchService, marketDataResearchBarsSourceLabel } from "../../services/marketDataResearch";
 import {
   MARKET_DATA_QUOTE_MODE_SWITCH,

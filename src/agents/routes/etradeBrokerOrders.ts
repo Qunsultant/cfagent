@@ -12,8 +12,7 @@
  * original inline block returned.
  */
 
-import { ETradeSlackTradingService, decodeOrderPriceSource } from "../../trading";
-import type { NormalizedTimeInForce } from "../../trading/timeInForce";
+import { ETradeSlackTradingService, decodeOrderPriceSource, type NormalizedTimeInForce } from "../../trading";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { orderPayloadHash } from "./orderPayloadHash";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";

@@ -43,8 +43,7 @@ import { AGENT_DIDS, createDidAttestationSync } from "../agents/did";
 import { createOutboundRateLimiter, type OutboundRateLimiter } from "../security/outboundRateLimiter";
 import { getCachedQuoteWithAge, setCachedQuote } from "./quoteCache";
 import { ALPACA_CONNECT_HINT } from "./providerUxLinks";
-import { normalizeAlpacaBaseUrl } from "../trading";
-import type { NormalizedTimeInForce } from "../trading/timeInForce";
+import { normalizeAlpacaBaseUrl, type NormalizedTimeInForce } from "../trading";
 import {
   isAlpacaConfigured,
   levelsForQuoteSwitch,
