@@ -130,6 +130,16 @@ export interface ScreenerPresetManagerProps<C> {
   /** Applies a loaded preset's criteria into the criteria panel. */
   onApplyPreset: (criteria: C) => void;
   /**
+   * Issue #4432 (S4c): reports WHICH preset was applied, alongside the
+   * criteria. The criteria callback cannot carry it (its contract is
+   * criteria-only and shared with options call sites), and the hub needs
+   * the id to arm a schedule with presetId. Optional: call sites that
+   * do not arm presets omit it. Invoked after onApplyPreset in
+   * handleLoad, so a caller that clears arming in its criteria handler
+   * still ends armed.
+   */
+  onApplyPresetIdentity?: (preset: ScreenerPreset) => void;
+  /**
    * Issue #1498 (#940-D): maps a stored preset filter onto panel state.
    * Defaults to the stocks mapper, so the #1497 stocks call site is
    * unchanged; options call sites pass optionsFilterToCriteria.
@@ -142,6 +152,7 @@ export function ScreenerPresetManager<C>({
   userLogin,
   currentFilter,
   onApplyPreset,
+  onApplyPresetIdentity,
   filterToCriteria,
 }: ScreenerPresetManagerProps<C>) {
   const [presets, setPresets] = useState<ScreenerPreset[]>([]);
@@ -197,6 +208,10 @@ export function ScreenerPresetManager<C>({
           stockFilterToCriteria(found.criteria as unknown as StockScreenerFilter) as unknown as C
         );
       }
+      // Issue #4432 (S4c): report the applied preset AFTER the
+      // criteria callback, so a caller that clears arming in its
+      // criteria handler still ends armed with this preset.
+      onApplyPresetIdentity?.(found);
       setNotice(`Preset "${found.name}" loaded into the criteria panel.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to load preset.");

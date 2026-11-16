@@ -15,7 +15,11 @@
 
 import { useState } from "react";
 import { Badge, Button, Card, Notice, PageSection } from "./components/ui";
-import { ScreenerPresetManager, createPreset } from "./ScreenerPresetManager";
+import {
+  ScreenerPresetManager,
+  createPreset,
+  type ScreenerPreset,
+} from "./ScreenerPresetManager";
 import {
   listStarterPresets,
   type StarterPreset,
@@ -27,6 +31,12 @@ export interface PresetsPanelProps {
   userLogin?: string;
   currentFilter: StockScreenerFilter;
   onApplyPreset: (criteria: StockCriteriaState) => void;
+  /**
+   * Issue #4432 (S4c): reports WHICH preset was applied, alongside the
+   * criteria — forwarded to the inner ScreenerPresetManager. Optional:
+   * call sites that do not arm presets omit it.
+   */
+  onApplyPresetIdentity?: (preset: ScreenerPreset) => void;
   onNavigateNewScreen: () => void;
 }
 
@@ -45,6 +55,7 @@ export function PresetsPanel({
   userLogin,
   currentFilter,
   onApplyPreset,
+  onApplyPresetIdentity,
   onNavigateNewScreen,
 }: PresetsPanelProps) {
   const starters = listStarterPresets();
@@ -93,6 +104,7 @@ export function PresetsPanel({
           onApplyPreset(criteria);
           onNavigateNewScreen();
         }}
+        onApplyPresetIdentity={onApplyPresetIdentity}
       />
       </PageSection>
 

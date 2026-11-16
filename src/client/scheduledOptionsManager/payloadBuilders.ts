@@ -298,6 +298,93 @@ export function buildDiscoveryCaptureSubmission(input: {
 }
 
 /**
+ * S4c (#4432): the Stock Hub "Schedule this screen" capture builds its
+ * create body HERE — the same builder module as the schedule form and
+ * the discovery capture — instead of hand-assembling it in the hub. The
+ * capture snapshots the hub new-screen form's merged filter (the same
+ * filter the manual run sends, minus minScore and limit — see the
+ * caller's comment: minScore is a manual-path ranking threshold, not a
+ * schedule criterion, and limit is represented by top-level maxItems;
+ * the strict S1 schema below rejects any other unknown key loudly,
+ * so this builder never silently drops a field), universe, sector, and
+ * maxItems, plus the armed presetId when one is armed.
+ *
+ * Preset vs filters follows the form branch exactly (#1499): a chosen
+ * preset replaces the custom thresholds — the run resolves the preset's
+ * CURRENT criteria at run time, so the capture never freezes criteria
+ * into the payload alongside the preset id. No preset means the
+ * criteria exactly as captured ride as `filters`.
+ *
+ * Universe ALL is refused here as well as at the route: a scheduled
+ * screen needs one specific universe (buildSchedulePayload's rule), and
+ * the hub form allows ALL — the capture strip disables the button
+ * there, and this builder is the loud backstop.
+ *
+ * Broker/mode/provider are NOT inputs: the create route strips caller
+ * identity and stamps the server-resolved tenant selections, and the
+ * caller sends the live environment on the x-environment header.
+ * Delivery rides the form branch's conventions (slackChannel only when
+ * Slack push is on, blank recipients omitted, values trimmed).
+ */
+export function buildMarketScreenCaptureSubmission(input: {
+  universe: string;
+  sector?: string;
+  maxItems?: number;
+  filters: Record<string, any>;
+  presetId?: string;
+  pushToSlack?: boolean;
+  slackChannel?: string;
+  emailTo?: string;
+  webhookUrl?: string;
+} & ScheduleCadenceInput): { requestBody: Record<string, any> } | { error: string } {
+  if (!input.universe) {
+    return { error: "Stock schedules require one explicit universe." };
+  }
+  if (input.universe === "ALL") {
+    return {
+      error:
+        "Scheduled screens need one specific universe — pick a universe other than All before scheduling.",
+    };
+  }
+  const payload: Record<string, any> = {
+    universe: input.universe,
+    sector: input.sector || "ALL",
+    ...(input.maxItems !== undefined ? { maxItems: input.maxItems } : {}),
+    trigger: "scheduled",
+    pushToSlack: input.pushToSlack ?? false,
+    slackChannel:
+      input.pushToSlack && input.slackChannel?.trim()
+        ? input.slackChannel.trim()
+        : undefined,
+    emailTo: input.emailTo?.trim() || undefined,
+    webhookUrl: input.webhookUrl?.trim() || undefined,
+    // Issue #1499 (#940-E): a chosen preset replaces the custom
+    // thresholds — the run resolves the preset's CURRENT criteria at
+    // run time, so the form never freezes criteria into the payload
+    // alongside the preset id.
+    ...(input.presetId
+      ? { presetId: input.presetId }
+      : Object.keys(input.filters).length > 0
+        ? { filters: input.filters }
+        : {}),
+  };
+  const validationError = validateScheduleCriteriaClient(
+    JOB_CALLBACKS.marketScreen,
+    payload,
+  );
+  if (validationError) return { error: validationError };
+
+  const requestBody: Record<string, any> = {
+    callback: JOB_CALLBACKS.marketScreen,
+    scheduleType: input.scheduleType,
+    payload,
+  };
+  const cadenceError = applyScheduleCadence(requestBody, input);
+  if (cadenceError) return { error: cadenceError };
+  return { requestBody };
+}
+
+/**
  * The hero Run Now payload: an immediate options analysis with the
  * form state. NOT a schedule payload — it carries no trigger stamp
  * (the legacy hero body's exact shape).

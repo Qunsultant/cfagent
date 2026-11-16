@@ -19,10 +19,18 @@
  *  - no navigate-only onApplyPreset remains anywhere in
  *    StockHub;
  *  - the presets tabpanel region applies through
- *    handleCriteriaChange (which sets the criteria and
+ *    handlePresetApply (which sets the criteria and
  *    clears any applied pattern, so a preset-applied run
  *    is never misreported as a pattern run) before
  *    navigating to new-screen.
+ *
+ * Issue #4432 (S4c): the wrapper applies through handlePresetApply,
+ * not handleCriteriaChange — handleCriteriaChange clears the preset
+ * arming, and the identity callback (onApplyPresetIdentity) arms it
+ * right after the criteria callback. Applying through the clearing
+ * handler here would still end armed (the manager invokes identity
+ * after criteria), but the non-clearing handler states the intent at
+ * the call site instead of relying on that order.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -33,7 +41,7 @@ describe("presets tab Apply (#2860 F3)", () => {
     expect(src).not.toContain('onApplyPreset={() => handleTabChange("new-screen")}');
   });
 
-  it("the presets tabpanel applies criteria through handleCriteriaChange, then navigates", () => {
+  it("the presets tabpanel applies criteria through handlePresetApply, then navigates", () => {
     const src = readFileSync("src/client/StockHub.tsx", "utf8");
     const start = src.indexOf("screener-tabpanel-presets");
     expect(start).toBeGreaterThan(-1);
@@ -41,12 +49,12 @@ describe("presets tab Apply (#2860 F3)", () => {
     // migration (the `options-assumptions` section that used to follow
     // it is gone), so the region runs to the end of the file. Anchor
     // on the onApplyPreset handler body: apply through
-    // handleCriteriaChange, then navigate to new-screen.
+    // handlePresetApply, then navigate to new-screen.
     const region = src.slice(start);
     expect(region).toContain("<PresetsPanel");
     const handlerStart = region.indexOf("onApplyPreset={(criteria) => {");
     expect(handlerStart).toBeGreaterThan(-1);
-    const applyIndex = region.indexOf("handleCriteriaChange(criteria);", handlerStart);
+    const applyIndex = region.indexOf("handlePresetApply(criteria);", handlerStart);
     const navigateIndex = region.indexOf('handleTabChange("new-screen");', applyIndex);
     expect(applyIndex).toBeGreaterThan(handlerStart);
     expect(navigateIndex).toBeGreaterThan(applyIndex);

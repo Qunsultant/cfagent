@@ -14,9 +14,10 @@
  *     and the exact value the create route stamps server-side when
  *     it is absent (src/agents/routes/schedules.ts), so the stored
  *     schedule is unchanged.
- *  2. ONE CONSTRUCTION PATH (source pins): exactly two client files
- *     post schedule creates — the one schedule UI's section and the
- *     discovery capture — and both build their bodies through
+ *  2. ONE CONSTRUCTION PATH (source pins): exactly three client files
+ *     post schedule creates — the one schedule UI's section, the
+ *     discovery capture, and (issue #4432, S4c) the Stock Hub "Schedule
+ *     this screen" capture — and all three build their bodies through
  *     scheduledOptionsManager/payloadBuilders.
  *  3. HUB INVENTORY COVERAGE (source pins): the one screening hub
  *     (ScreenersHub) hosts the stock screener, the options research
@@ -170,15 +171,17 @@ describe("S8 one construction path (source pins)", () => {
     expect(panel).not.toContain("payload: { requests: [capturedRequest]");
   });
 
-  it("exactly two client files post schedule creates, both via the builders", () => {
+  it("exactly three client files post schedule creates, all via the builders", () => {
     // #3123: the create POST itself lives in the one client module
-    // (jobsApi's createSchedule); the two panels post through it or
-    // — StrategyDiscoveryPanel, outside the #3123 T2 migration —
-    // through the direct fetch the slice did not move. Either way
-    // both files build through the S7 payload builders.
+    // (jobsApi's createSchedule); the panels post through it or —
+    // StrategyDiscoveryPanel and StockHub, outside the #3123 T2
+    // migration — through the direct fetch the slices did not move.
+    // Either way all three files build through the S7 payload builders.
+    // Issue #4432 (S4c) adds the third poster: the Stock Hub capture.
     const posters: Array<[string, string, string]> = [
       ["src/client/ScheduledOptionsManager.tsx", "buildScheduleSubmission", "createSchedule("],
       ["src/client/options/StrategyDiscoveryPanel.tsx", "buildDiscoveryCaptureSubmission", 'fetch("/api/schedules/create"'],
+      ["src/client/StockHub.tsx", "buildMarketScreenCaptureSubmission", 'fetch("/api/schedules/create"'],
     ];
     for (const [rel, builder, transport] of posters) {
       const src = read(rel);
