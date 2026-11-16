@@ -211,6 +211,17 @@ function ensureDraftStored(
   });
 }
 
+export function markDraftCancelledIfPresent(
+  ctx: { getOrm?: () => { trades?: { update?: (id: string, patch: { status: "cancelled" }) => unknown } } },
+  orderId: string,
+): void {
+  try {
+    ctx.getOrm?.()?.trades?.update?.(orderId, { status: "cancelled" });
+  } catch {
+    // Best-effort: orders placed outside mas_trades may have no local draft row.
+  }
+}
+
 export async function handleBrokerOrderRoutes(
   request: Request,
   url: URL,
@@ -531,6 +542,9 @@ export async function handleBrokerOrderRoutes(
           reason: typeof body.reason === "string" ? body.reason : undefined,
         });
         recordCancelOutcome(ctx.getOrm()?.getSql?.(), receipt, "broker_order_cancel", ctx.env);
+        if (receipt.success) {
+          markDraftCancelledIfPresent(ctx, receipt.target?.orderId ?? cancelOrderId);
+        }
         return Response.json(
           { ...receipt, orderId: receipt.target?.orderId ?? cancelOrderId, timestamp: new Date().toISOString() },
           { status: receipt.success ? 200 : 409 },
@@ -538,6 +552,9 @@ export async function handleBrokerOrderRoutes(
       }
 
       const cancelled = await platform.cancelOrderRemote(cancelOrderId);
+      if (cancelled.success) {
+        markDraftCancelledIfPresent(ctx, cancelOrderId);
+      }
       return Response.json(cancelled, { status: cancelled.success ? 200 : 409 });
     } catch (err) {
       return Response.json(
