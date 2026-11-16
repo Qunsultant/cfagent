@@ -614,3 +614,104 @@ export class ETradeAccountDiscoveryCommand implements IMcpToolCommand<{}> {
   }
 }
 
+/**
+ * Issue #4660 (matrix gap 8): the E*TRADE platform behind the neutral seam, for
+ * the two tools that read and change broker order state. The mode is the
+ * tenant's STORED selection (never a per-call override), the same resolution the
+ * other brokers' order tools use, so a caller cannot read one environment while
+ * the tenant trades in another.
+ */
+async function etradeOrderPlatform(context: McpToolContext) {
+  const { TradingPlatformRegistry } = await import("../../trading");
+  const { resolveTradeEnvironmentFromSettings } = await import("../../agents/routes/brokerEnvironment");
+  const environment = resolveTradeEnvironmentFromSettings(context.readSettingRaw, context.env);
+  const platform = TradingPlatformRegistry.getPlatform(
+    "etrade",
+    context.env,
+    context.orm,
+    context.sessionId,
+    environment,
+  );
+  return { platform, environment };
+}
+
+/**
+ * 8. E*TRADE Orders Command (issue #4660)
+ *
+ * Lists the tenant's E*TRADE orders in the neutral broker shape — the same
+ * shape the other brokers' order-list tools return — so a chat surface renders
+ * one order list regardless of the selected broker.
+ */
+export class ETradeOrdersCommand implements IMcpToolCommand<{ status?: "open" | "closed" | "all" }> {
+  readonly name = "etrade_orders";
+  readonly description = "Query active and filled E*TRADE orders with a status filter and agentic DID audit tracing.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      status: { type: "string", enum: ["open", "closed", "all"], description: "Order status filter (default: open)" },
+    },
+  };
+
+  readonly zodSchema = z.object({
+    status: z.enum(["open", "closed", "all"]).default("open").optional(),
+  });
+
+  async execute(input: { status?: "open" | "closed" | "all" }, context: McpToolContext) {
+    const { platform, environment } = await etradeOrderPlatform(context);
+    const status = input?.status || "open";
+    // The E*TRADE platform implements getOrderHistory and the catalog declares
+    // orderHistory for etrade — the non-null assertion is the platform's own
+    // contract, not a guess about another broker.
+    const orders = await platform.getOrderHistory!(status);
+    context.audit("etrade.orders_queried", "trading", {
+      status,
+      count: orders?.length || 0,
+      environment,
+    });
+    return { success: true, orders, count: orders?.length || 0, environment };
+  }
+}
+
+/**
+ * 9. E*TRADE Cancel Order Command (issue #4660)
+ *
+ * Cancels ONE open E*TRADE order by id and returns the broker's own receipt,
+ * the same contract the other brokers' single-order cancel uses. There is no
+ * cancel-all or per-ticker scope here: E*TRADE has no ladder model, and the
+ * ladder-scoped cancel tools own those scopes.
+ */
+export class ETradeCancelOrderCommand implements IMcpToolCommand<{ order_id?: string; orderId?: string }> {
+  readonly name = "etrade_cancel_order";
+  readonly description = "Cancel one open E*TRADE order by order ID.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      order_id: { type: "string", description: "Order ID to cancel" },
+      orderId: { type: "string", description: "CamelCase alias for order_id" },
+    },
+  };
+
+  readonly zodSchema = z.object({
+    order_id: z.string().optional(),
+    orderId: z.string().optional(),
+  });
+
+  async execute(input: any, context: McpToolContext) {
+    const orderId = input?.order_id ?? input?.orderId;
+    if (!orderId) {
+      throw new Error("order_id is required");
+    }
+    const { platform, environment } = await etradeOrderPlatform(context);
+    // The E*TRADE platform implements cancelOrderRemote and the catalog declares
+    // orderCancel for etrade.
+    const receipt = await platform.cancelOrderRemote!(orderId);
+    context.audit("etrade.order_cancelled", "trading", {
+      orderId: receipt.orderId,
+      success: receipt.success,
+      environment,
+    });
+    return receipt;
+  }
+}
+

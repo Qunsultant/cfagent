@@ -51,6 +51,9 @@ import {
   ETradeGetPositionsCommand,
   ETradeAuthStatusCommand,
   ETradeAccountDiscoveryCommand,
+  // Issue #4660 (matrix gap 8): the order read and the one-order cancel.
+  ETradeOrdersCommand,
+  ETradeCancelOrderCommand,
 } from "./etradeCommands";
 import {
   MarketDataGetQuoteCommand,
@@ -1772,6 +1775,11 @@ export class McpToolFactory {
     this.registerTool(new ETradeGetPositionsCommand());
     this.registerTool(new ETradeAuthStatusCommand());
     this.registerTool(new ETradeAccountDiscoveryCommand());
+    // Issue #4660 (matrix gap 8): order listing and one-order cancel, so a
+    // chat surface sees and cancels the selected broker's orders the same way
+    // it already can on the brokers that had these two tools first.
+    this.registerTool(new ETradeOrdersCommand());
+    this.registerTool(new ETradeCancelOrderCommand());
 
     // Market Data Research & Quoting Commands (yfinance & Alpaca)
     this.registerTool(new MarketDataGetQuoteCommand());

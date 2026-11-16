@@ -174,6 +174,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   etrade_auth_status: "mcp:read",
   etrade_account_discovery: "mcp:read",
   etrade_market_scan: "mcp:read",
+  // Issue #4660 (matrix gap 8): listing orders is a read, like alpaca_orders
+  // and public_orders above.
+  etrade_orders: "mcp:read",
   market_data_get_quote: "mcp:read",
   market_data_company_fundamentals: "mcp:read",
   market_data_historical_bars: "mcp:read",
@@ -354,6 +357,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // trade (11)
   etrade_preview_order: "mcp:trade",
   etrade_execute_order: "mcp:trade",
+  // Issue #4660 (matrix gap 8): cancelling one order changes broker state —
+  // the same scope as placing one, and the same as public_cancel_order.
+  etrade_cancel_order: "mcp:trade",
   alpaca_place_order: "mcp:trade",
   alpaca_execute_order: "mcp:trade",
   // Issue #3782: the Alpaca preview tool is a trade-scope draft

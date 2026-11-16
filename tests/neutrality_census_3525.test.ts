@@ -701,6 +701,21 @@ function measure(): Map<string, number> {
  * phase2-survey.md etrade 1 / yahoo 1). The HISTORICAL marker is restated
  * 159/783 -> 162/791. Measured totals move 1280/10061 -> 1283/10069
  * (re-based onto 105b9b96).
+ * Baseline update (#4660, 2026-11-16): matrix gap 8 gives E*TRADE the order
+ * read and the one-order cancel the other brokers already had. Every raised
+ * row is the provider's own adapter or the inventory that names it — the
+ * E*TRADE command module, the factory registration, the permission map, the
+ * tool-family record, the catalog's copilot block, and the two docs that
+ * enumerate tools by provider — all dispositioned INTEGRATION (naming the
+ * provider is their job): 8 raises (mcp-server-inventory.md/etrade 5->6,
+ * tool-attribution-audit-1763.md/etrade 8->10, chatPrompt.ts/etrade 7->8 — the
+ * steering now names the E*TRADE order tools instead of leaving an E*TRADE
+ * session pointed at another broker's, registry.ts/etrade 27->30,
+ * commands.ts/etrade 24->28, etradeCommands.ts/etrade 119->143,
+ * mcpPermissionPorts.ts/etrade 9->11, brokerCatalog.ts/etrade 26->29). The
+ * prose that named the sibling brokers inside the E*TRADE module was
+ * neutralized instead of baselined, so no alpaca or public.com row appears.
+ * Measured totals move 1283/10073 -> 1283/10114 (re-based onto 043afa900).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -811,7 +826,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/security/service-tokens-2681.md", "etrade", 1],
   ["docs/architecture/security/sessionstore-resource-measurement-1819.md", "etrade", 6],
   ["docs/architecture/security/step-up-windows-3102.md", "etrade", 1],
-  ["docs/architecture/security/tool-attribution-audit-1763.md", "etrade", 8],
+  ["docs/architecture/security/tool-attribution-audit-1763.md", "etrade", 10],
   ["docs/architecture/security/unenabled-orchestrations-1771.md", "alpaca", 1],
   ["docs/architecture/security/unenabled-orchestrations-1771.md", "etrade", 1],
   ["docs/architecture/security/user-request-quota-2842.md", "etrade", 5],
@@ -921,7 +936,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/agentic/job-system.md", "nasdaq", 2],
   ["docs/architecture/agentic/job-system.md", "yahoo", 2],
   ["docs/architecture/agentic/mcp-server-inventory.md", "alpaca", 4],
-  ["docs/architecture/agentic/mcp-server-inventory.md", "etrade", 5],
+  ["docs/architecture/agentic/mcp-server-inventory.md", "etrade", 6],
   ["docs/architecture/agentic/mcp-server-inventory.md", "yahoo", 2],
   ["docs/architecture/code/10-mcp-standards.md", "etrade", 1],
   ["docs/architecture/code/13-structure-and-file-organization.md", "etrade", 6],
@@ -952,7 +967,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agentic/chainExecutor.ts", "yahoo", 2],
   ["src/agents/browserAgent.ts", "etrade", 4],
   ["src/agents/chatPrompt.ts", "alpaca", 2],
-  ["src/agents/chatPrompt.ts", "etrade", 7],
+  ["src/agents/chatPrompt.ts", "etrade", 8],
   ["src/agents/copilotTradingMode.ts", "alpaca", 9],
   ["src/agents/copilotTradingMode.ts", "etrade", 5],
   ["src/agents/judge.ts", "alpaca", 1],
@@ -1007,7 +1022,7 @@ const BASELINE: Array<[string, string, number]> = [
   // the copilot must check verbatim — same disposition; its prose comment was
   // neutralized instead, so the row is the rule line alone.
   ["src/agents/prompts/stockCopilotPrompt.ts", "yahoo", 2],
-  ["src/agents/registry.ts", "etrade", 27],
+  ["src/agents/registry.ts", "etrade", 30],
   ["src/agents/registry.ts", "public.com", 5],
   ["src/agents/research-agent.ts", "etrade", 6],
   ["src/agents/routes/agenticPayments.ts", "etrade", 4],
@@ -1275,7 +1290,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/chainJobCommands.ts", "yahoo", 3],
   ["src/mcps/openaimp/cloudflareAgentCommands.ts", "etrade", 32],
   ["src/mcps/openaimp/commands.ts", "alpaca", 3],
-  ["src/mcps/openaimp/commands.ts", "etrade", 24],
+  ["src/mcps/openaimp/commands.ts", "etrade", 28],
   ["src/mcps/openaimp/deliverJobCommands.ts", "alpaca", 3],
   ["src/mcps/openaimp/deliverJobCommands.ts", "etrade", 3],
   ["src/mcps/openaimp/deliverJobCommands.ts", "nasdaq", 2],
@@ -1284,7 +1299,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/enrichJobCommands.ts", "etrade", 3],
   ["src/mcps/openaimp/enrichJobCommands.ts", "nasdaq", 2],
   ["src/mcps/openaimp/enrichJobCommands.ts", "yahoo", 3],
-  ["src/mcps/openaimp/etradeCommands.ts", "etrade", 119],
+  ["src/mcps/openaimp/etradeCommands.ts", "etrade", 143],
   ["src/mcps/openaimp/feedJobCommands.ts", "alpaca", 4],
   ["src/mcps/openaimp/feedJobCommands.ts", "etrade", 4],
   ["src/mcps/openaimp/feedJobCommands.ts", "nasdaq", 3],
@@ -1305,7 +1320,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/marketDataCommands.ts", "etrade", 5],
   ["src/mcps/openaimp/marketDataCommands.ts", "yahoo", 4],
   ["src/mcps/openaimp/mcpPermissionPorts.ts", "alpaca", 6],
-  ["src/mcps/openaimp/mcpPermissionPorts.ts", "etrade", 9],
+  ["src/mcps/openaimp/mcpPermissionPorts.ts", "etrade", 11],
   ["src/mcps/openaimp/meshDoorCommands.ts", "alpaca", 6],
   ["src/mcps/openaimp/meshDoorCommands.ts", "etrade", 15],
   ["src/mcps/public/publicMcp.ts", "public.com", 6],
@@ -1503,7 +1518,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/alpaca/platform.ts", "etrade", 8],
   ["src/trading/alpaca/signIn.ts", "alpaca", 6],
   ["src/trading/brokerCatalog.ts", "alpaca", 19],
-  ["src/trading/brokerCatalog.ts", "etrade", 26],
+  ["src/trading/brokerCatalog.ts", "etrade", 29],
   ["src/trading/brokerPanels.ts", "alpaca", 1],
   ["src/trading/brokerPanels.ts", "etrade", 1],
   ["src/trading/brokerPresentation.ts", "alpaca", 12],

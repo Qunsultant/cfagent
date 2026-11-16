@@ -758,6 +758,9 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "etrade_get_positions",
       "etrade_auth_status",
       "etrade_account_discovery",
+      // Issue #4660 (matrix gap 8): chat/MCP list + cancel for E*TRADE.
+      "etrade_orders",
+      "etrade_cancel_order",
     ],
     commandSources: [{ file: "src/mcps/openaimp/etradeCommands.ts", kind: "readonly-name" }],
   },

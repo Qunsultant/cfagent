@@ -86,6 +86,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `etrade_auth_status` | mcp:read | L (I / R on other doors) |
 | `etrade_account_discovery` | mcp:read | L (I / R on other doors) |
 | `etrade_market_scan` | mcp:read | L (I / R on other doors) |
+| `etrade_orders` | mcp:read | L (I / R on other doors) — lists the tenant's E*TRADE orders in the neutral shape (#4660) |
 | `market_data_get_quote` | mcp:read | L (I / R on other doors) |
 | `foss_get_quote` (deprecated #1906 alias of `market_data_get_quote`, same scope) | mcp:read | L (I / R on other doors) |
 | `market_data_company_fundamentals` | mcp:read | L (I / R on other doors) |
@@ -208,6 +209,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 |---|---|---|
 | `etrade_preview_order` | mcp:trade | L (I / R on other doors) |
 | `etrade_execute_order` | mcp:trade | L (I / R on other doors) |
+| `etrade_cancel_order` | mcp:trade | L (I / R on other doors) — cancels one order via the E*TRADE cancel endpoint and returns the broker's receipt (#4660) |
 | `alpaca_place_order` | mcp:trade | L (I / R on other doors) |
 | `alpaca_execute_order` | mcp:trade | L (I / R on other doors) — settles a stored preview draft by orderId (#3846); refuses a missing or non-previewed draft |
 | `alpaca_preview_order` | mcp:trade | L (I / R on other doors) — creates a draft with a provenanced price (#3782); refuses LIMIT drafts with no user limit and no live quote |
