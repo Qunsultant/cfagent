@@ -2146,7 +2146,6 @@ export function ETradeTradingHub({
                 density="compact"
                 icon="⚠️"
                 title={liveOnlyNoticeCopy({ brokerLabel: presentation.label }).title}
-                className="broker-live-only-notice"
               >
                 {liveOnlyNoticeCopy({ brokerLabel: presentation.label }).body}
               </Notice>
