@@ -1440,115 +1440,113 @@ export function StockHub({
                 payload-builder module. A scheduled screen needs one
                 specific universe, so the button is disabled while the
                 form is on All — the builder refuses ALL loudly too. */}
-            <div style={{ marginTop: "var(--space-3)" }}>
-              {!scheduleCaptureOpen ? (
-                <Flex gap="2" align="center" wrap>
+            {!scheduleCaptureOpen ? (
+              <Flex gap="2" align="center" wrap>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={openScheduleCapture}
+                  disabled={universe === "ALL"}
+                  title="Create a durable schedule that re-runs this screen's criteria"
+                >
+                  🗓 Schedule this screen
+                </Button>
+                <span className="ui-meta">
+                  {universe === "ALL"
+                    ? "Pick a specific universe to schedule — scheduled screens cannot run over All."
+                    : "Re-runs the criteria above on a schedule; results land in Schedules."}
+                </span>
+              </Flex>
+            ) : capturedScreen ? (
+              <div role="group" aria-label="Confirm scheduled screen">
+                <p className="ui-meta">
+                  Schedule THIS screen: <strong>{capturedScreen.universe}</strong> ·{" "}
+                  {capturedScreen.sector === "ALL" ? "all sectors" : capturedScreen.sector} ·{" "}
+                  max {capturedScreen.maxItems ?? "universe default"} ·{" "}
+                  {capturedScreen.presetName ? (
+                    <>preset <strong>{capturedScreen.presetName}</strong></>
+                  ) : (
+                    "custom thresholds"
+                  )} · {Object.keys(capturedScreen.filters).length} criteria ·{" "}
+                  {activeProvider?.label ?? "provider"}
+                </p>
+                <Flex gap="2" wrap>
+                  <Select label="Cadence"
+                    value={captureScheduleType}
+                    onChange={(event) => setCaptureScheduleType(event.target.value as typeof captureScheduleType)}
+                    aria-label="Schedule cadence type"
+                  >
+                    <option value="interval">Interval</option>
+                    <option value="cron">Cron (UTC)</option>
+                    <option value="delayed">Delayed (once)</option>
+                    <option value="scheduled">One-shot date</option>
+                  </Select>
+                  {captureScheduleType === "interval" && (
+                    <TextInput label="Every (seconds)"
+                      type="number"
+                      min={60}
+                      step={60}
+                      value={captureIntervalSeconds}
+                      onChange={(event) => setCaptureIntervalSeconds(Number(event.target.value))}
+                      aria-label="Interval seconds"
+                    />
+                  )}
+                  {captureScheduleType === "cron" && (
+                    <TextInput label="Cron (UTC)"
+                      type="text"
+                      value={captureCron}
+                      onChange={(event) => setCaptureCron(event.target.value)}
+                      aria-label="Cron expression"
+                    />
+                  )}
+                  {captureScheduleType === "delayed" && (
+                    <TextInput label="Delay (seconds)"
+                      type="number"
+                      min={1}
+                      step={60}
+                      value={captureDelaySeconds}
+                      onChange={(event) => setCaptureDelaySeconds(Number(event.target.value))}
+                      aria-label="Delay seconds"
+                    />
+                  )}
+                  {captureScheduleType === "scheduled" && (
+                    <TextInput label="Run at"
+                      type="datetime-local"
+                      value={captureDate}
+                      onChange={(event) => setCaptureDate(event.target.value)}
+                      aria-label="One-shot date and time"
+                    />
+                  )}
+                </Flex>
+                {captureError && (
+                  <Notice tone="danger" density="compact" onDismiss={() => setCaptureError("")}>
+                    {captureError}
+                  </Notice>
+                )}
+                <Flex gap="2">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => void handleCreateScreenSchedule()}
+                    disabled={captureSubmitting}
+                    loading={captureSubmitting}
+                  >
+                    Create schedule
+                  </Button>
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={openScheduleCapture}
-                    disabled={universe === "ALL"}
-                    title="Create a durable schedule that re-runs this screen's criteria"
+                    onClick={() => {
+                      setScheduleCaptureOpen(false);
+                      setCapturedScreen(null);
+                      setCaptureError("");
+                    }}
                   >
-                    🗓 Schedule this screen
+                    Cancel
                   </Button>
-                  <span className="ui-meta">
-                    {universe === "ALL"
-                      ? "Pick a specific universe to schedule — scheduled screens cannot run over All."
-                      : "Re-runs the criteria above on a schedule; results land in Schedules."}
-                  </span>
                 </Flex>
-              ) : capturedScreen ? (
-                <div role="group" aria-label="Confirm scheduled screen">
-                  <p className="ui-meta">
-                    Schedule THIS screen: <strong>{capturedScreen.universe}</strong> ·{" "}
-                    {capturedScreen.sector === "ALL" ? "all sectors" : capturedScreen.sector} ·{" "}
-                    max {capturedScreen.maxItems ?? "universe default"} ·{" "}
-                    {capturedScreen.presetName ? (
-                      <>preset <strong>{capturedScreen.presetName}</strong></>
-                    ) : (
-                      "custom thresholds"
-                    )} · {Object.keys(capturedScreen.filters).length} criteria ·{" "}
-                    {activeProvider?.label ?? "provider"}
-                  </p>
-                  <Flex gap="2" wrap>
-                    <Select label="Cadence"
-                      value={captureScheduleType}
-                      onChange={(event) => setCaptureScheduleType(event.target.value as typeof captureScheduleType)}
-                      aria-label="Schedule cadence type"
-                    >
-                      <option value="interval">Interval</option>
-                      <option value="cron">Cron (UTC)</option>
-                      <option value="delayed">Delayed (once)</option>
-                      <option value="scheduled">One-shot date</option>
-                    </Select>
-                    {captureScheduleType === "interval" && (
-                      <TextInput label="Every (seconds)"
-                        type="number"
-                        min={60}
-                        step={60}
-                        value={captureIntervalSeconds}
-                        onChange={(event) => setCaptureIntervalSeconds(Number(event.target.value))}
-                        aria-label="Interval seconds"
-                      />
-                    )}
-                    {captureScheduleType === "cron" && (
-                      <TextInput label="Cron (UTC)"
-                        type="text"
-                        value={captureCron}
-                        onChange={(event) => setCaptureCron(event.target.value)}
-                        aria-label="Cron expression"
-                      />
-                    )}
-                    {captureScheduleType === "delayed" && (
-                      <TextInput label="Delay (seconds)"
-                        type="number"
-                        min={1}
-                        step={60}
-                        value={captureDelaySeconds}
-                        onChange={(event) => setCaptureDelaySeconds(Number(event.target.value))}
-                        aria-label="Delay seconds"
-                      />
-                    )}
-                    {captureScheduleType === "scheduled" && (
-                      <TextInput label="Run at"
-                        type="datetime-local"
-                        value={captureDate}
-                        onChange={(event) => setCaptureDate(event.target.value)}
-                        aria-label="One-shot date and time"
-                      />
-                    )}
-                  </Flex>
-                  {captureError && (
-                    <Notice tone="danger" density="compact" onDismiss={() => setCaptureError("")}>
-                      {captureError}
-                    </Notice>
-                  )}
-                  <Flex gap="2">
-                    <Button
-                      type="button"
-                      variant="primary"
-                      onClick={() => void handleCreateScreenSchedule()}
-                      disabled={captureSubmitting}
-                      loading={captureSubmitting}
-                    >
-                      Create schedule
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        setScheduleCaptureOpen(false);
-                        setCapturedScreen(null);
-                        setCaptureError("");
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </Flex>
-                </div>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
             {captureSuccess && (
               <Notice tone="success" density="compact" onDismiss={() => setCaptureSuccess("")}>
                 {captureSuccess}
