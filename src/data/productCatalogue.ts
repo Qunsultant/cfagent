@@ -79,6 +79,19 @@ import { VALID_TIERS, type StoreTier } from "./commercialPorts";
 import { AGENT_CARDS } from "../a2a/agent-cards";
 import { getAgentByClass } from "../agents/registry";
 import { isKnownFeatureFlag, type FeatureFlag } from "../features/featureFlagPorts";
+// Issue #4696 — created products are subscription-store rows: the
+// builder below reads plan rows + product rows (both supplied by the
+// caller; this module still reads no store itself).
+import {
+  DEFAULT_SEGMENT,
+  FREE_PRODUCT_ID,
+  resolveEffectiveVersion,
+  type ProductRecord,
+} from "./productPorts";
+import {
+  isPlanPriceApproved,
+  type SubscriptionPlanRecord,
+} from "./subscriptionPorts";
 
 export type ProductTier = StoreTier;
 export type ProductAvailability =
@@ -160,14 +173,33 @@ export interface ProductGateRequirements {
 
 export interface ProductEntry {
   id: string;
-  family: PriceFamily;
+  /**
+   * Issue #4696 — null for created products: they are not
+   * family-scoped (plans carry no family; subscription products
+   * are not family-scoped). Family-keyed consumers must guard
+   * the null (productAccess panel lookup, bundle member prices,
+   * cfpay channel select) — never default it to a family.
+   */
+  family: PriceFamily | null;
   tier: ProductTier;
   canonicalName: string;
   servingAgent: string | null;
   gateEndpoint: string | null;
   /** Price charged for THIS tier; null unless PayPerUse with a chargeable price. */
   priceUSD: number | null;
-  priceSource: "gate" | "catalogue-approved" | null;
+  /**
+   * Issue #4696 — "plan-approved": the price is the effective
+   * version's APPROVED plan price, not a price-catalogue price.
+   * Never "catalogue-approved" for a created row.
+   */
+  priceSource: "gate" | "catalogue-approved" | "plan-approved" | null;
+  /**
+   * Issue #4696 — the effective version's period in days; null
+   * for family rows (their price is per call, not per period).
+   * Carried so the display can label a created row's price with
+   * its period ("$1.00 / 30 days").
+   */
+  periodDays: number | null;
   availability: ProductAvailability;
   requirements: ProductGateRequirements;
   listed: boolean;
@@ -219,6 +251,7 @@ export function buildProductCatalog(
           gateEndpoint: gate ? gate.resource : null,
           priceUSD: null,
           priceSource: null,
+          periodDays: null,
           availability: "entitlement-pending",
           requirements,
           listed: false,
@@ -238,6 +271,7 @@ export function buildProductCatalog(
           gateEndpoint: gate ? gate.resource : null,
           priceUSD: null,
           priceSource: null,
+          periodDays: null,
           availability: "ungated-discovery",
           requirements,
           listed: false,
@@ -277,12 +311,138 @@ export function buildProductCatalog(
         gateEndpoint: gate ? gate.resource : null,
         priceUSD: resolved.priceUSD,
         priceSource: resolved.source,
+        periodDays: null,
         availability: listed ? "purchasable" : "unlisted",
         requirements,
         listed,
         unlistedReasons,
       });
     }
+  }
+  return rows;
+}
+
+/**
+ * Issue #4696 — one catalog row per created SUBSCRIPTION product.
+ *
+ * Listing shape (decided for this slice; see the #4696 PR body):
+ * one row per PRODUCT, not per version — the effective version for
+ * the caller's segment only, resolved with the one resolver
+ * (resolveEffectiveVersion), the same semantics GET /plans uses for
+ * buyers. The catalog has no caller account, so the segment is the
+ * default segment (the segment every existing row is backfilled
+ * into). A product with no effective version is still a row,
+ * unlisted with a named reason — the same always-present pattern
+ * as the family rows — never silently omitted.
+ *
+ * Only subscription-kind products are wired here: plan rows ARE
+ * subscription versions. per_run products already ARE the family
+ * rows (a per_run product is a family, `prod-per-run-<family>`);
+ * runs_pack products live in a different version store
+ * (RunsPackAdapters) with a different purchase flow — their
+ * wiring is a follow-on slice, not this one. prod-free (the
+ * read-only baseline, no versions) is excluded by id.
+ *
+ * Listing rule (approved prices only): listed = an effective
+ * version exists AND its price is APPROVED. The gate
+ * requirements do NOT decide this: a created row has no serving
+ * agent, no gate endpoint, and no metered receipt path — it is
+ * sold through the Selling checkout, not a gate — so the
+ * requirements below are honest values, not the listing rule.
+ * The unlistedReasons are the source of truth for why a row is
+ * not listed, exactly as for family rows.
+ *
+ * Pure derivation over caller-supplied rows: no store reads.
+ */
+export function createdProductId(productId: string): string {
+  return `created:${productId}`;
+}
+
+export interface BuildCreatedProductRowsInput {
+  /** All plan rows (active and deactivated — the resolver skips inactive ones). */
+  plans: SubscriptionPlanRecord[];
+  /** All product rows (every kind — non-subscription kinds are skipped). */
+  products: ProductRecord[];
+  nowMs: number;
+  /** Segment whose effective version lists; default DEFAULT_SEGMENT. */
+  segment?: string;
+  /** Shared run-status surface present (AsyncJobsPanel/WorkflowRunsPanel). */
+  runStatusSurfacePresent?: boolean;
+}
+
+export function buildCreatedProductRows(
+  input: BuildCreatedProductRowsInput,
+): ProductEntry[] {
+  const segment = input.segment ?? DEFAULT_SEGMENT;
+  const runStatusSurface = input.runStatusSurfacePresent ?? true;
+  const plansByProduct = new Map<string, SubscriptionPlanRecord[]>();
+  for (const plan of input.plans) {
+    const list = plansByProduct.get(plan.productId) ?? [];
+    list.push(plan);
+    plansByProduct.set(plan.productId, list);
+  }
+  const ordered = [...input.products].sort(
+    (a, b) => a.createdAtMs - b.createdAtMs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  const rows: ProductEntry[] = [];
+  for (const product of ordered) {
+    if (product.kind !== "subscription") continue;
+    if (product.id === FREE_PRODUCT_ID) continue;
+    const versions = plansByProduct.get(product.id) ?? [];
+    const requirements: ProductGateRequirements = {
+      registryEntry: false,
+      price: false,
+      gateEndpoint: false,
+      receiptPath: false,
+      runStatusSurface,
+    };
+    const base = {
+      id: createdProductId(product.id),
+      family: null as PriceFamily | null,
+      tier: "Subscribed" as ProductTier,
+      canonicalName: product.name,
+      servingAgent: null as string | null,
+      gateEndpoint: null as string | null,
+      requirements,
+    };
+    if (versions.length === 0) {
+      rows.push({
+        ...base,
+        priceUSD: null,
+        priceSource: null,
+        periodDays: null,
+        availability: "unlisted",
+        listed: false,
+        unlistedReasons: ["no versions yet — the product has no plan versions"],
+      });
+      continue;
+    }
+    const effective = resolveEffectiveVersion(versions, segment, input.nowMs);
+    if (effective === null) {
+      rows.push({
+        ...base,
+        priceUSD: null,
+        priceSource: null,
+        periodDays: null,
+        availability: "unlisted",
+        listed: false,
+        unlistedReasons: [
+          `no effective version for the ${segment} segment — no active version is currently effective`,
+        ],
+      });
+      continue;
+    }
+    const approved = isPlanPriceApproved(effective);
+    requirements.price = approved;
+    rows.push({
+      ...base,
+      priceUSD: approved ? effective.priceUSD : null,
+      priceSource: approved ? "plan-approved" : null,
+      periodDays: effective.periodDays,
+      availability: approved ? "purchasable" : "unlisted",
+      listed: approved,
+      unlistedReasons: approved ? [] : ["plan price not approved — only an approved plan price may be charged"],
+    });
   }
   return rows;
 }

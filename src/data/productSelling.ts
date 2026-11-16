@@ -41,6 +41,7 @@
  *   period). A mint alone — no row — is never activation.
  */
 import { buildFunnelEvent, type FunnelEvent } from "./productMarketing";
+import type { PriceFamily } from "./priceCataloguePorts";
 
 /** Minimal display shape the selling derivation needs (a subset of the
  *  Phase 4 CatalogDisplayEntry — the panel maps full rows to this). */
@@ -54,6 +55,51 @@ export interface CatalogDisplayEntryLike {
   priceUSD: number | null;
   purchasePath: { label: string; route: string; note: string } | null;
   purchasePathReason: string | null;
+}
+
+/**
+ * Issue #4696 — member prices by family, from the catalog rows the
+ * panel already renders (server-truth approved prices). Created rows
+ * carry family null and are EXCLUDED: a null key would corrupt the
+ * family-keyed map the bundle savings derivation reads, and a
+ * created product is not a per-run member.
+ */
+export function familyMemberPrices(
+  rows: Array<{ family: PriceFamily | null; priceUSD: number | null }>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.family === null || row.priceUSD === null) continue;
+    out[row.family] = row.priceUSD;
+  }
+  return out;
+}
+
+/**
+ * Issue #4696 — the cfpay channel's product options: one pay-per-use
+ * run of a listed product, paid through the cfpay channel. The
+ * channel flow is family-keyed (the mint resolves the channel price
+ * by family), so created rows — family null, subscription products,
+ * never a pay-per-use run — are EXCLUDED. A null key would also
+ * collide in the select's option keys.
+ */
+export function cfpayChannelOptions(
+  rows: Array<{
+    family: PriceFamily | null;
+    priceUSD: number | null;
+    canonicalName: string;
+    listed: boolean;
+  }>,
+): Array<{ family: PriceFamily; label: string }> {
+  const options: Array<{ family: PriceFamily; label: string }> = [];
+  for (const row of rows) {
+    if (!row.listed || row.priceUSD === null || row.family === null) continue;
+    options.push({
+      family: row.family,
+      label: `${row.canonicalName} — $${row.priceUSD.toFixed(2)}`,
+    });
+  }
+  return options;
 }
 
 /** Plan shape as GET /plans returns it (server truth, operator data). */

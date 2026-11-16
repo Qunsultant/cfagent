@@ -318,16 +318,18 @@ describe("funnel events + success metrics (#2695)", () => {
 
 describe("catalog read route (#2695)", () => {
   it("answers 401 without a session, 405 on non-GET, 503 without a catalogue", async () => {
-    const unauth = await handleProductCatalogRoute({ session: null, method: "GET", listPrices: async () => PRICE_FIXTURE });
+    const emptyPlans = async () => [];
+    const emptyProducts = async () => [];
+    const unauth = await handleProductCatalogRoute({ session: null, method: "GET", listPrices: async () => PRICE_FIXTURE, listPlans: emptyPlans, listProducts: emptyProducts });
     expect(unauth.status).toBe(401);
-    const wrongMethod = await handleProductCatalogRoute({ session: { login: "u1" }, method: "POST", listPrices: async () => PRICE_FIXTURE });
+    const wrongMethod = await handleProductCatalogRoute({ session: { login: "u1" }, method: "POST", listPrices: async () => PRICE_FIXTURE, listPlans: emptyPlans, listProducts: emptyProducts });
     expect(wrongMethod.status).toBe(405);
-    const noCatalogue = await handleProductCatalogRoute({ session: { login: "u1" }, method: "GET", listPrices: null });
+    const noCatalogue = await handleProductCatalogRoute({ session: { login: "u1" }, method: "GET", listPrices: null, listPlans: emptyPlans, listProducts: emptyProducts });
     expect(noCatalogue.status).toBe(503);
   });
 
   it("serves display rows derived from the catalogue, inventing nothing", async () => {
-    const res = await handleProductCatalogRoute({ session: { login: "u1" }, method: "GET", listPrices: async () => PRICE_FIXTURE });
+    const res = await handleProductCatalogRoute({ session: { login: "u1" }, method: "GET", listPrices: async () => PRICE_FIXTURE, listPlans: async () => [], listProducts: async () => [] });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { products: CatalogDisplayEntry[] };
     const options = body.products.find((p) => p.id === "options:PayPerUse");
