@@ -2028,13 +2028,13 @@ const BASELINE: Array<[string, string, number]> = [
   // #3892 INTEGRATION: the registry names the providers whose support it
   // declares (native/emulated/none is a per-provider fact), and its
   // trailing-stop notes quote the provider's field names.
-  ["src/trading/advancedOrders.ts", "alpaca", 28],
+  ["src/trading/advancedOrders.ts", "alpaca", 29],
   // #3892 INTEGRATION: the introspection payload is per provider, so the
   // tool names the providers it enumerates.
   ["src/mcps/openaimp/tradingLimitCommands.ts", "alpaca", 1],
   // #3892 INTEGRATION: the registry declares per-broker support, so the
   // E*TRADE rows are the `none`/`emulated` facts a caller is refused by name.
-  ["src/trading/advancedOrders.ts", "etrade", 27],
+  ["src/trading/advancedOrders.ts", "etrade", 28],
   // #3892 INTEGRATION: the introspection payload names the provider it
   // enumerates, alongside the other broker's.
   ["src/mcps/openaimp/tradingLimitCommands.ts", "etrade", 1],
@@ -2135,9 +2135,9 @@ const BASELINE: Array<[string, string, number]> = [
   // data providers it compares by definition; the table is the artefact,
   // not platform framing (same disposition as the broker-parity-matrix
   // rows, #4038/#4039). Measured 2026-11-15 on the placed file.
-  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 80],
+  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 82],
   ["docs/architecture/business/brokerage-data-matrix.md", "public.com", 14],
-  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 60],
+  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 63],
   ["docs/architecture/business/brokerage-data-matrix.md", "schwab", 3],
   ["docs/architecture/business/brokerage-data-matrix.md", "fidelity", 2],
   ["docs/architecture/business/brokerage-data-matrix.md", "robinhood", 1],
