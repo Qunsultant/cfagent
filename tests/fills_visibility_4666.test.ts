@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { mapAlpacaOrderHistoryRow } from "../src/trading/alpaca/platform";
-import { ETradeClient } from "../src/trading/etrade/client";
+import { ETradeRestClient } from "../src/trading/etrade/client";
 import { parsePublicOrders } from "../src/services/publicTrading";
 
 describe("Fills visibility on BrokerRemoteOrder (#4666)", () => {
@@ -115,7 +115,7 @@ describe("Fills visibility on BrokerRemoteOrder (#4666)", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     try {
-      const client = new ETradeClient({
+      const client = new ETradeRestClient({
         ENVIRONMENT: "sandbox",
         ETRADE_CONSUMER_KEY: "test-key",
         ETRADE_CONSUMER_SECRET: "test-secret",
