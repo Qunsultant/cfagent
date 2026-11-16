@@ -909,6 +909,8 @@ const EXPECTED_INVENTORY = [
   "handleEtradeBrokerRoutes :: endsWith(\"/etrade/orders/cancel\")",
   "handleBrokerOrderRoutes :: endsWith(\"/broker/order/preview\")",
   "handleBrokerOrderRoutes :: endsWith(\"/broker/order/execute\")",
+  // Issue #4670: the neutral replace route — same router, same tenant broker.
+  "handleBrokerOrderRoutes :: endsWith(\"/broker/order/replace\")",
   // Issue #3390: the neutral cancel route, on the same delegating router.
   "handleBrokerOrderRoutes :: endsWith(\"/broker/order/cancel\")",
   // Issue #3884: the per-ticker cancel scope.
