@@ -659,6 +659,23 @@ function measure(): Map<string, number> {
  * 166->165. Measured totals move 1191/9359 -> 1192/9355 (re-based onto
  * 155f5121; the totals on 2ac3e995 were 1191/9355 -> 1192/9351, on 7d81cd93
  * 1190/9351 -> 1191/9347, and on cc33837c 1174/9135 -> 1175/9131).
+ * Baseline update (#4791, 2026-11-16): the CAIO-lane surveys file
+ * under docs/architecture/survey/ as verbatim dated snapshots
+ * (2026-10-29/11-01) — the #2225 mesh survey (summary + full text),
+ * the three #2494 Think-adoption domain surveys, the #2494 AGNTCY
+ * workstream survey, and the assessment-scope audit. The survey
+ * texts name the brokers/providers they surveyed; neutralizing
+ * those mentions would falsify the evidence record, so all rows
+ * are dispositioned HISTORICAL: 10 new rows
+ * (2225-agent-mesh-survey-part1.md etrade 11;
+ * 2225-agent-mesh-survey-part2.md etrade 10 / public.com 1 /
+ * alpaca 1; 2494-agntcy-workstream-survey.md etrade 1 /
+ * public.com 1; 2494-think-adoption-trading-survey.md etrade 8 /
+ * public.com 3; assessment-scope-audit.md etrade 1 / public.com 1).
+ * The summary, payment, and screener surveys carry no
+ * provider-brand rows. The HISTORICAL marker is restated
+ * 145/732 -> 155/771 (the 732 had drifted by one; the true
+ * pre-change total was 733).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1639,7 +1656,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/agents/copilot-broker-capability.md", "yahoo", 1],
   ["src/agents/orchestrator.ts", "alpaca", 1],
   ["src/config/asyncJobModes.ts", "alpaca", 1],
-  // ---- HISTORICAL (145 rows / 732 lines) ----
+  // ---- HISTORICAL (155 rows / 771 lines) ----
   ["docs/Assessment.md", "etrade", 6],
   ["docs/Assessment.md", "yahoo", 2],
   ["docs/agents/options-report-inventory.md", "etrade", 4],
@@ -1691,7 +1708,19 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/1976-data-foundation-survey.md", "etrade", 1],
   ["docs/architecture/survey/1976-step5-sessionstore-audit.md", "etrade", 30],
   ["docs/architecture/survey/1976-step5-sessionstore-audit.md", "public.com", 1],
+  // #4791 HISTORICAL: dated survey snapshots naming the brokers surveyed.
+  ["docs/architecture/survey/2225-agent-mesh-survey-part1.md", "etrade", 11],
+  ["docs/architecture/survey/2225-agent-mesh-survey-part2.md", "etrade", 10],
+  ["docs/architecture/survey/2225-agent-mesh-survey-part2.md", "public.com", 1],
+  ["docs/architecture/survey/2225-agent-mesh-survey-part2.md", "alpaca", 1],
+  ["docs/architecture/survey/2494-agntcy-workstream-survey.md", "etrade", 1],
+  ["docs/architecture/survey/2494-agntcy-workstream-survey.md", "public.com", 1],
+  ["docs/architecture/survey/2494-think-adoption-trading-survey.md", "etrade", 8],
+  ["docs/architecture/survey/2494-think-adoption-trading-survey.md", "public.com", 3],
   ["docs/architecture/survey/ai-search-activation-survey.md", "etrade", 11],
+  // #4791 HISTORICAL: the assessment-scope audit names the providers its inventoried items integrate.
+  ["docs/architecture/survey/assessment-scope-audit.md", "etrade", 1],
+  ["docs/architecture/survey/assessment-scope-audit.md", "public.com", 1],
   ["docs/architecture/survey/native-payments-survey-design.md", "etrade", 1],
   ["docs/architecture/survey/search-hub-survey-design.md", "etrade", 8],
   ["docs/compliance/facts-n-findings-01.md", "alpaca", 2],
