@@ -15,12 +15,14 @@
  *
  * Divergence is pinned as data, not as branching code:
  *   - E*TRADE route:  source "etrade",      deliver true,  provider
- *     unset (the ScreenerAgent default), delivery = the parsed
- *     envelope (the sync path publishes it via publishOrBridge).
+ *     the tenant-resolved provider the route passes in, delivery
+ *     = the parsed envelope (the sync path publishes it via
+ *     publishOrBridge).
  *   - Market-data route: source "market-data", deliver false,
- *     provider "yahoo", delivery = {} — the parsed envelope is
- *     deliberately NOT forwarded, exactly as today: the
- *     market-data route has no deliver step.
+ *     provider the tenant-resolved provider the route passes in,
+ *     delivery = {} — the parsed envelope is deliberately NOT
+ *     forwarded, exactly as today: the market-data route has no
+ *     deliver step.
  *   - Goal stock leg (issue #2882): source "goal", deliver
  *     false, provider unset, universe "ALL", asyncRequested
  *     false, delivery = {}. Goal delivery and the goal
@@ -34,6 +36,14 @@
  *     spec is a canonical record of the leg, not an
  *     execution reroute: goal execution stays in
  *     goalDrivenScreen + goal dispatch.
+ *
+ * Issue #4431 (S5/N3): the provider is never hardcoded per route
+ * anymore. The routes resolve the tenant's effective data-provider
+ * selection and pass it as `provider`; the builder carries it onto
+ * the spec verbatim. A caller that passes none leaves the spec
+ * without a provider, and the planner refuses the run
+ * (FAILURE_NO_SCREENING_PROVIDER) instead of screening another
+ * provider's data.
  *
  * Ordering contract (preserves both routes' behaviour exactly):
  * the E*TRADE route admits the mode BEFORE its listings switch
@@ -49,6 +59,7 @@
  */
 
 import { parseStockScreenRequest } from "../trading";
+import type { StockScreenProvider } from "../trading";
 import {
   admitScreenModeSelection,
   type ScreenModeSelection,
@@ -123,8 +134,9 @@ export interface StockScreenRunProvenance {
  */
 export interface StockScreenRunSpec extends StockScreenRunProvenance {
   source: StockScreenSource;
-  /** Undefined for E*TRADE (agent default) and goal (goal-owned); "yahoo" for market-data. */
-  provider?: "yahoo";
+  /** Issue #4431 (S5/N3): the tenant-resolved provider the routes stamp. Undefined for goal
+   * (goal-owned); never a per-route hardcode. */
+  provider?: StockScreenProvider;
   /** The pinned delivery divergence: E*TRADE true, market-data and goal false. */
   deliver: boolean;
   filters: StockScreenerFilter;
@@ -221,6 +233,14 @@ export function buildStockScreenRunSpec(args: {
   /** Pre-admitted mode (E*TRADE route: admitted before listings). */
   modeSelection?: ScreenModeSelection;
   /**
+   * Issue #4431 (S5/N3): the tenant-resolved data provider, resolved
+   * by the calling route (resolveManualScreenProviders) and carried
+   * onto the spec verbatim. No per-route hardcode lives here: a
+   * market-data spec no longer means "yahoo" by construction, and an
+   * E*TRADE spec no longer means an unset agent default.
+   */
+  provider?: StockScreenProvider;
+  /**
    * Issue #3922: the hosting instance's per-login settings
    * reader, forwarded to the internal mode admission when no
    * pre-admitted selection rides — the ND gate then resolves
@@ -266,7 +286,7 @@ export function buildStockScreenRunSpec(args: {
     ok: true,
     spec: {
       source: args.source,
-      ...(args.source === "market-data" ? { provider: "yahoo" as const } : {}),
+      ...(args.provider ? { provider: args.provider } : {}),
       deliver: args.source === "etrade",
       filters,
       universe,

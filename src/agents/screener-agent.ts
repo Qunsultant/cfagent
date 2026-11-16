@@ -1303,7 +1303,7 @@ export class ScreenerAgent extends PortThink {
     } catch {}
     // Issue #2864: the run's execution plan comes from the one
     // planner (src/workflows/stockScreenPlanner.ts) — sector
-    // (#421), universe default, provider default (#1007), and
+    // (#421), universe default, required provider (#4431), and
     // fallback marker (#1527) are resolved there, verbatim.
     // Downstream code keeps using these same names unchanged.
     const plan = planStockScreenRun(req, timestamp);

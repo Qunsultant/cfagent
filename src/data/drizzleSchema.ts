@@ -352,9 +352,9 @@ export const agentTenantSettings = sqliteTable("agent_tenant_settings", {
   autoRefreshEnabled: integer("auto_refresh_enabled").notNull().default(0),
   /** Issue #2481: auto-refresh cadence in seconds. Absent row = 15. */
   autoRefreshIntervalS: integer("auto_refresh_interval_s").notNull().default(15),
-  /** Per-tenant data-provider selection. Absent row = etrade. */
+  /** Per-tenant data-provider selection. Absent row = alpaca (adapter default, DEFAULT_TENANT_PROVIDERS, #3990). The column DEFAULT below is a pre-#3990 leftover — reads never see it (the adapter applies the alpaca default); changing it needs a migration slice, not this comment fix. */
   dataProviderId: text("data_provider_id").notNull().default("etrade"),
-  /** Per-tenant broker selection. Absent row = etrade. */
+  /** Per-tenant broker selection. Absent row = alpaca (adapter default, DEFAULT_TENANT_PROVIDERS, #3812/#3937). The column DEFAULT below is a pre-#3937 leftover — see the data-provider note above. */
   brokerId: text("broker_id").notNull().default("etrade"),
 });
 

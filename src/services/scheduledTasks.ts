@@ -1697,8 +1697,11 @@ export class ScheduledTasksService {
       // is planned through the one planner — sector, universe,
       // provider, and fallback marker resolve here, not by hand.
       // Values are identical to the hand-derived ones above:
-      // planner defaults equal runScreenInner defaults, and the
-      // fallback→yahoo rule is the planner's verbatim copy.
+      // the planner's sector/universe/provider/fallback resolution
+      // is the same derivation runScreenInner used, with the provider
+      // now required (#4431) — the scheduled path resolves it first
+      // (#3655 F6), so the planner never meets a missing one here.
+      // The fallback→yahoo rule is the planner's verbatim copy.
       const scheduledPlan = planScheduledScreen(
         {
           sector: options.sector,

@@ -313,9 +313,14 @@ describe("POST /etrade/screen under #2373 Slice A", () => {
     expect(params.tenantId).toBe(TENANT);
     expect(params.account.tenantId).toBe(TENANT);
     // Issue #2373 (S1b, F9): the tenant-resolved provider is
-    // stamped explicitly (etrade is the route's implied provider),
-    // and no broker rides when none is stored.
-    expect(params.screenerCommand.provider).toBe("etrade");
+    // stamped explicitly, and no broker rides when none is stored.
+    // Issue #4431 (S5/N3): no selection is stored, so the
+    // tenant-resolved provider is the platform default (alpaca) —
+    // F9's "unconfigured → the route's implied provider is the
+    // run's provider" is superseded by the tenant-resolved spec
+    // (item 3); the route provider still governs the F9 mismatch
+    // check, which passes here because nothing is stored.
+    expect(params.screenerCommand.provider).toBe("alpaca");
     expect("broker" in params.screenerCommand).toBe(false);
     // The payment workflow instance id IS the run request id, and the
     // screener command it carries is the broker's command.
@@ -620,7 +625,10 @@ describe("POST /market-data/screen under #2373 Slice A", () => {
     expect(params.screenerCommand.jobId).toBe(body.runRequestId);
     expect(params.screenerCommand.type).toBe("run-screen");
     expect(params.screenerCommand.role).toBe("parent");
-    expect(params.screenerCommand.provider).toBe("yahoo");
+    // Issue #4431 (S5/N3): no selection stored — the command
+    // carries the effective default (alpaca), not the route's
+    // implied yahoo; see the etrade uncovered test above.
+    expect(params.screenerCommand.provider).toBe("alpaca");
     expect(params.screenerCommand.deliver).toBe(false);
     expect(audits.map((a) => a.type)).toContain("market_data.screener.payment_started");
   });
@@ -694,7 +702,9 @@ describe("POST /market-data/screen under #2373 Slice A", () => {
     expect(res!.status).toBe(202);
     expect(payment.creates).toHaveLength(1);
     expect(payment.creates[0].params.email).toBe("");
-    expect(payment.creates[0].params.screenerCommand.provider).toBe("yahoo");
+    // Issue #4431 (S5/N3): no selection stored — the command
+    // carries the effective default (alpaca), not yahoo.
+    expect(payment.creates[0].params.screenerCommand.provider).toBe("alpaca");
   });
 
   // Issue #2373 (S1b, F9): the market-data route implies yahoo;

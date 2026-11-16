@@ -560,7 +560,8 @@ export async function handleReportsRoutes(
   // selections, stored on the existing agent_tenant_settings row
   // (migration 0027), tenant server-resolved via resolveIaaaTenant,
   // never from a client value. Absent row = the platform defaults
-  // (#3812: etrade data provider / alpaca broker).
+  // (#3812/#3990: alpaca data provider / alpaca broker —
+  // DEFAULT_TENANT_PROVIDERS, applied by the adapters).
   // This route does not touch the auto-refresh handler above.
   if (path.endsWith("/tenant/settings/providers")) {
     try {

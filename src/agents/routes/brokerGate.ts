@@ -19,8 +19,11 @@
  * failure fails CLOSED with a named 503 (issue #3460 slice 3):
  * the gate cannot verify the tenant's broker, so it serves
  * nothing rather than failing open to etrade. An unconfigured
- * tenant still passes through to the E*TRADE surface — the S7
- * menu makes selection explicit and retires that default.
+ * tenant is refused with 409 NO_BROKER_CONFIGURED (issue #4431,
+ * S5/N3) — the pass-through the S7 menu was to retire is retired
+ * here, for the gate, instead. The #3460 S0–S12 slice menu
+ * (unfiled) is the boundary: this gate states it, it does not
+ * duplicate that programme's planning.
  * Returns null for every non-gated path, and the orchestrator
  * continues its sequential matching.
  */
@@ -28,6 +31,7 @@ import type { Env } from "../../types";
 import {
   brokerUnavailableResponse,
   brokerStoreUnavailableResponse,
+  noBrokerConfiguredResponse,
 } from "../../services/tenantProviders";
 import { readTenantBrokerSelection } from "../../services/providerConnections";
 
@@ -50,11 +54,12 @@ export async function handleBrokerGateRoutes(
       return brokerStoreUnavailableResponse();
     }
     if (read.status === "unconfigured") {
-      // Issue #3460 slice 3 boundary: no selection stored yet, so the
-      // E*TRADE surface serves as before. The S7 menu retires this
-      // default by making selection explicit; the gate never invents
-      // a broker, it only passes the request through.
-      return null;
+      // Issue #4431 (S5/N3): no selection stored, so the gate
+      // refuses with 409 NO_BROKER_CONFIGURED instead of passing
+      // the request through to the E*TRADE surface. The #3460
+      // S0–S12 menu is the boundary for the rest of that
+      // programme; this refusal is this slice's scope.
+      return noBrokerConfiguredResponse();
     }
     if (read.brokerId !== "etrade") {
       return brokerUnavailableResponse(read.brokerId);

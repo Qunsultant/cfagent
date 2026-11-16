@@ -146,9 +146,9 @@ export interface TenantSettingsRecord {
   autoRefreshEnabled: boolean;
   /** Issue #2481: auto-refresh cadence in seconds. Absent row = 15. */
   autoRefreshIntervalS: number;
-  /** Per-tenant data-provider selection. Absent row = etrade. */
+  /** Per-tenant data-provider selection. Absent row = alpaca (DEFAULT_TENANT_PROVIDERS, #3990). */
   dataProviderId: string;
-  /** Per-tenant broker selection. Absent row = etrade. */
+  /** Per-tenant broker selection. Absent row = alpaca (DEFAULT_TENANT_PROVIDERS, #3812/#3937). */
   brokerId: string;
 }
 

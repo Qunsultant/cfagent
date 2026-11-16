@@ -85,6 +85,18 @@ export interface PaidStockScreenSeamArgs {
   userLogin: string;
   checkoutEmail: string;
   spec: StockScreenRunSpec;
+  /**
+   * Issue #4431 (S5/N3): the ROUTE's implied provider — "etrade"
+   * for /etrade/screen, "yahoo" for /market-data/screen. It is
+   * NOT the run's provider: since #4431 the spec carries the
+   * tenant-resolved provider, so the seam can no longer derive
+   * the route's provider from spec.provider (that derivation
+   * made the F9 route-vs-selection check vacuous — the spec
+   * always equals the stored selection). The route passes its
+   * own provider explicitly; the check below compares it
+   * against the stored selection exactly as F9 did.
+   */
+  routeProvider: "etrade" | "yahoo";
   /** E*TRADE passes its requested env; market-data passes none (broker parity). */
   environment?: "TEST" | "PROD";
   /** E*TRADE passes its settings reader; market-data passes none (broker parity). */
@@ -172,9 +184,15 @@ export async function submitPaidStockScreenOrNull(
     // gate: the route's implied provider must match the tenant's
     // stored data-provider selection, or the run is refused with
     // a coded 409 and no fallback provider is used. An
-    // unconfigured tenant (no selection stored) passes: the
-    // implied provider is the run's provider.
-    const impliedProvider = args.spec.provider ?? "etrade";
+    // unconfigured tenant (no selection stored) passes the
+    // check; the run's provider is then the spec's
+    // tenant-resolved (effective) provider, not the route's —
+    // see the command construction below (#4431).
+    // Issue #4431 (S5/N3): the route's provider arrives explicitly
+    // (args.routeProvider) — the spec now carries the
+    // tenant-resolved provider, so deriving the route's provider
+    // from spec.provider would make this check vacuous.
+    const impliedProvider = args.routeProvider;
     const selectedProvider = await resolveTenantDataProviderSelection(args.env);
     if (selectedProvider !== null && selectedProvider !== impliedProvider) {
       return providerMismatchResponse(impliedProvider, selectedProvider);
@@ -224,6 +242,15 @@ export async function submitPaidStockScreenOrNull(
     // already proved it equals any stored selection), and the
     // stored broker rides as provenance only when one is stored
     // — never a defaulted broker.
+    // Issue #4431 (S5/N3): the command carries the spec's
+    // tenant-resolved provider — for a configured tenant it
+    // equals the route provider (the check above proved it); for
+    // an unconfigured tenant it is the effective default
+    // (alpaca), NOT the route provider: F9's "unconfigured →
+    // the implied provider is the run's provider" is superseded
+    // by the tenant-resolved spec (item 3) + the platform
+    // default, so an unconfigured run screens the effective
+    // provider instead of silently screening the route's.
     let portfolioContext: boolean | undefined;
     if (args.readSettingRaw) {
       const { isPortfolioContextEnabled } =
@@ -234,7 +261,7 @@ export async function submitPaidStockScreenOrNull(
     const paidCommand = buildStockScreenWorkflowCommand(args.spec, {
       userLogin: args.userLogin,
       tenantId,
-      provider: impliedProvider,
+      provider: args.spec.provider ?? impliedProvider,
       ...(storedBroker !== null ? { brokerId: storedBroker } : {}),
       ...(args.environment !== undefined ? { environment: args.environment } : {}),
       ...(portfolioContext !== undefined ? { portfolioContext } : {}),

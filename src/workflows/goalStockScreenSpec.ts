@@ -29,16 +29,17 @@
  *     spec with async requested routes like any spec,
  *     carrying goal provenance. The planner mapping below is the
  *     canonical coordinates of the leg (sector precedence,
- *     universe ALL, planner-default provider as the
- *     would-apply default — NOT the leg's actual provider,
- *     which stays in the goal result's provider /
- *     providerFallback fields).
+ *     universe ALL, caller-supplied provider — issue #4431
+ *     removed the planner default, so no provider is implied
+ *     here; NOT the leg's actual provider, which stays in the
+ *     goal result's provider / providerFallback fields).
  * No order placement, no options-leg change, no screening
  * semantics change: the filter is copied, never recomputed.
  */
 
 import type { GoalScreenPlan } from "../services/goalDrivenScreen";
 import type { StockScreenRunSpec } from "./stockScreenRunSpec";
+import type { StockScreenProvider } from "../trading";
 import {
   planStockScreenRun,
   type StockScreenPlan,
@@ -81,14 +82,21 @@ export function isGoalStockSpec(spec: StockScreenRunSpec): boolean {
 /**
  * Planner coordinates for a goal stock-leg spec: sector
  * precedence (filter sector, else ALL), universe ALL, trigger
- * as given. The returned plan's provider is the planner
- * default (etrade) — the would-apply default, not the leg's
- * actual provider (goal-owned; see module header).
+ * as given. The plan's provider is the caller's provider —
+ * the engine command's provider (plannerPort passes
+ * `input.provider`) or the spec's own when one is stamped —
+ * never a default: issue #4431 (S5/N3) removed the planner
+ * default, so a goal leg with no provider anywhere refuses
+ * with FAILURE_NO_SCREENING_PROVIDER instead of screening
+ * another provider's data. The plan's provider is still not
+ * the leg's actual provider (goal-owned; see module header)
+ * unless the caller passes the goal's own provider.
  */
 export function planGoalStockLeg(
   spec: StockScreenRunSpec,
   trigger: "manual" | "scheduled",
   timestamp: string,
+  provider?: StockScreenProvider,
 ): StockScreenPlan {
   if (spec.source !== "goal") {
     throw new Error("planGoalStockLeg requires a source \"goal\" spec.");
@@ -98,6 +106,11 @@ export function planGoalStockLeg(
       trigger,
       filters: spec.filters as { sector?: string },
       universe: spec.universe as "ALL",
+      ...(provider !== undefined
+        ? { provider }
+        : spec.provider !== undefined
+          ? { provider: spec.provider }
+          : {}),
     },
     timestamp,
   );

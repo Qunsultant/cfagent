@@ -13,7 +13,7 @@ function query() {
 }
 
 describe("buildStockScreenRunSpec", () => {
-  it("etrade spec carries deliver=true, no provider, and the parsed delivery envelope", () => {
+  it("etrade spec carries deliver=true, no provider when the route passes none, and the parsed delivery envelope", () => {
     const result = buildStockScreenRunSpec({
       env: {},
       method: "POST",
@@ -38,7 +38,7 @@ describe("buildStockScreenRunSpec", () => {
     });
   });
 
-  it("market-data spec carries deliver=false, provider yahoo, and an empty delivery (envelope not forwarded)", () => {
+  it("market-data spec carries deliver=false, the tenant-resolved provider, and an empty delivery (envelope not forwarded)", () => {
     const result = buildStockScreenRunSpec({
       env: {},
       method: "POST",
@@ -46,6 +46,9 @@ describe("buildStockScreenRunSpec", () => {
       query: query(),
       asyncRequested: false,
       source: "market-data",
+      // Issue #4431 (S5/N3): the route resolves the tenant provider and passes it in —
+      // the builder never hardcodes a provider per route.
+      provider: "yahoo",
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -53,6 +56,20 @@ describe("buildStockScreenRunSpec", () => {
     expect(result.spec.provider).toBe("yahoo");
     expect(result.spec.source).toBe("market-data");
     expect(result.spec.delivery).toEqual({});
+  });
+
+  it("a market-data spec with no provider passed in carries none — never a per-route hardcode (#4431)", () => {
+    const result = buildStockScreenRunSpec({
+      env: {},
+      method: "POST",
+      rawFilters: { sector: "Technology" },
+      query: query(),
+      asyncRequested: false,
+      source: "market-data",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.provider).toBeUndefined();
   });
 
   it("a pre-admitted mode is passed through, not re-admitted (E*TRADE listings ordering)", () => {

@@ -28,6 +28,9 @@ function stockSpec(): StockScreenRunSpec {
     source: "etrade",
     trigger: "manual",
     deliver: true,
+    // Issue #4431 (S5/N3): the tenant-resolved provider the routes stamp — the planner
+    // requires it; a spec with no provider refuses instead of screening a default.
+    provider: "etrade",
     universe: "TECH",
     filters: { sector: "TECH" },
     asyncRequested: false,
@@ -70,14 +73,39 @@ describe("planner port #2991", () => {
       runIdentity: { jobId: "job-1" },
       trigger: "manual",
       provenanceTrigger: "goal",
+      // Issue #4431 (S5/N3): the engine command's provider threads into the goal leg —
+      // the planner requires it and a goal leg with none refuses.
+      provider: "yahoo",
       classInput: spec,
       timestamp: TIMESTAMP,
     });
     expect(plan.classPlan.sector).toBe("TECH");
     expect(plan.classPlan.universe).toBe("ALL");
+    expect(plan.provider).toBe("yahoo");
     expect(plan.idempotencyKey).toBe(
       `screener:manual:ALL:TECH:${TIMESTAMP}`,
     );
+  });
+
+  it("a goal stock leg with no provider anywhere refuses (#4431)", () => {
+    const port = createPlannerPort([stockPlanBlock(), optionsPlanBlock()]);
+    const spec = goalStockSpecFromPlan({
+      goalKind: "income",
+      outlook: "range_bound",
+      structures: ["iron_condor", "butterfly"],
+      stockFilter: { momentum: "any", sector: "TECH", minPrice: 10 },
+      optionsFilter: { minDte: 7, maxDte: 45 },
+    });
+    expect(() =>
+      port.plan({
+        assetClass: "stock",
+        runIdentity: { jobId: "job-1" },
+        trigger: "manual",
+        provenanceTrigger: "goal",
+        classInput: spec,
+        timestamp: TIMESTAMP,
+      }),
+    ).toThrow(expect.objectContaining({ code: "FAILURE_NO_SCREENING_PROVIDER" }));
   });
 
   it("plans an options route request through the options plan Block", () => {

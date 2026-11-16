@@ -17,30 +17,36 @@ const TS = "2026-11-02T13:00:00.000Z";
 describe("planStockScreenRun", () => {
   it("prefers req.sector, then filters.sector, then ALL", () => {
     expect(
-      planStockScreenRun({ trigger: "manual", sector: "Technology", filters: { sector: "Energy" } }, TS).sector,
+      planStockScreenRun({ trigger: "manual", provider: "etrade", sector: "Technology", filters: { sector: "Energy" } }, TS).sector,
     ).toBe("Technology");
     expect(
-      planStockScreenRun({ trigger: "manual", filters: { sector: "Energy" } }, TS).sector,
+      planStockScreenRun({ trigger: "manual", provider: "etrade", filters: { sector: "Energy" } }, TS).sector,
     ).toBe("Energy");
-    expect(planStockScreenRun({ trigger: "manual" }, TS).sector).toBe("ALL");
+    expect(planStockScreenRun({ trigger: "manual", provider: "etrade" }, TS).sector).toBe("ALL");
   });
 
-  it("defaults universe to TECH and provider to etrade", () => {
-    const plan = planStockScreenRun({ trigger: "manual" }, TS);
+  it("defaults universe to TECH", () => {
+    const plan = planStockScreenRun({ trigger: "manual", provider: "yahoo" }, TS);
     expect(plan.universe).toBe("TECH");
-    expect(plan.provider).toBe("etrade");
+    expect(plan.provider).toBe("yahoo");
+  });
+
+  it("refuses a missing provider with FAILURE_NO_SCREENING_PROVIDER (#4431)", () => {
+    expect(() => planStockScreenRun({ trigger: "manual" }, TS)).toThrow(
+      expect.objectContaining({ code: "FAILURE_NO_SCREENING_PROVIDER" }),
+    );
   });
 
   it("keys manual runs on the full timestamp and scheduled runs on the minute", () => {
     const manual = planStockScreenRun(
-      { trigger: "manual", universe: "NASDAQ100", sector: "ALL" },
+      { trigger: "manual", provider: "etrade", universe: "NASDAQ100", sector: "ALL" },
       TS,
     );
     expect(manual.idempotencyKey).toBe(
       "screener:manual:NASDAQ100:ALL:2026-11-02T13:00:00.000Z",
     );
     const scheduled = planStockScreenRun(
-      { trigger: "scheduled", universe: "NASDAQ100", sector: "ALL" },
+      { trigger: "scheduled", provider: "etrade", universe: "NASDAQ100", sector: "ALL" },
       TS,
     );
     expect(scheduled.idempotencyKey).toBe(
@@ -53,6 +59,7 @@ describe("planStockScreenRun", () => {
       {
         trigger: "scheduled",
         universe: "NASDAQ100",
+        provider: "yahoo",
         providerFallback: { from: "etrade", reason: "auth dead" },
       },
       TS,
@@ -75,8 +82,14 @@ describe("planFromSpec", () => {
     } as StockScreenRunSpec;
   }
 
-  it("maps the E*TRADE spec to the etrade default provider", () => {
-    const plan = planFromSpec(spec(), "manual", TS);
+  it("refuses a spec with no provider with FAILURE_NO_SCREENING_PROVIDER (#4431)", () => {
+    expect(() => planFromSpec(spec(), "manual", TS)).toThrow(
+      expect.objectContaining({ code: "FAILURE_NO_SCREENING_PROVIDER" }),
+    );
+  });
+
+  it("maps the spec's tenant-resolved provider through (#4431)", () => {
+    const plan = planFromSpec(spec({ provider: "etrade" }), "manual", TS);
     expect(plan.provider).toBe("etrade");
     expect(plan.universe).toBe("NASDAQ100");
     expect(plan.sector).toBe("ALL");

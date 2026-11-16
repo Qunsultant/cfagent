@@ -330,6 +330,10 @@ describe("stock-signals paid shape on current main (#2373 Slice B)", () => {
 // Handler-level: the real stock-signals route, flag ON and flag OFF
 // ---------------------------------------------------------------------------
 for (const flagOn of [true, false]) {
+  // Issue #4431 (S5/N3): the served-path tests store yahoo — an
+  // unconfigured tenant is refused outright (no engine default to
+  // fall back to), so the metering/identity assertions below run
+  // against a stored serving provider.
   describe(`real stock-signals handler, monetization flag ${flagOn ? "ON" : "OFF"} (#2373 Slice B)`, () => {
     it("unpaid async request -> 402, nothing served, no meter row", async () => {
       const h = makeHarness(flagOn);
@@ -347,7 +351,7 @@ for (const flagOn of [true, false]) {
     });
 
     it("unpaid sync request -> 402, nothing served", async () => {
-      const h = makeHarness(flagOn);
+      const h = makeHarness(flagOn, { tenantDataProviderId: "yahoo" });
       const res = await callStockSignals(
         h,
         stockSignalsRequest({ method: "GET", query: "?symbols=NVDA" }),
@@ -359,7 +363,7 @@ for (const flagOn of [true, false]) {
     });
 
     it("verified x402 session traffic, sync branch -> served + metered under the login", async () => {
-      const h = makeHarness(flagOn);
+      const h = makeHarness(flagOn, { tenantDataProviderId: "yahoo" });
       const req = stockSignalsRequest({
         method: "GET",
         query: "?symbols=NVDA",
@@ -384,7 +388,7 @@ for (const flagOn of [true, false]) {
 
     it("verified x402 session traffic, async branch -> workflow handle served, sync engine not run", async () => {
       workflowFake.handle = { jobId: "job_symbols_test", workflowId: "wf_test", statusUrl: "/api/jobs/job_symbols_test" };
-      const h = makeHarness(flagOn);
+      const h = makeHarness(flagOn, { tenantDataProviderId: "yahoo" });
       const req = stockSignalsRequest({
         method: "POST",
         body: { symbols: ["NVDA"], async: true },
@@ -403,7 +407,7 @@ for (const flagOn of [true, false]) {
     });
 
     it("verified x402 anonymous traffic (no login), sync branch -> served via the payer scope, not the gateway identity", async () => {
-      const h = makeHarness(flagOn);
+      const h = makeHarness(flagOn, { tenantDataProviderId: "yahoo" });
       const req = stockSignalsRequest({
         method: "GET",
         query: "?symbols=NVDA",
@@ -422,7 +426,7 @@ for (const flagOn of [true, false]) {
 
     it("verified x402 anonymous traffic (no login), async branch -> workflow handle served via the payer scope", async () => {
       workflowFake.handle = { jobId: "job_symbols_test", workflowId: "wf_test", statusUrl: "/api/jobs/job_symbols_test" };
-      const h = makeHarness(flagOn);
+      const h = makeHarness(flagOn, { tenantDataProviderId: "yahoo" });
       const req = stockSignalsRequest({
         method: "POST",
         body: { symbols: ["NVDA"], async: true },
@@ -439,7 +443,7 @@ for (const flagOn of [true, false]) {
 
     it("verified MPP anonymous traffic (no login), sync branch -> served via the verified MPP payer scope", async () => {
       mppFake.source = `did:pkh:eip155:1:${MPP_PAYER}`;
-      const h = makeHarness(flagOn);
+      const h = makeHarness(flagOn, { tenantDataProviderId: "yahoo" });
       const req = stockSignalsRequest({
         method: "GET",
         query: "?symbols=NVDA",
@@ -621,7 +625,7 @@ describe("stock-signals fulfilment provider resolution (#2373 S1b, F9)", () => {
     expect("provider" in ((workflowFake.lastCommand ?? {}) as Record<string, unknown>)).toBe(false);
   });
 
-  it("no provider stored + sync → served with the provider OMITTED (engine default, not hardcoded yahoo)", async () => {
+  it("no provider stored + sync → refused outright, no screen run (#4431)", async () => {
     const h = makeHarness(true);
     const req = stockSignalsRequest({
       method: "GET",
@@ -630,8 +634,12 @@ describe("stock-signals fulfilment provider resolution (#2373 S1b, F9)", () => {
     });
     const res = await callStockSignals(h, req, "trader_session_1");
     expect(res!.status).toBe(200);
-    expect(((await res!.json()) as any).success).toBe(true);
-    expect(syncedSpec(h)?.provider).toBeUndefined();
+    const body = (await res!.json()) as any;
+    expect(body.success).toBe(false);
+    expect(body.error).toBe(
+      "No data provider is configured for this tenant. Choose a data provider in Settings to run premium stock signals.",
+    );
+    expect(h.runStockScreenViaEngine).not.toHaveBeenCalled();
   });
 
   it("stored provider public + sync → plain refusal, no screen run, no fallback", async () => {

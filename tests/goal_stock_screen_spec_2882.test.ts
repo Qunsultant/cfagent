@@ -63,11 +63,19 @@ describe("goal stock leg translation #2882", () => {
 
   it("planner mapping: sector precedence, universe ALL, manual idempotency formula", () => {
     const spec = goalStockSpecFromPlan(PLAN);
-    const plan = planGoalStockLeg(spec, "manual", "2026-11-02T10:00:00.000Z");
+    const plan = planGoalStockLeg(spec, "manual", "2026-11-02T10:00:00.000Z", "etrade");
     expect(plan.sector).toBe("TECH");
     expect(plan.universe).toBe("ALL");
+    expect(plan.provider).toBe("etrade");
     expect(plan.idempotencyKey).toBe("screener:manual:ALL:TECH:2026-11-02T10:00:00.000Z");
     expect(plan.scheduledClaimKey).toBe("stock:ALL");
+  });
+
+  it("planner mapping refuses a goal leg with no provider anywhere (#4431)", () => {
+    const spec = goalStockSpecFromPlan(PLAN);
+    expect(() => planGoalStockLeg(spec, "manual", "2026-11-02T10:00:00.000Z")).toThrow(
+      expect.objectContaining({ code: "FAILURE_NO_SCREENING_PROVIDER" }),
+    );
   });
 
   it("planner mapping refuses non-goal specs loudly", () => {

@@ -6,9 +6,10 @@ import { handleBrokerGateRoutes } from "../src/agents/routes/brokerGate";
  * Issue #3460 slice 3 — gates fail-closed.
  *
  * 1. The broker gate: a store failure now returns a named 503 instead
- *    of failing open to E*TRADE. Unconfigured still passes through
- *    (the /etrade/ surface serves until the S7 menu makes selection
- *    explicit); a non-E*TRADE broker still gets the 409.
+ *    of failing open to E*TRADE. Unconfigured is refused with 409
+ *    NO_BROKER_CONFIGURED (S5/N3 #4431 — the pass-through retired
+ *    here; the #3460 S-slice menu S0–S12 is the boundary for the
+ *    wider programme); a non-E*TRADE broker still gets the 409.
  * 2. The manual screen entry (`resolveEngineClient`) reads the broker
  *    through the same presence-aware seam — its refusal test lives in
  *    tests/fail_closed_fallbacks_3460.test.ts, updated in this slice.
@@ -89,13 +90,16 @@ describe("handleBrokerGateRoutes — store failure is a named 503", () => {
     expect(body.code).toBe("FAILURE_BROKER_STORE_UNAVAILABLE");
   });
 
-  it("passes through when the tenant has no stored selection (S7 retires this default)", async () => {
+  it("refuses an unconfigured tenant with 409 NO_BROKER_CONFIGURED (#4431)", async () => {
     adapter.current = { getTenantBrokerSelection: async () => null };
     const [request, url, path] = gateRequest("/etrade/quotes");
     const response = await handleBrokerGateRoutes(request, url, path, "s1", {
       env: {} as never,
     });
-    expect(response).toBeNull();
+    expect(response).not.toBeNull();
+    expect(response!.status).toBe(409);
+    const body = await response!.json();
+    expect(body.code).toBe("NO_BROKER_CONFIGURED");
   });
 
   it("still returns 409 for a configured non-E*TRADE broker", async () => {
