@@ -5,22 +5,25 @@
  * message leads, the raw code is secondary, and category/retryability
  * are visible — never a raw-code-only rendering for a cataloged code.
  * The raw payload stays visible below, unchanged. Built only from
- * ui primitives (Card, Badge); the card keeps the explorer's existing
- * event-* class names so its styling is untouched.
+ * ui primitives (Card, Badge, Flex, Stack) with token utilities —
+ * the explorer's old event-* classes are retired (issue #4825), so
+ * the per-agent tag colors are gone: the agent renders as a neutral
+ * Badge, the name as text.
  */
 import React from "react";
-import { Card, Badge } from "../components/ui";
+import { Badge, Card, Flex, Stack } from "../components/ui";
 import type { AuditLogEvent } from "../chat/types";
 
 export function AuditEventCard({ event: e }: { event: AuditLogEvent }) {
   const resolved = e.resolvedAspects ?? null;
   return (
-    <Card padding="none" className="event-item">
-      <div className="event-header">
-        <span className={`event-agent-tag ${e.agent}`}>{e.agent.toUpperCase()}</span>
-        <span className="event-type">{e.type}</span>
-        <span className="event-time">{new Date(e.created_at).toLocaleTimeString()}</span>
-      </div>
+    <Card padding="sm">
+      <Stack gap="2">
+        <Flex justify="between" align="center" gap="2">
+          <Badge size="xs" tone="neutral">{e.agent.toUpperCase()}</Badge>
+          <span className="ui-meta-sm">{e.type}</span>
+          <span className="ui-meta-sm">{new Date(e.created_at).toLocaleTimeString()}</span>
+        </Flex>
       {resolved ? (
         <div>
           <div>
@@ -37,7 +40,8 @@ export function AuditEventCard({ event: e }: { event: AuditLogEvent }) {
           </div>
         </div>
       ) : null}
-      <pre className="event-payload">{JSON.stringify(e.payload, null, 2)}</pre>
-    </Card>
+      <pre className="ui-pre">{JSON.stringify(e.payload, null, 2)}</pre>
+    </Stack>
+  </Card>
   );
 }

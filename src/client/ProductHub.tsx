@@ -35,10 +35,12 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import {
   PageSection,
   PageTemplate,
+  KpiRibbon,
   Tabs,
   TabPanel,
   type TabOption,
 } from "./components/ui";
+import { PageChromeContext } from "./components/ui/PageShell";
 import {
   ProductCatalogPanel,
   MarketingDraftPreviewSection,
@@ -109,6 +111,16 @@ export function ProductHub() {
         }
       },
     });
+
+  // Issue #4825 — the hub's kpiRibbon slot: the catalog size, reported
+  // up by the Products tab's panel when its catalog loads (no second
+  // read — the panel's own fetch reports the counts). The ribbon stays
+  // empty until the first load reports; KpiRibbon renders nothing
+  // with no items.
+  const [catalogStats, setCatalogStats] = useState<{
+    total: number;
+    listed: number;
+  } | null>(null);
 
   // Selling tab state: the products prop for the SellingSection (lazy
   // catalog read, once) and the open signal (bumped on every visit;
@@ -184,6 +196,16 @@ export function ProductHub() {
     <PageTemplate
       title="Product Hub"
       scopeNote="The product catalog, selling options, marketing draft previews, product and version configuration, and free-run allowances — one hub."
+      kpiRibbon={
+        catalogStats ? (
+          <KpiRibbon
+            items={[
+              { label: "Products", value: String(catalogStats.total) },
+              { label: "Listed", value: String(catalogStats.listed) },
+            ]}
+          />
+        ) : undefined
+      }
     >
       <PageSection>
         <Tabs<ProductHubTab>
@@ -195,8 +217,14 @@ export function ProductHub() {
         />
       </PageSection>
 
-      {/* Tabbed panels — mount on first visit, stay preserved. */}
-
+      {/* Tabbed panels — mount on first visit, stay preserved.
+          The panels render under "tab" chrome (the #4167 host pattern):
+          ProductCatalogPanel renders its own PageShell, and without the
+          host context the page would carry a second h1 ("Products") next
+          to the hub's own ("Product Hub"). Under "tab" the panel's shell
+          collapses to body-only; the panel itself is never edited for
+          the host it lands in. */}
+      <PageChromeContext.Provider value="tab">
       {visitedTabs.has("products") && (
         <TabPanel
           idBase="product-hub"
@@ -208,6 +236,7 @@ export function ProductHub() {
             <ProductCatalogPanel
               onSubscribe={handleSubscribe}
               onPreviewDraft={handlePreviewDraft}
+              onCatalogStats={setCatalogStats}
             />
           </ErrorBoundary>
         </TabPanel>
@@ -272,6 +301,7 @@ export function ProductHub() {
           </ErrorBoundary>
         </TabPanel>
       )}
+      </PageChromeContext.Provider>
     </PageTemplate>
   );
 }

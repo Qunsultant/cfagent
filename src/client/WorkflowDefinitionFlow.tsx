@@ -17,7 +17,7 @@
  * armed. ui/ primitives only, tokens only.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Card, Modal, Notice, Select, Stack, TextInput } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Modal, Notice, Select, Stack, TextInput } from "./components/ui";
 import { csrfHeaders } from "./apiFetch";
 import { JOB_DEFINITION_SCHEDULE_CALLBACK, jobIdForSpec } from "../config/jobDefinitionScheduling";
 
@@ -171,8 +171,10 @@ export function WorkflowDefinitionFlow() {
   return (
     <Card padding="md">
       <Stack gap="3">
-        <strong>Workflow definitions</strong>
-        <span>Define a job from its spec and schedule it</span>
+        <CardHeader
+          title="Workflow definitions"
+          subtitle="Define a job from its spec and schedule it"
+        />
         <Notice tone="warning" density="compact" title="Stage cadences">
           A stage cadence is a separate schedule for that stage. Until the host re-declares its
           scheduled tasks (the dynamic-declaration follow-up), a stage cadence on a newly defined job
@@ -192,8 +194,10 @@ export function WorkflowDefinitionFlow() {
         {(definitions ?? []).map((spec) => (
           <Card key={spec.id} padding="sm">
             <Stack gap="2">
-              <strong>{spec.name}</strong>
-              <span>{`${spec.id} · v${spec.version}`}</span>
+              <CardHeader
+                title={spec.name}
+                subtitle={`${spec.id} · v${spec.version}`}
+              />
               <div>
                 {spec.stages.map((stage) => (
                   <Badge key={`${spec.id}-${stage.kind}`} tone="neutral" size="sm">
