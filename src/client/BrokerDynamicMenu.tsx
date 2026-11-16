@@ -5,7 +5,7 @@ import {
   NAV_TAB_PRESETS,
 } from "./components/NavigationMenu";
 import { isTabFeatureEnabled } from "./featureFlags";
-import { PillGroup, Button, TextInput, Select } from "./components/ui";
+import { PillGroup, Button, TextInput, Select, Notice } from "./components/ui";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { apiFetch } from "./apiFetch";
 import { syncTarget, connectStatusEndpoint } from "./brokerEndpoints";
@@ -26,6 +26,10 @@ import {
   BROKER_ENV_CHANGED_EVENT,
   type BrokerEnvironment,
 } from "./brokerEnvironment";
+// Issue #4649 (matrix gap 1): the one live-mode rule set — which brokers can
+// simulate, when a switch needs a confirmation, and what the dialog/Notice say.
+import { needsLiveModeForBroker, liveOnlyNoticeCopy } from "./trading/liveMode";
+import { LiveModeSwitchDialog } from "./trading/LiveModeSwitchDialog";
 import {
   AdBannerConfig,
   getStoredAdBannerConfig,
@@ -175,6 +179,10 @@ export function BrokerDynamicMenu({
   const [localMsg, setLocalMsg] = useState("");
   const [localDiagLoading, setLocalDiagLoading] = useState(false);
   const [showKeyPairSignIn, setShowKeyPairSignIn] = useState(false);
+  // Issue #4649: the broker whose selection is waiting on the live-mode
+  // confirmation. Non-null === the dialog is open. The selection is NOT saved
+  // until the dialog is confirmed, so Public can never be stored in paper mode.
+  const [pendingLiveBroker, setPendingLiveBroker] = useState<string | null>(null);
   // Issue #3990: the personal-token card toggle, mirroring the
   // key-pair toggle above — one open card per credential kind.
   const [showTokenCard, setShowTokenCard] = useState(false);
@@ -580,6 +588,29 @@ export function BrokerDynamicMenu({
     }
   };
 
+  /**
+   * Issue #4649: selecting a broker that has no paper account while the stored
+   * mode is paper asks first. Confirming stores the broker AND flips the mode
+   * to PROD (the decided outcome: auto-switch, with the dialog as the
+   * confirmation); cancelling changes nothing, so the impossible
+   * "public + paper" pair is never created by this surface.
+   */
+  const handleSelectBroker = (nextBrokerId: string) => {
+    if (needsLiveModeForBroker(nextBrokerId, effectiveEnv)) {
+      setPendingLiveBroker(nextBrokerId);
+      return;
+    }
+    handleSetTenantProviders({ ...tenantProviders, brokerId: nextBrokerId });
+  };
+
+  const confirmLiveModeSelection = () => {
+    const nextBrokerId = pendingLiveBroker;
+    setPendingLiveBroker(null);
+    if (!nextBrokerId) return;
+    handleSetTenantProviders({ ...tenantProviders, brokerId: nextBrokerId });
+    onSwitchEnv("PROD");
+  };
+
   const onRunDiagnostics = () => {
     setIsPinned(false);
     setIsHovered(false);
@@ -763,7 +794,7 @@ export function BrokerDynamicMenu({
                 tooltip: `Select ${opt.label} as active broker`,
               }))}
               value={selectedBrokerId}
-              onChange={(v) => handleSetTenantProviders({ ...tenantProviders, brokerId: v })}
+              onChange={handleSelectBroker}
             />
           </div>
 
@@ -801,6 +832,32 @@ export function BrokerDynamicMenu({
               <span>Environment &amp; Connection</span>
               <small>{brokerPresentation(selectedBrokerId).modeWord[isLive ? "live" : "paper"]}</small>
             </div>
+            {/* Issue #4649 (matrix gap 1): the standing disclosure for the one
+                combination that cannot place — a broker with no paper account
+                while the stored mode is paper. Persistent (not a toast) and it
+                does not block preview; the button opens the same confirmation
+                the broker selection opens. */}
+            {needsLiveModeForBroker(selectedBrokerId, effectiveEnv) && (
+              <Notice
+                tone="warning"
+                variant="box"
+                density="compact"
+                icon="⚠️"
+                title={liveOnlyNoticeCopy({ brokerLabel: selectedBrokerLabel }).title}
+                className="broker-live-only-notice"
+              >
+                <p>{liveOnlyNoticeCopy({ brokerLabel: selectedBrokerLabel }).body}</p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="danger"
+                  onClick={() => setPendingLiveBroker(selectedBrokerId)}
+                  title={`Switch to live trading on ${selectedBrokerLabel}`}
+                >
+                  Switch to live trading
+                </Button>
+              </Notice>
+            )}
             <div className="etrade-controls-single-line broker-controls-single-line">
               <Button
                 type="button"
@@ -1314,6 +1371,16 @@ export function BrokerDynamicMenu({
           )}
         </div>
       )}
+
+      {/* Issue #4649: one dialog for arming live trading, on the ConfirmModal
+          primitive — never a native confirm(). */}
+      <LiveModeSwitchDialog
+        open={pendingLiveBroker !== null}
+        brokerLabel={brokerPresentation(pendingLiveBroker ?? selectedBrokerId).label}
+        broker={pendingLiveBroker ?? selectedBrokerId}
+        onConfirm={confirmLiveModeSelection}
+        onClose={() => setPendingLiveBroker(null)}
+      />
     </div>
   );
 }

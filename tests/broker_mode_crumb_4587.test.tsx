@@ -25,14 +25,28 @@ function src(p: string): string {
 }
 
 describe("broker + mode crumb label (#4587)", () => {
+  // Issue #4649: the helper takes the broker id as well, because the mode word
+  // is the broker's capability — Public.com has no paper account.
   it("paper mode reads broker / Paper", () => {
-    expect(brokerModeLabel("Alpaca", "paper")).toBe("Alpaca / Paper");
-    expect(brokerModeLabel("E*TRADE", "paper")).toBe("E*TRADE / Paper");
+    expect(brokerModeLabel({ broker: "alpaca", brokerLabel: "Alpaca", accountMode: "paper" })).toBe("Alpaca / Paper");
+    expect(brokerModeLabel({ broker: "etrade", brokerLabel: "E*TRADE", accountMode: "paper" })).toBe("E*TRADE / Paper");
   });
 
   it("live mode reads broker / Live Execution", () => {
-    expect(brokerModeLabel("Alpaca", "live")).toBe("Alpaca / Live Execution");
-    expect(brokerModeLabel("E*TRADE", "live")).toBe("E*TRADE / Live Execution");
+    expect(brokerModeLabel({ broker: "alpaca", brokerLabel: "Alpaca", accountMode: "live" })).toBe("Alpaca / Live Execution");
+    expect(brokerModeLabel({ broker: "etrade", brokerLabel: "E*TRADE", accountMode: "live" })).toBe("E*TRADE / Live Execution");
+  });
+
+  // Issue #4649 (matrix gap 1): Public.com has no paper mode, so the crumb must
+  // never read "Public.com / Paper" — the stored mode is auto-switched to live
+  // and the crumb says so in both states.
+  it("Public.com never reads Paper, in either stored mode", () => {
+    expect(brokerModeLabel({ broker: "public", brokerLabel: "Public.com", accountMode: "paper" })).toBe(
+      "Public.com / Live Execution",
+    );
+    expect(brokerModeLabel({ broker: "public", brokerLabel: "Public.com", accountMode: "live" })).toBe(
+      "Public.com / Live Execution",
+    );
   });
 
   it("Chat's crumb-subtitle span renders the helper, not mode alone", () => {
@@ -40,7 +54,12 @@ describe("broker + mode crumb label (#4587)", () => {
     const start = chat.indexOf('className="crumb-subtitle top-nav-control"');
     expect(start).toBeGreaterThanOrEqual(0);
     const block = chat.slice(start, chat.indexOf("</span>", start));
-    expect(block).toContain("brokerModeLabel(selectedBrokerLabel, accountMode)");
+    expect(block).toContain("brokerModeLabel({");
+    expect(block).toContain("brokerLabel: selectedBrokerLabel");
+    expect(block).toContain("accountMode");
+    // Issue #4649: the crumb passes the broker id, so the mode word can read
+    // the broker's paper-mode capability instead of assuming TEST = paper.
+    expect(block).toContain("broker: tenantProviders.brokerId");
     expect(block).not.toContain('"Paper"');
     expect(block).not.toContain('"Live Execution"');
   });

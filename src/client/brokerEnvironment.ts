@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "./apiFetch";
+import { brokerHasPaperMode, isBrokerId } from "../trading";
 
 export type BrokerEnvironment = "TEST" | "PROD";
 
@@ -39,9 +40,33 @@ export function isBrokerEnvironment(value: unknown): value is BrokerEnvironment 
  * Issue #4587 — the top-left crumb shows broker + mode, never mode
  * alone: "<broker> / Paper", "<broker> / Live Execution". The live
  * word stays "Live Execution", the wording the crumb already used.
+ *
+ * Issue #4649 (matrix gap 1): the mode word is the broker's capability,
+ * not the stored environment's name. A broker with no paper account
+ * (Public.com) never renders "Paper": in TEST it reads "Live Execution",
+ * because live is the only mode in which an order could ever place, and
+ * the dialog + Notice disclose that. Display-only was rejected — the
+ * selection auto-switches the stored mode to PROD, so the crumb and the
+ * stored mode agree.
  */
-export function brokerModeLabel(brokerLabel: string, accountMode: "paper" | "live"): string {
-  return `${brokerLabel} / ${accountMode === "paper" ? "Paper" : "Live Execution"}`;
+export function brokerModeLabel(params: {
+  /** The broker id, so the mode word can read its capability. */
+  broker: unknown;
+  /** The label the caller resolved for the broker (served identity or catalog). */
+  brokerLabel: string;
+  accountMode: "paper" | "live";
+}): string {
+  const rendersPaper = params.accountMode === "paper" && brokerCanSimulate(params.broker);
+  return `${params.brokerLabel} / ${rendersPaper ? "Paper" : "Live Execution"}`;
+}
+
+/**
+ * Issue #4649: true when the broker has a simulated (paper) account, so the
+ * word "Paper" is truthful for it. An unrecognised id answers true — an
+ * unknown broker must never be claimed to be live-only.
+ */
+export function brokerCanSimulate(broker: unknown): boolean {
+  return isBrokerId(broker) ? brokerHasPaperMode(broker) : true;
 }
 
 /** Remove the pre-#2482 keys. Never read as authority again. */

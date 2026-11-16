@@ -130,6 +130,15 @@ export interface BrokerDefinition {
   readonly label: string;
   readonly credentialKind: BrokerCredentialKind;
   readonly assetClasses: readonly BrokerAssetClass[];
+  /**
+   * Issue #4649 (matrix gap 1): does this broker have a SIMULATED (paper)
+   * account the platform can route TEST orders to? E*TRADE has a sandbox
+   * host, Alpaca has a paper host, Public has neither — its TEST mode is
+   * preview/read only. Declared per broker, total by type, because a surface
+   * must never infer the answer from a comment: the crumb wording, the
+   * mode-switch confirmation and the ticket warning all read this flag.
+   */
+  readonly paperMode: boolean;
   /** Which operations this broker supports. Total by type: every op is stated. */
   readonly supports: Readonly<Record<BrokerOperation, boolean>>;
   /** Environment → trading type. Total by type: every environment must resolve. */
@@ -210,6 +219,9 @@ export const BROKER_CATALOG = {
     label: "E*TRADE",
     credentialKind: "oauth1_per_login",
     assetClasses: ["equity", "options"],
+    // E*TRADE really does switch hosts: live api.etrade.com, otherwise the
+    // apisb.etrade.com sandbox. TEST places simulated orders.
+    paperMode: true,
     tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
     supports: {
       quote: true,
@@ -263,6 +275,9 @@ export const BROKER_CATALOG = {
     label: "Alpaca",
     credentialKind: "api_key_pair",
     assetClasses: ["equity", "options"],
+    // Alpaca really does switch hosts: ALPACA_PAPER_HOST vs
+    // ALPACA_LIVE_HOST. TEST places against the paper account.
+    paperMode: true,
     tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
     supports: {
       quote: true,
@@ -332,6 +347,11 @@ export const BROKER_CATALOG = {
     label: "Public.com",
     credentialKind: "personal_token",
     assetClasses: ["equity", "options"],
+    // Issue #4649: NO paper mode. Public has one live MCP endpoint; TEST is
+    // preview/read only and placement is refused at the seam. This flag is
+    // what the crumb, the mode-switch dialog and the ticket warning read, so
+    // "Public + Paper" can no longer be rendered by any surface.
+    paperMode: false,
     // Public has NO paper trading mode. TEST resolves to the paper
     // bucket for the platform's mode machinery (the type stays
     // total, and every mode call site keeps working), and placement
@@ -476,6 +496,15 @@ export function resolveBrokerSelection(input: {
 /** True when the selected broker can perform the operation (#3233). */
 export function brokerSupports(broker: BrokerId, operation: BrokerOperation): boolean {
   return BROKER_CATALOG[broker].supports[operation];
+}
+
+/**
+ * Issue #4649: does this broker have a simulated (paper) account? Total by
+ * type — the answer is declared per broker, never inferred. A surface that
+ * renders a mode reads this instead of assuming TEST means simulated.
+ */
+export function brokerHasPaperMode(broker: BrokerId): boolean {
+  return BROKER_CATALOG[broker].paperMode;
 }
 
 /** Issue #3839: the copilot capability for one broker. Total by type. */
