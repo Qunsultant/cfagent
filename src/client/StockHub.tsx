@@ -38,7 +38,9 @@ import {
   patternQualificationLines,
   type AppliedPattern,
 } from "./patternApplyHandoff";
-import { ScreenerPresetManager } from "./ScreenerPresetManager";
+import { ScreenerPresetManager, type ScreenerPreset } from "./ScreenerPresetManager";
+import { buildMarketScreenCaptureSubmission } from "./scheduledOptionsManager/payloadBuilders";
+import { etToUtcCron } from "./options/cronTime";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "./components/CapabilityNavBar";
 import { ScreenerResultsView, type ScreenerResultData } from "./ScreenerResultsView";
 import { UpgradeOffer } from "./UpgradeOffer";
@@ -311,11 +313,54 @@ export function StockHub({
   // the pattern's — an edited run is a hand-built run, and its
   // spec carries no patternRef.
   const [appliedPattern, setAppliedPattern] = useState<AppliedPattern | null>(null);
+  // Issue #4432 (S4c): the preset most recently applied to this form,
+  // when its criteria are still intact. Any manual criteria edit clears
+  // it (same rule as appliedPattern, #2909 G2), so a schedule armed
+  // from this form rides presetId only while its criteria are exactly
+  // the preset's — an edited form schedules its own criteria instead.
+  const [appliedPreset, setAppliedPreset] = useState<{ id: string; name: string } | null>(null);
   const appliedSearchRef = useRef<string | null>(null);
   const handleCriteriaChange = useCallback((next: StockCriteriaState) => {
     setStockCriteria(next);
     setAppliedPattern(null);
+    setAppliedPreset(null);
   }, []);
+  // Issue #4432 (S4c): a preset application sets the criteria WITHOUT
+  // clearing the arming — the identity callback arms it right after
+  // (ScreenerPresetManager invokes onApplyPresetIdentity after
+  // onApplyPreset). Panel edits go through handleCriteriaChange above,
+  // which clears.
+  const handlePresetApply = useCallback((next: StockCriteriaState) => {
+    setStockCriteria(next);
+    setAppliedPattern(null);
+  }, []);
+  const handlePresetIdentity = useCallback((preset: ScreenerPreset) => {
+    setAppliedPreset({ id: preset.id, name: preset.name });
+  }, []);
+  // Issue #4432 (S4c): the "Schedule this screen" capture — mirrors the
+  // StrategyDiscoveryPanel "schedule this view" capture (S8). The cadence
+  // is chosen here, at capture time; the screen is snapshotted when the
+  // confirm strip opens and its summary is shown before anything is
+  // created, so nobody schedules a screen they cannot see.
+  const [scheduleCaptureOpen, setScheduleCaptureOpen] = useState(false);
+  const [capturedScreen, setCapturedScreen] = useState<{
+    universe: string;
+    sector: string;
+    maxItems?: number;
+    filters: Record<string, unknown>;
+    presetId?: string;
+    presetName?: string;
+  } | null>(null);
+  const [captureScheduleType, setCaptureScheduleType] = useState<"interval" | "cron" | "delayed" | "scheduled">("interval");
+  const [captureIntervalSeconds, setCaptureIntervalSeconds] = useState(3600);
+  const [captureCron, setCaptureCron] = useState(() =>
+    etToUtcCron({ hour: 9, minute: 30, daysOfWeek: "1-5" }),
+  );
+  const [captureDelaySeconds, setCaptureDelaySeconds] = useState(1800);
+  const [captureDate, setCaptureDate] = useState("");
+  const [captureSubmitting, setCaptureSubmitting] = useState(false);
+  const [captureError, setCaptureError] = useState("");
+  const [captureSuccess, setCaptureSuccess] = useState("");
   // Issue #2909 (G2): consume the Apply handoff on every route
   // change (the hub is retained across tab switches, so a
   // mount-only effect would miss a later Apply). A search string
@@ -519,6 +564,42 @@ export function StockHub({
     setError("");
   };
 
+  // Issue #4432 (S4c): the one builder for this form's merged screen
+  // filter — the manual run and the schedule capture both build from it,
+  // so a scheduled screen carries exactly the criteria on screen. The
+  // capture strips only minScore + limit from its result (see
+  // openScheduleCapture): minScore is a manual-path ranking threshold,
+  // not a schedule criterion, and limit is represented by top-level
+  // maxItems.
+  const buildHubScreenFilters = () => ({
+    // Issue #2886 (S2): criteria first — the panel's carried-over
+    // non-panel keys (extra) must never override the form's own
+    // visible fields (universe, sector, price range, trend, limit,
+    // search), which are spread after this and win on a clash.
+    // The seven panel fields never collide with the form fields,
+    // so their behaviour is unchanged by the reorder.
+    ...stockCriteriaToFilter(stockCriteria),
+    universe,
+    ...(sector && sector !== "ALL" ? { sector } : {}),
+    ...(minScore.trim() !== "" ? { minScore: Number(minScore) } : {}),
+    ...(providerSupportsFilter(activeProvider, assetClass, "search") ? { search: symbolSearch.trim() || undefined } : {}),
+    ...(providerSupportsFilter(activeProvider, assetClass, "limit") ? { limit: numberFilter(stockLimit) } : {}),
+    ...(providerSupportsFilter(activeProvider, assetClass, "exchange") ? { exchange } : {}),
+    ...(providerSupportsFilter(activeProvider, assetClass, "price-range") ? {
+      minPrice: numberFilter(minPrice),
+      maxPrice: numberFilter(maxPrice),
+    } : {}),
+    ...(providerSupportsFilter(activeProvider, assetClass, "trend") ? {
+      gainersOnly: trend === "gainers" || undefined,
+      losersOnly: trend === "losers" || undefined,
+    } : {}),
+    // Issue #1496 (#940-B): enabled panel criteria only; a toggled-off
+    // criterion is absent, never sent as a null/zero the engine would
+    // misread. All seven fields genuinely filter on the manual path
+    // (evaluateUniverse), on both providers. (The criteria spread
+    // itself sits at the top of this literal — issue #2886 S2.)
+  });
+
   const runScreen = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     await executeScreen(false);
@@ -529,6 +610,105 @@ export function StockHub({
   // the seam will refuse again.
   const retryPaidScreen = async () => {
     await executeScreen(true);
+  };
+
+  // Issue #4432 (S4c): open the "Schedule this screen" capture. The
+  // screen is snapshotted here — universe, sector, maxItems, the merged
+  // filter minus minScore/limit, the armed preset when one is armed —
+  // and the confirm strip shows that snapshot, never a live re-read, so
+  // edits made while the strip is open do not change what gets
+  // scheduled. Undefined-valued keys are dropped from the snapshot, the
+  // same way JSON drops them on the wire, so the criteria count in the
+  // summary names only real criteria.
+  const openScheduleCapture = () => {
+    setCaptureError("");
+    setCaptureSuccess("");
+    const merged = buildHubScreenFilters();
+    const {
+      minScore: _minScore,
+      limit: _limit,
+      universe: _universe,
+      sector: _sector,
+      ...rest
+    } = merged as Record<string, unknown>;
+    const captureFilters: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(rest)) {
+      if (value !== undefined) captureFilters[key] = value;
+    }
+    setCapturedScreen({
+      universe,
+      sector,
+      maxItems: typeof merged.limit === "number" ? merged.limit : undefined,
+      filters: captureFilters,
+      ...(appliedPreset
+        ? { presetId: appliedPreset.id, presetName: appliedPreset.name }
+        : {}),
+    });
+    setScheduleCaptureOpen(true);
+  };
+
+  // Issue #4432 (S4c): create the schedule from the snapshot. The body
+  // is built by the one payload-builder module (the S7 rule), never
+  // hand-assembled here; broker/mode/provider are NOT sent — the create
+  // route strips caller identity and stamps the server-resolved tenant
+  // selections, and the live environment rides the x-environment header
+  // exactly as the manual run sends it.
+  const handleCreateScreenSchedule = async () => {
+    if (!capturedScreen) return;
+    setCaptureError("");
+    const built = buildMarketScreenCaptureSubmission({
+      universe: capturedScreen.universe,
+      sector: capturedScreen.sector,
+      maxItems: capturedScreen.maxItems,
+      filters: capturedScreen.filters,
+      ...(capturedScreen.presetId ? { presetId: capturedScreen.presetId } : {}),
+      pushToSlack: deliveryPushToSlack,
+      slackChannel: deliverySlackChannel,
+      emailTo: deliveryEmailTo,
+      webhookUrl: deliveryWebhookUrl,
+      scheduleType: captureScheduleType,
+      intervalSeconds: captureIntervalSeconds,
+      cronExpression: captureCron,
+      delaySeconds: captureDelaySeconds,
+      scheduledDate: captureDate,
+    });
+    if ("error" in built) {
+      setCaptureError(built.error);
+      return;
+    }
+    setCaptureSubmitting(true);
+    try {
+      const response = await fetch("/api/schedules/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-environment": activeEnv,
+          ...(userLogin ? { "x-user-login": userLogin } : {}),
+        },
+        body: JSON.stringify(built.requestBody),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+      };
+      if (response.ok && data.success) {
+        setScheduleCaptureOpen(false);
+        setCapturedScreen(null);
+        setCaptureSuccess(
+          `🗓 Scheduled this screen (${capturedScreen.universe} · ${
+            capturedScreen.sector === "ALL" ? "all sectors" : capturedScreen.sector
+          } · max ${capturedScreen.maxItems ?? "universe default"} · ${
+            capturedScreen.presetName ? `preset ${capturedScreen.presetName}` : "custom thresholds"
+          }) — manage it under Schedules.`,
+        );
+      } else {
+        setCaptureError(data.error || `Failed to create schedule (${response.status})`);
+      }
+    } catch (err: unknown) {
+      setCaptureError(err instanceof Error ? err.message : "Failed to create schedule");
+    } finally {
+      setCaptureSubmitting(false);
+    }
   };
 
   const executeScreen = async (forcePaid: boolean) => {
@@ -545,34 +725,10 @@ export function StockHub({
     setManualResult(null);
     setSummary("");
     try {
-      const filters = {
-        // Issue #2886 (S2): criteria first — the panel's carried-over
-        // non-panel keys (extra) must never override the form's own
-        // visible fields (universe, sector, price range, trend, limit,
-        // search), which are spread after this and win on a clash.
-        // The seven panel fields never collide with the form fields,
-        // so their behaviour is unchanged by the reorder.
-        ...stockCriteriaToFilter(stockCriteria),
-        universe,
-        ...(sector && sector !== "ALL" ? { sector } : {}),
-        ...(minScore.trim() !== "" ? { minScore: Number(minScore) } : {}),
-        ...(providerSupportsFilter(activeProvider, assetClass, "search") ? { search: symbolSearch.trim() || undefined } : {}),
-        ...(providerSupportsFilter(activeProvider, assetClass, "limit") ? { limit: numberFilter(stockLimit) } : {}),
-        ...(providerSupportsFilter(activeProvider, assetClass, "exchange") ? { exchange } : {}),
-        ...(providerSupportsFilter(activeProvider, assetClass, "price-range") ? {
-          minPrice: numberFilter(minPrice),
-          maxPrice: numberFilter(maxPrice),
-        } : {}),
-        ...(providerSupportsFilter(activeProvider, assetClass, "trend") ? {
-          gainersOnly: trend === "gainers" || undefined,
-          losersOnly: trend === "losers" || undefined,
-        } : {}),
-        // Issue #1496 (#940-B): enabled panel criteria only; a toggled-off
-        // criterion is absent, never sent as a null/zero the engine would
-        // misread. All seven fields genuinely filter on the manual path
-        // (evaluateUniverse), on both providers. (The criteria spread
-        // itself sits at the top of this literal — issue #2886 S2.)
-      };
+      // Issue #4432 (S4c): the merged filter comes from the one builder
+      // the schedule capture shares, so the run and the capture can
+      // never drift apart.
+      const filters = buildHubScreenFilters();
       setLastSentStockFilters(filters);
 
       // Issue #2545: the delivery envelope rides the same request —
@@ -1216,7 +1372,8 @@ export function StockHub({
                   assetClass="stocks"
                   userLogin={userLogin}
                   currentFilter={stockCriteriaToFilter(stockCriteria)}
-                  onApplyPreset={handleCriteriaChange}
+                  onApplyPreset={handlePresetApply}
+                  onApplyPresetIdentity={handlePresetIdentity}
                 />
                 <StockCriteriaPanel
                   criteria={stockCriteria}
@@ -1274,6 +1431,130 @@ export function StockHub({
               </Flex>
               </Stack>
             </form>
+
+            {/* Issue #4432 (S4c): "Schedule this screen" — the hub →
+                schedule bridge. Mirrors the StrategyDiscoveryPanel
+                "schedule this view" capture (S8): the cadence is chosen
+                in the confirm strip, the screen is snapshotted when the
+                strip opens, and the create body is built by the one
+                payload-builder module. A scheduled screen needs one
+                specific universe, so the button is disabled while the
+                form is on All — the builder refuses ALL loudly too. */}
+            <div style={{ marginTop: "var(--space-3)" }}>
+              {!scheduleCaptureOpen ? (
+                <Flex gap="2" align="center" wrap>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={openScheduleCapture}
+                    disabled={universe === "ALL"}
+                    title="Create a durable schedule that re-runs this screen's criteria"
+                  >
+                    🗓 Schedule this screen
+                  </Button>
+                  <span className="ui-meta">
+                    {universe === "ALL"
+                      ? "Pick a specific universe to schedule — scheduled screens cannot run over All."
+                      : "Re-runs the criteria above on a schedule; results land in Schedules."}
+                  </span>
+                </Flex>
+              ) : capturedScreen ? (
+                <div role="group" aria-label="Confirm scheduled screen">
+                  <p className="ui-meta">
+                    Schedule THIS screen: <strong>{capturedScreen.universe}</strong> ·{" "}
+                    {capturedScreen.sector === "ALL" ? "all sectors" : capturedScreen.sector} ·{" "}
+                    max {capturedScreen.maxItems ?? "universe default"} ·{" "}
+                    {capturedScreen.presetName ? (
+                      <>preset <strong>{capturedScreen.presetName}</strong></>
+                    ) : (
+                      "custom thresholds"
+                    )} · {Object.keys(capturedScreen.filters).length} criteria ·{" "}
+                    {activeProvider?.label ?? "provider"}
+                  </p>
+                  <Flex gap="2" wrap>
+                    <Select label="Cadence"
+                      value={captureScheduleType}
+                      onChange={(event) => setCaptureScheduleType(event.target.value as typeof captureScheduleType)}
+                      aria-label="Schedule cadence type"
+                    >
+                      <option value="interval">Interval</option>
+                      <option value="cron">Cron (UTC)</option>
+                      <option value="delayed">Delayed (once)</option>
+                      <option value="scheduled">One-shot date</option>
+                    </Select>
+                    {captureScheduleType === "interval" && (
+                      <TextInput label="Every (seconds)"
+                        type="number"
+                        min={60}
+                        step={60}
+                        value={captureIntervalSeconds}
+                        onChange={(event) => setCaptureIntervalSeconds(Number(event.target.value))}
+                        aria-label="Interval seconds"
+                      />
+                    )}
+                    {captureScheduleType === "cron" && (
+                      <TextInput label="Cron (UTC)"
+                        type="text"
+                        value={captureCron}
+                        onChange={(event) => setCaptureCron(event.target.value)}
+                        aria-label="Cron expression"
+                      />
+                    )}
+                    {captureScheduleType === "delayed" && (
+                      <TextInput label="Delay (seconds)"
+                        type="number"
+                        min={1}
+                        step={60}
+                        value={captureDelaySeconds}
+                        onChange={(event) => setCaptureDelaySeconds(Number(event.target.value))}
+                        aria-label="Delay seconds"
+                      />
+                    )}
+                    {captureScheduleType === "scheduled" && (
+                      <TextInput label="Run at"
+                        type="datetime-local"
+                        value={captureDate}
+                        onChange={(event) => setCaptureDate(event.target.value)}
+                        aria-label="One-shot date and time"
+                      />
+                    )}
+                  </Flex>
+                  {captureError && (
+                    <Notice tone="danger" density="compact" onDismiss={() => setCaptureError("")}>
+                      {captureError}
+                    </Notice>
+                  )}
+                  <Flex gap="2">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={() => void handleCreateScreenSchedule()}
+                      disabled={captureSubmitting}
+                      loading={captureSubmitting}
+                    >
+                      Create schedule
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setScheduleCaptureOpen(false);
+                        setCapturedScreen(null);
+                        setCaptureError("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </Flex>
+                </div>
+              ) : null}
+            </div>
+            {captureSuccess && (
+              <Notice tone="success" density="compact" onDismiss={() => setCaptureSuccess("")}>
+                {captureSuccess}
+                <Button variant="secondary" onClick={() => navigateToTab("schedules")}>View in Schedules</Button>
+              </Notice>
+            )}
 
             {paymentStarted && (
               <Notice tone="info" density="compact" onDismiss={() => setPaymentStarted(null)}>
@@ -1411,9 +1692,10 @@ export function StockHub({
             // — the same order PresetsPanel already uses
             // internally (apply, then navigate).
             onApplyPreset={(criteria) => {
-              handleCriteriaChange(criteria);
+              handlePresetApply(criteria);
               handleTabChange("new-screen");
             }}
+            onApplyPresetIdentity={handlePresetIdentity}
             onNavigateNewScreen={() => handleTabChange("new-screen")}
           />
         </div>

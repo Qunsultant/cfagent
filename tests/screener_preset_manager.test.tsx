@@ -134,7 +134,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function renderManager(onApplyPreset = vi.fn()) {
+async function renderManager(onApplyPreset = vi.fn(), onApplyPresetIdentity = vi.fn()) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -145,11 +145,12 @@ async function renderManager(onApplyPreset = vi.fn()) {
         userLogin="alice"
         currentFilter={{ minRsi: 25 }}
         onApplyPreset={onApplyPreset}
+        onApplyPresetIdentity={onApplyPresetIdentity}
       />
     );
   });
   await act(async () => {});
-  return { container, onApplyPreset };
+  return { container, onApplyPreset, onApplyPresetIdentity };
 }
 
 describe("Issue #1497 — preset helpers", () => {
@@ -249,7 +250,7 @@ describe("Issue #1497 — ScreenerPresetManager", () => {
   });
 
   it("Load of a vanished preset errors loudly and applies nothing", async () => {
-    const { container, onApplyPreset } = await renderManager();
+    const { container, onApplyPreset, onApplyPresetIdentity } = await renderManager();
     listPayload = [presetOptions];
     const load = Array.from(container.querySelectorAll("button")).find(
       (b) => b.textContent === "Load"
@@ -259,7 +260,28 @@ describe("Issue #1497 — ScreenerPresetManager", () => {
     });
     await act(async () => {});
     expect(onApplyPreset).not.toHaveBeenCalled();
+    expect(onApplyPresetIdentity).not.toHaveBeenCalled();
     expect(container.textContent).toMatch(/no longer exists/i);
+  });
+
+  it("Load reports the applied preset's identity after the criteria (issue #4432)", async () => {
+    const { container, onApplyPreset, onApplyPresetIdentity } = await renderManager();
+    const load = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent === "Load"
+    );
+    expect(load).toBeDefined();
+    await act(async () => {
+      load!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {});
+    expect(onApplyPreset).toHaveBeenCalledTimes(1);
+    expect(onApplyPresetIdentity).toHaveBeenCalledTimes(1);
+    expect(onApplyPresetIdentity.mock.calls[0][0]).toEqual(presetA);
+    // Identity runs after the criteria callback, so a caller that
+    // clears arming in its criteria handler still ends armed.
+    expect(onApplyPreset.mock.invocationCallOrder[0]).toBeLessThan(
+      onApplyPresetIdentity.mock.invocationCallOrder[0],
+    );
   });
 
   it("Save posts the current filter and refreshes the list", async () => {
@@ -314,12 +336,16 @@ describe("Issue #1497 — ScreenerPresetManager", () => {
   it("StockHub wires the manager into the stock run form (source pin, #2896)", () => {
     const src = readFileSync("src/client/StockHub.tsx", "utf8");
     expect(src).toContain("ScreenerPresetManager");
-    // Issue #2909 (G2): preset application goes through
-    // handleCriteriaChange, which sets the criteria exactly as
-    // setStockCriteria did and additionally clears any applied
+    // Issue #2909 (G2): preset application sets the criteria exactly
+    // as setStockCriteria did and additionally clears any applied
     // pattern, so a preset-applied run is never misreported as
     // a pattern run. The pin follows the wiring, not the name.
-    expect(src).toContain("onApplyPreset={handleCriteriaChange}");
+    // Issue #4432 (S4c): the in-form manager applies through
+    // handlePresetApply (which does NOT clear the preset arming — the
+    // identity callback arms it right after), while manual panel edits
+    // still go through handleCriteriaChange, which clears the arming.
+    expect(src).toContain("onApplyPreset={handlePresetApply}");
+    expect(src).toContain("onApplyPresetIdentity={handlePresetIdentity}");
     expect(src).toContain("onChange={handleCriteriaChange}");
   });
 });
