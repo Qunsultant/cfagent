@@ -831,6 +831,10 @@ export class ETradeTradingPlatform implements ITradingPlatform {
       orderType: record.orderType,
       limitPrice:
         record.orderType === "LIMIT" || record.orderType === "STOP_LIMIT" ? record.price : undefined,
+      // Issue #4659 (matrix gap 7): the trigger the draft carries (#4654) rides
+      // the place body, so an approved stop order states its price instead of
+      // depending on the preview session alone.
+      stopPrice: (record as { stopPrice?: number }).stopPrice,
       previewId:
         record.orderRef && String(record.orderRef).trim() !== "" ? String(record.orderRef).trim() : undefined,
       optionLegs: strategyOrder.optionLegs.length > 0 ? (strategyOrder.optionLegs as any) : undefined,

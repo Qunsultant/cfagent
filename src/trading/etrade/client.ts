@@ -1005,6 +1005,14 @@ export class ETradeRestClient {
     quantity: number;
     orderType?: string;
     limitPrice?: number;
+    /**
+     * Issue #4659 (matrix gap 7): the STOP / STOP_LIMIT trigger price. The place
+     * body never carried it, so a stop order was correct only if the preview
+     * session still held the trigger — an invisible dependency. Sending it makes
+     * the order self-describing; `PreviewIds` still rides along for the priced
+     * preview, and a stop order with neither is refused before any POST.
+     */
+    stopPrice?: number;
     previewId?: string;
     userLogin: string;
     optionLegs?: TradingOrderLeg[];
@@ -1057,6 +1065,25 @@ export class ETradeRestClient {
       };
     }
 
+    // Issue #4659 (matrix gap 7): a stop order needs its trigger EITHER on the
+    // wire (the fix) or in the preview session it references. With neither, the
+    // order cannot be placed truthfully — refuse before any broker contact
+    // rather than POST a stop type with no price.
+    {
+      const requestedType = (params.orderType || "MARKET").toUpperCase();
+      const isStopOrder = requestedType === "STOP" || requestedType === "STOP_LIMIT";
+      const hasStopPrice = Number.isFinite(params.stopPrice) && Number(params.stopPrice) > 0;
+      const hasPreviewId =
+        params.previewId !== undefined && params.previewId !== null && String(params.previewId).trim() !== "";
+      if (isStopOrder && !hasStopPrice && !hasPreviewId) {
+        return {
+          success: false, orderId: params.orderId, executionId: "", brokerOrderRef: "", authorizerDid: userDid,
+          status: "failed", symbol: params.symbol, action: params.action, quantity: params.quantity, executionPrice: 0,
+          totalSettled: 0, message: `E*TRADE ${requestedType} order refused: a stop price is required and neither the order nor its preview session carried one. Nothing was placed.`, timestamp: now,
+        };
+      }
+    }
+
     // 1. Remote MCP Tool Execution (if configured)
     if (this.env.ETRADE_MCP_SERVER_URL) {
       if (isStrategy) {
@@ -1076,6 +1103,9 @@ export class ETradeRestClient {
             quantity: params.quantity,
             orderType: params.orderType || "MARKET",
             limitPrice: params.limitPrice,
+            // Issue #4659 (matrix gap 7): the remote place tool takes the same
+            // terms; passing it here keeps both placement legs identical.
+            ...(params.stopPrice !== undefined ? { stopPrice: params.stopPrice } : {}),
           },
         });
         if (mcpRes?.orderId || mcpRes?.executionId) {
@@ -1171,6 +1201,10 @@ export class ETradeRestClient {
         const priceType = (params.orderType || "MARKET").toUpperCase();
         const isLimit = priceType === "LIMIT" || priceType === "STOP_LIMIT";
         const limitPrice = isLimit && params.limitPrice && params.limitPrice > 0 ? Number(params.limitPrice.toFixed(2)) : undefined;
+        // Issue #4659: the trigger travels on the order itself (the refusal above
+        // covers the case where neither it nor a preview id is present).
+        const isStop = priceType === "STOP" || priceType === "STOP_LIMIT";
+        const stopPrice = isStop && params.stopPrice && params.stopPrice > 0 ? Number(params.stopPrice.toFixed(2)) : undefined;
 
         const pId = params.previewId !== undefined && params.previewId !== null && String(params.previewId).trim() !== ""
           ? (!isNaN(Number(params.previewId)) ? Number(params.previewId) : String(params.previewId).trim())
@@ -1186,6 +1220,9 @@ export class ETradeRestClient {
                 allOrNone: false,
                 priceType: isStrategy ? etradePriceType(legs, priceType, params.strategyNetDebit || 0) : priceType,
                 ...(limitPrice ? { limitPrice } : {}),
+                // Issue #4659 (matrix gap 7): the STOP/STOP_LIMIT trigger, so the
+                // placed order no longer depends on the preview session holding it.
+                ...(stopPrice ? { stopPrice } : {}),
                 orderTerm: params.orderTerm || "GOOD_FOR_DAY",
                 marketSession: "REGULAR",
                 Instrument: isStrategy ? toETradeInstruments(legs) : [

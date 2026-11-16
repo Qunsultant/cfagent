@@ -1529,7 +1529,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/dataSources.ts", "tastytrade", 3],
   ["src/trading/dataSources.ts", "yahoo", 2],
   ["src/trading/email/agent.ts", "etrade", 42],
-  ["src/trading/etrade/client.ts", "etrade", 328],
+  // Issue #4659: the stop-price refusal names the broker in its user-facing
+  // message, the same INTEGRATION growth this row already records for the
+  // adapter's own vocabulary.
+  ["src/trading/etrade/client.ts", "etrade", 329],
   ["src/trading/etrade/optionOrders.ts", "etrade", 9],
   // Issue #4656: the adapter names its own time-in-force mapper (etradeOrderTerm)
   // — a code identifier in the broker's own adapter, the disposition this section
