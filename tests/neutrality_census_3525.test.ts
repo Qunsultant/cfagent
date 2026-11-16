@@ -750,7 +750,10 @@ function measure(): Map<string, number> {
  * verbatim (etradeBrokerPublish.ts); rewording the file name would falsify
  * the inventory, so the one row is dispositioned INTEGRATION (naming the
  * provider is the inventory's job — the #4792 survey precedent). The
- * INTEGRATION marker is restated 681/6528 -> 682/6529.
+ * INTEGRATION marker is restated 681/6528 -> 698/7062 (direct recount on
+ * current main; the 682/6529 stated by #4966's merge incremented the stale
+ * marker instead of recounting; the recount includes the #4958/#4854
+ * raises).
  * Baseline update (#4958, 2026-11-16; the Public auction slice): Public's own
  * platform file gains the on-open refusal message, which names the broker — a
  * user-facing string in that broker's adapter, dispositioned INTEGRATION like
@@ -974,7 +977,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (682 rows / 6531 lines) ----
+  // ---- INTEGRATION (698 rows / 7062 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
