@@ -33,9 +33,13 @@ import {
 import {
   approvePreviewedOrder,
   cancelPreviewedOrder,
+  type ApprovalExecutor,
 } from "../channels/approval";
 import { getVoiceConfig, getTradingConstraints } from "../../config/etapiConfig";
 import { brokerPresentation } from "../brokerPresentation";
+import { TradingPlatformRegistry } from "../registry";
+import type { TradingPlatformId } from "../interfaces";
+import { resolveTenantBrokerSelection } from "../../services/tenantProviders";
 import { getPlatformCapabilitiesDeskSummary } from "../../services/platformKnowledge";
 import { actorGateway } from "../../services/cloudflareActorGateway";
 
@@ -202,31 +206,19 @@ export class ETradeVoiceTradingService {
     // -----------------------------------------------------------------------
     const approveMatch = cleanTranscript.match(/\b(CONFIRM|APPROVE|EXECUTE|SUBMIT)\b(?:\s+(?:THE\s+)?(?:EXECUTION\s+(?:OF\s+)?)?(?:ORDER|TRADE))?(?:\s+(ord_[a-zA-Z0-9_-]+|[a-zA-Z0-9]{6,}))?/i);
     if (approveMatch) {
-      // Issue #3720: a Stock Copilot voice turn carries the copilot's
-      // server-resolved broker. The desk's execution arm is E*TRADE
-      // (the approval executor below), so an approval under any other
-      // resolved broker refuses BY NAME before anything executes —
-      // the #3429 invariant, kept at the execution leg for a turn the
-      // activation serves. Executing on the selected broker is the
-      // neutral desk's build (#3556); the refusal names the way.
-      if (request.copilotBrokerId && request.copilotBrokerId !== "etrade") {
-        const label = brokerPresentation(request.copilotBrokerId).label;
-        const spokenText = tuneFinancialPronunciation(
-          `I can't execute that order by voice. Your selected broker is ${label}, and the voice desk executes orders on E*TRADE only — nothing was executed. Use the Trading Hub or the neutral order API for ${label}.`
-        );
-        return {
-          success: false,
-          spokenText,
-          displayMarkdown: `⚠️ **Voice Execution Refused**: your selected broker is ${label}; the voice desk executes orders on E*TRADE only. Nothing was executed. Use the Trading Hub or the neutral order API (\`/api/broker/order/execute\`) for ${label}.`,
-          actionType: "error",
-          proposerDid: AGENT_DIDS.TRADING,
-          authorizerDid,
-          timestamp,
-        };
-      }
+      // Issue #4664 (Gap 10): resolve the selected broker's platform instead
+      // of refusing non-E*TRADE by name, so voice approvals work across brokers.
+      const resolvedBroker: TradingPlatformId =
+        (request.copilotBrokerId as TradingPlatformId | undefined) ??
+        (await resolveTenantBrokerSelection(this.env).catch(() => null)) ??
+        "etrade";
+      const executor: ApprovalExecutor =
+        resolvedBroker === "etrade"
+          ? tradingService
+          : (TradingPlatformRegistry.getPlatform(resolvedBroker, this.env, this.orm, this.sessionId) as unknown as ApprovalExecutor);
       const rawId = approveMatch[2];
       const explicitId = rawId ? (rawId.startsWith("ord_") ? rawId : `ord_${rawId}`) : undefined;
-      return this.handleVoiceApproval(explicitId, authorizerDid, tradingService, timestamp);
+      return this.handleVoiceApproval(explicitId, authorizerDid, executor, timestamp, resolvedBroker);
     }
 
     // -----------------------------------------------------------------------
@@ -254,8 +246,9 @@ export class ETradeVoiceTradingService {
   private async handleVoiceApproval(
     specifiedOrderId: string | undefined,
     authorizerDid: string,
-    tradingService: ETradeService,
-    timestamp: string
+    tradingService: ApprovalExecutor,
+    timestamp: string,
+    brokerId: TradingPlatformId = "etrade",
   ): Promise<VoiceTradingTurnResponse> {
     // Issue #1262 Phase 3: approval runs through the shared engine
     // (trade-tier gate + draft lookup + execute/fallback). Voice
@@ -300,14 +293,15 @@ export class ETradeVoiceTradingService {
     const execId = outcome.execId ?? `et_order_${Date.now()}`;
     const execMessage = outcome.kind === "failed" ? outcome.message : undefined;
 
+    const brokerLabel = brokerPresentation(brokerId).label;
     const spokenText = isSuccess
       ? tuneFinancialPronunciation(
-          `Order ${targetTrade.id} has been successfully executed on E*TRADE. Broker reference is ${execId}. Your trade to ${targetTrade.action} ${targetTrade.quantity} shares of ${targetTrade.symbol} has been placed.`
+          `Order ${targetTrade.id} has been successfully executed on ${brokerLabel}. Broker reference is ${execId}. Your trade to ${targetTrade.action} ${targetTrade.quantity} shares of ${targetTrade.symbol} has been placed.`
         )
-      : `E*TRADE order execution failed. The broker returned: ${execMessage || "Unknown rejection"}. No capital was moved.`;
+      : `${brokerLabel} order execution failed. The broker returned: ${execMessage || "Unknown rejection"}. No capital was moved.`;
 
     const displayMarkdown = isSuccess
-      ? `### ✅ Order Executed on E*TRADE\n\n- **Order ID:** \`${targetTrade.id}\`\n- **Action:** ${targetTrade.action} ${targetTrade.quantity} ${targetTrade.symbol}\n- **Broker Ref:** \`${execId}\`\n- **Total Settled:** $${targetTrade.totalValue.toFixed(2)} USD\n- **Authorizer DID:** \`${authorizerDid}\`\n- **Timestamp:** ${timestamp}`
+      ? `### ✅ Order Executed on ${brokerLabel}\n\n- **Order ID:** \`${targetTrade.id}\`\n- **Action:** ${targetTrade.action} ${targetTrade.quantity} ${targetTrade.symbol}\n- **Broker Ref:** \`${execId}\`\n- **Total Settled:** $${targetTrade.totalValue.toFixed(2)} USD\n- **Authorizer DID:** \`${authorizerDid}\`\n- **Timestamp:** ${timestamp}`
       : `### ❌ Order Execution Failed\n\n${execMessage || "Upstream broker rejected execution."}`;
 
     return {

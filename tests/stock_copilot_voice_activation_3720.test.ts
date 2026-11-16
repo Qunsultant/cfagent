@@ -338,7 +338,7 @@ describe("issue #3720 — the voice desk serves the Stock Copilot's tenant under
 /* 4. The execution invariant at the desk's approval leg               */
 /* ------------------------------------------------------------------ */
 
-describe("issue #3720 — voice order execution stays E*TRADE-only until the neutral desk (#3556)", () => {
+describe("issue #3720 / #4664 — voice order execution routes to the resolved copilot broker", () => {
   const mockEnv = {
     APP_BASE_URL: "https://agent.openaimp.com",
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
@@ -353,11 +353,11 @@ describe("issue #3720 — voice order execution stays E*TRADE-only until the neu
     return new ETradeVoiceTradingService(mockEnv, orm, "session-3720");
   }
 
-  it("an approval under a resolved non-E*TRADE copilot broker is refused by name and nothing executes", async () => {
+  it("an approval under a resolved non-E*TRADE copilot broker routes to that broker and never calls E*TRADE", async () => {
     const placeOrder = vi
       .spyOn(ETradeRestClient.prototype, "placeOrder")
       .mockImplementation(async () => {
-        throw new Error("placeOrder must not be reached");
+        throw new Error("E*TRADE placeOrder must not be reached for alpaca");
       });
     const service = makeService();
     const res = await service.processVoiceTurn({
@@ -365,14 +365,11 @@ describe("issue #3720 — voice order execution stays E*TRADE-only until the neu
       userLogin: LOGIN,
       copilotBrokerId: "alpaca",
     });
-    expect(res.success).toBe(false);
-    expect(res.actionType).toBe("error");
-    expect(res.spokenText).toContain("Alpaca");
-    // The spoken form is pronunciation-tuned (the tuner strips the
-    // markdown `*`); the display form keeps the broker's name intact.
-    expect(res.spokenText).toContain("ETRADE");
-    expect(res.displayMarkdown).toContain("Alpaca");
-    expect(res.displayMarkdown).toContain("E*TRADE");
+    // No draft exists in MockSqlStorage, so approvePreviewedOrder returns not_found
+    // instead of refusing non-E*TRADE by name (#4664).
+    expect(res.actionType).toBe("approval");
+    expect(res.orderStatus).toBe("not_found");
+    expect(res.spokenText).not.toContain("executes orders on E*TRADE");
     expect(placeOrder).not.toHaveBeenCalled();
   });
 
