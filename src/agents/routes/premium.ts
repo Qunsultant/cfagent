@@ -77,6 +77,10 @@ import { PREMIUM_QUOTA_KINDS, chargePremiumQuota, premiumQuotaRefusalBody } from
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import {
+  resolvePayerWalletIdentity,
+  type WalletLoginResolver,
+} from "../../security/payerWalletIdentity";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -261,17 +265,36 @@ function premiumPaymentService(
 export function premiumMeteredGateOptions(
   ctx: PremiumRouteContext,
   request: Request,
-  category: string
+  category: string,
+  options?: { resolveWalletMappedLogin?: WalletLoginResolver },
 ): MeteredGateOptions {
   // The scheduledReports.storePorts precedent: the composition
   // root takes the host's sql handle; the cast matches that seam.
   const meter = ctx.sql ? createCanonicalReportStorePorts(ctx.sql as never).usage : undefined;
   const login = request.headers.get("x-user-login");
-  return {
-    meter,
-    category,
-    ...(login ? { resolveTier: (userLogin: string) => resolvePremiumTier(ctx.env, userLogin) } : {}),
-  };
+  if (login) {
+    return {
+      meter,
+      category,
+      resolveTier: (userLogin: string) => resolvePremiumTier(ctx.env, userLogin),
+    };
+  }
+  if (options?.resolveWalletMappedLogin) {
+    return {
+      meter,
+      category,
+      resolveTier: async (subjectId: string) => {
+        const wallet = subjectId.startsWith("payer:") ? subjectId.slice("payer:".length) : subjectId;
+        const resolved = await resolvePayerWalletIdentity({
+          verifiedPayerWallet: wallet,
+          resolveWalletMappedLogin: options.resolveWalletMappedLogin,
+        });
+        if (!resolved.ok || !resolved.tierLookupLogin) return null;
+        return resolvePremiumTier(ctx.env, resolved.tierLookupLogin);
+      },
+    };
+  }
+  return { meter, category };
 }
 
 /**
