@@ -70,7 +70,7 @@ export function OmnichannelPanel({
             </Notice>
           )}
           {/* Header Card */}
-          <Card padding="md">
+          <Card>
             <CardHeader
               title="💬 Omnichannel Trading Desks (Email & Slack)"
               subtitle={<>Autonomous market research, quoting, and Human-in-the-Loop order drafting via Inbound Email and Slack Bot communication channels. All orders require explicit human authorization before live {presentation.label} execution.</>}
@@ -89,7 +89,7 @@ export function OmnichannelPanel({
 
           <Grid autoFit minColumnWidth="xl" gap="2">
             {/* Channel 1: Autonomous Email Trading Desk */}
-            <Card padding="md">
+            <Card>
               <Stack gap="2">
               <CardHeader
                 title={<><span>✉️</span> Autonomous Email Trading Desk</>}
@@ -214,7 +214,7 @@ export function OmnichannelPanel({
             </Card>
 
             {/* Channel 2: Autonomous Slack Trading Desk */}
-            <Card padding="md">
+            <Card>
               <Stack gap="2">
               <CardHeader
                 title={<><span>🤖</span> Autonomous Slack Trading Desk</>}

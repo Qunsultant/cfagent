@@ -183,7 +183,7 @@ export function PendingReviewQueue() {
             const urgent = msUntilExpiry(item.expiresAt, nowMs) < 60 * 60 * 1000;
             const acting = actingId === item.confirmationId;
             return (
-              <Card key={item.confirmationId} padding="md">
+              <Card key={item.confirmationId}>
                 <div className="pending-review-item-header">
                   <Badge tone={item.kind === "screener" ? "accent" : "neutral"} size="sm" dot>
                     {item.kind}

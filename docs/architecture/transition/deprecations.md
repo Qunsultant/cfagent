@@ -6,6 +6,15 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-16 — #4913 retires WorkCard in place (rule-of-three rationalization)
+
+- Component: `WorkCard` (`src/client/components/ui/WorkCard.tsx`) → deprecated in place
+- Date: 2026-11-16
+- Reason: Issue #4913 (sub of #3695) folds the single use (OrderTicketPanel's order form card) into the inline Card + Stack gap 5 + CardHeader composition WorkCard itself renders — the component is only that composition, so a second use would be a duplicate, not a reuse. The component stays on disk and exported (no file deletion, gitops §22) with a @deprecated JSDoc naming its successor.
+- Replacement: `<Card><Stack gap="5"><CardHeader … />…</Stack></Card>` (see the OrderTicketPanel fold in the same slice).
+- Consumers at deprecation: none — the sole use was folded in the same slice; the census test (tests/template_rule_of_three_4913.test.ts) pins zero prod uses.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-16 — S-U4 retires workflowRuns.css in place (#4820)
 
 - File: `src/client/workflowRuns.css` → retired in place (no rules remain)

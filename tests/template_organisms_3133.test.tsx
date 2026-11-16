@@ -14,7 +14,7 @@
  * Card (pad-md 1.25rem, 12px radius — the form card's var(--radius-lg))
  * where the hand-rolled cards used bespoke 1.5rem padding (order form)
  * and 1.25rem/1.35rem padding (chart card); WorkCard is flat where the
- * order form had no shadow, DetailCard is elevated where the chart card
+ * order form had no shadow, DetailCard is emphasized where the chart card
  * had the e2 shadow; no outer margin on any organism (spacing is the
  * parent Stack's gap, §1.6b). No page migrates in this slice (Wave 1,
  * #3138–#3140), so nothing visual changes anywhere. SummaryCard
@@ -140,7 +140,7 @@ describe("WorkCard (#3133 — order form card, OrderTicketPanel.tsx:370)", () =>
     );
     const card = document.querySelector(".ui-card");
     expect(card).not.toBeNull();
-    expect(card?.classList.contains("elevated")).toBe(false);
+    expect(card?.classList.contains("emphasized")).toBe(false);
     expect(document.querySelector(".ui-card-header h4")?.textContent).toBe(
       "⚡ Options Order Ticket",
     );
@@ -162,13 +162,13 @@ describe("WorkCard (#3133 — order form card, OrderTicketPanel.tsx:370)", () =>
 });
 
 describe("DetailCard (#3133 — autopilot chart card, AutopilotControlCenter.tsx:818)", () => {
-  it("renders an elevated card with the header and the content block", () => {
+  it("renders an emphasized card with the header and the content block", () => {
     render(
       <DetailCard title="Strategy Equity vs S&P 500 Benchmark" meta={<span>1D 1W 1M</span>}>
         <div>equity chart</div>
       </DetailCard>,
     );
-    const card = document.querySelector(".ui-card.elevated");
+    const card = document.querySelector(".ui-card.emphasized");
     expect(card).not.toBeNull();
     expect(document.querySelector(".ui-card-header h4")?.textContent).toBe(
       "Strategy Equity vs S&P 500 Benchmark",
@@ -184,7 +184,7 @@ describe("DetailCard (#3133 — autopilot chart card, AutopilotControlCenter.tsx
         <div>equity chart</div>
       </DetailCard>,
     );
-    expect(document.querySelector(".ui-card.elevated")).not.toBeNull();
+    expect(document.querySelector(".ui-card.emphasized")).not.toBeNull();
     expect(document.querySelector(".ui-card-header h4")).toBeNull();
     expect(document.querySelector(".ui-card-header .ui-push")?.textContent).toBe("1D 1W 1M");
     expect(document.body.textContent).toContain("equity chart");

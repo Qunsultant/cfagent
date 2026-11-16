@@ -53,7 +53,7 @@ export function PatternsPanel({ onApplyPattern }: PatternsPanelProps) {
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
         {patterns.map((pattern) => (
-          <Card key={pattern.id} padding="md">
+          <Card key={pattern.id}>
             <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
               <h3 style={{ margin: 0 }}>{pattern.label}</h3>
               <Badge tone="neutral">stock</Badge>

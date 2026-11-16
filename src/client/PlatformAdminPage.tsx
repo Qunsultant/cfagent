@@ -181,7 +181,7 @@ export function PlatformAdminPage({
       </div>
 
       <TabPanel idBase="platform-admin" tabId="ads" active={active === "ads"}>
-        <Card padding="md">
+        <Card>
           <AdsSection
             ads={ads}
             onToggleMaster={toggleMaster}
@@ -192,13 +192,13 @@ export function PlatformAdminPage({
       </TabPanel>
 
       <TabPanel idBase="platform-admin" tabId="provenance" active={active === "provenance"}>
-        <Card padding="md">
+        <Card>
           <ProvenanceSection />
         </Card>
       </TabPanel>
 
       <TabPanel idBase="platform-admin" tabId="api-keys" active={active === "api-keys"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>API Keys</span>
             <small>MCP transport access for external clients</small>
@@ -208,7 +208,7 @@ export function PlatformAdminPage({
       </TabPanel>
 
       <TabPanel idBase="platform-admin" tabId="tenants" active={active === "tenants"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>Tenants</span>
             <small>Tenant create, list, settings &amp; members</small>
@@ -218,7 +218,7 @@ export function PlatformAdminPage({
       </TabPanel>
 
       <TabPanel idBase="platform-admin" tabId="channels" active={active === "channels"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>Channels</span>
             <small>Delivery-channel enablement per tenant</small>
@@ -228,7 +228,7 @@ export function PlatformAdminPage({
       </TabPanel>
 
       <TabPanel idBase="platform-admin" tabId="accounts" active={active === "accounts"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>Accounts</span>
             <small>Self-service account setup, tier, credits, subscriptions &amp; catalogue</small>
@@ -238,7 +238,7 @@ export function PlatformAdminPage({
       </TabPanel>
 
       <TabPanel idBase="platform-admin" tabId="engine-tuning" active={active === "engine-tuning"}>
-        <Card padding="md">
+        <Card>
           <EngineTuningPanel userLogin={user?.login} />
         </Card>
       </TabPanel>

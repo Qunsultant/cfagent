@@ -68,7 +68,7 @@ export function PortfolioPanel({
       <PageSection title="Portfolio & holdings">
         <Stack gap="2">
           {/* Universal Hero Header */}
-          <Card padding="md">
+          <Card>
             <Flex gap="2" align="center" justify="between" wrap>
               <Stack gap="1">
                 <Flex gap="1" wrap>

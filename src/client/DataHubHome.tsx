@@ -73,14 +73,14 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
       </div>
 
       <TabPanel idBase="data-hub" tabId="data-providers" active={deepLink.view === "data-providers"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>Data Providers</span>
             <small>Provisioning lifecycle for market-data providers</small>
           </div>
           <DataProvidersPanel />
         </Card>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>BYOK Provider Credentials</span>
             <small>Bring Your Own Keys for broker execution and market data</small>
@@ -93,7 +93,7 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
       </TabPanel>
 
       <TabPanel idBase="data-hub" tabId="data-lifecycle" active={deepLink.view === "data-lifecycle"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>Data Lifecycle</span>
             <small>Clean state, platform bootstrap &amp; tenant bootstrap</small>
@@ -103,7 +103,7 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
       </TabPanel>
 
       <TabPanel idBase="data-hub" tabId="downloads" active={deepLink.view === "downloads"}>
-        <Card padding="md">
+        <Card>
           <DownloadsPanel userLogin={userLogin} />
         </Card>
       </TabPanel>

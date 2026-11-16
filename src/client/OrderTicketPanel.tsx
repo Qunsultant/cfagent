@@ -17,7 +17,6 @@ import {
   TabPanel,
   Tabs,
   TextInput,
-  WorkCard,
 } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import type { ETradeOrderDraft, ETradeQuote } from "../types";
@@ -470,37 +469,39 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                     would use. The mode comes from the TEST/PROD
                     selection the hub passes in, not from a broker
                     status read (see hub orderTradingType). */}
-                <WorkCard
-                  singleLine
-                  title={`⚡ ${orderAssetClass === "options" ? "Options Order Ticket" : "Equity / ETF Order Ticket"}`}
-                  subtitle={
-                    orderAssetClass === "options"
-                      ? "Broker-priced options strategy preview with human approval required"
-                      : orderContext?.optionLegs?.length
-                        ? "Stock strategy preview with human approval required"
-                        : "Zero-commission equity trading with agentic DID stamping"
-                  }
-                  belowSubtitle={
-                    <Flex gap="2" wrap>
-                      <Badge tone="accent" title={`Broker: ${brokerId}`}>{brokerLabel}</Badge>
-                      <Badge tone={tradingType === "live" ? "warning" : "success"}>{brokerModeBadge(brokerId, tradingType)}</Badge>
-                    </Flex>
-                  }
-                  meta={
-                    orderSymbol ? (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => fetchSymbolQuote(orderSymbol)}
-                        disabled={quoteLoading}
-                        title={`Refresh live quote for ${orderSymbol}`}
-                       loading={quoteLoading}>
-                        <span>↻</span>
-                        <span>{"Refresh Quote"}</span>
-                      </Button>
-                    ) : undefined
-                  }
-                >
+                <Card>
+                  <Stack gap="5">
+                    <CardHeader
+                      singleLine
+                      title={`⚡ ${orderAssetClass === "options" ? "Options Order Ticket" : "Equity / ETF Order Ticket"}`}
+                      subtitle={
+                        orderAssetClass === "options"
+                          ? "Broker-priced options strategy preview with human approval required"
+                          : orderContext?.optionLegs?.length
+                            ? "Stock strategy preview with human approval required"
+                            : "Zero-commission equity trading with agentic DID stamping"
+                      }
+                      belowSubtitle={
+                        <Flex gap="2" wrap>
+                          <Badge tone="accent" title={`Broker: ${brokerId}`}>{brokerLabel}</Badge>
+                          <Badge tone={tradingType === "live" ? "warning" : "success"}>{brokerModeBadge(brokerId, tradingType)}</Badge>
+                        </Flex>
+                      }
+                      meta={
+                        orderSymbol ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => fetchSymbolQuote(orderSymbol)}
+                            disabled={quoteLoading}
+                            title={`Refresh live quote for ${orderSymbol}`}
+                           loading={quoteLoading}>
+                            <span>↻</span>
+                            <span>{"Refresh Quote"}</span>
+                          </Button>
+                        ) : undefined
+                      }
+                    />
 
                 {orderError && (orderAssetClass === "options" ? (
                   <Notice tone="danger" title="Options preview failed. No order was created or submitted.">
@@ -966,7 +967,8 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                   </Flex>
                   </Stack>
                 </form>
-              </WorkCard>
+                  </Stack>
+                </Card>
 
           </PageSection>
         </TabPanel>
@@ -1013,7 +1015,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
             title="Human-in-the-loop and natural language"
             description="The safety guarantee behind every order, and the conversational entry points that draft one."
           >
-<Card padding="md">
+<Card>
                   <Stack gap="2">
                   <h5>🛡️ Agentic HITL Safety Guarantee</h5>
                   <p>
@@ -1044,7 +1046,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                 </Card>
 
                 {/* Sample Quick Action Box */}
-                <Card padding="md">
+                <Card>
                   <Stack gap="2">
                   <h5>💬 NLQ Voice &amp; Text Prompts</h5>
                   <p>You can also place trades effortlessly through conversational natural language:</p>

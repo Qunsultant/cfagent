@@ -338,7 +338,7 @@ function importersIndex(): Map<string, Set<string>> {
 
 /**
  * Classes the `ui/` primitives render by design (the Tabs
- * primitive's `selected`, Card's `elevated` / `highlight`): non-`ui-`
+ * primitive's `selected`, Card's `emphasized`): non-`ui-`
  * tokens in the primitives' `className=` expressions that coincide
  * with a bespoke-CSS definition. They are the design system's own
  * classes, not dead layout classes the page renders.

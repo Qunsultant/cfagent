@@ -114,7 +114,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       </div>
 
       <TabPanel idBase="security-hub" tabId="iaaa-admin" active={deepLink.view === "iaaa-admin"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>IAAA Admin</span>
             <small>Read-only memberships, genesis &amp; audit</small>
@@ -124,7 +124,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="users" active={deepLink.view === "users"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>Users</span>
             <small>User profiles, tenant memberships &amp; account linkage</small>
@@ -134,7 +134,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="admin-access" active={deepLink.view === "admin-access"}>
-        <Card padding="md">
+        <Card>
           <AdminAccessSection
             requesting={requesting}
             status={accessStatus}
@@ -145,7 +145,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="profile" active={deepLink.view === "profile"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>Profile</span>
             <small>Your display name and phone</small>
@@ -155,7 +155,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="pdp" active={deepLink.view === "pdp"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>PDP</span>
             <small>Live policy state: active snapshot, source &amp; obligations</small>
@@ -165,7 +165,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="pep" active={deepLink.view === "pep"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>PEP</span>
             <small>Live enforcement state: gated routes, enforcement &amp; grace</small>
@@ -175,7 +175,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="pip" active={deepLink.view === "pip"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>PIP</span>
             <small>Live attribute state: schema, sources &amp; your attributes</small>
@@ -185,7 +185,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="pap" active={deepLink.view === "pap"}>
-        <Card padding="md">
+        <Card>
           <div className="section-label-row">
             <span>PAP</span>
             <small>Live policy administration: proposals, preview, approval &amp; promotion</small>

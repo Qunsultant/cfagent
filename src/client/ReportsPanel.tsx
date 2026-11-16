@@ -306,7 +306,7 @@ export function ReportsPanel() {
       ) : (
       <Stack gap="2">
         {reports.map((r) => (
-          <Card key={r.id} padding="md">
+          <Card key={r.id}>
             <Flex gap="2" align="center" justify="between" wrap>
               <Badge
                 style={SOURCE_BADGE_STYLES[r.source] || FALLBACK_BADGE_STYLE}

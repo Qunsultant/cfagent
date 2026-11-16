@@ -1,11 +1,14 @@
 import React from "react";
 
 export interface CardProps {
-  /** Raised surface + stronger shadow instead of the flat card surface. */
-  elevated?: boolean;
-  /** Primary-tinted background + border for the lead tile (issue 2149: preserves the old first-stat highlight without a bespoke class). */
-  highlight?: boolean;
-  padding?: "none" | "sm" | "md" | "lg";
+  /**
+   * Emphasized treatment (#4913): the union of the folded `elevated`
+   * (raised surface + shadow) and `highlight` (primary-tinted background
+   * + border) treatments — a raised, primary-tinted card for the lead
+   * tile and the DetailCard surface.
+   */
+  emphasized?: boolean;
+  padding?: "none" | "sm" | "md";
   className?: string;
   /**
    * Issue #3367: an anchor id, so a section nav can scroll to this card. The
@@ -28,8 +31,7 @@ export interface CardProps {
  * already use, formalized. Styles: ./primitives.css.
  */
 export function Card({
-  elevated = false,
-  highlight = false,
+  emphasized = false,
   padding = "md",
   className = "",
   id,
@@ -39,7 +41,7 @@ export function Card({
   return (
     <div
       id={id}
-      className={`ui-card ${elevated ? "elevated" : ""} ${highlight ? "highlight" : ""} pad-${padding} ${className}`}
+      className={`ui-card ${emphasized ? "emphasized" : ""} pad-${padding} ${className}`}
       style={style}
     >
       {children}

@@ -2070,7 +2070,7 @@ export function ETradeTradingHub({
 
       {/* Active HITL Safety Preview Banner (Always visible when a draft is active) */}
       {activeDraft && (
-        <Card padding="md">
+        <Card>
           <Flex gap="2" align="center" justify="between">
             <Flex gap="2" align="center">
               <span aria-hidden="true">🛡️</span>

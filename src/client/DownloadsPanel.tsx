@@ -23,7 +23,7 @@ export function DownloadsPanel({ activeEnv, userLogin }: DownloadsPanelProps) {
       </div>
 
       <Stack gap="4" className="downloads-content">
-        <Card padding="md">
+        <Card>
           <Stack gap="3">
             <div>
               <h4 className="downloads-card-title">Options Chain &amp; Dataset Download</h4>
@@ -72,7 +72,7 @@ export function DownloadsPanel({ activeEnv, userLogin }: DownloadsPanelProps) {
           </Stack>
         </Card>
 
-        <Card padding="md">
+        <Card>
           <Stack gap="3">
             <h4 className="downloads-card-title">Export Formats &amp; Data Dictionary</h4>
             <Grid columns={3} gap="3">

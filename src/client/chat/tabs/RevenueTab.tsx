@@ -133,7 +133,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
         <TabPanel idBase="revenue" tabId="metrics" active={activeTab === "metrics"} retain={visitedTabs.has("metrics")}>
           <PageSection title="Metrics">
           <div className="ui-stat-grid">
-            <Card padding="none" highlight>
+            <Card padding="none" emphasized>
               <div className="ui-row">
                 <span>💵</span>
                 <div className="ui-stack">
@@ -183,7 +183,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
               </div>
             </Card>
 
-            <Card padding="none" highlight>
+            <Card padding="none" emphasized>
               <div className="ui-row">
                 <span>💎</span>
                 <div className="ui-stack">

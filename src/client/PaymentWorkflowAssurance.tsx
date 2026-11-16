@@ -1098,7 +1098,7 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
           </PageSection>
 
           <PageSection title="Tunable fakes">
-            <Card padding="md">
+            <Card>
               <div style={formSubgridStyle}>
                 <Select label="Simulated monetization flag (gate config)" value={cfg.monetizationOn ? "on" : "off"} onChange={(e) => set("monetizationOn", e.target.value === "on")}>
                   <option value="on">ON — gate applies</option>
@@ -1202,7 +1202,7 @@ export function PaymentWorkflowAssurance({ userLogin }: { userLogin?: string }) 
               silently running free. Live endpoints also require your login
               to be listed in PAYMENT_ASSURANCE_LIVE_LOGINS.
             </p>
-            <Card padding="md">
+            <Card>
               <div style={formSubgridStyle}>
                 <Select label="Live mode" value={liveMode} onChange={(e) => setLiveMode(e.target.value as "coverage" | "checkout")}>
                   <option value="coverage">coverage — test account covers the run</option>

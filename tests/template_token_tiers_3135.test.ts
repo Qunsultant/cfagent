@@ -199,10 +199,6 @@ const REGISTERED_EXCEPTIONS: Record<string, string> = {
   "max-width:100vw": "viewport unit in min()/calc()",
   "max-height:90vh": "viewport unit (modal max height)",
   "height:6rem": "skeleton block height; above the frozen scale max (4rem)",
-  // The one spacing value that does NOT convert: equidistant between
-  // --space-6 (1.5rem) and --space-8 (2rem) at +/-4px — conversion
-  // would visibly move layout, so it is registered, not converted.
-  "padding:1.75rem": "card pad-lg; tie at +/-4px from any scale step",
   // @media breakpoints — layout, not spacing.
   "@media:max-width:37.5rem": "toast compact breakpoint (600px)",
   "@media:max-width:900px": "compact breakpoint, #3134 (900px)",
