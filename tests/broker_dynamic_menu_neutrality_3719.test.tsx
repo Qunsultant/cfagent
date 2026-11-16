@@ -97,10 +97,25 @@ describe("BrokerDynamicMenu harmonization and neutrality (#3719)", () => {
     expect(toggleBtn.classList.contains("active")).toBe(true);
     expect(toggleBtn.classList.contains("prod")).toBe(false);
 
-    // Clicking toggle flips to PROD
+    // Clicking the toggle arms live trading — which now asks first
+    // (issue #4652), so the click opens the confirmation and posts nothing.
     await act(async () => {
       toggleBtn.click();
     });
+    expect(handleSwitchEnvironment).not.toHaveBeenCalled();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog, "the live-switch confirmation").not.toBeNull();
+    expect(dialog!.textContent).toContain("Switch to live trading on Alpaca?");
+
+    // Confirming is what flips to PROD.
+    const confirm = [...dialog!.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Switch to live trading"),
+    ) as HTMLButtonElement | undefined;
+    expect(confirm).toBeTruthy();
+    await act(async () => {
+      confirm!.click();
+    });
+    expect(handleSwitchEnvironment).toHaveBeenCalledTimes(1);
     expect(handleSwitchEnvironment).toHaveBeenCalledWith("PROD");
   });
 
