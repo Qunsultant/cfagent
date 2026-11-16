@@ -33,6 +33,7 @@ import type {
 import {
   DATA_CAPTURE_TABLE,
   canonicalJson,
+  resolveCaptureUserLogin,
   createFetchOutcomeRecorderWithStore,
   getCaptureBlob,
   recordCaptureWithStore,
@@ -110,6 +111,7 @@ function recordFromRow(r: any): DataCaptureRecord {
 
 function insertCaptureRow(sql: SqlStorage, record: DataCaptureRecord): void {
   ensureCaptureTable(sql);
+  const requiredUserLogin = resolveCaptureUserLogin(record.userLogin, record.tenantId);
   sql.exec(
     `INSERT INTO ${DATA_CAPTURE_TABLE}
      (id, provider_id, capability, request_params_json, run_id, tenant_id, user_login, fetched_at, status, raw_kind, raw_blob_ref, raw_byte_size, raw_sha256, normalized_digest, retention_class, failure_error, failure_kind, failure_message, created_at)
@@ -120,7 +122,7 @@ function insertCaptureRow(sql: SqlStorage, record: DataCaptureRecord): void {
     canonicalJson(record.requestParams),
     record.runId,
     record.tenantId,
-    record.userLogin,
+    requiredUserLogin,
     record.fetchedAt,
     record.status,
     record.rawKind,
