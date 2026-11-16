@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { advancedOrderType } from "../src/trading/advancedOrders";
-import { ETradeClient } from "../src/trading/etrade/client";
+import { ETradeRestClient } from "../src/trading/etrade/client";
 import { ETradeTradingPlatform } from "../src/trading/etrade/platform";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
@@ -14,7 +14,7 @@ describe("E*TRADE brackets / OCO / OTO honesty & placeBracketExits (#4667)", () 
   });
 
   it("placeBracketExits submits separate SELL LIMIT and SELL STOP orders for a BUY entry", async () => {
-    const client = new ETradeClient({ ETRADE_ENVIRONMENT: "sandbox" } as unknown as Env);
+    const client = new ETradeRestClient({ ETRADE_ENVIRONMENT: "sandbox" } as unknown as Env);
     const placeOrderSpy = vi.spyOn(client, "placeOrder").mockImplementation(async (params) => ({
       success: true,
       orderId: params.orderId,
