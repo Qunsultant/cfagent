@@ -466,6 +466,14 @@ const CONFORMING_INTERIORS: string[] = [
   // Issue 4682: the Marketing Hub home (PageShell + PageSection,
   // primitives only).
   "src/client/MarketingHubHome.tsx",
+  // Issue #4820 (S-U4): the six migrated interiors — Workflow Runs,
+  // Referrals, Payments, Social Posting, Ads, Revenue.
+  "src/client/WorkflowRunsPanel.tsx",
+  "src/client/chat/tabs/ReferralsTab.tsx",
+  "src/client/PaymentsPage.tsx",
+  "src/client/SocialPostingPanel.tsx",
+  "src/client/chat/tabs/AdsTab.tsx",
+  "src/client/chat/tabs/RevenueTab.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):

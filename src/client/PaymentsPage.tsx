@@ -22,6 +22,7 @@ import {
   FieldShell,
   Modal,
   Notice,
+  PageSection,
   PageShell,
   Select,
   Tabs,
@@ -119,7 +120,10 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
       fetchedRef.current = true;
       void fetchPaymentsData();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // No exhaustive-deps rule is configured (eslint.config.mjs); the
+    // effect intentionally depends only on `active` — the fetch runs
+    // once per activation by design (S-U4 #4820 removed the dead
+    // disable comment for the unconfigured rule).
   }, [active]);
 
   const handleCreatePayment = async (e: React.FormEvent) => {
@@ -217,6 +221,7 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
 
       {visitedTabs.has("gateways") && (
         <TabPanel idBase="payments" tabId="gateways" active={activeTab === "gateways"} retain>
+          <PageSection title="Gateways">
           <div className="ui-stack">
             {gateways.map((gw) => (
               <Card padding="none" key={gw.id}>
@@ -240,11 +245,13 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
               </Card>
             ))}
           </div>
+          </PageSection>
         </TabPanel>
       )}
 
       {visitedTabs.has("stats") && (
         <TabPanel idBase="payments" tabId="stats" active={activeTab === "stats"} retain>
+          <PageSection title="Stats">
           <div className="ui-stat-grid">
             <Card padding="none" highlight>
               <div className="ui-row">
@@ -283,19 +290,23 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
               </div>
             </Card>
           </div>
+          </PageSection>
         </TabPanel>
       )}
 
       {visitedTabs.has("wallet") && (
         <TabPanel idBase="payments" tabId="wallet" active={activeTab === "wallet"} retain>
+          <PageSection title="Wallet">
           <ErrorBoundary label="Agentic Wallet panel">
             <AgenticWalletPanel />
           </ErrorBoundary>
+          </PageSection>
         </TabPanel>
       )}
 
       {visitedTabs.has("create") && (
         <TabPanel idBase="payments" tabId="create" active={activeTab === "create"} retain>
+          <PageSection>
           <form onSubmit={handleCreatePayment}>
             <div className="ui-stack">
               <h4>➕ Initialize Payment / Checkout Link</h4>
@@ -364,11 +375,13 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
               </div>
             </div>
           </form>
+          </PageSection>
         </TabPanel>
       )}
 
       {visitedTabs.has("ledger") && (
         <TabPanel idBase="payments" tabId="ledger" active={activeTab === "ledger"} retain>
+          <PageSection>
           <h4>📋 Transaction Ledger & DID Provenance ({transactions.length})</h4>
           <p className="ui-meta">Stateful record of all payment operations, drafts, and cryptographic audit proofs.</p>
           {transactions.length === 0 ? (
@@ -447,11 +460,12 @@ export function PaymentsPage({ active, user }: { active: boolean; user: User }) 
               ))}
             </div>
           )}
+          </PageSection>
         </TabPanel>
       )}
 
       {selectedProofTx && (
-        <Modal open size="none" panelClassName="did-modal-card" title="🔐 W3C Agent Decentralized Identifier (DID) Proof" onClose={() => setSelectedProofTx(null)}>
+        <Modal open title="🔐 W3C Agent Decentralized Identifier (DID) Proof" onClose={() => setSelectedProofTx(null)}>
           <FieldShell id="proof-id" label="Transaction Draft ID">
             <code>{selectedProofTx.id}</code>
           </FieldShell>

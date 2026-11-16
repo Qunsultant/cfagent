@@ -8,10 +8,10 @@ Every legacy class the order / options / autopilot layouts use, mapped to its to
 
 ## Method
 
-- **Scope:** `OrderTicketPanel.tsx`, `ETradeTradingHub.tsx`, `components/AutopilotControlCenter.tsx`, all `Options*.tsx`, all of `src/client/options/**`, and `chat/OptionsStrategyCard.tsx` — 29 files.
+- **Scope:** `OrderTicketPanel.tsx`, `ETradeTradingHub.tsx`, `components/AutopilotControlCenter.tsx`, all `Options*.tsx`, all of `src/client/options/**`, and `chat/OptionsStrategyCard.tsx` — 29 files. The S-U4 section below maps the 51 classes retired by #4820 (`WorkflowRunsPanel.tsx`, `ReferralsTab.tsx`, `PaymentsPage.tsx`, `SocialPostingPanel.tsx`, `AdsTab.tsx`, `RevenueTab.tsx`) — outside the 650-class extraction.
 - **Extraction:** `className` attributes (quoted strings and `{...}` expressions); `${...}` interpolations stripped from literal parts; lowercase string literals harvested as state classes (`"active"`, `"selected"`) — except comparison operands (`"x" ===`, `=== "x"`, `.includes("x")`), which are data values, not classes.
 - **Verification:** each used class was checked against the class selectors defined in the 9 stylesheets these layouts load (`styles.css`, `primitives.css`, `strategyDiscovery.css`, `riskAnalysis.css`, `optionsFlows.css`, `optionsResearch.css`, `optionsCard.css`, `scheduledOptions.css`, `optionsResearch.css`). 610 of 650 have a rule; 40 are referenced but defined nowhere (dead classes, listed with their own successor).
-- **Coverage pin:** `tests/template_token_tiers_3135.test.ts` re-extracts the used set and asserts every class appears in this document and the total is 650. Add a class to a layout and the pin fails until this table gains its row. `ui-cell-nowrap` is applied via the Table primitive's `cellClassName` prop, which the extractor does not scan — it is listed here because it is genuinely used (8 sites in AutopilotControlCenter), so this table holds 651 rows against 650 extracted classes.
+- **Coverage pin:** `tests/template_token_tiers_3135.test.ts` re-extracts the used set and asserts every class appears in this document and the total is 650. Add a class to a layout and the pin fails until this table gains its row. `ui-cell-nowrap` is applied via the Table primitive's `cellClassName` prop, which the extractor does not scan — it is listed here because it is genuinely used (8 sites in AutopilotControlCenter), so this table holds 702 rows against 650 extracted classes (651 #3135 rows + 51 S-U4 rows below).
 
 ## Correction to the brief
 
@@ -20,15 +20,88 @@ The #3135 discussion brief said "the three layouts reference hundreds of literal
 ## Summary
 
 - **650** legacy classes used by the layouts in scope.
-- **113 Token** — map to a primitive that already exists (11 of them are `ui-*` classes, already tokens).
+- **164 Token** — map to a primitive that already exists (11 of them are `ui-*` classes, already tokens; 51 more are the S-U4 retired-class rows below).
 - **538 Deletion candidate** — no token equivalent yet; successor is "none yet" (S-U7) except 40 dead classes whose successor is deletion itself (no rule exists, so removing the reference changes nothing).
 - **0 deletions in this slice.**
+- **S-U4 (#4820): 51 of the 164 Token rows** live in the section below — the retired classes of the six migrated interiors, all mapped to existing primitives or `ui-*` utilities (702 rows total).
 
 Disposition rules, in order: `ui-*` → itself; `*-card-header` → CardHeader; `*-btn` / `*-button` → Button; `*-badge` / `*-pill` → Badge; `*-modal` → Modal; `*-tabs` / `*-tab` → Tabs; `*-input` / `*-select` → TextInput / Select; `*-notice` / `*-banner` / `*-alert` → Notice; `*-table` → Table; `*-card` → Card family (WorkCard / DetailCard); bare state words (`active`, `selected`, …) → primitive prop/state on migration; everything else → deletion candidate, successor none yet.
 
 ## Tables
 
 One table per class family (first `-`-segment). `Used by` names the files that reference the class.
+
+### S-U4 (#4820) — retired classes, 51 classes (51 Token, 0 deletion candidate)
+
+Retired by the S-U4 migration slice (#4820, sub of #3695): the six interiors
+`WorkflowRunsPanel.tsx`, `ReferralsTab.tsx`, `PaymentsPage.tsx`,
+`SocialPostingPanel.tsx`, `AdsTab.tsx`, `RevenueTab.tsx` render zero bespoke
+classes now. These rows are NOT part of the 650-class extraction above — they
+map the classes the migration removed, so the mapping stays complete as
+slices retire classes. Every row is Token: the successor is an existing
+primitive or `ui-*` utility. The `ui-brand-*` classes are new utilities in
+`primitives.css` bound to the `--brand-*` tokens in `tokens.css` (brand
+colors as design tokens, Ceos DECIDED 2026-11-16); the `workflowRuns.css`
+sheet is retired in place and the dead social / `did-modal-card` rules are
+deleted from `styles.css`. Single-token `ui-*` classes only: the interior
+gate counts every non-`ui-` token as bespoke, so the compound modifiers
+(`gap-1`, `autofit-md`, …) the brief first specified are NOT used — stacks
+use `ui-stack` (gap 8px), facts and I/O grids use `ui-stat-grid`, the
+controls row uses `ui-row`.
+
+| Legacy class | Disposition | Successor | Used by |
+|---|---|---|---|
+| `workflow-runs-page` | Token | Bare `<div>` — the tab viewport owns scroll; no class | WorkflowRunsPanel.tsx |
+| `workflow-runs-controls` | Token | `ui-row` | WorkflowRunsPanel.tsx |
+| `workflow-runs-filter` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-filter-grow` | Token | `ui-stack ui-grow` | WorkflowRunsPanel.tsx |
+| `workflow-runs-filter-label` | Token | `ui-label` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stats` | Token | `ui-stat-grid` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stat` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stat-value` | Token | `<strong>` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stat-label` | Token | `ui-meta-sm` | WorkflowRunsPanel.tsx |
+| `workflow-runs-table-card` | Token | `ui-clip` | WorkflowRunsPanel.tsx |
+| `workflow-runs-table-container` | Token | `ui-scroll-x` | WorkflowRunsPanel.tsx |
+| `workflow-runs-when` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-workflow` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-trigger` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-result` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stages-cell` | Token | `ui-row` | WorkflowRunsPanel.tsx |
+| `workflow-runs-what` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-title` | Token | `<strong>` | WorkflowRunsPanel.tsx |
+| `workflow-runs-muted` | Token | `ui-meta-sm` | WorkflowRunsPanel.tsx |
+| `workflow-runs-mono` | Token | `ui-mono` | WorkflowRunsPanel.tsx |
+| `workflow-runs-error` | Token | `ui-danger ui-meta-sm` | WorkflowRunsPanel.tsx |
+| `workflow-runs-detail` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-detail-header` | Token | `CardHeader` | WorkflowRunsPanel.tsx |
+| `workflow-runs-detail-title` | Token | `CardHeader` title prop | WorkflowRunsPanel.tsx |
+| `workflow-runs-detail-subtitle` | Token | `CardHeader` subtitle prop | WorkflowRunsPanel.tsx |
+| `workflow-runs-detail-actions` | Token | `CardHeader` meta prop | WorkflowRunsPanel.tsx |
+| `workflow-runs-facts` | Token | `ui-stat-grid` | WorkflowRunsPanel.tsx |
+| `workflow-runs-fact` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stage-list` | Token | `ui-scroll-x` | WorkflowRunsPanel.tsx |
+| `workflow-runs-io-grid` | Token | `ui-stat-grid` | WorkflowRunsPanel.tsx |
+| `workflow-runs-io` | Token | Bare `<section>` | WorkflowRunsPanel.tsx |
+| `workflow-runs-pre` | Token | `ui-pre` | WorkflowRunsPanel.tsx |
+| `workflow-runs-artifacts` | Token | `ui-row` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stage-io` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
+| `workflow-runs-subheading` | Token | Bare `<h4>` | WorkflowRunsPanel.tsx |
+| `workflow-runs-subheading-sm` | Token | `ui-label ui-mt-0 ui-mb-1` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stage-details` | Token | `Card` + bare `<details>` + `<strong>` summary | WorkflowRunsPanel.tsx |
+| `social-btn` | Token | `Button` primitive (ghost, sm) + `ui-brand-<network>` | ReferralsTab.tsx |
+| `mini-social-btn` | Token | `Button` primitive (ghost, sm) + `ui-brand-<network> ui-brand-mini` | ReferralsTab.tsx |
+| `x-twitter` | Token | `ui-brand-x-twitter` | ReferralsTab.tsx |
+| `linkedin` | Token | `ui-brand-linkedin` | ReferralsTab.tsx |
+| `reddit` | Token | `ui-brand-reddit` | ReferralsTab.tsx |
+| `facebook` | Token | `ui-brand-facebook` | ReferralsTab.tsx |
+| `whatsapp` | Token | `ui-brand-whatsapp` | ReferralsTab.tsx |
+| `telegram` | Token | `ui-brand-telegram` | ReferralsTab.tsx |
+| `threads` | Token | `ui-brand-threads` | ReferralsTab.tsx |
+| `bluesky` | Token | `ui-brand-bluesky` | ReferralsTab.tsx |
+| `hackernews` | Token | `ui-brand-hackernews` | ReferralsTab.tsx |
+| `pinterest` | Token | `ui-brand-pinterest` | ReferralsTab.tsx |
+| `discord` | Token | `Button` primitive — the Discord action is already a Button; no `ui-brand-discord` class (no Discord share link exists) | ReferralsTab.tsx |
+| `did-modal-card` | Token | `Modal` primitive (default size md) | PaymentsPage.tsx |
 
 ### `strat` — 278 classes (54 Token, 224 deletion candidate)
 

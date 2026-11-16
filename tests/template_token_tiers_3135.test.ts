@@ -184,6 +184,7 @@ const REGISTERED_EXCEPTIONS: Record<string, string> = {
   "max-width:720px": "modal size-lg width",
   "max-width:920px": "modal size-xl width",
   "max-width:40rem": "layout measure",
+  "max-height:320px": "JSON pre clamp (.ui-pre, S-U4 #4820)",
   "min-width:12rem": "layout width",
   "grid-template-columns:12rem": "grid minmax floor (layout)",
   "grid-template-columns:160px": "autofit-xs minmax floor",

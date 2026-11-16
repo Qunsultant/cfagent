@@ -1,6 +1,6 @@
 import React from "react";
 import { adAccentPalette } from "../../designTokens";
-import { Badge, Card, Select, Button, TextInput, PageShell, FieldShell, Tabs, TabPanel, Notice } from "../../components/ui";
+import { Badge, Card, Select, Button, TextInput, PageSection, PageShell, FieldShell, Tabs, TabPanel, Notice } from "../../components/ui";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
 import type { AdItem } from "../types";
 
@@ -42,7 +42,8 @@ const isAdsTab = (v: unknown): v is AdsTabId => v === "offers" || v === "submit"
  * Sponsored Offers & Partner Marketplace as a shell page (issue #2161,
  * epic #2150 slice 2): URL-synced inner tabs (?view=) with visited
  * panels retained mounted-hidden. Per-ad accent colors are record data
- * and still flow through Card/Badge style props; all layout is tokens.
+ * and survive only as the submit form's accent Select options (S-U4
+ * #4820): no card, badge, or button renders a per-ad color anymore.
  */
 export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, handleAdClick, handleCreateAd, newAdColor, newAdCta, newAdSponsor, newAdTagline, newAdTitle, newAdUrl, savingAd, setNewAdColor, setNewAdCta, setNewAdSponsor, setNewAdTagline, setNewAdTitle, setNewAdUrl, param = "view"}: AdsTabProps) {
   const { activeTab, visitedTabs, handleTabChange } = useUrlSyncedTabs<AdsTabId>({
@@ -73,22 +74,13 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
           idBase="ads"
         />
         <TabPanel idBase="ads" tabId="offers" active={activeTab === "offers"} retain={visitedTabs.has("offers")}>
+          <PageSection title="Offers">
           <div className="ui-stat-grid">
             {ads.map((ad) => (
-              <Card
-                key={ad.id}
-                style={{
-                  borderColor: `${ad.accentColor}50`,
-                  boxShadow: `0 8px 32px ${ad.accentColor}15`,
-                }}
-              >
+              <Card key={ad.id}>
                 <div className="ui-stack">
                   <div className="ui-row">
-                    <Badge
-                      size="xs"
-                      uppercase
-                      style={{ background: `${ad.accentColor}25`, color: ad.accentColor }}
-                    >
+                    <Badge size="xs" uppercase>
                       {ad.badge}
                     </Badge>
                     <span className="ui-meta-sm">Sponsored by {ad.sponsor}</span>
@@ -105,7 +97,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
                   <div>
                     <Button
                       type="button"
-                      style={{ background: ad.accentColor }}
+                      variant="primary"
                       onClick={() => handleAdClick(ad)}
                     >
                       {ad.ctaText}
@@ -115,8 +107,10 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
               </Card>
             ))}
           </div>
+          </PageSection>
         </TabPanel>
         <TabPanel idBase="ads" tabId="submit" active={activeTab === "submit"} retain={visitedTabs.has("submit")}>
+          <PageSection>
           <Card>
             <div className="ui-stack">
               <div>
@@ -203,6 +197,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
               </form>
             </div>
           </Card>
+          </PageSection>
         </TabPanel>
       </PageShell>
     </div>

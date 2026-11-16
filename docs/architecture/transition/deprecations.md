@@ -6,6 +6,15 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-16 — S-U4 retires workflowRuns.css in place (#4820)
+
+- File: `src/client/workflowRuns.css` → retired in place (no rules remain)
+- Date: 2026-11-16
+- Reason: Issue #4820 (sub of #3695, S-U4) migrates `src/client/WorkflowRunsPanel.tsx` to primitives and tokens; the sheet's sole importer no longer imports it and no other consumer exists. The sheet stays on disk (no file deletion, gitops §22) with a deprecation header naming its successor.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities, incl. the new `ui-label`, `ui-mono`, `ui-pre`, `ui-scroll-x`, `ui-clip`, `ui-grow`) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: none — the sole importer was migrated in the same slice.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-15 — UX docs consolidation D0 retires three stale UX docs to docs/archive/ (#4632)
 
 - File: `docs/architecture/UX/design-system-01.md` → `docs/archive/design-system-01.md`
