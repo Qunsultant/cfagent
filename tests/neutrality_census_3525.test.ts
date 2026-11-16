@@ -756,6 +756,13 @@ function measure(): Map<string, number> {
  * user-facing string in that broker's adapter, dispositioned INTEGRATION like
  * the rest of the row: 1 raise (public/platform.ts public.com 12->13).
  * Measured totals move 1284/10139 -> 1284/10140 (re-based onto 1930e03e7).
+ * Baseline update (#4670, 2026-11-16; the Alpaca replace slice): the provider
+ * gains a real PATCH and the command module gains one trade tool, so the two
+ * Alpaca-owned files grow and the shared environment-resolver's identifier gets
+ * its own row. All dispositioned INTEGRATION: 2 raises (cancelOrderCommands.ts
+ * alpaca 5->9 — the replace tool's class, schema and audit; marketDataResearch.ts
+ * alpaca 114->120 — the PATCH implementation) and 1 new row
+ * (cancelOrderCommands.ts etrade 2 — the shared resolver's name, an identifier).
  * Baseline update (#4854, 2026-11-16): the scheduled firer's options
  * screens cut over to the strategy workflow host, gated. 2 raises:
  * the scheduledTasks.ts etrade row 90 -> 91, dispositioned
@@ -1482,7 +1489,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/goalScreenWorkflowSubmission.ts", "etrade", 1],
   ["src/services/goalScreenWorkflowSubmission.ts", "yahoo", 2],
   ["src/services/hedgeProposals.ts", "etrade", 10],
-  ["src/services/marketDataResearch.ts", "alpaca", 114],
+  ["src/services/marketDataResearch.ts", "alpaca", 120],
   ["src/services/marketDataResearch.ts", "etrade", 2],
   ["src/services/marketDataResearch.ts", "yahoo", 31],
   ["src/services/marketDataService.ts", "alpaca", 3],
@@ -2033,7 +2040,11 @@ const BASELINE: Array<[string, string, number]> = [
   // keeps the brand in exactly one field (the ledger's broker stamp).
   ["src/trading/cancelFilters.ts", "alpaca", 7],
   ["src/services/orderCancellation.ts", "alpaca", 2],
-  ["src/mcps/openaimp/cancelOrderCommands.ts", "alpaca", 5],
+  ["src/mcps/openaimp/cancelOrderCommands.ts", "alpaca", 9],
+  // #4670 INTEGRATION: `resolveTradeEnvironmentFromSettings` is the shared
+  // environment resolver the order tools all call; its name carries the brand as
+  // an identifier, so the row is baselined rather than the helper rewritten.
+  ["src/mcps/openaimp/cancelOrderCommands.ts", "etrade", 2],
   ["src/client/AlpacaCancelAllControl.tsx", "alpaca", 8],
   // #3866 INTEGRATION: the lifecycle table names the brokers it covers.
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "etrade", 1],

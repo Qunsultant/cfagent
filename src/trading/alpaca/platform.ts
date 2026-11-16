@@ -4,7 +4,7 @@
  * Implements ITradingPlatform for Alpaca Trading API v2
  */
 
-import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult, BrokerRemoteOrder, BrokerActivity, BrokerWatchlist, BrokerCancelOrderResult, OrderPriceSource } from "../../types";
+import type { Env, BrokerQuote, BrokerAccount, BrokerPosition, BrokerPositionLot, BrokerOrderDraft, BrokerOrderExecutionResult, BrokerStatus, BrokerOptionChain, BrokerOptionContract, BrokerOptionExpireDate, StockScreenerFilter, StockScreenResult, BrokerRemoteOrder, BrokerActivity, BrokerWatchlist, BrokerCancelOrderResult, BrokerReplaceOrderResult, ReplaceOrderParams, OrderPriceSource } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ITradingPlatform, OrderPreviewParams, PlaceOrderParams } from "../interfaces";
 import { BROKER_CATALOG, type TradingType } from "../brokerCatalog";
@@ -27,7 +27,7 @@ import {
 import { AlpacaMarketDataProvider } from "../../services/marketDataResearch";
 // Issue #4657: the registry's validator is the single statement of which order
 // types exist per broker and what each one requires.
-import { validateAdvancedOrder } from "../advancedOrders";
+import { validateAdvancedOrder, validateReplaceOrder } from "../advancedOrders";
 import type { NormalizedTimeInForce } from "../timeInForce";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 
@@ -953,6 +953,63 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
    * the broker's own answer (204 / 404 / 422) is reported verbatim and a
    * refusal is never rendered as a cancelled order.
    */
+  /**
+   * Issue #4670 (matrix gap 16) — the caller the replace validator never had.
+   *
+   * The order is READ first: its class decides whether a replace is legal (a
+   * bracket parent is refused rather than detached from its legs) and its
+   * status decides whether it is still replaceable at all. Only then is the
+   * PATCH sent, carrying exactly the fields the caller changed.
+   */
+  async replaceOrderRemote(params: ReplaceOrderParams): Promise<BrokerReplaceOrderResult> {
+    const orderId = String(params?.orderId ?? "").trim();
+    if (!orderId) {
+      return { success: false, orderId: "", message: "A replace needs the order id. Nothing was replaced." };
+    }
+    const current = await this.alpacaData.getOrder(orderId);
+    if (!current.success || !current.order) {
+      return {
+        success: false,
+        orderId,
+        httpStatus: current.httpStatus,
+        message: `${current.message ?? "The order could not be read"} Nothing was replaced.`,
+      };
+    }
+    const status = String(current.order.status ?? "").toLowerCase();
+    if (["filled", "canceled", "cancelled", "expired", "rejected", "replaced"].includes(status)) {
+      return {
+        success: false,
+        orderId,
+        status,
+        message: `Alpaca order ${orderId} is '${status}', so it can no longer be replaced. Nothing was replaced.`,
+      };
+    }
+    const verdict = validateReplaceOrder({
+      broker: "alpaca",
+      orderClass: String(current.order.order_class ?? "simple"),
+    });
+    if (!verdict.ok) {
+      return { success: false, orderId, code: verdict.code, message: `${verdict.message} Nothing was replaced.` };
+    }
+
+    const trail =
+      params.trailPrice !== undefined ? params.trailPrice : params.trailPercent !== undefined ? params.trailPercent : undefined;
+    const replaced = await this.alpacaData.replaceOrder(orderId, {
+      qty: Number.isFinite(params.quantity) && Number(params.quantity) > 0 ? Number(params.quantity) : undefined,
+      time_in_force: params.timeInForce,
+      limit_price: Number.isFinite(params.limitPrice) ? Number(params.limitPrice) : undefined,
+      stop_price: Number.isFinite(params.stopPrice) ? Number(params.stopPrice) : undefined,
+      trail,
+    });
+    return {
+      success: replaced.success,
+      orderId: replaced.orderId,
+      status: replaced.order?.status,
+      httpStatus: replaced.httpStatus,
+      message: replaced.message,
+    };
+  }
+
   async cancelOrderRemote(orderId: string | number): Promise<BrokerCancelOrderResult> {
     await this.ready();
     const res = await this.alpacaData.cancelOrder(orderId);

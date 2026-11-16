@@ -29,7 +29,14 @@ import {
   createSqlCancelPreviewStore,
   type CancelPreviewStore,
 } from "../../services/cancelPreviewStore";
-import { CANCEL_ORDER_CLASSES, resolveTradingLimits, type TradingLimitsSnapshot } from "../../trading";
+import {
+  CANCEL_ORDER_CLASSES,
+  TIME_IN_FORCE_VALUES,
+  TradingPlatformRegistry,
+  normalizeTimeInForce,
+  resolveTradingLimits,
+  type TradingLimitsSnapshot,
+} from "../../trading";
 import { createSettingsPort } from "../../data/createSettingsPorts";
 
 /**
@@ -110,6 +117,105 @@ export class AlpacaCancelOrderCommand implements IMcpToolCommand {
     if (receipt.success) {
       markDraftRowCancelledIfPresent(context.orm, receipt.target?.orderId ?? input.orderId);
     }
+    return receipt;
+  }
+}
+
+/**
+ * Issue #4670 (matrix gap 16) — `alpaca_replace_order`: change ONE open order in
+ * place, as an agent tool.
+ *
+ * The gap this closes is that replace existed only as a validator with no
+ * caller: a caller could cancel and re-place, which drops queue position and
+ * (for a bracket) detaches the held legs. This tool runs the SAME platform
+ * method the neutral route runs, so the two surfaces cannot disagree.
+ *
+ * The refusal is coded and factual, exactly like cancel: a compound parent
+ * (bracket/oco/oto) and an order that is no longer open answer with a named
+ * code rather than a silent no-op.
+ */
+export class AlpacaReplaceOrderCommand implements IMcpToolCommand<{
+  orderId: string;
+  quantity?: number;
+  limit_price?: number;
+  stop_price?: number;
+  time_in_force?: string;
+  trail_price?: number;
+  trail_percent?: number;
+}> {
+  readonly name = "alpaca_replace_order";
+  readonly description =
+    "Replace ONE open Alpaca order in place (PATCH /v2/orders/{id}): quantity, limit price, stop price, time-in-force or trail. Only the fields you state are sent, so an unstated term keeps its broker value. A bracket/OCO/OTO parent and an order that is no longer open are refused by name — nothing is cancelled and re-placed behind your back.";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      orderId: { type: "string", description: "The broker order id to replace" },
+      quantity: { type: "number", description: "New quantity (omit to keep)" },
+      limit_price: { type: "number", description: "New limit price (omit to keep)" },
+      stop_price: { type: "number", description: "New stop trigger (omit to keep)" },
+      time_in_force: {
+        type: "string",
+        enum: [...TIME_IN_FORCE_VALUES],
+        description: "New time-in-force (omit to keep)",
+      },
+      trail_price: { type: "number", description: "New trail distance in dollars (omit to keep)" },
+      trail_percent: { type: "number", description: "New trail distance in percent (omit to keep)" },
+    },
+    required: ["orderId"],
+  };
+
+  readonly zodSchema = z.object({
+    orderId: z.string().min(1).describe("The broker order id to replace"),
+    quantity: z.number().positive().optional(),
+    limit_price: z.number().positive().optional(),
+    stop_price: z.number().positive().optional(),
+    time_in_force: z.enum([...TIME_IN_FORCE_VALUES] as [string, ...string[]]).optional(),
+    trail_price: z.number().positive().optional(),
+    trail_percent: z.number().positive().optional(),
+  });
+
+  async execute(
+    input: {
+      orderId: string;
+      quantity?: number;
+      limit_price?: number;
+      stop_price?: number;
+      time_in_force?: string;
+      trail_price?: number;
+      trail_percent?: number;
+    },
+    context: McpToolContext,
+  ) {
+    const orderId = String(input?.orderId ?? "").trim();
+    if (!orderId) throw new Error("orderId is required");
+
+    // The tenant's STORED environment, never a per-call override — the same
+    // resolution the sibling order tools use.
+    const { resolveTradeEnvironmentFromSettings } = await import("../../agents/routes/brokerEnvironment");
+    const environment = resolveTradeEnvironmentFromSettings(context.readSettingRaw, context.env);
+    const platform = TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId, environment);
+    if (typeof platform.replaceOrderRemote !== "function") {
+      throw new Error("Alpaca does not provide order replacement on this platform instance.");
+    }
+
+    const receipt = await platform.replaceOrderRemote({
+      orderId,
+      quantity: input.quantity,
+      limitPrice: input.limit_price,
+      stopPrice: input.stop_price,
+      timeInForce: normalizeTimeInForce(input.time_in_force),
+      trailPrice: input.trail_price,
+      trailPercent: input.trail_percent,
+    });
+
+    context.audit?.(receipt.success ? "alpaca.order_replaced" : "alpaca.order_replace_refused", "trading", {
+      orderId: receipt.orderId,
+      status: receipt.status,
+      code: receipt.code,
+      environment,
+      message: receipt.message,
+    });
     return receipt;
   }
 }

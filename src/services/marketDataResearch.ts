@@ -2837,6 +2837,67 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   }
 
   /**
+   * Issue #4670 (matrix gap 16): Alpaca's replace is a real PATCH on the order
+   * (`PATCH /v2/orders/{id}`). Only the fields the caller states are sent, so an
+   * unstated term keeps its broker value instead of being reset — and a request
+   * with nothing to change is refused before the wire.
+   */
+  async replaceOrder(
+    orderId: string,
+    changes: { qty?: number; time_in_force?: string; limit_price?: number; stop_price?: number; trail?: number },
+  ): Promise<{ success: boolean; orderId: string; order?: any; message: string; httpStatus?: number }> {
+    const id = String(orderId ?? "").trim();
+    if (!id) return { success: false, orderId: "", message: "Alpaca replace needs an order id." };
+    const body: Record<string, unknown> = {};
+    if (changes.qty !== undefined) body.qty = String(changes.qty);
+    if (changes.time_in_force !== undefined) body.time_in_force = changes.time_in_force;
+    if (changes.limit_price !== undefined) body.limit_price = String(changes.limit_price);
+    if (changes.stop_price !== undefined) body.stop_price = String(changes.stop_price);
+    if (changes.trail !== undefined) body.trail = String(changes.trail);
+    if (Object.keys(body).length === 0) {
+      return {
+        success: false,
+        orderId: id,
+        message: "Alpaca replace needs at least one changed field (qty, time-in-force, limit, stop or trail). Nothing was sent.",
+      };
+    }
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        orderId: id,
+        message: "Alpaca Trading error: credentials are not configured, so no order was replaced.",
+      };
+    }
+
+    try {
+      const res = await this.throttledFetch(`${this.getTradingUrl()}/v2/orders/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { ...this.getHeaders(), "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as any;
+      if (res.ok && data?.id) {
+        return {
+          success: true,
+          orderId: String(data.id),
+          order: data,
+          message: `Alpaca order ${id} replaced.`,
+          httpStatus: res.status,
+        };
+      }
+      const detail = typeof data?.message === "string" ? data.message : `HTTP ${res.status}`;
+      return {
+        success: false,
+        orderId: id,
+        httpStatus: res.status,
+        message: `Alpaca did not replace order ${id}: ${detail}`,
+      };
+    } catch (err: any) {
+      return { success: false, orderId: id, message: `Alpaca replace failed: ${err?.message || String(err)}` };
+    }
+  }
+
+  /**
    * Real Alpaca Trading v2: Get Account Details
    */
   async getAccount(): Promise<{ success: boolean; account?: any; message?: string; httpStatus?: number }> {

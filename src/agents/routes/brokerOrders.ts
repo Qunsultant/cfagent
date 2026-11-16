@@ -499,6 +499,96 @@ export async function handleBrokerOrderRoutes(
     }
   }
 
+  // Issue #4670 (matrix gap 16): neutral replace. Same rule as cancel — the
+  // order belongs to the broker that took it (the tenant's selection), and a
+  // broker without the capability is refused by name rather than asked to
+  // modify someone else's order or to cancel-and-replace behind the caller.
+  if (path.endsWith("/broker/order/replace") && request.method === "POST") {
+    try {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const replaceOrderId = String(body.orderId ?? body.id ?? "").trim();
+      if (!replaceOrderId) {
+        return Response.json({ error: "orderId is required" }, { status: 400 });
+      }
+      const userLogin = request.headers.get("x-user-login");
+      if (!userLogin) return unauthenticatedResponse();
+
+      const quantity = body.quantity === undefined ? undefined : Number(body.quantity);
+      if (quantity !== undefined && (!Number.isFinite(quantity) || quantity <= 0)) {
+        return Response.json({ error: "quantity must be a positive number when supplied." }, { status: 400 });
+      }
+      const limitPrice = body.limitPrice === undefined ? undefined : Number(body.limitPrice);
+      if (limitPrice !== undefined && (!Number.isFinite(limitPrice) || limitPrice <= 0)) {
+        return Response.json({ error: "limitPrice must be a positive number when supplied." }, { status: 400 });
+      }
+      const stopPrice = body.stopPrice === undefined ? undefined : Number(body.stopPrice);
+      if (stopPrice !== undefined && (!Number.isFinite(stopPrice) || stopPrice <= 0)) {
+        return Response.json({ error: "stopPrice must be a positive number when supplied." }, { status: 400 });
+      }
+      // Issue #4670 reuses the canonical time-in-force vocabulary (#4656): an
+      // unknown token is a 400 here, never a silently dropped field.
+      const timeInForce = normalizeTimeInForce(body.timeInForce);
+      if (hasTimeInForce(body.timeInForce) && !timeInForce) {
+        return Response.json(
+          {
+            error: `Unsupported timeInForce: ${String(body.timeInForce)}. Supported values: ${TIME_IN_FORCE_VALUES.map((v) => v.toUpperCase()).join(", ")}.`,
+          },
+          { status: 400 },
+        );
+      }
+      const trailPrice = body.trailPrice === undefined ? undefined : Number(body.trailPrice);
+      const trailPercent = body.trailPercent === undefined ? undefined : Number(body.trailPercent);
+      if (
+        quantity === undefined &&
+        limitPrice === undefined &&
+        stopPrice === undefined &&
+        timeInForce === undefined &&
+        trailPrice === undefined &&
+        trailPercent === undefined
+      ) {
+        return Response.json(
+          { error: "A replace needs at least one change: quantity, limitPrice, stopPrice, timeInForce, trailPrice or trailPercent." },
+          { status: 400 },
+        );
+      }
+
+      const broker = await resolveTenantBroker(ctx.env);
+      const platform = brokerSupports(broker, "orderPlace")
+        ? TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv)
+        : null;
+      if (!platform || typeof platform.replaceOrderRemote !== "function") {
+        return Response.json(
+          {
+            code: "provider_unsupported",
+            broker,
+            message: `${broker} cannot replace an open order here; it was not cancelled and re-placed either.`,
+            retryable: false,
+          },
+          { status: 501 },
+        );
+      }
+
+      const receipt = await platform.replaceOrderRemote({
+        orderId: replaceOrderId,
+        quantity,
+        limitPrice,
+        stopPrice,
+        timeInForce,
+        trailPrice,
+        trailPercent,
+      });
+      return Response.json(
+        { ...receipt, timestamp: new Date().toISOString() },
+        { status: receipt.success ? 200 : 409 },
+      );
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to replace order" },
+        { status: 500 },
+      );
+    }
+  }
+
   // Issue #3390: neutral cancel. A remote order belongs to the broker that took
   // it, not to a stored draft, so the broker is the tenant's selection — and a
   // broker without the capability is refused by name, never asked to cancel

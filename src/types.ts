@@ -2252,6 +2252,31 @@ export interface BrokerCancelOrderResult {
   timestamp: string;
 }
 
+/**
+ * Issue #4670 (matrix gap 16): what a caller may change on one open order. Every
+ * field is optional — an unstated field keeps its broker value, and a request
+ * with nothing stated is refused rather than sent as a no-op PATCH.
+ */
+export interface ReplaceOrderParams {
+  orderId: string;
+  quantity?: number;
+  limitPrice?: number;
+  stopPrice?: number;
+  timeInForce?: "day" | "gtc" | "ioc" | "fok" | "opg" | "cls";
+  trailPrice?: number;
+  trailPercent?: number;
+}
+
+/** The broker's own answer to a replace: success only on a confirmed change. */
+export interface BrokerReplaceOrderResult {
+  success: boolean;
+  orderId: string;
+  message: string;
+  status?: string;
+  code?: string;
+  httpStatus?: number;
+}
+
 // --- Omnichannel Trading Agent Communication Channels (Email & Slack) ---
 
 export interface InboundEmailPayload {
