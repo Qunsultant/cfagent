@@ -852,7 +852,7 @@ export class ETradeRestClient {
             priceType: isStrategy ? etradePriceType(legs, priceType, params.strategyNetDebit || 0) : priceType,
             ...(limitPrice !== undefined ? { limitPrice } : {}),
             ...(stopPrice !== undefined ? { stopPrice } : {}),
-            orderTerm: params.orderTerm || "GOOD_FOR_DAY",
+            orderTerm: "GOOD_FOR_DAY",
             marketSession: "REGULAR",
             Instrument: isStrategy ? toETradeInstruments(legs) : [
               {
@@ -1246,7 +1246,7 @@ export class ETradeRestClient {
                 // Issue #4659 (matrix gap 7): the STOP/STOP_LIMIT trigger, so the
                 // placed order no longer depends on the preview session holding it.
                 ...(stopPrice ? { stopPrice } : {}),
-                orderTerm: params.orderTerm || "GOOD_FOR_DAY",
+                orderTerm: "GOOD_FOR_DAY",
                 marketSession: "REGULAR",
                 Instrument: isStrategy ? toETradeInstruments(legs) : [
                   {
@@ -1365,7 +1365,7 @@ export class ETradeRestClient {
               orderType: priceType as any,
               limitPrice,
               stopPrice: (params as any).stopPrice,
-              orderTerm: "GOOD_FOR_DAY",
+              orderTerm: params.orderTerm || "GOOD_FOR_DAY",
             });
 
             if (refreshedPreview?.previewId) {
@@ -1382,7 +1382,7 @@ export class ETradeRestClient {
                       allOrNone: false,
                       priceType,
                       ...(limitPrice ? { limitPrice } : {}),
-                      orderTerm: "GOOD_FOR_DAY",
+                      orderTerm: params.orderTerm || "GOOD_FOR_DAY",
                       marketSession: "REGULAR",
                       Instrument: [
                         {
@@ -3092,6 +3092,8 @@ export class ETradeRestClient {
       orderType?: string;
       limitPrice?: number;
       stopPrice?: number;
+      /** Issue #5001: the caller's term, defaulting to the broker's day default. */
+      orderTerm?: "GOOD_FOR_DAY" | "GOOD_UNTIL_CANCEL" | "IMMEDIATE_OR_CANCEL";
     }
   ): Promise<any> {
     const envConfig = this.getEnvConfig();
@@ -3119,7 +3121,7 @@ export class ETradeRestClient {
             priceType: params.orderType || "MARKET",
             ...(params.limitPrice ? { limitPrice: params.limitPrice } : {}),
             ...(params.stopPrice ? { stopPrice: params.stopPrice } : {}),
-            orderTerm: "GOOD_FOR_DAY",
+            orderTerm: params.orderTerm || "GOOD_FOR_DAY",
             marketSession: "REGULAR",
             Instrument: [
               {
@@ -3163,6 +3165,8 @@ export class ETradeRestClient {
       orderType?: string;
       limitPrice?: number;
       stopPrice?: number;
+      /** Issue #5001: the caller's term, defaulting to the broker's day default. */
+      orderTerm?: "GOOD_FOR_DAY" | "GOOD_UNTIL_CANCEL" | "IMMEDIATE_OR_CANCEL";
     }
   ): Promise<any> {
     const envConfig = this.getEnvConfig();
@@ -3190,7 +3194,7 @@ export class ETradeRestClient {
             priceType: params.orderType || "MARKET",
             ...(params.limitPrice ? { limitPrice: params.limitPrice } : {}),
             ...(params.stopPrice ? { stopPrice: params.stopPrice } : {}),
-            orderTerm: "GOOD_FOR_DAY",
+            orderTerm: params.orderTerm || "GOOD_FOR_DAY",
             marketSession: "REGULAR",
             Instrument: [
               {

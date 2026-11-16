@@ -145,8 +145,16 @@ describe("#3892 — replace never detaches a parent's legs", () => {
     expect(refused.message).toContain("detach");
   });
 
-  it("refuses replace on a broker without it", () => {
-    expect(validateReplaceOrder({ broker: "etrade", orderClass: "simple" })).toMatchObject({ ok: false, code: "replace_not_supported" });
+  it("allows replace on both brokers that document it, and still refuses a compound parent (#3892/#5001)", () => {
+    // Issue #5001 flipped E*TRADE to native (its change preview + change place),
+    // so the gate now opens there too; the parent rule is what stays.
+    for (const broker of ["alpaca", "etrade"] as const) {
+      expect(validateReplaceOrder({ broker, orderClass: "simple" }), broker).toMatchObject({ ok: true });
+      expect(validateReplaceOrder({ broker, orderClass: "bracket" }), broker).toMatchObject({
+        ok: false,
+        code: "replace_parent_unsupported",
+      });
+    }
   });
 });
 
