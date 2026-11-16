@@ -24,6 +24,9 @@
  * E*TRADE-only. The legacy /api/etrade/* routes are untouched.
  */
 import { orderCapabilitiesFor } from "../../config/orderCapabilities";
+// Issue #4654/#4656: one derivation of the draft's approved terms for both
+// execute routes.
+import { deriveOrderExecutionTerms } from "./orderExecutionTerms";
 import {
   TradingPlatformRegistry,
   ROUTED_BROKER_IDS,
@@ -402,20 +405,13 @@ export async function handleBrokerOrderRoutes(
       const action = existingRecord.action as any;
       const quantity = Number(existingRecord.quantity);
       const orderType = existingRecord.orderType || "MARKET";
-      // Issue #4654 (matrix gap 4): the draft's price is the limit for LIMIT
-      // **and STOP_LIMIT** (the old test dropped it for the latter), and the
-      // stored stop price is the trigger for STOP/STOP_LIMIT.
-      const pricedType = orderType === "LIMIT" || orderType === "STOP_LIMIT";
-      const limitPrice = pricedType ? existingRecord.price : undefined;
-      const stopPrice =
-        orderType === "STOP" || orderType === "STOP_LIMIT"
-          ? typeof existingRecord.stopPrice === "number"
-            ? existingRecord.stopPrice
-            : existingRecord.price
-          : undefined;
-      // Issue #4656 (matrix gap 5): the time-in-force the user approved, read
-      // from the draft (undefined on legacy rows → the broker default).
-      const timeInForce = normalizeTimeInForce(existingRecord.timeInForce);
+      // Issue #4654 / #4656: the draft's approved terms (limit for LIMIT and
+      // STOP_LIMIT, trigger for a stop type, the stored time-in-force) come from
+      // ONE derivation, shared with the legacy route.
+      const terms = deriveOrderExecutionTerms(existingRecord);
+      const limitPrice = terms.limitPrice;
+      const stopPrice = terms.stopPrice;
+      const timeInForce = terms.timeInForce;
       const parsedStrategy = parseStrategyOrder(existingRecord.previewNotes);
       const strategyOrder = parsedStrategy.optionLegs.length > 0 ? parsedStrategy : undefined;
 
