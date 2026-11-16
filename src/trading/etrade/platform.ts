@@ -84,6 +84,27 @@ export function nonLivePricingNotice(quoteStatus?: string): string {
   return `⚠ PRICED FROM A NON-LIVE QUOTE (${quoteStatus}): live E*TRADE quote unavailable — the estimated price uses static fallback data, not live market data. Verify the price before authorizing.`;
 }
 
+interface ETradeBracketDraftNotes {
+  kind: "bracket-draft-v1";
+  takeProfit?: { limitPrice?: number };
+  stopLoss?: { stopPrice?: number };
+}
+
+function parseBracketDraft(rawNotes: unknown): ETradeBracketDraftNotes | null {
+  if (typeof rawNotes !== "string" || !rawNotes.includes("bracket-draft-v1")) return null;
+  try {
+    const parsed = JSON.parse(rawNotes) as Partial<ETradeBracketDraftNotes> | null;
+    if (!parsed || parsed.kind !== "bracket-draft-v1") return null;
+    return {
+      kind: "bracket-draft-v1",
+      takeProfit: parsed.takeProfit,
+      stopLoss: parsed.stopLoss,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export class ETradeTradingPlatform implements ITradingPlatform {
   readonly platformId = "etrade" as const;
   readonly name = "E*TRADE by Morgan Stanley Brokerage";
@@ -776,15 +797,11 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     const proposerDid = record.proposerDid;
     const proofSignature = record.proofSignature;
 
-    // Issue #3839: an E*TRADE bracket preview is a DRAFT with computed
-    // legs; this client has no conditional-order placement, so a parent
-    // must never be placed alone under a bracket approval. Refuse honestly
-    // and leave the draft previewed; separate exit orders are the path.
-    if (decision === "approved" && typeof record.previewNotes === "string" && record.previewNotes.includes("bracket-draft-v1")) {
-      throw new Error(
-        `Order draft '${orderId}' is an E*TRADE bracket preview. This client has no native bracket placement, so placing the parent alone would leave the position unprotected. Nothing was submitted; place the parent and the two exits as separate approved orders.`,
-      );
-    }
+    // Issue #4667 (matrix gap 13): an E*TRADE bracket preview carries computed
+    // exit legs (`bracket-draft-v1`); placement submits the entry order first
+    // and then places separate take-profit / stop-loss exit orders via
+    // `placeBracketExits` (the catalog's stated model).
+    const bracketDraft = parseBracketDraft(record.previewNotes);
 
     if (decision === "rejected") {
       if (this.orm?.trades) {
@@ -862,6 +879,43 @@ export class ETradeTradingPlatform implements ITradingPlatform {
         authorizerDid,
         updatedAt: now,
       });
+    }
+
+    if (
+      bracketDraft &&
+      result.success &&
+      (result.status === "executed" || result.status === "submitted")
+    ) {
+      const exits = await this.client.placeBracketExits({
+        orderId,
+        symbol,
+        entryAction: action,
+        quantity,
+        takeProfitLimitPrice: bracketDraft.takeProfit?.limitPrice,
+        stopLossStopPrice: bracketDraft.stopLoss?.stopPrice,
+        userLogin: authorizerDid,
+      });
+      const exitNotes: string[] = [];
+      if (exits.takeProfitResult) {
+        exitNotes.push(
+          exits.takeProfitResult.success
+            ? `TP exit placed (${exits.takeProfitResult.brokerOrderRef || exits.takeProfitResult.executionId || "ok"})`
+            : `TP exit failed (${exits.takeProfitResult.message})`,
+        );
+      }
+      if (exits.stopLossResult) {
+        exitNotes.push(
+          exits.stopLossResult.success
+            ? `SL exit placed (${exits.stopLossResult.brokerOrderRef || exits.stopLossResult.executionId || "ok"})`
+            : `SL exit failed (${exits.stopLossResult.message})`,
+        );
+      }
+      if (exitNotes.length > 0) {
+        return {
+          ...result,
+          message: `${result.message} Bracket exits: ${exitNotes.join("; ")}.`,
+        };
+      }
     }
 
     return result;
