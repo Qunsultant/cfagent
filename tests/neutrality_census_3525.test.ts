@@ -2200,6 +2200,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "alpaca", 24],
   ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "yahoo", 19],
   ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "nasdaq", 3],
+  // #4813 (post-merge red on #4809): the #4770 operations guide
+  // names the providers that serve each feed/door. It is a dated
+  // HISTORICAL record of the system as surveyed (2026-11-16) —
+  // naming the serving source is the document's job, as in #4802.
+  // Neutralizing the names would make the guide unusable.
   ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "etrade", 2],
   ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "alpaca", 1],
   ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "yahoo", 2],
