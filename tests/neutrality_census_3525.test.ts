@@ -2090,6 +2090,31 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/958-screening-consolidation-survey.md", "yahoo", 3],
   ["docs/architecture/survey/958-screening-consolidation-survey.md", "nasdaq", 1],
   ["docs/architecture/survey/982-screening-s2-verify-first-survey.md", "etrade", 6],
+  // Docs that landed without their census rows while main was already red
+  // (#4770 operations guide, #4800/#4811 CISO survey copies, plus the #4793
+  // survey move): HISTORICAL dated records and INTEGRATION subject docs — the
+  // same disposition the neighbouring docs/** rows carry. Added by the #4654
+  // lane as the §10 / §18.2 stop-the-line fix: main cannot go green without
+  // them, and no PR can merge while main is red.
+  ["docs/architecture/survey/2012-2405-dedup-audit-survey.md", "etrade", 1],
+  ["docs/architecture/survey/2373-single-payment-path-design-note.md", "etrade", 8],
+  ["docs/architecture/survey/2373-single-payment-path-design-note.md", "yahoo", 1],
+  ["docs/architecture/survey/2373-single-payment-path-design-note.md", "nasdaq", 1],
+  ["docs/architecture/survey/3551-options-onboarding-survey.md", "etrade", 21],
+  ["docs/architecture/survey/3551-options-onboarding-survey.md", "alpaca", 3],
+  ["docs/architecture/survey/3551-options-onboarding-survey.md", "yahoo", 3],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey-correction.md", "public.com", 2],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey-correction.md", "alpaca", 2],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey-correction.md", "yahoo", 1],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "etrade", 16],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "public.com", 5],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "alpaca", 24],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "yahoo", 19],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "nasdaq", 3],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "etrade", 2],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "alpaca", 1],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "yahoo", 2],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "nasdaq", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
