@@ -152,6 +152,8 @@ Every issue carries its creating agent's name as a hashtag in the `## Agent` fie
 
 The issue templates live in `.github/ISSUE_TEMPLATE/` on the default branch — GitHub reads issue templates only from that directory, so a template anywhere else never surfaces in the New Issue chooser. Every template carries a per-doc conformance checklist (platforms.md, ADD.md, standards.md, gitops.md, tech-standards.md, anti-drift.md, ux-architecture.md) and a required before/after journey-impact statement; an issue with an unanswered checklist line or a missing journey-impact statement is incomplete.
 
+Task issues also carry a Full-stack coverage section (issue #4914): an architecture-first mapping table (one row per layer — 15-factors, full-stack areas, platforms enabled), a domain declaration, and a multi-dimensional enablement checklist, with one sub-issue per full-stack area; the tables live in `.github/ISSUE_TEMPLATE/task.md`.
+
 ```markdown
 ## Agent
 #<agent-hashtag>
