@@ -690,6 +690,17 @@ function measure(): Map<string, number> {
  * 145/732 -> 159/783 (the 732 had drifted by one, and the #4792
  * rows landed without restating the marker; the true pre-change
  * span on this base is 149/745).
+ * Baseline update (#3121, 2026-11-16): the two #3121 scheduling surveys
+ * file under docs/architecture/survey/ as verbatim dated snapshots
+ * (2026-11-11) — the #3122 S0 dedup report and the #3121 Phase 2 survey.
+ * The survey texts name the providers they surveyed (the E*TRADE
+ * token-renewal identifiers the surveyed code names, a quoted code
+ * comment, and the Yahoo-gapfill worktree name); neutralizing those
+ * mentions would falsify the evidence record, so all rows are
+ * dispositioned HISTORICAL: 3 new rows (3122-s0-dedup-report.md etrade 6;
+ * phase2-survey.md etrade 1 / yahoo 1). The HISTORICAL marker is restated
+ * 159/783 -> 162/791. Measured totals move 1280/10061 -> 1283/10069
+ * (re-based onto 105b9b96).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1673,7 +1684,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/agents/copilot-broker-capability.md", "yahoo", 1],
   ["src/agents/orchestrator.ts", "alpaca", 1],
   ["src/config/asyncJobModes.ts", "alpaca", 1],
-  // ---- HISTORICAL (159 rows / 783 lines) ----
+  // ---- HISTORICAL (162 rows / 791 lines) ----
   ["docs/Assessment.md", "etrade", 6],
   ["docs/Assessment.md", "yahoo", 2],
   ["docs/agents/options-report-inventory.md", "etrade", 4],
@@ -1744,6 +1755,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/native-payments-survey-design.md", "etrade", 1],
   ["docs/architecture/survey/search-hub-survey-design.md", "etrade", 8],
   ["docs/architecture/survey/slice4-label-survey.md", "etrade", 4],
+  // #3121 HISTORICAL: dated survey snapshots naming the providers surveyed.
+  ["docs/architecture/survey/3122-s0-dedup-report.md", "etrade", 6],
+  ["docs/architecture/survey/phase2-survey.md", "etrade", 1],
+  ["docs/architecture/survey/phase2-survey.md", "yahoo", 1],
   ["docs/compliance/facts-n-findings-01.md", "alpaca", 2],
   ["docs/compliance/facts-n-findings-01.md", "etrade", 5],
   ["docs/compliance/facts-n-findings-01.md", "public.com", 1],
