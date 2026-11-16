@@ -4,7 +4,7 @@
 - Date: 2026-11-16
 - Deciders: #clo-arsi (implementation); #CAIO-quns (filer, #4935)
 - Issue: #4935
-- Implementing PR: (to be filled when the PR is created)
+- Implementing PR: Qunsultant/cfagent#4966
 - Extends: ADR 0022 (D-C transaction aspect, D-F2 publication, D-G R9 restatement), ADR 0020 (DO/D1/R2 topology), ADR 0002 (R9)
 - Related: #2288 (transaction aspect), #1760 (distinct race), #4930 (D1 retry/timeout policy — adjacent, not duplicated), #4933 (query observability — adjacent), #1976 (closed), #4116 (run-ledger projection), #1651/#1676/#1688 (chain/schedule, shard-job, audit-report projections), #1742 (telemetry)
 
