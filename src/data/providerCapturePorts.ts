@@ -200,6 +200,24 @@ export interface ResolvedRunContext {
 }
 
 /**
+ * Issue #4617: Ensure every new capture row carries a non-null user leg
+ * (explicit userLogin -> tenantId for tenant-scoped jobs -> "system" for
+ * background/unattributed collection runs).
+ */
+export function resolveCaptureUserLogin(
+  userLogin?: string | null,
+  tenantId?: string | null,
+): string {
+  if (typeof userLogin === "string" && userLogin.trim().length > 0) {
+    return userLogin.trim();
+  }
+  if (typeof tenantId === "string" && tenantId.trim().length > 0 && tenantId.trim() !== "default") {
+    return tenantId.trim();
+  }
+  return "system";
+}
+
+/**
  * Resolve a caller's optional run context to the concrete
  * attribution every capture carries: a missing runId becomes a
  * generated collection-run id, a missing tenant becomes
@@ -397,7 +415,7 @@ export async function recordCaptureWithStore(
     requestParams: parseParams(canonicalJson(input.requestParams ?? {})),
     runId: input.runId,
     tenantId: input.tenantId,
-    userLogin: input.userLogin ?? null,
+    userLogin: resolveCaptureUserLogin(input.userLogin, input.tenantId),
     fetchedAt,
     retentionClass: input.retentionClass ?? DEFAULT_CAPTURE_RETENTION_CLASS,
     createdAt: fetchedAt,
@@ -511,7 +529,7 @@ export async function recordFetchFailureWithStore(
     requestParams: parseParams(canonicalJson(input.requestParams ?? {})),
     runId: input.runId,
     tenantId: input.tenantId,
-    userLogin: input.userLogin ?? null,
+    userLogin: resolveCaptureUserLogin(input.userLogin, input.tenantId),
     fetchedAt,
     status: "fetch_failed",
     rawKind: null,
@@ -564,7 +582,7 @@ export function createFetchOutcomeRecorderWithStore(
         requestParams: meta.requestParams ?? {},
         runId: meta.runId,
         tenantId: meta.tenantId,
-        userLogin: meta.userLogin ?? null,
+        userLogin: resolveCaptureUserLogin(meta.userLogin, meta.tenantId),
         kind: failure.kind,
         message: failure.message,
       });
