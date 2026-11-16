@@ -771,6 +771,11 @@ function measure(): Map<string, number> {
  * other row there: 2 raises (advancedOrders.ts etrade 28->29 — the `replace`
  * entry's notes now state both brokers' flows; etrade/platform.ts etrade
  * 83->94 — the change preview/place method and its refusals).
+ * Baseline update (#5002, 2026-11-16; Public replace): that broker's adapter
+ * gains the replace method and its refusals, whose user-facing strings name the
+ * broker — dispositioned INTEGRATION like the rest of the row: 1 raise
+ * (public/platform.ts public.com 13->19).
+
  * Baseline update (#4854, 2026-11-16): the scheduled firer's options
  * screens cut over to the strategy workflow host, gated. 2 raises:
  * the scheduledTasks.ts etrade row 90 -> 91, dispositioned
@@ -2101,7 +2106,7 @@ const BASELINE: Array<[string, string, number]> = [
   // Issue #4656: the TIF refusal names the broker in its user-facing message
   // (PUBLIC_TIME_IN_FORCE_UNVERIFIED), the same INTEGRATION growth the #3990
   // rows above already account for.
-  ["src/trading/public/platform.ts", "public.com", 13],
+  ["src/trading/public/platform.ts", "public.com", 19],
   ["src/trading/public/platform.ts", "alpaca", 2],
   ["src/trading/screenerPipeline.ts", "public.com", 3],
   ["docs/architecture/agentic/mcp-server-inventory.md", "public.com", 2],

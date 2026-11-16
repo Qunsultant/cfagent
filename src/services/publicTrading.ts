@@ -159,6 +159,35 @@ export function publicSingleLegArgs(params: {
   return spec;
 }
 
+/**
+ * Issue #5002 (matrix gap 16): Public's replace body, in the documented shape —
+ * `orderId` is the order being replaced, `requestId` is a NEW id for the
+ * replacement, and the changed terms travel with the order type and expiration.
+ * Only the fields the caller changed are stated.
+ */
+export function publicReplaceArgs(params: {
+  orderId: string;
+  requestId: string;
+  orderType?: string;
+  timeInForce?: string;
+  quantity?: number;
+  limitPrice?: number;
+  stopPrice?: number;
+}): SemanticSpec {
+  const spec: SemanticSpec = {
+    order_id: { names: ["orderId", "order_id"], value: params.orderId },
+    request_id: { names: ["requestId", "request_id"], value: params.requestId },
+  };
+  if (params.orderType !== undefined) spec.order_type = { names: ["orderType", "order_type"], value: params.orderType };
+  if (params.timeInForce !== undefined) {
+    spec.expiration = { names: ["expiration"], value: { timeInForce: params.timeInForce.toUpperCase() } };
+  }
+  if (params.quantity !== undefined) spec.quantity = { names: ["quantity", "qty"], value: params.quantity };
+  if (params.limitPrice !== undefined) spec.limit_price = { names: ["limitPrice", "limit_price"], value: params.limitPrice };
+  if (params.stopPrice !== undefined) spec.stop_price = { names: ["stopPrice", "stop_price"], value: params.stopPrice };
+  return spec;
+}
+
 /** The semantic arguments for a multi-leg place/preflight. */
 export function publicMultilegArgs(params: {
   legs: TradingOrderLeg[];
