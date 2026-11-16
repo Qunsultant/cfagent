@@ -743,6 +743,14 @@ function measure(): Map<string, number> {
  * refusal and their doc comments; etrade/client.ts etrade 329->330 — the
  * predicate that keeps a LIMIT_ON_* order priced). Measured totals move
  * 1283/10127 -> 1283/10138 (re-based onto 5dbede526).
+ * Baseline update (#4935, 2026-11-16): ADR 0033 (cross-store consistency
+ * contract) files under docs/architecture/adr/ with its audit ledger. The
+ * ledger inventories the existing dual-write/projection paths by module
+ * file name, so it names the broker screener-run publication module
+ * verbatim (etradeBrokerPublish.ts); rewording the file name would falsify
+ * the inventory, so the one row is dispositioned INTEGRATION (naming the
+ * provider is the inventory's job — the #4792 survey precedent). The
+ * INTEGRATION marker is restated 681/6528 -> 682/6529.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -950,7 +958,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (681 rows / 6528 lines) ----
+  // ---- INTEGRATION (682 rows / 6529 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -958,6 +966,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "yahoo", 5],
   ["docs/architecture/adr/0019-enrichment-yahoo-alpaca.md", "alpaca", 17],
   ["docs/architecture/adr/0019-enrichment-yahoo-alpaca.md", "yahoo", 18],
+  // #4935: ADR 0033's audit ledger names the broker publication module
+  // it inventories (INTEGRATION — naming the provider is the
+  // inventory's job).
+  ["docs/architecture/adr/0033-cross-store-consistency-contract.md", "etrade", 1],
   ["docs/architecture/agentic/agent-capabilities.md", "alpaca", 1],
   ["docs/architecture/agentic/job-system.md", "alpaca", 6],
   ["docs/architecture/agentic/job-system.md", "nasdaq", 2],
@@ -2016,13 +2028,13 @@ const BASELINE: Array<[string, string, number]> = [
   // #3892 INTEGRATION: the registry names the providers whose support it
   // declares (native/emulated/none is a per-provider fact), and its
   // trailing-stop notes quote the provider's field names.
-  ["src/trading/advancedOrders.ts", "alpaca", 29],
+  ["src/trading/advancedOrders.ts", "alpaca", 28],
   // #3892 INTEGRATION: the introspection payload is per provider, so the
   // tool names the providers it enumerates.
   ["src/mcps/openaimp/tradingLimitCommands.ts", "alpaca", 1],
   // #3892 INTEGRATION: the registry declares per-broker support, so the
   // E*TRADE rows are the `none`/`emulated` facts a caller is refused by name.
-  ["src/trading/advancedOrders.ts", "etrade", 28],
+  ["src/trading/advancedOrders.ts", "etrade", 27],
   // #3892 INTEGRATION: the introspection payload names the provider it
   // enumerates, alongside the other broker's.
   ["src/mcps/openaimp/tradingLimitCommands.ts", "etrade", 1],
@@ -2123,9 +2135,9 @@ const BASELINE: Array<[string, string, number]> = [
   // data providers it compares by definition; the table is the artefact,
   // not platform framing (same disposition as the broker-parity-matrix
   // rows, #4038/#4039). Measured 2026-11-15 on the placed file.
-  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 83],
+  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 80],
   ["docs/architecture/business/brokerage-data-matrix.md", "public.com", 14],
-  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 63],
+  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 60],
   ["docs/architecture/business/brokerage-data-matrix.md", "schwab", 3],
   ["docs/architecture/business/brokerage-data-matrix.md", "fidelity", 2],
   ["docs/architecture/business/brokerage-data-matrix.md", "robinhood", 1],

@@ -105,7 +105,25 @@ aspect (`withTransaction`, `src/aspects/transactionAspect.ts`) or the
 store's atomic primitive — D1 `batch()`, DO `storage.transaction()`. The
 pin scans `src/`, excludes comment mentions and the DO
 `storage.transaction` API, and fails CI with a message naming the correct
-primitive.
+primitive. **Cross-store contract (ADR 0033, #4935).** A unit spans
+exactly one backend, so a DO write plus a D1 projection write can
+never be atomic: the dual-write discipline is DO first, then
+projection (the hook re-reads the stored row, never projects an
+in-memory guess), idempotency atomic at the statement level
+(`ON CONFLICT` / stale-guard) under concurrent redelivery, three
+declared lag classes (synchronous ORM carrier, asynchronous queue
+carrier with retry-then-DLQ, operator sweep/reconcile), and
+read-your-writes through the authoritative store unless the carrier
+is synchronous — d1-only mode is enterable only with the ORM carrier.
+A failed publication is recorded with a stable catalog code, never
+dropped silently. **Pin (#4935).**
+`tests/cross_store_consistency_pin_4935.test.ts` (in the `test:pins`
+suite, run by CI) enforces the pin-able rules: the dual-write
+call-site census, the DO-first ordering, the never-throw discipline,
+the reconcile operator-only rule, and the idempotency mechanism —
+with the audit findings F-2/F-3/F-4/F-5 allowlisted by finding number
+until their follow-up fixes (#4962, #4963, #4964, #4965) land and
+remove the exceptions.
 
 ## Q4 — Aspect composition is a registered runner, resolved at call time
 
