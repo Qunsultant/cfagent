@@ -246,6 +246,7 @@ export function BillingServicingPanel() {
         tabs={BILLING_TAB_OPTIONS}
         value={activeTab}
         onChange={handleTabChange}
+        className="ui-billing-tabs-sticky"
       />
 
       {loading && <p>Loading billing view</p>}
