@@ -143,6 +143,8 @@ export interface ScheduledReportInput {
   title: string;
   /** Producer label: "screener" | "iv_collection" | "retention" | ... */
   source: string;
+  /** Issue #4616: data provider that served the underlying market/screen data. */
+  servingProviderId?: string;
   /** One-paragraph summary for snippet display. */
   summary: string;
   /** Full report payload (JSON-serializable). */
@@ -174,11 +176,38 @@ export function ensureScheduledReportsTable(sql: SqlStorage): void {
   storePorts(sql).write.ensureSchema();
 }
 
+function servingProviderFromBody(body: unknown): string | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const rec = body as Record<string, unknown>;
+  for (const key of ["servingProviderId", "dataProviderId", "providerId", "provider"]) {
+    const candidate = rec[key];
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
 /** Shape a report input into a ScheduledReportRecord (id assigned). */
-export function toScheduledReportRecord(input: ScheduledReportInput): ScheduledReportRecord {
+export function toScheduledReportRecord(
+  input: ScheduledReportInput,
+): ScheduledReportRecord & { servingProviderId?: string } {
+  const explicitServingProvider =
+    (typeof input.servingProviderId === "string" && input.servingProviderId.trim().length > 0
+      ? input.servingProviderId.trim()
+      : undefined) ?? servingProviderFromBody(input.body);
+  const servingProviderId = explicitServingProvider ?? input.source;
+  const rawBody = input.body ?? {};
+  const stampedBody =
+    explicitServingProvider &&
+    rawBody &&
+    typeof rawBody === "object" &&
+    !Array.isArray(rawBody)
+      ? { ...(rawBody as Record<string, unknown>), servingProviderId: explicitServingProvider }
+      : rawBody;
   let body = "{}";
   try {
-    body = JSON.stringify(input.body ?? {});
+    body = JSON.stringify(stampedBody);
   } catch {
     body = "{}";
   }
@@ -189,6 +218,7 @@ export function toScheduledReportRecord(input: ScheduledReportInput): ScheduledR
     id: crypto.randomUUID(),
     runId: input.runId,
     generationId: input.generationId,
+    servingProviderId,
     title: input.title,
     source: input.source,
     summary: input.summary,
@@ -243,6 +273,28 @@ export interface CanonicalReportFanoutOutcome {
   aiSearch: FanoutIndexStatus;
   /** The AI Search executor's stable code when that leg did not index. */
   aiSearchCode?: string;
+}
+
+/**
+ * Issue #4616: read the serving data provider id from a stored canonical report
+ * body JSON. Returns null for legacy rows that predate this field (never
+ * invents or guesses a backfill).
+ */
+export function readReportServingProvider(bodyJson: string | null | undefined): string | null {
+  if (!bodyJson) return null;
+  try {
+    const parsed = JSON.parse(bodyJson) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    for (const key of ["servingProviderId", "dataProviderId", "providerId", "provider"]) {
+      const v = parsed[key];
+      if (typeof v === "string" && v.trim().length > 0) {
+        return v.trim();
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function fanoutCodeFor(
@@ -489,7 +541,7 @@ function reportOwnerOf(input: ScheduledReportInput): string {
  */
 function insertScheduledReportRow(
   sql: SqlStorage,
-  rec: ScheduledReportRecord,
+  rec: ScheduledReportRecord & { servingProviderId?: string },
   generationId: string | null,
   owner: string,
   bodyR2Key: string | null,
