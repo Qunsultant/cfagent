@@ -25,6 +25,8 @@ import type {
   BrokerOptionChain,
   BrokerOptionExpireDate,
   BrokerCancelOrderResult,
+  BrokerReplaceOrderResult,
+  ReplaceOrderParams,
   OrderPriceSource,
 } from "../types";
 import type { BrokerId } from "./brokerCatalog";
@@ -193,6 +195,12 @@ export interface ITradingPlatform {
    * naming the broker instead of offering a control that does nothing.
    */
   cancelOrderRemote?(orderId: string | number, accountKey?: string): Promise<BrokerCancelOrderResult>;
+  /**
+   * Issue #4670 (matrix gap 16): replace/modify an OPEN order in place. A broker
+   * without this refuses through the order-type registry (`replace`), never by
+   * cancelling and re-placing behind the caller's back.
+   */
+  replaceOrderRemote?(params: ReplaceOrderParams): Promise<BrokerReplaceOrderResult>;
   /**
    * Options data reads (issue #291 T5b). Optional: platforms without an
    * options data plane omit them and callers get provider_unsupported.

@@ -848,7 +848,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     status: "live",
     // Issue #3884: the per-ticker scope rides the same engine and family.
     // Issue #3885: the whole-book scope, behind its preview token and cap.
-    commands: ["alpaca_cancel_order", "alpaca_cancel_ticker", "alpaca_cancel_all"],
+    commands: ["alpaca_cancel_order", "alpaca_cancel_ticker", "alpaca_cancel_all", "alpaca_replace_order"],
     commandSources: [{ file: "src/mcps/openaimp/cancelOrderCommands.ts", kind: "readonly-name" }],
   },
   {

@@ -85,6 +85,7 @@ import {
 import {
   AlpacaCancelAllCommand,
   AlpacaCancelOrderCommand,
+  AlpacaReplaceOrderCommand,
   AlpacaCancelTickerCommand,
 } from "./cancelOrderCommands";
 import {
@@ -1808,6 +1809,8 @@ export class McpToolFactory {
     // Issue #3883: cancelling one order is an agent capability, not a
     // route only the UI could reach.
     this.registerTool(new AlpacaCancelOrderCommand());
+    // Issue #4670 (matrix gap 16): the replace validator's first caller.
+    this.registerTool(new AlpacaReplaceOrderCommand());
     // Issue #3884/#3886: every open order for one ticker, with the shared
     // class/side/ladder filter.
     this.registerTool(new AlpacaCancelTickerCommand());
