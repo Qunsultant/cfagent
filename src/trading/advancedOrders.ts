@@ -276,11 +276,12 @@ const ADVANCED: AdvancedOrderType[] = [
   {
     id: "replace",
     label: "Replace / modify",
-    broker: { alpaca: "native", etrade: "none" },
+    broker: { alpaca: "native", etrade: "native" },
     requires: ["orderId"],
     excludes: [],
     refusalCode: "replace_not_supported",
-    notes: "PATCH /v2/orders/{id} on Alpaca; a compound parent is refused rather than detached from its legs.",
+    notes:
+      "Alpaca PATCHes the order in place; E*TRADE runs its documented change preview + change place, which cancels the original and returns a NEW order id (issue #5001). A compound parent is refused on both rather than detached from its legs.",
   },
 ];
 

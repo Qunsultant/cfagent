@@ -766,6 +766,11 @@ function measure(): Map<string, number> {
  * alpaca 5->9 — the replace tool's class, schema and audit; marketDataResearch.ts
  * alpaca 114->120 — the PATCH implementation) and 1 new row
  * (cancelOrderCommands.ts etrade 2 — the shared resolver's name, an identifier).
+ * Baseline update (#5001, 2026-11-16; E*TRADE replace): the broker's change
+ * flow gains its caller, in that broker's own files — INTEGRATION, like every
+ * other row there: 2 raises (advancedOrders.ts etrade 28->29 — the `replace`
+ * entry's notes now state both brokers' flows; etrade/platform.ts etrade
+ * 83->94 — the change preview/place method and its refusals).
  * Baseline update (#4854, 2026-11-16): the scheduled firer's options
  * screens cut over to the strategy workflow host, gated. 2 raises:
  * the scheduledTasks.ts etrade row 90 -> 91, dispositioned
@@ -1617,7 +1622,7 @@ const BASELINE: Array<[string, string, number]> = [
   // Issue #4656: the adapter names its own time-in-force mapper (etradeOrderTerm)
   // — a code identifier in the broker's own adapter, the disposition this section
   // already records for per-broker execution entries.
-  ["src/trading/etrade/platform.ts", "etrade", 83],
+  ["src/trading/etrade/platform.ts", "etrade", 94],
   ["src/trading/etrade/quoteConfig.ts", "etrade", 2],
   ["src/trading/etrade/quoteTrace.ts", "etrade", 1],
   ["src/trading/factorGrades.ts", "etrade", 5],
@@ -2064,7 +2069,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/tradingLimitCommands.ts", "alpaca", 1],
   // #3892 INTEGRATION: the registry declares per-broker support, so the
   // E*TRADE rows are the `none`/`emulated` facts a caller is refused by name.
-  ["src/trading/advancedOrders.ts", "etrade", 28],
+  ["src/trading/advancedOrders.ts", "etrade", 29],
   // #3892 INTEGRATION: the introspection payload names the provider it
   // enumerates, alongside the other broker's.
   ["src/mcps/openaimp/tradingLimitCommands.ts", "etrade", 1],

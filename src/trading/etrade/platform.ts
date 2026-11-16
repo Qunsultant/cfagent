@@ -7,7 +7,7 @@
  * - Human-in-the-Loop (HITL) Execution Safety with W3C Agent DID Attestations.
  */
 
-import type { Env, ETradeQuote, ETradeAccount, ETradePosition, ETradePositionLot, ETradeOrderDraft, ETradeOrderExecutionResult, ETradeBrokerStatus, StockScreenerFilter, StockScreenResult, ETradeOptionChain, ETradeOptionExpireDate, BrokerCancelOrderResult, BrokerActivity, BrokerAlert, BrokerRemoteOrder, BrokerWatchlist } from "../../types";
+import type { Env, ETradeQuote, ETradeAccount, ETradePosition, ETradePositionLot, ETradeOrderDraft, ETradeOrderExecutionResult, ETradeBrokerStatus, StockScreenerFilter, StockScreenResult, ETradeOptionChain, ETradeOptionExpireDate, BrokerCancelOrderResult, BrokerReplaceOrderResult, ReplaceOrderParams, BrokerActivity, BrokerAlert, BrokerRemoteOrder, BrokerWatchlist } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import type { ExpectedTradeTerms, ITradingPlatform, OrderPreviewParams } from "../interfaces";
 import { etradeOrderKind, validateTradingOrderLegs } from "./optionOrders";
@@ -31,6 +31,7 @@ import { getETradeAuthStatus, etradeIdentityFromLogin } from "../../security/etr
 import { parseStrategyOrder } from "../../agents/routes/orderPayloadHash";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 import { isAuctionTimeInForce, type NormalizedTimeInForce } from "../timeInForce";
+import { validateReplaceOrder } from "../advancedOrders";
 import { computeBracketExits } from "../bracketPercent";
 
 /**
@@ -864,6 +865,123 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     }
 
     return result;
+  }
+
+  /**
+   * Issue #5001 (matrix gap 16) — E*TRADE's change order.
+   *
+   * The broker's model is a two-step replace: a change PREVIEW, then a change
+   * PLACE that carries the preview id. The broker cancels the original and
+   * assigns a NEW order id, so the receipt names the new id and says so — it
+   * never pretends the same order changed in place.
+   *
+   * The order is read first: a status that is no longer open is refused by
+   * name, and the registry's replace gate runs before any broker call.
+   */
+  async replaceOrderRemote(params: ReplaceOrderParams): Promise<BrokerReplaceOrderResult> {
+    const orderId = String(params?.orderId ?? "").trim();
+    if (!orderId) {
+      return { success: false, orderId: "", message: "A replace needs the order id. Nothing was replaced." };
+    }
+
+    const current: any = await this.client.fetchOrderDetails(undefined, orderId).catch(() => null);
+    if (!current) {
+      const lastError = typeof this.client.getLastError === "function" ? this.client.getLastError() : undefined;
+      return {
+        success: false,
+        orderId,
+        message: `${lastError ?? `E*TRADE did not return order ${orderId}.`} Nothing was replaced.`,
+      };
+    }
+    const status = String(current.status ?? "").toUpperCase();
+    if (status !== "OPEN" && status !== "INDIVIDUAL_FILLS") {
+      return {
+        success: false,
+        orderId,
+        status,
+        message: `E*TRADE order ${orderId} is '${status}', so it can no longer be replaced. Nothing was replaced.`,
+      };
+    }
+    // E*TRADE has no native compound parent (brackets are emulated; gap 13), so
+    // the gate runs on 'simple' — kept here anyway so the rule has one home.
+    const verdict = validateReplaceOrder({ broker: "etrade", orderClass: "simple" });
+    if (!verdict.ok) {
+      return { success: false, orderId, code: verdict.code, message: `${verdict.message} Nothing was replaced.` };
+    }
+
+    // A change order states the WHOLE order, so unstated fields keep the values
+    // the broker already has.
+    const priceType = String(current.priceType ?? "MARKET").toUpperCase();
+    const isLimit = priceType === "LIMIT" || priceType === "STOP_LIMIT";
+    const isStop = priceType === "STOP" || priceType === "STOP_LIMIT";
+    const quantity = Number.isFinite(params.quantity) && Number(params.quantity) > 0
+      ? Number(params.quantity)
+      : Number(current.quantity);
+    const limitPrice = Number.isFinite(params.limitPrice)
+      ? Number(params.limitPrice)
+      : isLimit && Number(current.limitPrice) > 0
+        ? Number(current.limitPrice)
+        : undefined;
+    const stopPrice = Number.isFinite(params.stopPrice) ? Number(params.stopPrice) : undefined;
+    if (isStop && !(Number(stopPrice) > 0)) {
+      return {
+        success: false,
+        orderId,
+        message: `E*TRADE order ${orderId} is a ${priceType} order and its trigger is not readable here; state stopPrice. Nothing was replaced.`,
+      };
+    }
+    if (isLimit && !(Number(limitPrice) > 0)) {
+      return {
+        success: false,
+        orderId,
+        message: `E*TRADE order ${orderId} is a ${priceType} order and its limit price is not readable here; state limitPrice. Nothing was replaced.`,
+      };
+    }
+    const orderTerm = etradeOrderTerm(params.timeInForce);
+    const change = {
+      orderId,
+      symbol: String(current.symbol ?? "").toUpperCase(),
+      action: String(current.orderAction ?? "BUY"),
+      quantity,
+      orderType: priceType,
+      ...(limitPrice !== undefined ? { limitPrice } : {}),
+      ...(stopPrice !== undefined ? { stopPrice } : {}),
+      ...(orderTerm !== undefined ? { orderTerm } : {}),
+    };
+
+    const preview = await this.client.changeOrderPreview(undefined, change).catch(() => null);
+    const previewId =
+      preview?.PreviewOrderResponse?.PreviewIds?.previewId ??
+      preview?.PreviewOrderResponse?.PreviewIds?.[0]?.previewId ??
+      preview?.PreviewIds?.previewId;
+    const previewError = preview?.Error?.message ?? preview?.PreviewOrderResponse?.messageList?.Message?.[0]?.description;
+    if (!previewId) {
+      return {
+        success: false,
+        orderId,
+        message: `E*TRADE did not preview the change: ${String(previewError ?? "no preview id returned")}. Nothing was replaced.`,
+      };
+    }
+
+    const placed = await this.client.changeOrderPlace(undefined, { ...change, previewId }).catch(() => null);
+    const newOrderId =
+      placed?.PlaceOrderResponse?.OrderIds?.[0]?.orderId ??
+      placed?.PlaceOrderResponse?.OrderIds?.orderId ??
+      placed?.PlaceOrderResponse?.orderId;
+    const placeError = placed?.Error?.message ?? placed?.PlaceOrderResponse?.messageList?.Message?.[0]?.description;
+    if (!newOrderId) {
+      return {
+        success: false,
+        orderId,
+        message: `E*TRADE did not place the change: ${String(placeError ?? "no order id returned")}. Nothing was replaced.`,
+      };
+    }
+    return {
+      success: true,
+      orderId: String(newOrderId),
+      status: "replaced",
+      message: `E*TRADE order ${orderId} was replaced by order ${String(newOrderId)}; the broker cancelled the original.`,
+    };
   }
 
   /**
