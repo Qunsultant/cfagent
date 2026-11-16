@@ -2087,6 +2087,15 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/958-screening-consolidation-survey.md", "yahoo", 3],
   ["docs/architecture/survey/958-screening-consolidation-survey.md", "nasdaq", 1],
   ["docs/architecture/survey/982-screening-s2-verify-first-survey.md", "etrade", 6],
+  // Stop-the-line CI baseline for #4790 / #4800 / #4770 docs merged onto main
+  ["docs/architecture/survey/2012-2405-dedup-audit-survey.md", "etrade", 1],
+  ["docs/architecture/survey/2373-single-payment-path-design-note.md", "etrade", 8],
+  ["docs/architecture/survey/2373-single-payment-path-design-note.md", "yahoo", 1],
+  ["docs/architecture/survey/2373-single-payment-path-design-note.md", "nasdaq", 1],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "etrade", 2],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "alpaca", 1],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "yahoo", 2],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "nasdaq", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
