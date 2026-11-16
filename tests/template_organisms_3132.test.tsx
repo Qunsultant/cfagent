@@ -103,8 +103,8 @@ describe("KpiRibbon (#3132 — autopilot executive ribbon, AutopilotControlCente
 
   it("renders one card per item, each label/value/sub-trend", () => {
     render(<KpiRibbon items={items} />);
-    expect(document.querySelector(".ui-stat-grid")).not.toBeNull();
-    expect(document.querySelectorAll(".ui-stat-grid .ui-card")).toHaveLength(3);
+    expect(document.querySelector(".ui-grid")).not.toBeNull();
+    expect(document.querySelectorAll(".ui-grid .ui-card")).toHaveLength(3);
     const text = document.body.textContent ?? "";
     for (const item of items) {
       expect(text).toContain(item.label);
@@ -115,12 +115,12 @@ describe("KpiRibbon (#3132 — autopilot executive ribbon, AutopilotControlCente
 
   it("sub-trend tones read through the token utilities", () => {
     render(<KpiRibbon items={items} />);
-    expect(document.querySelectorAll(".ui-stat-grid .ui-success")).toHaveLength(2);
+    expect(document.querySelectorAll(".ui-grid .ui-success")).toHaveLength(2);
   });
 
   it("renders nothing when there are no items (slot rule, §1.6b)", () => {
     render(<KpiRibbon items={[]} />);
-    expect(document.querySelector(".ui-stat-grid")).toBeNull();
+    expect(document.querySelector(".ui-grid")).toBeNull();
     expect(document.body.textContent).toBe("");
   });
 });
