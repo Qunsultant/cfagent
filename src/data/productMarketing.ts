@@ -211,13 +211,16 @@ export interface PurchasePath {
 
 export interface CatalogDisplayEntry {
   id: string;
-  family: PriceFamily;
+  /** Issue #4696 — null for created products (not family-scoped). */
+  family: PriceFamily | null;
   tier: ProductTier;
   canonicalName: string;
   servingAgent: string | null;
   priceUSD: number | null;
-  priceSource: "gate" | "catalogue-approved" | null;
+  priceSource: "gate" | "catalogue-approved" | "plan-approved" | null;
   priceLabel: string | null;
+  /** Issue #4696 — the effective version's period in days; null for family rows. */
+  periodDays: number | null;
   availability: ProductAvailability;
   listed: boolean;
   unlistedReasons: string[];
@@ -247,17 +250,33 @@ export function buildCatalogDisplay(
         ? null
         : entry.priceSource === "gate"
           ? `$${entry.priceUSD.toFixed(2)} per call — real (testnet) x402 gate`
-          : `$${entry.priceUSD.toFixed(2)} — approved catalogue price`;
+          : entry.priceSource === "plan-approved"
+            ? entry.periodDays !== null
+              ? `$${entry.priceUSD.toFixed(2)} / ${entry.periodDays} days — approved plan price`
+              : `$${entry.priceUSD.toFixed(2)} — approved plan price`
+            : `$${entry.priceUSD.toFixed(2)} — approved catalogue price`;
     const realVsSimulated =
       entry.priceSource === "gate"
         ? "real (testnet)"
         : entry.priceSource === "catalogue-approved"
           ? "operator catalogue price"
-          : null;
+          : entry.priceSource === "plan-approved"
+            ? "approved plan price"
+            : null;
     let purchasePath: PurchasePath | null = null;
     let purchasePathReason: string | null = null;
     if (entry.listed && entry.availability === "purchasable") {
-      if (entry.gateEndpoint !== null) {
+      if (entry.family === null) {
+        // Issue #4696 — a created product is bought through the
+        // Selling checkout (the catalog table shows the Subscribe
+        // button for listed Subscribed rows; this path is the
+        // API-level truth for every other consumer).
+        purchasePath = {
+          label: "Buy in Selling options",
+          route: "?tab=product-hub&view=selling-options",
+          note: "Created product — bought through the Selling checkout, not a gate endpoint.",
+        };
+      } else if (entry.gateEndpoint !== null) {
         purchasePath = {
           label: "Pay per call",
           route: entry.gateEndpoint,
@@ -287,6 +306,7 @@ export function buildCatalogDisplay(
       priceUSD: entry.priceUSD,
       priceSource: entry.priceSource,
       priceLabel,
+      periodDays: entry.periodDays,
       availability: entry.availability,
       listed: entry.listed,
       unlistedReasons: [...entry.unlistedReasons],

@@ -35,6 +35,8 @@ import {
 } from "../data/productMarketing";
 import {
   buildProductSelling,
+  cfpayChannelOptions,
+  familyMemberPrices,
   type CatalogDisplayEntryLike,
   type SellingPlanInput,
   type SubscriptionRowInput,
@@ -707,11 +709,10 @@ export function SellingSection({
           // Issue #2781: member prices by family, from the catalog
           // rows the panel already renders (server-truth approved
           // prices) — the derivation computes savings from these.
-          bundleMemberPrices: Object.fromEntries(
-            (products ?? [])
-              .filter((p) => p.priceUSD !== null)
-              .map((p) => [p.family, p.priceUSD as number]),
-          ),
+          // Issue #4696: created rows carry family null and are
+          // excluded inside the helper — a null key would corrupt
+          // the family-keyed map.
+          bundleMemberPrices: familyMemberPrices(products ?? []),
         })
       : null;
 
@@ -941,13 +942,11 @@ export function SellingSection({
                   onChange={(event) => setChannelFamily(event.target.value)}
                 >
                   <option value="">Select a product</option>
-                  {(products ?? [])
-                    .filter((p) => p.listed && p.priceUSD !== null)
-                    .map((p) => (
-                      <option key={p.family} value={p.family}>
-                        {p.canonicalName} — ${p.priceUSD!.toFixed(2)}
-                      </option>
-                    ))}
+                  {cfpayChannelOptions(products ?? []).map((o) => (
+                    <option key={o.family} value={o.family}>
+                      {o.label}
+                    </option>
+                  ))}
                 </Select>
               </FieldShell>
               <FieldShell id="channel-email" label="Email">

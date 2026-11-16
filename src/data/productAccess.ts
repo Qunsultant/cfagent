@@ -158,6 +158,22 @@ export const PRODUCT_PANEL_SURFACES: Record<PriceFamily, PanelSurface> = {
   },
 };
 
+/**
+ * Issue #4696 — the panel surface for a created product: no
+ * per-run panel trigger exists (created products are not
+ * family-scoped); the purchase surface is the Selling tab, where
+ * the plan checkout lives. The run-status surface is the same
+ * shared surface every product reports.
+ */
+export const CREATED_PRODUCT_PANEL_SURFACE: PanelSurface = {
+  trigger: "Selling tab (?tab=product-hub&view=selling-options) — plan checkout",
+  runStatusSurface: RUN_STATUS_SURFACE,
+};
+
+/** Issue #4696 — why a created product is never mesh-routable, by design. */
+export const CREATED_PRODUCT_NOT_ROUTABLE_NOTE =
+  "created product — sold through the Selling checkout, not a mesh door; no chat route or gate applies by design";
+
 export interface ChatSurface {
   command: string;
   doorService: string;
@@ -172,7 +188,7 @@ export interface ChatSurface {
 export interface ApiSurface {
   gateEndpoint: string | null;
   priceUSD: number | null;
-  priceSource: "gate" | "catalogue-approved" | null;
+  priceSource: "gate" | "catalogue-approved" | "plan-approved" | null;
 }
 
 export type DimensionVerdictValue = "agree" | "divergent" | "not-applicable";
@@ -184,7 +200,8 @@ export interface DimensionVerdict {
 
 export interface ProductAccess {
   id: string;
-  family: PriceFamily;
+  /** Issue #4696 — null for created products (not family-scoped). */
+  family: PriceFamily | null;
   tier: ProductTier;
   canonicalName: string;
   servingAgent: string | null;
@@ -247,7 +264,10 @@ export function resolveProductAccess(
   entry: ProductEntry,
   catalogueEntries: PriceEntry[],
 ): ProductAccess {
-  const panel = PRODUCT_PANEL_SURFACES[entry.family];
+  const panel =
+    entry.family === null
+      ? CREATED_PRODUCT_PANEL_SURFACE
+      : PRODUCT_PANEL_SURFACES[entry.family];
   const api: ApiSurface = {
     gateEndpoint: entry.gateEndpoint,
     priceUSD: entry.priceUSD,
@@ -262,6 +282,32 @@ export function resolveProductAccess(
     panel,
     api,
   };
+  if (entry.family === null) {
+    // Issue #4696 — a created product is never mesh-routable, by
+    // design (no chat route, no gate, no serving agent): it is sold
+    // through the Selling checkout. Not a bug to paper over — the
+    // parity verdict says so, with the reason named.
+    return {
+      ...base,
+      workflow: null,
+      routable: false,
+      nonRoutableReasons: entry.listed
+        ? [CREATED_PRODUCT_NOT_ROUTABLE_NOTE]
+        : [...entry.unlistedReasons],
+      chat: null,
+      chatReachabilityNote: null,
+      parity: {
+        verdict: "not-routable",
+        dimensions: {
+          agent: notApplicable("created product — no serving agent"),
+          gate: notApplicable("created product — no gate endpoint"),
+          price: notApplicable("created product — price is the approved plan price"),
+          operation: notApplicable("created product — sold through the Selling checkout"),
+        },
+        notes: [CREATED_PRODUCT_NOT_ROUTABLE_NOTE],
+      },
+    };
+  }
   if (!entry.listed) {
     return {
       ...base,

@@ -33,6 +33,8 @@ import { createShardJobAdapter, readJobHistory } from "../../data/createShardJob
 import { handleMeshRegistryRoute } from "../../agents/meshRegistryRoute";
 import { handleProductCatalogRoute } from "../../agents/productCatalogRoute";
 import { createPriceCatalogueAdapter } from "../../data/createPriceCataloguePorts";
+import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
+import { createProductAdapter } from "../../data/createProductPorts";
 import { handleRetentionPurgeRoute } from "../../data/retentionRoute";
 import { buildPurgeAuditEventInput } from "../../data/retention1766";
 import { actorGateway } from "../../services/cloudflareActorGateway";
@@ -406,8 +408,13 @@ export async function handlePrivacyChainsRoutes(request: Request, env: Env, url:
     // requireAuth (any signed-in user), like the registry read.
     // The price list comes from the price-catalogue adapter bound
     // to AGENT_DB; unbound → the handler answers 503 (a read route
-    // never auto-migrates a schema). Exactly one bounded
-    // price-catalogue query per request; no SessionStore reads
+    // never auto-migrates a schema). Issue #4696: the catalog also
+    // lists operator-created subscription products — the plan list
+    // (all rows, so the builder can tell "no versions" from "none
+    // effective") from the subscription adapter and the product
+    // list from the product adapter, same binding, same fail-closed
+    // direction. Exactly one bounded query per store per request
+    // (price catalogue, plans, products); no SessionStore reads
     // beyond requireAuth's own session check. The handler answers
     // GET only and writes nothing.
     if (path === "/api/products/catalog") {
@@ -415,10 +422,18 @@ export async function handlePrivacyChainsRoutes(request: Request, env: Env, url:
       const adapter = createPriceCatalogueAdapter(
         env as { AGENT_DB?: unknown },
       );
+      const subsAdapter = createSubscriptionAdapter(
+        env as { AGENT_DB?: unknown },
+      );
+      const productsAdapter = createProductAdapter(
+        env as { AGENT_DB?: unknown },
+      );
       return handleProductCatalogRoute({
         session,
         method: request.method,
         listPrices: adapter ? () => adapter.getAllPrices() : null,
+        listPlans: subsAdapter ? () => subsAdapter.listPlans(false) : null,
+        listProducts: productsAdapter ? () => productsAdapter.listProducts() : null,
       });
     }
 
