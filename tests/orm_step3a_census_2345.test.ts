@@ -73,7 +73,9 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // 17 since #4386 (P6c) moved the two COUNT(*) reads to the
   // parameterized count entry — the browse SELECT stays (its
   // WHERE is dynamic; see #4386 and the facade comment).
-  ["src/data/ormFacade.ts", 17],
+  // Issue #4654: the guarded mas_trades stop_price reconciliation adds one
+  // PRAGMA probe and one ALTER exec, the same shape as broker/price_source/mode.
+  ["src/data/ormFacade.ts", 19],
   // 4 at 3a; 5 since #4412 added the mas_promotions index exec
   // (sql.exec(MAS_PROMOTIONS_INDEX_DDL) in ensurePromotionsIndex());
   // 8 since #3182 added the mas_transactions tenant column's
