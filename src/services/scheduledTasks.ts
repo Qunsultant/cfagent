@@ -107,6 +107,20 @@ import {
   runOptionsPanelViaEngineWithAgents,
   runStrategyScreenViaEngine,
 } from "../workflows/optionsScreenEngine";
+import type { BrokerStageInput } from "../workflows/optionsStepPorts";
+import {
+  awaitOptionsWorkflowRun,
+  optionsWorkflowRunDepsFromEnv,
+  startStrategyScreenWorkflow,
+  type AwaitOptionsWorkflowRunOpts,
+  type StartOptionsScreenWorkflowOpts,
+} from "../workflows/optionsWorkflowHost";
+import { panelResultToPipelineResult } from "../workflows/strategyScreenPorts";
+import type { JobPipelineStores } from "../data/jobPipelinePorts";
+import type { JobRunRecorder } from "./jobPipelineEngine";
+import type { PanelDiscoveryResult } from "./recommendationKernel";
+import type { PipelineResult } from "../trading";
+import { discoveryBrokerStageInput } from "./discoveryService";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook
@@ -494,6 +508,188 @@ async function resolveDiscoveryRunMode(
   return effective ? { mode: effective.mode, modeSource: effective.modeSource } : undefined;
 }
 
+/** The scheduled firer's dispatch decision: the host, or the unchanged sync dispatch. */
+export interface ScheduledFirerDispatchDecision {
+  route: "host" | "sync";
+  reason: string;
+}
+
+/**
+ * Issue #4854 — the scheduled firer's dispatch gate (the #4848
+ * manual-route gate's shape, as the #4853 panel gate mirrors it).
+ * The host only when the leg's (broker, mode) pair derived from
+ * the platform the run executes on and the residency bindings are
+ * configured, and the run carries no stored snapshot input; anything
+ * else stays on the unchanged sync dispatch. A snapshot-input run
+ * stays on sync because the stored snapshot would have to ride the
+ * D1 job definition — the #1236 feed seam's contract is a
+ * stored-snapshot run, not a live-chain run. No symbol gate: every
+ * discovery expression is symbol-scoped. No gate decision is
+ * logged; the run's job record shows which dispatch served it.
+ */
+export function scheduledFirerDispatchRoute(input: {
+  broker: BrokerStageInput | null;
+  env: Env;
+  snapshotInput?: FeedSnapshotInput;
+}): ScheduledFirerDispatchDecision {
+  if (!input.broker) {
+    return {
+      route: "sync",
+      reason:
+        "no broker stage input derives from the firer platform, so the residency could not resolve the run's own chain source",
+    };
+  }
+  if (input.snapshotInput !== undefined) {
+    return {
+      route: "sync",
+      reason:
+        "a snapshot input rides along, so the run executes on its stored snapshot — the snapshot does not travel on the job definition",
+    };
+  }
+  const workflow = input.env.JOB_PIPELINE_WORKFLOW;
+  if (!input.env.AGENT_DB || !workflow || typeof workflow.create !== "function") {
+    return {
+      route: "sync",
+      reason: "the workflow residency bindings are not configured in this deployment",
+    };
+  }
+  return {
+    route: "host",
+    reason: "broker pair derived, residency bindings configured, no snapshot input",
+  };
+}
+
+/** The per-run host dispatch: the decision plus the derived pair, taken once per run. */
+export interface ScheduledFirerHostDispatch {
+  decision: ScheduledFirerDispatchDecision;
+  broker: BrokerStageInput | null;
+}
+
+/**
+ * Issue #4854 — resolve the firer's host dispatch once per run:
+ * the (broker, mode) pair derives from the firer platform with
+ * the schedule's environment, through the #4853 derivation —
+ * the same environment resolution the platform was constructed
+ * with, so the residency fetches the same environment's chains the
+ * sync dispatch would — and the gate decides from it. The
+ * platform, environment, and snapshot input are fixed for the run,
+ * so a run never mixes dispatches mid-flight.
+ */
+export function resolveScheduledFirerHostDispatch(
+  env: Env,
+  environment: string | undefined,
+  snapshotInput?: FeedSnapshotInput,
+): ScheduledFirerHostDispatch {
+  const broker = discoveryBrokerStageInput("etrade", env, environment);
+  return {
+    decision: scheduledFirerDispatchRoute({ broker, env, snapshotInput }),
+    broker,
+  };
+}
+
+/**
+ * Issue #4854 — the host dispatch's injectable seams (the
+ * #4291/#4848/#4853 idiom): the workflow create call, the residency
+ * stores, and the await options. Tests inject fakes; production
+ * passes nothing and the dispatch derives from env.
+ */
+export interface ScheduledFirerHostSeams {
+  startWorkflow?: StartOptionsScreenWorkflowOpts["startWorkflow"];
+  stores?: JobPipelineStores;
+  runRecorder?: JobRunRecorder;
+  awaitOptions?: AwaitOptionsWorkflowRunOpts;
+}
+
+/**
+ * Issue #4854 — one scheduled firer panel screen through the
+ * strategy workflow host: define the strategy job with the leg's
+ * broker pair and the universe descriptor stamped on the stored
+ * request, create the workflow instance, await settlement, and map
+ * the shapeReport back to the PipelineResult the firer consumes.
+ * The envelope is the sync dispatch's envelope
+ * (runOptionsPanelViaEngineWithAgents) with trigger "scheduled"
+ * and the firer's run-id template, so a host run and a sync run
+ * are the same job shape in Workflow Runs. The universe descriptor
+ * is tenant-less: the residency rebuild defaults the tenant exactly
+ * as the firer's call-site bundle build does
+ * (scheduledUniverseDeps passes no tenant). The await bound is the
+ * manual route's (300s, #4848): a panel screen over live chains is
+ * the same shape of work. A failed run throws the sync path's
+ * failure shape; a run that completes without a report refuses to
+ * answer from nothing, as the sync path does.
+ *
+ * The caller's engine stores do not thread here: the host run
+ * records over the residency's durable stores, not the caller's
+ * stores, so a host-path screen is not addressable by per-stage
+ * control from the copilot turn until control moves to the durable
+ * stores (#4859). The sync fallback keeps the #4275 threading for
+ * gated-out runs. The stage queue is not threaded either: the
+ * residency binds it from env (#4851 — the same binding the
+ * service's stageQueue threads from), so a host-path screen
+ * publishes through the same queue as today.
+ */
+export async function runScheduledFirerPanelViaHost(args: {
+  env: Env;
+  request: StrategyRequest;
+  runId: string;
+  userLogin?: string;
+  broker: BrokerStageInput;
+  seams?: ScheduledFirerHostSeams;
+}): Promise<PipelineResult> {
+  const deps =
+    args.seams?.stores && args.seams?.runRecorder
+      ? { stores: args.seams.stores, runRecorder: args.seams.runRecorder }
+      : optionsWorkflowRunDepsFromEnv(args.env);
+  const started = await startStrategyScreenWorkflow(
+    args.env,
+    {
+      runId: args.runId,
+      request: {
+        assetClass: "options",
+        runIdentity: { runId: args.runId },
+        trigger: "scheduled",
+        classInput: {
+          strategyRequest: args.request,
+          strategyFilter: undefined,
+          riskProfile: undefined,
+          alternatives: undefined,
+          snapshotOverride: undefined,
+        },
+      },
+      ...(args.userLogin ? { userLogin: args.userLogin } : {}),
+      trigger: "scheduled",
+      universe: { provider: "nasdaq" },
+      broker: args.broker,
+    },
+    {
+      ...deps,
+      ...(args.seams?.startWorkflow ? { startWorkflow: args.seams.startWorkflow } : {}),
+    },
+  );
+  const view = await awaitOptionsWorkflowRun(deps, started.jobId, {
+    timeoutMs: 300_000,
+    ...(args.seams?.awaitOptions ?? {}),
+  });
+  if (view.state === "failed") {
+    const failed = view.stages.find((stage) => stage.status === "failed");
+    throw new Error(
+      `Options strategy screen failed at ${failed?.stageId ?? "unknown"}: ${failed?.error ?? "unknown reason"}`,
+    );
+  }
+  if (view.state !== "completed") {
+    throw new Error(
+      `Options strategy screen run ${args.runId} ended ${view.state} without a result`,
+    );
+  }
+  const panelResult = view.shapeReport as PanelDiscoveryResult | undefined;
+  if (!panelResult) {
+    throw new Error(
+      "Options strategy screen completed without a report artifact; refusing to answer from nothing.",
+    );
+  }
+  return panelResultToPipelineResult(panelResult);
+}
+
 export class ScheduledTasksService {
   constructor(
     private env: Env,
@@ -568,6 +764,13 @@ export class ScheduledTasksService {
      * above — tests substitute a fake; production omits it.
      */
     private submitStockScreenViaEngine?: SubmitStockScreenViaEngine,
+    /**
+     * Issue #4854: the host dispatch's injectable seams for the
+     * scheduled firer's panel runs. Same injectable rule as the
+     * engine seams above — tests substitute fakes; production
+     * omits it and the dispatch derives from env.
+     */
+    private firerHostSeams?: ScheduledFirerHostSeams,
   ) {}
 
   /**
@@ -4011,9 +4214,19 @@ export class ScheduledTasksService {
         recommender: new RecommendationAgent(),
       };
 
+      // Issue #4854: the firer's host dispatch is decided once per
+      // run — the platform, environment, and snapshot input are
+      // fixed for the run — and threaded into each symbol's screen,
+      // so a run never mixes dispatches mid-flight.
+      const firerHost = resolveScheduledFirerHostDispatch(
+        this.env,
+        options.environment,
+        options.snapshotInput,
+      );
+
       const outcomes: DiscoverySymbolOutcome[] = [];
       for (const request of requests) {
-        outcomes.push(await this.runDiscoveryRequest(agents, etrade, request, options.snapshotInput, userLogin));
+        outcomes.push(await this.runDiscoveryRequest(agents, etrade, request, options.snapshotInput, userLogin, firerHost));
       }
 
       const failures = outcomes
@@ -4305,6 +4518,7 @@ export class ScheduledTasksService {
     request: StrategyRequest,
     snapshotInput?: FeedSnapshotInput,
     userLogin?: string,
+    hostDispatch?: ScheduledFirerHostDispatch,
   ): Promise<DiscoverySymbolOutcome> {
     const symbol = request.symbol.toUpperCase().trim();
     try {
@@ -4369,20 +4583,31 @@ export class ScheduledTasksService {
         });
         fireRequest = { ...request, expirationDteBands: bands };
       }
-      // Issue #4275: the firer routes through the engine-routed
-      // panel over its pre-built agents — a scheduled screen is a
-      // strategy engine job, not a direct panel call. The snapshot
-      // override rides the classInput exactly as it rode the
-      // direct call's options, so snapshot-input mode and feed
-      // provenance are unchanged.
-      const result = await runOptionsPanelViaEngineWithAgents(agents, fireRequest, {
-        ...(snapshotOverride ? { snapshotOverride } : {}),
-        userLogin: userLogin ?? this.userLogin,
-        trigger: "scheduled",
-        runId: `options-panel:scheduled:${symbol}:${new Date().toISOString()}`,
-        engineStores: this.engineSql ? optionsEngineStoresFromSql(this.engineSql) : null,
-        queue: this.stageQueue ?? null,
-      });
+      // Issue #4854: the firer's panel screen dispatches through
+      // the strategy workflow host when the per-run dispatch says
+      // so — the same stages, the same envelope, the same run id —
+      // and through the unchanged engine-routed panel otherwise.
+      // The run id mints once, here, so a host run and a sync run
+      // carry the same job identity for the same symbol.
+      const runId = `options-panel:scheduled:${symbol}:${new Date().toISOString()}`;
+      const result =
+        hostDispatch?.decision.route === "host" && hostDispatch.broker
+          ? await runScheduledFirerPanelViaHost({
+              env: this.env,
+              request: fireRequest,
+              runId,
+              userLogin: userLogin ?? this.userLogin,
+              broker: hostDispatch.broker,
+              ...(this.firerHostSeams ? { seams: this.firerHostSeams } : {}),
+            })
+          : await runOptionsPanelViaEngineWithAgents(agents, fireRequest, {
+              ...(snapshotOverride ? { snapshotOverride } : {}),
+              userLogin: userLogin ?? this.userLogin,
+              trigger: "scheduled",
+              runId,
+              engineStores: this.engineSql ? optionsEngineStoresFromSql(this.engineSql) : null,
+              queue: this.stageQueue ?? null,
+            });
       const snapshot = result.snapshot;
       // A snapshot that never loaded its chain is a failure, not
       // an empty success: the screen records why (validation
@@ -4649,6 +4874,16 @@ export class ScheduledTasksService {
       };
       const emMultiples = getOpportunityScannerConfig().targetEmMultiples;
 
+      // Issue #4854: the firer's host dispatch is decided once per
+      // run — the platform, environment, and snapshot input are
+      // fixed for the run — and threaded into each symbol's screen,
+      // so a run never mixes dispatches mid-flight.
+      const firerHost = resolveScheduledFirerHostDispatch(
+        this.env,
+        options.environment,
+        options.snapshotInput,
+      );
+
       const outcomes: DiscoverySymbolOutcome[] = [];
       const constructed: StrategyRequest[] = [];
       for (const symbol of symbols) {
@@ -4692,7 +4927,7 @@ export class ScheduledTasksService {
         // request, so the run's calendar facts stay auditable. The
         // service never throws; uncovered keeps event risk unverified.
         derived.request.eventCalendar = await getSymbolEventCalendar(symbol);
-        const outcome = await this.runDiscoveryRequest(agents, etrade, derived.request, options.snapshotInput, userLogin);
+        const outcome = await this.runDiscoveryRequest(agents, etrade, derived.request, options.snapshotInput, userLogin, firerHost);
         outcomes.push({ ...outcome, derivation: derived.derivation });
       }
 
