@@ -85,17 +85,15 @@ describe("#3892 — no silent downgrade", () => {
     expect(refused.message).toContain("market");
   });
 
-  it("refuses session-timed orders where the broker declares no auction support, and accepts them on the one that does (#4671)", () => {
-    // Issue #4671: Alpaca models an auction order as market/limit + opg|cls, so
-    // the capability is now native there; E*TRADE still declares none and must
-    // refuse by name rather than place a day order.
-    const alpaca = validateAdvancedOrder({ type: "session_timed", broker: "alpaca", params: { time_in_force: "opg" } });
-    expect(alpaca).toMatchObject({ ok: true, support: "native" });
-    const refused = validateAdvancedOrder({ type: "session_timed", broker: "etrade", params: { time_in_force: "opg" } });
-    expect(refused.ok).toBe(false);
-    if (refused.ok) return;
-    expect(refused.code).toBe("order_type_unsupported");
-    expect(refused.message).toContain("session_timed @ etrade");
+  it("accepts session-timed orders on the brokers that document an auction, and names the ones that do not (#4671/#4957)", () => {
+    // Issue #4671: Alpaca models an auction order as market/limit + opg|cls.
+    // Issue #4957: E*TRADE documents the same four orders as price types
+    // (MARKET_ON_OPEN / …_ON_CLOSE / LIMIT_ON_OPEN / …_ON_CLOSE), so the one
+    // capability entry is now native on both.
+    for (const broker of ["alpaca", "etrade"] as const) {
+      const accepted = validateAdvancedOrder({ type: "session_timed", broker, params: { time_in_force: "opg" } });
+      expect(accepted, broker).toMatchObject({ ok: true, support: "native" });
+    }
   });
 
   it("refuses an unknown type with the known list", () => {

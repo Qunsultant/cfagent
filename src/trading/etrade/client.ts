@@ -41,6 +41,17 @@ import type { OptionRequestBudget, TradingOrderLeg } from "../interfaces";
 
 export type ETradeMarketMoverCategory = "gainers" | "losers" | "active";
 
+/**
+ * Issue #4957 (matrix gap 17): E*TRADE's auction price types are LIMIT-bearing.
+ * LIMIT_ON_OPEN / LIMIT_ON_CLOSE carry a limit price exactly as LIMIT
+ * does; MARKET_ON_OPEN / MARKET_ON_CLOSE carry none. One predicate serves
+ * the preview and the place body, so the two cannot disagree about a price.
+ */
+const LIMIT_BEARING_PRICE_TYPES = new Set(["LIMIT", "STOP_LIMIT", "LIMIT_ON_OPEN", "LIMIT_ON_CLOSE"]);
+
+function isLimitBearingPriceType(priceType: string): boolean {
+  return LIMIT_BEARING_PRICE_TYPES.has(priceType);
+}
 function firstQuoteData(data: any): any {
   const quoteData = data?.QuoteResponse?.QuoteData;
   if (Array.isArray(quoteData)) return quoteData[0];
@@ -773,7 +784,19 @@ export class ETradeRestClient {
       symbol: string;
       action: "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT";
       quantity: number;
-      orderType?: "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
+      /**
+       * Issue #4957 (matrix gap 17): the auction price types are legal here too —
+       * MARKET_ON_OPEN / MARKET_ON_CLOSE / LIMIT_ON_OPEN / LIMIT_ON_CLOSE.
+       */
+      orderType?:
+        | "MARKET"
+        | "LIMIT"
+        | "STOP"
+        | "STOP_LIMIT"
+        | "MARKET_ON_OPEN"
+        | "MARKET_ON_CLOSE"
+        | "LIMIT_ON_OPEN"
+        | "LIMIT_ON_CLOSE";
       limitPrice?: number;
       stopPrice?: number;
       orderTerm?: "GOOD_FOR_DAY" | "GOOD_UNTIL_CANCEL" | "IMMEDIATE_OR_CANCEL";
@@ -806,7 +829,7 @@ export class ETradeRestClient {
 
     const clientOrderId = (params.orderId.replace(/[^a-zA-Z0-9]/g, "") || `ord${Date.now()}`).slice(0, 20);
     const priceType = (params.orderType || "MARKET").toUpperCase();
-    const isLimit = priceType === "LIMIT" || priceType === "STOP_LIMIT";
+    const isLimit = isLimitBearingPriceType(priceType);
     const limitPrice = isLimit && params.limitPrice && params.limitPrice > 0 ? Number(params.limitPrice.toFixed(2)) : undefined;
     const isStop = priceType === "STOP" || priceType === "STOP_LIMIT";
     const stopPrice = isStop && params.stopPrice && params.stopPrice > 0 ? Number(params.stopPrice.toFixed(2)) : undefined;
@@ -1199,7 +1222,7 @@ export class ETradeRestClient {
 
         const clientOrderId = (params.orderId.replace(/[^a-zA-Z0-9]/g, "") || `ord${Date.now()}`).slice(0, 20);
         const priceType = (params.orderType || "MARKET").toUpperCase();
-        const isLimit = priceType === "LIMIT" || priceType === "STOP_LIMIT";
+        const isLimit = isLimitBearingPriceType(priceType);
         const limitPrice = isLimit && params.limitPrice && params.limitPrice > 0 ? Number(params.limitPrice.toFixed(2)) : undefined;
         // Issue #4659: the trigger travels on the order itself (the refusal above
         // covers the case where neither it nor a preview id is present).

@@ -734,6 +734,15 @@ function measure(): Map<string, number> {
  * INTEGRATION. 1 raise (nlqOptionsStrategy.ts etrade 19 -> 20:
  * the default line). The cutover's comments name no provider.
  * Totals move 1196/9372 -> 1196/9373.
+
+ * Baseline update (#4957, 2026-11-16): E*TRADE carries the auction as its own
+ * documented PRICE TYPE (MARKET_ON_OPEN / …_ON_CLOSE / LIMIT_ON_OPEN /
+ * …_ON_CLOSE), so the mapping and the limit-bearing predicate live in the
+ * broker's own adapter — dispositioned INTEGRATION like every other row in
+ * those files: 2 raises (etrade/platform.ts etrade 72->83 — the mapping, the
+ * refusal and their doc comments; etrade/client.ts etrade 329->330 — the
+ * predicate that keeps a LIMIT_ON_* order priced). Measured totals move
+ * 1283/10127 -> 1283/10138 (re-based onto 5dbede526).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1565,12 +1574,12 @@ const BASELINE: Array<[string, string, number]> = [
   // Issue #4659: the stop-price refusal names the broker in its user-facing
   // message, the same INTEGRATION growth this row already records for the
   // adapter's own vocabulary.
-  ["src/trading/etrade/client.ts", "etrade", 329],
+  ["src/trading/etrade/client.ts", "etrade", 330],
   ["src/trading/etrade/optionOrders.ts", "etrade", 9],
   // Issue #4656: the adapter names its own time-in-force mapper (etradeOrderTerm)
   // — a code identifier in the broker's own adapter, the disposition this section
   // already records for per-broker execution entries.
-  ["src/trading/etrade/platform.ts", "etrade", 72],
+  ["src/trading/etrade/platform.ts", "etrade", 83],
   ["src/trading/etrade/quoteConfig.ts", "etrade", 2],
   ["src/trading/etrade/quoteTrace.ts", "etrade", 1],
   ["src/trading/factorGrades.ts", "etrade", 5],

@@ -173,13 +173,13 @@ const ADVANCED: AdvancedOrderType[] = [
   {
     id: "session_timed",
     label: "Session-timed (MOO/MOC/LOO/LOC)",
-    broker: { alpaca: "native", etrade: "none" },
+    broker: { alpaca: "native", etrade: "native" },
     requires: ["time_in_force"],
     excludes: [],
     tif: AUCTION_TIME_IN_FORCE,
     refusalCode: "order_type_unsupported",
     notes:
-      "Issue #4671: an auction order is a market or limit order carrying opg/cls, not a separate wire type — market+opg = MOO, market+cls = MOC, limit+opg = LOO, limit+cls = LOC. Native on Alpaca; E*TRADE has no verified auction field here, so it is refused by name rather than emulated.",
+      "Issue #4671/#4957: an auction order is a market or limit order carrying an auction term, not a separate wire type — market+opg = MOO, market+cls = MOC, limit+opg = LOO, limit+cls = LOC. Alpaca carries it as `time_in_force` opg/cls; E*TRADE as the documented `priceType` MARKET_ON_OPEN / MARKET_ON_CLOSE / LIMIT_ON_OPEN / LIMIT_ON_CLOSE. A stop or an option order participates in neither and is refused by name.",
   },
   {
     id: "mleg",

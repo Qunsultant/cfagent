@@ -140,7 +140,9 @@ describe("#4656 — the canonical vocabulary is one module and fails closed", ()
 
   it("no longer offers E*TRADE a fill-or-kill it cannot put on the wire", () => {
     const etrade = orderCapabilitiesFor({ brokerId: "etrade", mode: "live", assetClass: "equity" });
-    expect(etrade.timeInForce).toEqual(["DAY", "GTC", "IOC"]);
+    // Since #4957 the auction values are listed too (they are E*TRADE price types,
+    // not order terms); FOK is still the one term this broker has no value for.
+    expect(etrade.timeInForce).toEqual(["DAY", "GTC", "IOC", "OPG", "CLS"]);
     // Alpaca's own time_in_force enum does carry fok, so it keeps it.
     const alpaca = orderCapabilitiesFor({ brokerId: "alpaca", mode: "live", assetClass: "equity" });
     expect(alpaca.timeInForce).toContain("FOK");

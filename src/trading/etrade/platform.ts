@@ -30,7 +30,6 @@ import { getCuratedStockBySymbol } from "../../config/curatedStockUniverse";
 import { getETradeAuthStatus, etradeIdentityFromLogin } from "../../security/etradeOAuth";
 import { parseStrategyOrder } from "../../agents/routes/orderPayloadHash";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
-import { validateAdvancedOrder } from "../advancedOrders";
 import { isAuctionTimeInForce, type NormalizedTimeInForce } from "../timeInForce";
 import { computeBracketExits } from "../bracketPercent";
 
@@ -503,11 +502,6 @@ export class ETradeTradingPlatform implements ITradingPlatform {
   }
 
   async previewOrder(params: OrderPreviewParams): Promise<ETradeOrderDraft> {
-    // Issue #4671 (matrix gap 17): the same refusal as the place seam. A preview
-    // must not record a term this broker cannot carry — the draft would then
-    // execute as something the user did not ask for.
-    const auctionRefusal = auctionTimeInForceRefusal(params.timeInForce);
-    if (auctionRefusal) throw new Error(auctionRefusal);
     const symbol = params.symbol.trim().toUpperCase();
     const action = (params.action || params.orderAction || "BUY") as "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT";
     const optionLegs = params.optionLegs || [];
@@ -531,6 +525,13 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     const sessionId = params.sessionId || this.userLogin;
     const userDid = getUserDid(sessionId);
     const orderType = params.orderType || "MARKET";
+    // Issue #4957 (matrix gap 17): this broker expresses auction participation as
+    // a PRICE TYPE, so the pair (order type, time-in-force) maps onto one. A pair
+    // with no documented value — a stop, or an option order — is refused by name
+    // before any broker call rather than previewed as something it is not.
+    const auctionRefusal = auctionOrderRefusal(orderType, params.timeInForce, isOptionsOrder);
+    if (auctionRefusal) throw new Error(auctionRefusal);
+    const auctionPriceType = etradeAuctionPriceType(orderType, params.timeInForce);
 
     let executionPrice = orderType === "LIMIT" && params.limitPrice ? params.limitPrice : quote?.lastPrice ?? 0;
     let estimatedTotal = Number((executionPrice * params.quantity).toFixed(2));
@@ -595,7 +596,7 @@ export class ETradeTradingPlatform implements ITradingPlatform {
           symbol,
           action,
           quantity: params.quantity,
-          orderType,
+          orderType: auctionPriceType ?? orderType,
           limitPrice: params.limitPrice,
           stopPrice: params.stopPrice,
           // Issue #4656 (matrix gap 5): this broker's own term for the approved
@@ -878,7 +879,11 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     // a capability this broker does not declare, so it is refused BY NAME here —
     // the last stop before the wire — instead of mapping to no orderTerm and
     // placing a day order that only looked session-timed.
-    const auctionRefusal = auctionTimeInForceRefusal(params?.timeInForce);
+    const auctionRefusal = auctionOrderRefusal(
+      params?.orderType,
+      params?.timeInForce,
+      (params?.optionLegs?.length ?? 0) > 0,
+    );
     if (auctionRefusal) {
       return {
         success: false,
@@ -899,24 +904,69 @@ export class ETradeTradingPlatform implements ITradingPlatform {
     // Issue #4656 (matrix gap 5): map the approved time-in-force onto the broker's
     // own orderTerm. The route has already refused a value this broker cannot
     // carry, so this is the last, cheapest place to keep the wire honest.
-    return this.client.placeOrder({ ...params, orderTerm: etradeOrderTerm(params.timeInForce) });
+    const auctionPriceType = etradeAuctionPriceType(params?.orderType, params?.timeInForce);
+    return this.client.placeOrder({
+      ...params,
+      ...(auctionPriceType ? { orderType: auctionPriceType } : {}),
+      orderTerm: etradeOrderTerm(params.timeInForce),
+    });
   }
 }
 
 /**
- * Issue #4671 (matrix gap 17): the ONE place this broker decides about an
- * auction time-in-force. It asks the order-type registry (`session_timed`) —
- * the same table the other broker's seam validates through — so both brokers
- * answer from one capability record rather than two opinions.
+ * Issue #4957 (matrix gap 17): E*TRADE expresses auction participation as a
+ * PRICE TYPE, not an order term — `MARKET_ON_OPEN`, `MARKET_ON_CLOSE`,
+ * `LIMIT_ON_OPEN` and `LIMIT_ON_CLOSE` are documented values of the order's
+ * `priceType` (E*TRADE Order API, place/preview order). The pair (order type,
+ * time-in-force) therefore maps onto exactly one of them; nothing new is sent.
+ *
+ * Returns null when the request is not an auction order at all. The registry's
+ * `session_timed` entry remains the capability declaration this mapping backs.
  */
-function auctionTimeInForceRefusal(timeInForce: unknown): string | null {
+export type ETradeAuctionPriceType =
+  | "MARKET_ON_OPEN"
+  | "MARKET_ON_CLOSE"
+  | "LIMIT_ON_OPEN"
+  | "LIMIT_ON_CLOSE";
+
+/** The four documented price types, indexed by the pair that selects them. */
+const AUCTION_PRICE_TYPES: Record<"market" | "limit", Record<"opg" | "cls", ETradeAuctionPriceType>> = {
+  market: { opg: "MARKET_ON_OPEN", cls: "MARKET_ON_CLOSE" },
+  limit: { opg: "LIMIT_ON_OPEN", cls: "LIMIT_ON_CLOSE" },
+};
+
+export function etradeAuctionPriceType(
+  orderType: string | undefined,
+  timeInForce: NormalizedTimeInForce | undefined,
+): ETradeAuctionPriceType | null {
   if (!isAuctionTimeInForce(timeInForce)) return null;
-  const verdict = validateAdvancedOrder({
-    type: "session_timed",
-    broker: "etrade",
-    params: { time_in_force: timeInForce },
-  });
-  return verdict.ok ? null : `${verdict.message} The order was not placed.`;
+  const base = String(orderType ?? "MARKET").trim().toLowerCase();
+  if (base !== "market" && base !== "limit") {
+    // A stop cannot participate in an auction: E*TRADE documents no such price type.
+    return null;
+  }
+  return AUCTION_PRICE_TYPES[base][timeInForce];
+}
+
+/**
+ * The named refusal for an auction request this broker cannot express, or null
+ * when it can. Refusing here keeps "no silent downgrade": an auction order never
+ * lands as a plain day order that only looked session-timed.
+ */
+export function auctionOrderRefusal(
+  orderType: string | undefined,
+  timeInForce: NormalizedTimeInForce | undefined,
+  hasOptionLegs: boolean,
+): string | null {
+  if (!isAuctionTimeInForce(timeInForce)) return null;
+  const priceType = etradeAuctionPriceType(orderType, timeInForce);
+  if (!priceType) {
+    return `E*TRADE has no auction price type for a ${String(orderType ?? "MARKET").toUpperCase()} order — only MARKET and LIMIT participate in the opening or closing auction. Nothing was sent.`;
+  }
+  if (hasOptionLegs) {
+    return "E*TRADE's auction price types are documented for equity orders; an option order cannot state one here. Nothing was sent.";
+  }
+  return null;
 }
 
 /**
