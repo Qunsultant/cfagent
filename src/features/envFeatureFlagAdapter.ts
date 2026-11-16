@@ -14,6 +14,7 @@
 
 import {
   ALL_FEATURE_FLAGS,
+  DEFAULT_MONETIZATION_FLAG_VALUE,
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
@@ -21,10 +22,44 @@ import {
   isKnownFeatureFlag,
 } from "./featureFlagPorts";
 
+const PRODUCTION_ENV_NAMES = new Set(["production", "prod"]);
+const NON_PRODUCTION_ENV_NAMES = new Set(["local", "test", "development", "dev"]);
+
+/**
+ * Issue #4613: Returns true when the runtime is production so the Env adapter
+ * cannot serve flags outside local/test environments.
+ */
+export function isProductionFlagRuntime(env?: unknown): boolean {
+  if (env && typeof env === "object") {
+    const rec = env as Record<string, unknown>;
+    const explicitCandidates = [rec.ENVIRONMENT, rec.CF_ENV, rec.NODE_ENV];
+    for (const candidate of explicitCandidates) {
+      if (typeof candidate !== "string") continue;
+      const normalized = candidate.trim().toLowerCase();
+      if (PRODUCTION_ENV_NAMES.has(normalized)) return true;
+      if (NON_PRODUCTION_ENV_NAMES.has(normalized)) return false;
+    }
+  }
+  const procEnv =
+    typeof globalThis !== "undefined" &&
+    (globalThis as { process?: { env?: Record<string, unknown> } }).process?.env;
+  if (procEnv) {
+    const procNodeEnv = typeof procEnv.NODE_ENV === "string" ? procEnv.NODE_ENV.trim().toLowerCase() : "";
+    const procAppEnv = typeof procEnv.ENVIRONMENT === "string" ? procEnv.ENVIRONMENT.trim().toLowerCase() : "";
+    if (PRODUCTION_ENV_NAMES.has(procNodeEnv) || PRODUCTION_ENV_NAMES.has(procAppEnv)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export class EnvFeatureFlagAdapter implements FeatureFlagPort {
   constructor(private readonly env?: Record<string, unknown> | null) {}
 
   async isEnabled(flag: string, _context?: FeatureEvaluationContext): Promise<boolean> {
+    if (isProductionFlagRuntime(this.env)) {
+      return false;
+    }
     if (!isKnownFeatureFlag(flag)) {
       return false;
     }
@@ -99,14 +134,11 @@ export class EnvFeatureFlagAdapter implements FeatureFlagPort {
       return this.isEnabled(productParent, _context);
     }
 
-    // Issue #2043: monetization is ALWAYS default-closed (OFF),
-    // like screener. It gates charging: the
-    // bare-env default-TRUE below would otherwise silently enable
-    // payment in any environment with zero feature configuration.
-    // Explicit enablement only: FEATURE_FLAGS bulk JSON,
-    // FEATURE_MONETIZATION, or the legacy var above.
+    // Issue #4613: single monetization default shared with CfFlagshipAdapter.
+    // Explicit overrides (FEATURE_FLAGS, FEATURE_MONETIZATION, MONETIZATION_ENABLED)
+    // still win above.
     if (flag === "monetization") {
-      return false;
+      return DEFAULT_MONETIZATION_FLAG_VALUE;
     }
 
     // 4. Screener is ALWAYS default-closed (OFF)

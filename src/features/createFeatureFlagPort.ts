@@ -12,12 +12,25 @@
  */
 
 import { CfFlagshipAdapter, type FlagshipBindingLike } from "./cfFlagshipAdapter";
-import { EnvFeatureFlagAdapter } from "./envFeatureFlagAdapter";
+import { EnvFeatureFlagAdapter, isProductionFlagRuntime } from "./envFeatureFlagAdapter";
 import {
+  ALL_FEATURE_FLAGS,
   type FeatureFlag,
   type FeatureFlagPort,
 } from "./featureFlagPorts";
 import { InMemoryFeatureFlagAdapter } from "./inMemoryFeatureFlagAdapter";
+
+class FailClosedProductionFlagPort implements FeatureFlagPort {
+  async isEnabled(): Promise<boolean> {
+    return false;
+  }
+
+  async getAllFlags(): Promise<Record<FeatureFlag, boolean>> {
+    return Object.fromEntries(
+      ALL_FEATURE_FLAGS.map((flag) => [flag, false]),
+    ) as Record<FeatureFlag, boolean>;
+  }
+}
 
 export type FeatureFlagRuntime = "cf" | "env" | "in-memory";
 
@@ -47,10 +60,18 @@ export function createFeatureFlagPort(
       return new CfFlagshipAdapter(flagsBinding);
     }
 
+    if (isProductionFlagRuntime(envObj)) {
+      return new FailClosedProductionFlagPort();
+    }
+
     return new EnvFeatureFlagAdapter(envObj);
   }
 
-  // 3. Fallback to empty env adapter (fail-closed)
+  if (isProductionFlagRuntime()) {
+    return new FailClosedProductionFlagPort();
+  }
+
+  // 3. Fallback to empty env adapter in local/test only
   return new EnvFeatureFlagAdapter({});
 }
 
