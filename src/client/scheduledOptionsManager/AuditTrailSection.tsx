@@ -1,5 +1,5 @@
 import React from "react";
-import { Badge, Table, type TableColumn } from "../components/ui";
+import { Badge, CardHeader, Table, type TableColumn } from "../components/ui";
 import { formatAuditTimestamp } from "./format";
 
 export interface AuditTrailSectionProps {
@@ -131,11 +131,16 @@ export function AuditTrailSection({ auditLogs, loadingAudit }: AuditTrailSection
     // the page no longer shows two titles for one table.
     <section className="sched-section-card" aria-labelledby="sched-audit-heading">
       <header className="sched-section-header">
-        <h4 id="sched-audit-heading">
-          <span aria-hidden="true">📜</span> Execution History &amp; Audit Trail
-          <span className="sched-count-pill">{auditLogs.length} Events</span>
-          <small className="schedule-row-muted">Schedule execution history</small>
-        </h4>
+        <CardHeader
+          id="sched-audit-heading"
+          title={
+            <>
+              <span aria-hidden="true">📜</span> Execution History &amp; Audit Trail
+              <span className="sched-count-pill">{auditLogs.length} Events</span>
+              <small className="schedule-row-muted">Schedule execution history</small>
+            </>
+          }
+        />
         {loadingAudit && <span className="schedule-row-muted">Loading…</span>}
       </header>
 

@@ -32,6 +32,7 @@ import { TextInput } from "./components/ui/TextInput";
 import { withCsrfInit } from "./apiFetch";
 
 import { commercialPath } from "../data/commercialUrlCatalog";
+import { CardHeader } from "./components/ui";
 const LIST_PATH = commercialPath("operators");
 const ADD_PATH = commercialPath("operatorsAdd");
 const REMOVE_PATH = commercialPath("operatorsRemove");
@@ -59,13 +60,6 @@ const opSubtitleStyle: React.CSSProperties = {
   color: "var(--color-text-muted)",
   fontSize: "var(--font-size-body)",
 };
-const opTitleStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: "var(--font-size-title-sm)",
-  fontWeight: 600,
-  color: "var(--color-text-primary)",
-};
-
 export interface EffectiveOperatorRow {
   login: string;
   source: "env" | "store";
@@ -189,7 +183,7 @@ export function StoreOperatorsPanel() {
       <Card>
         <div style={opCardContentStyle}>
           <div>
-            <h2 style={opTitleStyle}>Store operators</h2>
+            <CardHeader title="Store operators" />
             <p style={opSubtitleStyle}>
               Effective operators are the deployment list plus the store list. Env-managed operators are removed via the
               deployment dashboard, not here; store operators are managed below. Removing the last effective operator is
@@ -209,7 +203,7 @@ export function StoreOperatorsPanel() {
     <Card>
       <div style={opCardContentStyle}>
         <div>
-          <h2 style={opTitleStyle}>Store operators</h2>
+          <CardHeader title="Store operators" />
           <p style={opSubtitleStyle}>
             Effective operators are the deployment list plus the store list. Env-managed operators are removed via the
             deployment dashboard, not here; store operators are managed below. Removing the last effective operator is

@@ -1269,7 +1269,7 @@ export function StockHub({
           style={hubTab !== "new-screen" && hubTab !== "run-screen" ? { display: "none" } : undefined}
         >
           <Stack gap="2" style={{ padding: "0 var(--space-4)" }}>
-            <h2 style={{ fontSize: "1.125rem", margin: "1.5rem 0 0.25rem" }}>Run a new screen</h2>
+            <CardHeader title="Run a new screen" />
             <p style={{ fontSize: "var(--font-size-body)", color: "var(--color-text-muted)", margin: "0 0 0.75rem" }}>
               Provider health: see the <a href="/?tab=platform-admin&view=data-providers">provider dashboard</a> in Platform Admin.
             </p>

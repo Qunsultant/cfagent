@@ -77,7 +77,7 @@ export function FlowTradeDetailModal({
         {/* Header */}
         <div className="flow-modal-header">
           <div className="flow-modal-title-wrap">
-            <h2 className="flow-modal-title">{title}</h2>
+            <CardHeader title={title} />
             <div className="flow-modal-subtitle">{company}</div>
           </div>
           <div className="flow-modal-header-right">

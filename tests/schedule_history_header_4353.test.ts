@@ -50,7 +50,9 @@ describe("4353-P02 one heading row on the audit trail", () => {
     expect(audit).toContain("Execution History &amp; Audit Trail");
     expect(audit).toContain("Schedule execution history");
     // The description is inside the heading, not a second stacked title.
-    const heading = audit.slice(audit.indexOf("<h4"), audit.indexOf("</h4>"));
+    // The heading is a CardHeader now (issue 4913); slice the element.
+    const start = audit.indexOf("<CardHeader");
+    const heading = audit.slice(start, audit.indexOf("/>", start));
     expect(heading).toContain("Schedule execution history");
     expect(audit).not.toContain('caption="Schedule execution history"');
   });
@@ -58,7 +60,9 @@ describe("4353-P02 one heading row on the audit trail", () => {
 
 describe("4353-P03 one heading row on the schedules list", () => {
   it("keeps the count and the description on the heading, and drops the caption", () => {
-    const heading = panel.slice(panel.indexOf("<h4"), panel.indexOf("</h4>"));
+    // The heading is a CardHeader now (issue 4913); slice the element.
+    const start = panel.indexOf("<CardHeader");
+    const heading = panel.slice(start, panel.indexOf("/>", start));
     expect(heading).toContain("Every durable schedule, one row each");
     expect(heading).toContain("sched-count-pill");
     expect(panel).not.toContain('caption="Every durable schedule, one row each"');

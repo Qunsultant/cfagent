@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Button, Notice } from "./components/ui";
+import { Button, CardHeader, Notice } from "./components/ui";
 import { subscribeOptionsLatest, refreshOptionsLatest } from "./optionsLatestShared";
 import { apiFetch as fetch } from "./apiFetch";
 import {
@@ -840,9 +840,13 @@ export function ScheduledOptionsManager({
       {/* Top Hero Banner */}
       <div className="sched-hero-banner">
         <div className="sched-hero-info">
-          <h3>
-            <span aria-hidden="true">⏰</span> Autonomous Options Screening &amp; Schedulers
-          </h3>
+          <CardHeader
+            title={
+              <>
+                <span aria-hidden="true">⏰</span> Autonomous Options Screening &amp; Schedulers
+              </>
+            }
+          />
           <p>
             <strong>Persistent Background Timers</strong> (<code>schedule</code> /{" "}
             <code>scheduleEvery</code>) run inside the autonomous orchestration runtime — each

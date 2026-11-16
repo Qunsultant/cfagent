@@ -599,9 +599,13 @@ export function EtapiConfigModal({
           {activeTab === "ai" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
               <div style={{ padding: "var(--space-3)", background: "var(--color-accent-subtle)", border: "1px solid var(--color-border-focus)", borderRadius: "var(--radius-md, 8px)" }}>
-                <h4 style={{ margin: "0 0 0.4rem", fontSize: "var(--font-size-body)", color: "var(--color-accent)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                  <span>🧠</span> Workflow Model Selection
-                </h4>
+                <CardHeader
+                  title={
+                    <>
+                      <span>🧠</span> Workflow Model Selection
+                    </>
+                  }
+                />
                 <p style={{ margin: "0 0 0.85rem", fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)" }}>
                   Configure which neural AI model is assigned to each specific trading and intelligence workflow.
                 </p>
@@ -666,9 +670,13 @@ export function EtapiConfigModal({
               </div>
 
               <div style={{ padding: "var(--space-3)", background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-subtle)", borderRadius: "8px" }}>
-                <h4 style={{ margin: "0 0 0.4rem", fontSize: "var(--font-size-body)", color: "var(--color-text-primary)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                  <span>🌡️</span> Sampling Temperatures
-                </h4>
+                <CardHeader
+                  title={
+                    <>
+                      <span>🌡️</span> Sampling Temperatures
+                    </>
+                  }
+                />
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--space-3)" }}>
                   <div>
                     <TextInput id="etapi-temperature-deterministic" label="Deterministic (Orders):"
@@ -707,9 +715,13 @@ export function EtapiConfigModal({
               </div>
 
               <div style={{ padding: "var(--space-3)", background: "var(--color-danger-subtle)", border: "1px solid var(--color-danger)", borderRadius: "var(--radius-md, 8px)" }}>
-                <h4 style={{ margin: "0 0 0.4rem", fontSize: "var(--font-size-body)", color: "var(--color-danger)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                  <span>🛡️</span> Trading Safety Limits &amp; Constraints
-                </h4>
+                <CardHeader
+                  title={
+                    <>
+                      <span>🛡️</span> Trading Safety Limits &amp; Constraints
+                    </>
+                  }
+                />
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--space-3)" }}>
                   <div>
                     <TextInput id="etapi-max-order-quantity" label="Max Order Shares:"

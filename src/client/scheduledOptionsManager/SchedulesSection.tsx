@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, EmptyState, Table } from "../components/ui";
+import { Button, CardHeader, EmptyState, Table } from "../components/ui";
 import type { ScheduledTaskItem } from "./types";
 import {
   buildScheduleRowColumns,
@@ -44,10 +44,14 @@ export function SchedulesSection({
   return (
     <section className="sched-section-card">
       <header className="sched-section-header">
-        <h4>
-          <span aria-hidden="true">⏱️</span> Active Durable Schedules
-          <span className="sched-count-pill">{schedules.length} Active</span>
-        </h4>
+        <CardHeader
+          title={
+            <>
+              <span aria-hidden="true">⏱️</span> Active Durable Schedules
+              <span className="sched-count-pill">{schedules.length} Active</span>
+            </>
+          }
+        />
         {loading && schedules.length > 0 && (
           <span className="schedule-row-muted">Refreshing…</span>
         )}

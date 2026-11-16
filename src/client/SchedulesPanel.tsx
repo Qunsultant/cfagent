@@ -32,6 +32,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Badge,
   Button,
+  CardHeader,
   Flex,
   Notice,
   PillGroup,
@@ -862,11 +863,15 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             {/* Issue #4353 — one heading row: the name, the count and the
                 table's own description, instead of a title stacked over the
                 caption. */}
-            <h4>
-              <span aria-hidden="true">🗂️</span> Schedules
-              <span className="sched-count-pill">{statusFiltered.length} Shown</span>
-              <small className="schedule-row-muted">Every durable schedule, one row each</small>
-            </h4>
+            <CardHeader
+              title={
+                <>
+                  <span aria-hidden="true">🗂️</span> Schedules
+                  <span className="sched-count-pill">{statusFiltered.length} Shown</span>
+                  <small className="schedule-row-muted">Every durable schedule, one row each</small>
+                </>
+              }
+            />
             {loading && <span className="schedule-row-muted">Refreshing…</span>}
           </header>
           <Table

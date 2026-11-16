@@ -1279,7 +1279,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
         <Stack gap="2" aria-label="Options research workflow">
           {workflowSteps.map((s) => (
             <Card padding="sm" key={s.step}>
-              <h4><Badge tone="neutral">{s.step}</Badge> {s.title}</h4>
+              <CardHeader title={<><Badge tone="neutral">{s.step}</Badge> {s.title}</>} />
               <p>{s.blurb}</p>
               <Stack gap="1">
                 {s.examples.map((example) => (
@@ -1517,7 +1517,13 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
       {result && (
         <Stack gap="2">
           <Flex gap="2" align="center" justify="between" wrap>
-            <h2>{result.candidates.length ? `${result.candidates.length} ranked candidates` : "No candidates pass the constraints"}</h2>
+            <CardHeader
+              title={
+                result.candidates.length
+                  ? `${result.candidates.length} ranked candidates`
+                  : "No candidates pass the constraints"
+              }
+            />
             <span className="ui-meta-sm">{result.modelVersion} · {new Date(result.generatedAt).toLocaleString()}</span>
           </Flex>
           <p className="ui-meta">

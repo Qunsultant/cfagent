@@ -374,7 +374,7 @@ export function McpApiExplorer() {
             <div className="runner-header">
               <div className="runner-title-group">
                 <span className="runner-badge">Interactive MCP Sandbox</span>
-                <h4><code>{activeTool.name}</code></h4>
+                <CardHeader title={<code>{activeTool.name}</code>} />
               </div>
               <span className="category-pill">{activeTool.category}</span>
             </div>
@@ -484,7 +484,7 @@ export function McpApiExplorer() {
             <div className="runner-header">
               <div className="runner-title-group">
                 <span className="runner-badge">Live Resource Inspector</span>
-                <h4><code>{activeResource.uri}</code></h4>
+                <CardHeader title={<code>{activeResource.uri}</code>} />
               </div>
               <Button
               variant="primary"
@@ -546,7 +546,7 @@ export function McpApiExplorer() {
             <div className="runner-header">
               <div className="runner-title-group">
                 <span className="runner-badge">Prompt Generator</span>
-                <h4><code>{activePrompt.name}</code></h4>
+                <CardHeader title={<code>{activePrompt.name}</code>} />
               </div>
               <Button
               variant="primary"
@@ -633,7 +633,7 @@ export function McpApiExplorer() {
             <div className="runner-header">
               <div className="runner-title-group">
                 <span className={`method-pill ${activeRest.method.toLowerCase()}`}>{activeRest.method}</span>
-                <h4><code>{activeRest.path}</code></h4>
+                <CardHeader title={<code>{activeRest.path}</code>} />
               </div>
               <span className="auth-pill">{activeRest.authRequired ? "🔒 Auth Required" : "🌐 Public"}</span>
             </div>

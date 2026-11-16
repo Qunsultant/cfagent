@@ -1,5 +1,5 @@
 import React from "react";
-import { Badge, Table, type TableColumn } from "../components/ui";
+import { Badge, CardHeader, Table, type TableColumn } from "../components/ui";
 import type { OptionsRunSummary } from "./types";
 
 export interface LatestRunsSectionProps {
@@ -66,10 +66,14 @@ export function LatestRunsSection({ latestRuns, runsLoading, runsError }: Latest
   return (
     <section className="sched-section-card">
       <header className="sched-section-header">
-        <h4>
-          <span aria-hidden="true">📈</span> Latest Autonomous Options Runs
-          <span className="sched-count-pill">{latestRuns.length} Runs</span>
-        </h4>
+        <CardHeader
+          title={
+            <>
+              <span aria-hidden="true">📈</span> Latest Autonomous Options Runs
+              <span className="sched-count-pill">{latestRuns.length} Runs</span>
+            </>
+          }
+        />
         {runsLoading && <span className="schedule-row-muted">Refreshing…</span>}
       </header>
 
