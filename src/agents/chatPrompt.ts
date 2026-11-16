@@ -174,13 +174,19 @@ export interface ResolvedPromptBrokerTools {
 export function resolvePromptBrokerTools(
   input?: Partial<Pick<OrchestratorPromptInput, "activeBroker" | "activeMode" | "copilotExecutionMode">>,
 ): ResolvedPromptBrokerTools {
-  const isEtrade = /^(etrade|e\*trade|e-trade)$/i.test(String(input?.activeBroker ?? "").trim());
+  const rawBroker = String(input?.activeBroker ?? "").trim();
+  const isEtrade = /^(etrade|e\*trade|e-trade)$/i.test(rawBroker);
+  const isPublic = /^public(?:\.com)?$/i.test(rawBroker);
   const isLive = /^(live|prod)$/i.test(String(input?.activeMode ?? "").trim());
   const executionPolicy = input?.copilotExecutionMode === "autonomous" ? "autonomous" : "hitl";
   const [brokerId, brokerLabel, quoteTool, previewTool, executeTool] = isEtrade
     ? ["etrade", "E*TRADE", "tool_openaimp_etrade_get_quote", "tool_openaimp_etrade_preview_order", "tool_openaimp_etrade_execute_order"]
-    : ["alpaca", "Alpaca", "tool_openaimp_alpaca_get_quote", "tool_openaimp_alpaca_preview_order", "tool_openaimp_alpaca_place_order"];
-  const [ordersTool, cancelBracketTool] = ["tool_openaimp_alpaca_orders", "tool_openaimp_alpaca_cancel_bracket_ladder"];
+    : isPublic
+      ? ["public", "Public", "tool_openaimp_public_get_quote", "tool_openaimp_public_preview_order", "tool_openaimp_public_place_order"]
+      : ["alpaca", "Alpaca", "tool_openaimp_alpaca_get_quote", "tool_openaimp_alpaca_preview_order", "tool_openaimp_alpaca_place_order"];
+  const [ordersTool, cancelBracketTool] = isPublic
+    ? ["tool_openaimp_public_orders", "tool_openaimp_public_cancel_order"]
+    : ["tool_openaimp_alpaca_orders", "tool_openaimp_alpaca_cancel_bracket_ladder"];
   return {
     brokerId,
     brokerLabel,
