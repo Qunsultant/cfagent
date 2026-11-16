@@ -218,6 +218,6 @@ describe("4363-P05 the tool surfaces", () => {
     const modes = readFileSync(join(root, "src/config/asyncJobModes.ts"), "utf8");
     expect(modes).toContain('"set_job_execution_mode"');
     const panel = readFileSync(join(root, "src/client/WorkflowRunsPanel.tsx"), "utf8");
-    expect(panel).toContain("<dt>Execution mode</dt>");
+    expect(panel).toContain('<dt className="ui-label">Execution mode</dt>');
   });
 });
