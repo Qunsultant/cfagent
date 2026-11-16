@@ -754,6 +754,12 @@ export async function getETradeRequestToken(
 /**
  * Step 3: Exchange Verifier for Access Token
  * Calls GET /oauth/access_token
+ *
+ * Issue #4988 (#945 Q10): the optional identity carries the
+ * internal-id dual-write into storeAccessTokens (the #1759
+ * pattern), so a service-login exchange also lands under the
+ * service internal-id key — not only the login-scoped key.
+ * Callers that omit it behave exactly as before.
  */
 export async function exchangeETradeVerifier(
   env: Env,
@@ -761,7 +767,8 @@ export async function exchangeETradeVerifier(
   verifier: string,
   explicitRequestToken?: string,
   explicitRequestTokenSecret?: string,
-  overrideEnv?: string
+  overrideEnv?: string,
+  identity?: ETradeTokenIdentity
 ): Promise<ETradeTokenSet> {
   const envConfig = resolveEnvironmentConfig(env, overrideEnv);
   const consumerKey = envConfig.etrade.apiKey;
@@ -834,7 +841,7 @@ export async function exchangeETradeVerifier(
         throw new BusinessError("FAILURE_ETRADE_OAUTH_EXCHANGE_FAILED");
       }
 
-      await storeAccessTokens(env, userLogin, accessToken, accessTokenSecret, overrideEnv);
+      await storeAccessTokens(env, userLogin, accessToken, accessTokenSecret, overrideEnv, identity);
 
       return {
         accessToken,

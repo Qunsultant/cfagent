@@ -1,6 +1,8 @@
 /**
  * Client for the service-user administration routes (#2331 slice 1,
- * UI slice #2501): status read + platform-tier provision.
+ * UI slice #2501): status read + platform-tier provision, plus the
+ * service-login E*TRADE authorization client (#4988): start (returns
+ * the E*TRADE authorize URL), verifier-PIN completion, token revoke.
  *
  * Status reads go through src/client/apiFetch.ts (the #71 rule).
  * The provision POST deliberately uses raw fetch instead: apiFetch
@@ -21,11 +23,30 @@ export interface ServiceUserPlatformStatus {
   roles: string[];
 }
 
+/**
+ * Issue #4988 — the provisioning checklist (#1764) as the status
+ * route reports it. The client renders it read-only; the token
+ * item is presence only (never a value).
+ */
+export interface ProvisioningChecklistItem {
+  id: string;
+  label: string;
+  status: "pass" | "fail" | "unknown";
+  detail?: string;
+}
+
+export interface ProvisioningChecklist {
+  complete: boolean;
+  checklist: ProvisioningChecklistItem[];
+  ownerActions: string[];
+}
+
 export interface ServiceUserStatus {
   serviceUser: string;
   serviceInternalUserId: string;
   platform: ServiceUserPlatformStatus | null;
   tenants: string[];
+  provisioning?: ProvisioningChecklist;
 }
 
 /** Error carrying the HTTP status, so the UI can render 401/403/202 distinctly. */
@@ -52,6 +73,27 @@ function isPlatformStatus(value: unknown): value is ServiceUserPlatformStatus {
   );
 }
 
+function isProvisioningChecklist(value: unknown): value is ProvisioningChecklist {
+  if (!isRecord(value)) return false;
+  if (typeof value.complete !== "boolean") return false;
+  if (
+    !Array.isArray(value.checklist) ||
+    !value.checklist.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.id === "string" &&
+        typeof item.label === "string" &&
+        (item.status === "pass" || item.status === "fail" || item.status === "unknown"),
+    )
+  ) {
+    return false;
+  }
+  if (!Array.isArray(value.ownerActions) || !value.ownerActions.every((a) => typeof a === "string")) {
+    return false;
+  }
+  return true;
+}
+
 /** Shape guard: true only for a well-formed status payload. */
 export function isServiceUserStatus(value: unknown): value is ServiceUserStatus {
   if (!isRecord(value)) return false;
@@ -59,6 +101,9 @@ export function isServiceUserStatus(value: unknown): value is ServiceUserStatus 
   if (typeof value.serviceInternalUserId !== "string") return false;
   if (value.platform !== null && !isPlatformStatus(value.platform)) return false;
   if (!Array.isArray(value.tenants) || !value.tenants.every((t) => typeof t === "string")) {
+    return false;
+  }
+  if (value.provisioning !== undefined && !isProvisioningChecklist(value.provisioning)) {
     return false;
   }
   return true;
@@ -97,6 +142,77 @@ export type ProvisionOutcome =
   | { kind: "provisioned"; membershipId: string }
   | { kind: "alreadyProvisioned"; membershipId: string }
   | { kind: "queued"; jobId?: string };
+
+/**
+ * Issue #4988 — start the service-login E*TRADE authorization.
+ * Returns the E*TRADE authorize URL the owner opens in a new tab
+ * (logging in at E*TRADE as the service login); E*TRADE then shows
+ * a verifier PIN, completed via completeServiceEtradeAuth. Raw
+ * fetch, like provisionPlatformTier: the server is the gate, and a
+ * 401 means not signed in, a 403 means not a platform admin, a
+ * stale step-up session, or a PDP denial — all surfaced, never
+ * silently retried.
+ */
+export async function startServiceEtradeAuth(): Promise<{
+  authorizeUrl: string;
+  serviceUser: string;
+}> {
+  let resp: Response;
+  try {
+    resp = await globalThis.fetch("/api/admin/service-user/etrade/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({}),
+    });
+  } catch {
+    throw new ServiceUserApiError(0, "Failed to reach the server.");
+  }
+  const data = await readBody(resp);
+  if (!resp.ok) throw new ServiceUserApiError(resp.status, errorMessage(data, resp.status));
+  if (typeof data.authorizeUrl !== "string" || typeof data.serviceUser !== "string") {
+    throw new ServiceUserApiError(resp.status, "Unexpected authorization response.");
+  }
+  return { authorizeUrl: data.authorizeUrl, serviceUser: data.serviceUser };
+}
+
+/** Complete the service-login authorization with the E*TRADE verifier PIN. */
+export async function completeServiceEtradeAuth(verifier: string): Promise<void> {
+  let resp: Response;
+  try {
+    resp = await globalThis.fetch("/api/admin/service-user/etrade/verifier", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({ verifier }),
+    });
+  } catch {
+    throw new ServiceUserApiError(0, "Failed to reach the server.");
+  }
+  const data = await readBody(resp);
+  if (!resp.ok) throw new ServiceUserApiError(resp.status, errorMessage(data, resp.status));
+  if (data.ok !== true) {
+    throw new ServiceUserApiError(resp.status, "Unexpected authorization response.");
+  }
+}
+
+/** Revoke the service login's stored E*TRADE token (owner's token untouched). */
+export async function revokeServiceEtradeToken(): Promise<boolean> {
+  let resp: Response;
+  try {
+    resp = await globalThis.fetch("/api/admin/service-user/etrade/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
+      body: JSON.stringify({}),
+    });
+  } catch {
+    throw new ServiceUserApiError(0, "Failed to reach the server.");
+  }
+  const data = await readBody(resp);
+  if (!resp.ok) throw new ServiceUserApiError(resp.status, errorMessage(data, resp.status));
+  if (data.ok !== true) {
+    throw new ServiceUserApiError(resp.status, "Unexpected revocation response.");
+  }
+  return data.deleted === true;
+}
 
 /**
  * Provision the platform tier. The 202 outcome is returned, never

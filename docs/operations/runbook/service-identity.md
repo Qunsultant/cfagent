@@ -13,10 +13,14 @@ TradingAgent / screener / report paths.
 
 It replaces the legacy `default_trader` fallback, under which those paths
 silently borrowed a synthetic shared login. The service identity is a
-**real login**: it authorizes E*TRADE once through the standard Connect
-E*TRADE (3-legged OAuth) flow, and its token is stored per-identity in the
+**real login**: it authorizes E*TRADE once through its own dedicated
+authorization flow — the "Authorize service login with E*TRADE" action
+in the Service User section (see "Authorizing the service login with
+E*TRADE (#4988)" below) — and its token is stored per-identity in the
 SessionStore as `etrade:token:<ENV>:<login>` — the same store, expiry,
-renewal, and revocation as any user's token.
+renewal, and revocation as any user's token. The user's own Connect
+E*TRADE flow authorizes only the signed-in login and never the service
+login; the two flows share the E*TRADE OAuth helpers but no identity.
 
 The configured value is an **identifier, not a credential**. It grants
 nothing by itself; the stored OAuth token does the work, and revoking that
@@ -45,8 +49,10 @@ Order of operations:
 
 1. Choose the service login (an existing operator identity or a dedicated
    one) and set `SERVICE_USER_LOGIN` to it.
-2. Authorize that identity once via the Connect E*TRADE flow, so a stored
-   token exists under its login.
+2. Authorize that identity once via the "Authorize service login with
+   E*TRADE" action in the Service User section (IAAA Admin → Overview →
+   Service user) — see "Authorizing the service login with E*TRADE
+   (#4988)" below — so a stored token exists under its login.
 3. **Then** deploy / merge Phase A of #1185 (PR #1232). Merges deploy to
    PROD; from that deploy onward, unattended work runs under this identity.
 
@@ -77,12 +83,59 @@ fields:
 Every non-pass item names its owner action in
 `provisioning.ownerActions`: provision the platform tier via
 `POST /api/admin/service-user/provision {"tier": "platform"}`,
-authorize the service login once via the Connect E*TRADE flow,
+authorize the service login once via the "Authorize service login
+with E*TRADE" action in the Service User section,
 or re-check token presence after a store-read failure. An item
 that is not a pass is therefore explicitly carried with an
 owner action, which is the #1764 acceptance for this checklist
 — the checklist is complete, or its remainder is owned, never
 unrecorded.
+
+## Authorizing the service login with E*TRADE (#4988, #945 Q10)
+
+The service login is authorized through its own dedicated routes
+under the service-user admin surface (`src/agents/routes/serviceUser.ts`),
+not through the user's Connect E*TRADE flow:
+
+1. **Start** — `POST /api/admin/service-user/etrade/start`
+   (platform-admin caller, Q4 step-up for
+   integration-credential management — 5-minute window — and PDP
+   `integration:connect`). The service login is resolved server-side
+   from `SERVICE_USER_LOGIN`; it is never taken from the request.
+   Returns the E*TRADE authorize URL. The request-token secret is
+   stored under the service login's key and never returned.
+2. **Complete** — the owner opens the authorize URL, logs in at
+   E*TRADE as the service/operator login, and pastes the verifier
+   PIN the E*TRADE page shows into the Service User section, which
+   posts `POST /api/admin/service-user/etrade/verifier`
+   (platform-admin caller, PDP `integration:connect`). The exchange
+   binds to the request-token record stored under the service login's
+   key, so a client-supplied login cannot redirect the token; the
+   access token lands under the service login's keys only
+   (`etrade:token:<ENV>:svc-background` + the internal-id key
+   `service:svc-background`). Completion is a verifier PIN, not a
+   browser callback: no callback URL is registered with E*TRADE,
+   because the DO-side start route has no trusted public origin.
+3. **Revoke** — `POST /api/admin/service-user/etrade/revoke`
+   (platform-admin caller) or the "Revoke service login token"
+   action in the Service User section. Deletes only the service
+   login's key set; the owner's token is untouched.
+
+Start, completion, and revocation each emit one audit event with
+the acting admin as actor and the service identity as target.
+Refusals (non-admin, stale step-up, PDP-denied) write nothing.
+
+Renewal: the 03:00 UTC token-renewal pass enumerates every stored
+token (`renewAllStoredETradeTokens`), so the service login's token
+renews on the same midnight-ET lifecycle as a user token — no
+separate renewal wiring exists or is needed.
+
+The E*TRADE-side step — logging in at E*TRADE as the
+service/operator login (a second/operator login, or a second
+account) — is an owner action outside the code. Until it is done,
+the checklist's brokerage-token item stays fail and background
+work has no broker token of its own; nothing falls back to the
+owner's token.
 
 ## Implications if it is not set
 
@@ -139,11 +192,13 @@ order, never flip → copy.
 ## Changing or revoking it
 
 - **Change the value:** set the new login and make sure that identity's
-  stored E*TRADE token exists *first* (authorize it via the linking flow).
-  Dispatches use the new identity from the next tick; the previous
-  identity's records stay keyed under its own login.
+  stored E*TRADE token exists *first* (authorize it via the Service User
+  section action). Dispatches use the new identity from the next tick;
+  the previous identity's records stay keyed under its own login.
 - **Revoke unattended access:** revoke/delete the service identity's
-  stored token. Unattended E*TRADE work stops; user flows are untouched.
+  stored token (the "Revoke service login token" action in the Service
+  User section, or `POST /api/admin/service-user/etrade/revoke`).
+  Unattended E*TRADE work stops; user flows are untouched.
 - **Roll back a deploy:** redeploy the previous release. Re-adding the old
   `ETRADE_OAUTH_TOKEN*` secrets restores nothing — since #1185 Phase B,
   no code reads them.
