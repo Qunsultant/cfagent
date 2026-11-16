@@ -19,7 +19,9 @@ import {
 } from "./brokerEnvironment";
 export { publishManualScreenerRun } from "./etradeBrokerPublish";
 import { ETradeThinkHarness } from "../../services/thinkHarness";
-import { TradingPlatformRegistry, fetchQuoteLiveStrict, normalizeTimeInForce } from "../../trading";
+import { TradingPlatformRegistry, fetchQuoteLiveStrict } from "../../trading";
+// #4654/#4656: draft→placement terms, shared with the neutral route.
+import { deriveOrderExecutionTerms } from "./orderExecutionTerms";
 import { resolveEnvironmentConfig } from "../../config/environment";
 import { generateHedgeProposals } from "../../services/hedgeProposals";
 import { normalizeBundleCandidates } from "../../services/recommendationBundle";
@@ -511,20 +513,12 @@ export async function handleEtradeBrokerRoutes(
       const symbol = existingRecord.symbol.toUpperCase();
       const action = existingRecord.action as any;
       const quantity = Number(existingRecord.quantity);
-      const orderType = existingRecord.orderType || "MARKET";
-      // Issue #4654 (matrix gap 4): same derivation as the neutral route — the
-      // stored price is the limit for LIMIT/STOP_LIMIT, and the trigger for
-      // STOP/STOP_LIMIT is the stored stop price (falling back to the price).
-      const limitPrice =
-        orderType === "LIMIT" || orderType === "STOP_LIMIT" ? existingRecord.price : undefined;
-      const stopPrice =
-        orderType === "STOP" || orderType === "STOP_LIMIT"
-          ? typeof existingRecord.stopPrice === "number"
-            ? existingRecord.stopPrice
-            : existingRecord.price
-          : undefined;
-      // Issue #4656 (matrix gap 5): the approved time-in-force, from the draft.
-      const timeInForce = normalizeTimeInForce(existingRecord.timeInForce);
+      // #4654/#4656: the approved terms, derived once for both routes.
+      const terms = deriveOrderExecutionTerms(existingRecord);
+      const orderType = terms.orderType;
+      const limitPrice = terms.limitPrice;
+      const stopPrice = terms.stopPrice;
+      const timeInForce = terms.timeInForce;
       // #1726: dedup — the stored strategy-order parse already lives
       // in orderPayloadHash.ts; only optionLegs/strategyNetDebit are
       // consumed downstream, and both match the inline parse.
