@@ -64,7 +64,7 @@
  * or an account.
  */
 
-import { ThinkWorkflow } from "@cloudflare/think/workflows";
+import { PortThinkWorkflow } from "./portThinkWorkflow";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { DefaultProgress } from "agents/workflows";
 import type { Env } from "../types";
@@ -221,7 +221,7 @@ function adaptStep(step: WorkflowStep): SagaWorkflowStep {
   };
 }
 
-export class CrossDomainSagaWorkflow extends ThinkWorkflow<any, SagaParams, DefaultProgress, Env> {
+export class CrossDomainSagaWorkflow extends PortThinkWorkflow<any, SagaParams, DefaultProgress, Env> {
   async run(
     event: WorkflowEvent<SagaParams>,
     step: WorkflowStep,

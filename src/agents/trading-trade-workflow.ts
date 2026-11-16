@@ -21,7 +21,7 @@
  * to runTradeApprovalFlow, which is unit-testable with a fake step.
  */
 
-import { ThinkWorkflow } from "@cloudflare/think/workflows";
+import { PortThinkWorkflow } from "../workflows/portThinkWorkflow";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { DefaultProgress } from "agents/workflows";
 import type { Env } from "../types";
@@ -203,7 +203,7 @@ export async function runTradeApprovalFlow(
   return { status: "settled", orderId: params.orderId, decision: decision.decision, result };
 }
 
-export class TradingTradeWorkflow extends ThinkWorkflow<
+export class TradingTradeWorkflow extends PortThinkWorkflow<
   // Issue #1738: TradingAgent is an Agents SDK actor now, not a
   // Think class, so it cannot satisfy ThinkWorkflow's agent-type
   // constraint. ADR 0004 W13 already prescribes `any` here (the

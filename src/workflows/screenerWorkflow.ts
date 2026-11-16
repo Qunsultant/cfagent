@@ -26,7 +26,7 @@
  * never uses agent tracking — runs are tracked via D1
  * projection rows + instance status, which is the design.
  */
-import { ThinkWorkflow } from "@cloudflare/think/workflows";
+import { PortThinkWorkflow } from "./portThinkWorkflow";
 import { resolveScheduleBranch } from "../services/workflowLifecycle";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import type { DefaultProgress } from "agents/workflows";
@@ -389,7 +389,7 @@ function buildDeps(
   };
 }
 
-export class ScreenerScreenWorkflow extends ThinkWorkflow<
+export class ScreenerScreenWorkflow extends PortThinkWorkflow<
   any,
   WorkflowJobCommand,
   DefaultProgress,

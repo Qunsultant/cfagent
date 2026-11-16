@@ -280,6 +280,23 @@ to whole seconds (the provider has no ms label) — poll
 granularity only, since deadlines are enforced by the flow's
 clock checks.
 
+### W13 supersession — PortThinkWorkflow port base (2026-11-16, issue #4924)
+
+W13's decision stands in substance: ThinkWorkflow remains the runtime
+base, the agent type stays `any`, and each workflow class stays a thin
+adapter. What changes is the shape: the five workflow classes no longer
+extend ThinkWorkflow directly. They extend `PortThinkWorkflow`
+(src/workflows/portThinkWorkflow.ts), a thin intermediate base that
+forwards the SDK base's generic parameters unchanged and carries no
+behavior. The port module is the sole "@cloudflare/think/workflows"
+import site in src/; the per-class "foundation adapter" framing in W13
+and in the agent-conformance pin is superseded by this single seam.
+The port/adapter standard requires external execution surfaces behind
+a named seam; the earlier direct-extension convention was a scope
+exclusion in the PortThink adoption, not an exemption. No behavior
+change, no binding change: `instanceof` chains are preserved and the
+wrangler bindings name the classes, not the base.
+
 ## Consequences
 
 - Every synchronous screener route (etrade, market-data, premium)

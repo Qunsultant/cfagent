@@ -155,11 +155,12 @@ describe("Agent conformance (issue #1738)", () => {
       "src/actors/thinkPortMapping.ts",
     ]);
     // The workflows subpath is a different specifier and stays:
-    // the five workflow classes are ThinkWorkflow by ADR 0004 W13.
-    // Saga (#2041 S1) is the fourth foundation adapter, same
-    // pattern as the other three — its addition here is deliberate.
-    // JobPipeline (#3534) is the fifth, same pattern — its addition
-    // here is deliberate.
+    // issue #4924 supersedes ADR 0004 W13's per-class "foundation
+    // adapter" shape — the five workflow classes now extend the
+    // PortThinkWorkflow port base, and the port module is the sole
+    // workflows-specifier import site in src/. Any other importer
+    // fails; a new workflow class extends the port, it does not
+    // import the SDK base.
     const workflowFiles = listTsFiles(path.join(ROOT, "src")).filter((f) =>
       read(path.relative(ROOT, f)).includes('from "@cloudflare/think/workflows"')
     );
@@ -167,13 +168,7 @@ describe("Agent conformance (issue #1738)", () => {
       workflowFiles
         .map((f) => path.relative(ROOT, f).replace(/\\/g, "/"))
         .sort(),
-    ).toEqual([
-      "src/agents/trading-trade-workflow.ts",
-      "src/workflows/jobPipelineWorkflow.ts",
-      "src/workflows/paymentWorkflow.ts",
-      "src/workflows/sagaWorkflow.ts",
-      "src/workflows/screenerWorkflow.ts",
-    ]);
+    ).toEqual(["src/workflows/portThinkWorkflow.ts"]);
   });
 
   it("the Worker exports ResearchAgent as a Durable Object class", () => {
