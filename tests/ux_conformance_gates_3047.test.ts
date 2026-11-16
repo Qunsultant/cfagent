@@ -1209,12 +1209,11 @@ describe("interior consistency (#3991, S-U1)", () => {
 });
 
 /**
- * Bespoke-layout freeze (#3136, Phase 2). A bespoke layout class is a
- * non-primitive class rule whose declarations include a layout
- * property (display grid/flex, grid-template-*, flex-direction,
- * grid-column/row, position absolute/fixed). The grandfathered list in
- * tests/ux_layout_freeze_3136.json is the complete set at freeze time
- * (1,185 classes); any class outside it fails CI, and any entry whose
+ * Bespoke-class freeze (#3136, Phase 2; tightened S-U4 #4820). A bespoke
+ * class is any non-`ui-` class rule in the scanned CSS — layout or not.
+ * The grandfathered list in tests/ux_layout_freeze_3136.json is the
+ * complete set at freeze time (2,611 classes: 1,162 layout + 1,449
+ * non-layout); any class outside it fails CI, and any entry whose
  * class no longer exists is stale and must be removed in the same PR
  * that deletes the class. Burn-down: delete the class + its entry in
  * the slice that owns the class's wave — never the entry alone.
@@ -1224,10 +1223,13 @@ describe("interior consistency (#3991, S-U1)", () => {
  * exactly (target-based: only the last simple selector of each comma
  * part is the rule's subject — `.a .b { display: flex }` freezes `.b`,
  * not `.a`). The set-equality test cross-checks the two.
+ *
+ * Rules inside `@media` blocks are NOT scanned: the regex only matches
+ * a rule whose selector starts outside a brace block, so a rule defined
+ * only inside `@media` never reaches the scanner (verified by a minimal
+ * repro — the freeze doc used to claim otherwise).
  */
 const LAYOUT_FREEZE_FILE = "tests/ux_layout_freeze_3136.json";
-const LAYOUT_PROP_RE =
-  /(?:^|[;{])\s*(display\s*:\s*(?:grid|flex|inline-grid|inline-flex)|grid-template(?:-columns|-rows|-areas)?\s*:|flex-direction\s*:|grid-column\s*:|grid-row\s*:|position\s*:\s*(?:absolute|fixed))/i;
 const FREEZE_WAVES = [
   "wave-1",
   "S-U4",
@@ -1275,15 +1277,16 @@ function targetClasses(selector: string): string[] {
   return out;
 }
 
-/** class -> defining files, for every layout class in the scanned CSS. */
-function scanLayoutClasses(): Map<string, string[]> {
+/** class -> defining files, for every bespoke class in the scanned CSS
+ *  (S-U4 #4820: the layout-property filter is gone — every non-`ui-`
+ *  class rule freezes, not just layout ones). */
+function scanClasses(): Map<string, string[]> {
   const found = new Map<string, Set<string>>();
   for (const abs of walkCss(CLIENT_DIR)) {
     const rel = toRepoRel(abs);
     if (!isScannedCss(rel)) continue;
     const text = stripCssComments(readFileSync(abs, "utf8"));
     for (const m of text.matchAll(/([^{}@]+?)\s*\{([^}]*)\}/g)) {
-      if (!LAYOUT_PROP_RE.test(m[2])) continue;
       for (const cls of targetClasses(m[1])) {
         if (!found.has(cls)) found.set(cls, new Set());
         found.get(cls)?.add(rel);
@@ -1302,7 +1305,10 @@ function freezeViolations(
 ): string[] {
   const violations: string[] = [];
   for (const cls of scanned.keys()) {
-    if (!grandfathered[cls]) violations.push(`${cls}: new bespoke layout class`);
+    // Primitive-library classes that collide with scanned sheets
+    // (ui-table, ui-btn, ui-input, ui-modal-body, …) are not bespoke.
+    if (cls.startsWith("ui-")) continue;
+    if (!grandfathered[cls]) violations.push(`${cls}: new bespoke class`);
   }
   for (const cls of Object.keys(grandfathered)) {
     if (!scanned.has(cls)) violations.push(`${cls}: stale freeze entry`);
@@ -1316,15 +1322,15 @@ function loadFreeze(): Record<string, FreezeEntry> {
   ) as Record<string, FreezeEntry>;
 }
 
-describe("bespoke-layout freeze (#3136)", () => {
-  it("no bespoke layout class exists outside the grandfathered list; no grandfathered entry is stale", () => {
-    const scanned = scanLayoutClasses();
+describe("bespoke-class freeze (#3136)", () => {
+  it("no bespoke class exists outside the grandfathered list; no grandfathered entry is stale", () => {
+    const scanned = scanClasses();
     const grandfathered = loadFreeze();
     expect(freezeViolations(scanned, grandfathered)).toEqual([]);
   });
 
   it("grandfathered entries are well-formed and live", () => {
-    const scanned = scanLayoutClasses();
+    const scanned = scanClasses();
     const grandfathered = loadFreeze();
     const problems: string[] = [];
     for (const [cls, entry] of Object.entries(grandfathered)) {
@@ -1351,7 +1357,7 @@ describe("bespoke-layout freeze (#3136)", () => {
     expect(problems).toEqual([]);
   });
 
-  it("gate bites: an unlisted layout class and a stale entry are violations", () => {
+  it("gate bites: an unlisted bespoke class and a stale entry are violations", () => {
     const scanned = new Map<string, string[]>([
       ["kept-layout", ["src/client/styles.css"]],
       ["new-layout", ["src/client/styles.css"]],
@@ -1361,7 +1367,7 @@ describe("bespoke-layout freeze (#3136)", () => {
       "gone-layout": { file: "src/client/styles.css", wave: "S-U7" },
     };
     expect(freezeViolations(scanned, grandfathered)).toEqual([
-      "new-layout: new bespoke layout class",
+      "new-layout: new bespoke class",
       "gone-layout: stale freeze entry",
     ]);
     expect(
