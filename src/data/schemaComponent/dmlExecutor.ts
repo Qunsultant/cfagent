@@ -27,6 +27,7 @@ import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type {
   DmlCatalogue,
+  DmlCatalogueEntry,
   DmlDb,
   DmlParams,
 } from "./dmlCatalogue";
@@ -36,6 +37,7 @@ import {
   SchemaComponentError,
   SchemaErrorCode,
 } from "./schemaErrors";
+import { withD1Retry } from "../d1RetryPolicy";
 
 /** Re-validate the resolved entry before running it (tamper guard). */
 function revalidate(code: string, entry: unknown): void {
@@ -46,6 +48,23 @@ function revalidate(code: string, entry: unknown): void {
       `code ${code}: ${validation.reason}`,
     );
   }
+}
+
+/**
+ * #4930 — whether re-executing this entry is a no-op under redelivery
+ * (ADR 0033 R-1). A read never writes; an upsert carries its ON
+ * CONFLICT guard; anything else needs the audited `idempotent: true`
+ * declaration on the entry. An entry that is not safe here is still
+ * retried for did-not-run errors (the statement never executed), just
+ * never for ambiguous ones — that half of the decision lives in the
+ * retry helper, not here.
+ */
+function isSafeToRetryEntry(entry: DmlCatalogueEntry): boolean {
+  return (
+    entry.operation === "read" ||
+    entry.operation === "upsert" ||
+    entry.idempotent === true
+  );
 }
 
 /**
@@ -80,9 +99,13 @@ export async function executeDml<T = unknown, TDb extends DrizzleD1Database<any>
     );
   }
   try {
-    return (await withAspects(
-      { operationName: code },
-      () => entry.run!(db as unknown as DmlDb, params),
+    return (await withD1Retry(
+      () =>
+        withAspects(
+          { operationName: code },
+          () => entry.run!(db as unknown as DmlDb, params),
+        ),
+      { operationName: code, idempotent: isSafeToRetryEntry(entry) },
     )) as T;
   } catch (err) {
     if (err instanceof SchemaComponentError) throw err;
@@ -116,10 +139,14 @@ export async function executeDmlSql<T = unknown, TDb extends DrizzleD1Database<a
   const query = entry.build(params);
   const openDb = db as unknown as DmlDb;
   try {
-    return (await withAspects({ operationName: code }, async () => {
-      if (entry.mode === "all") return openDb.all(query);
-      return openDb.run(query);
-    })) as T;
+    return (await withD1Retry(
+      () =>
+        withAspects({ operationName: code }, async () => {
+          if (entry.mode === "all") return openDb.all(query);
+          return openDb.run(query);
+        }),
+      { operationName: code, idempotent: isSafeToRetryEntry(entry) },
+    )) as T;
   } catch (err) {
     if (err instanceof SchemaComponentError) throw err;
     const cause = err instanceof Error ? err.message : String(err);

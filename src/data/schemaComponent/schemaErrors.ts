@@ -13,6 +13,8 @@ export enum SchemaErrorCode {
   MISSING_PARAMETER = "SCHEMA_MISSING_PARAMETER",
   EXECUTION_FAILED = "SCHEMA_EXECUTION_FAILED",
   UNCODED_STATEMENT = "SCHEMA_UNCODED_STATEMENT",
+  /** Issue #4930 — a D1 operation exhausted its bounded retry budget. */
+  RETRY_EXHAUSTED = "SCHEMA_RETRY_EXHAUSTED",
 }
 
 export interface SchemaErrorMetadata {
@@ -64,6 +66,13 @@ export const SCHEMA_ERROR_CATALOG: Record<SchemaErrorCode, SchemaErrorMetadata> 
     defaultMessage: "A statement without a catalogue code cannot execute.",
     remediation:
       "Catalogue the statement first (code + plane + table + statement text), then execute it by code.",
+  },
+  [SchemaErrorCode.RETRY_EXHAUSTED]: {
+    code: SchemaErrorCode.RETRY_EXHAUSTED,
+    httpStatus: 500,
+    defaultMessage: "D1 operation failed after bounded retries.",
+    remediation:
+      "The operation exhausted its retry budget; the last error is attached to the error details. Re-run the call; do not retry the write by hand unless the operation is idempotent (ADR 0033 R-1).",
   },
 };
 

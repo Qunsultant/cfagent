@@ -123,7 +123,22 @@ call-site census, the DO-first ordering, the never-throw discipline,
 the reconcile operator-only rule, and the idempotency mechanism —
 with the audit findings F-2/F-3/F-4/F-5 allowlisted by finding number
 until their follow-up fixes (#4962, #4963, #4964, #4965) land and
-remove the exceptions.
+remove the exceptions. **Retry policy (#4930).** Transient D1 failures
+are retried at the DML executor boundary by one shared helper
+(`withD1Retry`, `src/data/d1RetryPolicy.ts`): at most 3 attempts,
+100ms doubling to a 1000ms cap. The classifier is an allowlist —
+lock contention (SQLITE_BUSY / "database is locked") proves the
+statement never ran and is retried for any operation; timeouts and
+transport failures are ambiguous and are retried only for idempotent
+operations (reads, upserts, and entries carrying the audited
+`idempotent: true` declaration). A non-idempotent write that fails
+ambiguously fails fast with its original error, and exhausted retries
+throw the coded `SCHEMA_RETRY_EXHAUSTED` error. A retry re-runs the
+whole transaction-aspect unit, never resumes mid-unit. **Pin (#4930).**
+`tests/d1_retry_policy_4930.test.ts` (in the `test:pins` suite, run by
+CI) pins the classification, the budgets, the executor wiring, and the
+catalogue retry census (54 executed entries: 38 fully retryable,
+16 did-not-run-only).
 
 ## Q4 — Aspect composition is a registered runner, resolved at call time
 

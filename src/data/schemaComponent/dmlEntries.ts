@@ -149,6 +149,9 @@ const FEED_DATASET_ENTRIES: DmlCatalogueEntry[] = [
     table: "mas_feed_datasets",
     operation: "delete",
     form: "builder",
+    // #4930: delete by primary key — re-deleting a missing row is a
+    // no-op, so the entry is safe to retry under redelivery.
+    idempotent: true,
     run: async (db, params) => {
       return db
         .delete(masFeedDatasets)
@@ -251,6 +254,9 @@ const INDEX_LIST_ENTRIES: DmlCatalogueEntry[] = [
     table: "mas_index_lists",
     operation: "delete",
     form: "builder",
+    // #4930: delete by primary key — re-deleting a missing row is a
+    // no-op, so the entry is safe to retry under redelivery.
+    idempotent: true,
     run: async (db, params) => {
       return db
         .delete(masIndexLists)
@@ -882,6 +888,11 @@ function marketplaceTableEntries(
       operation: "update",
       form: "build",
       mode: "run",
+      // #4930: pure-assignment SET (column = bound literal) by id —
+      // re-setting the same values is a no-op, so the entry is safe
+      // to retry under redelivery. (The counter step below is NOT
+      // flagged: col = col + delta double-counts on re-execution.)
+      idempotent: true,
       build: marketplaceUpdate(table, columnMap, idField),
     },
     {
@@ -890,6 +901,9 @@ function marketplaceTableEntries(
       operation: "delete",
       form: "build",
       mode: "run",
+      // #4930: delete by id — re-deleting a missing row is a no-op,
+      // so the entry is safe to retry under redelivery.
+      idempotent: true,
       build: marketplaceDelete(table, columnMap, idField),
     },
     {
