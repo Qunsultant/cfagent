@@ -659,6 +659,48 @@ function measure(): Map<string, number> {
  * 166->165. Measured totals move 1191/9359 -> 1192/9355 (re-based onto
  * 155f5121; the totals on 2ac3e995 were 1191/9355 -> 1192/9351, on 7d81cd93
  * 1190/9351 -> 1191/9347, and on cc33837c 1174/9135 -> 1175/9131).
+ * Baseline update (#4792, 2026-11-16): four CPO-dhmp surveys are filed
+ * into docs/architecture/survey/ as dated records of what was measured
+ * on their stated bases. Their provider-brand mentions are route
+ * paths, query-param names, and file names that cannot be reworded
+ * without falsifying the survey — all dispositioned S5 live docs
+ * (dated records / identifier inventories): 4 new rows
+ * (2380-survey-draft.md/etrade 6 — the /api/etrade/... route paths
+ * in the surface inventory; 2380-survey-draft.md/alpaca 1 — the
+ * alpaca.ts route reference; 3238-param-survey.md/etrade 1 — the
+ * etrade_auth / etrade_connect_error param names;
+ * slice4-label-survey.md/etrade 4 — the ETradeTradingHub.tsx file
+ * name). ux-framework-survey.md carries no rows. Measured totals move
+ * 1192/9360 -> 1196/9372 (re-based onto c334d9ae).
+ * Baseline update (#4791, 2026-11-16; re-based onto 38c4115b):
+ * the CAIO-lane surveys file under docs/architecture/survey/ as
+ * verbatim dated snapshots (2026-10-29/11-01) — the #2225 mesh
+ * survey (summary + full text), the three #2494 Think-adoption
+ * domain surveys, the #2494 AGNTCY workstream survey, and the
+ * assessment-scope audit. The survey texts name the
+ * brokers/providers they surveyed; neutralizing those mentions
+ * would falsify the evidence record, so all rows are dispositioned
+ * HISTORICAL: 10 new rows (2225-agent-mesh-survey-part1.md etrade
+ * 11; 2225-agent-mesh-survey-part2.md etrade 10 / public.com 1 /
+ * alpaca 1; 2494-agntcy-workstream-survey.md etrade 1 /
+ * public.com 1; 2494-think-adoption-trading-survey.md etrade 8 /
+ * public.com 3; assessment-scope-audit.md etrade 1 / public.com 1).
+ * The summary, payment, and screener surveys carry no
+ * provider-brand rows. The HISTORICAL marker is restated
+ * 145/732 -> 159/783 (the 732 had drifted by one, and the #4792
+ * rows landed without restating the marker; the true pre-change
+ * span on this base is 149/745).
+ * Baseline update (#4840, 2026-11-16): the two #3121 scheduling surveys
+ * file under docs/architecture/survey/ as verbatim dated snapshots
+ * (2026-11-11) — the #3122 S0 dedup report and the #3121 Phase 2 survey.
+ * The survey texts name the providers they surveyed (the E*TRADE
+ * token-renewal identifiers the surveyed code names, a quoted code
+ * comment, and the Yahoo-gapfill worktree name); neutralizing those
+ * mentions would falsify the evidence record, so all rows are
+ * dispositioned HISTORICAL: 3 new rows (3122-s0-dedup-report.md etrade 6;
+ * phase2-survey.md etrade 1 / yahoo 1). The HISTORICAL marker is restated
+ * 159/783 -> 162/791. Measured totals move 1280/10061 -> 1283/10069
+ * (re-based onto 105b9b96).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1489,7 +1531,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/email/agent.ts", "etrade", 42],
   ["src/trading/etrade/client.ts", "etrade", 328],
   ["src/trading/etrade/optionOrders.ts", "etrade", 9],
-  ["src/trading/etrade/platform.ts", "etrade", 66],
+  // Issue #4656: the adapter names its own time-in-force mapper (etradeOrderTerm)
+  // — a code identifier in the broker's own adapter, the disposition this section
+  // already records for per-broker execution entries.
+  ["src/trading/etrade/platform.ts", "etrade", 69],
   ["src/trading/etrade/quoteConfig.ts", "etrade", 2],
   ["src/trading/etrade/quoteTrace.ts", "etrade", 1],
   ["src/trading/factorGrades.ts", "etrade", 5],
@@ -1639,7 +1684,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/agents/copilot-broker-capability.md", "yahoo", 1],
   ["src/agents/orchestrator.ts", "alpaca", 1],
   ["src/config/asyncJobModes.ts", "alpaca", 1],
-  // ---- HISTORICAL (145 rows / 732 lines) ----
+  // ---- HISTORICAL (162 rows / 791 lines) ----
   ["docs/Assessment.md", "etrade", 6],
   ["docs/Assessment.md", "yahoo", 2],
   ["docs/agents/options-report-inventory.md", "etrade", 4],
@@ -1691,9 +1736,29 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/1976-data-foundation-survey.md", "etrade", 1],
   ["docs/architecture/survey/1976-step5-sessionstore-audit.md", "etrade", 30],
   ["docs/architecture/survey/1976-step5-sessionstore-audit.md", "public.com", 1],
+  ["docs/architecture/survey/2380-survey-draft.md", "alpaca", 1],
+  ["docs/architecture/survey/2380-survey-draft.md", "etrade", 6],
+  ["docs/architecture/survey/3238-param-survey.md", "etrade", 1],
+  // #4791 HISTORICAL: dated survey snapshots naming the brokers surveyed.
+  ["docs/architecture/survey/2225-agent-mesh-survey-part1.md", "etrade", 11],
+  ["docs/architecture/survey/2225-agent-mesh-survey-part2.md", "etrade", 10],
+  ["docs/architecture/survey/2225-agent-mesh-survey-part2.md", "public.com", 1],
+  ["docs/architecture/survey/2225-agent-mesh-survey-part2.md", "alpaca", 1],
+  ["docs/architecture/survey/2494-agntcy-workstream-survey.md", "etrade", 1],
+  ["docs/architecture/survey/2494-agntcy-workstream-survey.md", "public.com", 1],
+  ["docs/architecture/survey/2494-think-adoption-trading-survey.md", "etrade", 8],
+  ["docs/architecture/survey/2494-think-adoption-trading-survey.md", "public.com", 3],
   ["docs/architecture/survey/ai-search-activation-survey.md", "etrade", 11],
+  // #4791 HISTORICAL: the assessment-scope audit names the providers its inventoried items integrate.
+  ["docs/architecture/survey/assessment-scope-audit.md", "etrade", 1],
+  ["docs/architecture/survey/assessment-scope-audit.md", "public.com", 1],
   ["docs/architecture/survey/native-payments-survey-design.md", "etrade", 1],
   ["docs/architecture/survey/search-hub-survey-design.md", "etrade", 8],
+  ["docs/architecture/survey/slice4-label-survey.md", "etrade", 4],
+  // #4840 HISTORICAL: dated survey snapshots naming the providers surveyed.
+  ["docs/architecture/survey/3122-s0-dedup-report.md", "etrade", 6],
+  ["docs/architecture/survey/phase2-survey.md", "etrade", 1],
+  ["docs/architecture/survey/phase2-survey.md", "yahoo", 1],
   ["docs/compliance/facts-n-findings-01.md", "alpaca", 2],
   ["docs/compliance/facts-n-findings-01.md", "etrade", 5],
   ["docs/compliance/facts-n-findings-01.md", "public.com", 1],
@@ -1941,7 +2006,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/publicTrading.ts", "public.com", 9],
   ["src/trading/brokerCatalog.ts", "public.com", 4],
   ["src/trading/brokerPresentation.ts", "public.com", 4],
-  ["src/trading/public/platform.ts", "public.com", 11],
+  // Issue #4656: the TIF refusal names the broker in its user-facing message
+  // (PUBLIC_TIME_IN_FORCE_UNVERIFIED), the same INTEGRATION growth the #3990
+  // rows above already account for.
+  ["src/trading/public/platform.ts", "public.com", 12],
   ["src/trading/public/platform.ts", "alpaca", 2],
   ["src/trading/screenerPipeline.ts", "public.com", 3],
   ["docs/architecture/agentic/mcp-server-inventory.md", "public.com", 2],
@@ -2012,7 +2080,7 @@ const BASELINE: Array<[string, string, number]> = [
   // rows, #4038/#4039). Measured 2026-11-15 on the placed file.
   ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 80],
   ["docs/architecture/business/brokerage-data-matrix.md", "public.com", 14],
-  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 59],
+  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 60],
   ["docs/architecture/business/brokerage-data-matrix.md", "schwab", 3],
   ["docs/architecture/business/brokerage-data-matrix.md", "fidelity", 2],
   ["docs/architecture/business/brokerage-data-matrix.md", "robinhood", 1],
@@ -2026,6 +2094,87 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/business/brokerage-data-matrix.md", "polygon", 2],
   ["docs/architecture/business/brokerage-data-matrix.md", "finnhub", 6],
   ["docs/architecture/business/brokerage-data-matrix.md", "twelvedata", 2],
+  // #4802 (post-merge red on #4797): the 30 consolidated survey
+  // documents name the providers they survey. They are dated
+  // HISTORICAL records — neutralizing the names would falsify
+  // the record. Same disposition as the brokerage-data-matrix
+  // rows (#4634): the providers are the documents' subject, not
+  // platform framing. Counts measured on the placed files.
+  ["docs/architecture/survey/1116-alpaca-provider-survey.md", "etrade", 8],
+  ["docs/architecture/survey/1116-alpaca-provider-survey.md", "alpaca", 35],
+  ["docs/architecture/survey/1116-alpaca-provider-survey.md", "yahoo", 12],
+  ["docs/architecture/survey/1116-alpaca-provider-survey.md", "nasdaq", 11],
+  ["docs/architecture/survey/1116-data-provider-storage-survey.md", "etrade", 5],
+  ["docs/architecture/survey/1116-data-provider-storage-survey.md", "alpaca", 2],
+  ["docs/architecture/survey/1116-data-provider-storage-survey.md", "yahoo", 4],
+  ["docs/architecture/survey/1116-e2-screening-cutover-survey.md", "etrade", 29],
+  ["docs/architecture/survey/1116-e2-screening-cutover-survey.md", "alpaca", 1],
+  ["docs/architecture/survey/1116-e2-screening-cutover-survey.md", "yahoo", 10],
+  ["docs/architecture/survey/1116-e2-screening-cutover-survey.md", "nasdaq", 6],
+  ["docs/architecture/survey/1116-e3-provisioning-lifecycle-survey.md", "etrade", 2],
+  ["docs/architecture/survey/1169-r2-agent-search-survey.md", "etrade", 8],
+  ["docs/architecture/survey/1169-s4-remainder-survey.md", "etrade", 2],
+  ["docs/architecture/survey/1356-stock-screener-etrade-quote-cutover-survey.md", "etrade", 83],
+  ["docs/architecture/survey/1356-stock-screener-etrade-quote-cutover-survey.md", "yahoo", 33],
+  ["docs/architecture/survey/1356-stock-screener-etrade-quote-cutover-survey.md", "nasdaq", 11],
+  ["docs/architecture/survey/1378-nasdaq-residuals-survey.md", "etrade", 8],
+  ["docs/architecture/survey/1378-nasdaq-residuals-survey.md", "yahoo", 1],
+  ["docs/architecture/survey/1378-nasdaq-residuals-survey.md", "nasdaq", 2],
+  ["docs/architecture/survey/1661-storage-handle-survey.md", "etrade", 3],
+  ["docs/architecture/survey/1661-storage-handle-survey.md", "nasdaq", 1],
+  ["docs/architecture/survey/1686-nlq-mcp-storage-plumbing-survey.md", "etrade", 31],
+  ["docs/architecture/survey/1686-nlq-mcp-storage-plumbing-survey.md", "yahoo", 1],
+  ["docs/architecture/survey/2223-a2a-agent-reachability-survey.md", "etrade", 4],
+  ["docs/architecture/survey/2225-agent-mesh-survey.md", "etrade", 21],
+  ["docs/architecture/survey/2225-agent-mesh-survey.md", "public.com", 1],
+  ["docs/architecture/survey/2225-agent-mesh-survey.md", "alpaca", 1],
+  ["docs/architecture/survey/3527-publish-stage-survey.md", "etrade", 2],
+  ["docs/architecture/survey/3530-remainders-survey.md", "etrade", 3],
+  ["docs/architecture/survey/3530-remainders-survey.md", "alpaca", 3],
+  ["docs/architecture/survey/3530-remainders-survey.md", "yahoo", 4],
+  ["docs/architecture/survey/3530-remainders-survey.md", "nasdaq", 2],
+  ["docs/architecture/survey/3667-universe-integration-survey.md", "etrade", 1],
+  ["docs/architecture/survey/3667-universe-integration-survey.md", "alpaca", 1],
+  ["docs/architecture/survey/3667-universe-integration-survey.md", "yahoo", 3],
+  ["docs/architecture/survey/3751-provider-identity-survey.md", "etrade", 46],
+  ["docs/architecture/survey/3751-provider-identity-survey.md", "public.com", 5],
+  ["docs/architecture/survey/3751-provider-identity-survey.md", "alpaca", 27],
+  ["docs/architecture/survey/3751-provider-identity-survey.md", "yahoo", 10],
+  ["docs/architecture/survey/3751-provider-identity-survey.md", "nasdaq", 9],
+  ["docs/architecture/survey/3786-code-standards-survey-2.md", "etrade", 5],
+  ["docs/architecture/survey/4306-feed-job-schedules-monthly-survey.md", "etrade", 2],
+  ["docs/architecture/survey/4306-feed-job-schedules-monthly-survey.md", "alpaca", 2],
+  ["docs/architecture/survey/4306-feed-job-schedules-monthly-survey.md", "yahoo", 20],
+  ["docs/architecture/survey/4306-feed-job-schedules-monthly-survey.md", "nasdaq", 8],
+  ["docs/architecture/survey/4766-4767-pipeline-run-fidelity-survey.md", "fidelity", 3],
+  ["docs/architecture/survey/4766-4767-pipeline-run-fidelity-survey.md", "yahoo", 4],
+  ["docs/architecture/survey/4770-dispatch-modes-research-notes-addendum.md", "etrade", 1],
+  ["docs/architecture/survey/4770-dispatch-modes-research-notes.md", "etrade", 1],
+  ["docs/architecture/survey/4770-dispatch-modes-research-notes.md", "yahoo", 2],
+  ["docs/architecture/survey/958-screening-consolidation-survey.md", "etrade", 21],
+  ["docs/architecture/survey/958-screening-consolidation-survey.md", "yahoo", 3],
+  ["docs/architecture/survey/958-screening-consolidation-survey.md", "nasdaq", 1],
+  ["docs/architecture/survey/982-screening-s2-verify-first-survey.md", "etrade", 6],
+  // Stop-the-line CI baseline for consolidated survey + dispatch-modes docs on main
+  ["docs/architecture/survey/2012-2405-dedup-audit-survey.md", "etrade", 1],
+  ["docs/architecture/survey/2373-single-payment-path-design-note.md", "etrade", 8],
+  ["docs/architecture/survey/2373-single-payment-path-design-note.md", "yahoo", 1],
+  ["docs/architecture/survey/2373-single-payment-path-design-note.md", "nasdaq", 1],
+  ["docs/architecture/survey/3551-options-onboarding-survey.md", "etrade", 21],
+  ["docs/architecture/survey/3551-options-onboarding-survey.md", "alpaca", 3],
+  ["docs/architecture/survey/3551-options-onboarding-survey.md", "yahoo", 3],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey-correction.md", "public.com", 2],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey-correction.md", "alpaca", 2],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey-correction.md", "yahoo", 1],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "etrade", 16],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "public.com", 5],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "alpaca", 24],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "yahoo", 19],
+  ["docs/architecture/survey/3990-data-provider-taxonomy-survey.md", "nasdaq", 3],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "etrade", 2],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "alpaca", 1],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "yahoo", 2],
+  ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "nasdaq", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
