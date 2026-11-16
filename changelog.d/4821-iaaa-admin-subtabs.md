@@ -1,0 +1,3 @@
+### Added
+
+- **IAAA Admin Overview sub-tabs (Qunsultant/cfagent#4821):** the Overview tab's stacked sections are now nine URL-addressable sub-tabs (`?tab=security-hub&view=iaaa-admin&iaaaTab=overview&iaaaSection=<section>`): Summary, Service user, Service tokens, Role grants, Bootstrap proposals, Logged-in users, Deactivate, Access requests, Audit events. Each existing panel is re-homed behind its sub-tab (moved, not duplicated — exactly one mount per section); legacy `?iaaaTab=` links keep working, and access requests load only when their sub-tab is visited. Policy proposals are not part of this slice — they already live on the PAP tab.

@@ -46,6 +46,11 @@ import {
   type AdminOverview,
 } from "./iaaaAdminApi";
 import {
+  IAAA_ADMIN_SECTIONS,
+  IAAA_ADMIN_SECTION_LABELS,
+  type IaaaAdminSection,
+} from "./iaaaAdminSections";
+import {
   API_ENDPOINT_CATALOG,
   IAAA_AUDIT_EVENT_CATALOG,
   IAAA_CATALOG_GAPS,
@@ -140,6 +145,16 @@ export function IaaaAdminPanel() {
       IAAA_ADMIN_TABS.some((t) => t.id === v),
     defaultTab: "overview",
   });
+  // #4821: the Overview tab's stacked sections are sub-tabs of their
+  // own (`?iaaaSection=`), URL-synced by a second instance of the
+  // shared hook. An unknown or missing section falls back to Summary;
+  // the legacy `?iaaaTab=` values are untouched.
+  const { activeTab: section, handleTabChange: setSection } = useUrlSyncedTabs<IaaaAdminSection>({
+    param: "iaaaSection",
+    isValid: (v): v is IaaaAdminSection =>
+      IAAA_ADMIN_SECTIONS.some((s) => s === v),
+    defaultTab: "summary",
+  });
   // #1274: pending access requests for this tenant. A tenant-admin
   // without platform-admin never reaches this panel (the overview
   // gate is platform-admin), so the decide buttons serve admins who
@@ -197,9 +212,19 @@ export function IaaaAdminPanel() {
     }
   }, []);
 
+  // #4821: access requests belong to their own sub-tab, so they load
+  // only when it is visited — not on every Overview visit.
   useEffect(() => {
-    if (!loading && !notAdmin && !error) void loadAccessRequests();
-  }, [loading, notAdmin, error, loadAccessRequests]);
+    if (
+      !loading &&
+      !notAdmin &&
+      !error &&
+      tab === "overview" &&
+      section === "access-requests"
+    ) {
+      void loadAccessRequests();
+    }
+  }, [loading, notAdmin, error, tab, section, loadAccessRequests]);
 
   const loadMemberships = useCallback(async () => {
     setMembersError("");
@@ -418,6 +443,22 @@ export function IaaaAdminPanel() {
       />
 
       <TabPanel idBase="iaaa-admin" tabId="overview" active={tab === "overview"}>
+        {/* Issue #4821: the Overview sections are sub-tabs of their own
+        (`?iaaaSection=`), re-homing the existing panels — moved, not
+        duplicated. Inactive sections unmount (TabPanel default), so
+        each section's panel fetches only when its sub-tab is visited. */}
+        <Tabs
+          tabs={IAAA_ADMIN_SECTIONS.map((id) => ({
+            id,
+            label: IAAA_ADMIN_SECTION_LABELS[id],
+          }))}
+          value={section}
+          onChange={setSection}
+          ariaLabel="IAAA admin overview sections"
+          idBase="iaaa-admin-overview"
+        />
+
+        <TabPanel idBase="iaaa-admin-overview" tabId="summary" active={section === "summary"}>
         <div className="iaaa-admin-summary">
           <div>
             <span className="iaaa-admin-label">Tenant</span>
@@ -473,21 +514,27 @@ export function IaaaAdminPanel() {
             )}
           </>
         )}
+        </TabPanel>
 
+        <TabPanel idBase="iaaa-admin-overview" tabId="service-user" active={section === "service-user"}>
         {/* Issue #2501: service-user provisioning lives on Overview,
         not a new tab (tab indices unchanged) and not duplicated in
         the Queue tab: like admin counts and genesis, it is platform
         state. */}
         <h4>Service user</h4>
         <ServiceUserSection />
+        </TabPanel>
 
+        <TabPanel idBase="iaaa-admin-overview" tabId="service-tokens" active={section === "service-tokens"}>
         {/* Issue #2681: service tokens live on Overview beside the
         service-user section, not a new tab (tab indices unchanged)
         and not duplicated elsewhere: like the service-user tiers,
         they are platform state. */}
         <h4>Service tokens</h4>
         <ServiceTokensPanel />
+        </TabPanel>
 
+        <TabPanel idBase="iaaa-admin-overview" tabId="role-grants" active={section === "role-grants"}>
         {/* Issue #2688: human role grants live on Overview beside
         the service-user and service-token sections, not a new tab
         (tab indices unchanged) and not duplicated elsewhere: like
@@ -495,7 +542,9 @@ export function IaaaAdminPanel() {
         this same section through the limited view above. */}
         <h4>Role grants</h4>
         <RoleGrantsPanel />
+        </TabPanel>
 
+        <TabPanel idBase="iaaa-admin-overview" tabId="bootstrap-proposals" active={section === "bootstrap-proposals"}>
         {/* Issue #3077 (#945 Q3): bootstrap proposals live on Overview beside
         the role-grants section, not a new tab (tab indices
         unchanged) and not duplicated elsewhere: like them, bootstrap
@@ -503,7 +552,9 @@ export function IaaaAdminPanel() {
         this section (the limited view above returns early). */}
         <h4>Bootstrap proposals</h4>
         <BootstrapProposalsPanel />
+        </TabPanel>
 
+        <TabPanel idBase="iaaa-admin-overview" tabId="logged-in-users" active={section === "logged-in-users"}>
         {/* Issue #2836: logged-in users live on Overview beside
         the role-grants section, not a new tab (tab indices
         unchanged) and not duplicated elsewhere. Unlike policy
@@ -511,13 +562,9 @@ export function IaaaAdminPanel() {
         the limited view above — server-scoped to their tenant. */}
         <h4>Logged-in users</h4>
         <LoggedInUsersPanel />
+        </TabPanel>
 
-        <p className="iaaa-admin-note">
-          Audit events are read-only. Pending access requests below can be
-          approved or denied here; approval grants the requested role, denial grants nothing.
-          Membership grant, revoke, and edit live on the Members tab.
-        </p>
-
+        <TabPanel idBase="iaaa-admin-overview" tabId="deactivate" active={section === "deactivate"}>
         <h4>Deactivate my account</h4>
         <p className="iaaa-admin-note">
           Deactivation revokes your sessions, memberships, API keys, and broker tokens,
@@ -528,6 +575,14 @@ export function IaaaAdminPanel() {
         <Button type="button" onClick={() => void deactivate()}>
           {deactivateArmed ? "Confirm deactivation" : "Deactivate my account"}
         </Button>
+        </TabPanel>
+
+        <TabPanel idBase="iaaa-admin-overview" tabId="access-requests" active={section === "access-requests"}>
+        <p className="iaaa-admin-note">
+          Audit events are read-only. Pending access requests below can be
+          approved or denied here; approval grants the requested role, denial grants nothing.
+          Membership grant, revoke, and edit live on the Members tab.
+        </p>
 
         <h4>Access requests</h4>
         {accessError && <Notice tone="danger">{accessError}</Notice>}
@@ -575,7 +630,9 @@ export function IaaaAdminPanel() {
             rowKey={(r) => r.requestId}
           />
         )}
+        </TabPanel>
 
+        <TabPanel idBase="iaaa-admin-overview" tabId="audit-events" active={section === "audit-events"}>
         <h4>Recent audit events</h4>
         {overview.recentAuditEvents.length === 0 ? (
           <EmptyState title="No audit events" description="No events recorded for this tenant yet." />
@@ -596,6 +653,7 @@ export function IaaaAdminPanel() {
             rowKey={(event) => event.id}
           />
         )}
+        </TabPanel>
       </TabPanel>
 
       <TabPanel idBase="iaaa-admin" tabId="members" active={tab === "members"}>

@@ -48,11 +48,23 @@ let root: Root | null = null;
 let container: HTMLDivElement;
 
 function tabButtons(): HTMLButtonElement[] {
-  return Array.from(container.querySelectorAll('[role="tab"]')) as HTMLButtonElement[];
+  // #4821 pin update (§7): the Overview tab now carries a second tab
+  // bar (its section sub-tabs), so the top-level tabs are scoped to
+  // their own bar instead of every [role="tab"] on the page.
+  const bar = container.querySelector('[aria-label="IAAA admin sections"]');
+  if (!bar) return [];
+  return Array.from(bar.querySelectorAll('[role="tab"]')) as HTMLButtonElement[];
 }
 
 function tabLabels(): string[] {
   return tabButtons().map((b) => b.textContent ?? "");
+}
+
+// #4821: the Overview tab's section sub-tab bar.
+function sectionTabButtons(): HTMLButtonElement[] {
+  const bar = container.querySelector('[aria-label="IAAA admin overview sections"]');
+  if (!bar) return [];
+  return Array.from(bar.querySelectorAll('[role="tab"]')) as HTMLButtonElement[];
 }
 
 async function renderPanel() {
@@ -94,6 +106,13 @@ describe("IAAA admin tabs", () => {
     expect(container.textContent).toContain("primary");
     expect(container.textContent).toContain("platform-admin (platform)");
     expect(container.textContent).toContain("Completed");
+    // #4821 pin update (§7): the Overview is sub-tabbed now — the
+    // default Summary shows the tenant summary, and the audit events
+    // live on the Audit events sub-tab, not on the landing screen.
+    expect(container.textContent).not.toContain("auth.login");
+    await act(async () => {
+      sectionTabButtons()[8].click();
+    });
     expect(container.textContent).toContain("auth.login");
   });
 
@@ -110,6 +129,12 @@ describe("IAAA admin tabs", () => {
     const overview = tabButtons()[0];
     await act(async () => {
       overview.click();
+    });
+    // #4821 pin update (§7): returning to Overview lands on the
+    // Summary sub-tab; the audit events are one click further in.
+    expect(container.textContent).not.toContain("Recent audit events");
+    await act(async () => {
+      sectionTabButtons()[8].click();
     });
     expect(container.textContent).toContain("Recent audit events");
   });
