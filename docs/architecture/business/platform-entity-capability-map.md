@@ -517,12 +517,12 @@ capability, not an absence.
   `revokedAtMs` (revoked = history; the policy decision point denies on
   next fresh read; session termination is offboarding, not revocation);
   session expiry; wired vs unwired alias.
-- **Dimensions a future revision should add:** data residency (no
-  residency dimension exists in code today); retention / deletion
-  (per-tenant purge is not evidenced); cost attribution (spend is
-  login/tier-shaped, not tenant-shaped, in the ledger of record);
-  cross-tenant incident response (traceable only where the provenance
-  tuple was stamped — see §5.3 breaks).
+- **Dimensions a future revision should add:** data residency,
+  retention / deletion, cost attribution, and cross-tenant incident
+  response — decisions and designs are now recorded in
+  [`tenant-isolation-future-dimensions.md`](tenant-isolation-future-dimensions.md)
+  (#4620; incident response builds on #4615 provenance tuples and #4619
+  per-tenant observability view).
 
 ## 7. Inconsistencies found (stated, not smoothed over)
 
