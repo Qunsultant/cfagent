@@ -23,6 +23,7 @@ import { TradingPlatformRegistry } from "../src/trading/registry";
 import { normalizeTimeInForce, TIME_IN_FORCE_VALUES } from "../src/trading";
 import { etradeOrderTerm } from "../src/trading/etrade/platform";
 import { PublicTradingPlatform } from "../src/trading/public/platform";
+import { publicSingleLegArgs } from "../src/services/publicTrading";
 import { orderCapabilitiesFor } from "../src/config/orderCapabilities";
 import type { Env } from "../src/types";
 
@@ -283,5 +284,37 @@ describe("#4656 — Public refuses a TIF it cannot honour, by name", () => {
     });
     expect(receipt.success).toBe(false);
     expect(receipt.message).toMatch(/PUBLIC_TIME_IN_FORCE_UNVERIFIED/);
+  });
+  it("refuses an auction TIF the same way, naming the missing field (issue #4958)", async () => {
+    const receipt = await publicPlatform().placeOrderRemote({
+      orderId: "draft-3",
+      symbol: "AAPL",
+      action: "BUY",
+      quantity: 1,
+      orderType: "MARKET",
+      timeInForce: "opg",
+      userLogin: "owner@example.com",
+    });
+    expect(receipt.success).toBe(false);
+    expect(receipt.message).toMatch(/PUBLIC_TIME_IN_FORCE_UNVERIFIED/);
+    // The reason is the absence of a verifiable field, not "we did not try".
+    expect(receipt.message).toMatch(/exposes no time-in-force field that can be verified/);
+  });
+
+  it("has nothing to send an auction term on: the single-leg spec carries no time-in-force key (#4958)", () => {
+    const spec = publicSingleLegArgs({
+      symbol: "AAPL",
+      assetClass: "equity",
+      action: "BUY",
+      quantity: 1,
+      orderType: "MARKET",
+    });
+    expect(Object.keys(spec)).not.toContain("time_in_force");
+    // Every key the spec can emit, so a future field cannot slip in unremarked.
+    expect(Object.keys(spec).sort()).toEqual(
+      ["instrument_type", "limit_price", "order_class", "order_side", "order_type", "quantity", "stop_price", "symbol"].filter(
+        (key) => key in spec,
+      ).sort(),
+    );
   });
 });
