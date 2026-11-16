@@ -512,7 +512,17 @@ export async function handleEtradeBrokerRoutes(
       const action = existingRecord.action as any;
       const quantity = Number(existingRecord.quantity);
       const orderType = existingRecord.orderType || "MARKET";
-      const limitPrice = existingRecord.orderType === "LIMIT" ? existingRecord.price : undefined;
+      // Issue #4654 (matrix gap 4): same derivation as the neutral route — the
+      // stored price is the limit for LIMIT/STOP_LIMIT, and the trigger for
+      // STOP/STOP_LIMIT is the stored stop price (falling back to the price).
+      const limitPrice =
+        orderType === "LIMIT" || orderType === "STOP_LIMIT" ? existingRecord.price : undefined;
+      const stopPrice =
+        orderType === "STOP" || orderType === "STOP_LIMIT"
+          ? typeof existingRecord.stopPrice === "number"
+            ? existingRecord.stopPrice
+            : existingRecord.price
+          : undefined;
       // #1726: dedup — the stored strategy-order parse already lives
       // in orderPayloadHash.ts; only optionLegs/strategyNetDebit are
       // consumed downstream, and both match the inline parse.
@@ -543,7 +553,7 @@ export async function handleEtradeBrokerRoutes(
       const executionVerdict = autopilot.verdict;
 
       const etrade = new ETradeService(ctx.getOrm(), ctx.env, userLogin, requestedEnv);
-      return await completeEtradeOrderExecution({ ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, strategyOrder, executionVerdict, executor: etrade });
+      return await completeEtradeOrderExecution({ ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, stopPrice, strategyOrder, executionVerdict, executor: etrade });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to execute trade order" }, { status: 500 });
     }

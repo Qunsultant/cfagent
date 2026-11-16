@@ -202,6 +202,8 @@ export async function completeEtradeOrderExecution(args: {
   quantity: number;
   orderType: string;
   limitPrice: number | undefined;
+  /** Issue #4654: the STOP/STOP_LIMIT trigger price from the stored draft. */
+  stopPrice: number | undefined;
   strategyOrder: any;
   executionVerdict: PolicyVerdict | null;
   /**
@@ -215,7 +217,7 @@ export async function completeEtradeOrderExecution(args: {
     executeOrder: (orderId: string, authorizerDid: string, decision: any, expectedTerms?: any) => any;
   };
 }): Promise<Response> {
-  const { ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, strategyOrder, executionVerdict, executor } = args;
+  const { ctx, sessionId, body, orderId, decision, userLogin, userDid, existingRecord, symbol, action, quantity, orderType, limitPrice, stopPrice, strategyOrder, executionVerdict, executor } = args;
   let result: any;
 
   // Issue #3089: the draft's broker decides the backend. For E*TRADE
@@ -237,6 +239,8 @@ export async function completeEtradeOrderExecution(args: {
       quantity,
       orderType,
       limitPrice,
+      // Issue #4654 (matrix gap 4): the trigger price travels with the order.
+      stopPrice,
       // Issue #3782: forward the stored draft's provenance (persisted
       // at preview time as JSON) so placeOrder's guard can verify the
       // price.

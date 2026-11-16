@@ -149,7 +149,18 @@ function ensureDraftStored(
   if (!orm?.trades) return;
   const existing = orm.trades.findById(preview.orderId);
   if (existing) {
-    orm.trades.update(preview.orderId, { broker, mode, updatedAt: new Date().toISOString() });
+    // Issue #4654: the draft row is the only carrier of the stop price from
+    // preview to execute, so a platform that persisted its own row gets it
+    // stamped here (the platform's row is created before this call).
+    const stopPrice = typeof (preview as { stopPrice?: unknown }).stopPrice === "number"
+      ? (preview as { stopPrice: number }).stopPrice
+      : undefined;
+    orm.trades.update(preview.orderId, {
+      broker,
+      mode,
+      ...(stopPrice !== undefined ? { stopPrice } : {}),
+      updatedAt: new Date().toISOString(),
+    });
     return;
   }
   orm.trades.create({
@@ -169,6 +180,10 @@ function ensureDraftStored(
     previewNotes: preview.previewNotes ?? preview.previewMessage,
     broker,
     mode,
+    stopPrice:
+      typeof (preview as { stopPrice?: unknown }).stopPrice === "number"
+        ? (preview as { stopPrice: number }).stopPrice
+        : undefined,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -337,7 +352,17 @@ export async function handleBrokerOrderRoutes(
       const action = existingRecord.action as any;
       const quantity = Number(existingRecord.quantity);
       const orderType = existingRecord.orderType || "MARKET";
-      const limitPrice = existingRecord.orderType === "LIMIT" ? existingRecord.price : undefined;
+      // Issue #4654 (matrix gap 4): the draft's price is the limit for LIMIT
+      // **and STOP_LIMIT** (the old test dropped it for the latter), and the
+      // stored stop price is the trigger for STOP/STOP_LIMIT.
+      const pricedType = orderType === "LIMIT" || orderType === "STOP_LIMIT";
+      const limitPrice = pricedType ? existingRecord.price : undefined;
+      const stopPrice =
+        orderType === "STOP" || orderType === "STOP_LIMIT"
+          ? typeof existingRecord.stopPrice === "number"
+            ? existingRecord.stopPrice
+            : existingRecord.price
+          : undefined;
       const parsedStrategy = parseStrategyOrder(existingRecord.previewNotes);
       const strategyOrder = parsedStrategy.optionLegs.length > 0 ? parsedStrategy : undefined;
 
@@ -405,6 +430,7 @@ export async function handleBrokerOrderRoutes(
         quantity,
         orderType,
         limitPrice,
+        stopPrice,
         strategyOrder,
         executionVerdict,
         executor: platform,

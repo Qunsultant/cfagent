@@ -336,6 +336,16 @@ export class DatabaseORM {
       }
     }
 
+    // Issue #4654 (matrix gap 4): the STOP/STOP_LIMIT trigger price on
+    // stored drafts, carried from preview to execute because the row's
+    // `price` is the quote (or the limit). Same guarded-ALTER precedent.
+    {
+      const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
+      if (!cols.some((c) => c.name === "stop_price")) {
+        this.sql.exec(remainderAlterSql("mas_trades", "stop_price"));
+      }
+    }
+
     // 10. Watchlists Table (E*TRADE & Local Agent Watchlists)
     ensureSharedTable(this.sql, "mas_watchlists");
 
