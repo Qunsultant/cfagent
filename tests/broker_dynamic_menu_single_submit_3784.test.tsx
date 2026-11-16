@@ -100,17 +100,37 @@ describe("one switch action posts /environment/switch exactly once (#3784)", () 
     return button as HTMLButtonElement;
   }
 
+  /**
+   * Issue #4652: arming live trading now opens the confirmation dialog (a
+   * portal on document.body) before any POST, so the single-post property is
+   * pinned by walking through it. The property itself is unchanged.
+   */
+  async function confirmLiveSwitch() {
+    const dialog = document.querySelector('[role="dialog"]');
+    if (!dialog) throw new Error("the live-switch confirmation dialog did not open");
+    const confirm = [...dialog.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Switch to live trading"),
+    );
+    if (!confirm) throw new Error("the dialog's confirm button was not found");
+    await click(confirm);
+  }
+
   it("menu toggle with the Chat prop posts once (was: prop + direct = 2)", async () => {
     await renderMenu({
       handleSwitchEnvironment: (target) => void switchBrokerEnvironment(target),
     });
     await click(buttonByText("Paper"));
+    // Issue #4652: the click asks first; nothing is posted yet.
+    expect(switchPosts).toEqual([]);
+    await confirmLiveSwitch();
     expect(switchPosts).toEqual([{ environment: "PROD" }]);
   });
 
   it("menu toggle with no prop posts once via the direct import", async () => {
     await renderMenu();
     await click(buttonByText("Paper"));
+    expect(switchPosts).toEqual([]);
+    await confirmLiveSwitch();
     expect(switchPosts).toEqual([{ environment: "PROD" }]);
   });
 
@@ -127,6 +147,8 @@ describe("one switch action posts /environment/switch exactly once (#3784)", () 
     );
     expect(livePill).toBeDefined();
     await click(livePill!);
+    expect(switchPosts).toEqual([]);
+    await confirmLiveSwitch();
     expect(switchPosts).toEqual([{ environment: "PROD" }]);
   });
 
