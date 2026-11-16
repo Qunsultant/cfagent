@@ -179,7 +179,9 @@ describe("#2120 slice 1 nav registration (source pins)", () => {
     const chat = src("client/Chat.tsx");
     expect(chat).toContain("<AuditVaultPage");
     const page = src("client/AuditVaultPage.tsx");
-    expect(page).toContain("nlq-presets");
+    // Issue #4825 retired the bespoke nlq-presets class (the presets row
+    // is a Flex now); the row's label text is the pin that survives it.
+    expect(page).toContain("Natural Language Queries:");
     expect(page).toContain('onAsk?.(trimmed, "Records Explorer")');
   });
 });

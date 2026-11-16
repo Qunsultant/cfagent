@@ -14,10 +14,17 @@
  * CONFORMING_TEMPLATE_ROUTES below. Wave 1 (#3138–#3140) extends that
  * list in its own PRs — a new PageTemplate consumer must flip its
  * register entry in the same PR, or this test fails.
+ *
+ * General rule (#4825): every template-state route fills ≥1 template
+ * slot or renders ≥1 card composition (see tests/template_route_tree.ts
+ * for the tree walk and the composition definition). The rule iterates
+ * the register, so a route that later claims `template` state is
+ * covered on day one — no per-page test is ever added for it.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { routeConformance } from "./template_route_tree";
 
 const HERE = join(__dirname, "..");
 const CLIENT_DIR = join(HERE, "src", "client");
@@ -294,5 +301,24 @@ describe("route template gate (#3136)", () => {
     expect(src).not.toMatch(/\.css["']/);
     expect(src).toContain('from "./ui"');
     expect(src).not.toContain("<PageShell");
+  });
+
+  it("every template-state route fills a slot or renders a card composition (#4825)", () => {
+    const template = loadTemplateRegister();
+    const routes = Object.entries(template)
+      .filter(([, e]) => e.state === "template")
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    expect(routes.length).toBeGreaterThan(0);
+    const violations: string[] = [];
+    for (const [id, entry] of routes) {
+      const { slots, compositions } = routeConformance(entry.file as string);
+      if (slots < 1 && compositions < 1) {
+        violations.push(
+          `${id}: template state but no slot filled and no card composition ` +
+            `(slots=${slots}, compositions=${compositions})`,
+        );
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });
