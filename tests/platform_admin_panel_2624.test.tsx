@@ -147,7 +147,7 @@ describe("platform admin panel (#2624)", () => {
     const dialog = container.querySelector('[role="dialog"]');
     expect(dialog).toBeTruthy();
     expect(dialog!.getAttribute("aria-label")).toBe("Platform Admin");
-    expect(container.querySelector(".platform-admin-title")?.textContent).toBe("Platform Admin");
+    expect(container.querySelector(".platform-admin-title-block h4")?.textContent).toBe("Platform Admin");
 
     const menuItems = container.querySelectorAll(".platform-admin-menu-item");
     expect(menuItems).toHaveLength(7);
@@ -189,7 +189,7 @@ describe("platform admin panel (#2624)", () => {
       ],
     };
     await render(panel({ config: custom }));
-    expect(container.querySelector(".platform-admin-title")?.textContent).toBe("Operations Admin");
+    expect(container.querySelector(".platform-admin-title-block h4")?.textContent).toBe("Operations Admin");
     const labels = Array.from(container.querySelectorAll(".platform-admin-menu-label")).map((el) => el.textContent);
     expect(labels).toEqual(["Keys", "IAAA"]);
     expect(container.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();

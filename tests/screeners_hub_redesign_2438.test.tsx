@@ -224,7 +224,7 @@ describe("StockHub redesign (#2438, moved by #2896)", () => {
     await renderHub();
     const detail = container.querySelector("#selected-run-detail");
     expect(detail).not.toBeNull();
-    const headings = Array.from(detail!.querySelectorAll("h3")).filter((h) => h.textContent === "Run detail");
+    const headings = Array.from(detail!.querySelectorAll("h3, h4")).filter((h) => h.textContent === "Run detail");
     expect(headings).toHaveLength(1);
     expect(detail!.textContent || "").toContain("Scheduled");
     expect(detail!.textContent || "").toContain("12 matched of 100 scanned");
