@@ -166,8 +166,9 @@ export function BootstrapProposalsPanel() {
         <div className="lup-item-meta">
           <span className="lup-item-user">Propose a bootstrap change</span>
           <span className="lup-item-count">
+            {/* Issue #4839 G8: visible labels, not aria-label only. */}
             <Select
-              aria-label="Change action"
+              label="Change action"
               value={action}
               onChange={(e) => setAction(e.target.value as "add" | "remove")}
             >
@@ -175,13 +176,13 @@ export function BootstrapProposalsPanel() {
               <option value="remove">remove</option>
             </Select>{" "}
             <TextInput
-              aria-label="Bootstrap identifier"
+              label="Bootstrap identifier"
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
               placeholder="UUID, v1: id, issuer:subject, or platform: entry"
             />{" "}
             <TextInput
-              aria-label="Proposal reason"
+              label="Proposal reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="reason (required)"

@@ -124,6 +124,12 @@ export function ServiceUserSection() {
 
   return (
     <>
+      {/* Issue #4839 G4: the section explains itself before the button. */}
+      <p className="iaaa-admin-note">
+        The service user is the platform&apos;s own identity for background work. The
+        platform tier is the set of admin roles it holds; Provision creates that tier
+        the first time — only a status read showing it provisioned counts as done.
+      </p>
       <div className="iaaa-admin-summary">
         <div>
           <span className="iaaa-admin-label">Service user</span>
