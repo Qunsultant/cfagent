@@ -14,7 +14,7 @@
  */
 
 import { useState } from "react";
-import { Badge, Button, Card, Notice, PageSection } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Notice, PageSection } from "./components/ui";
 import {
   ScreenerPresetManager,
   createPreset,
@@ -119,7 +119,7 @@ export function PresetsPanel({
         {starters.map((starter) => (
           <Card key={starter.id}>
             <div className="ui-row">
-              <h4>{starter.name}</h4>
+              <CardHeader title={starter.name} />
               <Badge tone="neutral">proposed</Badge>
               <Badge tone="neutral">read-only</Badge>
             </div>

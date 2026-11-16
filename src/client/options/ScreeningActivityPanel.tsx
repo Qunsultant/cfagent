@@ -15,7 +15,7 @@
  * scheduled tick; the underlying research run has its own controls.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button } from "../components/ui";
+import { Button, CardHeader } from "../components/ui";
 import { apiFetch } from "../apiFetch";
 
 export interface ScreeningActivityEntryView {
@@ -121,9 +121,7 @@ export function ScreeningActivityPanel({ userLogin }: ScreeningActivityPanelProp
         borderRadius: "8px",
       }}
     >
-      <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
-        🤖 Autonomous Screening Activity
-      </h4>
+      <CardHeader title="🤖 Autonomous Screening Activity" />
       <p style={{ margin: "0 0 0.75rem", color: "var(--color-text-secondary)", fontSize: "var(--font-size-body)", lineHeight: 1.5 }}>
         What the screening system did on its own: discovery runs, strategy re-selections, weight
         adjustments, promotions, and channel deliveries. Everything here is a proposal or a draft —

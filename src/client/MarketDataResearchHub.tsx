@@ -3,7 +3,7 @@ import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { apiFetch as fetch } from "./apiFetch";
 import { mapScreenErrorFromBody } from "./paidScreenSubmit";
 import { UpgradeOffer } from "./UpgradeOffer";
-import { Badge, Card, EmptyState, Spinner, Button, Notice, Select, Table, TextInput, PageShell, PageSection, FieldShell, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
+import { Badge, Card, CardHeader, EmptyState, Spinner, Button, Notice, Select, Table, TextInput, PageShell, PageSection, FieldShell, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { ResearchReportActions } from "./ResearchReportActions";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import { TabHoverItem } from "./TabHoverItem";
@@ -632,9 +632,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
           <Card>
             <Flex justify="between" align="start" gap="2">
               <div>
-                <h3>
-                  📊 Yahoo Finance Live Market Screener
-                </h3>
+                <CardHeader title="📊 Yahoo Finance Live Market Screener" />
                 <p className="ui-meta">
                   Real-time Level 1 quotes, daily changes, dynamic RSI-14 momentum, and institutional P/E valuations powered 100% by Yahoo Finance API.
                 </p>
@@ -825,9 +823,9 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             {/* Expandable Alpaca Snapshot Drawer right inside the Screener page */}
             {showAlpacaDrawerOnScreener && snapshot && (
               <div style={{ background: "var(--color-surface-sunken)", border: "1px dashed var(--color-warning)", borderRadius: "10px", padding: "var(--space-4)", marginTop: "0.5rem" }}>
-                <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-warning)", fontSize: "var(--font-size-body)" }}>
+                <CardHeader title={<>
                   🦙 Alpaca Market Snapshot {snapshot.provenance === "live" ? "Live" : "Market Data Profile"} Inspection — {activeSymbol}
-                </h4>
+                </>} />
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "var(--space-3)", fontSize: "var(--font-size-body-sm)" }}>
                   <div style={{ background: "var(--color-card)", border: "1px solid var(--color-border-subtle)", padding: "var(--space-2-5)", borderRadius: "6px" }}>
                     <div style={{ color: "var(--color-text-muted)" }}>Latest Execution Trade</div>
@@ -1183,7 +1181,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                   <Flex gap="2" align="center">
                     <strong>{report.symbol}</strong>
                     <Stack gap="0">
-                      <h4>{report.fundamentals.companyName}</h4>
+                      <CardHeader title={report.fundamentals.companyName} />
                       <span className="ui-meta-sm">{report.fundamentals.sector} • {report.fundamentals.industry}</span>
                     </Stack>
                   </Flex>
@@ -1353,7 +1351,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               <Flex justify="between" align="center" gap="2">
                 <Flex gap="2" align="center">
 
-                  <h4>Yahoo Finance Engine</h4>
+                  <CardHeader title="Yahoo Finance Engine" />
                 </Flex>
                 <Flex as="span" inline gap="1-5" align="center">
                   <MarketDataResearchProvenanceBadge provenance={yfinanceQuote?.provenance} note={yfinanceQuote?.note} />
@@ -1422,7 +1420,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               <Flex justify="between" align="center" gap="2">
                 <Flex gap="2" align="center">
 
-                  <h4>Alpaca Market Data v2</h4>
+                  <CardHeader title="Alpaca Market Data v2" />
                 </Flex>
                 <Flex as="span" inline gap="1-5" align="center">
                   <MarketDataResearchProvenanceBadge provenance={alpacaQuote?.provenance} note={alpacaQuote?.note} />
@@ -1718,7 +1716,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               <Flex justify="between" align="center" gap="2">
                 <Flex gap="2" align="center">
 
-                  <h4>Alpaca Market Data v2 Snapshot: {snapshot.symbol}</h4>
+                  <CardHeader title={<>Alpaca Market Data v2 Snapshot: {snapshot.symbol}</>} />
                 </Flex>
                 <Flex as="span" inline gap="1-5" align="center">
                   <MarketDataResearchProvenanceBadge provenance={snapshot.provenance} note={snapshot.note} />
@@ -1760,9 +1758,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
             <Flex justify="between" align="start" gap="2">
               <Flex align="center" gap="2">
                 <span style={{ fontSize: "1.25rem" }}>🛡️</span>
-                <h4>
-                  Alpaca Agentic Tracing Stream &amp; Provenance Ledger
-                </h4>
+                <CardHeader title="Alpaca Agentic Tracing Stream &amp; Provenance Ledger" />
                 <Badge tone="success">
                   W3C DID ATTESTED
                 </Badge>

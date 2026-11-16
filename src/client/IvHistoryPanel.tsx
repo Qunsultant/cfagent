@@ -5,7 +5,7 @@
  * scheduled job: per-symbol coverage, IV rank over time, latest readings.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, PageSection, Select, Table } from "./components/ui";
+import { Button, CardHeader, PageSection, Select, Table } from "./components/ui";
 import { brokerSupports, isBrokerId } from "../trading";
 import { readTenantProvidersState } from "./tenantProviders";
 
@@ -184,7 +184,7 @@ export function IvHistoryPanel() {
 
           {detail && (
             <div>
-              <h3 style={{ fontSize: "1rem" }}>{detail.symbol}</h3>
+              <CardHeader title={detail.symbol} />
               <div style={{ fontSize: "var(--font-size-body)", marginBottom: "0.5rem" }}>
                 {detail.observations} observations · coverage {detail.coveragePct.toFixed(0)}% ·{" "}
                 {detail.warmingUp ? "warming up" : "active"} ·{" "}

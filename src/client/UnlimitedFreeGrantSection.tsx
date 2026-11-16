@@ -23,7 +23,7 @@
  * All calls go through src/client/apiFetch.ts (the #71 rule).
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Notice, Stack, TextInput } from "./components/ui";
+import { Button, CardHeader, Notice, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 
 import { commercialPath } from "../data/commercialUrlCatalog";
@@ -195,7 +195,7 @@ export function UnlimitedFreeGrantSection({ userId }: { userId: string }) {
   const grant = record.unlimitedFreeGrant ?? null;
   return (
     <Stack gap="1">
-      <h4>Unlimited-free grant (operator)</h4>
+      <CardHeader title="Unlimited-free grant (operator)" />
       <p>
         An approved account runs any screen — stock, options, goal,
         strategy, manual or scheduled — free and unlimited, with no

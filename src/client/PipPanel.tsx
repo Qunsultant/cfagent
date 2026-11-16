@@ -24,7 +24,7 @@
  * className tokens, no inline styles, no CSS imports.
  */
 import { useEffect, useState } from "react";
-import { EmptyState, Spinner, Stack } from "./components/ui";
+import { CardHeader, EmptyState, Spinner, Stack } from "./components/ui";
 import { fetchPipState, type PipState } from "./pipApi";
 
 type LoadState =
@@ -78,7 +78,7 @@ export function PipPanel() {
   return (
     <Stack gap="2">
       <div>
-        <h3>Attribute schema</h3>
+        <CardHeader title="Attribute schema" />
         <p>
           The attributes the PDP evaluates, as defined by the live
           AttributeProvider interface. Memberships carry the roles
@@ -106,7 +106,7 @@ export function PipPanel() {
       </div>
 
       <div>
-        <h3>Attribute sources</h3>
+        <CardHeader title="Attribute sources" />
         <p>
           Read-only: where each attribute group comes from, and the
           adapter that resolves it. The PDP reads memberships only
@@ -128,7 +128,7 @@ export function PipPanel() {
       </div>
 
       <div>
-        <h3>Your attributes</h3>
+        <CardHeader title="Your attributes" />
         <p>
           The attributes the provider resolves for your session.
         </p>

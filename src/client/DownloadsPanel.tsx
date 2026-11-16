@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button, TextInput, Card, Stack, Flex, Grid } from "./components/ui";
+import { Button, CardHeader, TextInput, Card, Stack, Flex, Grid } from "./components/ui";
 import { OptionsDataDownloadDropdown } from "./options/OptionsDataDownloadDropdown";
 import { useBrokerEnvironment } from "./brokerEnvironment";
 
@@ -26,7 +26,7 @@ export function DownloadsPanel({ activeEnv, userLogin }: DownloadsPanelProps) {
         <Card>
           <Stack gap="3">
             <div>
-              <h4 className="downloads-card-title">Options Chain &amp; Dataset Download</h4>
+              <CardHeader title="Options Chain &amp; Dataset Download" />
               <p className="downloads-card-sub">
                 Select an underlying ticker to export its live options chain across all strikes, maturities, and Greeks.
               </p>
@@ -74,7 +74,7 @@ export function DownloadsPanel({ activeEnv, userLogin }: DownloadsPanelProps) {
 
         <Card>
           <Stack gap="3">
-            <h4 className="downloads-card-title">Export Formats &amp; Data Dictionary</h4>
+            <CardHeader title="Export Formats &amp; Data Dictionary" />
             <Grid columns={3} gap="3">
               <div className="downloads-format-card">
                 <strong>📊 CSV Format (.csv)</strong>

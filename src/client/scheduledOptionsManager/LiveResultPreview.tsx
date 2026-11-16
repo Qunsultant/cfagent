@@ -1,5 +1,5 @@
 import React from "react";
-import { Badge, Button } from "../components/ui";
+import { Badge, Button, CardHeader } from "../components/ui";
 import {
   candidateToTradeContext,
   type TradeOrderContext,
@@ -35,7 +35,7 @@ export function LiveResultPreview({ liveResult, thesis = "bullish", onPreviewTra
   return (
     <section className="live-execution-preview" aria-label="Live screening execution result">
       <div className="preview-top-bar">
-        <h4>⚡ Live Screening Execution Completed</h4>
+        <CardHeader title="⚡ Live Screening Execution Completed" />
         <div className="dispatch-status-pills">
           {channels.map((entry) => (
             <Badge key={entry.name} tone={entry.tone} size="xs">

@@ -18,7 +18,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "./apiFetch";
-import { Button } from "./components/ui";
+import { Button, CardHeader } from "./components/ui";
 
 export interface ScreeningOutcomeView {
   recommendationRef: string;
@@ -84,9 +84,7 @@ export function ScreeningOutcomesPanel({ userLogin }: ScreeningOutcomesPanelProp
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-2)" }}>
-        <h4 style={{ margin: "0 0 0.5rem", color: "var(--color-accent)", fontSize: "var(--font-size-title-sm)" }}>
-          📈 Recommendation Track Record
-        </h4>
+        <CardHeader title="📈 Recommendation Track Record" />
         <Button variant="secondary" size="sm" onClick={() => void load()}>
           ↻ Refresh
         </Button>

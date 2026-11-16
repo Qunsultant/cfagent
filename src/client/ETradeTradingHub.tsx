@@ -4,7 +4,7 @@ import { apiFetch as fetch } from "./apiFetch";
 import { mapScreenErrorFromBody } from "./paidScreenSubmit";
 import { getDisplayUserDid } from "../agents/did";
 import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
-import { Card, Badge, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, PageSection, FieldShell, Flex, Grid, Stack, useToast } from "./components/ui";
+import { Card, Badge, CardHeader, TextInput, Button, EmptyState, Select, Spinner, Table, Modal, Notice, PageShell, PageSection, FieldShell, Flex, Grid, Stack, useToast } from "./components/ui";
 import { PageChromeContext } from "./components/ui/PageShell";
 import { getRoute } from "./routes";
 import { parseTabFromSearch, subscribeToRouteChanges } from "./router";
@@ -2074,7 +2074,7 @@ export function ETradeTradingHub({
           <Flex gap="2" align="center" justify="between">
             <Flex gap="2" align="center">
               <span aria-hidden="true">🛡️</span>
-              <h4>HUMAN-IN-THE-LOOP ORDER PREVIEW AWAITING APPROVAL</h4>
+              <CardHeader title="HUMAN-IN-THE-LOOP ORDER PREVIEW AWAITING APPROVAL" />
             </Flex>
             <span className="ui-meta-sm">ID: <code className="ui-warning">{activeDraft.orderId}</code></span>
           </Flex>

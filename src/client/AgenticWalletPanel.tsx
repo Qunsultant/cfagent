@@ -34,7 +34,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button } from "./components/ui";
+import { Button, CardHeader } from "./components/ui";
 import {
   fetchAgenticLedger,
   fetchAgenticWalletStatus,
@@ -108,7 +108,7 @@ export function AgenticWalletPanel() {
   return (
     <section className="awp-panel" aria-label="Agentic wallet">
       <div className="awp-header">
-        <h4>🤖 Agentic Wallet — x402 / MPP Micropayments</h4>
+        <CardHeader title="🤖 Agentic Wallet — x402 / MPP Micropayments" />
         {status && simulated && <span className="awp-sim-badge">Simulated</span>}
         <Button type="button" className="awp-refresh" onClick={() => void load()} disabled={loading} loading={loading}>
           {"🔄 Refresh"}

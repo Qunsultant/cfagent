@@ -11,7 +11,7 @@
  * styles), and no issue-number patterns in rendered text.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Badge, Button, EmptyState, Modal, Notice, Select, Table, TextInput } from "./components/ui";
+import { Badge, Button, CardHeader, EmptyState, Modal, Notice, Select, Table, TextInput } from "./components/ui";
 import {
   addGoal,
   createSchedule,
@@ -226,7 +226,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
         </Notice>
       )}
 
-      <h3 className="ui-mt-2">Scheduled goals</h3>
+      <CardHeader title="Scheduled goals" />
       <p className="ui-meta">Budget-checked operations evaluated on the worker tick. Run history comes from per-run records, not just the last run.</p>
       <Table
         columns={[
@@ -275,7 +275,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
       />
       {selectedGoalId && (
         <div className="ui-mt-2">
-          <h4>Run history: {selectedGoalId}</h4>
+          <CardHeader title={<>Run history: {selectedGoalId}</>} />
           <Table
             columns={runColumns}
             rows={goalRuns.filter((r) => r.jobId === selectedGoalId)}
@@ -285,7 +285,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
         </div>
       )}
 
-      <h3 className="ui-mt-2">Add a goal</h3>
+      <CardHeader title="Add a goal" />
       {goalFormError && <Notice tone="danger">{goalFormError}</Notice>}
       <div className="ui-form-row">
         <TextInput label="Id" value={goalForm.id} onChange={(e) => setGoalForm({ ...goalForm, id: e.target.value })} />
@@ -312,7 +312,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
         </Button>
       </div>
 
-      <h3 className="ui-mt-2">Durable schedules</h3>
+      <CardHeader title="Durable schedules" />
       <p className="ui-meta">Orchestrator schedules woken directly by the platform. Paused schedules show no next run; resume them before triggering.</p>
       <Table
         columns={[
@@ -364,7 +364,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
       />
       {selectedScheduleId && (
         <div className="ui-mt-2">
-          <h4>Run history: {selectedScheduleId}</h4>
+          <CardHeader title={<>Run history: {selectedScheduleId}</>} />
           <Table
             columns={runColumns}
             rows={scheduleRuns.filter((r) => r.jobId === selectedScheduleId)}
@@ -374,7 +374,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
         </div>
       )}
 
-      <h3 className="ui-mt-2">Create a schedule</h3>
+      <CardHeader title="Create a schedule" />
       <p className="ui-meta">Only the gated callbacks can be armed from here. Screening schedules need a connected account; the server reports that plainly.</p>
       {scheduleFormError && <Notice tone="danger">{scheduleFormError}</Notice>}
       <div className="ui-form-row">
@@ -405,7 +405,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
         </Button>
       </div>
 
-      <h3 className="ui-mt-2">Worker cron triggers</h3>
+      <CardHeader title="Worker cron triggers" />
       <p className="ui-meta">Platform triggers declared in deployment config. They are read-only here: changing one is a deployment action, never a UI edit.</p>
       <Table
         columns={[

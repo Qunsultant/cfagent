@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { apiFetch as fetch } from "../apiFetch";
-import { Modal, TextInput, Select, Notice, Button, Flex, Stack, Card } from "../components/ui";
+import { CardHeader, Modal, TextInput, Select, Notice, Button, Flex, Stack, Card } from "../components/ui";
 import type { EtapiConfig, AiModelDefinition } from "../../config/etapiConfig";
 
 export interface EtapiConfigModalProps {
@@ -750,9 +750,7 @@ export function EtapiConfigModal({
           <Flex align="center" gap="3">
             <span className="text-xl">⚙️</span>
             <div>
-              <h3 className="m-0 font-bold">
-                ETAPI Engine Configuration &amp; Tuning
-              </h3>
+              <CardHeader title="ETAPI Engine Configuration &amp; Tuning" />
               <p className="m-0 text-muted">
                 Externalized defaults • Zero hardcoding • Cascading overrides for active env [{activeEnv}]
               </p>
@@ -783,9 +781,7 @@ export function EtapiConfigModal({
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
           <span style={{ fontSize: "var(--font-size-title)" }}>⚙️</span>
           <div>
-            <h3 style={{ margin: 0, fontSize: "var(--font-size-title-sm)", fontWeight: 700, color: "var(--color-text-primary)" }}>
-              ETAPI Engine Configuration &amp; Tuning
-            </h3>
+            <CardHeader title="ETAPI Engine Configuration &amp; Tuning" />
             <p style={{ margin: 0, fontSize: "var(--font-size-body-sm)", color: "var(--color-text-muted)" }}>
               Externalized defaults • Zero hardcoding • Cascading overrides for active env [{activeEnv}]
             </p>

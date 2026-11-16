@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, Card, Flex, Notice, Spinner, Stack, TextInput, useToast } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Flex, Notice, Spinner, Stack, TextInput, useToast } from "./components/ui";
 import { csrfHeaders } from "./apiFetch";
 import { useBrokerEnvironment } from "./brokerEnvironment";
 
@@ -172,7 +172,7 @@ export function AlpacaSignInCard({ activeEnv, collapsedWhenConfigured = false }:
     return (
       <Card>
         <Flex align="center" gap="2">
-          <h4>Alpaca sign-in</h4>
+          <CardHeader title="Alpaca sign-in" />
           <Spinner size="sm" label="Loading Alpaca sign-in status" />
         </Flex>
       </Card>
@@ -182,7 +182,7 @@ export function AlpacaSignInCard({ activeEnv, collapsedWhenConfigured = false }:
   if (load.state === "error") {
     return (
       <Card>
-        <h4>Alpaca sign-in</h4>
+        <CardHeader title="Alpaca sign-in" />
         <Notice tone="danger" title="Alpaca sign-in is unavailable">
           <span data-broker-code={load.code ?? "unavailable"}>{load.message}</span>
           {load.code && <span> ({load.code})</span>}
@@ -199,7 +199,7 @@ export function AlpacaSignInCard({ activeEnv, collapsedWhenConfigured = false }:
   return (
     <Card data-alpaca-signin="1" data-active-env={effectiveEnv}>
       <Flex align="center" gap="2">
-        <h4>Alpaca sign-in</h4>
+        <CardHeader title="Alpaca sign-in" />
         <Badge tone={status.signedIn ? "success" : status.configured ? "neutral" : "warning"} size="sm">
           {status.signedIn ? "Signed in" : status.configured ? "Deployment keys" : "Not connected"}
         </Badge>

@@ -19,7 +19,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch as fetch } from "./apiFetch";
-import { Badge, Button, Card, EmptyState, Modal, Notice, Spinner } from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, Modal, Notice, Spinner } from "./components/ui";
 
 export interface PendingReviewItem {
   confirmationId: string;
@@ -156,7 +156,7 @@ export function PendingReviewQueue() {
         </p>
       </Modal>
       <div className="pending-review-header">
-        <h3>Pending review</h3>
+        <CardHeader title="Pending review" />
         <Badge tone="neutral" size="sm">
           {items.length} held
         </Badge>

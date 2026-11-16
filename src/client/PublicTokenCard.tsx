@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Button, Card, Flex, Notice, Spinner, Stack, TextInput, useToast } from "./components/ui";
+import { Button, Card, CardHeader, Flex, Notice, Spinner, Stack, TextInput, useToast } from "./components/ui";
 import { apiFetch, csrfHeaders } from "./apiFetch";
 import { connectStatusEndpoint, tokenConnectEndpoint, tokenDisconnectEndpoint } from "./brokerEndpoints";
 
@@ -127,7 +127,7 @@ export function PublicTokenCard() {
 
   return (
     <Card>
-      <h4>Public.com personal access token</h4>
+      <CardHeader title="Public.com personal access token" />
       <Stack gap="2">
         <Notice tone="info">
           Public.com has no paper trading mode: in TEST mode you can preview orders and read data, and placement is

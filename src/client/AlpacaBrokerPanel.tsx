@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Badge, Button, Card, EmptyState, Flex, Notice, Spinner, Stack, Table } from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, Flex, Notice, Spinner, Stack, Table } from "./components/ui";
 import type { BrokerAccount, BrokerPosition, BrokerStatus } from "../types";
 import {
   BROKER_CATALOG,
@@ -347,7 +347,7 @@ export function AlpacaBrokerPanel({ activeEnv, broker = "alpaca" }: AlpacaBroker
 
       <Card>
         <Flex align="center" gap="2">
-          <h4>Connection</h4>
+          <CardHeader title="Connection" />
           {configured !== null && (
             <Badge tone={configured ? "success" : "warning"} size="sm">
               {configured ? "Configured" : "Not configured"}
@@ -385,7 +385,7 @@ export function AlpacaBrokerPanel({ activeEnv, broker = "alpaca" }: AlpacaBroker
 
       <Card>
         <Flex align="center" gap="2">
-          <h4>{label}</h4>
+          <CardHeader title={label} />
           {tradingType && (
             <Badge tone={tradingType === "live" ? "warning" : "info"} size="sm">
               {tradingType === "live" ? "Live trading" : "Paper trading"}
@@ -427,7 +427,7 @@ export function AlpacaBrokerPanel({ activeEnv, broker = "alpaca" }: AlpacaBroker
       {/* Issue #3359: the broker's own order history. */}
       <Card id="section-order-history" className="ui-anchor">
         <Flex align="center" gap="2">
-          <h4>Order history</h4>
+          <CardHeader title="Order history" />
           {/* Issue #3885: cancel every open order — preview first, then the
               token, then the table refreshes only on a confirmed cancel.
               Issue #3990: Alpaca-only — the cancel-all control calls the
@@ -495,7 +495,7 @@ export function AlpacaBrokerPanel({ activeEnv, broker = "alpaca" }: AlpacaBroker
       {/* Issue #3359: the broker's own account activity, in its own vocabulary. */}
       <Card id="section-activity" className="ui-anchor">
         <Flex align="center" gap="2">
-          <h4>Account activity</h4>
+          <CardHeader title="Account activity" />
         </Flex>
         <BrokerSurfaceGate broker={brokerId} surface="activity">
           {activity.state === "loading" && <Spinner size="sm" label={`Loading ${label} account activity`} />}
@@ -523,7 +523,7 @@ export function AlpacaBrokerPanel({ activeEnv, broker = "alpaca" }: AlpacaBroker
           refusal instead of an empty table. */}
       <Card id="section-alerts" className="ui-anchor">
         <Flex align="center" gap="2">
-          <h4>Alerts</h4>
+          <CardHeader title="Alerts" />
         </Flex>
         <BrokerSurfaceGate broker={brokerId} surface="alerts">
           {alerts.state === "loading" && <Spinner size="sm" label={`Loading ${label} alerts`} />}
@@ -548,7 +548,7 @@ export function AlpacaBrokerPanel({ activeEnv, broker = "alpaca" }: AlpacaBroker
 
       <Card id="section-watchlists" className="ui-anchor">
         <Flex align="center" gap="2">
-          <h4>Watchlists</h4>
+          <CardHeader title="Watchlists" />
         </Flex>
         <BrokerSurfaceGate broker={brokerId} surface="watchlists">
           {watchlists.state === "loading" && <Spinner size="sm" label={`Loading ${label} watchlists`} />}

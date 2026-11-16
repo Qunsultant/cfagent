@@ -193,7 +193,7 @@ afterEach(async () => {
 describe("IAAA Admin content pass (#4839)", () => {
   it("G1 — the page states its purpose above the tab bar", async () => {
     await renderPanel();
-    const heading = container.querySelector("h3");
+    const heading = container.querySelector("h4");
     expect(heading?.textContent).toBe("IAAA Admin");
     expect(container.textContent).toContain("Identity and access administration");
     expect(container.textContent).toContain("tenant admins see only their own tenant");

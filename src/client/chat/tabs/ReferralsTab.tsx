@@ -17,6 +17,7 @@ import { FieldShell } from "../../components/ui/Field";
 import { Tabs, TabPanel } from "../../components/ui/Tabs";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
 import { BRAND } from "../../branding";
+import { CardHeader } from "../../components/ui";
 
 export interface ReferralsTabProps {
   activeShareRefId: string | null;
@@ -116,7 +117,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                 <div>
                   <Badge size="xs" uppercase tone="neutral">YOUR EXCLUSIVE INVITE LINK</Badge>
                 </div>
-                <h4>Share Multi-Agent Studio & Earn $10 Compute Credits</h4>
+                <CardHeader title="Share Multi-Agent Studio & Earn $10 Compute Credits" />
                 <p className="ui-meta">
                   When friends or coworkers sign up using your link, both of you unlock 50,000 free inference tokens and premium agent execution limits.
                 </p>
@@ -325,7 +326,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
             <Card>
               <div className="ui-stack">
                 <div>
-                  <h4>➕ Place a New Referral Link</h4>
+                  <CardHeader title="➕ Place a New Referral Link" />
                   <p className="ui-meta">Publish your affiliate or referral link to your account to share with teammates and fellow developers.</p>
                 </div>
                 <form onSubmit={handleCreateReferral} className="ui-stack">
@@ -402,7 +403,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
             <Card>
               <div className="ui-stack">
                 <div>
-                  <h4>📋 Your Placed Referral Links ({referrals.length})</h4>
+                  <CardHeader title={<>📋 Your Placed Referral Links ({referrals.length})</>} />
                   <p className="ui-meta">Track clicks and manage your active promotional URLs.</p>
                 </div>
 
@@ -558,7 +559,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
           <Card>
             <div className="ui-stack">
               <div>
-                <h4>🌐 Official Developer Social Platforms & Communities</h4>
+                <CardHeader title="🌐 Official Developer Social Platforms & Communities" />
                 <p className="ui-meta">
                   Connect with the OpenAIMP ecosystem, join real-time agent engineering discussions, and stay updated across all social media networks.
                 </p>

@@ -51,6 +51,7 @@ import {
   webDarkTheme,
   webLightTheme,
 } from "@fluentui/react-components";
+import { CardHeader } from "../components/ui";
 export type ChatSubView = "general" | "options" | "stock" | (string & {});
 
 // #3230: Fluent v9 Input renders a wrapper root around the inner
@@ -507,7 +508,7 @@ export function AgentChatTabContentInner({
         {messages.length === 0 ? (
           <div className="hero-welcome">
             <div className="hero-icon">{currentCopilot?.hero?.icon || currentCopilot?.icon || "⚡"}</div>
-            <h3>{currentCopilot?.hero?.title || currentCopilot?.label}</h3>
+            <CardHeader title={currentCopilot?.hero?.title || currentCopilot?.label} />
             <p>
               {currentCopilot?.hero?.description || currentCopilot?.tooltip?.description}
             </p>

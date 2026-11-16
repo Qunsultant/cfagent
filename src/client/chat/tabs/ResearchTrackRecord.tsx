@@ -1,5 +1,5 @@
 import React from "react";
-import { Badge, Button, EmptyState, Notice, Spinner, Table } from "../../components/ui";
+import { Badge, Button, CardHeader, EmptyState, Notice, Spinner, Table } from "../../components/ui";
 import { apiFetch } from "../../apiFetch";
 
 /**
@@ -79,7 +79,7 @@ export function TrackRecordView(props: { data: TrackRecordData }) {
         <Badge tone="neutral">Avg R: {rMult(d.avgRMultiple)}</Badge>
       </div>
 
-      <h4>By strategy</h4>
+      <CardHeader title="By strategy" />
       <Table
         columns={[
           { key: "key", header: "Strategy", render: (s: TrackSlice) => s.key },
@@ -93,7 +93,7 @@ export function TrackRecordView(props: { data: TrackRecordData }) {
         empty={<EmptyState title="No strategies recorded yet." />}
       />
 
-      <h4>By period</h4>
+      <CardHeader title="By period" />
       <Table
         columns={[
           { key: "key", header: "Period", render: (s: TrackSlice) => s.key },
@@ -107,7 +107,7 @@ export function TrackRecordView(props: { data: TrackRecordData }) {
         empty={<EmptyState title="No periods recorded yet." />}
       />
 
-      <h4>Published ideas vs outcomes</h4>
+      <CardHeader title="Published ideas vs outcomes" />
       <Table
         columns={[
           { key: "symbol", header: "Symbol", render: (i: TrackIdea) => <strong>{i.symbol}</strong> },

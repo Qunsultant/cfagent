@@ -21,7 +21,7 @@
  */
 
 import { useState } from "react";
-import { Badge, Button, Card, EmptyState, Notice, PageSection, Spinner } from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, Notice, PageSection, Spinner } from "./components/ui";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import {
   resolveStockReportFormatStatus,
@@ -198,7 +198,7 @@ export function RunDetailView({
     <>
       {chrome === "card" && (
         <>
-          <h3 style={{ margin: "0 0 0.75rem" }}>Run detail</h3>
+          <CardHeader title="Run detail" />
 
           <section aria-label="Outcome" style={{ marginBottom: "1rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
@@ -236,7 +236,7 @@ export function RunDetailView({
 
       {(run.patternRef || (run.patternQualifications && run.patternQualifications.length > 0)) && (
         <section aria-label="Pattern" style={{ margin: "1rem 0" }}>
-          <h4 style={{ margin: "0 0 0.5rem" }}>Pattern</h4>
+          <CardHeader title="Pattern" />
           {run.patternRef && (
             <div>
               {typeof run.patternRef === "string"
@@ -258,7 +258,7 @@ export function RunDetailView({
       )}
 
       <section aria-label="Artifacts" style={{ margin: "1rem 0" }}>
-        <h4 style={{ margin: "0 0 0.5rem" }}>Artifacts</h4>
+        <CardHeader title="Artifacts" />
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
           <div>
             {pdfUrl ? (
@@ -381,7 +381,7 @@ export function RunDetailView({
       )}
 
       <section aria-label="Delivery status">
-        <h4 style={{ margin: "0 0 0.5rem" }}>Delivery status</h4>
+        <CardHeader title="Delivery status" />
         {confirmationsLoading ? (
           <Spinner label="Loading delivery status…" />
         ) : confirmations.length === 0 ? (

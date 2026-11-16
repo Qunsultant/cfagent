@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button, Card, Notice, Modal, PillGroup } from "./ui";
+import { Button, Card, CardHeader, Notice, Modal, PillGroup } from "./ui";
 
 export interface PartnerDeal {
   id: string;
@@ -129,7 +129,7 @@ export function PartnerDealsModal({
         <div className="partner-deals-title-area">
           <span className="partner-deals-icon">⭐</span>
           <div>
-            <h3 className="partner-deals-title">Partner Deals &amp; Developer Ecosystem</h3>
+            <CardHeader title="Partner Deals &amp; Developer Ecosystem" />
             <p className="partner-deals-subtitle">
               Externalized partner offers, sponsored developer credits, and tooling integrations.
             </p>
@@ -168,7 +168,7 @@ export function PartnerDealsModal({
                   <span className="deal-sponsor">{deal.sponsor}</span>
                 </div>
 
-                <h4 className="deal-title">{deal.title}</h4>
+                <CardHeader title={deal.title} />
                 <p className="deal-tagline">{deal.tagline}</p>
 
                 <div className="ui-footer-bar">

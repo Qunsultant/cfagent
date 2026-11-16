@@ -19,7 +19,7 @@
  * maxItems 100, bullish thesis, balanced risk profile.
  */
 import { useState } from "react";
-import { Button, Checkbox, Notice, Select, TextInput } from "../components/ui";
+import { Button, CardHeader, Checkbox, Notice, Select, TextInput } from "../components/ui";
 import { apiFetch as fetch } from "../apiFetch";
 import {
   buildOptionsRunNowPayload,
@@ -149,7 +149,7 @@ export function ScheduledOptionsRunForm({ activeEnv, userLogin }: ScheduledOptio
 
   return (
     <div className="options-comparison-note">
-      <h4>▶ Run the Options Market Screen now</h4>
+      <CardHeader title="▶ Run the Options Market Screen now" />
       <p>
         The scheduled job's full parameter set as a single run — same builder, same trigger path
         (the route stamps it <strong>manual</strong>), same delivery. Defaults are the production

@@ -20,7 +20,7 @@
  * client-supplied segment.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Notice, Select, Stack, TextInput } from "./components/ui";
+import { Button, CardHeader, Notice, Select, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { DEFAULT_SEGMENT, resolveEffectiveVersion } from "../data/productPorts";
 import { COMMERCIAL_API_BASE, commercialPath } from "../data/commercialUrlCatalog";
@@ -156,7 +156,7 @@ export function AccountVersionMoveSection({
     <div data-testid="account-version-move-panel">
       <Stack gap="2">
         <div>
-          <h3>Product versions</h3>
+          <CardHeader title="Product versions" />
           <p>
             Move this customer to the current version of the product they hold, or change their segment. A move
             never changes runs or credits; the current paid period runs to its end on the old terms.
@@ -216,7 +216,7 @@ export function AccountVersionMoveSection({
               );
             })}
             <Stack gap="1">
-              <h4>Change segment</h4>
+              <CardHeader title="Change segment" />
               <Select
                 label="Segment"
                 value={segmentChoice}

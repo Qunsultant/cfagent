@@ -1,5 +1,5 @@
 import React from "react";
-import { Badge, Button, Modal, Notice, TextInput } from "../components/ui";
+import { Badge, Button, CardHeader, Modal, Notice, TextInput } from "../components/ui";
 import type { ScheduledTaskItem } from "./types";
 import { FREQUENCY_PRESETS, cadenceText } from "./format";
 import { scheduleTitle } from "./scheduleDetail";
@@ -72,7 +72,7 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
       )}
 
       <section className="sched-detail-section">
-        <h3 className="sched-detail-section-title">Presets</h3>
+        <CardHeader title="Presets" />
         <div className="sched-cadence-presets">
           {FREQUENCY_PRESETS.filter(
             // Issue #4389 — a feed cannot run a cron, so its dialog offers only
@@ -98,7 +98,7 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
         // Issue #4389 — the feed's dialog says why cron is absent, instead of
         // offering a control the server refuses.
         <section className="sched-detail-section">
-          <h3 className="sched-detail-section-title">Interval only</h3>
+          <CardHeader title="Interval only" />
           <p className="sched-detail-note">
             The ticker push is a live feed: it runs on an interval, so there is no
             cron expression to set. Pick an interval above.
@@ -106,7 +106,7 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
         </section>
       ) : (
         <section className="sched-detail-section">
-          <h3 className="sched-detail-section-title">Custom cron (UTC)</h3>
+          <CardHeader title="Custom cron (UTC)" />
           <div className="sched-cadence-custom">
             <TextInput
               aria-label="Custom cron expression"

@@ -33,16 +33,7 @@
  * screen: the payment screen shows this identity read-only.
  */
 import { useCallback, useEffect, useState } from "react";
-import {
-  Button,
-  EmptyState,
-  Notice,
-  Select,
-  Spinner,
-  Stack,
-  Table,
-  TextInput,
-} from "./components/ui";
+import { Button, CardHeader, EmptyState, Notice, Select, Spinner, Stack, Table, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { SubscriptionGrantSection } from "./SubscriptionGrantSection";
 import { UnlimitedFreeGrantSection } from "./UnlimitedFreeGrantSection";
@@ -311,7 +302,7 @@ export function AccountAdminPanel() {
   return (
     <Stack gap="2">
       <div>
-        <h3>Your account</h3>
+        <CardHeader title="Your account" />
         <p>
           This is the read-only identity the payment screen shows for your
           signed-in account. Editing happens here, never on the payment screen.
@@ -336,7 +327,7 @@ export function AccountAdminPanel() {
       {self.identity.hasAccount && setupNote && <Notice tone="info">{setupNote}</Notice>}
 
       <div>
-        <h3>Subscriptions</h3>
+        <CardHeader title="Subscriptions" />
         {self.subscriptions.length === 0 ? (
           <EmptyState title="No subscriptions" description="No subscription rows exist for this account." />
         ) : (
@@ -360,7 +351,7 @@ export function AccountAdminPanel() {
       />
 
       <div>
-        <h3>Price catalogue bindings</h3>
+        <CardHeader title="Price catalogue bindings" />
         {!self.catalogueAvailable ? (
           <Notice tone="warning">
             The price catalogue is unavailable — prices are not shown rather than
@@ -389,7 +380,7 @@ export function AccountAdminPanel() {
       </div>
 
       <div>
-        <h3>Operator lookup</h3>
+        <CardHeader title="Operator lookup" />
         <p>
           Operators look up an account by the owner&apos;s signed-in login. This
           is a lookup, not tenant scoping: the account&apos;s tenant always
@@ -412,7 +403,7 @@ export function AccountAdminPanel() {
           <Stack gap="2">
             <IdentityBlock view={lookup} />
             <Stack gap="1">
-              <h4>Update tier and coverage (operator)</h4>
+              <CardHeader title="Update tier and coverage (operator)" />
               <p>
                 This writes through the existing operator-gated commercial
                 account route; it creates no new credit path.

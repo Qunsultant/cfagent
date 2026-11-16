@@ -4,7 +4,7 @@
 import React from "react";
 import type { FeatureFlag } from "../config/featureFlags";
 import type { NavTabId } from "./components/NavigationMenu";
-import { Badge, Card } from "./components/ui";
+import { Badge, Card, CardHeader } from "./components/ui";
 
 declare global {
   interface Window {
@@ -124,16 +124,9 @@ export function FeatureDisabledNotice({
             }}
           >
             <div style={{ fontSize: "var(--font-size-display)" }}>🔒</div>
-            <h3
-              style={{
-                margin: 0,
-                fontSize: "1.25rem",
-                fontWeight: 700,
-                color: "var(--color-text-primary)",
-              }}
-            >
+            <CardHeader title={<>
               {tabLabel ? `${tabLabel} is Disabled` : "Feature Disabled"}
-            </h3>
+            </>} />
             <p
               style={{
                 margin: 0,

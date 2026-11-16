@@ -8,7 +8,7 @@
  * any (the #1580 freeze/density gates scan this file too).
  */
 import React from "react";
-import { Card } from "./components/ui";
+import { Card, CardHeader } from "./components/ui";
 import type { DelegationContract } from "./delegationContract";
 
 const SECTIONS: Array<[string, keyof DelegationContract]> = [
@@ -30,7 +30,7 @@ export function DelegationContractPreview({
   return (
     <section aria-label="Delegation contract preview">
       <Card>
-        <h4>{title}</h4>
+        <CardHeader title={title} />
         {SECTIONS.map(([label, key]) => (
           <div key={key}>
             <strong>{label}</strong>

@@ -1,6 +1,6 @@
 import React from "react";
 import { adAccentPalette } from "../../designTokens";
-import { Badge, Card, Select, Button, TextInput, PageSection, PageShell, FieldShell, Tabs, TabPanel, Notice } from "../../components/ui";
+import { Badge, Card, CardHeader, Select, Button, TextInput, PageSection, PageShell, FieldShell, Tabs, TabPanel, Notice } from "../../components/ui";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
 import type { AdItem } from "../types";
 
@@ -86,7 +86,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
                     <span className="ui-meta-sm">Sponsored by {ad.sponsor}</span>
                   </div>
 
-                  <h4>{ad.title}</h4>
+                  <CardHeader title={ad.title} />
                   <p className="ui-meta">{ad.tagline}</p>
 
                   <div className="ui-row">
@@ -114,7 +114,7 @@ export function AdsTab({adFormError, adFormSuccess, ads, adsLoading, fetchAds, h
           <Card>
             <div className="ui-stack">
               <div>
-                <h4>📢 Submit a Sponsored Placement</h4>
+                <CardHeader title="📢 Submit a Sponsored Placement" />
                 <p className="ui-meta">Feature your tool, API, or infrastructure platform to autonomous agent developers across the network.</p>
               </div>
 

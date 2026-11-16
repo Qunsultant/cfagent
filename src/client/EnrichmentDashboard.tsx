@@ -11,15 +11,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "./apiFetch";
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  Notice,
-  Spinner,
-  Table,
-} from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, Notice, Spinner, Table } from "./components/ui";
 
 interface EnrichmentRunSummary {
   id: string;
@@ -117,7 +109,7 @@ export function EnrichmentDashboard({ userLogin }: { userLogin?: string }) {
   const providerLabel = status.provider === "alpaca" ? "Alpaca" : "Yahoo";
   return (
     <Card>
-      <h3>Daily enrichment + minute bars</h3>
+      <CardHeader title="Daily enrichment + minute bars" />
       <p>
         Active provider: <strong>{providerLabel}</strong> ({status.mode})
         {!status.alpacaConfigured && status.provider === "yahoo" && (

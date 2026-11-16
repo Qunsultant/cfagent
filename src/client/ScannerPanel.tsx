@@ -61,7 +61,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import "./scannerPanel.css";
-import { Badge, Button, Card, Checkbox, FieldShell, Flex, Grid, Notice, PageSection, PillGroup, Select, Stack, Table, TextInput, type BadgeTone } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Checkbox, FieldShell, Flex, Grid, Notice, PageSection, PillGroup, Select, Stack, Table, TextInput, type BadgeTone } from "./components/ui";
 import { StrategyLibraryModal } from "./options/StrategyLibraryModal";
 import { resolveCatalogStrategyLabels } from "./options/strategyLibrary";
 import { parseSymbolList } from "./accountApi";
@@ -493,7 +493,7 @@ export function TypeRollupCards({ rollup }: { rollup: ScanTypeRollup[] }) {
   if (!rollup || rollup.length === 0) return null;
   return (
     <Stack gap="2">
-      <h3>By strategy type</h3>
+      <CardHeader title="By strategy type" />
       <p className="ui-meta">
         Risk-screen roll-up: counts are candidates that passed the scanner risk screen.
         A screen pass is not an acceptance-rule pass and not a fit-gate qualification.
@@ -562,7 +562,7 @@ export function MatrixBoard({
   const types = matrixStrategyTypes(matrix);
   return (
     <Stack gap="2" id="scanner-matrix-board">
-      <h3>Fit matrix</h3>
+      <CardHeader title="Fit matrix" />
       <p className="ui-meta">
         Pass = screen pass only: at least one candidate passed the scanner risk screen in that
         type. The fit gate decides qualification — see the fit / borderline / no fit badge on each row.
@@ -738,7 +738,7 @@ export function ScanResultsView({ result, runContext, onPreviewTrade, storedRun 
 
       {assumptions.length > 0 && (
         <Stack gap="1">
-          <h3>Assumptions &amp; disclosures</h3>
+          <CardHeader title="Assumptions &amp; disclosures" />
           <ul>
             {assumptions.map((line, idx) => <li key={idx}>{line}</li>)}
           </ul>
@@ -1470,7 +1470,7 @@ export function ScannerPanel({ activeEnv, userLogin, onPreviewTrade }: ScannerPa
       {formOpen && (
         <form id="scp-profile-form" onSubmit={saveProfile}>
         <Stack gap="2">
-          <h3>{editingId ? "Edit profile" : "New profile"}</h3>
+          <CardHeader title={editingId ? "Edit profile" : "New profile"} />
           {formError && <Notice tone="danger">{formError}</Notice>}
           <Grid autoFit minColumnWidth="md" gap="2">
             <div>

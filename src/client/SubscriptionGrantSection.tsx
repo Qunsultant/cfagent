@@ -23,7 +23,7 @@
  * the shared commercialApi listPlans helper.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Notice, Select, Stack } from "./components/ui";
+import { Button, CardHeader, Notice, Select, Stack } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { listPlans, type PlanView } from "./commercialApi";
 
@@ -101,7 +101,7 @@ export function SubscriptionGrantSection({
 
   return (
     <div>
-      <h3>Grant subscription (operator)</h3>
+      <CardHeader title="Grant subscription (operator)" />
       <p>
         Grant an active plan to the looked-up account. The grant
         creates the subscription row and adds the plan&apos;s

@@ -31,6 +31,7 @@ import { codedMessage } from "../outcomes/outcomeAspects";
 import { PRICE_FAMILIES, type PriceFamily } from "../data/priceCataloguePorts";
 import { perRunProductId } from "../data/productPorts";
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
+import { CardHeader } from "./components/ui";
 
 const REFERRAL_CODE_BASE = COMMERCIAL_API_BASE;
 
@@ -282,7 +283,7 @@ export function ReferralCodesSection() {
           {redeemError && <Notice tone="danger">{redeemError}</Notice>}
           {showMintBlock && (
             <>
-              <h4>My referral code</h4>
+              <CardHeader title="My referral code" />
               <p>
                 Anyone who redeems your code gets free runs. A code is shown once, when it is issued — copy
                 it now.
@@ -314,7 +315,7 @@ export function ReferralCodesSection() {
               })}
               {ownCodes !== null && ownCodes.length > 0 && (
                 <>
-                  <h4>My codes</h4>
+                  <CardHeader title="My codes" />
                   {ownCodes.map((code) => (
                     <div key={code.id}>
                       <div>

@@ -26,7 +26,7 @@
  * All calls go through src/client/apiFetch.ts (the #71 rule).
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, Notice, Select, Stack, TextInput } from "./components/ui";
+import { Button, CardHeader, Notice, Select, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { commercialPath } from "../data/commercialUrlCatalog";
 
@@ -238,7 +238,7 @@ export function FreeAccessGrantSection({ userId }: { userId: string }) {
   const pastGrants = history.filter((row) => row.id !== active?.id);
   return (
     <Stack gap="1">
-      <h4>Free-access grant (operator)</h4>
+      <CardHeader title="Free-access grant (operator)" />
       <p>
         Free access for this account: sign-in, browse, and view stay
         free, with no subscription fee for access, until the grant

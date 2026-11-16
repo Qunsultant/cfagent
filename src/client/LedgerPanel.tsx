@@ -1,19 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  Flex,
-  PageSection,
-  PageShell,
-  Spinner,
-  TabPanel,
-  Table,
-  Tabs,
-  type TableColumn,
-  type TabOption,
-} from "./components/ui";
+import { Badge, Button, Card, CardHeader, EmptyState, Flex, PageSection, PageShell, Spinner, TabPanel, Table, Tabs, type TableColumn, type TabOption } from "./components/ui";
 import { safePriceFormat } from "./formatters";
 import {
   LEDGER_SORT_DEFAULT,
@@ -142,7 +128,7 @@ export function LedgerPanel({ orders, ordersLoading, fetchOrders, setRiskSubject
       <PageSection title="Order execution ledger">
         <Card>
           <Flex justify="between" align="center">
-            <h4>📜 Order Execution Ledger (Audited Trade Records)</h4>
+            <CardHeader title="📜 Order Execution Ledger (Audited Trade Records)" />
             <Button
               variant="secondary"
               disabled={ordersLoading}
