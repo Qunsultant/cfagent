@@ -2012,7 +2012,10 @@ const BASELINE: Array<[string, string, number]> = [
   // rows, #4038/#4039). Measured 2026-11-15 on the placed file.
   ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 80],
   ["docs/architecture/business/brokerage-data-matrix.md", "public.com", 14],
-  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 59],
+  // #4654 (INTEGRATION/provenance in the capability record): the gap-4 FIXED
+  // note names which brokers still own a stop-placement gap (6 / 7), the same
+  // provenance-enumeration disposition this row already carries.
+  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 60],
   ["docs/architecture/business/brokerage-data-matrix.md", "schwab", 3],
   ["docs/architecture/business/brokerage-data-matrix.md", "fidelity", 2],
   ["docs/architecture/business/brokerage-data-matrix.md", "robinhood", 1],
