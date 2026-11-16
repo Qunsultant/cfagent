@@ -43,6 +43,9 @@ import type { AgentContext } from "agents";
 import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
 import { createEvidenceSatellitePorts } from "../../data/createEvidenceSatellitePorts";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import type { SqlStorage } from "../../data/repositoryPorts";
+import { DO_DML_CATALOGUE } from "../../data/schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "../../data/schemaComponent/doDmlExecutor";
 import {
   buildCombinedCatalogue,
   executeDoLeg,
@@ -89,11 +92,6 @@ function countRows(sql: unknown, query: string): number {
   const exec = (sql as { exec: (q: string) => Iterable<unknown> }).exec;
   const rows = Array.from(exec(query)) as Array<{ n: number }>;
   return rows[0]?.n ?? 0;
-}
-
-function deleteRows(sql: unknown, query: string): void {
-  const exec = (sql as { exec: (q: string) => Iterable<unknown> }).exec;
-  exec(query);
 }
 
 /**
@@ -410,7 +408,18 @@ export async function handleMaintenanceRoutes(
       }
       runDelete = () => {
         try {
-          deleteRows(sql, "DELETE FROM mas_job_outcomes_meta");
+          // #4387 (P6d): the watermark clear executes through the
+          // DO DML catalogue (dml.do.mas_job_outcomes_meta.clear),
+          // AOP-logged with the code — the inline DELETE is gone.
+          // The missing-table tolerance below is unchanged: the
+          // executor wraps failures as EXECUTION_FAILED with the
+          // raw message embedded, so "no such table" still matches.
+          executeDoDml(
+            DO_DML_CATALOGUE,
+            sql as SqlStorage,
+            "dml.do.mas_job_outcomes_meta.clear",
+            {},
+          );
         } catch (err) {
           if (!isMissingTable(err)) throw err;
         }
@@ -428,7 +437,15 @@ export async function handleMaintenanceRoutes(
       }
       runDelete = () => {
         try {
-          deleteRows(sql, "DELETE FROM mas_events");
+          // #4387 (P6d): the audit-history clear executes through
+          // the DO DML catalogue (dml.do.mas_events.clear),
+          // AOP-logged with the code — the inline DELETE is gone.
+          executeDoDml(
+            DO_DML_CATALOGUE,
+            sql as SqlStorage,
+            "dml.do.mas_events.clear",
+            {},
+          );
         } catch (err) {
           if (!isMissingTable(err)) throw err;
         }

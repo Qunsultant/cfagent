@@ -584,9 +584,13 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
     // #4386 (P6c): the two events entries (ids_created_before,
     // tail_hash) are reads, but the catalogue carve-out counts
     // the registration as writing — uniform with the other
-    // catalogue tables. The bypass is unchanged.
+    // catalogue tables.
+    // #4387 (P6d): the clear entry (dml.do.mas_events.clear)
+    // joins the catalogue, and the maintenance route no longer
+    // holds the DELETE text — its #2489 bypass retires here.
+    // The route still performs the wipe (auditConfirm-gated),
+    // through the catalogue.
     layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/ormCatalogue.ts"],
-    bypass: { "src/agents/routes/maintenance.ts": "#2489 auditConfirm-gated selective wipe" },
   },
   mas_memory: {
     // #4386 (P6c): same move as mas_messages (see above).
@@ -614,8 +618,12 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
     layer: ["src/data/doSqliteJobOutcomeAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"],
   },
   mas_job_outcomes_meta: {
-    layer: ["src/data/doSqliteJobOutcomeAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"],
-    bypass: { "src/agents/routes/maintenance.ts": "#2489 selective wipe watermark reset" },
+    // #4387 (P6d): the clear entry
+    // (dml.do.mas_job_outcomes_meta.clear) joins the DO DML
+    // catalogue, and the maintenance route no longer holds the
+    // DELETE text — its #2489 bypass retires here. The route
+    // still performs the watermark reset, through the catalogue.
+    layer: ["src/data/doSqliteJobOutcomeAdapter.ts", "src/data/schemaComponent/doCatalogue.ts", "src/data/schemaComponent/doDmlEntries.ts"],
   },
   mas_strategy_reviews: { layer: ["src/data/doSqliteStrategyReviewAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_outcome_tracking: { layer: ["src/data/doSqliteOutcomeTrackingAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },

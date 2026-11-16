@@ -33,6 +33,11 @@
  * never weakened). The tranche files and their 11 templates are
  * unchanged; the P6c entries are pinned by
  * tests/orm_dml_catalogue_4386.test.ts.
+ *
+ * #4387 (P6d): the catalogue grows to 81 entries (64 repository +
+ * 17 template) with the two route-held DELETEs — the counts below
+ * move with the change (gitops §7). The route-held entries are
+ * pinned by tests/dml_route_catalogue_4387.test.ts.
  */
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
@@ -207,8 +212,8 @@ describe("DO DML catalogue coverage (#4385)", () => {
     const built = buildDoDmlCatalogue();
     expect(built.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
     expect(DO_DML_CATALOGUE.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
-    // 53 (P6b tranche) + 26 (P6c ORM-core) = 79.
-    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(79);
+    // 53 (P6b tranche) + 26 (P6c ORM-core) + 2 (P6d route-held) = 81.
+    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(81);
     expect(new Set(DO_DML_CATALOGUE_ENTRIES.map((e) => e.code)).size).toBe(
       DO_DML_CATALOGUE_ENTRIES.length,
     );
@@ -233,9 +238,9 @@ describe("DO DML catalogue coverage (#4385)", () => {
       (acc, e) => ({ ...acc, [e.form]: (acc[e.form] ?? 0) + 1 }),
       {} as Record<string, number>,
     );
-    // 42 + 22 (P6c) repository; 11 + 4 (P6c) template.
+    // 42 + 22 (P6c) repository; 11 + 4 (P6c) + 2 (P6d) template.
     expect(forms.repository).toBe(64);
-    expect(forms.template).toBe(15);
+    expect(forms.template).toBe(17);
   });
 
   it("every template statement is byte-identical to the constant it replaced", () => {

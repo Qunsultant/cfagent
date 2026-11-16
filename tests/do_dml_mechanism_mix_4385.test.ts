@@ -7,9 +7,11 @@
  * after the P6b first tranche:
  *
  *  - the 9 tranche files hold ZERO inline raw-DML statements;
- *  - the DO DML catalogue holds exactly 79 entries (64 repository +
- *    15 template) over the 9 tranche tables + the 5 ORM-core tables
- *    + the "__table__" parameterized placeholder (P6c, #4386);
+ *  - the DO DML catalogue holds exactly 81 entries (64 repository +
+ *    17 template) over the 9 tranche tables + the 5 ORM-core tables
+ *    + the "__table__" parameterized placeholder (P6c, #4386) + the
+ *    2 route-held tables (P6d, #4387: mas_job_outcomes_meta and
+ *    mas_events, both template clears);
  *  - the remaining inline count is 228 (the 297-statement survey
  *    inventory on 1501f5f4, less the 53 migrated by P6b and the 16
  *    migrated by P6c) — a later slice moves this number down and
@@ -131,8 +133,8 @@ describe("DO mechanism mix (#4385)", () => {
     expect(hits, "inline DML survives in a tranche file").toEqual([]);
   });
 
-  it("the catalogue holds the tranche + the ORM core: 79 entries", () => {
-    expect(DO_DML_CATALOGUE.size()).toBe(79);
+  it("the catalogue holds the tranche + the ORM core + the route-held pair: 81 entries", () => {
+    expect(DO_DML_CATALOGUE.size()).toBe(81);
     for (const table of TRANCHE_TABLES) {
       expect(DO_DML_CATALOGUE.findByTable(table).length, table).toBeGreaterThan(0);
     }
@@ -141,7 +143,7 @@ describe("DO mechanism mix (#4385)", () => {
       {} as Record<string, number>,
     );
     expect(forms.repository).toBe(64);
-    expect(forms.template).toBe(15);
+    expect(forms.template).toBe(17);
   });
 
   it("repository-bound tables: 9 tranche + 5 ORM-core + 1 parameterized = 15", () => {
@@ -164,7 +166,7 @@ describe("DO mechanism mix (#4385)", () => {
     expect(catalogueTables.size).toBe(15);
   });
 
-  it("template-only tables are exactly the 7 with inexpressible shapes", () => {
+  it("template-only tables are exactly the 8 with inexpressible shapes", () => {
     const templateTables = new Set(
       DO_DML_CATALOGUE.entries()
         .filter((e) => e.form === "template")
@@ -175,6 +177,7 @@ describe("DO mechanism mix (#4385)", () => {
       "mas_discovery_setup_runs",
       "mas_events",
       "mas_iv_history",
+      "mas_job_outcomes_meta",
       "mas_memory",
       "mas_opportunity_scans",
       "mas_transactions",

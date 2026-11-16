@@ -40,6 +40,8 @@ import { sessionStore } from "../../security/session";
 import type { MembershipStore } from "../../security/authorization";
 import type { KvLike } from "../../security/kvResilience";
 import type { Env } from "../../types";
+import { buildCombinedCatalogue } from "../../data/schemaComponent/recreateRunner";
+import { remainderStatementSql } from "../../data/schemaComponent/remainderCatalogue";
 
 export interface MigrationSchedule {
   id: string;
@@ -95,6 +97,48 @@ export interface OrchestratorMigrationContext {
 const KV_PAGE_SIZE = 500;
 /** SDK-internal tables: queue rows and chat session never migrate. */
 const EXCLUDED_TABLE_PREFIXES = ["sqlite_", "cf_agents_", "cf_ai_"];
+
+/**
+ * #4387 (P6d) — the tables the schema component knows, from the
+ * combined catalogue (the single authority for what tables exist).
+ * The migration's INSERT OR REPLACE resolves through the P3
+ * parameterized seed entry
+ * (seed.route.orchestrator_migration.insert_or_replace) and only
+ * ever writes a table in this set: an uncatalogued table is
+ * rejected before any SQL is built, so a template can never smuggle
+ * one in. A catalogued-but-absent table (a D1-plane table, which
+ * lives in another store) still fails at execution with "no such
+ * table" and is reported through the import's tableErrors channel
+ * exactly as before.
+ */
+const CATALOGUED_TABLES: ReadonlySet<string> = new Set(
+  buildCombinedCatalogue().entries().map((entry) => entry.table),
+);
+
+/**
+ * #4387 (P6d) — resolve the migration's INSERT OR REPLACE through
+ * the P3 parameterized seed entry. The statement is never assembled
+ * from an uncatalogued template again: the code is looked up in
+ * the remainder catalogue (an unknown code is rejected
+ * fail-closed there) and the table must be a catalogued table.
+ * `cols` / `placeholders` remain the call site's own assembly,
+ * per the P3 design — the columns come from the row being
+ * imported, and the values stay bound parameters, never
+ * interpolated.
+ */
+export function migrationInsertSql(
+  table: string,
+  cols: string,
+  placeholders: string,
+): string {
+  if (!CATALOGUED_TABLES.has(table)) {
+    throw new Error(`uncatalogued table for migration import: ${table}`);
+  }
+  return remainderStatementSql(
+    "seed.route.orchestrator_migration.insert_or_replace",
+    { table, cols, placeholders },
+  );
+}
 
 function jsonError(error: string, status: number): Response {
   return Response.json({ error }, { status });
@@ -245,7 +289,7 @@ async function importData(
       const placeholders = cols.map(() => "?").join(", ");
       try {
         ctx.storage.sql.exec(
-          `INSERT OR REPLACE INTO ${table} (${cols.join(", ")}) VALUES (${placeholders})`,
+          migrationInsertSql(table, cols.join(", "), placeholders),
           ...cols.map((c) => row[c]),
         );
         count += 1;
