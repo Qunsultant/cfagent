@@ -15,7 +15,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { readFileSync } from "node:fs";
 import { WorkflowRunsPanel } from "../src/client/WorkflowRunsPanel";
 import type { WorkflowRun } from "../src/services/workflowRuns";
 
@@ -141,14 +140,15 @@ afterEach(async () => {
 });
 
 describe("WorkflowRunsPanel", () => {
-  it("owns a scroll container so long run lists and details stay reachable", async () => {
-    payload = { count: 0, runs: [] };
+  it("renders the run table inside a horizontal scroll frame", async () => {
+    // One run: the Table renders its empty state without the container
+    // div when there are no rows, so the frame only exists with rows.
+    payload = { count: 1, runs: [run()] };
     await renderPanel();
-    expect(container.querySelector(".workflow-runs-page")).not.toBeNull();
-    const css = readFileSync("src/client/workflowRuns.css", "utf8");
-    const pageRule = css.match(/\.workflow-runs-page\s*\{([^}]*)\}/)?.[1] ?? "";
-    expect(pageRule).toContain("flex: 1 0 auto");
-    expect(pageRule).toContain("overflow: auto");
+    // S-U4 (#4820): the bespoke .workflow-runs-page scroller is gone —
+    // the tab viewport owns vertical scroll and the wide table scrolls
+    // on its own axis via .ui-scroll-x.
+    expect(container.querySelector(".ui-scroll-x")).not.toBeNull();
   });
 
   it("opens the selected run in a dialog and closes it", async () => {

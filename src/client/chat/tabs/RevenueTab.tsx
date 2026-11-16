@@ -9,7 +9,7 @@ import type { RevenueSummaryData } from "../types";
 import type { TableMetadataItem } from "../types";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
-import { PageShell } from "../../components/ui/PageShell";
+import { PageShell, PageSection } from "../../components/ui/PageShell";
 import { Card } from "../../components/ui/Card";
 import { Notice } from "../../components/ui/Notice";
 import { Select } from "../../components/ui/Select";
@@ -131,6 +131,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
           idBase="revenue"
         />
         <TabPanel idBase="revenue" tabId="metrics" active={activeTab === "metrics"} retain={visitedTabs.has("metrics")}>
+          <PageSection title="Metrics">
           <div className="ui-stat-grid">
             <Card padding="none" highlight>
               <div className="ui-row">
@@ -214,8 +215,10 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
               </div>
             </Card>
           </div>
+          </PageSection>
         </TabPanel>
         <TabPanel idBase="revenue" tabId="placements" active={activeTab === "placements"} retain={visitedTabs.has("placements")}>
+          <PageSection>
           <Card>
             <div className="ui-stack">
               <div>
@@ -346,8 +349,10 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
               </Card>
             </div>
           </Card>
+          </PageSection>
         </TabPanel>
         <TabPanel idBase="revenue" tabId="categories" active={activeTab === "categories"} retain={visitedTabs.has("categories")}>
+          <PageSection>
           <Card>
             <div className="ui-stack">
               <div>
@@ -431,8 +436,10 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
               </Card>
             </div>
           </Card>
+          </PageSection>
         </TabPanel>
         <TabPanel idBase="revenue" tabId="schemas" active={activeTab === "schemas"} retain={visitedTabs.has("schemas")}>
+          <PageSection>
           <Card>
             <div className="ui-stack">
               <div>
@@ -481,8 +488,10 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
               </div>
             </div>
           </Card>
+          </PageSection>
         </TabPanel>
         <TabPanel idBase="revenue" tabId="ads" active={activeTab === "ads"} retain={visitedTabs.has("ads")}>
+          <PageSection>
           <Card>
             <div className="ui-stack">
               <div>
@@ -555,6 +564,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
               </div>
             </div>
           </Card>
+          </PageSection>
         </TabPanel>
       </PageShell>
     </div>

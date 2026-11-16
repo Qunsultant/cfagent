@@ -1895,10 +1895,6 @@
     "file": "src/client/options/strategyDiscovery.css",
     "wave": "S-U7"
   },
-  "mini-social-btn": {
-    "file": "src/client/styles.css",
-    "wave": "S-U7"
-  },
   "modal-actions-bar": {
     "file": "src/client/styles.css",
     "wave": "S-U7"
@@ -3537,14 +3533,6 @@
     "file": "src/client/styles.css",
     "wave": "S-U7"
   },
-  "social-btn": {
-    "file": "src/client/styles.css",
-    "wave": "S-U7"
-  },
-  "social-buttons": {
-    "file": "src/client/styles.css",
-    "wave": "S-U7"
-  },
   "source-filters": {
     "file": "src/client/reports.css",
     "wave": "S-U6"
@@ -4784,86 +4772,6 @@
   "workflow-rule-link": {
     "file": "src/client/workflowsHub.css",
     "wave": "S-U7"
-  },
-  "workflow-runs-artifacts": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-controls": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-detail": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-detail-actions": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-detail-header": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-detail-subtitle": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-fact": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-facts": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-filter": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-io-grid": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-page": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-result": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-stage-io": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-stages-cell": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-stat": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-stats": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-trigger": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-what": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-when": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
-  },
-  "workflow-runs-workflow": {
-    "file": "src/client/workflowRuns.css",
-    "wave": "S-U4"
   },
   "workflow-step-node": {
     "file": "src/client/workflowsHub.css",

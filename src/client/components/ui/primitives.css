@@ -1291,3 +1291,303 @@ div.ui-drawer-title {
 .ui-anchor {
   scroll-margin-top: var(--space-10);
 }
+
+/* ---------- S-U4 (#4820): brand buttons + migration utilities ---------- */
+/* Brand share buttons (ReferralsTab). Ceos DECIDED 2026-11-16: per-network
+ * brand colors are design tokens, not bespoke CSS — the --brand-* constants
+ * already live in tokens.css (theme-invariant by definition, #471); these
+ * classes bind them to the Button primitive. Call sites use variant="ghost"
+ * size="sm"; the compound selector beats the ghost hover (which would
+ * otherwise paint every button muted on hover). Base = the merged cascade
+ * of the two retired .social-btn blocks in styles.css: inline-flex,
+ * centered, gap-1-5, padding 0.4/0.75rem (Button size-sm: 0.375/0.625rem),
+ * radius-md, caption, 600, no underline, shadow-sm; hover lifts -1px
+ * (the old -2px is not on the token scale) + brightness(1.2) + shadow-md.
+ * x-twitter/linkedin/telegram keep their first-block hover backgrounds
+ * (surface-hover / linkedin-strong / telegram-strong); the other networks
+ * keep their brand background on hover. linkedin stays accent text,
+ * telegram stays info text — both come from the first block, which the
+ * second block's background-only rules never overrode. The --brand-bg /
+ * --brand-border / --brand-color properties let the mini hover reuse the
+ * network background without one rule per network. */
+.ui-btn.variant-ghost.ui-brand-x-twitter {
+  --brand-bg: var(--brand-x);
+  --brand-border: var(--color-border-strong);
+  --brand-color: var(--color-text-primary);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-linkedin {
+  --brand-bg: var(--brand-linkedin);
+  --brand-border: var(--brand-linkedin);
+  --brand-color: var(--color-accent);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-reddit {
+  --brand-bg: var(--brand-reddit);
+  --brand-border: var(--brand-reddit-bright);
+  --brand-color: var(--color-text-primary);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-facebook {
+  --brand-bg: var(--brand-facebook);
+  --brand-border: var(--brand-facebook-border);
+  --brand-color: var(--color-text-primary);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-whatsapp {
+  --brand-bg: var(--brand-whatsapp);
+  --brand-border: var(--brand-whatsapp-bright);
+  --brand-color: var(--color-text-primary);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-telegram {
+  --brand-bg: var(--brand-telegram);
+  --brand-border: var(--color-accent);
+  --brand-color: var(--color-info-text);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-threads {
+  --brand-bg: var(--brand-threads);
+  --brand-border: var(--color-border-strong);
+  --brand-color: var(--color-text-primary);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-bluesky {
+  --brand-bg: var(--brand-bluesky);
+  --brand-border: var(--color-accent);
+  --brand-color: var(--color-text-primary);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-hackernews {
+  --brand-bg: var(--brand-hackernews);
+  --brand-border: var(--brand-hackernews);
+  --brand-color: var(--color-text-primary);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-pinterest {
+  --brand-bg: var(--brand-pinterest);
+  --brand-border: var(--brand-pinterest);
+  --brand-color: var(--color-text-primary);
+  background: var(--brand-bg);
+  border-color: var(--brand-border);
+  color: var(--brand-color);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ui-btn.variant-ghost.ui-brand-x-twitter:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+.ui-btn.variant-ghost.ui-brand-linkedin:hover:not(:disabled) {
+  background: var(--brand-linkedin-strong);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+.ui-btn.variant-ghost.ui-brand-reddit:hover:not(:disabled) {
+  background: var(--brand-bg);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+.ui-btn.variant-ghost.ui-brand-facebook:hover:not(:disabled) {
+  background: var(--brand-bg);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+.ui-btn.variant-ghost.ui-brand-whatsapp:hover:not(:disabled) {
+  background: var(--brand-bg);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+.ui-btn.variant-ghost.ui-brand-telegram:hover:not(:disabled) {
+  background: var(--brand-telegram-strong);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+.ui-btn.variant-ghost.ui-brand-threads:hover:not(:disabled) {
+  background: var(--brand-bg);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+.ui-btn.variant-ghost.ui-brand-bluesky:hover:not(:disabled) {
+  background: var(--brand-bg);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+.ui-btn.variant-ghost.ui-brand-hackernews:hover:not(:disabled) {
+  background: var(--brand-bg);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+.ui-btn.variant-ghost.ui-brand-pinterest:hover:not(:disabled) {
+  background: var(--brand-bg);
+  color: var(--brand-color);
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: var(--shadow-md);
+}
+
+/* Icon-only brand button (the retired .mini-social-btn, 28px). The 28px
+ * square is not on the frozen scale: --space-8 (32px) is the nearest step
+ * above the Button size-sm 30px min-height, so the icon button reads as
+ * the small-button size. Border stays subtle and text stays primary, as
+ * the mini network rules set background only; the hover keeps the brand
+ * background (minis never changed it) and grows 1.1x, as before. Placed
+ * after the brand hovers so it wins the equal-specificity ties. */
+.ui-btn.variant-ghost.ui-brand-mini {
+  width: var(--space-8);
+  height: var(--space-8);
+  min-height: 0;
+  padding: 0;
+  font-size: var(--font-size-body-sm);
+  border-radius: var(--radius-sm);
+  border-color: var(--color-border-subtle);
+  color: var(--color-text-primary);
+  box-shadow: none;
+  transition: all 0.15s ease;
+}
+.ui-btn.variant-ghost.ui-brand-mini:hover:not(:disabled) {
+  background: var(--brand-bg);
+  transform: translateY(-1px) scale(1.1);
+  filter: brightness(1.2);
+  box-shadow: none;
+}
+
+/* Micro-label: the filter-label / fact-term / subheading-sm treatment
+ * (caption, semibold, muted, uppercase, 0.04em tracking — the tracking
+ * is a registered exception in template_token_tiers_3135.test.ts). */
+.ui-label {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Monospace identifier: run ids, durations, stage order (the retired
+ * .workflow-runs-mono). Bare <code> renders in Inter (tokens.css
+ * enforces the body font on code/kbd/samp); only pre gets monospace. */
+.ui-mono {
+  font-family: var(--font-code);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* JSON / record pre block (the retired .workflow-runs-pre): sunken
+ * surface, caption, pre-wrap, clamped at 320px with its own scroll.
+ * The 320px clamp is a registered exception in
+ * template_token_tiers_3135.test.ts (no scale step is 320px). */
+.ui-pre {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  max-height: 320px;
+  overflow: auto;
+  background: var(--color-surface-sunken);
+  color: var(--color-surface-sunken-foreground);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Horizontal-only scroll frame (the retired
+ * .workflow-runs-table-container / .workflow-runs-stage-list): a wide
+ * table scrolls on its own axis instead of pushing the page. */
+.ui-scroll-x {
+  overflow-x: auto;
+}
+
+/* Clip children to the rounded card (the retired
+ * .workflow-runs-table-card): without it the table header's muted
+ * background paints square over the card's rounded corners. */
+.ui-clip {
+  overflow: hidden;
+}
+
+/* Zero-margin utilities, completing the margin family (ui-mt-1, ui-mb-1,
+ * ui-ml-3): the facts <dd> needs its browser 40px start margin removed,
+ * and the label <h5> needs its top margin removed without losing the
+ * bottom one. Bare 0 is unitless, never a length token. */
+.ui-m-0 {
+  margin: 0;
+}
+.ui-mt-0 {
+  margin-top: 0;
+}
+
+/* Flex grow with a floor (the retired .workflow-runs-filter-grow,
+ * flex: 1 1 220px): the search filter takes the row's remaining space
+ * but never narrows below 12rem. The 220px basis has no scale step;
+ * min-width: 12rem is the registered exception the layout tier already
+ * carries, and the auto basis keeps the same wrap behaviour. */
+.ui-grow {
+  flex: 1 1 auto;
+  min-width: 12rem;
+}

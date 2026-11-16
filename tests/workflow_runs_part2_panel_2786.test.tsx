@@ -104,7 +104,9 @@ async function renderPanel() {
 }
 
 function titles(): string[] {
-  return [...container.querySelectorAll(".workflow-runs-title")].map((el) => el.textContent ?? "");
+  // S-U4 (#4820): run titles are bare <strong> now (was .workflow-runs-title).
+  // Scope to the table: the stats <strong> values sit outside it.
+  return [...container.querySelectorAll("table strong")].map((el) => el.textContent ?? "");
 }
 
 function buttonByPrefix(prefix: string): HTMLButtonElement {

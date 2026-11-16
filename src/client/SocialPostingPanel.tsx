@@ -13,7 +13,7 @@
  * All reads/writes go through the existing session-gated routes.
  */
 import React, { useCallback, useEffect, useState } from "react";
-import { Badge, Button, Card, Notice, PageShell, Tabs, TabPanel, TextInput } from "./components/ui";
+import { Badge, Button, Card, Notice, PageSection, PageShell, Tabs, TabPanel, TextInput } from "./components/ui";
 import type { TabOption } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import {
@@ -188,6 +188,7 @@ export function SocialPostingPanel({
           />
           {visitedTabs.has("brief") && (
             <TabPanel idBase="social" tabId="brief" active={activeTab === "brief"} retain>
+              <PageSection title="Brief">
               <div className="ui-stack ui-narrow">
                 <TextInput
                   multiline
@@ -214,10 +215,12 @@ export function SocialPostingPanel({
                   {savedNote && <span className="ui-meta ui-success ui-ml-3">{savedNote}</span>}
                 </div>
               </div>
+              </PageSection>
             </TabPanel>
           )}
           {visitedTabs.has("goal") && (
             <TabPanel idBase="social" tabId="goal" active={activeTab === "goal"} retain>
+              <PageSection title="Goals">
               {goalMissing && (
                 <div className="ui-meta">
                   The {DAILY_SOCIAL_POST_GOAL_ID} goal is not in the store yet.
@@ -261,10 +264,12 @@ export function SocialPostingPanel({
                   </Card>
                 </div>
               )}
+              </PageSection>
             </TabPanel>
           )}
           {visitedTabs.has("approvals") && (
             <TabPanel idBase="social" tabId="approvals" active={activeTab === "approvals"} retain>
+              <PageSection title="Approvals">
               {approvals.length === 0 && (
                 <div className="ui-meta">No pending approvals for {date}.</div>
               )}
@@ -282,10 +287,12 @@ export function SocialPostingPanel({
                   </Card>
                 ))}
               </div>
+              </PageSection>
             </TabPanel>
           )}
           {visitedTabs.has("posts") && (
             <TabPanel idBase="social" tabId="posts" active={activeTab === "posts"} retain>
+              <PageSection title="Posts">
               {posts.length === 0 && (
                 <div className="ui-meta">No submitted posts or drafts for {date}.</div>
               )}
@@ -334,10 +341,12 @@ export function SocialPostingPanel({
                   );
                 })}
               </div>
+              </PageSection>
             </TabPanel>
           )}
           {visitedTabs.has("tokens") && (
             <TabPanel idBase="social" tabId="tokens" active={activeTab === "tokens"} retain>
+              <PageSection title="Token health">
               {SOCIAL_CHANNEL_ORDER.filter((id) => tokenChannels[id]).map((id) => {
                 const channel = tokenChannels[id];
                 return (
@@ -356,6 +365,7 @@ export function SocialPostingPanel({
                 Validity reads Unknown in production by design: no live probe is wired, so validity is
                 never assumed — only a real post proves a token works.
               </div>
+              </PageSection>
             </TabPanel>
           )}
         </>

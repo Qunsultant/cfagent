@@ -1644,55 +1644,6 @@ body {
   background: var(--color-success);
 }
 
-.social-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.social-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.85rem;
-  border-radius: 8px;
-  font-size: var(--font-size-body-sm);
-  font-weight: 600;
-  text-decoration: none;
-  transition: all 0.15s ease;
-}
-
-.social-btn.x-twitter {
-  background: var(--color-muted);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-medium);
-}
-
-.social-btn.x-twitter:hover {
-  background: var(--color-surface-hover);
-}
-
-.social-btn.linkedin {
-  background: var(--brand-linkedin-subtle);
-  color: var(--color-accent);
-  border: 1px solid var(--brand-linkedin-strong);
-}
-
-.social-btn.linkedin:hover {
-  background: var(--brand-linkedin-strong);
-}
-
-.social-btn.telegram {
-  background: var(--brand-telegram-subtle);
-  color: var(--color-info-text);
-  border: 1px solid var(--brand-telegram-strong);
-}
-
-.social-btn.telegram:hover {
-  background: var(--brand-telegram-strong);
-}
-
 @media (max-width: 860px) {
 }
 
@@ -1967,23 +1918,6 @@ body {
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-.did-modal-card {
-  background: var(--color-card);
-  color: var(--color-card-foreground);
-  border: 1px solid var(--color-card-border);
-  border-radius: 14px;
-  max-width: 600px;
-  width: 90%;
-  padding: 1.75rem;
-  box-shadow: var(--shadow-card));
-  animation: scaleIn 0.2s ease-out;
-}
-
-@keyframes scaleIn {
-  from { transform: scale(0.95); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
 }
 
 .modal-header {
@@ -2405,87 +2339,6 @@ body {
   margin-top: auto;
   padding-top: 0.4rem;
 }
-
-.social-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.75rem;
-  border-radius: 8px;
-  font-size: var(--font-size-caption);
-  font-weight: 600;
-  text-decoration: none;
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-subtle);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: var(--shadow-sm);
-}
-
-.social-btn:hover {
-  transform: translateY(-2px);
-  filter: brightness(1.2);
-  box-shadow: var(--shadow-md);
-}
-
-.social-btn.x-twitter { background: var(--brand-x); border-color: var(--color-border-strong); }
-.social-btn.linkedin { background: var(--brand-linkedin); border-color: var(--brand-linkedin); }
-.social-btn.reddit { background: var(--brand-reddit); border-color: var(--brand-reddit-bright); }
-.social-btn.facebook { background: var(--brand-facebook); border-color: var(--brand-facebook-border); }
-.social-btn.whatsapp { background: var(--brand-whatsapp); border-color: var(--brand-whatsapp-bright); }
-.social-btn.telegram { background: var(--brand-telegram); border-color: var(--color-accent); }
-.social-btn.threads { background: var(--brand-threads); border-color: var(--color-border-strong); }
-.social-btn.bluesky { background: var(--brand-bluesky); border-color: var(--color-accent); }
-.social-btn.hackernews { background: var(--brand-hackernews); border-color: var(--brand-hackernews); }
-.social-btn.pinterest { background: var(--brand-pinterest); border-color: var(--brand-pinterest); }
-.social-btn.discord { background: var(--brand-discord); border-color: var(--color-indigo-text); cursor: pointer; }
-.social-btn.discord.copied { background: var(--color-success); border-color: var(--color-success); }
-
-.share-toggle-btn {
-  background: var(--color-primary-alpha);
-  border: 1px solid var(--color-primary-border);
-  color: var(--color-indigo-text);
-  padding: 0.35rem 0.65rem;
-  border-radius: 6px;
-  font-size: var(--font-size-caption);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.share-toggle-btn:hover, .share-toggle-btn.active {
-  background: var(--color-primary-alpha);
-  color: var(--color-on-gradient);
-  border-color: var(--color-primary-border);
-}
-
-.mini-social-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  font-size: var(--font-size-body-sm);
-  text-decoration: none;
-  color: var(--color-text-primary);
-  background: var(--color-muted);
-  border: 1px solid var(--color-border-subtle);
-  transition: all 0.15s ease;
-}
-
-.mini-social-btn:hover {
-  transform: translateY(-1px) scale(1.1);
-  filter: brightness(1.2);
-}
-
-.mini-social-btn.x-twitter { background: var(--brand-x); }
-.mini-social-btn.linkedin { background: var(--brand-linkedin); }
-.mini-social-btn.reddit { background: var(--brand-reddit); }
-.mini-social-btn.whatsapp { background: var(--brand-whatsapp); }
-.mini-social-btn.telegram { background: var(--brand-telegram); }
-.mini-social-btn.threads { background: var(--brand-threads); }
-.mini-social-btn.bluesky { background: var(--brand-bluesky); }
-.mini-social-btn.discord { background: var(--brand-discord); cursor: pointer; }
 
 /* ========================================================
    Google Ads & Multi-Network Display Unit Component

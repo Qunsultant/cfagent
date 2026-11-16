@@ -31,12 +31,12 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import "./workflowRuns.css";
 import { controlJobStage } from "./jobsApi";
 import {
   Badge,
   Button,
   Card,
+  CardHeader,
   EmptyState,
   Modal,
   Notice,
@@ -406,11 +406,11 @@ function DocumentCell({
   }
   if (!url) {
     return none ? (
-      <span className="workflow-runs-muted" title="This run produced no documents">
+      <span className="ui-meta-sm" title="This run produced no documents">
         None
       </span>
     ) : (
-      <span className="workflow-runs-muted">—</span>
+      <span className="ui-meta-sm">—</span>
     );
   }
   return (
@@ -620,11 +620,11 @@ export function WorkflowRunsPanel() {
       header: <SortHeader label="Started" sortKey="started" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
       ariaSort: (sort.key === "started" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
-        <div className="workflow-runs-when">
+        <div className="ui-stack">
           <span>{formatTimestamp(run.startedAt)}</span>
-          <span className="workflow-runs-muted">{run.finishedAt ? `Ended ${formatTimestamp(run.finishedAt)}` : "No end recorded"}</span>
+          <span className="ui-meta-sm">{run.finishedAt ? `Ended ${formatTimestamp(run.finishedAt)}` : "No end recorded"}</span>
           {run.status === "running" && run.lastActivityAt && (
-            <span className="workflow-runs-muted">
+            <span className="ui-meta-sm">
               Last activity {formatTimestamp(run.lastActivityAt)}
               {typeof run.heartbeatAgeMs === "number" ? ` · ${formatDuration(run.heartbeatAgeMs)} ago` : ""}
             </span>
@@ -637,14 +637,14 @@ export function WorkflowRunsPanel() {
       header: <SortHeader label="Workflow" sortKey="workflow" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
       ariaSort: (sort.key === "workflow" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
-        <div className="workflow-runs-workflow">
-          <span className="workflow-runs-title">{run.title}</span>
-          <span className="workflow-runs-muted">
+        <div className="ui-stack">
+          <strong>{run.title}</strong>
+          <span className="ui-meta-sm">
             {run.workflow} ·{" "}
             <Button
               variant="ghost"
               size="sm"
-              className="workflow-runs-mono"
+              className="ui-mono"
               onClick={() => setSelectedId(run.id)}
               aria-label={`View details for ${run.runId}`}
             >
@@ -659,11 +659,11 @@ export function WorkflowRunsPanel() {
       header: <SortHeader label="Trigger" sortKey="trigger" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
       ariaSort: (sort.key === "trigger" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
-        <div className="workflow-runs-trigger">
+        <div className="ui-stack">
           <Badge tone={TRIGGER_TONE[run.trigger]} size="sm">
             {TRIGGER_LABEL[run.trigger]}
           </Badge>
-          <span className="workflow-runs-muted">{run.triggerDetail}</span>
+          <span className="ui-meta-sm">{run.triggerDetail}</span>
         </div>
       ),
     },
@@ -682,7 +682,7 @@ export function WorkflowRunsPanel() {
       header: <SortHeader label="Lifecycle" sortKey="lifecycle" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
       ariaSort: (sort.key === "lifecycle" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
-        <span className="workflow-runs-muted">
+        <span className="ui-meta-sm">
           {run.lifecycle ? LIFECYCLE_LABEL[run.lifecycle] : "Not recorded"}
         </span>
       ),
@@ -700,27 +700,27 @@ export function WorkflowRunsPanel() {
           // trigger with no schedule evidence is data that should
           // exist but doesn't, so it keeps "Not recorded".
           return run.trigger === "manual" || run.trigger === "agent" || run.trigger === "webhook" ? (
-            <span className="workflow-runs-muted">Not scheduled</span>
+            <span className="ui-meta-sm">Not scheduled</span>
           ) : (
-            <span className="workflow-runs-muted">Not recorded</span>
+            <span className="ui-meta-sm">Not recorded</span>
           );
         }
         // #3813: a schedule object stamped "not-scheduled" renders
         // "Not scheduled" (kept from main; composes with #3810's
         // trigger-based rule above for runs with no schedule object).
         if (schedule.identity === "not-scheduled") {
-          return <span className="workflow-runs-muted">Not scheduled</span>;
+          return <span className="ui-meta-sm">Not scheduled</span>;
         }
         return (
-          <div className="workflow-runs-trigger">
-            <span className="workflow-runs-muted">{SCHEDULE_MECHANISM_LABEL[schedule.mechanism]}</span>
-            {schedule.identity && <span className="workflow-runs-muted">{schedule.identity}</span>}
-            {schedule.reason && <span className="workflow-runs-muted">{schedule.reason}</span>}
+          <div className="ui-stack">
+            <span className="ui-meta-sm">{SCHEDULE_MECHANISM_LABEL[schedule.mechanism]}</span>
+            {schedule.identity && <span className="ui-meta-sm">{schedule.identity}</span>}
+            {schedule.reason && <span className="ui-meta-sm">{schedule.reason}</span>}
             {schedule.nextFiringAt && (
-              <span className="workflow-runs-muted">Next: {formatTimestamp(schedule.nextFiringAt)}</span>
+              <span className="ui-meta-sm">Next: {formatTimestamp(schedule.nextFiringAt)}</span>
             )}
             {typeof schedule.delaySeconds === "number" && (
-              <span className="workflow-runs-muted">Delay: {schedule.delaySeconds}s</span>
+              <span className="ui-meta-sm">Delay: {schedule.delaySeconds}s</span>
             )}
           </div>
         );
@@ -731,7 +731,7 @@ export function WorkflowRunsPanel() {
       header: <SortHeader label="Source" sortKey="source" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
       ariaSort: (sort.key === "source" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) => (
-        <span className="workflow-runs-muted">
+        <span className="ui-meta-sm">
           {run.documents
             ? (SOURCE_LABEL[run.documents.family] ?? run.documents.family)
             : (SOURCE_LABEL[run.family] ?? run.family)}
@@ -770,7 +770,7 @@ export function WorkflowRunsPanel() {
       header: <SortHeader label="Duration" sortKey="duration" sort={sort} onSort={(key) => setSort(nextWorkflowRunSort(sort, key))} />,
       ariaSort: (sort.key === "duration" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       align: "right" as const,
-      render: (run: WorkflowRun) => <span className="workflow-runs-mono">{formatDuration(run.durationMs)}</span>,
+      render: (run: WorkflowRun) => <span className="ui-mono">{formatDuration(run.durationMs)}</span>,
     },
     {
       key: "stages",
@@ -778,9 +778,9 @@ export function WorkflowRunsPanel() {
       ariaSort: (sort.key === "stages" ? (sort.dir === "asc" ? "ascending" : "descending") : "none") as "ascending" | "descending" | "none",
       render: (run: WorkflowRun) =>
         run.stageCount === 0 ? (
-          <span className="workflow-runs-muted">No stages recorded</span>
+          <span className="ui-meta-sm">No stages recorded</span>
         ) : (
-          <div className="workflow-runs-stages-cell">
+          <div className="ui-row">
             <span>
               {run.completedStages}/{run.stageCount} completed
             </span>
@@ -804,15 +804,15 @@ export function WorkflowRunsPanel() {
             ? `${outcome.matched ?? "—"} matched / ${outcome.scanned ?? "—"} scanned`
             : null;
         return (
-          <div className="workflow-runs-result">
+          <div className="ui-stack">
             {counts && <span>{counts}</span>}
             {run.artifacts.length > 0 && (
-              <span className="workflow-runs-muted">
+              <span className="ui-meta-sm">
                 {run.artifacts.length} artifact{run.artifacts.length === 1 ? "" : "s"}
               </span>
             )}
-            {run.error && <span className="workflow-runs-muted">{run.error}</span>}
-            {!counts && run.artifacts.length === 0 && !run.error && <span className="workflow-runs-muted">—</span>}
+            {run.error && <span className="ui-meta-sm">{run.error}</span>}
+            {!counts && run.artifacts.length === 0 && !run.error && <span className="ui-meta-sm">—</span>}
           </div>
         );
       },
@@ -837,7 +837,7 @@ export function WorkflowRunsPanel() {
   const failedSources = Object.entries(storeErrors);
 
   return (
-    <div className="workflow-runs-page">
+    <div>
       <PageShell
       title="Workflow Runs"
       scopeNote="Every run the workflow engine recorded — job chains (feed → generate → serve → deliver) and standalone screener, goal, and discovery outcomes. Each run shows its stages, inputs, outputs, failures, artifacts, and how it was triggered. Trade approvals and payments stay in their own ledgers (Approvals, Billing)."
@@ -849,7 +849,7 @@ export function WorkflowRunsPanel() {
           below. A failed load left no retry on the page. The error now
           renders inline with its own Retry, and Refresh stays visible. */}
       {error && (
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: "var(--space-3)" }}>
+        <div className="ui-row">
           <Notice tone="danger">{error}</Notice>
           <Button variant="secondary" size="sm" onClick={() => void loadRuns("replace", 0)} loading={loading} disabled={loading}>
             Retry
@@ -869,28 +869,28 @@ export function WorkflowRunsPanel() {
             : "Workflow runs"
         }
       >
-        <Card padding="md" className="workflow-runs-controls">
-          <div className="workflow-runs-filter">
-            <span className="workflow-runs-filter-label">Trigger</span>
+        <Card padding="md" className="ui-row">
+          <div className="ui-stack">
+            <span className="ui-label">Trigger</span>
             <PillGroup options={TRIGGER_OPTIONS} value={triggerFilter} onChange={setTriggerFilter} size="sm" ariaLabel="Filter runs by trigger" />
           </div>
-          <div className="workflow-runs-filter">
-            <span className="workflow-runs-filter-label">Status</span>
+          <div className="ui-stack">
+            <span className="ui-label">Status</span>
             <PillGroup options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} size="sm" ariaLabel="Filter runs by status" />
           </div>
-          <div className="workflow-runs-filter">
-            <span className="workflow-runs-filter-label">Lifecycle</span>
+          <div className="ui-stack">
+            <span className="ui-label">Lifecycle</span>
             <PillGroup options={LIFECYCLE_OPTIONS} value={lifecycleFilter} onChange={setLifecycleFilter} size="sm" ariaLabel="Filter runs by lifecycle state" />
           </div>
-          <div className="workflow-runs-filter">
-            <span className="workflow-runs-filter-label">Schedule</span>
+          <div className="ui-stack">
+            <span className="ui-label">Schedule</span>
             <PillGroup options={SCHEDULE_OPTIONS} value={scheduleFilter} onChange={setScheduleFilter} size="sm" ariaLabel="Filter runs by schedule type" />
           </div>
-          <div className="workflow-runs-filter">
-            <span className="workflow-runs-filter-label">Reports</span>
+          <div className="ui-stack">
+            <span className="ui-label">Reports</span>
             <PillGroup options={REPORTS_OPTIONS} value={reportsFilter} onChange={setReportsFilter} size="sm" ariaLabel="Filter runs by report documents" />
           </div>
-          <div className="workflow-runs-filter workflow-runs-filter-grow">
+          <div className="ui-stack ui-grow">
             <TextInput
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -938,8 +938,8 @@ export function WorkflowRunsPanel() {
           >
             Prune history
           </Button>
-          <div className="workflow-runs-filter">
-            <span className="workflow-runs-muted">
+          <div className="ui-stack">
+            <span className="ui-meta-sm">
               Pausing ad beacons is per-browser and undercounts ad attribution while paused. Prune is session-scoped;
               running rows are never deleted.
             </span>
@@ -947,7 +947,7 @@ export function WorkflowRunsPanel() {
         </Card>
 
         {summary && (
-          <div className="workflow-runs-stats" aria-label="Run summary">
+          <div className="ui-stat-grid" aria-label="Run summary">
             {[
               { label: "Runs loaded", value: summary.total },
               { label: "Completed", value: summary.completed },
@@ -961,9 +961,9 @@ export function WorkflowRunsPanel() {
               { label: "Manual", value: summary.byTrigger.manual },
               { label: "Autonomous", value: summary.byTrigger.autonomous },
             ].map((stat) => (
-              <Card key={stat.label} padding="sm" className="workflow-runs-stat">
-                <span className="workflow-runs-stat-value">{stat.value}</span>
-                <span className="workflow-runs-stat-label">{stat.label}</span>
+              <Card key={stat.label} padding="sm" className="ui-stack">
+                <strong>{stat.value}</strong>
+                <span className="ui-meta-sm">{stat.label}</span>
               </Card>
             ))}
           </div>
@@ -976,13 +976,13 @@ export function WorkflowRunsPanel() {
           </Notice>
         )}
 
-        <Card padding="none" className="workflow-runs-table-card">
+        <Card padding="none" className="ui-clip">
           <Table
             columns={columns}
             rows={displayed}
             rowKey={(run) => run.id}
             caption="Workflow runs"
-            containerClassName="workflow-runs-table-container"
+            containerClassName="ui-scroll-x"
             empty={
               <EmptyState
                 framed
@@ -1029,7 +1029,7 @@ export function WorkflowRunsPanel() {
 
       {pruneOpen && (
         <Modal open onClose={() => setPruneOpen(false)} title="Prune history">
-          <p className="workflow-runs-muted">
+          <p className="ui-meta-sm">
             Session-scoped: only this session&apos;s async-job rows are counted. Running rows are never deleted.
           </p>
           {pruneLoading && !prunePreview && <p>Loading preview…</p>}
@@ -1246,15 +1246,15 @@ export function RunDetail({
         key: "order",
         header: "#",
         align: "right" as const,
-        render: (stage: WorkflowRunStage) => <span className="workflow-runs-mono">{stage.order}</span>,
+        render: (stage: WorkflowRunStage) => <span className="ui-mono">{stage.order}</span>,
       },
       {
         key: "stage",
         header: "Stage",
         render: (stage: WorkflowRunStage) => (
-          <div className="workflow-runs-workflow">
-            <span className="workflow-runs-title">{stage.label}</span>
-            <span className="workflow-runs-muted">
+          <div className="ui-stack">
+            <strong>{stage.label}</strong>
+            <span className="ui-meta-sm">
               {stage.stage}
               {stage.capability ? ` · ${stage.capability}` : ""}
               {stage.channel ? ` · ${stage.channel}` : ""}
@@ -1298,7 +1298,7 @@ export function RunDetail({
         key: "recorded",
         header: "Recorded",
         render: (stage: WorkflowRunStage) => (
-          <span className="workflow-runs-muted">
+          <span className="ui-meta-sm">
             {stage.recordedBy === "job"
               ? stage.jobKind
                 ? `${stage.jobKind} job`
@@ -1313,9 +1313,9 @@ export function RunDetail({
         key: "timing",
         header: "Started / duration",
         render: (stage: WorkflowRunStage) => (
-          <div className="workflow-runs-when">
+          <div className="ui-stack">
             <span>{formatTimestamp(stage.startedAt)}</span>
-            <span className="workflow-runs-muted">{formatDuration(stage.durationMs)}</span>
+            <span className="ui-meta-sm">{formatDuration(stage.durationMs)}</span>
           </div>
         ),
       },
@@ -1359,12 +1359,12 @@ export function RunDetail({
         key: "what",
         header: "What happened",
         render: (stage: WorkflowRunStage) => (
-          <div className="workflow-runs-what">
+          <div className="ui-stack">
             <span>{stage.detail || "No description recorded"}</span>
             {/* Issue #4418: the pre-reap last activity rides the existing muted
         line (no new bespoke class — the UX ratchet counts them). */}
     {(stage.reason || stage.lastActivityAt || (stage.attempts?.length ?? 0) > 0) && (
-      <span className="workflow-runs-muted">
+      <span className="ui-meta-sm">
         {[
           stage.reason ? `Reason: ${stage.reason}` : null,
           stage.lastActivityAt ? `Last activity ${stage.lastActivityAt}` : null,
@@ -1379,7 +1379,7 @@ export function RunDetail({
       </span>
     )}
             {stage.error && (
-              <span className="workflow-runs-error">{stage.error}</span>
+              <span className="ui-danger ui-meta-sm">{stage.error}</span>
             )}
           </div>
         ),
@@ -1388,36 +1388,38 @@ export function RunDetail({
     return withActions ? columns : columns.filter((column) => column.key !== "actions");
   };
   return (
-    <div className="workflow-runs-detail">
-      <div className="workflow-runs-detail-header">
-        <div>
-          <h3 className="workflow-runs-detail-title">{run.title}</h3>
-          <div className="workflow-runs-detail-subtitle">
+    <div className="ui-stack">
+      <CardHeader
+        title={run.title}
+        subtitle={
+          <span className="ui-row">
             <span>{run.workflow}</span>
-            <span className="workflow-runs-mono">{run.runId}</span>
-            <span className="workflow-runs-muted">{run.source === "job-chain" ? "Job tree" : run.source === "report" ? "Report record only" : run.stageCount > 0 ? "Unified run record" : "Outcome record only"}</span>
-          </div>
-        </div>
-        <div className="workflow-runs-detail-actions">
-          {canRetryChain && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void retryChain()}
-              loading={chainRetryBusy}
-              disabled={chainRetryBusy}
-            >
-              Retry failed shards
-            </Button>
-          )}
-          <Badge tone={TRIGGER_TONE[run.trigger]} size="sm">
-            {TRIGGER_LABEL[run.trigger]}
-          </Badge>
-          <Badge tone={runStatusTone(run)} size="sm" dot>
-            {runStatusLabel(run)}
-          </Badge>
-        </div>
-      </div>
+            <span className="ui-mono">{run.runId}</span>
+            <span className="ui-meta-sm">{run.source === "job-chain" ? "Job tree" : run.source === "report" ? "Report record only" : run.stageCount > 0 ? "Unified run record" : "Outcome record only"}</span>
+          </span>
+        }
+        meta={
+          <span className="ui-row">
+            {canRetryChain && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void retryChain()}
+                loading={chainRetryBusy}
+                disabled={chainRetryBusy}
+              >
+                Retry failed shards
+              </Button>
+            )}
+            <Badge tone={TRIGGER_TONE[run.trigger]} size="sm">
+              {TRIGGER_LABEL[run.trigger]}
+            </Badge>
+            <Badge tone={runStatusTone(run)} size="sm" dot>
+              {runStatusLabel(run)}
+            </Badge>
+          </span>
+        }
+      />
 
       {run.error && (
         <Notice tone="danger" density="compact" variant="strip" title="Recorded failure">
@@ -1452,51 +1454,50 @@ export function RunDetail({
         </Notice>
       )}
 
-      <dl className="workflow-runs-facts">
-        <div className="workflow-runs-fact">
-          <dt>Trigger</dt>
-          <dd>{run.triggerDetail}</dd>
+      <dl className="ui-stat-grid">
+        <div className="ui-stack">
+          <dt className="ui-label">Trigger</dt>
+          <dd className="ui-m-0">{run.triggerDetail}</dd>
         </div>
-        <div className="workflow-runs-fact">
-          <dt>Triggered by</dt>
-          <dd>{run.triggeredBy || "Not recorded"}</dd>
+        <div className="ui-stack">
+          <dt className="ui-label">Triggered by</dt>
+          <dd className="ui-m-0">{run.triggeredBy || "Not recorded"}</dd>
         </div>
-        <div className="workflow-runs-fact">
-          <dt>Started</dt>
-          <dd>{formatTimestamp(run.startedAt)}</dd>
+        <div className="ui-stack">
+          <dt className="ui-label">Started</dt>
+          <dd className="ui-m-0">{formatTimestamp(run.startedAt)}</dd>
         </div>
-        <div className="workflow-runs-fact">
-          <dt>Finished</dt>
-          <dd>{formatTimestamp(run.finishedAt)}</dd>
+        <div className="ui-stack">
+          <dt className="ui-label">Finished</dt>
+          <dd className="ui-m-0">{formatTimestamp(run.finishedAt)}</dd>
         </div>
-        <div className="workflow-runs-fact">
-          <dt>Duration</dt>
-          <dd>{formatDuration(run.durationMs)}</dd>
+        <div className="ui-stack">
+          <dt className="ui-label">Duration</dt>
+          <dd className="ui-m-0">{formatDuration(run.durationMs)}</dd>
         </div>
         {(() => {
           // Issue #4363 — the execution mode the engine definition recorded.
           // Absent on a run whose stages carry none: no invented default.
           const mode = run.stages.find((stage) => stage.executionMode)?.executionMode;
-          // Rendered as a bare dt/dd pair: no new bespoke class occurrence
-          // (the interior snapshot counts them), and the token styling of
-          // the surrounding <dl> still applies.
+          // Rendered as a fact div like the other pairs (S-U4 #4820):
+          // the bare pair rendered with the browser-default dd indent.
           return mode ? (
-            <>
-              <dt>Execution mode</dt>
-              <dd>{mode}</dd>
-            </>
+            <div className="ui-stack">
+              <dt className="ui-label">Execution mode</dt>
+              <dd className="ui-m-0">{mode}</dd>
+            </div>
           ) : null;
         })()}
-        <div className="workflow-runs-fact">
-          <dt>Stages</dt>
-          <dd>
+        <div className="ui-stack">
+          <dt className="ui-label">Stages</dt>
+          <dd className="ui-m-0">
             {run.stageCount} recorded · {run.completedStages} completed
             {run.failedStages > 0 ? ` · ${run.failedStages} failed` : ""}
           </dd>
         </div>
       </dl>
 
-      <h4 className="workflow-runs-subheading">Stages</h4>
+      <h4>Stages</h4>
       {run.stages.length === 0 ? (
         <Notice tone="neutral" density="compact">
           {run.source === "report"
@@ -1504,7 +1505,7 @@ export function RunDetail({
             : "No stage records exist for this run — the producing store recorded only the run outcome. Stages are never inferred."}
         </Notice>
       ) : (
-        <div className="workflow-runs-stage-list">
+        <div className="ui-scroll-x">
           <Table
             columns={stageColumns(true)}
             rows={run.stages}
@@ -1666,33 +1667,33 @@ export function RunDetail({
         </PageSection>
       )}
 
-      <div className="workflow-runs-io-grid">
-        <section className="workflow-runs-io" aria-label="Run inputs">
-          <h4 className="workflow-runs-subheading">Inputs</h4>
-          <pre className="workflow-runs-pre">{formatJson(run.inputs)}</pre>
+      <div className="ui-stat-grid">
+        <section aria-label="Run inputs">
+          <h4>Inputs</h4>
+          <pre className="ui-pre">{formatJson(run.inputs)}</pre>
         </section>
-        <section className="workflow-runs-io" aria-label="Run outputs">
-          <h4 className="workflow-runs-subheading">Outputs</h4>
-          <pre className="workflow-runs-pre">{formatJson(run.outputs)}</pre>
+        <section aria-label="Run outputs">
+          <h4>Outputs</h4>
+          <pre className="ui-pre">{formatJson(run.outputs)}</pre>
         </section>
       </div>
 
       {run.documents && (
-        <section className="workflow-runs-io" aria-label="Documents">
-          <h4 className="workflow-runs-subheading">Documents</h4>
-          <div className="workflow-runs-artifacts">
+        <section aria-label="Documents">
+          <h4>Documents</h4>
+          <div className="ui-row">
             <DocumentCell url={run.documents.pdfUrl} status={run.documents.pdfStatus} error={run.documents.pdfError} kind="PDF" />
             <DocumentCell url={run.documents.xlsxUrl} status={run.documents.xlsxStatus} error={run.documents.xlsxError} kind="XLSX" />
             <DocumentCell url={run.documents.csvUrl} status={run.documents.csvStatus} error={run.documents.csvError} kind="CSV" />
           </div>
-          <p className="workflow-runs-muted">Canonical row {run.documents.reportId}</p>
+          <p className="ui-meta-sm">Canonical row {run.documents.reportId}</p>
         </section>
       )}
 
       {run.documents && (
-        <section className="workflow-runs-io" aria-label="Docs run details">
-          <h4 className="workflow-runs-subheading">Docs run details</h4>
-          {docsLoading && <p className="workflow-runs-muted">Loading docs run details…</p>}
+        <section aria-label="Docs run details">
+          <h4>Docs run details</h4>
+          {docsLoading && <p className="ui-meta-sm">Loading docs run details…</p>}
           {stageActionError && (
             <Notice tone="danger" density="compact">
               Stage action failed: {stageActionError}
@@ -1709,12 +1710,12 @@ export function RunDetail({
         </section>
       )}
 
-      <section className="workflow-runs-io" aria-label="Artifacts and delivery">
-        <h4 className="workflow-runs-subheading">Artifacts & delivery</h4>
+      <section aria-label="Artifacts and delivery">
+        <h4>Artifacts & delivery</h4>
         {visibleArtifacts.length === 0 && Object.keys(run.deliveryStates).length === 0 ? (
-          <p className="workflow-runs-muted">No artifacts or delivery states recorded for this run.</p>
+          <p className="ui-meta-sm">No artifacts or delivery states recorded for this run.</p>
         ) : (
-          <div className="workflow-runs-artifacts">
+          <div className="ui-row">
             {visibleArtifacts.map((artifact) => (
               <a key={`${artifact.kind}:${artifact.url}`} href={artifact.url} target="_blank" rel="noreferrer">
                 {artifact.label}
@@ -1730,26 +1731,30 @@ export function RunDetail({
       </section>
 
       {run.stages.some((stage) => stage.input !== null || stage.output !== null) && (
-        <section className="workflow-runs-stage-io" aria-label="Per-stage inputs and outputs">
-          <h4 className="workflow-runs-subheading">Per-stage inputs & outputs</h4>
+        <section className="ui-stack" aria-label="Per-stage inputs and outputs">
+          <h4>Per-stage inputs & outputs</h4>
           {run.stages
             .filter((stage) => stage.input !== null || stage.output !== null)
             .map((stage) => (
-              <details key={stage.key} className="workflow-runs-stage-details">
-                <summary>
-                  {stage.order}. {stage.label} — {stageStatus(stage)}
-                </summary>
-                <div className="workflow-runs-io-grid">
-                  <section className="workflow-runs-io" aria-label={`${stage.label} inputs`}>
-                    <h5 className="workflow-runs-subheading-sm">Inputs</h5>
-                    <pre className="workflow-runs-pre">{formatJson(stage.input)}</pre>
-                  </section>
-                  <section className="workflow-runs-io" aria-label={`${stage.label} outputs`}>
-                    <h5 className="workflow-runs-subheading-sm">Outputs</h5>
-                    <pre className="workflow-runs-pre">{formatJson(stage.output)}</pre>
-                  </section>
-                </div>
-              </details>
+              <Card key={stage.key} padding="sm">
+                <details>
+                  <summary>
+                    <strong>
+                      {stage.order}. {stage.label} — {stageStatus(stage)}
+                    </strong>
+                  </summary>
+                  <div className="ui-stat-grid ui-mt-2">
+                    <section aria-label={`${stage.label} inputs`}>
+                      <h5 className="ui-label ui-mt-0 ui-mb-1">Inputs</h5>
+                      <pre className="ui-pre">{formatJson(stage.input)}</pre>
+                    </section>
+                    <section aria-label={`${stage.label} outputs`}>
+                      <h5 className="ui-label ui-mt-0 ui-mb-1">Outputs</h5>
+                      <pre className="ui-pre">{formatJson(stage.output)}</pre>
+                    </section>
+                  </div>
+                </details>
+              </Card>
             ))}
         </section>
       )}

@@ -7,7 +7,7 @@ import type { ReferralItem } from "../types";
 import type { User } from "../types";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
-import { PageShell } from "../../components/ui/PageShell";
+import { PageShell, PageSection } from "../../components/ui/PageShell";
 import { Card } from "../../components/ui/Card";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { Notice } from "../../components/ui/Notice";
@@ -72,9 +72,10 @@ const isReferralsTab = (v: unknown): v is ReferralsTabId =>
 /**
  * Referrals & Partner Hub as a shell page (issue #2161, epic #2150
  * slice 2): URL-synced inner tabs (?view=) with visited panels
- * retained mounted-hidden. Share-button skins stay as-is: they are
- * third-party network colors already token-valued, not page layout.
- * All layout, stats, and forms move to primitives and utilities.
+ * retained mounted-hidden. Share buttons are Button primitives with
+ * per-network brand colors as design tokens (ui-brand-*, S-U4 #4820):
+ * no hand-rolled button skins remain. All layout, stats, and forms
+ * move to primitives and utilities.
  */
 export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copiedReferral, copiedShareRefId, discordCopied, externalAds, fetchReferrals, googleAdsEnabled, googlePublisherId, googleSlotId, handleCopyDiscordEmbed, handleCopyPersonalRef, handleCopyRefDiscordEmbed, handleCreateReferral, handleDeleteReferral, handleExternalAdClick, handleReferralClick, newRefCategory, newRefReward, newRefTitle, newRefUrl, personalReferralUrl, refFormError, refFormSuccess, referrals, referralsLoading, savingRef, setActiveShareRefId, setNewRefCategory, setNewRefReward, setNewRefTitle, setNewRefUrl, user, param = "view"}: ReferralsTabProps) {
   const { activeTab, visitedTabs, handleTabChange } = useUrlSyncedTabs<ReferralsTabId>({
@@ -108,6 +109,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
           idBase="referrals"
         />
         <TabPanel idBase="referrals" tabId="share" active={activeTab === "share"} retain={visitedTabs.has("share")}>
+          <PageSection>
           <Card>
             <div className="ui-stack">
               <div className="ui-stack">
@@ -135,114 +137,134 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
               </div>
               <span className="ui-meta-sm">Share to All Social Media Platforms:</span>
               <div className="ui-stat-grid">
-                <a
+                <Button
                   href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
                     `Build autonomous AI trading and intelligence agents on ${BRAND.name}: ${personalReferralUrl}`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn x-twitter"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-x-twitter"
                   title="Share on X (Twitter)"
                 >
                   𝕏 X (Twitter)
-                </a>
-                <a
+                </Button>
+                <Button
                   href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
                     personalReferralUrl
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn linkedin"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-linkedin"
                   title="Share on LinkedIn"
                 >
                   💼 LinkedIn
-                </a>
-                <a
+                </Button>
+                <Button
                   href={`https://reddit.com/submit?url=${encodeURIComponent(
                     personalReferralUrl
                   )}&title=${encodeURIComponent(`${BRAND.name}: Autonomous Multi-Agent Trading & Strategy Execution`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn reddit"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-reddit"
                   title="Share on Reddit"
                 >
                   👽 Reddit
-                </a>
-                <a
+                </Button>
+                <Button
                   href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(personalReferralUrl)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn facebook"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-facebook"
                   title="Share on Facebook"
                 >
                   📘 Facebook
-                </a>
-                <a
+                </Button>
+                <Button
                   href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
                     `Build autonomous AI agents on Multi-Agent Studio: ${personalReferralUrl}`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn whatsapp"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-whatsapp"
                   title="Share on WhatsApp"
                 >
                   💬 WhatsApp
-                </a>
-                <a
+                </Button>
+                <Button
                   href={`https://t.me/share/url?url=${encodeURIComponent(
                     personalReferralUrl
                   )}&text=${encodeURIComponent("Check out Multi-Agent Studio for edge AI agents")}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn telegram"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-telegram"
                   title="Share on Telegram"
                 >
                   ✈️ Telegram
-                </a>
-                <a
+                </Button>
+                <Button
                   href={`https://www.threads.net/intent/post?text=${encodeURIComponent(
                     `Autonomous Multi-Agent Trading Platform: ${personalReferralUrl}`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn threads"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-threads"
                   title="Share on Threads"
                 >
                   🧵 Threads
-                </a>
-                <a
+                </Button>
+                <Button
                   href={`https://bsky.app/intent/compose?text=${encodeURIComponent(
                     `Check out ${BRAND.name} for multi-agent trading: ${personalReferralUrl}`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn bluesky"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-bluesky"
                   title="Share on Bluesky"
                 >
                   🦋 Bluesky
-                </a>
-                <a
+                </Button>
+                <Button
                   href={`https://news.ycombinator.com/submitlink?u=${encodeURIComponent(
                     personalReferralUrl
                   )}&t=${encodeURIComponent(`${BRAND.name}: Institutional Multi-Agent Trading System`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn hackernews"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-hackernews"
                   title="Share on Hacker News"
                 >
                   🟧 Hacker News
-                </a>
-                <a
+                </Button>
+                <Button
                   href={`https://pinterest.com/pin/create/button/?url=${encodeURIComponent(
                     personalReferralUrl
                   )}&description=${encodeURIComponent("Autonomous Multi-Agent Trading & Strategy Execution")}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="social-btn pinterest"
+                  variant="ghost"
+                  size="sm"
+                  className="ui-brand-pinterest"
                   title="Pin on Pinterest"
                 >
                   📌 Pinterest
-                </a>
+                </Button>
                 <Button
                   variant="secondary"
                   onClick={handleCopyDiscordEmbed}
@@ -253,8 +275,10 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
               </div>
             </div>
           </Card>
+          </PageSection>
         </TabPanel>
         <TabPanel idBase="referrals" tabId="activity" active={activeTab === "activity"} retain={visitedTabs.has("activity")}>
+          <PageSection title="Activity">
           <div className="ui-stat-grid">
             <Card padding="none">
               <div className="ui-row">
@@ -293,8 +317,10 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
               </div>
             </Card>
           </div>
+          </PageSection>
         </TabPanel>
         <TabPanel idBase="referrals" tabId="links" active={activeTab === "links"} retain={visitedTabs.has("links")}>
+          <PageSection>
           <div className="ui-form-row">
             <Card>
               <div className="ui-stack">
@@ -430,69 +456,83 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                           {activeShareRefId === ref.id && (
                             <div className="ui-row">
                               <span className="ui-meta-sm">Share:</span>
-                              <a
+                              <Button
                                 href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`${ref.title}: ${ref.url}`)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="mini-social-btn x-twitter"
+                                variant="ghost"
+                                size="sm"
+                                className="ui-brand-x-twitter ui-brand-mini"
                                 title="Share on X"
                               >
                                 𝕏
-                              </a>
-                              <a
+                              </Button>
+                              <Button
                                 href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(ref.url)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="mini-social-btn linkedin"
+                                variant="ghost"
+                                size="sm"
+                                className="ui-brand-linkedin ui-brand-mini"
                                 title="Share on LinkedIn"
                               >
                                 💼
-                              </a>
-                              <a
+                              </Button>
+                              <Button
                                 href={`https://reddit.com/submit?url=${encodeURIComponent(ref.url)}&title=${encodeURIComponent(ref.title)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="mini-social-btn reddit"
+                                variant="ghost"
+                                size="sm"
+                                className="ui-brand-reddit ui-brand-mini"
                                 title="Share on Reddit"
                               >
                                 👽
-                              </a>
-                              <a
+                              </Button>
+                              <Button
                                 href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`${ref.title}: ${ref.url}`)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="mini-social-btn whatsapp"
+                                variant="ghost"
+                                size="sm"
+                                className="ui-brand-whatsapp ui-brand-mini"
                                 title="Share on WhatsApp"
                               >
                                 💬
-                              </a>
-                              <a
+                              </Button>
+                              <Button
                                 href={`https://t.me/share/url?url=${encodeURIComponent(ref.url)}&text=${encodeURIComponent(ref.title)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="mini-social-btn telegram"
+                                variant="ghost"
+                                size="sm"
+                                className="ui-brand-telegram ui-brand-mini"
                                 title="Share on Telegram"
                               >
                                 ✈️
-                              </a>
-                              <a
+                              </Button>
+                              <Button
                                 href={`https://threads.net/intent/post?text=${encodeURIComponent(`${ref.title}: ${ref.url}`)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="mini-social-btn threads"
+                                variant="ghost"
+                                size="sm"
+                                className="ui-brand-threads ui-brand-mini"
                                 title="Share on Threads"
                               >
                                 🧵
-                              </a>
-                              <a
+                              </Button>
+                              <Button
                                 href={`https://bsky.app/intent/compose?text=${encodeURIComponent(`${ref.title}: ${ref.url}`)}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="mini-social-btn bluesky"
+                                variant="ghost"
+                                size="sm"
+                                className="ui-brand-bluesky ui-brand-mini"
                                 title="Share on Bluesky"
                               >
                                 🦋
-                              </a>
+                              </Button>
                               <Button
                                 variant="secondary"
                                 size="sm"
@@ -511,8 +551,10 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
               </div>
             </Card>
           </div>
+          </PageSection>
         </TabPanel>
         <TabPanel idBase="referrals" tabId="community" active={activeTab === "community"} retain={visitedTabs.has("community")}>
+          <PageSection>
           <Card>
             <div className="ui-stack">
               <div>
@@ -670,6 +712,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
               </div>
             </div>
           </Card>
+          </PageSection>
         </TabPanel>
 
         {adBannerConfig.enabled && adBannerConfig.showGoogleAdUnits && Boolean(adBannerConfig.tabVisibility.referrals) && googleAdsEnabled && (
