@@ -53,6 +53,8 @@ const PINNED_STAR_REEXPORTS = [
   "./baseBreakout",
   // Issue #3892: the declarative advanced-order registry and its builders.
   "./advancedOrders",
+  // Issue #4656: the canonical time-in-force vocabulary (routes + platforms).
+  "./timeInForce",
   // Issue #3232: the broker catalog joins the public trading surface.
   "./brokerCatalog",
   // Issue #2853: the broker panel contract joins the public trading surface.
