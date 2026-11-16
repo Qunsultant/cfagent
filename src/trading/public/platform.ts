@@ -24,7 +24,7 @@
  * is never retried by this platform.
  */
 
-import type { Env } from "../../types";
+import type { Env, ReplaceOrderParams, BrokerReplaceOrderResult } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import { BROKER_CATALOG, type TradingEnvironment, type TradingType } from "../brokerCatalog";
 import type {
@@ -57,6 +57,7 @@ import {
   publicDraftFromPreflight,
   publicAuctionOrderType,
   publicMultilegArgs,
+  publicReplaceArgs,
   publicNoPaperModeOutcomeExists,
   publicNoPaperModeRefusal,
   publicPlacedExecution,
@@ -704,6 +705,117 @@ export class PublicTradingPlatform implements ITradingPlatform {
         message: `Public.com cancellation failed: ${message}`,
         timestamp: new Date().toISOString(),
       };
+    }
+  }
+
+  /**
+   * Issue #5002 (matrix gap 16) — Public's replace, through the tool its own
+   * server exposes and our client already allow-lists: `cancel_and_replace_order`.
+   *
+   * The order is READ first, because Public's rules depend on what it is: a
+   * bracket's ENTRY cannot be replaced (its exits would be orphaned), a bracket
+   * LEG may change price only, and only an order still open is replaceable at
+   * all. Placement is asynchronous on this broker, so the receipt says
+   * "accepted" — never that the change has already happened.
+   */
+  async replaceOrderRemote(params: ReplaceOrderParams): Promise<BrokerReplaceOrderResult> {
+    const orderId = String(params?.orderId ?? "").trim();
+    if (!orderId) {
+      return { success: false, orderId: "", message: "A replace needs the order id. Nothing was replaced." };
+    }
+    const paperRefusal = this.noPaperModeRefusalCode();
+    if (paperRefusal) {
+      return { success: false, orderId, code: paperRefusal.code, message: paperRefusal.message };
+    }
+
+    const changed =
+      params.quantity !== undefined ||
+      params.limitPrice !== undefined ||
+      params.stopPrice !== undefined ||
+      params.timeInForce !== undefined;
+    if (!changed) {
+      return {
+        success: false,
+        orderId,
+        message: "A replace needs at least one change (quantity, limit price, stop price or time-in-force). Nothing was replaced.",
+      };
+    }
+
+    let order: any = null;
+    try {
+      const text = await this.trading.callTradingTool("get_order", {
+        order_id: { names: ["order_id", "orderId", "id"], value: orderId },
+      });
+      const parsed = this.trading.parseResult(text) as any;
+      order = parsed?.order ?? parsed;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, orderId, message: `The order could not be read: ${message}. Nothing was replaced.` };
+    }
+    if (!order) {
+      return { success: false, orderId, message: `Public.com did not return order ${orderId}. Nothing was replaced.` };
+    }
+
+    const status = String(order.status ?? "").toUpperCase();
+    const openStatuses = new Set(["NEW", "PARTIALLY_FILLED", "PENDING_REPLACE"]);
+    if (!openStatuses.has(status)) {
+      return {
+        success: false,
+        orderId,
+        status,
+        message: `Public.com order ${orderId} is '${status}', so it can no longer be replaced. Nothing was replaced.`,
+      };
+    }
+    const bracketId = order.bracketId ?? order.bracket_id;
+    if (bracketId !== undefined && bracketId !== null && String(bracketId) === orderId) {
+      return {
+        success: false,
+        orderId,
+        code: "replace_parent_unsupported",
+        message:
+          "replace_parent_unsupported: this order is a bracket ENTRY. Public.com cannot replace an entry without orphaning its exits — cancel the bracket and place a fresh one. Nothing was replaced.",
+      };
+    }
+    if (bracketId !== undefined && bracketId !== null && String(bracketId) !== orderId && params.quantity !== undefined) {
+      return {
+        success: false,
+        orderId,
+        code: "replace_parent_unsupported",
+        message:
+          "A bracket leg may change its price only; quantity changes belong to the entry. Nothing was replaced.",
+      };
+    }
+
+    try {
+      const text = await this.trading.callTradingTool(
+        "cancel_and_replace_order",
+        publicReplaceArgs({
+          orderId,
+          requestId: crypto.randomUUID(),
+          orderType: String(order.orderType ?? order.type ?? "MARKET").toUpperCase(),
+          timeInForce: params.timeInForce,
+          quantity: params.quantity,
+          limitPrice: params.limitPrice,
+          stopPrice: params.stopPrice,
+        }),
+      );
+      const payload = this.trading.parseResult(text) as any;
+      const errorMessage = payload?.error ?? payload?.message ?? payload?.detail;
+      const acceptedId = payload?.orderId ?? payload?.order_id ?? payload?.requestId ?? payload?.request_id;
+      if (errorMessage && !acceptedId) {
+        return { success: false, orderId, message: `Public.com did not accept the replacement: ${String(errorMessage)}` };
+      }
+      return {
+        success: true,
+        orderId: String(acceptedId ?? orderId),
+        status: "replace_accepted",
+        message:
+          "Public.com accepted the replacement; it is applied asynchronously, so confirm it with the order read before telling anyone the order has changed.",
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.lastError = message;
+      return { success: false, orderId, message: `Public.com replacement failed: ${message}` };
     }
   }
 
