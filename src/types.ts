@@ -2221,6 +2221,8 @@ export interface BrokerRemoteOrder {
   stopPrice?: number;
   orderAction?: string;
   quantity?: number;
+  filledQty?: number;
+  avgFillPrice?: number;
   symbol?: string;
 }
 

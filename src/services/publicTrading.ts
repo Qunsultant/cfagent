@@ -365,6 +365,10 @@ export function parsePublicOrders(payload: unknown): BrokerRemoteOrder[] {
       rawStatus,
       orderAction: str(pickField(row, ["order_side", "side", "orderSide"])),
       quantity: num(pickField(row, ["quantity", "qty"])),
+      filledQty: num(pickField(row, ["filled_quantity", "filledQuantity", "filled_qty", "filledQty"])),
+      avgFillPrice: num(
+        pickField(row, ["average_fill_price", "averageFillPrice", "avg_fill_price", "avgFillPrice", "filled_avg_price"])
+      ),
       symbol: str(pickField(row, ["symbol", "ticker"])),
       limitPrice: num(pickField(row, ["limit_price", "limitPrice"])),
       placedTime: num(pickField(row, ["created_at", "placed_time", "timestamp"]))

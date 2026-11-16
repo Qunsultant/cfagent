@@ -2938,6 +2938,16 @@ export class ETradeRestClient {
       return rawOrders.map((o: any) => {
         const orderDetail = o.OrderDetail?.[0] || o.OrderDetail || {};
         const instrument = orderDetail.Instrument?.[0] || orderDetail.Instrument || {};
+        const rawFilledQty = instrument.filledQuantity ?? orderDetail.filledQuantity;
+        const filledQty =
+          rawFilledQty !== undefined && rawFilledQty !== null && rawFilledQty !== ""
+            ? Number(rawFilledQty)
+            : undefined;
+        const rawAvgFillPrice = instrument.averageExecutionPrice ?? orderDetail.averageExecutionPrice;
+        const avgFillPrice =
+          rawAvgFillPrice !== undefined && rawAvgFillPrice !== null && rawAvgFillPrice !== ""
+            ? Number(rawAvgFillPrice)
+            : undefined;
         return {
           orderId: o.orderId,
           details: o.details,
@@ -2952,6 +2962,8 @@ export class ETradeRestClient {
           stopPrice: orderDetail.stopPrice ? Number(orderDetail.stopPrice) : undefined,
           orderAction: instrument.orderAction,
           quantity: instrument.orderedQuantity ? Number(instrument.orderedQuantity) : undefined,
+          ...(filledQty !== undefined && Number.isFinite(filledQty) ? { filledQty } : {}),
+          ...(avgFillPrice !== undefined && Number.isFinite(avgFillPrice) ? { avgFillPrice } : {}),
           symbol: instrument.Product?.symbol,
         };
       });
@@ -3041,6 +3053,16 @@ export class ETradeRestClient {
 
       const orderDetail = orderData?.OrderDetail?.[0] || {};
       const instrument = orderDetail?.Instrument?.[0] || {};
+      const rawFilledQty = instrument.filledQuantity ?? orderDetail.filledQuantity;
+      const filledQty =
+        rawFilledQty !== undefined && rawFilledQty !== null && rawFilledQty !== ""
+          ? Number(rawFilledQty)
+          : undefined;
+      const rawAvgFillPrice = instrument.averageExecutionPrice ?? orderDetail.averageExecutionPrice;
+      const avgFillPrice =
+        rawAvgFillPrice !== undefined && rawAvgFillPrice !== null && rawAvgFillPrice !== ""
+          ? Number(rawAvgFillPrice)
+          : undefined;
 
       return {
         orderId: orderData.orderId || orderId,
@@ -3056,6 +3078,8 @@ export class ETradeRestClient {
         stopPrice: orderDetail.stopPrice ? Number(orderDetail.stopPrice) : undefined,
         orderAction: instrument.orderAction,
         quantity: instrument.orderedQuantity ? Number(instrument.orderedQuantity) : undefined,
+        ...(filledQty !== undefined && Number.isFinite(filledQty) ? { filledQty } : {}),
+        ...(avgFillPrice !== undefined && Number.isFinite(avgFillPrice) ? { avgFillPrice } : {}),
         symbol: instrument.Product?.symbol,
       };
     } catch (err) {

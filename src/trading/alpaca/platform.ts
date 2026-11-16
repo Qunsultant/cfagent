@@ -125,6 +125,8 @@ export function mapAlpacaOrderHistoryRow(raw: any): BrokerRemoteOrder {
   const orderId = typeof raw?.id === "string" && raw.id ? raw.id : "";
   if (!orderId) throw new Error("Alpaca returned an order without an id.");
   const quantity = Number(raw?.qty);
+  const filledQty = Number(raw?.filled_qty);
+  const avgFillPrice = Number(raw?.filled_avg_price);
   const limitPrice = Number(raw?.limit_price);
   const placedTime = Date.parse(String(raw?.submitted_at ?? ""));
   return {
@@ -134,6 +136,15 @@ export function mapAlpacaOrderHistoryRow(raw: any): BrokerRemoteOrder {
     rawStatus: typeof raw?.status === "string" ? raw.status : undefined,
     ...(Number.isFinite(placedTime) ? { placedTime } : {}),
     ...(Number.isFinite(quantity) ? { quantity } : {}),
+    ...(raw?.filled_qty !== null && raw?.filled_qty !== undefined && raw?.filled_qty !== "" && Number.isFinite(filledQty)
+      ? { filledQty }
+      : {}),
+    ...(raw?.filled_avg_price !== null &&
+    raw?.filled_avg_price !== undefined &&
+    raw?.filled_avg_price !== "" &&
+    Number.isFinite(avgFillPrice)
+      ? { avgFillPrice }
+      : {}),
     ...(Number.isFinite(limitPrice) && raw?.limit_price !== null ? { limitPrice } : {}),
     ...(typeof raw?.symbol === "string" && raw.symbol ? { symbol: raw.symbol.toUpperCase() } : {}),
     ...(typeof raw?.side === "string" ? { orderAction: raw.side.toUpperCase() } : {}),
