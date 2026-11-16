@@ -22,6 +22,8 @@
  * test can assert the exact strikes, ratios and quantities without a broker.
  */
 
+import { AUCTION_TIME_IN_FORCE, isAuctionTimeInForce } from "./timeInForce";
+
 export type AdvancedBrokerId = "alpaca" | "etrade";
 export type AdvancedSupport = "native" | "emulated" | "none";
 
@@ -171,12 +173,13 @@ const ADVANCED: AdvancedOrderType[] = [
   {
     id: "session_timed",
     label: "Session-timed (MOO/MOC/LOO/LOC)",
-    broker: { alpaca: "none", etrade: "none" },
+    broker: { alpaca: "native", etrade: "none" },
     requires: ["time_in_force"],
     excludes: [],
-    tif: ["opg", "cls"],
+    tif: AUCTION_TIME_IN_FORCE,
     refusalCode: "order_type_unsupported",
-    notes: "No configured broker exposes exchange-native MOO/MOC/LOO/LOC here; refused by name, not emulated.",
+    notes:
+      "Issue #4671: an auction order is a market or limit order carrying opg/cls, not a separate wire type — market+opg = MOO, market+cls = MOC, limit+opg = LOO, limit+cls = LOC. Native on Alpaca; E*TRADE has no verified auction field here, so it is refused by name rather than emulated.",
   },
   {
     id: "mleg",
@@ -288,6 +291,24 @@ export function advancedOrderType(id: string): AdvancedOrderType | null {
   return ADVANCED_ORDER_TYPES.find((entry) => entry.id === id) ?? null;
 }
 
+/**
+ * Issue #4671 (matrix gap 17) — MOO / MOC / LOO / LOC, DERIVED from the pair a
+ * caller already sends (order type + time-in-force). Never a second registry:
+ * the abbreviations are presentation over the same two fields the wire carries.
+ * Returns null when the pair is not an auction order.
+ */
+export function auctionOrderMnemonic(
+  type: string,
+  timeInForce: string | undefined,
+): "MOO" | "MOC" | "LOO" | "LOC" | null {
+  const tif = String(timeInForce ?? "").trim().toLowerCase();
+  if (!isAuctionTimeInForce(tif)) return null;
+  const base = String(type ?? "").trim().toLowerCase();
+  if (base === "market") return tif === "opg" ? "MOO" : "MOC";
+  if (base === "limit") return tif === "opg" ? "LOO" : "LOC";
+  return null;
+}
+
 export interface AdvancedOrderCatalog {
   broker: AdvancedBrokerId;
   available: Array<{ id: AdvancedOrderTypeId; label: string; support: "native" | "emulated"; tif?: readonly string[] }>;
@@ -351,6 +372,22 @@ function has(params: Record<string, unknown>, key: string): boolean {
 }
 
 /**
+ * The refusal shape for "this broker cannot do this", in one place: the message
+ * names the entry, the broker and the supported set, so it is actionable.
+ */
+function unsupportedHere(entry: AdvancedOrderType, broker: AdvancedBrokerId): AdvancedOrderValidation {
+  const supportedHere = ADVANCED_ORDER_TYPES.filter((candidate) => candidate.broker[broker] !== "none").map(
+    (candidate) => candidate.id,
+  );
+  return {
+    ok: false,
+    code: (entry.refusalCode as AdvancedOrderRefusalCode) ?? "order_type_unsupported",
+    message: `${entry.refusalCode} (${entry.id} @ ${broker}; supported: ${supportedHere.join(", ")})`,
+    supported: supportedHere,
+  };
+}
+
+/**
  * Validate one advanced-order request against the registry. The refusal names
  * the supported set, so "cannot be honoured" is actionable rather than vague.
  */
@@ -367,18 +404,21 @@ export function validateAdvancedOrder(request: AdvancedOrderRequest): AdvancedOr
 
   const support = entry.broker[request.broker];
   if (support === "none") {
-    const supportedHere = ADVANCED_ORDER_TYPES.filter((candidate) => candidate.broker[request.broker] !== "none").map(
-      (candidate) => candidate.id,
-    );
-    return {
-      ok: false,
-      code: (entry.refusalCode as AdvancedOrderRefusalCode) ?? "order_type_unsupported",
-      message: `${entry.refusalCode} (${entry.id} @ ${request.broker}; supported: ${supportedHere.join(", ")})`,
-      supported: supportedHere,
-    };
+    return unsupportedHere(entry, request.broker);
   }
 
   const params = request.params ?? {};
+  // Issue #4671 (matrix gap 17): an auction time-in-force makes the request a
+  // MOO/MOC/LOO/LOC, which is a capability in its own right. Validate it through
+  // the SAME registry entry that declares it, so a broker without auction
+  // support refuses by name instead of placing a day order that only looked
+  // session-timed. The base type's own rules still run below.
+  if (isAuctionTimeInForce(params.time_in_force)) {
+    const sessionTimed = advancedOrderType("session_timed");
+    if (sessionTimed && sessionTimed.broker[request.broker] === "none") {
+      return unsupportedHere(sessionTimed, request.broker);
+    }
+  }
   for (const required of entry.requires) {
     if (!has(params, required)) {
       return {

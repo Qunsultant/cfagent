@@ -1,3 +1,5 @@
+import type { NormalizedTimeInForce } from "./trading/timeInForce";
+
 export interface Env {
   ASSETS: Fetcher;
   AI: Ai;
@@ -1217,7 +1219,7 @@ export interface TradeRecord {
   /** Issue #4656 (matrix gap 5): the time-in-force the ticket selected,
    * in the canonical lowercase vocabulary. Execute sends this value instead
    * of the broker's hardcoded default. Absent on legacy rows → default. */
-  timeInForce?: "day" | "gtc" | "ioc" | "fok";
+  timeInForce?: NormalizedTimeInForce;
   createdAt: string;
   updatedAt: string;
 }

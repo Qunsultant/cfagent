@@ -85,11 +85,17 @@ describe("#3892 — no silent downgrade", () => {
     expect(refused.message).toContain("market");
   });
 
-  it("refuses session-timed orders on both brokers instead of emulating them", () => {
-    for (const broker of ["alpaca", "etrade"] as const) {
-      const refused = validateAdvancedOrder({ type: "session_timed", broker, params: { time_in_force: "opg" } });
-      expect(refused.ok).toBe(false);
-    }
+  it("refuses session-timed orders where the broker declares no auction support, and accepts them on the one that does (#4671)", () => {
+    // Issue #4671: Alpaca models an auction order as market/limit + opg|cls, so
+    // the capability is now native there; E*TRADE still declares none and must
+    // refuse by name rather than place a day order.
+    const alpaca = validateAdvancedOrder({ type: "session_timed", broker: "alpaca", params: { time_in_force: "opg" } });
+    expect(alpaca).toMatchObject({ ok: true, support: "native" });
+    const refused = validateAdvancedOrder({ type: "session_timed", broker: "etrade", params: { time_in_force: "opg" } });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.code).toBe("order_type_unsupported");
+    expect(refused.message).toContain("session_timed @ etrade");
   });
 
   it("refuses an unknown type with the known list", () => {

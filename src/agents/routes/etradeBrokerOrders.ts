@@ -13,6 +13,7 @@
  */
 
 import { ETradeSlackTradingService, decodeOrderPriceSource } from "../../trading";
+import type { NormalizedTimeInForce } from "../../trading/timeInForce";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { orderPayloadHash } from "./orderPayloadHash";
 import type { EtradeBrokerRouteContext } from "./etradeBroker";
@@ -205,7 +206,7 @@ export async function completeEtradeOrderExecution(args: {
   /** Issue #4654: the STOP/STOP_LIMIT trigger price from the stored draft. */
   stopPrice: number | undefined;
   /** Issue #4656: the time-in-force the user approved on the draft. */
-  timeInForce?: "day" | "gtc" | "ioc" | "fok";
+  timeInForce?: NormalizedTimeInForce;
   strategyOrder: any;
   executionVerdict: PolicyVerdict | null;
   /**

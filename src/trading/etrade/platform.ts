@@ -30,6 +30,8 @@ import { getCuratedStockBySymbol } from "../../config/curatedStockUniverse";
 import { getETradeAuthStatus, etradeIdentityFromLogin } from "../../security/etradeOAuth";
 import { parseStrategyOrder } from "../../agents/routes/orderPayloadHash";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
+import { validateAdvancedOrder } from "../advancedOrders";
+import { isAuctionTimeInForce, type NormalizedTimeInForce } from "../timeInForce";
 import { computeBracketExits } from "../bracketPercent";
 
 /**
@@ -501,6 +503,11 @@ export class ETradeTradingPlatform implements ITradingPlatform {
   }
 
   async previewOrder(params: OrderPreviewParams): Promise<ETradeOrderDraft> {
+    // Issue #4671 (matrix gap 17): the same refusal as the place seam. A preview
+    // must not record a term this broker cannot carry — the draft would then
+    // execute as something the user did not ask for.
+    const auctionRefusal = auctionTimeInForceRefusal(params.timeInForce);
+    if (auctionRefusal) throw new Error(auctionRefusal);
     const symbol = params.symbol.trim().toUpperCase();
     const action = (params.action || params.orderAction || "BUY") as "BUY" | "SELL" | "BUY_TO_COVER" | "SELL_SHORT";
     const optionLegs = params.optionLegs || [];
@@ -867,11 +874,49 @@ export class ETradeTradingPlatform implements ITradingPlatform {
   }
 
   async placeOrderRemote(params: any): Promise<ETradeOrderExecutionResult> {
+    // Issue #4671 (matrix gap 17): an auction time-in-force (MOO/MOC/LOO/LOC) is
+    // a capability this broker does not declare, so it is refused BY NAME here —
+    // the last stop before the wire — instead of mapping to no orderTerm and
+    // placing a day order that only looked session-timed.
+    const auctionRefusal = auctionTimeInForceRefusal(params?.timeInForce);
+    if (auctionRefusal) {
+      return {
+        success: false,
+        orderId: params?.orderId,
+        executionId: "",
+        brokerOrderRef: "",
+        authorizerDid: getUserDid(params?.userLogin),
+        status: "failed",
+        symbol: String(params?.symbol ?? "").toUpperCase(),
+        action: params?.action,
+        quantity: params?.quantity,
+        executionPrice: 0,
+        totalSettled: 0,
+        message: auctionRefusal,
+        timestamp: new Date().toISOString(),
+      } as ETradeOrderExecutionResult;
+    }
     // Issue #4656 (matrix gap 5): map the approved time-in-force onto the broker's
     // own orderTerm. The route has already refused a value this broker cannot
     // carry, so this is the last, cheapest place to keep the wire honest.
     return this.client.placeOrder({ ...params, orderTerm: etradeOrderTerm(params.timeInForce) });
   }
+}
+
+/**
+ * Issue #4671 (matrix gap 17): the ONE place this broker decides about an
+ * auction time-in-force. It asks the order-type registry (`session_timed`) —
+ * the same table the other broker's seam validates through — so both brokers
+ * answer from one capability record rather than two opinions.
+ */
+function auctionTimeInForceRefusal(timeInForce: unknown): string | null {
+  if (!isAuctionTimeInForce(timeInForce)) return null;
+  const verdict = validateAdvancedOrder({
+    type: "session_timed",
+    broker: "etrade",
+    params: { time_in_force: timeInForce },
+  });
+  return verdict.ok ? null : `${verdict.message} The order was not placed.`;
 }
 
 /**
@@ -881,7 +926,7 @@ export class ETradeTradingPlatform implements ITradingPlatform {
  * because the route refuses FOK against the capability matrix first.
  */
 export function etradeOrderTerm(
-  timeInForce: "day" | "gtc" | "ioc" | "fok" | undefined,
+  timeInForce: NormalizedTimeInForce | undefined,
 ): "GOOD_FOR_DAY" | "GOOD_UNTIL_CANCEL" | "IMMEDIATE_OR_CANCEL" | undefined {
   switch (timeInForce) {
     case "gtc":
@@ -890,6 +935,12 @@ export function etradeOrderTerm(
       return "IMMEDIATE_OR_CANCEL";
     case "day":
       return "GOOD_FOR_DAY";
+    // Issue #4671: E*TRADE declares no auction term, so the auction values have
+    // none. `auctionTimeInForceRefusal` stops such a request before this
+    // mapping, so this branch is the defensive half of that refusal.
+    case "opg":
+    case "cls":
+      return undefined;
     default:
       return undefined;
   }

@@ -28,6 +28,7 @@ import type {
   OrderPriceSource,
 } from "../types";
 import type { BrokerId } from "./brokerCatalog";
+import type { NormalizedTimeInForce } from "./timeInForce";
 
 /** Optional invocation-wide limiter for outbound option API fetch attempts. */
 export interface OptionRequestBudget {
@@ -60,7 +61,7 @@ export interface OrderPreviewParams {
    * maps it onto its own wire term or refuses it by name where it cannot
    * honour it.
    */
-  timeInForce?: "day" | "gtc" | "ioc" | "fok";
+  timeInForce?: NormalizedTimeInForce;
   sessionId?: string;
   notes?: string;
   /** Optional bracket order parameters. */
@@ -140,7 +141,7 @@ export interface PlaceOrderParams {
   /**
    * Issue #3508: optional Time-In-Force specification.
    */
-  timeInForce?: "day" | "gtc" | "ioc" | "fok" | "opg" | "cls";
+  timeInForce?: NormalizedTimeInForce;
 }
 
 /**
