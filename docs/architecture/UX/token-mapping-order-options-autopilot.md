@@ -8,10 +8,10 @@ Every legacy class the order / options / autopilot layouts use, mapped to its to
 
 ## Method
 
-- **Scope:** `OrderTicketPanel.tsx`, `ETradeTradingHub.tsx`, `components/AutopilotControlCenter.tsx`, all `Options*.tsx`, all of `src/client/options/**`, and `chat/OptionsStrategyCard.tsx` — 29 files. The S-U4 section below maps the 51 classes retired by #4820 (`WorkflowRunsPanel.tsx`, `ReferralsTab.tsx`, `PaymentsPage.tsx`, `SocialPostingPanel.tsx`, `AdsTab.tsx`, `RevenueTab.tsx`) — outside the 650-class extraction.
+- **Scope:** `OrderTicketPanel.tsx`, `ETradeTradingHub.tsx`, `components/AutopilotControlCenter.tsx`, all `Options*.tsx`, all of `src/client/options/**`, and `chat/OptionsStrategyCard.tsx` — 29 files. The S-U4 section below maps the 51 classes retired by #4820 (`WorkflowRunsPanel.tsx`, `ReferralsTab.tsx`, `PaymentsPage.tsx`, `SocialPostingPanel.tsx`, `AdsTab.tsx`, `RevenueTab.tsx`) — outside the 644-class extraction. The #4913 section below maps the 6 classes retired by #4913 (the rule-of-three header migration) — also outside the extraction.
 - **Extraction:** `className` attributes (quoted strings and `{...}` expressions); `${...}` interpolations stripped from literal parts; lowercase string literals harvested as state classes (`"active"`, `"selected"`) — except comparison operands (`"x" ===`, `=== "x"`, `.includes("x")`), which are data values, not classes.
-- **Verification:** each used class was checked against the class selectors defined in the 9 stylesheets these layouts load (`styles.css`, `primitives.css`, `strategyDiscovery.css`, `riskAnalysis.css`, `optionsFlows.css`, `optionsResearch.css`, `optionsCard.css`, `scheduledOptions.css`, `optionsResearch.css`). 610 of 650 have a rule; 40 are referenced but defined nowhere (dead classes, listed with their own successor).
-- **Coverage pin:** `tests/template_token_tiers_3135.test.ts` re-extracts the used set and asserts every class appears in this document and the total is 650. Add a class to a layout and the pin fails until this table gains its row. `ui-cell-nowrap` is applied via the Table primitive's `cellClassName` prop, which the extractor does not scan — it is listed here because it is genuinely used (8 sites in AutopilotControlCenter), so this table holds 702 rows against 650 extracted classes (651 #3135 rows + 51 S-U4 rows below).
+- **Verification:** each used class was checked against the class selectors defined in the 9 stylesheets these layouts load (`styles.css`, `primitives.css`, `strategyDiscovery.css`, `riskAnalysis.css`, `optionsFlows.css`, `optionsResearch.css`, `optionsCard.css`, `scheduledOptions.css`, `optionsResearch.css`). 605 of 644 have a rule; 39 are referenced but defined nowhere (dead classes, listed with their own successor).
+- **Coverage pin:** `tests/template_token_tiers_3135.test.ts` re-extracts the used set and asserts every class appears in this document and the total is 644. Add a class to a layout and the pin fails until this table gains its row. `ui-cell-nowrap` is applied via the Table primitive's `cellClassName` prop, which the extractor does not scan — it is listed here because it is genuinely used (8 sites in AutopilotControlCenter), so this table holds 702 rows against 644 extracted classes (645 #3135 rows + 51 S-U4 rows + 6 #4913 rows below).
 
 ## Correction to the brief
 
@@ -19,11 +19,12 @@ The #3135 discussion brief said "the three layouts reference hundreds of literal
 
 ## Summary
 
-- **650** legacy classes used by the layouts in scope.
-- **164 Token** — map to a primitive that already exists (11 of them are `ui-*` classes, already tokens; 51 more are the S-U4 retired-class rows below).
-- **538 Deletion candidate** — no token equivalent yet; successor is "none yet" (S-U7) except 40 dead classes whose successor is deletion itself (no rule exists, so removing the reference changes nothing).
+- **644** legacy classes used by the layouts in scope.
+- **170 Token** — map to a primitive that already exists (11 of them are `ui-*` classes, already tokens; 51 more are the S-U4 retired-class rows below, 6 more the #4913 retired-class rows below).
+- **532 Deletion candidate** — no token equivalent yet; successor is "none yet" (S-U7) except 40 dead classes whose successor is deletion itself (no rule exists, so removing the reference changes nothing).
 - **0 deletions in this slice.**
-- **S-U4 (#4820): 51 of the 164 Token rows** live in the section below — the retired classes of the six migrated interiors, all mapped to existing primitives or `ui-*` utilities (702 rows total).
+- **S-U4 (#4820): 51 of the 170 Token rows** live in the section below — the retired classes of the six migrated interiors, all mapped to existing primitives or `ui-*` utilities (702 rows total).
+- **#4913: 6 of the 170 Token rows** live in the section below — the heading classes retired by the rule-of-three header migration, all mapped to CardHeader.
 
 Disposition rules, in order: `ui-*` → itself; `*-card-header` → CardHeader; `*-btn` / `*-button` → Button; `*-badge` / `*-pill` → Badge; `*-modal` → Modal; `*-tabs` / `*-tab` → Tabs; `*-input` / `*-select` → TextInput / Select; `*-notice` / `*-banner` / `*-alert` → Notice; `*-table` → Table; `*-card` → Card family (WorkCard / DetailCard); bare state words (`active`, `selected`, …) → primitive prop/state on migration; everything else → deletion candidate, successor none yet.
 
@@ -36,7 +37,7 @@ One table per class family (first `-`-segment). `Used by` names the files that r
 Retired by the S-U4 migration slice (#4820, sub of #3695): the six interiors
 `WorkflowRunsPanel.tsx`, `ReferralsTab.tsx`, `PaymentsPage.tsx`,
 `SocialPostingPanel.tsx`, `AdsTab.tsx`, `RevenueTab.tsx` render zero bespoke
-classes now. These rows are NOT part of the 650-class extraction above — they
+classes now. These rows are NOT part of the 644-class extraction above — they
 map the classes the migration removed, so the mapping stays complete as
 slices retire classes. Every row is Token: the successor is an existing
 primitive or `ui-*` utility. The `ui-brand-*` classes are new utilities in
@@ -46,7 +47,7 @@ sheet is retired in place and the dead social / `did-modal-card` rules are
 deleted from `styles.css`. Single-token `ui-*` classes only: the interior
 gate counts every non-`ui-` token as bespoke, so the compound modifiers
 (`gap-1`, `autofit-md`, …) the brief first specified are NOT used — stacks
-use `ui-stack` (gap 8px), facts and I/O grids use `ui-stat-grid`, the
+use `ui-stack` (gap 8px), facts and I/O grids use `Grid` (autoFit), the
 controls row uses `ui-row`.
 
 | Legacy class | Disposition | Successor | Used by |
@@ -56,12 +57,12 @@ controls row uses `ui-row`.
 | `workflow-runs-filter` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
 | `workflow-runs-filter-grow` | Token | `ui-stack ui-grow` | WorkflowRunsPanel.tsx |
 | `workflow-runs-filter-label` | Token | `ui-label` | WorkflowRunsPanel.tsx |
-| `workflow-runs-stats` | Token | `ui-stat-grid` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stats` | Token | `Grid` (`autoFit`, `minColumnWidth="sm"`, `gap="2"`) | WorkflowRunsPanel.tsx |
 | `workflow-runs-stat` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
 | `workflow-runs-stat-value` | Token | `<strong>` | WorkflowRunsPanel.tsx |
 | `workflow-runs-stat-label` | Token | `ui-meta-sm` | WorkflowRunsPanel.tsx |
 | `workflow-runs-table-card` | Token | `ui-clip` | WorkflowRunsPanel.tsx |
-| `workflow-runs-table-container` | Token | `ui-scroll-x` | WorkflowRunsPanel.tsx |
+| `workflow-runs-table-container` | Token | `ui-scroll-frame` | WorkflowRunsPanel.tsx |
 | `workflow-runs-when` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
 | `workflow-runs-workflow` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
 | `workflow-runs-trigger` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
@@ -77,16 +78,16 @@ controls row uses `ui-row`.
 | `workflow-runs-detail-title` | Token | `CardHeader` title prop | WorkflowRunsPanel.tsx |
 | `workflow-runs-detail-subtitle` | Token | `CardHeader` subtitle prop | WorkflowRunsPanel.tsx |
 | `workflow-runs-detail-actions` | Token | `CardHeader` meta prop | WorkflowRunsPanel.tsx |
-| `workflow-runs-facts` | Token | `ui-stat-grid` | WorkflowRunsPanel.tsx |
+| `workflow-runs-facts` | Token | `Grid` (`autoFit`, `minColumnWidth="sm"`, `gap="2"`) | WorkflowRunsPanel.tsx |
 | `workflow-runs-fact` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
-| `workflow-runs-stage-list` | Token | `ui-scroll-x` | WorkflowRunsPanel.tsx |
-| `workflow-runs-io-grid` | Token | `ui-stat-grid` | WorkflowRunsPanel.tsx |
+| `workflow-runs-stage-list` | Token | `ui-scroll-frame` | WorkflowRunsPanel.tsx |
+| `workflow-runs-io-grid` | Token | `Grid` (`autoFit`, `minColumnWidth="sm"`, `gap="2"`) | WorkflowRunsPanel.tsx |
 | `workflow-runs-io` | Token | Bare `<section>` | WorkflowRunsPanel.tsx |
 | `workflow-runs-pre` | Token | `ui-pre` | WorkflowRunsPanel.tsx |
 | `workflow-runs-artifacts` | Token | `ui-row` | WorkflowRunsPanel.tsx |
 | `workflow-runs-stage-io` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
 | `workflow-runs-subheading` | Token | Bare `<h4>` | WorkflowRunsPanel.tsx |
-| `workflow-runs-subheading-sm` | Token | `ui-label ui-mt-0 ui-mb-1` | WorkflowRunsPanel.tsx |
+| `workflow-runs-subheading-sm` | Token | `ui-label ui-mt-0` + `Stack` gap="1" below | WorkflowRunsPanel.tsx |
 | `workflow-runs-stage-details` | Token | `Card` + bare `<details>` + `<strong>` summary | WorkflowRunsPanel.tsx |
 | `social-btn` | Token | `Button` primitive (ghost, sm) + `ui-brand-<network>` | ReferralsTab.tsx |
 | `mini-social-btn` | Token | `Button` primitive (ghost, sm) + `ui-brand-<network> ui-brand-mini` | ReferralsTab.tsx |
@@ -102,6 +103,26 @@ controls row uses `ui-row`.
 | `pinterest` | Token | `ui-brand-pinterest` | ReferralsTab.tsx |
 | `discord` | Token | `Button` primitive — the Discord action is already a Button; no `ui-brand-discord` class (no Discord share link exists) | ReferralsTab.tsx |
 | `did-modal-card` | Token | `Modal` primitive (default size md) | PaymentsPage.tsx |
+
+### #4913 — retired classes, 6 classes (6 Token, 0 deletion candidate)
+
+Retired by the rule-of-three header migration (#4913, sub of #3695): the
+hand-rolled headings in `FlowTradeDetailModal.tsx`, `RiskAnalysisModal.tsx`,
+and `EtapiConfigModal.tsx` are `CardHeader` now. These rows are NOT part of
+the 644-class extraction above — they map the classes the migration removed,
+so the mapping stays complete as slices retire classes. Every row is Token:
+the successor is the `CardHeader` primitive. (`font-bold` had no rule
+defining it anywhere in `src/client`; its reference lived on a heading that
+is a `CardHeader` now.)
+
+| Legacy class | Disposition | Successor | Used by |
+|---|---|---|---|
+| `flow-modal-section-title` | Token | `CardHeader` | FlowTradeDetailModal.tsx |
+| `flow-modal-title` | Token | `CardHeader` | FlowTradeDetailModal.tsx |
+| `font-bold` | Token | `CardHeader` | EtapiConfigModal.tsx |
+| `risk-ai-title` | Token | `CardHeader` | RiskAnalysisModal.tsx |
+| `risk-modal-h2` | Token | `CardHeader` | RiskAnalysisModal.tsx |
+| `risk-section-title` | Token | `CardHeader` | RiskAnalysisModal.tsx |
 
 ### `strat` — 278 classes (54 Token, 224 deletion candidate)
 
@@ -386,7 +407,7 @@ controls row uses `ui-row`.
 | `strat-zoom-btn` | Token | Button primitive | StrategyDiscoveryPanel.tsx |
 | `strat-zoom-btn-group` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | StrategyDiscoveryPanel.tsx |
 
-### `flow` — 95 classes (25 Token, 70 deletion candidate)
+### `flow` — 93 classes (25 Token, 68 deletion candidate)
 
 | Legacy class | Disposition | Successor | Used by |
 |---|---|---|---|
@@ -447,10 +468,8 @@ controls row uses `ui-row`.
 | `flow-modal-metric-card` | Token | Card family — WorkCard / DetailCard (#3133) | FlowTradeDetailModal.tsx |
 | `flow-modal-metrics-grid` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowTradeDetailModal.tsx |
 | `flow-modal-section-card` | Token | Card family — WorkCard / DetailCard (#3133) | FlowTradeDetailModal.tsx |
-| `flow-modal-section-title` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowTradeDetailModal.tsx |
 | `flow-modal-subtitle` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowTradeDetailModal.tsx |
 | `flow-modal-time` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowTradeDetailModal.tsx |
-| `flow-modal-title` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowTradeDetailModal.tsx |
 | `flow-modal-title-wrap` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowTradeDetailModal.tsx |
 | `flow-numeric-comparison-block` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-perf-item` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowTradeDetailModal.tsx |
@@ -486,7 +505,7 @@ controls row uses `ui-row`.
 | `flow-type-badge` | Token | Badge primitive | OptionsFlowsHub.tsx |
 | `flow-your-filters-panel` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 
-### `risk` — 63 classes (10 Token, 53 deletion candidate)
+### `risk` — 60 classes (10 Token, 50 deletion candidate)
 
 | Legacy class | Disposition | Successor | Used by |
 |---|---|---|---|
@@ -501,7 +520,6 @@ controls row uses `ui-row`.
 | `risk-ai-card` | Token | Card family — WorkCard / DetailCard (#3133) | RiskAnalysisModal.tsx |
 | `risk-ai-header` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-ai-prompt-box` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
-| `risk-ai-title` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-be-buffer` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-be-price` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-breakeven-pill` | Token | Badge primitive | RiskAnalysisModal.tsx |
@@ -519,7 +537,6 @@ controls row uses `ui-row`.
 | `risk-level-badge` | Token | Badge primitive | RiskAnalysisModal.tsx |
 | `risk-modal-body` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-modal-close-btn` | Token | Button primitive | RiskAnalysisModal.tsx |
-| `risk-modal-h2` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-modal-header` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-modal-header-actions` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-modal-icon-shield` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
@@ -537,7 +554,6 @@ controls row uses `ui-row`.
 | `risk-scenario-table` | Token | Table primitive | RiskAnalysisModal.tsx |
 | `risk-section-box` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-section-header` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
-| `risk-section-title` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-sizing-calculator` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-sizing-contracts-val` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-sizing-input-row` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
@@ -931,12 +947,6 @@ controls row uses `ui-row`.
 | Legacy class | Disposition | Successor | Used by |
 |---|---|---|---|
 | `excluded` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | StrategyDiscoveryPanel.tsx |
-
-### `font` — 1 classes (0 Token, 1 deletion candidate)
-
-| Legacy class | Disposition | Successor | Used by |
-|---|---|---|---|
-| `font-bold` | Deletion candidate | Delete — no rule defines this class anywhere in `src/client`; removing the reference changes nothing visually | EtapiConfigModal.tsx |
 
 ### `full` — 1 classes (0 Token, 1 deletion candidate)
 
