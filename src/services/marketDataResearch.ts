@@ -44,6 +44,7 @@ import { createOutboundRateLimiter, type OutboundRateLimiter } from "../security
 import { getCachedQuoteWithAge, setCachedQuote } from "./quoteCache";
 import { ALPACA_CONNECT_HINT } from "./providerUxLinks";
 import { normalizeAlpacaBaseUrl } from "../trading";
+import type { NormalizedTimeInForce } from "../trading/timeInForce";
 import {
   isAlpacaConfigured,
   levelsForQuoteSwitch,
@@ -2628,7 +2629,8 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     notional?: number;
     /** Issue #3892: GTD's expiry instant (RFC 3339). */
     good_till_date?: string;
-    time_in_force?: "day" | "gtc" | "ioc" | "fok" | "gtd";
+    /** Issue #4671: the canonical vocabulary — opg/cls are the auction (MOO/MOC/LOO/LOC) values. */
+    time_in_force?: NormalizedTimeInForce | "gtd";
     extended_hours?: boolean;
     order_class?: "simple" | "bracket" | "oco" | "oto";
     take_profit?: { limit_price: number };
@@ -3530,7 +3532,7 @@ export class MarketDataResearchService {
     trail_percent?: number;
     notional?: number;
     good_till_date?: string;
-    time_in_force?: "day" | "gtc" | "ioc" | "fok" | "gtd";
+    time_in_force?: NormalizedTimeInForce | "gtd";
     extended_hours?: boolean;
     order_class?: "simple" | "bracket" | "oco" | "oto";
     take_profit?: { limit_price: number };

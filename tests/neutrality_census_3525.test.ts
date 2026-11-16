@@ -716,7 +716,17 @@ function measure(): Map<string, number> {
  * mcpPermissionPorts.ts/etrade 9->11, brokerCatalog.ts/etrade 26->29). The
  * prose that named the sibling brokers inside the E*TRADE module was
  * neutralized instead of baselined, so no alpaca or public.com row appears.
- * Measured totals move 1283/10073 -> 1283/10115 (re-based onto 043afa900).
+ * Measured totals move 1283/10115 -> 1283/10124 (re-based onto 043afa900).
+ * Baseline update (#4671, 2026-11-16): gap 17 gives the auction terms a broker.
+ * An auction order is market/limit + opg/cls, so the change lands in the two
+ * capability records (the order-type registry and the matrix doc), in the
+ * E*TRADE seam that now refuses the term by name, and nowhere else. Every row
+ * is a provider's own file or the document that inventories it — all
+ * dispositioned INTEGRATION (naming the provider is their job): 5 raises
+ * (brokerage-data-matrix.md etrade 80->82 / alpaca 60->62, advancedOrders.ts
+ * etrade 27->28 / alpaca 28->29, etrade/platform.ts etrade 69->72). The prose
+ * that named the sibling broker inside `timeInForce.ts` and the E*TRADE seam
+ * was neutralized instead of baselined, so no new row appears.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1553,7 +1563,7 @@ const BASELINE: Array<[string, string, number]> = [
   // Issue #4656: the adapter names its own time-in-force mapper (etradeOrderTerm)
   // — a code identifier in the broker's own adapter, the disposition this section
   // already records for per-broker execution entries.
-  ["src/trading/etrade/platform.ts", "etrade", 69],
+  ["src/trading/etrade/platform.ts", "etrade", 72],
   ["src/trading/etrade/quoteConfig.ts", "etrade", 2],
   ["src/trading/etrade/quoteTrace.ts", "etrade", 1],
   ["src/trading/factorGrades.ts", "etrade", 5],
@@ -1990,13 +2000,13 @@ const BASELINE: Array<[string, string, number]> = [
   // #3892 INTEGRATION: the registry names the providers whose support it
   // declares (native/emulated/none is a per-provider fact), and its
   // trailing-stop notes quote the provider's field names.
-  ["src/trading/advancedOrders.ts", "alpaca", 28],
+  ["src/trading/advancedOrders.ts", "alpaca", 29],
   // #3892 INTEGRATION: the introspection payload is per provider, so the
   // tool names the providers it enumerates.
   ["src/mcps/openaimp/tradingLimitCommands.ts", "alpaca", 1],
   // #3892 INTEGRATION: the registry declares per-broker support, so the
   // E*TRADE rows are the `none`/`emulated` facts a caller is refused by name.
-  ["src/trading/advancedOrders.ts", "etrade", 27],
+  ["src/trading/advancedOrders.ts", "etrade", 28],
   // #3892 INTEGRATION: the introspection payload names the provider it
   // enumerates, alongside the other broker's.
   ["src/mcps/openaimp/tradingLimitCommands.ts", "etrade", 1],
@@ -2097,9 +2107,9 @@ const BASELINE: Array<[string, string, number]> = [
   // data providers it compares by definition; the table is the artefact,
   // not platform framing (same disposition as the broker-parity-matrix
   // rows, #4038/#4039). Measured 2026-11-15 on the placed file.
-  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 80],
+  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 82],
   ["docs/architecture/business/brokerage-data-matrix.md", "public.com", 14],
-  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 60],
+  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 62],
   ["docs/architecture/business/brokerage-data-matrix.md", "schwab", 3],
   ["docs/architecture/business/brokerage-data-matrix.md", "fidelity", 2],
   ["docs/architecture/business/brokerage-data-matrix.md", "robinhood", 1],

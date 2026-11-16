@@ -12,10 +12,28 @@
  * is what every pre-#4656 caller gets), and an unrecognised value is rejected —
  * never coerced to `day`.
  */
-export type NormalizedTimeInForce = "day" | "gtc" | "ioc" | "fok";
+export type NormalizedTimeInForce = "day" | "gtc" | "ioc" | "fok" | "opg" | "cls";
 
 /** Every value the canonical vocabulary accepts, in display order. */
-export const TIME_IN_FORCE_VALUES: readonly NormalizedTimeInForce[] = ["day", "gtc", "ioc", "fok"];
+export const TIME_IN_FORCE_VALUES: readonly NormalizedTimeInForce[] = ["day", "gtc", "ioc", "fok", "opg", "cls"];
+
+/**
+ * Issue #4671 (matrix gap 17) — the auction half of the vocabulary. An auction
+ * order is NOT a separate order type: it is a market or limit order whose
+ * time-in-force names an exchange auction (the broker's wire model). The four
+ * abbreviations therefore DERIVE from (type, tif), never from a second table:
+ * market+opg = MOO, market+cls = MOC, limit+opg = LOO, limit+cls = LOC.
+ *
+ * Only a broker whose capability table lists these values may be sent one; a
+ * broker that cannot is refused by name through the one order-type registry
+ * (`session_timed`), never silently downgraded to a day order.
+ */
+export const AUCTION_TIME_IN_FORCE: readonly NormalizedTimeInForce[] = ["opg", "cls"];
+
+/** True when this value names an exchange auction rather than a session term. */
+export function isAuctionTimeInForce(value: unknown): value is "opg" | "cls" {
+  return value === "opg" || value === "cls";
+}
 
 /**
  * Normalize a caller's time-in-force to the canonical token.

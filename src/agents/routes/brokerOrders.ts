@@ -37,6 +37,7 @@ import {
   hasTimeInForce,
   TIME_IN_FORCE_VALUES,
   type BrokerId,
+  type NormalizedTimeInForce,
 } from "../../trading";
 import { handleBrokerLimitRoutes } from "./brokerLimits";
 import {
@@ -163,7 +164,7 @@ function ensureDraftStored(
   preview: any,
   broker: RoutedBroker,
   mode: "live" | "paper",
-  timeInForce?: "day" | "gtc" | "ioc" | "fok",
+  timeInForce?: NormalizedTimeInForce,
 ): void {
   const orm = ctx.getOrm();
   if (!orm?.trades) return;

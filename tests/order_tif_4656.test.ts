@@ -132,7 +132,9 @@ describe("#4656 — the canonical vocabulary is one module and fails closed", ()
     expect(normalizeTimeInForce(undefined)).toBeUndefined();
     expect(normalizeTimeInForce("")).toBeUndefined();
     expect(normalizeTimeInForce("sweep")).toBeUndefined();
-    expect(TIME_IN_FORCE_VALUES).toEqual(["day", "gtc", "ioc", "fok"]);
+    // Issue #4671 added the two auction values — the vocabulary is one list, so
+    // the auction capability cannot exist as a parallel token set.
+    expect(TIME_IN_FORCE_VALUES).toEqual(["day", "gtc", "ioc", "fok", "opg", "cls"]);
   });
 
   it("no longer offers E*TRADE a fill-or-kill it cannot put on the wire", () => {
@@ -261,6 +263,22 @@ describe("#4656 — Public refuses a TIF it cannot honour, by name", () => {
       orderType: "LIMIT",
       limitPrice: 100,
       timeInForce: "gtc",
+      userLogin: "owner@example.com",
+    });
+    expect(receipt.success).toBe(false);
+    expect(receipt.message).toMatch(/PUBLIC_TIME_IN_FORCE_UNVERIFIED/);
+  });
+
+  // Issue #4671 (matrix gap 17): an auction term is a non-default TIF too, so it
+  // takes the SAME named refusal — Public must not pretend to place a MOO/MOC.
+  it("refuses an auction TIF (opg) the same way, by name", async () => {
+    const receipt = await publicPlatform().placeOrderRemote({
+      orderId: "draft-2",
+      symbol: "AAPL",
+      action: "BUY",
+      quantity: 1,
+      orderType: "MARKET",
+      timeInForce: "opg",
       userLogin: "owner@example.com",
     });
     expect(receipt.success).toBe(false);

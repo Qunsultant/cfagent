@@ -16,7 +16,7 @@
 import raw from "../../config/order-capabilities.json";
 
 export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
-export type OrderTimeInForce = "DAY" | "GTC" | "IOC" | "FOK";
+export type OrderTimeInForce = "DAY" | "GTC" | "IOC" | "FOK" | "OPG" | "CLS";
 export type BrokerMode = "paper" | "live";
 export type OrderAssetClass = "equity" | "options";
 
@@ -24,7 +24,7 @@ export type OrderAssetClass = "equity" | "options";
 export const ALL_ORDER_TYPES: readonly OrderType[] = ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"];
 
 /** Every time-in-force the ticket knows how to render, in display order. */
-export const ALL_TIME_IN_FORCE: readonly OrderTimeInForce[] = ["DAY", "GTC", "IOC", "FOK"];
+export const ALL_TIME_IN_FORCE: readonly OrderTimeInForce[] = ["DAY", "GTC", "IOC", "FOK", "OPG", "CLS"];
 
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   MARKET: "Market",
@@ -38,6 +38,11 @@ export const TIME_IN_FORCE_LABELS: Record<OrderTimeInForce, string> = {
   GTC: "Good-til-cancelled",
   IOC: "Immediate-or-cancel",
   FOK: "Fill-or-kill",
+  // Issue #4671 (matrix gap 17): the auction values. With a Market order they
+  // are MOO/MOC, with a Limit order LOO/LOC — the pair decides, so the label
+  // names the session rather than inventing a second order-type list.
+  OPG: "At the open (auction)",
+  CLS: "At the close (auction)",
 };
 
 export interface OrderCapabilities {

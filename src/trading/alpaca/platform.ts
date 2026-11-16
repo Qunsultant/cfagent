@@ -28,6 +28,7 @@ import { AlpacaMarketDataProvider } from "../../services/marketDataResearch";
 // Issue #4657: the registry's validator is the single statement of which order
 // types exist per broker and what each one requires.
 import { validateAdvancedOrder } from "../advancedOrders";
+import type { NormalizedTimeInForce } from "../timeInForce";
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 
 // Issue #3990: the paper/live resolver lives in optionsData.ts now
@@ -1106,6 +1107,9 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
         trail_price: params.trailPrice,
         trail_percent: params.trailPercent,
         qty: params.quantity,
+        // Issue #4671: the time-in-force is part of what a type may require
+        // (an auction order is market/limit + opg/cls), so the registry sees it.
+        time_in_force: params.timeInForce,
       },
     });
     if (!advanced.ok) {
@@ -1307,8 +1311,8 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
       // draft carries (#4654/#4656), not an empty set — a stop draft approved
       // here used to reach the seam with no stop price at all.
       stopPrice: (record as { stopPrice?: number }).stopPrice,
-      ...((record as { timeInForce?: "day" | "gtc" | "ioc" | "fok" }).timeInForce
-        ? { timeInForce: (record as { timeInForce?: "day" | "gtc" | "ioc" | "fok" }).timeInForce }
+      ...((record as { timeInForce?: NormalizedTimeInForce }).timeInForce
+        ? { timeInForce: (record as { timeInForce?: NormalizedTimeInForce }).timeInForce }
         : {}),
       priceSource,
       userLogin: this.userLogin,
