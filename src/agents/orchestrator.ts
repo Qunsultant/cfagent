@@ -114,7 +114,7 @@ import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
 import { submitAsyncJob, recoverQueuedAsyncJobs, recoverStaleRunningAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, retryFailedChainJobs, type AsyncJobsContext } from "./orchestrator/asyncJobs";
-import { watchdogMissedSchedules, type ScheduleWatchdogContext, type ScheduleWatchdogSweepResult } from "./orchestrator/scheduleWatchdog";
+import { formatMissedScheduleAlertDetail, watchdogMissedSchedules, type ScheduleWatchdogContext, type ScheduleWatchdogSweepResult } from "./orchestrator/scheduleWatchdog";
 import { RECORDED_SCHEDULE_CALLBACKS } from "./orchestrator/scheduleCallbacks";
 import { ensureOrchestratorTables } from "./orchestrator/tableSchema";
 import { REPORT_CONFIRMATION_TTL_MS } from "./orchestrator/reportConfirmationTtl";
@@ -790,12 +790,10 @@ export class OrchestratorAgent extends PortThink {
         // token second). Detection + the exactly-once claim live in
         // scheduleWatchdog.watchdogMissedSchedules; this hook is
         // delivery only, and audits its own outcome.
-        const ownerPart = info.userLogin ? ` | user: ${info.userLogin}` : "";
-        const callbackPart = info.callback ? ` | callback: ${info.callback}` : "";
         const text = renderChannelText("missed_schedule_alert", "slack", {
           scheduleId: info.scheduleId, kind: "schedule", callback: info.callback,
           expectedTick: info.expectedTick, lastRun: info.lastRun ?? "never",
-          detail: `missed-fire: expected ${info.expectedTick} (last run: ${info.lastRun ?? "never"})${callbackPart}${ownerPart}`,
+          detail: formatMissedScheduleAlertDetail(info),
         }, "legacy_missed_schedule_alert");
         const result = await postSlackText({ post: fetchSlackPost, env: this.env, text });
         this.audit(result.ok ? "schedule.missed_fire_alert" : "schedule.missed_fire_alert_failed", "orchestrator", {
