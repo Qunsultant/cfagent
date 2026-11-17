@@ -14,7 +14,8 @@
  * failure rolls both back, so a key is never recorded without its
  * write and a write never lands without its key.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { eq } from "drizzle-orm";
 import { agentProfileIdempotencyKeys, agentUserProfiles } from "./drizzleSchema";
 import {
@@ -35,7 +36,7 @@ export type ProfileDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1ProfileDb(d1: D1Database): ProfileDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentUserProfiles, agentProfileIdempotencyKeys },
   });
 }
