@@ -392,13 +392,14 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
     expect(listCapturesByProvider(sql as never, "default", "alpaca").length).toBe(0);
   });
 
-  it("configured + conformant provider → ok:true naming all three capabilities", async () => {
+  it("configured + conformant provider → ok:true naming all four capabilities", async () => {
     const result = await verifyAlpacaDataProvider(undefined, {
       provider: fixtureMarketData(),
       optionsChain: stubOptionsChain as never,
+      news: (async () => []) as never,
     });
     expect(result.ok).toBe(true);
-    expect(result.summary).toMatch(/conformance passed for quotes, historicalBars, optionsChains/);
+    expect(result.summary).toMatch(/conformance passed for quotes, historicalBars, optionsChains, news/);
   });
 
   it("kit failure → ok:false with the failure list, never a silent pass", async () => {
@@ -413,6 +414,7 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
     const result = await verifyAlpacaDataProvider(undefined, {
       provider: fixtureMarketData(),
       optionsChain: badChain as never,
+      news: (async () => []) as never,
     });
     expect(result.ok).toBe(false);
     expect(result.summary).toMatch(/conformance failed/);
