@@ -24,6 +24,7 @@
  * E*TRADE-only. The legacy /api/etrade/* routes are untouched.
  */
 import { orderCapabilitiesFor } from "../../config/orderCapabilities";
+import { accountBindingAuditFields, resolveExecutionAccountContext } from "../../services/accountBindings";
 // Issue #4654/#4656: one derivation of the draft's approved terms for both
 // execute routes.
 import { deriveOrderExecutionTerms } from "./orderExecutionTerms";
@@ -313,6 +314,16 @@ export async function handleBrokerOrderRoutes(
       const userLogin = request.headers.get("x-user-login");
       if (!userLogin) return unauthenticatedResponse();
 
+      const accountCtx = await resolveExecutionAccountContext(ctx.env, userLogin, {
+        broker,
+        mode: modeFromEnvironment(requestedEnv),
+        accountType: body.accountType ?? (assetClass === "options" ? "options" : "stock"),
+        scope: body.bindingScope ?? "copilot",
+        explicitAccountId: body.accountId ?? body.accountKey,
+      });
+      if (accountCtx) {
+        ctx.audit("broker.account_binding_resolved", "trading", accountBindingAuditFields(accountCtx));
+      }
       const platform = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv);
       const preview = await platform.previewOrder({
         assetClass,

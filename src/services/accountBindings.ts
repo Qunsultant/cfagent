@@ -11,11 +11,18 @@ import { ACCOUNT_BINDING_CONFIG } from "../config/accountBindings";
 import { createStoreKv, type DoNamespaceLike } from "../data/durableKv";
 import {
   accountBindingSlotId,
+  isAccountBindingBroker,
+  normalizeAccountBindingScope,
+  normalizeAccountType,
   resolveEffectiveAccountBinding,
   validateAccountBindingInput,
   type AccountBinding,
+  type AccountBindingBroker,
   type AccountBindingKey,
   type AccountBindingResolution,
+  type AccountBindingScope,
+  type AccountType,
+  type TradingType,
 } from "../trading";
 
 function getBindingKv(env: Env) {
@@ -108,4 +115,90 @@ export async function removeAccountBinding(
     await kv.put(userBindingsKey(userLogin), JSON.stringify(next));
   }
   return true;
+}
+
+export interface ExecutionAccountContext {
+  readonly broker: AccountBindingBroker;
+  readonly mode: TradingType;
+  readonly accountType: AccountType;
+  readonly accountId?: string;
+  readonly accountName?: string;
+  readonly scope: AccountBindingScope;
+  readonly resolvedFromScope: AccountBindingScope | null;
+  readonly source: "explicit" | "binding" | "unset";
+}
+
+export async function resolveExecutionAccountContext(
+  env: Env,
+  userLogin: string,
+  input: {
+    broker: string;
+    mode: TradingType;
+    accountType?: unknown;
+    scope?: unknown;
+    explicitAccountId?: unknown;
+  },
+): Promise<ExecutionAccountContext | null> {
+  const normBroker = input.broker.trim().toLowerCase();
+  if (!isAccountBindingBroker(normBroker)) return null;
+
+  const accountType =
+    normalizeAccountType(input.accountType) ?? ACCOUNT_BINDING_CONFIG.defaultAccountType;
+  const scope = normalizeAccountBindingScope(input.scope, "copilot");
+
+  const explicit =
+    typeof input.explicitAccountId === "string" && input.explicitAccountId.trim()
+      ? input.explicitAccountId.trim()
+      : undefined;
+  if (explicit) {
+    return {
+      broker: normBroker,
+      mode: input.mode,
+      accountType,
+      accountId: explicit,
+      scope,
+      resolvedFromScope: null,
+      source: "explicit",
+    };
+  }
+
+  const resolved = await resolveUserAccountBinding(env, userLogin, {
+    broker: normBroker,
+    mode: input.mode,
+    accountType,
+    scope,
+  });
+  if (resolved.found && resolved.binding) {
+    return {
+      broker: normBroker,
+      mode: input.mode,
+      accountType,
+      accountId: resolved.binding.accountId,
+      accountName: resolved.binding.accountName,
+      scope,
+      resolvedFromScope: resolved.resolvedFromScope,
+      source: "binding",
+    };
+  }
+
+  return {
+    broker: normBroker,
+    mode: input.mode,
+    accountType,
+    scope,
+    resolvedFromScope: null,
+    source: "unset",
+  };
+}
+
+export function accountBindingAuditFields(ctx: ExecutionAccountContext | null): Record<string, unknown> {
+  if (!ctx) return {};
+  return {
+    broker: ctx.broker,
+    mode: ctx.mode,
+    accountType: ctx.accountType,
+    ...(ctx.accountId ? { accountId: ctx.accountId } : {}),
+    bindingScope: ctx.scope,
+    bindingSource: ctx.source,
+  };
 }
