@@ -47,6 +47,7 @@ import {
   type JobRunRecorder,
 } from "../src/services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../src/services/jobPipelineSteps";
+import { runIdBody } from "../src/services/executionTreeIds";
 import {
   registerOptionsWorkflowSteps,
   type OptionsWorkflowStepDeps,
@@ -478,7 +479,7 @@ describe("goal workflow host (#4290)", () => {
       expect(outcome.state).toBe("completed");
       expect(journal.names.length).toBeGreaterThanOrEqual(9);
       for (const name of journal.names) {
-        expect(name.startsWith(`job-step:${outcome.runId}:`)).toBe(true);
+        expect(name.startsWith(`step:${runIdBody(outcome.runId)}:`)).toBe(true);
       }
       const view = await control.getJob(jobId);
       const stages = pipelineStages(view);

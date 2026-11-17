@@ -42,7 +42,7 @@ import type {
   Premortem,
 } from "./researchFalsification";
 import { buildFalsification, buildPremortem } from "./researchFalsification";
-import { oodaStepShortId, researchPipelineStageShortId } from "./executionTreeIds";
+import { oodaStepShortId } from "./executionTreeIds";
 
 export type TriggerSource = "manual" | "scheduled";
 
@@ -196,8 +196,9 @@ export interface OodaStep {
    * `ooda:observe` | `ooda:orient` | `ooda:decide` | `ooda:act`.
    * The bare `stage` string is unchanged; the short id is what tells
    * this candidate-level step apart from the run-level stage of the
-   * same name (`respipe:observe` etc.). Always populated by the
-   * recorder in `runResearchPipeline`.
+   * same name (whose id is the stage execution id
+   * `stage:<runBody>:observe:-`). Always populated by the recorder
+   * in `runResearchPipeline`.
    */
   shortId?: string;
 }
@@ -208,8 +209,13 @@ export interface OodaStep {
  * The OODA steps (above) operate *within* these stages — OODA is the
  * candidate-level loop, the pipeline stages are the run-level flow.
  * Issue #4774: the two levels share the stage names "observe" |
- * "orient" | "decide" — a trace entry's `shortId` (`respipe:*` here,
- * `ooda:*` on the candidate loop) is what resolves which level it is.
+ * "orient" | "decide" — the level is what resolves them: the
+ * candidate-level step carries its `ooda:*` shortId, the run-level
+ * stage is identified by its stage execution id
+ * (`stage:<runBody>:<stage>:-`). The `respipe:` namespace that used
+ * to qualify run-level stages was retired by the uniform-convention
+ * adoption (#5175, 2026-11-17) — the hierarchy scopes the stages,
+ * so no separate namespace is needed.
  */
 export type PipelineStage =
   | "configure"
@@ -225,13 +231,12 @@ export interface PipelineStageStep {
   stage: PipelineStage;
   detail: string;
   at: string;
-  /**
-   * Issue #4774: the level-qualified short id of this stage —
-   * `respipe:<stage>`. See `OodaStep.shortId`: the same bare stage
-   * name at the candidate level is `ooda:<stage>`. Always populated
-   * by the recorder in `runResearchPipeline`.
-   */
-  shortId?: string;
+  // No shortId: run-level stages carry no loop qualifier. The
+  // `respipe:` short id this interface used to carry was retired by
+  // the uniform-convention adoption (#5175, 2026-11-17) — a
+  // run-level stage is identified by its stage execution id
+  // (`stage:<runBody>:<stage>:-`), and only the candidate-level
+  // OODA loop carries a shortId (`OodaStep.shortId`, `ooda:*`).
 }
 
 export interface ResearchReport {
@@ -715,7 +720,7 @@ export async function runResearchPipeline(
   // Issue #774: pipeline stage trace (the 8 stages from the design doc).
   const stageTrace: PipelineStageStep[] = [];
   const stage = (s: PipelineStage, detail: string) =>
-    stageTrace.push({ stage: s, detail, at: new Date().toISOString(), shortId: researchPipelineStageShortId(s) });
+    stageTrace.push({ stage: s, detail, at: new Date().toISOString() });
 
   const rejected: RejectedEntry[] = [];
   const watchlist: WatchlistEntry[] = [];

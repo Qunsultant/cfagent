@@ -33,6 +33,7 @@ import {
   type JobPipelineDeps,
 } from "../src/services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../src/services/jobPipelineSteps";
+import { runIdBody } from "../src/services/executionTreeIds";
 import {
   optionsStepDepsForWorkflow,
   createJobPipelineWorkflowDeps,
@@ -348,7 +349,7 @@ describe("options workflow host (#4289)", () => {
       // engine's runId-scoped step names.
       expect(journal.names.length).toBeGreaterThanOrEqual(9);
       for (const name of journal.names) {
-        expect(name.startsWith(`job-step:${outcome.runId}:`)).toBe(true);
+        expect(name.startsWith(`step:${runIdBody(outcome.runId)}:`)).toBe(true);
       }
       const view = await control.getJob(jobId);
       const stages = pipelineStages(view);

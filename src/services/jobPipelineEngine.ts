@@ -98,6 +98,7 @@ import {
 } from "./jobPipelineConfig";
 import type { JobStepContext, JobStepRegistry } from "./jobPipelineSteps";
 import { publishJobStatus, publishStageAction } from "./jobPipelineEvents";
+import { stepExecutionId } from "./executionTreeIds";
 import type { MessagePublisher, StageName } from "../messaging/messagingPorts";
 import {
   resolvePipelinePolicy,
@@ -725,7 +726,7 @@ export class JobPipelineControl {
     let counter = 0;
     this.newRunId =
       deps.newRunId ??
-      (() => `run-${this.now().getTime().toString(36)}-${(++counter).toString(36)}`);
+      (() => `run:${this.now().getTime().toString(36)}-${(++counter).toString(36)}`);
   }
 
   private iso(): string {
@@ -3288,7 +3289,7 @@ export class JobPipelineControl {
       let result;
       try {
         result = await journal.do(
-          `job-step:${ctx.runId}:${path || "root"}:${stepIndex}:${eff.shardKey ?? "-"}:${itemIndex ?? "-"}`,
+          stepExecutionId(ctx.runId, path, stepIndex, eff.shardKey, itemIndex),
           () => handler(stepCtx),
         );
       } catch (error) {
