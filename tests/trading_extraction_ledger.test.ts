@@ -57,6 +57,8 @@ const PINNED_STAR_REEXPORTS = [
   "./timeInForce",
   // Issue #3232: the broker catalog joins the public trading surface.
   "./brokerCatalog",
+  // Issue #5110: multi-account & asset-class account binding domain model.
+  "./accountBindings",
   // Issue #2853: the broker panel contract joins the public trading surface.
   "./brokerPanels",
   // Issue #3417: what a broker is CALLED, beside what it can do.
