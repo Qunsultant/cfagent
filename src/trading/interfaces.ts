@@ -25,6 +25,7 @@ import type {
   BrokerOptionChain,
   BrokerOptionExpireDate,
   BrokerCancelOrderResult,
+  BrokerExerciseOptionResult,
   BrokerReplaceOrderResult,
   ReplaceOrderParams,
   OrderPriceSource,
@@ -253,6 +254,8 @@ export interface ITradingPlatform {
    * "no alerts".
    */
   getAlerts?(): Promise<BrokerAlert[]>;
+  /** Issue #4672 (matrix gap 18): exercise an open long option contract. */
+  exerciseOption?(symbolOrContractId: string): Promise<BrokerExerciseOptionResult>;
 }
 
 export interface IMarketScreener {

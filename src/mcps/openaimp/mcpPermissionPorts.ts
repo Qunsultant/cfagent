@@ -373,6 +373,7 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // Issue #4670 (matrix gap 16): replacing one order changes broker state — the
   // same scope as placing or cancelling one.
   alpaca_replace_order: "mcp:trade",
+  alpaca_exercise_option: "mcp:trade",
   // Issue #3884: cancelling a ticker's open orders is a broker-state change.
   alpaca_cancel_ticker: "mcp:trade",
   // Issue #3885: “cancel everything” is a trade-scope act with its own

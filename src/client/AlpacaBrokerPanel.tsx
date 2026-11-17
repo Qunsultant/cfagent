@@ -168,7 +168,16 @@ const ORDER_HISTORY_COLUMNS = [
 
 const ACTIVITY_COLUMNS = [
   { key: "when", header: "Date", render: (row: ActivityPayload["activities"][number]) => fmtWhen(row.activityDate) },
-  { key: "type", header: "Type", render: (row: ActivityPayload["activities"][number]) => row.activityType },
+  {
+    key: "type",
+    header: "Type",
+    render: (row: ActivityPayload["activities"][number]) => {
+      if (row.activityType === "OPASN") return "OPASN (Option Assignment)";
+      if (row.activityType === "OPEXC") return "OPEXC (Option Exercise)";
+      if (row.activityType === "OPEXP") return "OPEXP (Option Expiration)";
+      return row.activityType;
+    },
+  },
   { key: "symbol", header: "Symbol", render: (row: ActivityPayload["activities"][number]) => row.symbol ?? "-" },
   {
     key: "qty",
