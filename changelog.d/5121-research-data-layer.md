@@ -1,1 +1,2 @@
-- Added tenant-aware research canonical leg (`src/workflows/researchCanonicalLeg.ts`), pinned research data/evaluation ports (`src/workflows/researchDataPorts.ts`), and research task-ledger reconciliation (`reconcileResearchTaskWithRunRecord`) for `#5121` (`#5109`).
+### Added
+- Tenant-aware research canonical leg (`src/workflows/researchCanonicalLeg.ts`), pinned research data/evaluation ports (`src/workflows/researchDataPorts.ts`), and research task-ledger reconciliation (`reconcileResearchTaskWithRunRecord`) for `#5121` (`#5109`).
