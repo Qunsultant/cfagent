@@ -12,6 +12,7 @@ import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedS
 import { DatabaseORM, type SqlStorage } from "../orm";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
+import { BROKER_CATALOG } from "../trading";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
 import { actorGateway } from "./cloudflareActorGateway";
@@ -575,13 +576,31 @@ export interface ScheduledFirerHostDispatch {
  * sync dispatch would — and the gate decides from it. The
  * platform, environment, and snapshot input are fixed for the run,
  * so a run never mixes dispatches mid-flight.
+ *
+ * Issue #5184 — the run carries the broker: the stage input derives from the
+ * tenant's resolved broker (`resolveTenantBroker`, the one default), never a
+ * literal id. A broker whose catalogue entry does not declare
+ * `supports.optionChains` is refused here, by name, before any workflow
+ * starts — the alternative is a schedule that authenticates a broker the
+ * tenant does not use and fails every cron (incident #5181).
  */
-export function resolveScheduledFirerHostDispatch(
+export async function resolveScheduledFirerHostDispatch(
   env: Env,
   environment: string | undefined,
   snapshotInput?: FeedSnapshotInput,
-): ScheduledFirerHostDispatch {
-  const broker = discoveryBrokerStageInput("etrade", env, environment);
+): Promise<ScheduledFirerHostDispatch> {
+  const brokerId = await resolveTenantBroker(env);
+  if (BROKER_CATALOG[brokerId]?.supports?.optionChains !== true) {
+    // Named refusal, before any workflow starts: the run must not reach a
+    // broker whose catalogue says it serves no option chains.
+    throw new Error(
+      codedMessage(
+        "FAILURE_BROKER_UNAVAILABLE",
+        `${brokerId} does not serve option chains; this schedule needs a broker whose catalogue declares optionChains`,
+      ),
+    );
+  }
+  const broker = discoveryBrokerStageInput(brokerId, env, environment);
   return {
     decision: scheduledFirerDispatchRoute({ broker, env, snapshotInput }),
     broker,
@@ -4227,7 +4246,7 @@ export class ScheduledTasksService {
       // run — the platform, environment, and snapshot input are
       // fixed for the run — and threaded into each symbol's screen,
       // so a run never mixes dispatches mid-flight.
-      const firerHost = resolveScheduledFirerHostDispatch(
+      const firerHost = await resolveScheduledFirerHostDispatch(
         this.env,
         options.environment,
         options.snapshotInput,
@@ -4887,7 +4906,7 @@ export class ScheduledTasksService {
       // run — the platform, environment, and snapshot input are
       // fixed for the run — and threaded into each symbol's screen,
       // so a run never mixes dispatches mid-flight.
-      const firerHost = resolveScheduledFirerHostDispatch(
+      const firerHost = await resolveScheduledFirerHostDispatch(
         this.env,
         options.environment,
         options.snapshotInput,

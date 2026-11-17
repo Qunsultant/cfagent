@@ -1,0 +1,3 @@
+### Fixed
+
+- **The scheduled options screen stops naming a broker (#5184, slice 1 of #5187):** the firer derived its chain source from `discoveryBrokerStageInput("etrade", …)` (`src/services/scheduledTasks.ts`), so an Alpaca or Public tenant's options schedule authenticated E*TRADE and failed every cron with `FAILURE_AUTH_NO_SESSION` (incident #5181). The dispatch now resolves the tenant's broker (`resolveTenantBroker` — the one default) and gates on the catalogue: a broker whose `supports.optionChains` is not true is refused by name before any workflow starts. An E*TRADE tenant is unchanged; an Alpaca/paper tenant's scheduled run now runs on Alpaca.
