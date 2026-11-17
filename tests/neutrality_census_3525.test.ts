@@ -1532,7 +1532,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/goalScreenWorkflowSubmission.ts", "etrade", 1],
   ["src/services/goalScreenWorkflowSubmission.ts", "yahoo", 2],
   ["src/services/hedgeProposals.ts", "etrade", 10],
-  ["src/services/marketDataResearch.ts", "alpaca", 120],
+  // #4672 (Gap 18): marketDataResearch.ts/alpaca 120->130 — adds exerciseOptionPosition (`POST /v2/positions/{id}/exercise`) on AlpacaMarketDataProvider.
+  ["src/services/marketDataResearch.ts", "alpaca", 130],
   ["src/services/marketDataResearch.ts", "etrade", 2],
   ["src/services/marketDataResearch.ts", "yahoo", 31],
   ["src/services/marketDataService.ts", "alpaca", 3],

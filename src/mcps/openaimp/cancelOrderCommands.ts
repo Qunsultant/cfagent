@@ -124,7 +124,10 @@ export class AlpacaCancelOrderCommand implements IMcpToolCommand {
 async function resolveSelectedAlpacaPlatform(context: McpToolContext) {
   const { resolveTradeEnvironmentFromSettings } = await import("../../agents/routes/brokerEnvironment");
   const environment = resolveTradeEnvironmentFromSettings(context.readSettingRaw, context.env);
-  return TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId, environment);
+  return {
+    environment,
+    platform: TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId, environment),
+  };
 }
 
 /**
@@ -198,9 +201,7 @@ export class AlpacaReplaceOrderCommand implements IMcpToolCommand<{
 
     // The tenant's STORED environment, never a per-call override — the same
     // resolution the sibling order tools use.
-    const { resolveTradeEnvironmentFromSettings } = await import("../../agents/routes/brokerEnvironment");
-    const environment = resolveTradeEnvironmentFromSettings(context.readSettingRaw, context.env);
-    const platform = await resolveSelectedAlpacaPlatform(context);
+    const { environment, platform } = await resolveSelectedAlpacaPlatform(context);
     if (typeof platform.replaceOrderRemote !== "function") {
       throw new Error("This broker does not provide order replacement on this platform instance.");
     }
@@ -254,7 +255,7 @@ export class AlpacaExerciseOptionCommand implements IMcpToolCommand<{ symbolOrCo
     const symbolOrContractId = String(input?.symbolOrContractId ?? "").trim();
     if (!symbolOrContractId) throw new Error("symbolOrContractId is required");
 
-    const platform = await resolveSelectedAlpacaPlatform(context);
+    const { platform } = await resolveSelectedAlpacaPlatform(context);
     if (typeof platform.exerciseOption !== "function") {
       throw new Error("This broker does not support option exercise on this platform instance.");
     }
