@@ -155,14 +155,17 @@ describe("F3 auto-shard is trigger-independent (#2599)", () => {
     mockDeliverGatedSlack.mockClear();
   });
 
-  it("manual trigger over 3 symbols shards (queued contract, one feed shard per symbol)", async () => {
+  it("manual trigger over 3 symbols shards (engine contract, one chain job carrying 3 symbols)", async () => {
     const { orm, env } = makeEnv("f3_manual_shard");
-    const submitted: unknown[] = [];
-    const shardSubmit = async (spec: unknown) => {
-      submitted.push(spec);
-      return { jobId: `job-${submitted.length}`, status: "queued" as const, statusUrl: "https://x" };
+    const started: Array<{ chain: { chainId: string; options?: { symbols?: string[] } } }> = [];
+    const service = new ScheduledTasksService(env, orm, "f3_manual_shard");
+    // Issue #4780: the chain submits through the engine seam now —
+    // one startOptionsChainWorkflow call carrying the whole chain,
+    // not one shardSubmit call per symbol.
+    (service as any).startOptionsChainWorkflow = async (_env: unknown, input: { chain: { chainId: string } }) => {
+      started.push(input as never);
+      return { instanceId: "wf-1", jobId: `options-chain:${input.chain.chainId}` };
     };
-    const service = new ScheduledTasksService(env, orm, "f3_manual_shard", undefined, undefined, undefined, undefined, undefined, undefined, shardSubmit as never);
     const res = await service.autonomousOptionsAnalysis({
       symbols: ["AAPL", "MSFT", "NVDA"],
       thesis: "bullish",
@@ -171,7 +174,11 @@ describe("F3 auto-shard is trigger-independent (#2599)", () => {
     expect(res.success).toBe(true);
     expect((res.data as { sharded?: boolean }).sharded).toBe(true);
     expect(typeof (res.data as { chainId?: unknown }).chainId).toBe("string");
-    expect(submitted).toHaveLength(3);
+    expect(started).toHaveLength(1);
+    expect(started[0].chain.options?.symbols).toEqual(["AAPL", "MSFT", "NVDA"]);
+    expect((res.data as { jobId?: string }).jobId).toBe(
+      `options-chain:${(res.data as { chainId?: string }).chainId}`,
+    );
     expect((res.data as { opportunities?: unknown[] }).opportunities).toEqual([]);
   });
 
@@ -181,18 +188,12 @@ describe("F3 auto-shard is trigger-independent (#2599)", () => {
     // real pipeline — monolithic success, res.data.sharded undefined.
     const { orm, env } = makeEnv("f3_manual_monolithic");
     stubChains({ AAPL: 150, MSFT: 250 });
-    const submitted: unknown[] = [];
-    const shardSubmit = async (spec: unknown) => {
-      submitted.push(spec);
-      return { jobId: `job-${submitted.length}`, status: "queued" as const, statusUrl: "https://x" };
-    };
-    const service = new ScheduledTasksService(env, orm, "f3_manual_monolithic", undefined, undefined, undefined, undefined, undefined, undefined, shardSubmit as never);
+    const service = new ScheduledTasksService(env, orm, "f3_manual_monolithic");
     const res = await service.autonomousOptionsAnalysis({
       symbols: ["AAPL", "MSFT"],
       thesis: "bullish",
       trigger: "manual",
     });
-    expect(submitted).toHaveLength(0);
     expect((res.data as { sharded?: boolean }).sharded).toBeUndefined();
     expect(res.success).toBe(true);
   });

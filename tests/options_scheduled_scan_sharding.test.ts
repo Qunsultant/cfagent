@@ -1,23 +1,28 @@
 /**
  * Issue #1785: a scheduled options scan over a universe too large for one
- * Worker invocation's subrequest budget must route to the EXISTING
- * sharded path (planOptionsFeedShards: one paced per-symbol job, each
- * invocation with its own budget) instead of running monolithically
- * and deferring 97 of 100 symbols.
+ * Worker invocation's subrequest budget must route to the sharded path
+ * instead of running monolithically and deferring 97 of 100 symbols.
  *
  * Routing rule (see the constant in scheduledTasks.ts): a scheduled run
  * whose resolved symbol count exceeds what one budget covers at the
  * measured per-symbol cost takes the sharded branch. Explicit
  * `sharded: true` still shards regardless of size; small scheduled
  * runs and manual runs keep today's monolithic path.
+ *
+ * Issue #4780: the sharded path is the one engine job now — the chain
+ * dispatches as `options-chain:<chainId>` through
+ * startOptionsChainWorkflow (one call carrying the whole chain), not
+ * as one paced per-symbol async job per symbol. The per-symbol
+ * staggering lives in the chain job's feed node (sharded shape,
+ * sequential units, one journaled workflow step per unit).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { DatabaseORM } from "../src/orm";
 import type { Env } from "../src/types";
-import type { AsyncJobSubmission } from "../src/types";
+import type { ShardChainContext } from "../src/types";
 
-describe("scheduled options scan sharding (#1785)", () => {
+describe("scheduled options scan sharding (#1785, #4780)", () => {
   let mockEnv: Env;
   let mockOrm: DatabaseORM;
 
@@ -32,29 +37,31 @@ describe("scheduled options scan sharding (#1785)", () => {
     mockOrm = new DatabaseORM(mockSql as any);
   });
 
-  function makeService(submitted: AsyncJobSubmission[]) {
-    const shardSubmit = vi.fn(async (spec: AsyncJobSubmission) => {
-      submitted.push(spec);
-      return { jobId: `job-${submitted.length}`, status: "queued" as const, statusUrl: "/jobs/job" };
-    });
-    const service = new ScheduledTasksService(
-      mockEnv, mockOrm, "test_trader",
-      undefined, undefined, undefined, undefined, undefined, undefined,
-      shardSubmit as never,
-    );
+  function makeService(started: Array<{ chain: ShardChainContext }>) {
+    const service = new ScheduledTasksService(mockEnv, mockOrm, "test_trader");
+    // Issue #4780: the chain submits through the engine seam — one
+    // startOptionsChainWorkflow call carrying the whole chain. The
+    // fake echoes the chain job id, as the real seam does.
+    (service as any).startOptionsChainWorkflow = async (
+      _env: unknown,
+      input: { chain: ShardChainContext },
+    ) => {
+      started.push(input);
+      return { instanceId: "wf-1", jobId: `options-chain:${input.chain.chainId}` };
+    };
     (service as any).guardScheduledAuth = async () => ({ blocked: false });
     (service as any).getScreenerAgent = () => ({ claimScheduledExecution: async () => true });
     (service as any).publishScreenerEvent = vi.fn(async () => {});
-    return { service, shardSubmit };
+    return { service };
   }
 
   function makeSymbols(n: number): string[] {
     return Array.from({ length: n }, (_, i) => `SYM${String(i).padStart(3, "0")}`);
   }
 
-  it("a 100-symbol scheduled scan routes to the sharded path: one per-symbol job each", async () => {
-    const submitted: AsyncJobSubmission[] = [];
-    const { service } = makeService(submitted);
+  it("a 100-symbol scheduled scan routes to the sharded path: one chain job carrying 100 symbols", async () => {
+    const started: Array<{ chain: ShardChainContext }> = [];
+    const { service } = makeService(started);
     const result = await service.autonomousOptionsAnalysis({
       symbols: makeSymbols(100),
       thesis: "bullish",
@@ -63,32 +70,31 @@ describe("scheduled options scan sharding (#1785)", () => {
     });
     expect((result.data as any)?.sharded).toBe(true);
     expect((result.data as any)?.chainId).toBeTruthy();
-    expect(submitted).toHaveLength(100);
-    for (const spec of submitted) {
-      expect(spec.capability).toBe("shard.execute");
-      expect((spec.payload as any)?.chain?.screenType).toBe("options");
-    }
-    const keys = submitted.map((s) => (s.payload as any)?.shard?.key);
-    expect(new Set(keys).size).toBe(100);
-    expect(String((result.data as any)?.summary)).toContain("100 paced symbol jobs");
+    expect(started).toHaveLength(1);
+    expect(started[0].chain.options?.symbols).toHaveLength(100);
+    expect(new Set(started[0].chain.options?.symbols).size).toBe(100);
+    expect((result.data as any)?.jobId).toBe(
+      `options-chain:${(result.data as any)?.chainId}`,
+    );
+    expect(String((result.data as any)?.summary)).toContain("one engine chain job");
   });
 
-  it("a small scheduled scan keeps the monolithic path (no shards submitted)", async () => {
-    const submitted: AsyncJobSubmission[] = [];
-    const { service } = makeService(submitted);
+  it("a small scheduled scan keeps the monolithic path (no chain started)", async () => {
+    const started: Array<{ chain: ShardChainContext }> = [];
+    const { service } = makeService(started);
     const result = await service.autonomousOptionsAnalysis({
       symbols: ["AAPL", "MSFT"],
       thesis: "bullish",
       riskProfile: "balanced",
       trigger: "scheduled",
     });
-    expect(submitted).toHaveLength(0);
+    expect(started).toHaveLength(0);
     expect((result.data as any)?.sharded).not.toBe(true);
   });
 
   it("explicit sharded: true still shards regardless of size", async () => {
-    const submitted: AsyncJobSubmission[] = [];
-    const { service } = makeService(submitted);
+    const started: Array<{ chain: ShardChainContext }> = [];
+    const { service } = makeService(started);
     const result = await service.autonomousOptionsAnalysis({
       symbols: ["AAPL", "MSFT"],
       thesis: "bullish",
@@ -97,16 +103,18 @@ describe("scheduled options scan sharding (#1785)", () => {
       sharded: true,
     });
     expect((result.data as any)?.sharded).toBe(true);
-    expect(submitted).toHaveLength(2);
+    expect(started).toHaveLength(1);
+    expect(started[0].chain.options?.symbols).toEqual(["AAPL", "MSFT"]);
   });
 
-  it("a large scheduled scan without the shard port fails honestly instead of running partial", async () => {
+  it("a large scheduled scan without the workflow residency fails honestly instead of running partial", async () => {
     const service = new ScheduledTasksService(mockEnv, mockOrm, "test_trader");
     (service as any).guardScheduledAuth = async () => ({ blocked: false });
     (service as any).getScreenerAgent = () => ({ claimScheduledExecution: async () => true });
     (service as any).publishScreenerEvent = vi.fn(async () => {});
-    // The function's catch converts the sharded-branch throw into a
-    // failure result + options.failed event (never a partial success).
+    // The function's catch converts the start seam's refusal (no
+    // AGENT_DB / JOB_PIPELINE_WORKFLOW in this env) into a failure
+    // result + options.failed event (never a partial success).
     const result = await service.autonomousOptionsAnalysis({
       symbols: makeSymbols(100),
       thesis: "bullish",
@@ -114,6 +122,6 @@ describe("scheduled options scan sharding (#1785)", () => {
       trigger: "scheduled",
     });
     expect(result.success).toBe(false);
-    expect(String((result as any).error)).toContain("Sharded options runs require the async-job submission port");
+    expect(String((result as any).error)).toContain("job_pipeline_workflow_not_configured");
   });
 });

@@ -102,6 +102,7 @@ import {
 } from "../services/enrichPipelineJobs";
 import { screenerStepDepsForScheduledAgent } from "../services/screenerPipelineJobs";
 import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
+import { optionsChainStepDepsForScheduledAgent } from "../services/optionsChainPipelineJobs";
 import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
 import {
   ensureAnalyzePipelineJobs,
@@ -173,7 +174,8 @@ export interface ScheduledTasksPipelineContext {
   ) => Promise<{ instanceId: string }>;
 }
 
-function pipelineSql(ctx: ScheduledTasksPipelineContext): SqlStorage {
+/** Issue #4780: exported for the options-chain step deps — the chain residency reads the same host SQL. */
+export function pipelineSql(ctx: ScheduledTasksPipelineContext): SqlStorage {
   const sql = (
     ctx.agentCtx?.storage as unknown as { sql?: SqlStorage } | undefined
   )?.sql;
@@ -543,6 +545,11 @@ export function createScheduledAgentPipelineControl(
       // resolving registration over the host's own stores, so a
       // host-dispatched options job executes in this residency.
       optionsStepDepsForScheduledAgent(ctx),
+      // Issue #4780: the options-chain steps compose here too — the
+      // chain job's six steps, resolved per invocation from the chain
+      // on the stored definition, so a host-dispatched chain executes
+      // in this residency.
+      optionsChainStepDepsForScheduledAgent(ctx),
     ),
     invocation: "sync",
   });
@@ -821,6 +828,9 @@ export async function startPipelineJobWorkflow(
       // (This control only mirrors the definition; the steps never
       // execute here, exactly as for the screener steps.)
       optionsStepDepsForScheduledAgent(ctx),
+      // Issue #4780: the options-chain steps compose here too, as in
+      // the host control — the same registry in both compositions.
+      optionsChainStepDepsForScheduledAgent(ctx),
     ),
     invocation: "workflow-shard",
   });
