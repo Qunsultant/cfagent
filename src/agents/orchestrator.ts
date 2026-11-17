@@ -1734,13 +1734,13 @@ export class OrchestratorAgent extends PortThink {
         }
         await this.ctx.storage.put(key, { slot });
       }
-      const service = new ScheduledTasksService(this.env, this.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).scanRuns, undefined, undefined, undefined, (outcome, schedulerUserLogin, chainReport) => scheduleScreenerFollowups(this.asyncJobsContext(), outcome, schedulerUserLogin, chainReport), {sql:this.ctx.storage.sql,blobStorage:this.ctx.storage,env:this.env}, (spec) => (this as any).submitAsyncJob(spec), undefined, this.env.SCREENER_EVENTS ?? null);
+      const service = new ScheduledTasksService(this.env, this.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: this.ctx.storage.sql, storage: this.ctx.storage }).scanRuns, undefined, undefined, undefined, (outcome, schedulerUserLogin, chainReport) => scheduleScreenerFollowups(this.asyncJobsContext(), outcome, schedulerUserLogin, chainReport), {sql:this.ctx.storage.sql,blobStorage:this.ctx.storage,env:this.env}, undefined, this.env.SCREENER_EVENTS ?? null);
       const res = await service.autonomousOptionsAnalysis({ ...payload, userLogin, environment, sharded: payload?.sharded });
       if ((res as any).skipped) {
         return (outcome = { outcome: "skipped", detail: "service skipped" });
       }
       if (res.data?.sharded) {
-        return (outcome = { outcome: "success", descriptor: "sharded to async-job rails; per-shard rows carry the outcome" });
+        return (outcome = { outcome: "success", descriptor: "sharded to the one engine; the chain job's stages carry the outcome" });
       }
       // Issue #223 + #910 + #2091: history row + canonical row, via
       // the shared recorder (extracted so orchestrator.ts stays

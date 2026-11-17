@@ -132,7 +132,6 @@ function stockService(opts: { sharded: boolean }) {
     undefined,
     undefined,
     undefined,
-    opts.sharded ? async () => ({ jobId: "job-1", status: "queued", statusUrl: "/jobs/job-1" }) : undefined,
   );
   const audit = vi.fn(() => {});
   const guard = vi.fn(async () => ({ blocked: false as const }));

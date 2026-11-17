@@ -90,7 +90,11 @@ import {
   type JobStageView,
 } from "../services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
-import type { Env } from "../types";
+import {
+  buildOptionsChainJobDefinition,
+  optionsChainJobId,
+} from "../services/optionsChainJobDefinition";
+import type { Env, ShardChainContext } from "../types";
 import {
   COMPARISON_JOB_ID_PREFIX,
   comparisonJobDefinition,
@@ -360,6 +364,74 @@ export async function startComparisonWorkflow(
     );
   }
   return startOptionsScreenWorkflow(env, { ...input, jobKind: "comparison" }, opts);
+}
+
+/** What one durable options-chain start needs: the chain itself (the job id IS the chain id). */
+export interface StartOptionsChainWorkflowInput {
+  /** The chain — job id `options-chain:<chainId>`, one job per chain. */
+  chain: ShardChainContext;
+  /** The acting login — rides the raw config beside the chain. */
+  userLogin?: string;
+  trigger?: "manual" | "scheduled";
+}
+
+/**
+ * Issue #4780 — the options sharded chain's start seam: define the
+ * chain job (`options-chain:<chainId>`, buildOptionsChainJobDefinition)
+ * on the D1 residency and create the workflow instance that executes
+ * it. The chain is validated BEFORE defining anything — a chain with
+ * no id or no symbols refuses by name with no job defined, like the
+ * shape validations in the named seams. Refuses by name when the
+ * JOB_PIPELINE_WORKFLOW binding or the AGENT_DB binding the residency
+ * reads is not configured. The injectable seams (startWorkflow /
+ * stores / runRecorder) are the start seam's shape, shared with
+ * startOptionsScreenWorkflow, so tests inject fakes at the same seam.
+ */
+export async function startOptionsChainWorkflow(
+  env: Env,
+  input: StartOptionsChainWorkflowInput,
+  opts: StartOptionsScreenWorkflowOpts = {},
+): Promise<{ instanceId: string; jobId: string }> {
+  const trigger = input.trigger ?? "scheduled";
+  const definition = buildOptionsChainJobDefinition(input.chain);
+  const jobId = optionsChainJobId(input.chain.chainId);
+
+  const stores = opts.stores ?? (env.AGENT_DB ? createJobPipelineStoresFromD1(env.AGENT_DB) : null);
+  if (!stores) {
+    throw workflowNotConfigured(
+      "the AGENT_DB binding the workflow residency reads is not configured in this deployment; the chain was not dispatched.",
+    );
+  }
+  const runRecorder =
+    opts.runRecorder ?? (env.AGENT_DB ? jobRunRecorderFromD1(env.AGENT_DB) : null);
+  if (!runRecorder) {
+    throw workflowNotConfigured(
+      "the AGENT_DB binding the workflow residency reads is not configured in this deployment; the chain was not dispatched.",
+    );
+  }
+  const defineControl = new JobPipelineControl({
+    stores,
+    runRecorder,
+    publisher: null,
+    steps: createBuiltinStepRegistry(),
+    invocation: "workflow-shard",
+  });
+  await defineControl.defineJob(definition);
+
+  if (opts.startWorkflow) {
+    const started = await opts.startWorkflow(jobId, { trigger });
+    return { instanceId: started.instanceId, jobId };
+  }
+  const workflow = env.JOB_PIPELINE_WORKFLOW;
+  if (!workflow || typeof workflow.create !== "function") {
+    throw workflowNotConfigured(
+      "the JOB_PIPELINE_WORKFLOW binding is not configured in this deployment; the chain was not dispatched.",
+    );
+  }
+  const created = await workflow.create({
+    params: { jobId, trigger },
+  });
+  return { instanceId: created.id, jobId };
 }
 
 /**

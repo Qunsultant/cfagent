@@ -39,8 +39,6 @@ import {
   planNextFeedShard,
   planServeJob,
   planShardAdvance,
-  applyShardPacing,
-  planOptionsFeedShards,
   planStoreShards,
   SHARD_RETRY_BUCKET,
   shardProvenanceIds,
@@ -48,6 +46,7 @@ import {
   type ShardChainContext,
   type ShardRow,
 } from "../src/services/shardJobs";
+import { buildOptionsChainJobDefinition } from "../src/services/optionsChainJobDefinition";
 import { executeShardJob } from "../src/services/shardExecutors";
 import { collateOpportunityScanShards } from "../src/trading/options/opportunityScanner";
 import { marketScreenScheduleCriteriaSchema, optionsAnalysisScheduleCriteriaSchema } from "../src/trading/screeningSchemas";
@@ -285,32 +284,41 @@ describe("Retry-After override on withRetry (issue #1355)", () => {
 });
 
 describe("shard planner + completeness gate on mas_async_jobs rows (issue #1355)", () => {
-  it("plans paced per-symbol option feed shards", () => {
-    const specs = planOptionsFeedShards(chain({
-      screenType: "options",
-      options: { symbols: ["AAPL", "MSFT", "NVDA"] },
-      staggerMs: 1_000,
-    }), "2026-10-24T12:00:00.000Z");
-    expect(specs.map((spec) => (spec.payload as any).shard.key)).toEqual(["AAPL", "MSFT", "NVDA"]);
-    expect(specs.map((spec) => spec.runAt)).toEqual([
-      "2026-10-24T12:00:00.000Z",
-      "2026-10-24T12:00:01.000Z",
-      "2026-10-24T12:00:02.000Z",
-    ]);
-    expect(specs.every((spec) => spec.stage === "feed")).toBe(true);
+  it("plans per-symbol option feed shards on the engine job (#4780)", () => {
+    // Issue #4780: planOptionsFeedShards is gone — the chain's feed
+    // node shards by symbol instead. Same symbols, same order, same
+    // stage; the pacing moved to the engine (sharded shape, sequential
+    // units, one journaled workflow step per unit).
+    const definition = buildOptionsChainJobDefinition(
+      chain({
+        screenType: "options",
+        options: { symbols: ["AAPL", "MSFT", "NVDA"], thesis: "bullish", targetDate: "2026-11-23", riskProfile: "balanced" },
+      }),
+    ) as { root: { kind: string; processing?: { shards?: string[] }; executionMode?: Record<string, unknown> } };
+    expect(definition.root.kind).toBe("options-chain.feed");
+    expect(definition.root.processing?.shards).toEqual(["AAPL", "MSFT", "NVDA"]);
+    // The root node IS the feed node: its effective shape is
+    // "sharded" when more than one symbol (the stock idiom), so
+    // execNode fans the feed out one unit per symbol.
+    expect(definition.root.executionMode).toEqual({
+      delivery: "async",
+      concurrency: "sequential",
+      pacing: "batch",
+      shape: "sharded",
+    });
   });
 
-  it("stamps the dispatch provenance onto every shard submission (#4415)", () => {
-    const specs = planOptionsFeedShards(chain({
-      screenType: "options",
-      options: { symbols: ["AAPL", "MSFT"] },
-      scheduleId: "sched-9",
-    }), "2026-10-24T12:00:00.000Z");
-    for (const spec of specs) {
-      expect(spec.trigger).toBe("scheduled");
-      expect(spec.triggeredBy).toBe("u1");
-      expect(spec.scheduleId).toBe("sched-9");
-    }
+  it("stamps the dispatch provenance onto the chain job (#4415, #4780)", () => {
+    const definition = buildOptionsChainJobDefinition(
+      chain({
+        screenType: "options",
+        options: { symbols: ["AAPL", "MSFT"], thesis: "bullish", targetDate: "2026-11-23", riskProfile: "balanced" },
+        scheduleId: "sched-9",
+      }),
+    ) as { chain: ShardChainContext };
+    expect(definition.chain.trigger).toBe("scheduled");
+    expect(definition.chain.userLogin).toBe("u1");
+    expect(definition.chain.scheduleId).toBe("sched-9");
   });
 
   it("plans options assembly only after every symbol is terminal", () => {
@@ -755,22 +763,12 @@ describe("schedule schema + RunSummary surfacing (issues #1355, #1346)", () => {
   });
 });
 describe("shard-chain dispatch pacing (#4424)", () => {
-  it("releases a burst of inFlightCap shards, then paces the rest by the interval", () => {
-    const specs = ["a", "b", "c", "d", "e"].map((key) => ({ key }));
-    const paced = applyShardPacing(
-      specs,
-      { inFlightCap: 3, paceIntervalMs: 2000, staggerMs: 1000 },
-      "2026-10-24T12:00:00.000Z",
-    );
-    expect(paced.map((spec) => spec.runAt)).toEqual([
-      "2026-10-24T12:00:00.000Z",
-      "2026-10-24T12:00:01.000Z",
-      "2026-10-24T12:00:02.000Z",
-      "2026-10-24T12:00:05.000Z",
-      "2026-10-24T12:00:07.000Z",
-    ]);
-  });
-
+  // Issue #4780: applyShardPacing is gone — the dispatch pacing moved
+  // to the engine (the chain job's feed node shards by symbol with
+  // sequential units; each unit is its own journaled workflow step).
+  // The pacing proof is the definition test above plus the #4780 pin
+  // (tests/options_chain_engine_4780.test.ts). Only the config
+  // resolution remains here.
   it("reads the knobs from config and honours the environment overrides", () => {
     expect(SHARD_PACING).toMatchObject({ inFlightCap: 8, paceIntervalMs: 2000, staggerMs: 1000 });
     expect(resolveShardPacing({ SHARD_CHAIN_IN_FLIGHT_CAP: "5" }).inFlightCap).toBe(5);

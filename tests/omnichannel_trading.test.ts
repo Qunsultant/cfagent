@@ -54,6 +54,10 @@ describe("Cloudflare Email & Slack Trading Agents (Omnichannel E*TRADE)", () => 
     ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
     EMAIL_AGENT_ADDRESS: "trade@agent.openaimp.com",
+    // Issue #5147: this suite pins the E*TRADE-shaped channel behaviour, so the
+    // tenant selection is explicit — the no-selection default is now the
+    // platform default (Alpaca), pinned in tests/voice_nlq_slack_neutral_4664.
+    TENANT_BROKER_ID: "etrade",
     SLACK_SIGNING_SECRET: "test_slack_signing_secret_12345",
     SLACK_BOT_TOKEN: "xoxb-test-mock-token",
   };

@@ -6,6 +6,65 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-17 — options sharded chain start routes through the one engine (#4780)
+
+- Function: the bespoke options chain start (`planOptionsFeedShards` +
+  the `shardSubmit` async-job port + `applyShardPacing`) → retired;
+  the chain now dispatches as one engine job `options-chain:<chainId>`
+  through `startOptionsChainWorkflow`
+  (`src/workflows/optionsWorkflowHost.ts`), defined by
+  `buildOptionsChainJobDefinition` (`src/services/optionsChainPipelineJobs.ts`)
+- Date: 2026-11-17
+- Reason: Issue #4780 (sub-issue of #3550, [One engine]) removes the
+  last bespoke chain-start path. The chain is built exactly as before
+  (same broker/mode provenance, same schedule attribution, same
+  per-symbol screen inputs) and dispatched through the engine seam;
+  the feed node's sharded shape with sequential units IS the pacing
+  now — each unit is its own journaled workflow step, its own Worker
+  invocation, its own subrequest budget — so the 1s stagger / `runAt`
+  is retired, not dropped (the step boundary replaces it
+  structurally). The #4280 entry's reservation ("the options sharded
+  chain still uses the `shardSubmit` port, which stays") is now
+  discharged: no scheduled chain executes outside the engine after
+  this slice. The feed unit reuses the sync per-symbol scan path
+  (`runStrategyScreenViaEngine`); the chain advance still rides the
+  mas_async_jobs completion hook for in-flight chains.
+- Replacement: `startOptionsChainWorkflow` +
+  `buildOptionsChainJobDefinition` (`src/services/optionsChainPipelineJobs.ts`),
+  called by `ScheduledTasksService.autonomousOptionsAnalysis` with
+  `jobId = options-chain:<chainId>`. The chain job's six stages are
+  feed → assemble → generate → store → serve → deliver; the root
+  node's shape follows the symbol count (sharded when more than one
+  symbol, monolith for a single symbol — the stock idiom).
+- Consumers at deprecation: no production callers remain — the one
+  live caller (`autonomousOptionsAnalysis`) was migrated in the same
+  slice. The pin `tests/options_chain_engine_4780.test.ts` (wired
+  into `test:pins`) asserts no second chain-start path remains.
+- Kept, never deleted: `planFeedStart` (`src/services/shardJobs.ts`)
+  — its only caller remains the frozen deprecated module
+  (`src/workflows/startScheduledShardedChain.deprecated.ts`), which
+  must keep working as the record (#4776 owns its eventual removal).
+  "planFeedStart has no callers" is read as no LIVE callers.
+  `staggerRunAt` stays (the in-flight executor's generate/store
+  shards still use it). `config/shardPacing.ts` stays on disk but is
+  now unreferenced by `src/` — a leftover for the #4789 tracker.
+  The two `.deprecated.ts` files stay in place.
+- Known gaps (recorded, not blockers): the engine path does not write
+  the serve-record summary row (`recordOptionsServeReport` needs a
+  `DatabaseORM` the step residency has no handle to) — per-format
+  canonical rows carry the run's provenance; a follow-up sub-issue
+  under #4780 is prepared
+  (`~/workspace/verify-priority-queue/4780/followup-serve-record-body.md`,
+  to be filed by the main agent). The chain job is not in
+  `workflowCatalog` (its six stages differ from the
+  options-screener family's eight). #4423 retry lineage (shard ids,
+  retried-shard counts) is not carried in the canonical body — the
+  workflow step journal is the retry record. The blob seam refuses by
+  name (`OPTIONS_CHAIN_REPORTS_BUCKET_UNBOUND`) when `REPORTS_BUCKET`
+  is unbound, rather than silently dropping bytes to legacy DO storage.
+- Deletion condition: zero consumers plus an owner decision plus a gate
+  amendment; deletion is never part of a program slice.
+
 ## 2026-11-17 — tail slice 1 retires dataProvidersPanel.css in place (#5016)
 
 - File: `src/client/dataProvidersPanel.css` → retired in place (no rules remain)

@@ -244,7 +244,6 @@ function stockService(opts: { envTenant?: string | null; user?: string }) {
     undefined,
     undefined,
     undefined,
-    undefined,
   );
   const audit = vi.fn(() => {});
   const guard = vi.fn(async () => ({ blocked: false as const }));

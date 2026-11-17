@@ -126,6 +126,9 @@ describe("Options Scanner & Watchlist Capability Suite", () => {
       ETRADE_API_SECRET: "sandbox_consumer_secret",
       ETRADE_ENV: "SANDBOX",
       ETRADE_ACCOUNT_ID: "83321443",
+      // Issue #5147: this suite pins the E*TRADE desk, so the selection is
+      // explicit — the no-selection default is the platform default (Alpaca).
+      TENANT_BROKER_ID: "etrade",
     } as any;
 
     const expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
