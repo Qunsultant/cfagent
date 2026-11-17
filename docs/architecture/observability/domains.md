@@ -67,7 +67,7 @@ order. **J1–J7 first; the rest follow one at a time.**
 | 4 | MCP / A2A / agents | The agent surface: the orchestrator, mesh doors, MCP tools, and A2A dispatch. | Planned. |
 | 5 | Scheduler / jobs + runs ledger | ScheduledAgent goals, schedules, and the runs ledger (the record of whether a run happened). | Planned. |
 | 6 | Payments / commercial | Agentic payments, Stripe billing, x402 tier gating, entitlements. | Planned. |
-| 7 | Market data / brokers | Data providers and broker integrations: E*TRADE, Alpaca, Yahoo, Public. | Planned. |
+| 7 | Market data / brokers | Data providers and broker integrations. | Planned. |
 | 8 | Core platform | The Worker runtime itself: routing, ingress, the dashboard/API, config. | Planned. |
 
 ## 2. The technical enablement domains in detail
@@ -108,7 +108,7 @@ second logger, a second trace store, or a second dashboard.
 ### 2.2 Stock Copilot / screening
 
 - **What it is.** The autonomous paper-trading copilot (scheduled cycles,
-  Alpaca paper by construction) and the stock screener (universe → quotes
+  paper-only by construction) and the stock screener (universe → quotes
   → screen). Owner: the Stock Copilot program (#4001 / #3929 / #3911
   lineage); the pipeline underneath is J1–J7.
 - **Telemetry it emits today.** Cycle events in the Audit Vault
@@ -197,14 +197,14 @@ second logger, a second trace store, or a second dashboard.
 
 ### 2.7 Market data / brokers
 
-- **What it is.** The data providers and broker integrations: E*TRADE
-  (OAuth, tokens at `etrade:token:<ENV>:<login>`), Alpaca, Yahoo
-  (quotes, fundamentals, news/sentiment), Public. The feed jobs are
+- **What it is.** The data providers and broker integrations (broker OAuth
+  tokens keyed by broker, environment, and login; quotes,
+  fundamentals, news/sentiment from the market-data providers). The feed jobs are
   parameterized by universe (one job per data type taking a symbol list).
 - **Telemetry it emits today.** Feed-run records (`data_provider.feed_run`
   audit, job/run ids recorded even with no artifact since #4015);
   structured logs; store-op records for the SessionStore ops the broker
-  flows perform. The outbound token bucket (E*TRADE/Alpaca/LLM) is the
+  flows perform. The outbound token bucket (brokers/LLM) is the
   rate-limiting for this domain (#3532).
 - **Store.** Audit Vault + runs ledger + D1.
 - **OTel status.** Planned.
