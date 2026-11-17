@@ -247,6 +247,13 @@ export interface StockCopilotDeps {
   executionMode?: CopilotExecutionMode;
   /** #3519: tenancy memory port for distilled learnings. */
   memory?: StockCopilotMemoryPort;
+  /** #5155: end-to-end execution traceability fields. */
+  triggerSource?: "scheduled_task" | "ux" | "chat_copilot" | string;
+  scheduleId?: string;
+  taskId?: string;
+  runId?: string;
+  traceId?: string;
+  accountId?: string;
 }
 
 export interface StockCopilotRejection {
@@ -467,6 +474,12 @@ async function evaluateExit(
     session,
     reason: exitReason,
     timestamp: nowIso,
+    triggerSource: deps.triggerSource,
+    scheduleId: deps.scheduleId,
+    taskId: deps.taskId,
+    runId: deps.runId,
+    traceId: deps.traceId,
+    accountId: deps.accountId,
   });
 }
 
@@ -615,6 +628,12 @@ async function attemptEntry(
     session: args.session,
     strategy,
     timestamp: nowIso,
+    triggerSource: deps.triggerSource,
+    scheduleId: deps.scheduleId,
+    taskId: deps.taskId,
+    runId: deps.runId,
+    traceId: deps.traceId,
+    accountId: deps.accountId,
   });
 }
 
