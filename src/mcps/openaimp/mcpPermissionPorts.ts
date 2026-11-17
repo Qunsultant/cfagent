@@ -308,6 +308,9 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // stage_pause/stage_resume/stage_cancel).
   run_pipeline_chain: "mcp:write",
   manage_pipeline_chain: "mcp:write",
+  // #5117: nightly research job & runtime chain definition.
+  run_research_job: "mcp:write",
+  define_pipeline_chain: "mcp:write",
   // #2351 (mesh S7): the BrowserAgent/SlackAgent doors' deliveries —
   // each posts a snap to the configured Slack destination (an
   // outbound side effect; no caller-supplied webhook is accepted).
