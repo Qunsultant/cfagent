@@ -122,7 +122,12 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
     setStep(clampStep(initialStep));
   }, [initialStep]);
   const [identity, setIdentity] = useState<PlatformIdentityView | null>(null);
-  const [identityError, setIdentityError] = useState(false);
+  // Issue #3335: the identity-load failure itself, kept so the Notice
+  // can render its coded message (catalog businessMessage, or the fixed
+  // per-status string) instead of the hardcoded generic copy — the same
+  // pattern as setupError (#3309). A failure that names its cause is
+  // diagnosable; a generic "couldn't load" is not.
+  const [identityError, setIdentityError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
   const [setupState, setSetupState] = useState<"idle" | "setting-up" | "done" | "error">("idle");
   // #3309: the setup failure itself, kept so the Notice can render
@@ -183,8 +188,8 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
       try {
         const found = await fetchPlatformIdentity();
         if (!cancelled) setIdentity(found);
-      } catch {
-        if (!cancelled) setIdentityError(true);
+      } catch (error: unknown) {
+        if (!cancelled) setIdentityError(error instanceof Error ? error : new Error("Identity load failed."));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -378,9 +383,9 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
         {identityError || identity === null ? (
           <Card>
             <Notice tone="danger">
-              First-run setup couldn&apos;t load your account. Check your
-              connection and try again, or continue to the hub for now —
-              setup will show again on your next login until it is completed.
+              First-run setup couldn&apos;t load your account.{" "}
+              {identityError?.message ?? "Check your connection and try again."}{" "}
+              Continue to the hub for now — setup will show again on your next login until it is completed.
             </Notice>
             {onDismiss && (
               <Button type="button" variant="primary" onClick={onDismiss}>
