@@ -277,6 +277,16 @@ export const COMPARISON_JOB_ID_PREFIX = "comparison";
 export const COMPARISON_STEP = "comparison.run";
 
 /**
+ * Issue #4896 — the stage-storage artifact kind under which the
+ * resolving comparison step writes the comparison result: the
+ * legs read the result back under this key after awaiting the
+ * run, since a comparison view carries no shapeReport. The step's
+ * output contract stays `{ runId }`; this key is the leg-side
+ * read-back, not a view field.
+ */
+export const COMPARISON_RESULT_ARTIFACT = "comparisonResult";
+
+/**
  * The comparison job definition, as raw configuration for
  * JobPipelineControl.defineJob: a root-only tree — the root carries
  * the single `comparison.run` step and there are no children. The

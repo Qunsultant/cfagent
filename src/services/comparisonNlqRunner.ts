@@ -25,11 +25,20 @@
  *   comparison itself — same snapshot, same core inputs, same
  *   artifact modulo the run id, which the runner mints so the
  *   engine job and the artifact carry one id.
+ * - userLogin + hostSeams are optional (issue #4896): with the
+ *   acting login threaded and the residency bindings configured,
+ *   the comparison dispatches through the workflow host and no
+ *   snapshot is fetched locally; the host run writes no ledger
+ *   rows (the accepted-absent discipline), so the outcome reports
+ *   ledgerPersisted false. Anything else stays on the sync
+ *   dispatch below, unchanged.
  */
 import { DynamicOptionsScreener, OptionsDataAgent, RecommendationAgent, StrategyRiskAgent, type RiskProfile, type StrategyRequest, type StrategyScreenFilter } from "../trading";
 import { mintComparisonRunId, type ComparisonLedgerSink } from "./recommendationKernel";
-import { buildComparisonQuestion, kernelSnapshotFromDataSnapshot, runProductionComparison, type ProductionComparisonDeps, type ProductionComparisonResult } from "./comparisonRunner";
+import { buildComparisonQuestion, comparisonEmptySnapshotError, kernelSnapshotFromDataSnapshot, runProductionComparison, type ProductionComparisonDeps, type ProductionComparisonResult } from "./comparisonRunner";
+import { resolveComparisonHostDispatch, runComparisonViaHost, type ComparisonHostSeams } from "./comparisonHostDispatch";
 import { runComparisonViaEngine, type OptionsEngineStores } from "../workflows/optionsScreenEngine";
+import type { Env } from "../types";
 
 export interface ComparisonNlqOutcome {
   ok: boolean;
@@ -48,6 +57,14 @@ export interface ComparisonNlqRunner {
      *  Absent, the core executes directly and leaves no durable
      *  pipeline record (the #4069 accepted-absent discipline). */
     engineStores?: OptionsEngineStores | null;
+    /** Issue #4896: the acting login — the host gate requires
+     *  it (the residency's chain factory yields no source
+     *  without one). Absent, the run stays on the sync dispatch. */
+    userLogin?: string;
+    /** Issue #4896: the host dispatch's injectable seams
+     *  (tests inject fakes; production passes nothing and the
+     *  dispatch derives from env). */
+    hostSeams?: ComparisonHostSeams;
   }): Promise<ComparisonNlqOutcome>;
 }
 
@@ -65,6 +82,43 @@ export function createComparisonRunner(deps: {
           error: "Three-way comparison is unavailable in this context: no environment is configured for LLM generation, so the llm and hybrid arms cannot run.",
         };
       }
+      // Issue #4896: the host dispatch, gated — when the leg's
+      // (broker, mode) pair derives from the session's platform,
+      // the acting login is threaded, and the residency bindings
+      // are configured, the comparison runs through the workflow
+      // host and no snapshot is fetched locally: the resolving
+      // step fetches it, and the step's empty-snapshot failure
+      // surfaces here with the shared message. The host run
+      // writes no ledger rows (accepted-absent), so the outcome
+      // reports the run as not persisted.
+      const hostDispatch = resolveComparisonHostDispatch(
+        deps.env as Env,
+        "etrade",
+        undefined,
+        input.userLogin,
+      );
+      if (hostDispatch.decision.route === "host" && hostDispatch.broker) {
+        try {
+          const result = await runComparisonViaHost({
+            env: deps.env as Env,
+            request: input.request,
+            riskProfile: input.riskProfile ?? "balanced",
+            ...(input.strategyFilter !== undefined ? { strategyFilter: input.strategyFilter } : {}),
+            runId: mintComparisonRunId(),
+            // The gate's host route implies a login is present.
+            userLogin: input.userLogin!,
+            broker: hostDispatch.broker,
+            ...(input.hostSeams ? { seams: input.hostSeams } : {}),
+          });
+          return { ok: true, result, ledgerPersisted: false };
+        } catch (error) {
+          return {
+            ok: false,
+            ledgerPersisted: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
       const dataAgent = new OptionsDataAgent(new DynamicOptionsScreener(deps.client));
       const s = await dataAgent.loadSnapshot(input.request);
       // The shared snapshot mapping (comparisonRunner.ts) — the
@@ -76,7 +130,7 @@ export function createComparisonRunner(deps: {
         return {
           ok: false,
           ledgerPersisted: false,
-          error: `Comparison snapshot for ${s.symbol} has no screened contracts.`,
+          error: comparisonEmptySnapshotError(s.symbol).message,
         };
       }
       const riskAgent = new StrategyRiskAgent();

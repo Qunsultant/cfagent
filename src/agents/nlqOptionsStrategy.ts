@@ -786,6 +786,10 @@ async function runComparisonAction(
     request: request as StrategyRequest,
     riskProfile: filters.riskProfile,
     strategyFilter: filters.strategyFilter,
+    // Issue #4896: the acting login threads to the runner, so
+    // the host gate can resolve — absent, the run stays on the
+    // sync dispatch, exactly as before.
+    userLogin: deps.userLogin,
     // Issue #4276: a SQL handle records the comparison run durably
     // in the host DO (the #4066 pattern), so a later per-stage
     // control action can address it; absent, in-memory stores

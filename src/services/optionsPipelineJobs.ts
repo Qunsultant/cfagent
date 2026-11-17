@@ -64,10 +64,12 @@ import {
 } from "../trading";
 import {
   buildComparisonQuestion,
+  comparisonEmptySnapshotError,
   kernelSnapshotFromDataSnapshot,
   runProductionComparison,
 } from "./comparisonRunner";
 import {
+  COMPARISON_RESULT_ARTIFACT,
   COMPARISON_STEP,
   OPTIONS_SCREEN_ROOT_STEP,
   OPTIONS_SCREEN_STEP,
@@ -75,6 +77,7 @@ import {
   resolveOptionsStageId,
   runOptionsScreenStep,
 } from "../workflows/optionsScreenEngine";
+import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 import {
   assertOptionsStageRebuildable,
   decodeBrokerStageInput,
@@ -390,14 +393,13 @@ export function registerOptionsWorkflowSteps(
     if ((snapshot.contracts ?? []).length === 0) {
       // The NLQ runner's discipline: an empty snapshot is a
       // failure, not an empty answer — a silent empty comparison
-      // would hide a data problem.
-      throw new Error(
-        `Comparison snapshot for ${snapshot.symbol} has no screened contracts.`,
-      );
+      // would hide a data problem. The message is the shared
+      // helper's (#4896), so the step and the runner cannot drift.
+      throw comparisonEmptySnapshotError(snapshot.symbol);
     }
     const riskAgent = new StrategyRiskAgent();
     const recommender = new RecommendationAgent();
-    await runProductionComparison({
+    const result = await runProductionComparison({
       snapshot,
       request: strategyRequest,
       question: buildComparisonQuestion(strategyRequest),
@@ -414,6 +416,17 @@ export function registerOptionsWorkflowSteps(
       ledgerSql: null,
       runId,
     });
+    // Issue #4896: the result is the legs' deliverable — a
+    // host-path comparison run's result must be readable after
+    // settlement, and the comparison view carries no report. The
+    // step writes the result to stage storage under the
+    // comparison result key; the legs read it back after
+    // awaiting the run. The step's output contract stays
+    // `{ runId }` (the closure step's hand-off), unchanged.
+    await optionsStageStorageFromArtifacts(deps.artifacts, ctx.runId).put(
+      optionsArtifactKey(runId, COMPARISON_RESULT_ARTIFACT),
+      result,
+    );
     return {
       output: { runId },
       descriptor: `comparison run ${runId}`,
