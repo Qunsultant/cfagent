@@ -14,21 +14,21 @@ against the platform prototypes: a `parity` cell must be a real method, and an
 `impossible` cell must be absent (a stub that returns empty data is a lie, not a
 gap). Change the code, change this table in the same PR.
 
-| Capability | E*TRADE | Alpaca | Public.com |
-|---|---|---|---|
-| Quotes | parity | parity | parity |
-| Options chains + expiries | parity | parity | parity |
-| Accounts | parity | parity | parity |
-| Positions | parity | parity | parity |
-| Position lots | parity | parity | parity (get_tax_lots_for_symbol; verified on the live surface, #4673) |
-| Order preview | parity | parity | parity |
-| Order placement | parity | parity | live-only (Public has no paper mode; TEST refuses with FAILURE_PUBLIC_NO_PAPER_MODE) |
-| Order cancel | parity | parity | parity |
-| Order history / activity | parity | parity | parity |
-| Watchlists | parity | parity | impossible (no watchlist tools on the hosted MCP surface) |
-| Session orders (pre/post/EXTO) | impossible (no session terms on the wire) | parity | impossible (no session terms on the hosted MCP surface) |
-| Historical bars | — | — | — |
-| Fundamentals | — | — | — |
+| Capability | E*TRADE | Alpaca | Public.com | Tastytrade |
+|---|---|---|---|---|
+| Quotes | parity | parity | parity | parity |
+| Options chains + expiries | parity | parity | parity | impossible (Tastytrade Slice 1 has no option chain adapter wired yet) |
+| Accounts | parity | parity | parity | parity |
+| Positions | parity | parity | parity | parity |
+| Position lots | parity | parity | parity (get_tax_lots_for_symbol; verified on the live surface, #4673) | impossible (Tastytrade Slice 1 exposes no lot-level position read) |
+| Order preview | parity | parity | parity | parity |
+| Order placement | parity | parity | live-only (Public has no paper mode; TEST refuses with FAILURE_PUBLIC_NO_PAPER_MODE) | parity |
+| Order cancel | parity | parity | parity | parity |
+| Order history / activity | parity | parity | parity | parity |
+| Watchlists | parity | parity | impossible (no watchlist tools on the hosted MCP surface) | impossible (Tastytrade Slice 1 exposes no watchlists adapter) |
+| Session orders (pre/post/EXTO) | impossible (no session terms on the wire) | parity | impossible (no session terms on the hosted MCP surface) | impossible (Tastytrade Slice 1 has no session-order terms wired) |
+| Historical bars | — | — | — | — |
+| Fundamentals | — | — | — | — |
 
 ## Data-plane rows
 

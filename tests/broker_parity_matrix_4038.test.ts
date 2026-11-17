@@ -18,6 +18,7 @@ import { BROKER_IDS } from "../src/services/tenantProviders";
 import { ETradeTradingPlatform } from "../src/trading/etrade/platform";
 import { AlpacaTradingPlatform } from "../src/trading/alpaca/platform";
 import { PublicTradingPlatform } from "../src/trading/public/platform";
+import { TastytradeTradingPlatform } from "../src/trading/tastytrade/platform";
 
 const DOC = join(__dirname, "..", "docs", "architecture", "broker-parity-matrix.md");
 
@@ -42,6 +43,7 @@ const PLATFORMS: Record<string, unknown> = {
   etrade: ETradeTradingPlatform.prototype,
   alpaca: AlpacaTradingPlatform.prototype,
   public: PublicTradingPlatform.prototype,
+  tastytrade: TastytradeTradingPlatform.prototype,
 };
 
 function readMatrix(): { header: string[]; rows: Array<{ label: string; cells: string[] }> } {
@@ -78,7 +80,7 @@ describe("Issue #4038 — broker parity matrix", () => {
 
   it("never claims parity for a method the platform does not implement", () => {
     const { rows } = readMatrix();
-    const brokers = ["etrade", "alpaca", "public"];
+    const brokers = ["etrade", "alpaca", "public", "tastytrade"];
     for (const row of rows) {
       const method = METHOD_BY_ROW[row.label];
       if (method === null || method === undefined) continue;
