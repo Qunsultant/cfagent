@@ -59,6 +59,8 @@ export interface MissedScheduleAlertInfo {
   expectedTick: string;
   lastRun: string | null;
   graceMs: number;
+  userLogin?: string;
+  jobId?: string;
 }
 
 export interface ScheduleWatchdogSweepResult {
@@ -78,6 +80,8 @@ export interface ScheduleWatchdogContext {
   };
   listSchedules: () => Promise<ScheduleWatchdogSchedule[]>;
   audit: (type: string, agent: "orchestrator", payload: Record<string, unknown>) => void;
+  /** #5157: optional instance owner login for alert attribution. */
+  userLogin?: string;
   /** Slack delivery hook (the #2567 seam); absent = audit + ledger only. */
   notifyMissedSchedule?: (info: MissedScheduleAlertInfo) => Promise<void>;
 }
@@ -198,6 +202,7 @@ export async function watchdogMissedSchedules(
         code: "missed_fire",
         expectedTick: finding.expectedTickIso,
         lastRun: finding.lastRunIso ?? null,
+        ...(ctx.userLogin ? { userLogin: ctx.userLogin } : {}),
       });
       if (typeof ctx.notifyMissedSchedule === "function") {
         const info: MissedScheduleAlertInfo = {
@@ -206,6 +211,8 @@ export async function watchdogMissedSchedules(
           expectedTick: finding.expectedTickIso ?? "",
           lastRun: finding.lastRunIso ?? null,
           graceMs,
+          ...(ctx.userLogin ? { userLogin: ctx.userLogin } : {}),
+          jobId: schedule.id,
         };
         void Promise.resolve()
           .then(() => ctx.notifyMissedSchedule!(info))
