@@ -115,9 +115,9 @@ describe("OTel per-signal exporter — resolveOtelSignalExporter", () => {
     expect(r.source).toBe("file");
   });
 
-  it("metrics defaults to otlp (S2 built it) and traces defaults to none (S3 not built yet)", () => {
+  it("metrics defaults to otlp (S2 built it) and traces defaults to otlp (S3 built it)", () => {
     expect(otelSignalExporterDefault("metrics")).toBe("otlp");
-    expect(otelSignalExporterDefault("traces")).toBe("none");
+    expect(otelSignalExporterDefault("traces")).toBe("otlp");
     expect(otelSignalExporterDefault("logs")).toBe("otlp");
   });
 

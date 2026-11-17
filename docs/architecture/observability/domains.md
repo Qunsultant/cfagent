@@ -101,9 +101,11 @@ second logger, a second trace store, or a second dashboard.
   of the J1–J7 convergence, not this program.
 - **Store.** D1 (`agent_mesh_trace_hops`, runs ledger rows) + Analytics
   Engine `observability` dataset + Workers Logs (console output).
-- **OTel status.** **In build (S1 #5081).** The OTel foundation + logging
-  instrumentation, scoped to J1–J7, gated by the per-domain switch.
-  Metrics (S2 #5082) and traces/spans (S3) follow as their own slices.
+- **OTel status.** **Live (S1 #5081 logging, S2 #5082 metrics, S3
+  #2808 tracing).** The OTel foundation + logging + metrics +
+  tracing instrumentation, scoped to J1–J7, gated by the
+  per-domain switch. S1/S2/S3 are merged; the other domains
+  stay OFF by default and follow as their own slices.
 
 ### 2.2 Stock Copilot / screening
 
@@ -233,7 +235,7 @@ itself is the umbrella, not a record.
 |---|---|---|---|---|
 | S1 | Logging | #5081 | One structured logger: `src/observability/structuredLogger.ts`. Store: Workers Logs + R2 archive (S1). | **In build** |
 | S2 | Metrics | #5082 | One metrics model + store (S2). The #1819 resource rollup (`src/data/d1ResourceRollupAdapter.ts`, D1 `resource_daily_rollups`) lives here. Health + SLOs live here as metrics. | **Planned** (the #1819 rollup itself is Live) |
-| S3 | Tracing | #2808 | Trace spine: `traceparent` + D1 `agent_mesh_trace_hops` + `GET /api/traces`. OTel spans are the instrumentation; #2808's harmonization program stays parked. | **Planned** (the mesh spine is Live, proof pending) |
+| S3 | Tracing | #2808 | Trace spine: `traceparent` + D1 `agent_mesh_trace_hops` + `GET /api/traces`. OTel spans are the instrumentation; #2808's harmonization program stays parked. | **Built** (OTel span instrumentation merged; the mesh spine is Live, proof pending) |
 | S4 | Error-reporting | #5083 | One owner + one alerting path (named by S4). Consumes logs/metrics/audit; never replaces them. | **Planned** |
 | S5 | Audit | #5084 | One audit store. Today two layers exist (`iaaaAuditStore.ts` vs `auditLogPorts`/`auditLogStoreImpl` + `auditReportPorts`) — S5 decides the canonical store (rename-form deprecation, never deletion). | **Planned** (audit itself is Live) |
 | S6 | Recording | #5085 | One runs ledger / run-row model (the #4002 rule). Reconciles runs ledger vs Audit Vault vs Loop status into one source of truth for "did the run happen". | **Planned** (the ledger is Live) |

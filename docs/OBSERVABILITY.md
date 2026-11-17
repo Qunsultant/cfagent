@@ -494,13 +494,84 @@ evaluators + a gauge; the dashboard (S8) surfaces them, and the
 70% cap-ALERT is S4 (alerting) — S2 instruments the measurement
 only.
 
+### Tracing (S3 scope, issue #2808)
+
+OTel span instrumentation only — NOT the #2808 harmonization
+program (harmonizing security, workflow, integration, schedule,
+login, agent, and action traces into one linked trace model),
+which stays parked. One span model + one store: the model is
+the OTel span (name, trace/span ids, parent, start/end,
+attributes, status); the store is the existing Analytics
+Engine `observability` dataset — the same store S1 uses for
+logs and S2 uses for metrics, reached through the existing
+`createObservabilitySink` / Analytics Engine adapter
+(`spanEventForReadableSpan` converts one span into one AE
+event: type `span.<name>`, duration in `durationMs`,
+trace/span/parent ids in fields, ERROR status → level
+"error"). No second traces store, no new backend. The export
+is the same OTLP/HTTP pattern as logs and metrics: the SDK's
+`TracerProvider` (batch processor in production, simple in
+tests) exports finished spans through the thin OTLP/HTTP span
+exporter (`JsonTraceSerializer` + injected transport) to the
+in-process ingestion handler, which archives one JSONL object
+per batch to R2 (`otel-archive/<YYYY-MM-DD>/<id>.jsonl`) and
+writes each span to the AE sink. `POST /api/otel/v1/traces`
+is a real HTTP endpoint for external OTLP senders, under the
+same `OTEL_INGEST_TOKEN` gate as the logs and metrics routes.
+
+**Free-tier guard.** The traces exporter counts AE writes per
+UTC day against the configured limit (`otel.traces.freeTier.
+dailyWriteLimit`, env
+`OTEL_TRACES_FREE_TIER_DAILY_WRITE_LIMIT`, default 100,000)
+and, when the limit is reached, drops further AE writes with
+exactly one coded OBS-1013 per day (the R2 archive path is
+NOT guarded — R2 has no per-row quota; a 0 write limit means
+no AE writes while R2 still archives). An empty span batch
+exports nothing (no serialization, no transport call).
+
+**Spans (J1–J7 first, others OFF by default).** The observers
+(`src/observability/otelJobPipelineTraces.ts`) are the one
+span model, wired through the engine's existing seams only —
+the `runSettledObserver` (chained after the metrics observer)
+and the stage-step `journal` (wrapping the metrics journal) —
+on the ScheduledAgent host: one `job.run.settled` span per
+terminally settled run (OK for completed, ERROR for failed
+with the error, UNSET for cancelled; a zero-duration marker
+at the settle moment — the run-settled info carries no start
+time, so no duration is invented) and one `job.stage.step`
+span per stage step (name, duration, OK/ERROR status, the
+error message; the step's error is always rethrown). Nested
+steps nest: the AsyncLocalStorage context manager (registered
+once per isolate by the traces composition root;
+`nodejs_compat` is on) makes a step that calls the journal
+again record a child span, and concurrent runs keep their own
+active span. The workflow / options / in-memory hosts are not
+yet wired (same helper, later slice). Both observers are
+best-effort and never throw. The traces gate applies the
+domain level (OFF means no spans) + sampling at span start;
+a span sampled out is never created. All span recording is
+best-effort and never throws.
+
+**Seam honesty.** The engine's journal seam carries no run
+context (`JobStepJournal.do` receives only the step name) and
+the run-settled info carries no duration or traceparent — so a
+step span is a root span (one trace per step) and the run span
+is a zero-duration marker at the settle moment. Linking a
+run's steps into one trace needs a run-context seam in the
+engine (a later slice, not S3). The existing traceparent
+discipline (`src/observability/observabilityPorts.ts`,
+`meshTrace.ts`) is reused for span ids; S3 does not
+harmonize the seven trace kinds.
+
 ### Coded messages (the S7 catalog seed)
 
 `OBS-1001` config invalid (fail-closed) · `OBS-1002` export
 failed · `OBS-1003` ingest failed (R2 write) · `OBS-1004`
 ingest rejected (malformed OTLP) · `OBS-1005` sink degraded ·
 `OBS-1006` metrics export failed · `OBS-1007` metrics free-tier
-guard (AE write limit reached). Defined in one place
+guard (AE write limit reached) · `OBS-1012` traces export
+failed · `OBS-1013` traces free-tier guard (AE write limit
+reached). Defined in one place
 (`src/observability/otelMessages.ts`); S7 adopts and expands it
 into the one message catalog.
 
@@ -516,4 +587,8 @@ into the one message catalog.
   transport for the same reason.
 - `@pydantic/otel-cf-workers` is traces-only (no LoggerProvider /
   sdk-logs) and its `@opentelemetry/core` 2.x conflicts with the
-  logs stack's core 3.x. S3 (tracing) will evaluate it then.
+  logs stack's core 3.x. S3 (tracing) evaluated it and did NOT
+  adopt it: the thin span exporter (`JsonTraceSerializer` +
+  injected transport, sdk-trace 3.1.1 on the same core/resources
+  3.1.1 line as sdk-logs/sdk-metrics) keeps one OTel version
+  across all three signals.

@@ -178,6 +178,8 @@ export interface OtelFileConfig {
     route: string;
     /** Issue #5082 (S2) — the metrics ingestion route. */
     metricsRoute: string;
+    /** Issue #2808 (S3) — the traces ingestion route. */
+    tracesRoute: string;
     r2Prefix: string;
     r2ContentType: string;
   };
@@ -191,6 +193,8 @@ export interface OtelFileConfig {
   destinations: Record<OtelDestination, boolean>;
   /** Issue #5082 (S2) — the metrics settings (all config values, externalized). */
   metrics: OtelMetricsFileConfig;
+  /** Issue #2808 (S3) — the traces settings (all config values, externalized). */
+  traces: OtelTracesFileConfig;
   /** Issue #5169 — the archive browser settings (all config values, externalized). */
   archive: OtelArchiveFileConfig;
 }
@@ -259,6 +263,30 @@ export const OTEL_METRICS_SETTINGS_BUILTIN: OtelMetricsSettings = {
   freeTierDailyReadQueryLimit: 10000,
   healthPipelineMaxFailureRate: 0.05,
   sloResourceRowsReadMaxPct: 0.7,
+} as const;
+
+/** One traces section in the config file (config/otel.json). */
+export interface OtelTracesFileConfig {
+  freeTier: {
+    dailyWriteLimit: number;
+  };
+}
+
+/** The resolved traces settings (the operational values the traces stack consumes). */
+export interface OtelTracesSettings {
+  freeTierDailyWriteLimit: number;
+}
+
+/**
+ * Issue #2808 (S3) — the BUILTIN safe defaults for the traces
+ * settings (used only when the file is missing or a value is
+ * invalid). The one setting is the free-tier daily AE write
+ * limit (100k writes/day, the real free-tier limit). An invalid
+ * value fails closed to this, never to a value that would flood
+ * the store.
+ */
+export const OTEL_TRACES_SETTINGS_BUILTIN: OtelTracesSettings = {
+  freeTierDailyWriteLimit: 100000,
 } as const;
 
 /** The parsed config file (the operational defaults). */
@@ -751,6 +779,60 @@ export function resolveOtelMetricsSettings(
 export interface OtelArchiveSettingsInput {
   pageSize: OtelScopeLevels;
   maxObjects: OtelScopeLevels;
+}
+
+export interface OtelTracesSettingsInput {
+  freeTierDailyWriteLimit: OtelScopeLevels;
+}
+
+export interface ResolvedOtelTracesSettings {
+  settings: OtelTracesSettings;
+  /** True when any setting's winning level held an unrecognized value. */
+  invalid: boolean;
+}
+
+/**
+ * Issue #2808 (S3) — resolves the traces settings over run >
+ * session > user > env > file > builtin (the safe defaults).
+ * Each setting resolves independently through the same
+ * five-level mechanism; an unrecognized winning value for a
+ * setting fails closed to that setting's builtin safe default
+ * with a coded OBS-1001 message and no fall-through.
+ * `invalid` is true when any setting failed closed.
+ */
+export function resolveOtelTracesSettings(
+  input: OtelTracesSettingsInput,
+): ResolvedOtelTracesSettings {
+  let invalid = false;
+  const resolveOne = <T>(
+    switchName: string,
+    levels: OtelScopeLevels,
+    normalize: (raw: unknown) => T | "invalid" | null,
+    builtin: T,
+  ): T => {
+    for (const [source, value] of orderedLevels(levels)) {
+      const normalized = normalize(value);
+      if (normalized === null) continue;
+      if (normalized === "invalid") {
+        logInvalid(switchName, source, value, String(builtin));
+        invalid = true;
+        return builtin;
+      }
+      return normalized;
+    }
+    return builtin;
+  };
+  return {
+    settings: {
+      freeTierDailyWriteLimit: resolveOne(
+        "OTEL_TRACES_FREE_TIER_DAILY_WRITE_LIMIT",
+        input.freeTierDailyWriteLimit,
+        normalizeNonNegativeInt,
+        OTEL_TRACES_SETTINGS_BUILTIN.freeTierDailyWriteLimit,
+      ),
+    },
+    invalid,
+  };
 }
 
 export interface ResolvedOtelArchiveSettings {
