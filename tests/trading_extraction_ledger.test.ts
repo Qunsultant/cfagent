@@ -63,6 +63,9 @@ const PINNED_STAR_REEXPORTS = [
   "./brokerPanels",
   // Issue #3417: what a broker is CALLED, beside what it can do.
   "./brokerPresentation",
+  // Issue #5131: the one channel-broker resolution (label + execution) shared
+  // by voice, NLQ and Slack.
+  "./channelBroker",
   // Issue #3272: the option chain source port joins the public trading surface.
   "./optionChainSource",
   // Issue #3272 S2: the stock quote source port joins the public trading surface.

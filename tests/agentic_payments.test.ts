@@ -804,9 +804,9 @@ describe("Cloudflare Agentic Payments (x402 & MPP Standards)", () => {
       expect(turn.displayMarkdown).toContain("Agentic Micropayments");
     });
 
-    it("tunes financial pronunciation for wallet receipts and amounts", () => {
+    it("tunes financial pronunciation for wallet receipts and amounts", async () => {
       const voiceService = new ETradeVoiceTradingService(mockEnv, orm, "voice_user");
-      const greeting = voiceService.getWelcomeGreeting();
+      const greeting = await voiceService.getWelcomeGreeting();
       expect(greeting.spokenText).toBeDefined();
       expect(greeting.spokenText).toContain("Welcome to the E*TRADE Voice Trading Desk");
     });

@@ -575,7 +575,7 @@ export async function handleTradingIntegrationsRoutes(
       principal,
       await buildChannelNlqDeps(ctx, orm, principal?.userLogin ?? userLogin)
     );
-    return Response.json(voiceService.getWelcomeGreeting());
+    return Response.json(await voiceService.getWelcomeGreeting());
   }
 
   return null;

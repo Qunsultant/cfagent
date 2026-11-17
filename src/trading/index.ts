@@ -69,6 +69,10 @@ export * from "./brokerPanels";
 // Issue #3417: what a broker is CALLED, beside what it can do. The worker and
 // the client both read it, so no surface has to invent a name.
 export * from "./brokerPresentation";
+// Issue #5131: the one resolution of which broker a channel surface (voice,
+// NLQ, Slack) names and executes on — the label and the execution come from
+// the same value, so they cannot disagree.
+export * from "./channelBroker";
 export * from "./optionChainSource";
 export * from "./stockQuoteSource";
 export * from "./neutralMarketScreener";
